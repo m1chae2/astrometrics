@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from astrometricslib.parameters import TunedParameter
+
 # The date and version written under each guide's title.
 DOC_VERSION = "1.2"
 DOC_DATE = "2026-10-15"
@@ -776,9 +778,15 @@ def get_symbol(module_path: str, symbol_name: str) -> Any:
     """
     try:
         mod = importlib.import_module(module_path)
-        return getattr(mod, symbol_name)
+        symbol = getattr(mod, symbol_name)
     except ImportError, AttributeError:
         return None
+    # A tuned value is declared as a parameter; the guide quotes its default.
+    if isinstance(symbol, TunedParameter):
+        # A value that follows a basis is a factor; the guides show its value
+        # on the reference setup.
+        return symbol.reference_value if symbol.basis is not None else symbol.default
+    return symbol
 
 
 def require_symbol(module_path: str, symbol_name: str) -> Any:
@@ -805,7 +813,11 @@ def require_symbol(module_path: str, symbol_name: str) -> Any:
     module = importlib.import_module(module_path)
     if not hasattr(module, symbol_name):
         raise LookupError(f"{module_path}.{symbol_name} no longer exists; update the review guide generator")
-    return getattr(module, symbol_name)
+    symbol = getattr(module, symbol_name)
+    # A tuned value is declared as a parameter; the guide quotes its default.
+    if isinstance(symbol, TunedParameter):
+        return symbol.reference_value if symbol.basis is not None else symbol.default
+    return symbol
 
 
 def default_of(function: Any, parameter: str) -> Any:
@@ -1292,9 +1304,7 @@ def build_astrometry_doc() -> str:
     refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
     driver_module = "astrometricslib._internal.drivers.astrometry_net_driver"
     fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
-    detector = require_symbol(
-        "astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector"
-    )
+    require_symbol("astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector")
     values = {
         "version_line": VERSION_LINE,
         "max_res": require_symbol(record_quality_module, "MAXIMUM_RESIDUAL_FRACTION_OF_FWHM"),
@@ -1310,8 +1320,16 @@ def build_astrometry_doc() -> str:
         "blind_cutoff": f"{require_symbol(driver_module, 'HINTED_SOLVE_NEAR_TIMEOUT_FRACTION'):.0%}",
         "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
         "blob_box": 2 * require_symbol(fwhm_module, "BLOB_WIDTH_BOX_RADIUS_PX"),
-        "threshold": float(default_of(detector.__init__, "threshold_sigma")),
-        "merge_px": float(default_of(detector.deduplicate, "separation_px")),
+        "threshold": float(
+            require_symbol(
+                "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
+                "STAR_FINDER_THRESHOLD_SIGMA",
+            )
+        ),
+        "merge_px": require_symbol(
+            "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
+            "SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS",
+        ),
         "refit_min_stars": require_symbol(refine_module, "MINIMUM_MATCHED_STARS"),
         "refit_sip": require_symbol(refine_module, "SIP_DEGREE"),
         "refit_clip": require_symbol(refine_module, "CLIP_SIGMAS"),
@@ -1565,10 +1583,11 @@ about twice the star's fitted FWHM. It is used because it detects better than a 
 from the fitted FWHM: more catalog matches and a smaller residual (partly measured; see
 <<AST-06>>). It is never reported as a FWHM.
 
-**Clean-up.** Detections closer than <<merge_px>> pixels are merged into one, because the finder
-can split one large star into two. Color frames are averaged in 2×2 blocks before detection:
-color interpolation leaves clumps of noise that would otherwise be found as thousands of false
-stars.
+**Clean-up.** Detections closer than <<merge_px>> kernel width are merged into one, at the
+position of the brighter. The finder already keeps its detections 2.5 kernel widths apart, so
+this only removes a star reported twice; merging over a wider distance joined separate stars.
+Color frames are averaged in 2×2 blocks before detection: color interpolation leaves clumps of
+noise that would otherwise be found as thousands of false stars.
 
 ### 3.2 Pixel-scale hint
 
@@ -1740,9 +1759,7 @@ def build_photometry_doc() -> str:
     indices_module = "astrometricslib.pipelines.photometry.processing.variability_indices"
     analyzer_module = "astrometricslib.pipelines.photometry.processing.variability_analyzer"
     periodicity_module = "astrometricslib.pipelines.photometry.processing.periodicity_search"
-    aperture = require_symbol(
-        "astrometricslib.pipelines.photometry.pre_processing.frame_photometry", "measure_aperture_photometry"
-    )
+    frame_photometry_module = "astrometricslib.pipelines.photometry.pre_processing.frame_photometry"
     values = {
         "version_line": VERSION_LINE,
         "rej_frac": require_symbol(record_quality_module, "MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG"),
@@ -1769,9 +1786,9 @@ def build_photometry_doc() -> str:
             "astrometricslib.pipelines.photometry.processing.family_wise_correction",
             "MAXIMUM_REPEAT_SHUFFLES",
         ),
-        "radius": float(default_of(aperture, "radius")),
-        "r_in": float(default_of(aperture, "annulus_inner")),
-        "r_out": float(default_of(aperture, "annulus_outer")),
+        "radius": float(require_symbol(frame_photometry_module, "APERTURE_RADIUS_PX")),
+        "r_in": float(require_symbol(frame_photometry_module, "SKY_ANNULUS_INNER_RADIUS_PX")),
+        "r_out": float(require_symbol(frame_photometry_module, "SKY_ANNULUS_OUTER_RADIUS_PX")),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
     }
@@ -2914,6 +2931,10 @@ them into straight-line tracks and asks the IMCCE SkyBoT service (an online list
 known solar-system body is at a given time) which known bodies were there. A confirmed mover
 with no match is a lead for a person to check.
 
+**Experimental.** This search is experimental. The app does not show its results, and it runs
+only when a person asks for it. Its false-positive rate on real data (how often it confirms a
+mover that is not real) is not measured, so a person should check every result.
+
 The diagram shows one run. The left branch prepares the reference stars; the right branch
 prepares each frame.
 
@@ -3208,7 +3229,10 @@ def build_stacking_doc() -> str:
             "`INSTRUME` (or `CAMERA`)",
             "Recommended",
             "`str`",
-            "Camera name; frames from two cameras are never stacked together.",
+            (
+                "Camera name; frames from two cameras are never stacked together, "
+                "and neither are frames of one camera at two focal lengths."
+            ),
             "The camera of the frame record.",
         ],
     ])

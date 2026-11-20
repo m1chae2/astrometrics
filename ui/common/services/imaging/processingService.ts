@@ -2,7 +2,7 @@
  * Service for managing image processing, log tailing, and variability analysis actions via the JSON-RPC backend api.
  */
 
-import { callBackend } from '../backendApi';
+import { callBackend, CancelProcessingResult } from '../backendApi';
 import { ProcessStatus, AnalysisResult, ProcessingJob } from '../../types/backendTypes';
 
 /**
@@ -51,13 +51,15 @@ export async function isProcessing(objectId: string): Promise<boolean> {
 
 /**
  * Requests cancellation of a processing job.
+ * @return The answer, whose `message` says why a job was not stopped (for example,
+ *   it runs in another program), or null if the request failed.
  */
 export async function cancelProcessing(
     objectId: string
-): Promise<ProcessStatus | null> {
+): Promise<CancelProcessingResult | null> {
     try {
         const result = await callBackend('processing:cancel', { target_id: objectId });
-        return result as ProcessStatus;
+        return result as CancelProcessingResult;
     } catch {
         return null;
     }

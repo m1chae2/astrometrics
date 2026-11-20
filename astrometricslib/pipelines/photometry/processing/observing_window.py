@@ -32,6 +32,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.processing.period_checks import (
     NIGHT_GAP_DAYS,
     split_into_nights,
@@ -52,22 +59,60 @@ __all__ = [
 # the set that decides most period ambiguities. Chosen by judgment. On the
 # real runs checked (PHO-18) the first three peaks all had power near 1, so
 # three is not shown to be enough.
-ALIAS_PEAK_COUNT = 3
+ALIAS_PEAK_COUNT = TunedParameter(
+    name="photometry.alias_peak_count",
+    default=3,
+    unit="peaks",
+    description="How many of the strongest window peaks a run stores.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-18",
+)
 
 # The highest frequency searched for window peaks, in cycles per day. Two
 # cycles per day reaches the second harmonic of the daily echo, so periods
 # down to 12 hours are covered. A period shorter than the exposure series
 # cannot be sampled by these runs at all.
-MAXIMUM_ALIAS_FREQUENCY_PER_DAY = 2.0
+MAXIMUM_ALIAS_FREQUENCY_PER_DAY = TunedParameter(
+    name="photometry.maximum_alias_frequency_per_day",
+    default=2.0,
+    unit="cycles/day",
+    description="Highest frequency searched for window peaks.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-18",
+)
 
 # Grid points per resolution width (1 / span). The same five samples across a
 # peak that the period search uses, so a narrow peak is not stepped over.
-_SAMPLES_PER_PEAK = 5
+_SAMPLES_PER_PEAK = TunedParameter(
+    name="photometry.samples_per_peak",
+    default=5,
+    unit="samples",
+    description="Grid points per resolution width when the window function is sampled.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D29",
+)
 
 # The grid starts this many resolution widths from zero, to leave the central
 # peak at zero frequency out. The central peak is 1 wide in units of 1 / span;
 # two widths clear it, as `alias_check` does.
-_CENTRAL_PEAK_WIDTHS = 2.0
+_CENTRAL_PEAK_WIDTHS = TunedParameter(
+    name="photometry.central_peak_widths",
+    default=2.0,
+    unit="resolution widths",
+    description=(
+        "How many resolution widths from zero the window grid starts, to leave out the central peak."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D29",
+)
 
 # A run needs this many nights for the schedule to repeat. One night has no
 # daily echo, only the sidelobes of its own length.
@@ -93,8 +138,8 @@ class WindowPeak:
 
 def strongest_window_peaks(
     time_days: Sequence[float] | np.ndarray,
-    peak_count: int = ALIAS_PEAK_COUNT,
-    maximum_frequency_per_day: float = MAXIMUM_ALIAS_FREQUENCY_PER_DAY,
+    peak_count: int | None = None,
+    maximum_frequency_per_day: float | None = None,
 ) -> tuple[list[WindowPeak], str]:
     """Find the strongest peaks of a run's window function.
 
@@ -117,18 +162,25 @@ def strongest_window_peaks(
         Why the list is empty or shorter than `peak_count`. Empty when the
         list is full.
     """
+    night_gap_days = resolve(NIGHT_GAP_DAYS).value
+    central_peak_widths = resolve(_CENTRAL_PEAK_WIDTHS).value
+    samples_per_peak = resolve(_SAMPLES_PER_PEAK).value
+    if peak_count is None:
+        peak_count = resolve(ALIAS_PEAK_COUNT).value
+    if maximum_frequency_per_day is None:
+        maximum_frequency_per_day = resolve(MAXIMUM_ALIAS_FREQUENCY_PER_DAY).value
     times = np.unique(np.asarray(time_days, dtype=float))
     times = times[np.isfinite(times)]
     if times.size < 3:
         return [], "the run has fewer than three distinct frame times"
-    if len(split_into_nights(times, NIGHT_GAP_DAYS)) < MINIMUM_NIGHTS_FOR_ALIASES:
+    if len(split_into_nights(times, night_gap_days)) < MINIMUM_NIGHTS_FOR_ALIASES:
         return [], "the run is a single night, so the schedule has no daily echo to measure"
     span = float(times.max() - times.min())
     resolution = 1.0 / span
-    first = _CENTRAL_PEAK_WIDTHS * resolution
+    first = central_peak_widths * resolution
     if first >= maximum_frequency_per_day:
         return [], "the run spans too short a time to separate a peak from the central peak"
-    step = resolution / _SAMPLES_PER_PEAK
+    step = resolution / samples_per_peak
     frequency = np.arange(first, maximum_frequency_per_day, step)
     power = window_power(times, frequency)
     interior = np.arange(1, frequency.size - 1)

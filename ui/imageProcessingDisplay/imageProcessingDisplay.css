@@ -1478,6 +1478,30 @@
   --star-marker-color: var(--accent-sky);
 }
 
+/* The pixel readout floats over the bottom-left corner of the image, so the image keeps its full height.
+   It takes no pointer events, so hovering, clicking, dragging and star labels under it still work.
+   It sits below the star profile panel (z-index 5), so it never hides the panel. */
+.fits-renderer__readout {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  max-width: calc(100% - 28px);
+  /* No frame: each badge is opaque (`<Badge opaque>`), so stars under the readout
+     do not show through its text, and the gaps between badges stay see-through. */
+  padding: 0;
+  background: transparent;
+  pointer-events: none;
+  font-family: var(--font-family-mono);
+  font-size: var(--small-font-size);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
 /* Name shown when the pointer is over a star with no label. */
 .fits-renderer__star-tooltip {
   position: absolute;

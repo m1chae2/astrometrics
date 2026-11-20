@@ -44,7 +44,8 @@ def compute_pointing_correction(
     iteration: int,
     config: CorrectionConfig,
     pointing_model: MountPointingModel | None = None,
-    latitude_deg: float = 45.0,
+    *,
+    latitude_deg: float,
 ) -> PointingCorrection:
     """Compute one iteration's pointing error and closing correction.
 
@@ -69,9 +70,9 @@ def compute_pointing_correction(
         measured error.
         Skipped even when supplied if its `confidence` is
         ``"insufficient_data"`` -- an unfit model predicts nothing.
-    latitude_deg : `float`, optional
-        Observer latitude in decimal degrees, used only when
-        `pointing_model` is supplied, default 45.0.
+    latitude_deg : `float`
+        Observer latitude in decimal degrees, keyword-only and required.
+        It is used only when `pointing_model` is supplied.
 
     Returns
     -------

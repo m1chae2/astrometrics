@@ -68,7 +68,7 @@ Build every screen from the components in `ui/common/components/` (`Button`, `Te
 
 ## Documentation
 
-The rules for writing and placing documentation are in [Documentation conventions](documentation/Documentation_Conventions.md), and [About these docs](documentation/About_These_Docs.md) maps every document.
+[About these docs](documentation/About_These_Docs.md) maps every document.
 
 - **Where content lives.** Theory goes in the architecture paper, code names and tuned values in the implementation paper, and evidence in the validation register under `documentation/library_design/validation/`.
 - **Generated files.** The pipeline review guides are generated. Edit the generators in `build/documentation/` and run them again. Never edit the output by hand.

@@ -39,6 +39,15 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers import bump_data_version, connect_db, read_data_versions
 from astrometricslib.exceptions import InvalidArgumentError, StorageError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 from astrometricslib.reports import observing_night_id
 
 if TYPE_CHECKING:
@@ -153,12 +162,26 @@ _INSERT_GUIDING_SAMPLE_SQL = """
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
-SPURIOUS_ALIGNMENT_ERROR_ARCSEC = 0.5
+SPURIOUS_ALIGNMENT_ERROR_ARCSEC = TunedParameter(
+    name="wayfinding.spurious_alignment_error_arcsec",
+    default=factor_for(0.5, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="arcseconds (× plate scale)",
+    description="A sync with a smaller pointing error is treated as a tracking-loop echo and is not stored.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D124",
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=0.5,
+)
 """A sync with a smaller pointing error is a tracking-loop echo, not a solve.
 
 Some mount drivers report each tracking update as a sync. Those updates
 move the mount by a tiny amount and are not plate solves, so they are not
-stored unless the caller forces it.
+stored unless the caller forces it. A plate solve cannot measure a pointing
+error much finer than about a quarter of a pixel, so the limit is a quarter
+of a pixel in arcseconds: 0.5 arcseconds at the reference plate scale of
+1.915 arcseconds per pixel, and more on a coarser one.
 """
 
 
@@ -287,7 +310,7 @@ class ControlRecordStore:
             pointing_error = math.hypot(d_ra, d_dec)
         if (
             pointing_error is not None
-            and pointing_error < SPURIOUS_ALIGNMENT_ERROR_ARCSEC
+            and pointing_error < resolve_parameter(SPURIOUS_ALIGNMENT_ERROR_ARCSEC).value
             and not attempt.get("force_record")
         ):
             logger.debug("Ignoring a tracking-loop echo of %.3f arcsec.", pointing_error)

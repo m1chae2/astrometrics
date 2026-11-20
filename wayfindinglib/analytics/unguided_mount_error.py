@@ -49,6 +49,13 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import minimize_scalar
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.guiding_spectrum import MINIMUM_CYCLES, SEGMENT_BREAK_SECONDS
 from wayfindinglib.models.session.unguided_mount_error import (
     AxisErrorTerms,
@@ -58,13 +65,31 @@ from wayfindinglib.models.session.unguided_mount_error import (
     UnguidedRunError,
 )
 
-MINIMUM_PERIOD_SECONDS = 60.0
+MINIMUM_PERIOD_SECONDS = TunedParameter(
+    name="wayfinding.minimum_period_seconds",
+    default=60.0,
+    unit="s",
+    description="Shortest repeating-error period searched, in seconds.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Shortest repeating-error period searched, in seconds.
 
 Faster swings are seeing and gear teeth, not the worm. Design estimate,
 register row WAY-D120."""
 
-MAXIMUM_PERIOD_SECONDS = 1500.0
+MAXIMUM_PERIOD_SECONDS = TunedParameter(
+    name="wayfinding.maximum_period_seconds",
+    default=1500.0,
+    unit="s",
+    description="Longest repeating-error period searched, in seconds.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Longest repeating-error period searched, in seconds.
 
 Worm periods of amateur equatorial mounts run from about 100 to 1000 seconds
@@ -72,17 +97,44 @@ Worm periods of amateur equatorial mounts run from about 100 to 1000 seconds
 fit a period longer than its length divided by `MINIMUM_CYCLES`. Design
 estimate, register row WAY-D120."""
 
-MINIMUM_FIT_SAMPLES = 60
+MINIMUM_FIT_SAMPLES = TunedParameter(
+    name="wayfinding.minimum_fit_samples",
+    default=60,
+    unit="samples",
+    description="Fewest samples in a run for a repeating-error fit.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Fewest samples in a run for a repeating-error fit.
 
 The fit has at least five free numbers; 60 samples keep it well determined.
 Design estimate, register row WAY-D120."""
 
-MINIMUM_SAMPLES_FOR_TERMS = 10
+MINIMUM_SAMPLES_FOR_TERMS = TunedParameter(
+    name="wayfinding.minimum_samples_for_terms",
+    default=10,
+    unit="samples",
+    description="Fewest samples in a run for the drift and random terms.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Fewest samples in a run for the drift and random terms. Design estimate,
 register row WAY-D120."""
 
-MINIMUM_AMPLITUDE_SIGNIFICANCE = 4.0
+MINIMUM_AMPLITUDE_SIGNIFICANCE = TunedParameter(
+    name="wayfinding.minimum_amplitude_significance",
+    default=4.0,
+    unit="sigma",
+    description="A repeating error counts only if its amplitude is this many times its uncertainty.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """A repeating error counts only if its amplitude is this many times its
 uncertainty. The period is searched on a grid, so a plain 3 sigma would let
 noise through about once in a hundred grids. Design estimate, register row
@@ -92,27 +144,93 @@ _GRID_OVERSAMPLING = 5
 """Trial frequencies per resolution element 1/T. Five put the grid well below
 the width of the periodogram peak."""
 
-_STEP_MAD_MULTIPLE = 6.0
-_STEP_MINIMUM_ARCSEC = 1.5
+_STEP_MAD_MULTIPLE = TunedParameter(
+    name="wayfinding.step_mad_multiple",
+    default=6.0,
+    unit="robust standard deviations",
+    description=(
+        "A change between two frames is a step (a dither) when it is more than this many robust standard"
+        " deviations from the typical change."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
+_STEP_MINIMUM_ARCSEC = TunedParameter(
+    name="wayfinding.step_minimum_arcsec",
+    default=1.5,
+    unit="arcsec",
+    description=(
+        "A change between two frames is a step (a dither) only when it is also more than this many "
+        "arcseconds."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """A change between two frames is a step (a dither) when it is more than 6
 robust standard deviations from the typical change and more than 1.5
 arcseconds. The worm's steepest slope for a 10 arcsecond swing in 480 seconds
 is 0.2 arcseconds a frame, so the second limit keeps real motion out. Design
 estimate, register row WAY-D120."""
 
-_MINIMUM_PIECE_SAMPLES = 8
+_MINIMUM_PIECE_SAMPLES = TunedParameter(
+    name="wayfinding.minimum_piece_samples",
+    default=8,
+    unit="samples",
+    description="A piece between two steps with fewer samples than this is dropped.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """A piece between two steps with fewer samples than this is dropped."""
 
-_MAXIMUM_AUTOCORRELATION = 0.9
+_MAXIMUM_AUTOCORRELATION = TunedParameter(
+    name="wayfinding.maximum_autocorrelation",
+    default=0.9,
+    unit="fraction",
+    description=(
+        "Cap on the frame-to-frame correlation used to reduce the sample count, so one smooth run does "
+        "not make the uncertainties unbounded."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Cap on the frame-to-frame correlation used to reduce the sample count, so
 one smooth run does not make the uncertainties unbounded."""
 
-MINIMUM_PULSES_FOR_SIGN = 10
+MINIMUM_PULSES_FOR_SIGN = TunedParameter(
+    name="wayfinding.minimum_pulses_for_sign",
+    default=10,
+    unit="pulses",
+    description="Fewest corrections on an axis for the direction of a pulse to be read from the run.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Fewest corrections on an axis for the direction of a pulse to be read from
 the run. An axis with fewer was not being guided. Design estimate, register
 row WAY-D120."""
 
-MINIMUM_SIGN_CORRELATION = 0.3
+MINIMUM_SIGN_CORRELATION = TunedParameter(
+    name="wayfinding.minimum_sign_correlation",
+    default=0.3,
+    unit="fraction",
+    description=(
+        "Smallest size of the correlation between the measured error and the pulses for the direction to"
+        " be trusted."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D120",
+)
 """Smallest size of the correlation between the measured error and the pulses
 for the direction to be trusted. A guider that corrects what it measures gives
 0.6 to 1.0 on the PHD2 contract recording and the Ekos logs; below this the
@@ -177,7 +295,7 @@ def split_stretches(times: np.ndarray) -> list[slice]:
     stretches : `list` [`slice`]
         One slice of the sample arrays for each continuous stretch.
     """
-    breaks = np.flatnonzero(np.diff(times) >= SEGMENT_BREAK_SECONDS) + 1
+    breaks = np.flatnonzero(np.diff(times) >= resolve_parameter(SEGMENT_BREAK_SECONDS).value) + 1
     starts = np.concatenate([[0], breaks]).astype(int)
     ends = np.concatenate([breaks, [times.size]]).astype(int)
     return [slice(int(a), int(b)) for a, b in zip(starts, ends, strict=True)]
@@ -202,12 +320,12 @@ def correction_sign(measured_error_arcsec: np.ndarray, pulses_ms: np.ndarray) ->
         not follow the error.
     """
     sent = np.abs(pulses_ms) > 0.0
-    if int(sent.sum()) < MINIMUM_PULSES_FOR_SIGN:
+    if int(sent.sum()) < resolve_parameter(MINIMUM_PULSES_FOR_SIGN).value:
         return None
     if float(np.std(measured_error_arcsec[sent])) <= 0.0:
         return None
     correlation = float(np.corrcoef(measured_error_arcsec[sent], pulses_ms[sent])[0, 1])
-    if not math.isfinite(correlation) or abs(correlation) < MINIMUM_SIGN_CORRELATION:
+    if not math.isfinite(correlation) or abs(correlation) < resolve_parameter(MINIMUM_SIGN_CORRELATION).value:
         return None
     return 1.0 if correlation < 0.0 else -1.0
 
@@ -267,11 +385,13 @@ def _find_pieces(times: np.ndarray, unguided: np.ndarray) -> np.ndarray:
         An integer for each sample; it rises by one after each step.
     """
     changes = np.diff(unguided)
-    if changes.size < MINIMUM_SAMPLES_FOR_TERMS:
+    if changes.size < resolve_parameter(MINIMUM_SAMPLES_FOR_TERMS).value:
         return np.zeros(times.size, dtype=int)
     center = float(np.median(changes))
     spread = _MAD_TO_SIGMA * float(np.median(np.abs(changes - center)))
-    limit = max(_STEP_MAD_MULTIPLE * spread, _STEP_MINIMUM_ARCSEC)
+    limit = max(
+        resolve_parameter(_STEP_MAD_MULTIPLE).value * spread, resolve_parameter(_STEP_MINIMUM_ARCSEC).value
+    )
     steps = np.abs(changes - center) > limit
     return np.concatenate([[0], np.cumsum(steps)]).astype(int)
 
@@ -340,10 +460,14 @@ def _inflation_from_residual(residual: np.ndarray, piece_index: np.ndarray) -> f
     """
     same_piece = piece_index[1:] == piece_index[:-1]
     first, second = residual[:-1][same_piece], residual[1:][same_piece]
-    if first.size < MINIMUM_SAMPLES_FOR_TERMS or float(np.std(first)) <= 0.0 or float(np.std(second)) <= 0.0:
+    if (
+        first.size < resolve_parameter(MINIMUM_SAMPLES_FOR_TERMS).value
+        or float(np.std(first)) <= 0.0
+        or float(np.std(second)) <= 0.0
+    ):
         return 1.0
     rho = float(np.corrcoef(first, second)[0, 1])
-    rho = min(max(rho, 0.0), _MAXIMUM_AUTOCORRELATION)
+    rho = min(max(rho, 0.0), resolve_parameter(_MAXIMUM_AUTOCORRELATION).value)
     return (1.0 + rho) / (1.0 - rho)
 
 
@@ -388,11 +512,13 @@ def _search_period(
         The best period in seconds, or `None` when the run is too short for
         any allowed period to fit `MINIMUM_CYCLES` times.
     """
-    longest = min(MAXIMUM_PERIOD_SECONDS, duration / MINIMUM_CYCLES)
-    if longest <= MINIMUM_PERIOD_SECONDS:
+    longest = min(
+        resolve_parameter(MAXIMUM_PERIOD_SECONDS).value, duration / resolve_parameter(MINIMUM_CYCLES).value
+    )
+    if longest <= resolve_parameter(MINIMUM_PERIOD_SECONDS).value:
         return None
     step = 1.0 / (_GRID_OVERSAMPLING * duration)
-    frequencies = np.arange(1.0 / longest, 1.0 / MINIMUM_PERIOD_SECONDS + step, step)
+    frequencies = np.arange(1.0 / longest, 1.0 / resolve_parameter(MINIMUM_PERIOD_SECONDS).value + step, step)
 
     def residual_sum(frequency: float) -> float:
         """Give the squared leftover at one trial frequency.
@@ -516,7 +642,7 @@ def _build_axis_series(
     notes: list[str] = []
     if sign is None:
         sent = int(np.count_nonzero(pulses))
-        if sent >= MINIMUM_PULSES_FOR_SIGN:
+        if sent >= resolve_parameter(MINIMUM_PULSES_FOR_SIGN).value:
             return (
                 empty,
                 empty,
@@ -524,7 +650,9 @@ def _build_axis_series(
                 [f"The {axis.upper()} pulses do not follow the error: the axis was not guided well."],
             )
         notes.append(
-            f"Fewer than {MINIMUM_PULSES_FOR_SIGN} {axis.upper()} corrections: the axis was not guided."
+            f"Fewer than "
+            f"{resolve_parameter(MINIMUM_PULSES_FOR_SIGN).value} {axis.upper()} corrections: the axis was "
+            f"not guided."
         )
         sign = 1.0
     kept_times: list[np.ndarray] = []
@@ -533,13 +661,13 @@ def _build_axis_series(
     next_piece = 0
     for window in split_stretches(series.times):
         stretch_times = series.times[window]
-        if stretch_times.size < _MINIMUM_PIECE_SAMPLES:
+        if stretch_times.size < resolve_parameter(_MINIMUM_PIECE_SAMPLES).value:
             continue
         values = reconstruct_unguided_error(errors[window], pulses[window], rate, sign)
         local = _find_pieces(stretch_times, values)
         for piece in range(int(local.max()) + 1):
             chosen = local == piece
-            if int(chosen.sum()) < _MINIMUM_PIECE_SAMPLES:
+            if int(chosen.sum()) < resolve_parameter(_MINIMUM_PIECE_SAMPLES).value:
                 continue
             kept_times.append(stretch_times[chosen])
             kept_values.append(values[chosen])
@@ -580,7 +708,7 @@ def measure_run(series: GuideRunSeries) -> UnguidedRunError:
     for axis in ("ra", "dec"):
         times, values, pieces, axis_notes = _build_axis_series(series, axis)
         notes.extend(axis_notes)
-        if times.size < MINIMUM_SAMPLES_FOR_TERMS:
+        if times.size < resolve_parameter(MINIMUM_SAMPLES_FOR_TERMS).value:
             if not axis_notes:
                 notes.append(f"Too few {axis.upper()} samples ({times.size}) for any term.")
             continue
@@ -592,21 +720,26 @@ def measure_run(series: GuideRunSeries) -> UnguidedRunError:
             result.samples_used = int(times.size)
             plain = _finish_fit(_design(relative, pieces, None), values, pieces, None)
             period = None
-            if times.size < MINIMUM_FIT_SAMPLES:
+            if times.size < resolve_parameter(MINIMUM_FIT_SAMPLES).value:
                 notes.append(f"Only {times.size} samples: too few to fit a periodic error.")
             else:
                 period = _search_period(relative, pieces, values, duration)
                 if period is None:
                     notes.append(
-                        f"The run lasts {duration:.0f} s, too short to hold {MINIMUM_CYCLES} cycles of "
-                        f"a {MINIMUM_PERIOD_SECONDS:.0f} s period: no periodic error fitted."
+                        f"The run lasts {duration:.0f} s, too short to hold "
+                        f"{resolve_parameter(MINIMUM_CYCLES).value} cycles of "
+                        f"a "
+                        f"{resolve_parameter(MINIMUM_PERIOD_SECONDS).value:.0f} s period: no periodic error "
+                        f"fitted."
                     )
             chosen = plain
             if period is not None:
                 with_sine = _finish_fit(_design(relative, pieces, 1.0 / period), values, pieces, period)
                 fit = _periodic_error_from_fit(with_sine, piece_count, duration, int(times.size), origin)
                 result.periodic_error = fit
-                result.significant_periodic_error = fit.significance >= MINIMUM_AMPLITUDE_SIGNIFICANCE
+                result.significant_periodic_error = (
+                    fit.significance >= resolve_parameter(MINIMUM_AMPLITUDE_SIGNIFICANCE).value
+                )
                 if result.significant_periodic_error:
                     chosen = with_sine
             result.ra = _axis_terms(chosen, piece_count, pieces)

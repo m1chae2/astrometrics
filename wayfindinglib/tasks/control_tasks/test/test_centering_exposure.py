@@ -92,7 +92,7 @@ def test_a_star_at_the_limit_has_the_detection_ratio() -> None:
 def test_limit_deepens_with_exposure_and_with_less_sky() -> None:
     """A longer exposure and a darker sky both reach fainter stars."""
     sensor = _sensor()
-    limits = [limiting_magnitude(seconds, sensor) for seconds in EXPOSURE_LADDER_SECONDS]
+    limits = [limiting_magnitude(seconds, sensor) for seconds in EXPOSURE_LADDER_SECONDS.default]
     assert limits == sorted(limits)
     assert len(set(limits)) == len(limits)
     assert limiting_magnitude(5.0, _sensor(sky_rate_e_per_s_per_px=0.1)) > limiting_magnitude(5.0, sensor)
@@ -114,7 +114,7 @@ def test_the_shortest_step_that_reaches_the_target_is_picked() -> None:
     sensor = _sensor()
     magnitudes = _field({16.5: 20})
     exposure, trials, reaches, _ = choose_exposure(sensor, magnitudes, target_star_count=15)
-    deep_enough = [s for s in EXPOSURE_LADDER_SECONDS if limiting_magnitude(s, sensor) >= 16.5]
+    deep_enough = [s for s in EXPOSURE_LADDER_SECONDS.default if limiting_magnitude(s, sensor) >= 16.5]
     assert exposure == deep_enough[0]
     assert reaches is True
     assert trials[-1].exposure_seconds == exposure
@@ -125,7 +125,7 @@ def test_the_shortest_step_that_reaches_the_target_is_picked() -> None:
 def test_enough_stars_at_the_first_step_gives_the_shortest_exposure() -> None:
     """Many bright stars: the minimum, 1 s, is enough."""
     exposure, trials, reaches, _ = choose_exposure(_sensor(), _field({8.0: 40}))
-    assert exposure == EXPOSURE_LADDER_SECONDS[0]
+    assert exposure == EXPOSURE_LADDER_SECONDS.default[0]
     assert len(trials) == 1
     assert reaches is True
 
@@ -133,8 +133,8 @@ def test_enough_stars_at_the_first_step_gives_the_shortest_exposure() -> None:
 def test_too_few_stars_clamps_at_the_longest_exposure() -> None:
     """Only 3 stars anywhere: the longest step is used, target missed."""
     exposure, trials, reaches, _ = choose_exposure(_sensor(), _field({10.0: 3}))
-    assert exposure == EXPOSURE_LADDER_SECONDS[-1]
-    assert len(trials) == len(EXPOSURE_LADDER_SECONDS)
+    assert exposure == EXPOSURE_LADDER_SECONDS.default[-1]
+    assert len(trials) == len(EXPOSURE_LADDER_SECONDS.default)
     assert reaches is False
 
 
@@ -295,7 +295,7 @@ def test_the_inputs_give_a_computed_exposure(stand_ins: dict[str, Any]) -> None:
     """With every input, the result is computed and carries its numbers."""
     result = _choose(_context(GOOD), [16.5] * 30)
     assert result.source == "computed"
-    assert result.exposure_seconds in EXPOSURE_LADDER_SECONDS
+    assert result.exposure_seconds in EXPOSURE_LADDER_SECONDS.default
     assert result.reaches_target is True
     assert result.zero_point_mag == pytest.approx(20.0)
     assert result.pixel_scale_arcsec == pytest.approx(1.9144, abs=1e-3)
@@ -391,7 +391,7 @@ def test_a_field_too_empty_for_the_target_uses_the_longest_exposure(stand_ins: d
     """Too few stars at any depth: 30 s is used and the reason warns."""
     result = _choose(_context(GOOD), [12.0] * 3)
     assert result.source == "computed"
-    assert result.exposure_seconds == EXPOSURE_LADDER_SECONDS[-1]
+    assert result.exposure_seconds == EXPOSURE_LADDER_SECONDS.default[-1]
     assert result.reaches_target is False
     assert "may fail" in result.reason
 

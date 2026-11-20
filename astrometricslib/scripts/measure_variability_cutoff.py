@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.known_variability import KnownVariability, combine_known_variability
 from astrometricslib.pipelines.photometry.post_processing.variability_skill import area_under_curve
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
@@ -48,7 +49,7 @@ from astrometricslib.pipelines.photometry.processing.variability_analyzer import
 )
 
 # The multipliers to try. 7.4 is the pipeline's own.
-MULTIPLIERS = (3.0, 4.0, 5.0, 6.0, DEFAULT_VARIABILITY_SIGMA_THRESHOLD, 9.0, 12.0, 16.0)
+MULTIPLIERS = (3.0, 4.0, 5.0, 6.0, resolve(DEFAULT_VARIABILITY_SIGMA_THRESHOLD).value, 9.0, 12.0, 16.0)
 
 DEFAULT_MINIMUM_STARS = 100
 
@@ -372,7 +373,9 @@ def format_report(
         "                       (recall)          (flagged)    (flagged)       (known vs. not listed)",
     ]
     for result in results:
-        marker = "  <- pipeline" if result.multiplier == DEFAULT_VARIABILITY_SIGMA_THRESHOLD else ""
+        marker = (
+            "  <- pipeline" if result.multiplier == resolve(DEFAULT_VARIABILITY_SIGMA_THRESHOLD).value else ""
+        )
         lines.append(
             f"{result.multiplier:5.1f}  {_percent(result.share_of_all):>11}   "
             f"{_percent(result.share(KnownVariability.KNOWN_VARIABLE)):>15}   "

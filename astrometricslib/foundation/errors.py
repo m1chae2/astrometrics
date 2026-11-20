@@ -118,6 +118,14 @@ class ConfigurationError(AstrometricsError):
     code = "configuration"
 
 
+class ParameterUnavailableError(ConfigurationError):
+    """A parameter that must not use its default has no value.
+
+    Raised for a parameter that is set to refuse when its value is missing,
+    such as a hardware limit.
+    """
+
+
 class StorageError(AstrometricsError):
     """Disk or database trouble.
 

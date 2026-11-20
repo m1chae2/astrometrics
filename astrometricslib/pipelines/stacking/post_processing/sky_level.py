@@ -36,6 +36,16 @@ from scipy.ndimage import median_filter
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.image_scaling import (
     AUTOSTRETCH_SHADOWS_CLIP_SIGMA,
     measure_sky,
@@ -44,7 +54,16 @@ from astrometricslib.pipelines.shared.image_scaling import (
 
 logger = logging.getLogger(__name__)
 
-LIGHTEST_SKY_LEVEL = 0.20
+LIGHTEST_SKY_LEVEL = TunedParameter(
+    name="stacking.lightest_sky_level",
+    default=0.20,
+    unit="fraction",
+    description="Brightest sky level the display rule gives, as a fraction of full brightness.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-29",
+)
 """The brightest sky the rule gives, as a fraction of full brightness.
 
 A lighter sky shows fainter structure, but it also lifts the grain of the
@@ -56,7 +75,16 @@ own Autostretch uses 0.25. Faint targets that the rule would lift past 0.20
 get 0.20.
 """
 
-DARKEST_SKY_LEVEL = 0.11
+DARKEST_SKY_LEVEL = TunedParameter(
+    name="stacking.darkest_sky_level",
+    default=0.11,
+    unit="fraction",
+    description="Darkest sky level the display rule gives, as a fraction of full brightness.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-29",
+)
 """The darkest sky the rule gives, as a fraction of full brightness.
 
 On the M 13, M 42, M 81 and M 101 stacks, a sky at 0.11 (grey 28 out of 255)
@@ -65,7 +93,16 @@ disappeared. Targets that would call for a darker sky than this are bright
 enough to look good at it.
 """
 
-FALLBACK_SKY_LEVEL = 0.18
+FALLBACK_SKY_LEVEL = TunedParameter(
+    name="stacking.fallback_sky_level",
+    default=0.18,
+    unit="fraction",
+    description="Sky level used when the stack's sky cannot be measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-29",
+)
 """The sky level used when the stack's sky cannot be measured.
 
 A middle value: 0.18 was the level that kept the faint arms of M 81 and M 101
@@ -82,21 +119,61 @@ visible while giving a visibly darker, cleaner sky than 0.25.
 # Calibrated on one target by eye, then checked on 22 other ASI533MM Pro
 # stacks, where the levels stayed in the expected order (fainter targets
 # lighter). Not validated on stacks from other cameras.
-EXTENDED_LIGHT_BRIGHTNESS = 0.36
+EXTENDED_LIGHT_BRIGHTNESS = TunedParameter(
+    name="stacking.extended_light_brightness",
+    default=0.36,
+    unit="fraction",
+    description="Display brightness at which extended light is placed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-29",
+)
 
 # The stack is cut into blocks of this many pixels on a side. A star is a few
 # pixels wide, so the median of such a block ignores it. Real extended light
 # (nebulae, galaxy halos) is many blocks wide and survives.
-_BLOCK_PIXELS = 8
+# On the reference setup this stands for 8 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+_BLOCK_PIXELS = TunedParameter(
+    name="stacking.block_pixels",
+    default=factor_for(8, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=8,
+    unit="× star width",
+    description="Side of the blocks the stack is cut into to find its sky.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D54",
+)
 
 # A second, small median filter (in blocks) removes stars that were bigger
 # than one block, such as the halo of a very bright star.
-_BLOCK_FILTER_SIZE = 3
+_BLOCK_FILTER_SIZE = TunedParameter(
+    name="stacking.block_filter_size",
+    default=3,
+    unit="blocks",
+    description="Size of the small median filter that removes stars bigger than one block.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D54",
+)
 
 # The brightest extended light the rule looks at is the 99th percentile of
 # the star-free map. That ignores a few extreme blocks (a star's wings) while
 # still reaching the bright core of a nebula.
-_EXTENDED_LIGHT_PERCENTILE = 99.0
+_EXTENDED_LIGHT_PERCENTILE = TunedParameter(
+    name="stacking.extended_light_percentile",
+    default=99.0,
+    unit="percentile",
+    description="Percentile of the star-free map taken as the brightest extended light.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D54",
+)
 
 
 @dataclass(frozen=True)
@@ -133,18 +210,19 @@ def measure_extended_light(arr: np.ndarray) -> float:
         The 99th percentile of the star-free block map, in the image's own
         units.
     """
-    rows = (arr.shape[0] // _BLOCK_PIXELS) * _BLOCK_PIXELS
-    columns = (arr.shape[1] // _BLOCK_PIXELS) * _BLOCK_PIXELS
+    block_pixels = resolve(_BLOCK_PIXELS).value
+    rows = (arr.shape[0] // block_pixels) * block_pixels
+    columns = (arr.shape[1] // block_pixels) * block_pixels
     blocks = arr[:rows, :columns].reshape(
-        rows // _BLOCK_PIXELS, _BLOCK_PIXELS, columns // _BLOCK_PIXELS, _BLOCK_PIXELS
+        rows // block_pixels, block_pixels, columns // block_pixels, block_pixels
     )
     with warnings.catch_warnings():
         # A block with no valid pixels gives a missing value, which the
         # percentile below skips. The warning about it is not useful.
         warnings.simplefilter("ignore", RuntimeWarning)
         block_medians = np.nanmedian(blocks, axis=(1, 3))
-    extended_light_map = median_filter(block_medians, size=_BLOCK_FILTER_SIZE)
-    return float(np.nanpercentile(extended_light_map, _EXTENDED_LIGHT_PERCENTILE))
+    extended_light_map = median_filter(block_medians, size=resolve(_BLOCK_FILTER_SIZE).value)
+    return float(np.nanpercentile(extended_light_map, resolve(_EXTENDED_LIGHT_PERCENTILE).value))
 
 
 def choose_sky_level(data: np.ndarray) -> SkyLevelChoice:
@@ -162,30 +240,34 @@ def choose_sky_level(data: np.ndarray) -> SkyLevelChoice:
         The sky level, between `DARKEST_SKY_LEVEL` and `LIGHTEST_SKY_LEVEL`,
         or `FALLBACK_SKY_LEVEL` if the sky cannot be measured.
     """
+    lightest_sky_level = resolve(LIGHTEST_SKY_LEVEL).value
+    fallback_sky_level = resolve(FALLBACK_SKY_LEVEL).value
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim == 3:
         arr = arr.mean(axis=0 if arr.shape[0] in (1, 3, 4) else 2)
     sky = measure_sky(arr)
     if sky is None or arr.ndim != 2:
-        return SkyLevelChoice(FALLBACK_SKY_LEVEL, None, "the sky could not be measured")
+        return SkyLevelChoice(fallback_sky_level, None, "the sky could not be measured")
     median, sigma, peak = sky
     black_point = max(median + AUTOSTRETCH_SHADOWS_CLIP_SIGMA * sigma, float(np.nanmin(arr)))
     if peak <= black_point:
-        return SkyLevelChoice(FALLBACK_SKY_LEVEL, None, "the image has no usable brightness range")
+        return SkyLevelChoice(fallback_sky_level, None, "the image has no usable brightness range")
     extended_light = measure_extended_light(arr)
     snr = (extended_light - median) / sigma
     if not np.isfinite(snr) or extended_light <= median:
         return SkyLevelChoice(
-            LIGHTEST_SKY_LEVEL, max(snr, 0.0) if np.isfinite(snr) else 0.0, "no extended light above the sky"
+            lightest_sky_level, max(snr, 0.0) if np.isfinite(snr) else 0.0, "no extended light above the sky"
         )
     normalized_median = (median - black_point) / (peak - black_point)
     normalized_extended = (extended_light - black_point) / (peak - black_point)
     if not 0.0 < normalized_median < normalized_extended < 1.0:
         return SkyLevelChoice(
-            FALLBACK_SKY_LEVEL, float(snr), "the extended light is as bright as the brightest pixel"
+            fallback_sky_level, float(snr), "the extended light is as bright as the brightest pixel"
         )
-    level = sky_level_for_peak(normalized_median, normalized_extended, EXTENDED_LIGHT_BRIGHTNESS)
-    chosen = min(LIGHTEST_SKY_LEVEL, max(DARKEST_SKY_LEVEL, level))
+    level = sky_level_for_peak(
+        normalized_median, normalized_extended, resolve(EXTENDED_LIGHT_BRIGHTNESS).value
+    )
+    chosen = min(lightest_sky_level, max(resolve(DARKEST_SKY_LEVEL).value, level))
     return SkyLevelChoice(chosen, float(snr), f"extended light is {snr:.1f} sigma above the sky")
 
 
@@ -207,5 +289,5 @@ def choose_sky_level_for_file(path: str) -> SkyLevelChoice:
         data = AstrometricsImage(path).data
     except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
         logger.debug("Could not read '%s' to choose a sky level: %s", path, error)
-        return SkyLevelChoice(FALLBACK_SKY_LEVEL, None, "the image could not be read")
+        return SkyLevelChoice(resolve(FALLBACK_SKY_LEVEL).value, None, "the image could not be read")
     return choose_sky_level(data)

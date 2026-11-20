@@ -20,6 +20,13 @@ import numpy as np
 from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
 from astrometricslib.pipelines.stacking.processing.group_gains import (
     CLIPPED_FRAME_ZERO_FRACTION,
@@ -49,13 +56,33 @@ logger = logging.getLogger(__name__)
 # supply the fainter pixels. 2 leaves under half a percent of bias in what is
 # kept. On the Vega session this has been checked only by this arithmetic and
 # by the unit tests, not against a clean group.
-CLIPPING_FLOOR_SIGMAS = 2.0
+CLIPPING_FLOOR_SIGMAS = TunedParameter(
+    name="stacking.clipping_floor_sigmas",
+    default=2.0,
+    unit="noise sigmas",
+    description=(
+        "Height above zero, in noise sigmas, below which the average of clipped frames is biased high."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D12",
+)
 
 # How many raw frames of a group are read to measure the frame noise. The
 # noise of a frame hardly varies from one frame to the next (the spread over
 # three frames per exposure was under 0.01 counts on the Vega session), so a
 # few are enough, and reading a full 3008 x 3008 frame is not free.
-FRAMES_SAMPLED_PER_GROUP = 3
+FRAMES_SAMPLED_PER_GROUP = TunedParameter(
+    name="stacking.frames_sampled_per_group",
+    default=3,
+    unit="frames",
+    description="Number of raw frames of a group read to measure the frame noise.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D26",
+)
 
 
 def group_weight(count: int, exposure_seconds: float, frame_noise: float) -> float:
@@ -122,6 +149,9 @@ def _prepare_group_inputs(
     ProcessingError
         If a group's background noise cannot be measured.
     """
+    clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
+    full_scale_counts = resolve(FULL_SCALE_COUNTS).value
+    clipping_floor_sigmas = resolve(CLIPPING_FLOOR_SIGMAS).value
     if not images or len(images) != len(exposures_seconds):
         raise InvalidArgumentError("Each group needs one image and one exposure length.")
     if any(exposure <= 0 for exposure in exposures_seconds):
@@ -165,8 +195,8 @@ def _prepare_group_inputs(
         if len(frame_zero_fractions) != len(images):
             raise InvalidArgumentError("Each group needs one zero fraction.")
         for index, (raw, zero_fraction) in enumerate(zip(images, frame_zero_fractions, strict=True)):
-            if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION:
-                floor = CLIPPING_FLOOR_SIGMAS * frame_noises[index] / FULL_SCALE_COUNTS
+            if zero_fraction > clipped_frame_zero_fraction:
+                floor = clipping_floor_sigmas * frame_noises[index] / full_scale_counts
                 trusted_masks[index] = usable_masks[index] & (np.asarray(raw) >= floor)
     star_level = star_clip_level(clip_ceiling_adu)
     star_masks = [
@@ -179,11 +209,11 @@ def measure_exposure_group_gains(
     images: list[np.ndarray],
     exposures_seconds: list[float],
     frame_counts: list[int] | None = None,
-    saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
+    saturation_level: float | None = None,
     frame_noises: list[float] | None = None,
     frame_zero_fractions: list[float] | None = None,
     covered_masks: list[np.ndarray] | None = None,
-    tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
+    tolerance: float | None = None,
     clip_ceiling_adu: float | None = None,
     use_star_fluxes: bool = True,
 ) -> tuple[int, list[GroupGainMeasurement]]:
@@ -238,6 +268,10 @@ def measure_exposure_group_gains(
         One entry per group.
 
     """
+    if saturation_level is None:
+        saturation_level = resolve(SATURATION_FRACTION_OF_FULL_SCALE).value
+    if tolerance is None:
+        tolerance = resolve(DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).value
     per_second, weights, _, trusted_masks, star_masks = _prepare_group_inputs(
         images,
         exposures_seconds,
@@ -305,7 +339,7 @@ def combine_exposure_group_images(
     images: list[np.ndarray],
     exposures_seconds: list[float],
     frame_counts: list[int] | None = None,
-    saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
+    saturation_level: float | None = None,
     frame_noises: list[float] | None = None,
     frame_zero_fractions: list[float] | None = None,
     covered_masks: list[np.ndarray] | None = None,
@@ -383,6 +417,8 @@ def combine_exposure_group_images(
         trusted and covered masks.
 
     """
+    if saturation_level is None:
+        saturation_level = resolve(SATURATION_FRACTION_OF_FULL_SCALE).value
     if frame_counts is None:
         frame_counts = [1] * len(images)
     per_second, weights, usable_masks, trusted_masks, star_masks = _prepare_group_inputs(
@@ -540,11 +576,13 @@ def measure_group_frames(groups: list[ExposureGroup]) -> tuple[list[float], list
         of each group. Above `CLIPPED_FRAME_ZERO_FRACTION` means the group's
         frames are clipped at zero.
     """
+    frames_sampled_per_group = resolve(FRAMES_SAMPLED_PER_GROUP).value
+    clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
     measured = []
     for group in groups:
         paths = [_frame_path(frame) for frame in group.frames]
-        step = max(1, len(paths) // FRAMES_SAMPLED_PER_GROUP)
-        samples = [measure_frame_noise(path) for path in paths[::step][:FRAMES_SAMPLED_PER_GROUP]]
+        step = max(1, len(paths) // frames_sampled_per_group)
+        samples = [measure_frame_noise(path) for path in paths[::step][:frames_sampled_per_group]]
         measured.append((
             float(np.median([noise for noise, _ in samples])),
             float(np.mean([zeros for _, zeros in samples])),
@@ -552,14 +590,14 @@ def measure_group_frames(groups: list[ExposureGroup]) -> tuple[list[float], list
     clean = [
         noise
         for noise, zero_fraction in measured
-        if zero_fraction <= CLIPPED_FRAME_ZERO_FRACTION and noise > 0
+        if zero_fraction <= clipped_frame_zero_fraction and noise > 0
     ]
     zero_fractions = [zero_fraction for _, zero_fraction in measured]
     if not clean:
         return [1.0] * len(groups), zero_fractions
     reference = max(clean)
     noises = [
-        noise if zero_fraction <= CLIPPED_FRAME_ZERO_FRACTION and noise > 0 else reference
+        noise if zero_fraction <= clipped_frame_zero_fraction and noise > 0 else reference
         for noise, zero_fraction in measured
     ]
     return noises, zero_fractions

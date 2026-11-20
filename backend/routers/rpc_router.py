@@ -55,6 +55,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Python terminal and its documentation
     "terminal:execute": ("scripting_service", "execute_structured"),
     "terminal:get_workspace": ("scripting_service", "get_workspace_manifest"),
+    # The last few console runs (text and figure files), read-only.
+    "terminal:get_recent_runs": ("scripting_service", "get_recent_runs"),
     "terminal:completions": ("scripting_service", "get_completions"),
     "terminal:list_recipes": ("scripting_service", "list_recipes"),
     "terminal:get_recipe": ("scripting_service", "get_recipe"),
@@ -236,6 +238,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "images:get_light_frame_data": ("image_service", "get_light_frame_data_by_id"),
     "images:convert_fits": ("image_service", "convert_fits"),
     "images:get_fits_header": ("image_service", "get_fits_header_data"),
+    "images:measure_star_profile": ("image_service", "measure_star_profile"),
+    "images:map_position": ("image_service", "map_position"),
+    "images:measure_detections": ("image_service", "measure_detections"),
     "images:delete": ("image_service", "delete_images"),
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames

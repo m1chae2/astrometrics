@@ -1,6 +1,6 @@
 # Validation register
 
-*Version 1.2 · 2026-10-15 · Status: current*
+*Version 1.5 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -62,6 +62,16 @@ Each file ends with a table of design estimates. These are values that have not 
 - A re-run of an entry's procedure adds a row to the entry's **Runs** table. The columns are Date, Code version, Verdict and Record. The other fields describe the current run, and **Our result** shows it. The table holds the history.
 - Only an entry that has been run more than once has a **Runs** table. So far these are MOV-01 and MOV-03.
 - The raw record of a re-run is a new file in `documentation/evidence/`. A saved record is never edited (see the [evidence README](https://github.com/m1chae2/astrometrics/blob/main/documentation/evidence/README.md)).
+
+### 2.2 Role, source and equipment
+
+The register holds the evidence. The facts about how the software uses a value are recorded once, on the value's declaration in the code (`astrometricslib.parameters`). A declaration states the value's role (what the software does with it, such as setting data aside, giving a verdict, limiting hardware, shaping results or only advising), its source (computed each run, from equipment settings, from configuration, from tuning results or fixed in code), the equipment whose change would call for a different value (the mount, telescope, camera, filter or grating, the observing site, or none), its kind and whether a conversion is pending. The words each field may take are defined there.
+
+The script `build/documentation/generate_parameter_table.py` writes a table of every parameter with these facts.
+
+A value whose source is the equipment profile is read from the config file, in the section of the equipment it depends on (camera, optic, mount or filter), or in the setup's section when it depends on several. Processing reads the setup its frames were taken with; planning and control read the active setup. A missing value falls back to the code default, and the run notes it.
+
+Two rules link the declarations to the register. An automatic value, meaning one the software acts on with no person checking, needs a Measured entry here. A value fixed in code depends on no equipment.
 
 ## 3. Status labels
 

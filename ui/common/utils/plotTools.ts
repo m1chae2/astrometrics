@@ -1,5 +1,7 @@
 // Lightweight Plot utilities used by multiple viewers
 // Exported to keep Plotly-related plumbing in one place.
+import { themedHoverLabel } from './plotHoverLabel';
+
 export type PlotlyTrace = {
   x: number[];
   y: number[];
@@ -9,11 +11,18 @@ export type PlotlyTrace = {
   // (script-src with no 'unsafe-eval', see electron/main.js) blocks outright
   // -- the trace silently falls back to Plotly's "WebGL is not supported"
   // placeholder instead of rendering. Use 'scatter' (SVG) for everything.
-  type?: 'scatter' | 'scattergl';
+  type?: 'scatter' | 'scattergl' | 'bar';
   mode?: 'lines' | 'markers' | 'lines+markers';
   line?: { color?: string; width?: number; shape?: string; dash?: string };
-  marker?: { color?: string; size?: number; symbol?: string };
+  /** One color for the trace, or one per point. */
+  marker?: { color?: string | string[]; size?: number; symbol?: string };
+  /** Error bars along y, from a list of half-lengths. */
+  error_y?: { type: 'data'; array: number[]; visible?: boolean; color?: string; thickness?: number; width?: number };
   hoverinfo?: string;
+  /** The text of the hover label, in Plotly's template syntax. `<extra></extra>` drops the trace-name box. */
+  hovertemplate?: string;
+  /** Opacity of the whole trace, 0 to 1. */
+  opacity?: number;
   showlegend?: boolean;
   name?: string;
 };
@@ -44,6 +53,7 @@ export type PlotlyLayout = {
   margin?: { l?: number; r?: number; t?: number; b?: number };
   showlegend?: boolean;
   hovermode?: string;
+  hoverlabel?: { bgcolor?: string; bordercolor?: string; font?: { color?: string; family?: string; size?: number } };
   shapes?: any[];
   annotations?: any[];
 };
@@ -175,7 +185,8 @@ export const buildLayout = (overrides?: {
     },
     margin: { l: 60, r: 20, t: 20, b: 50, ...overrides?.margin },
     showlegend: false,
-    hovermode: 'closest'
+    hovermode: 'closest',
+    hoverlabel: themedHoverLabel()
   };
 };
 

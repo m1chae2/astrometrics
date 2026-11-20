@@ -47,6 +47,14 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # A single number or an array of them.
 Numeric = float | np.ndarray
 
@@ -62,7 +70,16 @@ HUMIDITY_KEY = "relative_humidity_percent"
 # plane-parallel model is used. Below it the pipeline records that DAR was
 # not computed. This is a design choice (the common rule of thumb for a flat
 # atmosphere), not a measurement.
-MINIMUM_ALTITUDE_DEGREES = 20.0
+MINIMUM_ALTITUDE_DEGREES = TunedParameter(
+    name="spectroscopy.minimum_altitude_degrees",
+    default=20.0,
+    unit="degrees",
+    description="The lowest altitude at which the plane-parallel refraction model is used.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D06",
+)
 
 # The wavelength range of the Ciddor equations, in Angstroms.
 MINIMUM_WAVELENGTH_ANGSTROM = 3000.0
@@ -415,11 +432,11 @@ def refraction_arcsec(
         The star is lower than `MINIMUM_ALTITUDE_DEGREES` (or below the
         zenith, with a negative distance), so the model is refused.
     """
-    if not 0.0 <= zenith_distance_degrees <= 90.0 - MINIMUM_ALTITUDE_DEGREES:
+    if not 0.0 <= zenith_distance_degrees <= 90.0 - resolve(MINIMUM_ALTITUDE_DEGREES).value:
         raise ValueError(
             f"Zenith distance {zenith_distance_degrees:.2f} degrees is outside 0 to "
-            f"{90.0 - MINIMUM_ALTITUDE_DEGREES:.0f}; the plane-parallel model is refused "
-            f"below an altitude of {MINIMUM_ALTITUDE_DEGREES:.0f} degrees."
+            f"{90.0 - resolve(MINIMUM_ALTITUDE_DEGREES).value:.0f}; the plane-parallel model is refused "
+            f"below an altitude of {resolve(MINIMUM_ALTITUDE_DEGREES).value:.0f} degrees."
         )
     index = air_refractive_index(wavelength_angstrom, conditions)
     return (index - 1.0) * math.tan(math.radians(zenith_distance_degrees)) * _ARCSEC_PER_RADIAN

@@ -204,19 +204,25 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         return None
 
-    def cancel_analysis(self, target_id: str, filter_name: str | None = None) -> bool:
-        """Cancel an active analysis job.
+    def cancel_analysis(self, target_id: str, filter_name: str | None = None) -> dict[str, Any]:
+        """Cancel an active analysis job, or say why it cannot be cancelled.
 
         Returns
         -------
-        cancelled : `bool`
-            `True` if an active job was found and cancelled.
+        result : `dict`
+            `"cancelled"` is `True` if an active job was stopped. If not,
+            `"reason"` says why (no active job, or the job runs in another
+            process).
         """
         if self._job_service:
             active = self._job_service.get_jobs_for_target(target_id, job_type="analysis", status="started")
             if active:
                 return self.cancel_processing(active[0].id)
-        return False
+        return {
+            "cancelled": False,
+            "own_process": False,
+            "reason": "There is no active analysis job for this target.",
+        }
 
     def _start_analysis_task(
         self,

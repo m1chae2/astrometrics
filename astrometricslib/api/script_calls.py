@@ -222,8 +222,8 @@ def stack_subset(
 def detect_point_sources(
     pipelines: ProcessingPipelines,
     image_data: Any,
-    threshold_sigma: float = 5.0,
-    fwhm: float = 4.0,
+    threshold_sigma: float | None = None,
+    fwhm: float | None = None,
 ) -> PointSourceDetection:
     """Find stars (point sources) in an image's pixel data.
 
@@ -235,9 +235,11 @@ def detect_point_sources(
         2D pixel array to search.
     threshold_sigma : `float`, optional
         Detection threshold, in noise standard deviations above the
-        background. Defaults to 5.0.
+        background. Defaults to the star finder's registered threshold (5).
     fwhm : `float`, optional
-        Expected star width (FWHM), in pixels. Defaults to 4.0.
+        Expected star width (FWHM), in pixels. Defaults to the star finder's
+        own kernel width, which follows the star width of the setup (4 px on
+        the reference setup).
 
     Returns
     -------

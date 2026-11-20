@@ -26,7 +26,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import FITS_READ_ERRORS, InvalidArgumentError
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib._internal.coordinates import parse_coordinate_string
+from wayfindinglib.analytics.alignment_sessions import SLEW_ERROR_ARCSEC
 from wayfindinglib.astronomy.coordinate_transforms import signed_offset_components_arcsec
 
 if TYPE_CHECKING:
@@ -36,8 +38,13 @@ __all__ = ["ALIGNED_LIMIT_ARCSEC", "pointing_error_from_header", "record_frame_p
 
 logger = logging.getLogger(__name__)
 
-ALIGNED_LIMIT_ARCSEC = 120.0
-"""A frame whose pointing error is at most this counts as aligned."""
+ALIGNED_LIMIT_ARCSEC = SLEW_ERROR_ARCSEC
+"""A frame whose pointing error is at most this counts as aligned.
+
+It is the same limit as the one `alignment_sessions` uses to tell a slew from
+tracking (a solve further off is a slew): a frame within it is on target, one
+beyond it is not. One declaration, `SLEW_ERROR_ARCSEC`, holds the value and its
+tuner (`wayfinding.alignment_grouping`)."""
 
 
 def _angle_deg(value: Any, is_ra: bool) -> float | None:
@@ -127,7 +134,7 @@ def pointing_error_from_header(header: Any, file_path: str) -> dict[str, Any] | 
     delta_ra, delta_dec = signed_offset_components_arcsec(commanded_ra, commanded_dec, solved_ra, solved_dec)
     error = math.hypot(delta_ra, delta_dec)
     return {
-        "status": "aligned" if error <= ALIGNED_LIMIT_ARCSEC else "warning",
+        "status": "aligned" if error <= resolve_parameter(ALIGNED_LIMIT_ARCSEC).value else "warning",
         "delta_ra_arcsec": round(delta_ra, 2),
         "delta_dec_arcsec": round(delta_dec, 2),
         "pointing_error_arcsec": round(error, 2),

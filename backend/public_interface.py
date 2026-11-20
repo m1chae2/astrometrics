@@ -100,6 +100,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Python terminal and its documentation
     "terminal:execute",
     "terminal:get_workspace",
+    "terminal:get_recent_runs",
     "terminal:completions",
     "terminal:list_recipes",
     "terminal:get_recipe",
@@ -261,6 +262,9 @@ RPC_METHODS: tuple[str, ...] = (
     "images:get_light_frame_data",
     "images:convert_fits",
     "images:get_fits_header",
+    "images:measure_star_profile",
+    "images:map_position",
+    "images:measure_detections",
     "images:delete",
     "images:last",
     # Calibration frames
@@ -383,6 +387,7 @@ UI_EVENTS: tuple[UiEvent, ...] = (
     UiEvent("terminal:agent_exec", "An AI agent ran code in the terminal."),
     UiEvent("terminal:plot_generated", "The terminal made a plot to show."),
     UiEvent("editor:sync", "The script editor's text was replaced by another client."),
+    UiEvent("scripts:changed", "A user script was saved, so the User Scripts list is out of date."),
 )
 
 #: The kinds of route: a plain HTTP route, a WebSocket, or a folder of files.

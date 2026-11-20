@@ -80,7 +80,7 @@ def test_the_minimum_blob_size_separates_hot_pixels_from_stars() -> None:
     assert not measure_frame_saturation(frame, CEILING).saturated
 
     frame[20:22, 20:22] = CEILING
-    assert SATURATED_BLOB_MINIMUM_PIXELS == 4
+    assert SATURATED_BLOB_MINIMUM_PIXELS.default == 4
     assert measure_frame_saturation(frame, CEILING).saturated
 
 
@@ -108,4 +108,4 @@ def test_a_star_clipped_far_beyond_the_estimate_limit_gives_no_peak() -> None:
 
     assert result.saturated
     assert result.peak_above_sky_adu is None
-    assert MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO == pytest.approx(100.0)
+    assert MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO.default == pytest.approx(100.0)

@@ -111,6 +111,7 @@ from astrometricslib._internal.drivers.local_database import backup_catalog_data
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import (
@@ -1526,13 +1527,13 @@ _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     # configuration, none of which a stored summary holds.
     *(
         model_noise_metric_name(part, magnitude)
-        for magnitude in NOISE_MODEL_MAGNITUDES
+        for magnitude in resolve(NOISE_MODEL_MAGNITUDES).value
         for part in NOISE_MODEL_PARTS
     ),
     PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG,
     *(
         name
-        for rank in WINDOW_ALIAS_RANKS
+        for rank in resolve(WINDOW_ALIAS_RANKS).value
         for name in (window_alias_frequency_metric_name(rank), window_alias_power_metric_name(rank))
     ),
     PHOTOMETRY_TARGET_LIGHT_CURVE_AMPLITUDE_MAG,

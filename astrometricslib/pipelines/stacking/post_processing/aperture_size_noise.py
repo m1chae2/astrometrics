@@ -31,6 +31,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     MINIMUM_USABLE_APERTURES,
     faint_source_distance,
@@ -57,25 +64,77 @@ __all__ = [
 # to separate a slope of 0.5 from one of 1.0 with 100 apertures, while the
 # largest ring (outer radius 16 px) still fits between the 24 px that separate
 # apertures. Design estimate: no data set chose them.
-SIZE_RADIUS_MULTIPLES = (0.5, 1.0, 1.5, 2.0)
+SIZE_RADIUS_MULTIPLES = TunedParameter(
+    name="stacking.size_radius_multiples",
+    default=(0.5, 1.0, 1.5, 2.0),
+    unit="× aperture radius",
+    description="Radii of the size-noise test, as multiples of the noise aperture radius.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D32",
+)
+
 
 # The sky ring of each radius starts this far beyond the aperture and is this
 # wide: the gap and width of the noise aperture's own ring (7 - 4 = 3 px and
 # 12 - 7 = 5 px), so the ring keeps its relation to the aperture.
-_RING_GAP_PX = RING_INNER_PX - APERTURE_RADIUS_PX
-_RING_WIDTH_PX = RING_OUTER_PX - RING_INNER_PX
+def _ring_gap_px() -> float:
+    """Give the gap between a noise aperture and its sky ring.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_INNER_PX).value - resolve(APERTURE_RADIUS_PX).value
+
+
+def _ring_width_px() -> float:
+    """Give the width of a noise aperture's sky ring.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
+
 
 # An aperture must be at least this far from every pixel of the faint-source
 # mask: the largest ring's outer radius plus 1 px, the same reasoning as
-# `empty_apertures.FAINT_SOURCE_CLEARANCE_PX` (the center is rounded to a
+# `aperture_placement.faint_source_clearance_px` (the center is rounded to a
 # pixel, which moves it by up to 0.71 px).
-_CLEARANCE_PX = max(SIZE_RADIUS_MULTIPLES) * APERTURE_RADIUS_PX + _RING_GAP_PX + _RING_WIDTH_PX + 1.0
+def _clearance_px() -> float:
+    """Give how far an aperture must be from every faint-source pixel.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return (
+        max(resolve(SIZE_RADIUS_MULTIPLES).value) * resolve(APERTURE_RADIUS_PX).value
+        + _ring_gap_px()
+        + _ring_width_px()
+        + 1.0
+    )
+
 
 # The apertures are resampled (with replacement, the same draw for every
 # radius) this many times to get the error of the slope. The error of a
 # standard error from B resamples is 1 / sqrt(2 (B - 1)) of itself: 2.2% for
 # 1000. The fixed seed makes the number repeat exactly.
-_BOOTSTRAP_COUNT = 1000
+_BOOTSTRAP_COUNT = TunedParameter(
+    name="stacking.bootstrap_count",
+    default=1000,
+    unit="resamples",
+    description="How many bootstrap resamples give the error of the noise-versus-size slope.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D32",
+)
 _BOOTSTRAP_SEED = 20261026
 
 
@@ -184,9 +243,12 @@ def measure_aperture_size_noise(
         The noise at each radius and the exponent, or the reason there are too
         few apertures clear of the mask.
     """
+    minimum_usable_apertures = resolve(MINIMUM_USABLE_APERTURES).value
+    aperture_radius_px = resolve(APERTURE_RADIUS_PX).value
+    size_radius_multiples = resolve(SIZE_RADIUS_MULTIPLES).value
     if source_distance is None:
         source_distance = faint_source_distance(plane)
-    radii = tuple(multiple * APERTURE_RADIUS_PX for multiple in SIZE_RADIUS_MULTIPLES)
+    radii = tuple(multiple * aperture_radius_px for multiple in size_radius_multiples)
     height, width = plane.shape
     sums: list[list[float]] = []
     for column, row in pixel_positions:
@@ -195,7 +257,7 @@ def measure_aperture_size_noise(
         round_row, round_column = round(row), round(column)
         if not (0 <= round_row < height and 0 <= round_column < width):
             continue
-        if source_distance[round_row, round_column] <= _CLEARANCE_PX:
+        if source_distance[round_row, round_column] <= _clearance_px():
             continue
         values = [
             signed_aperture_sum(
@@ -203,19 +265,19 @@ def measure_aperture_size_noise(
                 float(column),
                 float(row),
                 radius=radius,
-                ring_inner=radius + _RING_GAP_PX,
-                ring_outer=radius + _RING_GAP_PX + _RING_WIDTH_PX,
+                ring_inner=radius + _ring_gap_px(),
+                ring_outer=radius + _ring_gap_px() + _ring_width_px(),
             )
             for radius in radii
         ]
         if any(value is None for value in values):
             continue
         sums.append([float(value) for value in values])
-    if len(sums) < MINIMUM_USABLE_APERTURES:
+    if len(sums) < minimum_usable_apertures:
         return ApertureSizeNoiseOutcome(
             None,
             f"only {len(sums)} apertures stay clear of faint sources and the edge at the largest radius; "
-            f"{MINIMUM_USABLE_APERTURES} are needed",
+            f"{minimum_usable_apertures} are needed",
         )
     table = np.asarray(sums)  # shape (n, radii)
     spreads = robust_sigma(table, axis=0)
@@ -225,7 +287,7 @@ def measure_aperture_size_noise(
     log_pixels = np.log(pixel_counts)
     exponent = float(_fitted_slope(log_pixels, np.log(spreads)))
     draws = np.random.default_rng(_BOOTSTRAP_SEED).integers(
-        0, table.shape[0], size=(_BOOTSTRAP_COUNT, table.shape[0])
+        0, table.shape[0], size=(resolve(_BOOTSTRAP_COUNT).value, table.shape[0])
     )
     resampled = table[draws]  # shape (B, n, radii)
     resampled_spreads = robust_sigma(resampled, axis=1)

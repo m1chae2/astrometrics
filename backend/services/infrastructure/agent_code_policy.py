@@ -48,6 +48,7 @@ PUBLIC_MODULES = frozenset({
     "astrometricslib.reports",
     "astrometricslib.jobs",
     "astrometricslib.drivers",
+    "astrometricslib.parameters",
     "wayfindinglib",
     "wayfindinglib.exceptions",
     "wayfindinglib.reports",

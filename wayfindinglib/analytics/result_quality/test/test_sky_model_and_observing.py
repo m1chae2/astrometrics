@@ -109,7 +109,7 @@ def test_sky_model_recovers_known_coefficients_and_reports_held_out_error() -> N
     assert model.model_derived
     assert model.constant == pytest.approx(truth[0], rel=0.05)
     assert model.held_out_relative_error < 0.05
-    assert model.nights_used >= sm.MINIMUM_NIGHTS_FOR_SKY_MODEL
+    assert model.nights_used >= sm.MINIMUM_NIGHTS_FOR_SKY_MODEL.default
 
 
 def test_prediction_without_the_moon_is_lower_when_the_moon_is_up() -> None:

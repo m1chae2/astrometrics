@@ -22,4 +22,4 @@ The documents say what the software is meant to do and why. The code says what i
 
 ## When the docs say nothing
 
-Say that the documents do not cover the topic, answer from the code, and suggest where the missing text belongs under the rules in `documentation/Documentation_Conventions.md`, Section 1: theory in the architecture paper, code names and tuned values in the implementation paper, evidence in the validation register.
+Say that the documents do not cover the topic, answer from the code, and suggest where the missing text belongs under the rules in `.claude/skills/documentation-style/CONVENTIONS.md`, Section 1: theory in the architecture paper, code names and tuned values in the implementation paper, evidence in the validation register.

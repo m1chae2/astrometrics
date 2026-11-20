@@ -42,6 +42,7 @@ from skimage.registration import phase_cross_correlation
 
 from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
@@ -330,7 +331,7 @@ def compare_target(name: str, manifest_path: str, siril_executable: str, work_ro
         print(f"\n=== {name}: needs at least two usable groups")
         return
     spectral = "_SPEC_" in os.path.basename(manifest_path)
-    crop = SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION if spectral else None
+    crop = resolve(SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION).value if spectral else None
     combined_path = os.path.join(os.path.dirname(os.path.dirname(manifest_path)), manifest["combined_stack"])
     images = [load_plane(group["stack_path"]) for group in groups]
     reference = int(np.argmax([group["weight"] for group in groups]))

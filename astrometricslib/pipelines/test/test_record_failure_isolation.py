@@ -179,7 +179,7 @@ def _record_asteroid(damage: str, _unused: bool) -> int:
         What the record step returned.
     """
     counts: Any = dict(ASTEROID_COUNTS)
-    gates = asteroid_record.asteroid_run_gates(counts, 3, 0)
+    gates = asteroid_record.asteroid_run_gates(counts, 3, 0, 2.0)
     if damage == "nan":
         counts["candidates_detected"] = math.nan
         gates = [gate.model_copy(update={"measured_value": math.nan}) for gate in gates]

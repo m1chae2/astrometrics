@@ -53,6 +53,13 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     APERTURE_RADIUS_PX,
     SKY_ANNULUS_INNER_RADIUS_PX,
@@ -81,11 +88,41 @@ MAGNITUDES_PER_FRACTION = 2.5 / math.log(10.0)
 # is for the aperture diameter in centimeters, the exposure in seconds and a
 # site at sea level. Model-derived, and not tuned on this observatory's
 # frames (PHO-D27 in the validation register).
-YOUNG_COEFFICIENT = 0.09
-YOUNG_AIRMASS_POWER = 1.75
+YOUNG_COEFFICIENT = TunedParameter(
+    name="photometry.young_coefficient",
+    default=0.09,
+    unit="coefficient",
+    description=(
+        "Coefficient of Young's scintillation formula, for the aperture diameter in centimeters "
+        "and the exposure in seconds."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="PHO-17",
+)
+YOUNG_AIRMASS_POWER = TunedParameter(
+    name="photometry.young_airmass_power",
+    default=1.75,
+    unit="power",
+    description="Airmass power in the scintillation formula, as Dravins et al. (1998) measured it.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="PHO-17",
+)
 
 # The height over which the turbulence thins out, in meters (Young 1967).
-SCINTILLATION_SCALE_HEIGHT_M = 8000.0
+SCINTILLATION_SCALE_HEIGHT_M = TunedParameter(
+    name="photometry.scintillation_scale_height_m",
+    default=8000.0,
+    unit="m",
+    description="Height over which the turbulence thins out in Young's scintillation formula.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="PHO-17",
+)
 
 
 def aperture_geometry_factor() -> float:
@@ -104,12 +141,15 @@ def aperture_geometry_factor() -> float:
     factor : `float`
         ``n_pix + n_pix**2 / n_sky`` for the photometry's circle and ring.
     """
-    circle_area = math.pi * APERTURE_RADIUS_PX**2
-    half_width = math.ceil(SKY_ANNULUS_OUTER_RADIUS_PX) + 1
+    aperture_radius_px = resolve(APERTURE_RADIUS_PX).value
+    sky_annulus_outer_radius_px = resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value
+    sky_annulus_inner_radius_px = resolve(SKY_ANNULUS_INNER_RADIUS_PX).value
+    circle_area = math.pi * aperture_radius_px**2
+    half_width = math.ceil(sky_annulus_outer_radius_px) + 1
     offsets = np.arange(-half_width, half_width + 1, dtype=float)
     distance = np.hypot(offsets[:, None], offsets[None, :])
     ring_pixel_count = int(
-        np.count_nonzero((distance >= SKY_ANNULUS_INNER_RADIUS_PX) & (distance < SKY_ANNULUS_OUTER_RADIUS_PX))
+        np.count_nonzero((distance >= sky_annulus_inner_radius_px) & (distance < sky_annulus_outer_radius_px))
     )
     return circle_area + circle_area**2 / ring_pixel_count
 
@@ -145,14 +185,17 @@ def scintillation_relative_noise(
     ValueError
         If the diameter, airmass or exposure is not above zero.
     """
+    young_coefficient = resolve(YOUNG_COEFFICIENT).value
+    young_airmass_power = resolve(YOUNG_AIRMASS_POWER).value
+    scintillation_scale_height_m = resolve(SCINTILLATION_SCALE_HEIGHT_M).value
     if aperture_diameter_mm <= 0 or airmass <= 0 or exposure_seconds <= 0:
         raise ValueError("The aperture, the airmass and the exposure must all be above zero.")
     diameter_cm = aperture_diameter_mm / 10.0
     return (
-        YOUNG_COEFFICIENT
+        young_coefficient
         * diameter_cm ** (-2.0 / 3.0)
-        * airmass**YOUNG_AIRMASS_POWER
-        * math.exp(-site_elevation_m / SCINTILLATION_SCALE_HEIGHT_M)
+        * airmass**young_airmass_power
+        * math.exp(-site_elevation_m / scintillation_scale_height_m)
         / math.sqrt(2.0 * exposure_seconds)
     )
 

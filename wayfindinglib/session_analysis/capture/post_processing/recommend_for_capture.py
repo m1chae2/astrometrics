@@ -29,6 +29,7 @@ references to the exact rows. Counts and values that are not rows go in
 `values`. Confidence is the register status of the capture rules (WAY-46).
 """
 
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -58,7 +59,7 @@ def _insufficient_frames(input_quality: CaptureInputQuality) -> TargetStatement:
         "capture_insufficient_data",
         message=(
             f"Only {input_quality.light_frames} light frames from this equipment exist for this "
-            f"night; at least {MINIMUM_FRAMES_PER_NIGHT} are needed to judge it."
+            f"night; at least {resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value} are needed to judge it."
         ),
         reason=(
             "Too few light frames from this equipment. Sync the night's frames into the library, "
@@ -67,12 +68,12 @@ def _insufficient_frames(input_quality: CaptureInputQuality) -> TargetStatement:
         values={"light_frames": float(input_quality.light_frames)},
         plain_message=(
             f"Only {input_quality.light_frames} light frames from this equipment exist for this night, "
-            f"and we need at least {MINIMUM_FRAMES_PER_NIGHT} to judge it. "
+            f"and we need at least {resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value} to judge it. "
             "Image longer or sync the frames, then check again."
         ),
         limits=[
             design_limit(
-                float(MINIMUM_FRAMES_PER_NIGHT),
+                float(resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value),
                 "frames",
                 "Fewest light frames a night needs for its medians to rest on more than a few frames.",
                 "WAY-D45",

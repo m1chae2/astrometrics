@@ -29,6 +29,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.efficiency import SKY_LIMITED_VARIANCE_RATIO
 from wayfindinglib.analytics.result_quality.rules import TARGET_PEAK_FRACTION
@@ -40,7 +41,7 @@ STARTING_POINT_ENTRY = "WAY-D67"
 
 
 def sky_dominated_exposure_seconds(
-    sky_rate_e_per_s_per_px: float, read_noise_e: float, variance_ratio: float = SKY_LIMITED_VARIANCE_RATIO
+    sky_rate_e_per_s_per_px: float, read_noise_e: float, variance_ratio: float | None = None
 ) -> float:
     """Find the shortest exposure where the sky noise dominates the read noise.
 
@@ -64,6 +65,8 @@ def sky_dominated_exposure_seconds(
     ValueError
         If the sky rate is not above 0 or the read noise is negative.
     """
+    if variance_ratio is None:
+        variance_ratio = resolve_parameter(SKY_LIMITED_VARIANCE_RATIO).value
     if sky_rate_e_per_s_per_px <= 0.0:
         raise ValueError("The sky rate must be above 0.")
     if read_noise_e < 0.0:
@@ -99,7 +102,7 @@ def clipping_cap_seconds(peak_rate_adu_per_s: float, room_adu: float) -> float:
     """
     if peak_rate_adu_per_s <= 0.0 or room_adu <= 0.0:
         raise ValueError("The peak rate and the room must be above 0.")
-    return TARGET_PEAK_FRACTION * room_adu / peak_rate_adu_per_s
+    return resolve_parameter(TARGET_PEAK_FRACTION).value * room_adu / peak_rate_adu_per_s
 
 
 @dataclass(frozen=True)
@@ -159,7 +162,8 @@ def build_starting_point(inputs: StartingPointInputs) -> StartingPoint:
     if inputs.peak_rate_adu_per_s is not None and inputs.room_adu is not None:
         cap = clipping_cap_seconds(inputs.peak_rate_adu_per_s, inputs.room_adu)
         cap_reason = (
-            f"{TARGET_PEAK_FRACTION:g} of the room ({inputs.room_adu:.0f} ADU) over the star's peak rate "
+            f"{resolve_parameter(TARGET_PEAK_FRACTION).value:g} of the room ({inputs.room_adu:.0f} ADU) "
+            f"over the star's peak rate "
             f"({inputs.peak_rate_adu_per_s:.1f} ADU per second), for a star centered on a pixel. "
             f"{inputs.clipping_note}"
         ).strip()
@@ -180,7 +184,8 @@ def build_starting_point(inputs: StartingPointInputs) -> StartingPoint:
         )
         exposure = max(exposure, 1.0)
         exposure_reason = (
-            f"The sky variance reaches {SKY_LIMITED_VARIANCE_RATIO:g} times the read-noise variance "
+            f"The sky variance reaches "
+            f"{resolve_parameter(SKY_LIMITED_VARIANCE_RATIO).value:g} times the read-noise variance "
             f"(sky {inputs.sky_rate_e_per_s_per_px:.3f} e/s/px, read noise {inputs.read_noise_e:.2f} e). "
             f"{inputs.sky_note} {inputs.read_noise_note}"
         ).strip()

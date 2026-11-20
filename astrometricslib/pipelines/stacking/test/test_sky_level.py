@@ -61,7 +61,7 @@ def test_a_faint_glow_gets_the_lightest_sky() -> None:
     """Verify a target barely above the sky lifts the sky as far as allowed."""
     choice = choose_sky_level(_image(glow_sigma=0.5))
 
-    assert choice.sky_level == pytest.approx(LIGHTEST_SKY_LEVEL)
+    assert choice.sky_level == pytest.approx(LIGHTEST_SKY_LEVEL.default)
     assert choice.extended_light_snr is not None
     assert choice.extended_light_snr < 1.0
 
@@ -70,7 +70,7 @@ def test_a_bright_glow_gets_the_darkest_sky() -> None:
     """Verify a target far above the sky leaves the sky as dark as allowed."""
     choice = choose_sky_level(_image(glow_sigma=300.0))
 
-    assert choice.sky_level == pytest.approx(DARKEST_SKY_LEVEL)
+    assert choice.sky_level == pytest.approx(DARKEST_SKY_LEVEL.default)
 
 
 def test_a_stronger_glow_never_lightens_the_sky() -> None:
@@ -81,14 +81,14 @@ def test_a_stronger_glow_never_lightens_the_sky() -> None:
 
     assert all(later <= earlier + 1e-9 for earlier, later in pairwise(levels))
     assert levels[0] > levels[-1]
-    assert all(DARKEST_SKY_LEVEL <= level <= LIGHTEST_SKY_LEVEL for level in levels)
+    assert all(DARKEST_SKY_LEVEL.default <= level <= LIGHTEST_SKY_LEVEL.default for level in levels)
 
 
 def test_a_middle_glow_gets_a_middle_sky() -> None:
     """Verify a glow of several noise units lands between the two limits."""
     level = choose_sky_level(_image(glow_sigma=8.0)).sky_level
 
-    assert DARKEST_SKY_LEVEL < level < LIGHTEST_SKY_LEVEL
+    assert DARKEST_SKY_LEVEL.default < level < LIGHTEST_SKY_LEVEL.default
 
 
 def test_stars_do_not_move_the_level() -> None:
@@ -103,14 +103,14 @@ def test_a_field_of_stars_alone_gets_the_lightest_sky() -> None:
     """Verify an empty field with stars has no extended light to protect."""
     choice = choose_sky_level(_image(glow_sigma=0.0, stars=200))
 
-    assert choice.sky_level == pytest.approx(LIGHTEST_SKY_LEVEL)
+    assert choice.sky_level == pytest.approx(LIGHTEST_SKY_LEVEL.default)
 
 
 def test_an_image_with_no_measurable_sky_gets_the_fallback() -> None:
     """Verify a blank image is reported, not guessed at."""
     choice = choose_sky_level(np.zeros((64, 64)))
 
-    assert choice.sky_level == pytest.approx(FALLBACK_SKY_LEVEL)
+    assert choice.sky_level == pytest.approx(FALLBACK_SKY_LEVEL.default)
     assert choice.extended_light_snr is None
     assert "could not be measured" in choice.reason
 
@@ -120,7 +120,7 @@ def test_an_image_with_missing_pixels_is_still_measured() -> None:
     image = _image(glow_sigma=300.0)
     image[:20, :20] = np.nan
 
-    assert choose_sky_level(image).sky_level == pytest.approx(DARKEST_SKY_LEVEL)
+    assert choose_sky_level(image).sky_level == pytest.approx(DARKEST_SKY_LEVEL.default)
 
 
 def test_a_colour_image_is_averaged_across_its_channels() -> None:
@@ -138,10 +138,10 @@ def test_a_fits_file_is_read_and_a_bad_file_gets_the_fallback(tmp_path: Path) ->
     bad = tmp_path / "broken.fits"
     bad.write_bytes(b"not a fits file")
 
-    assert choose_sky_level_for_file(str(good)).sky_level == pytest.approx(DARKEST_SKY_LEVEL)
-    assert choose_sky_level_for_file(str(bad)).sky_level == pytest.approx(FALLBACK_SKY_LEVEL)
+    assert choose_sky_level_for_file(str(good)).sky_level == pytest.approx(DARKEST_SKY_LEVEL.default)
+    assert choose_sky_level_for_file(str(bad)).sky_level == pytest.approx(FALLBACK_SKY_LEVEL.default)
     assert choose_sky_level_for_file(str(tmp_path / "absent.fits")).sky_level == pytest.approx(
-        FALLBACK_SKY_LEVEL
+        FALLBACK_SKY_LEVEL.default
     )
 
 
@@ -157,10 +157,10 @@ def test_the_sky_measurement_ignores_blank_images_and_finds_the_noise() -> None:
 
 def test_a_brighter_feature_leaves_the_sky_darker() -> None:
     """Verify the curve maths: more room above the sky means a darker sky."""
-    near = sky_level_for_peak(0.001, 0.002, EXTENDED_LIGHT_BRIGHTNESS)
-    far = sky_level_for_peak(0.001, 0.05, EXTENDED_LIGHT_BRIGHTNESS)
+    near = sky_level_for_peak(0.001, 0.002, EXTENDED_LIGHT_BRIGHTNESS.default)
+    far = sky_level_for_peak(0.001, 0.05, EXTENDED_LIGHT_BRIGHTNESS.default)
 
     assert far < near
-    assert sky_level_for_peak(0.01, 0.01, EXTENDED_LIGHT_BRIGHTNESS) == pytest.approx(
-        EXTENDED_LIGHT_BRIGHTNESS
+    assert sky_level_for_peak(0.01, 0.01, EXTENDED_LIGHT_BRIGHTNESS.default) == pytest.approx(
+        EXTENDED_LIGHT_BRIGHTNESS.default
     )

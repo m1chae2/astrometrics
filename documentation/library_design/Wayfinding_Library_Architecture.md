@@ -1,6 +1,6 @@
 # Wayfinding library architecture
 
-*Version 3.2 · 2026-10-24 · Status: current*
+*Version 3.3 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -177,7 +177,7 @@ Table 2 lists each core operation, its owner and the delegation state that gates
 
 ### 3.2 Theoretical rationale
 
-A telescope's optics and its mount's safe pointing envelope are set and changed together, so they form one telescope specification, held with the camera specifications in an equipment catalog. Reading the catalog is a foundation task because both peer functions need the active entries. Changing the active entry is an operator action on hardware, so it belongs to control.
+Equipment is one model shared with the processing library: a setup names the camera, optic, mount and filters used together, and one is active. The safe pointing envelope belongs to the mount, so a telescope joins an optic with its setup's mount envelope. Reading the catalog is foundation; changing the active setup is control.
 
 The pixel scale $\rho$, in arcseconds of sky per pixel, follows from the pixel pitch $\ell$ in micrometers and the focal length $F$ in millimeters:
 

@@ -5,6 +5,13 @@ neither package should import the other to get it. Constants that only one
 module uses stay in that module, next to the code that explains them.
 """
 
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # The value a stack pixel has when the frames were full up, as Siril writes
 # it: the frames are 16-bit, so a count of 65535 is 1.0. Frame noise is
 # measured in counts and the stacks are in these units, so this number joins
@@ -12,4 +19,13 @@ module uses stay in that module, next to the code that explains them.
 # data stored as 16-bit would put every value the same factor lower, and
 # the floor with it). The stacking, spectroscopy and expected-noise code all
 # use it.
-FULL_SCALE_COUNTS = 65535.0
+FULL_SCALE_COUNTS = TunedParameter(
+    name="foundation.full_scale_counts",
+    default=65535.0,
+    unit="ADU",
+    description="The count a 16-bit sensor reads at full scale.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="STK-38",
+)

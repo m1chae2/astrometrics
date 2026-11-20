@@ -21,6 +21,9 @@ The tests of each version run on the system it is for.
   Windows.
 * `stop_process_tree` stops a program and everything it started: a signal to
   its process group on Linux, ``taskkill /T /F`` on Windows.
+* `child_process_options` gives the `subprocess.Popen` options for a helper
+  program: its own process group, and on Linux a request that the kernel
+  stop it when the backend dies.
 * `on_windows` says whether the program runs on Windows. Use it only to turn
   on a feature that exists on one system alone (the Windows program setup),
   never to choose between two ways of doing the same thing.
@@ -30,18 +33,21 @@ import sys
 
 if sys.platform == "win32":
     from astrometricslib.foundation._system_windows import (
+        child_process_options,
         lower_process_priority,
         split_program_command,
         stop_process_tree,
     )
 else:
     from astrometricslib.foundation._system_posix import (
+        child_process_options,
         lower_process_priority,
         split_program_command,
         stop_process_tree,
     )
 
 __all__ = [
+    "child_process_options",
     "lower_process_priority",
     "on_windows",
     "split_program_command",

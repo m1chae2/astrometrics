@@ -19,7 +19,24 @@ split further.
 
 from itertools import pairwise
 
-ALTITUDE_BAND_EDGES = (0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0)
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
+
+ALTITUDE_BAND_EDGES = TunedParameter(
+    name="wayfinding.altitude_band_edges",
+    default=(0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0),
+    unit="deg",
+    description="Band edges in degrees.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D138",
+)
 """Band edges in degrees. 15 degree steps give about equal steps in airmass
 above 30 degrees (2.0, 1.4, 1.15, 1.04), where most observing happens."""
 
@@ -42,7 +59,7 @@ def altitude_label(altitude_degrees: float) -> str:
         For example ``"30-45 deg"``. An altitude below the first edge or
         at or above the last edge falls in the nearest band.
     """
-    bands = list(pairwise(ALTITUDE_BAND_EDGES))
+    bands = list(pairwise(resolve_parameter(ALTITUDE_BAND_EDGES).value))
     lower, upper = bands[-1]
     for band_lower, band_upper in bands:
         if altitude_degrees < band_upper:
@@ -131,7 +148,7 @@ def reachable_bins(minimum_altitude_degrees: float, maximum_altitude_degrees: fl
     """
     altitude_bands = [
         ("altitude", f"{lower:g}-{upper:g} deg")
-        for lower, upper in pairwise(ALTITUDE_BAND_EDGES)
+        for lower, upper in pairwise(resolve_parameter(ALTITUDE_BAND_EDGES).value)
         if upper > minimum_altitude_degrees and lower < maximum_altitude_degrees
     ]
     return [

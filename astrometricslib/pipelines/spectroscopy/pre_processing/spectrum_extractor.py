@@ -105,6 +105,16 @@ from scipy.ndimage import binary_dilation, median_filter
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
     PixelNoiseModel,
     combine_neighbour_variances,
@@ -143,12 +153,30 @@ except ImportError:
 # The minimum number of pixels we need to confidently find the center of
 # the spectrum line. If the line is too thin, the math will fail, so we
 # fall back to a simpler method.
-_MINIMUM_CROSS_SECTION_SAMPLES = 5
+_MINIMUM_CROSS_SECTION_SAMPLES = TunedParameter(
+    name="spectroscopy.minimum_cross_section_samples",
+    default=5,
+    unit="px",
+    description="The fewest pixels needed to find the centre of the spectrum line.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D35",
+)
 
 # How wide to make the reading box, compared to the measured width of the
 # spectrum. A value of 2.5 is wide enough to capture almost all (99%) of
 # the star's light without accidentally including too much empty black sky.
-APERTURE_SIGMA_MULTIPLIER = 2.5
+APERTURE_SIGMA_MULTIPLIER = TunedParameter(
+    name="spectroscopy.aperture_sigma_multiplier",
+    default=2.5,
+    unit="× sigma",
+    description="How wide to make the reading box, as a multiple of the measured spectrum width.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-04",
+)
 
 # How many neighbouring steps the width is smoothed over before it sets the
 # box size. The width is fitted again at every step and each fit is noisy
@@ -159,10 +187,28 @@ APERTURE_SIGMA_MULTIPLIER = 2.5
 # 4200 A to 1.9 px at 5000 A, 400 or so steps), so a median over 61 steps
 # removes the noise and still follows the change. 61 steps is about a tenth
 # of a typical trail (Vega's has 563). Chosen by judgement, not tuned.
-APERTURE_SIGMA_SMOOTHING_STEPS = 61
+APERTURE_SIGMA_SMOOTHING_STEPS = TunedParameter(
+    name="spectroscopy.aperture_sigma_smoothing_steps",
+    default=61,
+    unit="steps",
+    description="How many neighbouring steps the width is smoothed over before it sets the box size.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-04",
+)
 
 # The smallest box half-width the traced extraction will use, in pixels.
-_MINIMUM_APERTURE_HALF_WIDTH_PX = 1.0
+_MINIMUM_APERTURE_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.minimum_aperture_half_width_px",
+    default=1.0,
+    unit="px",
+    description="The smallest box half-width the traced extraction uses.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D35",
+)
 
 # The narrowest line width (in pixels) we'll accept as a real measurement,
 # not a math mistake. A Gaussian fit needs a handful of pixels spread
@@ -176,7 +222,16 @@ _MINIMUM_APERTURE_HALF_WIDTH_PX = 1.0
 # to a sigma of about 1e-38, which is far below anything a real spectral
 # line could be, but was still being accepted because the only existing
 # check was "greater than zero".
-_MINIMUM_FIT_SIGMA_PX = 0.5
+_MINIMUM_FIT_SIGMA_PX = TunedParameter(
+    name="spectroscopy.minimum_fit_sigma_px",
+    default=0.5,
+    unit="px",
+    description="The narrowest line width accepted as a real measurement.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D35",
+)
 
 # --- Sky background subtraction (see the module docstring) ---------------
 # The sky is measured in two strips ("sky bands"), one on each side of the
@@ -199,7 +254,21 @@ _MINIMUM_FIT_SIGMA_PX = 0.5
 # for most of the others (see
 # documentation/evidence/k_star_sky_investigation_20260919.json),
 # but no sweep of the gap was run there.
-SKY_BAND_GAP_PX = 6
+# It stands for a gap of about one and a half trail widths (6 on the
+# reference setup, 1.5 × the trail width), so it follows the trail width the
+# run measures.
+SKY_BAND_GAP_PX = TunedParameter(
+    name="spectroscopy.sky_band_gap_px",
+    default=factor_for(6, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="The gap between the reading box and each sky band.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-01",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=6,
+)
 
 # Wider bands give a steadier median (more pixels, less noise). Narrower
 # bands follow a changing sky better. 10 px gives 20 sky pixels per step,
@@ -208,14 +277,32 @@ SKY_BAND_GAP_PX = 6
 # width 10). Line depths (Na D, H-beta, H-gamma) moved by less than 0.002
 # across all the widths tried, so this is not a sensitive setting on that
 # frame. Same one-frame caveat as the gap.
-SKY_BAND_WIDTH_PX = 10
+SKY_BAND_WIDTH_PX = TunedParameter(
+    name="spectroscopy.sky_band_width_px",
+    default=10,
+    unit="px",
+    description="The width of each sky band.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-01",
+)
 
 # The fewest sky pixels we will trust in one band. Near the edge of the image
 # a band can be cut off. If fewer than this many pixels are left in a band,
 # one or two noisy pixels would decide its sky level, so that band is not
 # used. If neither band has enough, we skip the subtraction for that step
 # instead of guessing.
-SKY_BAND_MINIMUM_SAMPLE_COUNT = 4
+SKY_BAND_MINIMUM_SAMPLE_COUNT = TunedParameter(
+    name="spectroscopy.sky_band_minimum_sample_count",
+    default=4,
+    unit="count",
+    description="The fewest sky pixels trusted in one band.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D04",
+)
 
 
 def fit_cross_section_gaussian(
@@ -311,7 +398,7 @@ def _fit_cross_section_gaussian_python(
     pixel_y = np.rint(center_y + offsets * perpendicular_y).astype(int)
 
     valid_mask = (pixel_x >= 0) & (pixel_x < width) & (pixel_y >= 0) & (pixel_y < height)
-    if np.count_nonzero(valid_mask) < _MINIMUM_CROSS_SECTION_SAMPLES:
+    if np.count_nonzero(valid_mask) < resolve(_MINIMUM_CROSS_SECTION_SAMPLES).value:
         return None
 
     offsets_array = offsets[valid_mask].astype(float)
@@ -344,7 +431,7 @@ def _fit_cross_section_gaussian_python(
 
     if not np.isfinite(center_offset) or not np.isfinite(sigma):
         return None
-    if sigma < _MINIMUM_FIT_SIGMA_PX or sigma > search_radius * 2:
+    if sigma < resolve(_MINIMUM_FIT_SIGMA_PX).value or sigma > search_radius * 2:
         return None
     if abs(center_offset) > search_radius:
         return None
@@ -395,17 +482,94 @@ def fit_trail_centerline_polynomial(raw_centers: list[float | None], degree: int
 # spikes were a median 7 pixels wide (5-11 for the middle 80%, including the
 # dilation below), so 31 pixels is comfortably wide enough. It is a first
 # choice, checked only on M 27 and M 57 and not tuned.
-CONTAMINANT_BASELINE_WIDTH_PX = 31
+# It stands for about eight trail widths (31 on the reference setup, 7.9 ×
+# the trail width), so it follows the trail width the run measures.
+CONTAMINANT_BASELINE_WIDTH_PX = TunedParameter(
+    name="spectroscopy.contaminant_baseline_width_px",
+    default=factor_for(31, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="Width of the smoothing that separates a narrow contaminating spike from a smooth box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D34",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=31,
+)
 
 # A pixel counts as part of a contaminating spike when it stands this many
 # noise-widths above the smoothed copy. 4 is the usual "clearly not noise"
 # cut: with Gaussian noise fewer than 1 pixel in 15,000 passes by chance.
-CONTAMINANT_THRESHOLD_SIGMA = 4.0
+CONTAMINANT_THRESHOLD_SIGMA = TunedParameter(
+    name="spectroscopy.contaminant_threshold_sigma",
+    default=4.0,
+    unit="noise sigma",
+    description="A pixel is part of a contaminating spike when it stands this far above the smoothed copy.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D34",
+)
 
 # Each side of a flagged spike is also replaced, because a trail's faint
 # edges sit below the threshold but still carry its light. Two pixels is a
 # judgement, not a measurement: on M 27 it leaves 5.9% of the box replaced.
-CONTAMINANT_DILATION_PX = 2
+# It stands for about half a trail width (2 on the reference setup, 0.51 ×
+# the trail width), so it follows the trail width the run measures.
+CONTAMINANT_DILATION_PX = TunedParameter(
+    name="spectroscopy.contaminant_dilation_px",
+    default=factor_for(2, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="How many pixels each side of a flagged spike are also replaced.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D34",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=2,
+)
+
+# The box cut around the zero-order star when its position is refined is
+# 21 pixels wide (10 on each side of the middle). It must hold the whole star
+# image and its faint wings but stay small enough that the trail of the
+# spectrum and neighbors fill little of it. 10 px is 4.3 star widths on the
+# reference setup. It was chosen by judgment, and no sweep was run on it.
+# It stands for about four star widths (10 on the reference setup, 4.29 × the
+# star width), so it follows the star width the run measures.
+CENTROID_BOX_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.centroid_box_half_width_px",
+    default=factor_for(10, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Half the width of the box cut around the zero-order star to refine its position.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D57",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=10,
+)
+
+# The window that is moved onto the star inside the box above. It must stay
+# smaller than the box, so the window never reaches the box edge, and wide
+# enough to hold the star's wings. 8 px is 80% of the box half-width, and on
+# the reference setup 3.4 star widths. It was chosen by judgment, not tuned.
+# Because the box above scales with the same basis, the window stays inside
+# the box on any setup.
+# It stands for about three and a half star widths (8 on the reference
+# setup, 3.43 × the star width), so it follows the star width the run
+# measures.
+CENTROID_WINDOW_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.centroid_window_half_width_px",
+    default=factor_for(8.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Half the width of the window that is moved onto the zero-order star to refine its position.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D57",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=8.0,
+)
 
 
 def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
@@ -453,18 +617,18 @@ def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
         A line shorter than the smoothing window comes back unchanged.
     """
     values = np.asarray(cross_section, dtype=float)
-    if values.size < CONTAMINANT_BASELINE_WIDTH_PX:
+    if values.size < resolve(CONTAMINANT_BASELINE_WIDTH_PX).value:
         return values.copy()
     finite = np.isfinite(values)
     if not finite.all():
         return values.copy()
-    baseline = median_filter(values, size=CONTAMINANT_BASELINE_WIDTH_PX, mode="nearest")
+    baseline = median_filter(values, size=resolve(CONTAMINANT_BASELINE_WIDTH_PX).value, mode="nearest")
     residual = values - baseline
     noise_width = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
-    is_spike = residual > CONTAMINANT_THRESHOLD_SIGMA * noise_width
+    is_spike = residual > resolve(CONTAMINANT_THRESHOLD_SIGMA).value * noise_width
     if not is_spike.any():
         return values.copy()
-    is_spike = binary_dilation(is_spike, iterations=CONTAMINANT_DILATION_PX)
+    is_spike = binary_dilation(is_spike, iterations=resolve(CONTAMINANT_DILATION_PX).value)
     return np.where(is_spike, baseline, values)
 
 
@@ -473,18 +637,47 @@ def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
 # sigma are found again, until nothing more is dropped. Three sigma drops a
 # hot pixel, a cosmic ray or the edge of a faint passing trail, and keeps
 # 99.7 percent of plain sky noise, so it leaves the median unbiased.
-SKY_CLIP_SIGMA = 3.0
+SKY_CLIP_SIGMA = TunedParameter(
+    name="spectroscopy.sky_clip_sigma",
+    default=3.0,
+    unit="sigma",
+    description="Pixels further than this many sigma from a sky band's median are dropped.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D03",
+)
 
 # The most clipping passes per band. Three or four passes settle on a typical
 # band of 10 pixels; the cap only stops a pathological band from looping.
-SKY_CLIP_MAX_PASSES = 5
+SKY_CLIP_MAX_PASSES = TunedParameter(
+    name="spectroscopy.sky_clip_max_passes",
+    default=5,
+    unit="count",
+    description="The most clipping passes per sky band.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D03",
+)
 
 # How many times the noise of the difference between the two band medians
 # the bands may differ before the pipeline treats the higher one as
 # contaminated (a neighbour's trail or glow in it) and uses only the
 # lower-valued band. A false alarm costs little: the answer then falls back
 # to that band alone, which reads about half a band-median noise low.
-SKY_CONTAMINATION_SIGMA = 3.0
+SKY_CONTAMINATION_SIGMA = TunedParameter(
+    name="spectroscopy.sky_contamination_sigma",
+    default=3.0,
+    unit="sigma",
+    description=(
+        "How many noise units the two sky band medians may differ before the higher is called contaminated."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-03",
+)
 
 # The noise used to judge whether the two band medians differ is the lower
 # of the two bands' pixel scatter, but never below this fraction of the
@@ -496,7 +689,16 @@ SKY_CONTAMINATION_SIGMA = 3.0
 # 2026-10-10: 10-pixel bands of normal noise, clean sky bias -0.30 ADU at 13
 # ADU of noise per pixel, against -2.6 ADU for taking the lower median).
 # Chosen by simulation, not from real frames.
-SKY_POOLED_NOISE_FLOOR = 0.75
+SKY_POOLED_NOISE_FLOOR = TunedParameter(
+    name="spectroscopy.sky_pooled_noise_floor",
+    default=0.75,
+    unit="fraction",
+    description="The fraction of the pooled scatter below which the band noise is never taken.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-03",
+)
 
 # The standard error of a median of normal data is this many times the
 # data's sigma divided by the square root of the sample count:
@@ -644,11 +846,14 @@ def _clipped_band_statistics(band: np.ndarray) -> tuple[float, float, int] | Non
         pixels kept, or `None` when fewer than `SKY_BAND_MINIMUM_SAMPLE_COUNT`
         finite pixels exist.
     """
+    sky_band_minimum_sample_count = resolve(SKY_BAND_MINIMUM_SAMPLE_COUNT).value
+    sky_clip_max_passes = resolve(SKY_CLIP_MAX_PASSES).value
+    sky_clip_sigma = resolve(SKY_CLIP_SIGMA).value
     pixels = band.astype(float)
     pixels = pixels[np.isfinite(pixels)]
-    if pixels.size < SKY_BAND_MINIMUM_SAMPLE_COUNT:
+    if pixels.size < sky_band_minimum_sample_count:
         return None
-    for _ in range(SKY_CLIP_MAX_PASSES):
+    for _ in range(sky_clip_max_passes):
         median = float(np.median(pixels))
         # 1.4826 times the median absolute deviation is the sigma of normal
         # data, and a bright pixel cannot inflate it the way it inflates a
@@ -656,8 +861,8 @@ def _clipped_band_statistics(band: np.ndarray) -> tuple[float, float, int] | Non
         robust_sigma = 1.4826 * float(np.median(np.abs(pixels - median)))
         if robust_sigma <= 0.0:
             break
-        kept = pixels[np.abs(pixels - median) <= SKY_CLIP_SIGMA * robust_sigma]
-        if kept.size == pixels.size or kept.size < SKY_BAND_MINIMUM_SAMPLE_COUNT:
+        kept = pixels[np.abs(pixels - median) <= sky_clip_sigma * robust_sigma]
+        if kept.size == pixels.size or kept.size < sky_band_minimum_sample_count:
             break
         pixels = kept
     noise = float(np.std(pixels, ddof=1)) if pixels.size > 1 else 0.0
@@ -770,8 +975,8 @@ def measure_sky(
         of that level.
     """
     centre = round(aperture_center)
-    nearest_band_edge = math.ceil(aperture_half_width) + SKY_BAND_GAP_PX
-    farthest_band_edge = nearest_band_edge + SKY_BAND_WIDTH_PX
+    nearest_band_edge = math.ceil(aperture_half_width) + resolve(SKY_BAND_GAP_PX).value
+    farthest_band_edge = nearest_band_edge + resolve(SKY_BAND_WIDTH_PX).value
     line_length = cross_section.size
 
     lower_band = cross_section[max(0, centre - farthest_band_edge) : max(0, centre - nearest_band_edge)]
@@ -794,11 +999,11 @@ def measure_sky(
     # one band holds a neighbour. So the reference noise is the lower band
     # scatter, but not below `SKY_POOLED_NOISE_FLOOR` of the pooled scatter.
     pooled_noise = math.sqrt(0.5 * (lower_noise**2 + upper_noise**2))
-    reference_noise = max(min(lower_noise, upper_noise), SKY_POOLED_NOISE_FLOOR * pooled_noise)
+    reference_noise = max(min(lower_noise, upper_noise), resolve(SKY_POOLED_NOISE_FLOOR).value * pooled_noise)
     difference_noise = (
         MEDIAN_STANDARD_ERROR_FACTOR * reference_noise * math.sqrt(1.0 / lower_count + 1.0 / upper_count)
     )
-    if abs(upper_median - lower_median) > SKY_CONTAMINATION_SIGMA * difference_noise:
+    if abs(upper_median - lower_median) > resolve(SKY_CONTAMINATION_SIGMA).value * difference_noise:
         if upper_median > lower_median:
             return SkyMeasurement(
                 lower_median, SKY_MODE_UPPER_BAND_CONTAMINATED, _sky_level_variance([lower], noise_model)
@@ -863,7 +1068,7 @@ def smooth_aperture_sigmas(sigma_px: list[float | None] | np.ndarray) -> np.ndar
     """
     values = np.array([np.nan if value is None else value for value in sigma_px], dtype=float)
     values[~(values > 0)] = np.nan
-    half_window = APERTURE_SIGMA_SMOOTHING_STEPS // 2
+    half_window = resolve(APERTURE_SIGMA_SMOOTHING_STEPS).value // 2
     smoothed = np.full(values.size, np.nan)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN windows give NaN, as wanted
@@ -900,7 +1105,9 @@ def traced_aperture_half_widths_px(
     """
     raw = np.array([np.nan if value is None else value for value in sigma_px], dtype=float)
     smoothed = smooth_aperture_sigmas(raw)
-    half_widths = np.maximum(_MINIMUM_APERTURE_HALF_WIDTH_PX, APERTURE_SIGMA_MULTIPLIER * smoothed)
+    half_widths = np.maximum(
+        resolve(_MINIMUM_APERTURE_HALF_WIDTH_PX).value, resolve(APERTURE_SIGMA_MULTIPLIER).value * smoothed
+    )
     return np.where(np.isfinite(raw) & (raw > 0) & np.isfinite(smoothed), half_widths, fallback_half_width_px)
 
 
@@ -999,7 +1206,7 @@ class SpectrumExtractor:
 
     def __init__(
         self,
-        radius: int = 10,
+        radius: int,
         subtract_sky_background: bool = True,
         reject_narrow_contaminants: bool = False,
         noise_model: PixelNoiseModel | None = None,
@@ -1008,8 +1215,10 @@ class SpectrumExtractor:
 
         Parameters
         ----------
-        radius : `int`, optional
-            How wide of a box to use (default is 10 pixels).
+        radius : `int`
+            How wide of a box to use, in pixels. The pipeline passes
+            `SpectroscopyConfig.extraction_radius`, which is declared as
+            `EXTRACTION_RADIUS_PX` and follows the trail width.
         subtract_sky_background : `bool`, optional
             Take the night-sky glow out of every reading (default is
             `True`). Turn this off only to compare against the raw,
@@ -1101,8 +1310,10 @@ class SpectrumExtractor:
         if self.reject_narrow_contaminants:
             # Clean with a margin of real pixels beyond each box edge, so a
             # trail at the edge still has neighbours to be compared with.
-            margin_start = max(0, int(box_indices[0]) - CONTAMINANT_BASELINE_WIDTH_PX)
-            margin_end = min(cross_section.size, int(box_indices[-1]) + 1 + CONTAMINANT_BASELINE_WIDTH_PX)
+            margin_start = max(0, int(box_indices[0]) - resolve(CONTAMINANT_BASELINE_WIDTH_PX).value)
+            margin_end = min(
+                cross_section.size, int(box_indices[-1]) + 1 + resolve(CONTAMINANT_BASELINE_WIDTH_PX).value
+            )
             cleaned_with_margin = replace_narrow_spikes(cross_section[margin_start:margin_end])
             box_pixels = cleaned_with_margin[box_indices - margin_start]
         box_total = float(np.sum(box_weights * box_pixels))
@@ -1356,7 +1567,7 @@ class SpectrumExtractor:
         start_pos: tuple[float, float],
         vector: np.ndarray,
         length: float,
-        centerline_polynomial_degree: int = 2,
+        centerline_polynomial_degree: int,
     ) -> tuple[np.ndarray, list[float], list[float]]:
         """Advanced version of extract_line that follows curves.
 
@@ -1378,8 +1589,9 @@ class SpectrumExtractor:
             Which direction to go.
         length : `float`
             How long the spectrum is.
-        centerline_polynomial_degree : `int`, optional
-            How flexible the curve should be (default 2 means a simple curve).
+        centerline_polynomial_degree : `int`
+            How flexible the curve should be (2 means a simple curve). The
+            pipeline passes `SpectroscopyConfig.centerline_polynomial_degree`.
 
         Returns
         -------
@@ -1601,10 +1813,11 @@ class SpectrumExtractor:
         h, w = data.shape
         x0, y0 = start_pos
         ix0, iy0 = round(x0), round(y0)
-        y_start = max(0, iy0 - 10)
-        y_end = min(h, iy0 + 11)
-        x_start = max(0, ix0 - 10)
-        x_end = min(w, ix0 + 11)
+        box_half_width = round(resolve(CENTROID_BOX_HALF_WIDTH_PX).value)
+        y_start = max(0, iy0 - box_half_width)
+        y_end = min(h, iy0 + box_half_width + 1)
+        x_start = max(0, ix0 - box_half_width)
+        x_end = min(w, ix0 + box_half_width + 1)
 
         subgrid = data[y_start:y_end, x_start:x_end]
         total_mass = np.sum(subgrid)
@@ -1633,7 +1846,11 @@ class SpectrumExtractor:
 
     @staticmethod
     def _recentre_centroid_window(
-        box: np.ndarray, centre_x: float, centre_y: float, half_width: float = 8.0, iterations: int = 100
+        box: np.ndarray,
+        centre_x: float,
+        centre_y: float,
+        half_width: float | None = None,
+        iterations: int = 100,
     ) -> tuple[float, float]:
         """Refine a centroid with a window that stays centred on the star.
 
@@ -1655,7 +1872,8 @@ class SpectrumExtractor:
         half_width : `float`, optional
             How far the window reaches each side of its middle, in pixels.
             It must be smaller than half the box, so the window stays
-            inside the box.
+            inside the box. The default `None` takes the value of
+            `CENTROID_WINDOW_HALF_WIDTH_PX`.
         iterations : `int`, optional
             The most times to recentre the window. The loop stops early
             once the centre moves by less than 0.0001 pixel. Each step
@@ -1666,6 +1884,8 @@ class SpectrumExtractor:
         centre_x, centre_y : `float`
             The refined centroid, in the box's own pixel indices.
         """
+        if half_width is None:
+            half_width = float(resolve(CENTROID_WINDOW_HALF_WIDTH_PX).value)
         n_rows, n_cols = box.shape
         for _ in range(iterations):
             weights_x = _window_weights(n_cols, centre_x, half_width)
@@ -1776,7 +1996,8 @@ class SpectrumExtractor:
         radius: int,
         orientation: str = "vertical",
         angle_degrees: float = 0.0,
-        centerline_polynomial_degree: int = 2,
+        *,
+        centerline_polynomial_degree: int,
     ) -> tuple[np.ndarray, float, float, list[float], list[float]]:
         """Smart version of extract_with_flare_mask that follows curves.
 
@@ -1800,8 +2021,9 @@ class SpectrumExtractor:
             "horizontal" or "vertical".
         angle_degrees : `float`, optional
             Any overall tilt to the picture.
-        centerline_polynomial_degree : `int`, optional
-            How flexible the curve tracking should be.
+        centerline_polynomial_degree : `int`
+            How flexible the curve tracking should be. Keyword only; the
+            pipeline passes `SpectroscopyConfig.centerline_polynomial_degree`.
 
         Returns
         -------

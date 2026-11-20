@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib.analytics.result_quality.star_result_rules import (
     AMBIGUOUS_RMS_GAP_LIMIT,
     POOR_MATCH_RMS_LIMIT,
@@ -543,10 +544,12 @@ def star_flags_from_numbers(spectroscopy: Any) -> dict[str, bool]:
     rms = getattr(spectroscopy, "self_determined_spectral_type_rms", None)
     class_gap = getattr(spectroscopy, "rms_gap_to_next_class", None)
     subtype_gap = getattr(spectroscopy, "rms_gap_to_second_best", None)
+    poor_match_limit = resolve_parameter(POOR_MATCH_RMS_LIMIT).value
+    ambiguous_gap_limit = resolve_parameter(AMBIGUOUS_RMS_GAP_LIMIT).value
     return {
-        "is_poor_match": rms is not None and rms > POOR_MATCH_RMS_LIMIT,
-        "is_class_ambiguous": class_gap is not None and class_gap < AMBIGUOUS_RMS_GAP_LIMIT,
-        "is_ambiguous": subtype_gap is not None and subtype_gap < AMBIGUOUS_RMS_GAP_LIMIT,
+        "is_poor_match": rms is not None and rms > poor_match_limit,
+        "is_class_ambiguous": class_gap is not None and class_gap < ambiguous_gap_limit,
+        "is_ambiguous": subtype_gap is not None and subtype_gap < ambiguous_gap_limit,
     }
 
 

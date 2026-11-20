@@ -22,6 +22,8 @@ the measurements are written next to them.
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
@@ -33,6 +35,14 @@ from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import PhotometryPipelineQualityMetrics
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_ASTROMETRY_IDENTIFIED_STAR_COUNT,
     PHOTOMETRY_CATALOG_MATCHED_STAR_COUNT,
@@ -100,12 +110,33 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 # based on past runs). If we trigger a warning for anything less, we get
 # too many false alarms. Setting the limit to 0.25 (25%) helps us catch
 # real issues (like passing clouds) that need a human to check.
-MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
+MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = TunedParameter(
+    name="photometry.minimum_ensemble_rejection_fraction_to_flag",
+    default=0.25,
+    unit="fraction",
+    description="Share of a run's frames rejected as ensemble outliers that triggers a quality warning.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D09",
+)
 
 # The minimum number of rejected frames needed to trigger a quality warning.
 # This prevents false alarms when dealing with a small number of frames
 # (under 20), where a single rejected frame could cause a high percentage.
-MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
+MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = TunedParameter(
+    name="photometry.minimum_ensemble_rejection_count_to_flag",
+    default=5,
+    unit="frames",
+    description=(
+        "Fewest rejected frames that can trigger the ensemble-rejection warning, so a small run "
+        "does not warn on one frame."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D09",
+)
 
 # The fewest stars with a usable light curve (three or more points) needed
 # to say what the field's normal scatter is. The CV cutoff is the median
@@ -114,7 +145,16 @@ MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 # handful, not the field. A design estimate, not validated on real fields.
 # The noise model that replaces the CV cutoff needs more stars
 # (`MINIMUM_STARS_FOR_NOISE_MODEL`).
-MINIMUM_STARS_FOR_SCATTER_POPULATION = 10
+MINIMUM_STARS_FOR_SCATTER_POPULATION = TunedParameter(
+    name="photometry.minimum_stars_for_scatter_population",
+    default=10,
+    unit="stars",
+    description="Fewest stars with a usable light curve needed to say what the field's normal scatter is.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D13",
+)
 
 # The largest peak-to-peak amplitude, in magnitudes, a run's noise level (or,
 # without a noise model, its CV cutoff) may demand of a sinusoidal variable
@@ -122,7 +162,19 @@ MINIMUM_STARS_FOR_SCATTER_POPULATION = 10
 # A design estimate, not validated: pulsating, rotating and young-star
 # variables are mostly below about 0.3 mag, while eclipsing binaries, Cepheids,
 # RR Lyrae and Miras are larger.
-MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
+MAXIMUM_DETECTABLE_AMPLITUDE_MAG = TunedParameter(
+    name="photometry.maximum_detectable_amplitude_mag",
+    default=0.3,
+    unit="mag",
+    description=(
+        "Largest peak-to-peak amplitude a run's noise level may demand of a sinusoidal variable "
+        "before the run counts as blind to most variables."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-09",
+)
 
 # The largest 95th-percentile (over the frames) displacement of a frame's
 # corner, in pixels, that the `registration_drift` gate accepts. Each frame
@@ -138,13 +190,40 @@ MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
 # 0.2 px (scale) over a night, M 81 0.9 px, NGC 2403 1.8 px (a real rotation
 # of 0.05 degrees over the night; 1.9 px in the worst frame).
 # A designed limit, not a measured false-alarm rate.
-MAXIMUM_CORNER_DISPLACEMENT_PX = 1.0
+# One star width (1 px at the reference setup's 3 px width) of corner
+# movement. The limit follows the measured star width.
+MAXIMUM_CORNER_DISPLACEMENT_PX = TunedParameter(
+    name="photometry.maximum_corner_displacement_px",
+    default=factor_for(1.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=1.0,
+    unit="× star width",
+    description=(
+        "Largest 95th-percentile displacement of a frame corner that the registration drift gate accepts."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-04",
+)
 
 # The largest share of star measurements that may keep the shifted reference
 # position because the star's own centroid was refused. Above one in five,
 # the global shift does not fit the stars well enough to trust the rest. A
 # designed limit, not a measured false-alarm rate.
-MAXIMUM_CENTROID_FALLBACK_FRACTION = 0.20
+MAXIMUM_CENTROID_FALLBACK_FRACTION = TunedParameter(
+    name="photometry.maximum_centroid_fallback_fraction",
+    default=0.20,
+    unit="fraction",
+    description=(
+        "Largest share of star measurements that may keep the shifted reference position because "
+        "the star's own centroid was refused."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-04",
+)
 
 # The most per-frame reasons the `capture_timestamps` gate quotes in its
 # detail. The full list stays in the run's excluded frames.
@@ -164,7 +243,16 @@ COMPARISON_ENSEMBLE_GATE_NAME = "comparison_ensemble"
 # against 0.0036), on a night when the comparison stars' brightness fell by
 # 30 percent and recovered: patchy cloud that no ratio to the ensemble can
 # remove. 5 sits between those cases. A design value, set on three fields.
-MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED = 5.0
+MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED = TunedParameter(
+    name="photometry.maximum_ensemble_scatter_over_predicted",
+    default=5.0,
+    unit="ratio",
+    description="Most times the comparison stars' own scatter may exceed what their errors predict.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-02",
+)
 REGISTRATION_DRIFT_GATE_NAME = "registration_drift"
 SCATTER_POPULATION_GATE_NAME = "scatter_population"
 VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
@@ -174,7 +262,8 @@ FLUX_UNCERTAINTY_GATE_NAME = "flux_uncertainty"
 # How the comparison_ensemble gate words the limit on the size of a set. The
 # stored measurement of that gate always uses it, whichever test failed.
 COMPARISON_SET_SIZE_LIMIT_SOURCE = (
-    f"at least {MINIMUM_COMPARISON_STARS} comparison stars, the same set in every frame of a session"
+    f"at least {resolve(MINIMUM_COMPARISON_STARS).value} comparison stars, "
+    "the same set in every frame of a session"
 )
 
 
@@ -277,25 +366,32 @@ def photometry_run_gates(
     gates : `list` [`GateResult`]
         Eleven gates, in a fixed order.
     """
+    minimum_ensemble_rejection_count_to_flag = resolve(MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG).value
+    minimum_ensemble_rejection_fraction_to_flag = resolve(MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG).value
+    minimum_stars_for_scatter_population = resolve(MINIMUM_STARS_FOR_SCATTER_POPULATION).value
+    minimum_known_variables = resolve(MINIMUM_KNOWN_VARIABLES).value
+    minimum_unlisted_stars = resolve(MINIMUM_UNLISTED_STARS).value
+    minimum_discrimination_auc = resolve(MINIMUM_DISCRIMINATION_AUC).value
+    maximum_detectable_amplitude_mag = resolve(MAXIMUM_DETECTABLE_AMPLITUDE_MAG).value
     gates: list[GateResult] = []
 
     rejection_source = (
-        f"at least {MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG} frames and "
-        f"{MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG:.0%} of the run's frames"
+        f"at least {minimum_ensemble_rejection_count_to_flag} frames and "
+        f"{minimum_ensemble_rejection_fraction_to_flag:.0%} of the run's frames"
     )
-    if frames_contributed < MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG:
+    if frames_contributed < minimum_ensemble_rejection_count_to_flag:
         gates.append(
             unchecked_gate(
                 ENSEMBLE_REJECTION_GATE_NAME,
-                f"fewer than {MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG} frames: too few to find outliers",
+                f"fewer than {minimum_ensemble_rejection_count_to_flag} frames: too few to find outliers",
                 rejection_source,
             )
         )
     else:
         fraction = rejected_frame_count / frames_contributed
         if (
-            rejected_frame_count >= MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG
-            and fraction >= MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG
+            rejected_frame_count >= minimum_ensemble_rejection_count_to_flag
+            and fraction >= minimum_ensemble_rejection_fraction_to_flag
         ):
             gates.append(
                 failed_gate(
@@ -304,7 +400,7 @@ def photometry_run_gates(
                     "as global ensemble outliers, which is high enough to suspect the comparison "
                     "ensemble or the observing conditions",
                     fraction,
-                    MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG,
+                    minimum_ensemble_rejection_fraction_to_flag,
                     rejection_source,
                 )
             )
@@ -313,7 +409,7 @@ def photometry_run_gates(
                 passed_gate(
                     ENSEMBLE_REJECTION_GATE_NAME,
                     fraction,
-                    MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG,
+                    minimum_ensemble_rejection_fraction_to_flag,
                     rejection_source,
                 )
             )
@@ -381,13 +477,13 @@ def photometry_run_gates(
     gates.append(_registration_drift_gate(registration_drifts_px, centroid_shift_summaries))
 
     population_source = (
-        f"at least {MINIMUM_STARS_FOR_SCATTER_POPULATION} stars with three or more points (design estimate)"
+        f"at least {minimum_stars_for_scatter_population} stars with three or more points (design estimate)"
     )
     model_source = (
         f"at least {MINIMUM_STARS_FOR_NOISE_MODEL} stars with five or more points and a raw flux to fit the "
         "noise model (design estimate)"
     )
-    if stars_with_scatter < MINIMUM_STARS_FOR_SCATTER_POPULATION:
+    if stars_with_scatter < minimum_stars_for_scatter_population:
         gates.append(
             unchecked_gate(
                 SCATTER_POPULATION_GATE_NAME,
@@ -401,7 +497,7 @@ def photometry_run_gates(
             passed_gate(
                 SCATTER_POPULATION_GATE_NAME,
                 float(stars_with_scatter),
-                float(MINIMUM_STARS_FOR_SCATTER_POPULATION),
+                float(minimum_stars_for_scatter_population),
                 population_source,
             )
         )
@@ -427,9 +523,9 @@ def photometry_run_gates(
         )
 
     skill_source = (
-        f"at least {MINIMUM_KNOWN_VARIABLES} catalogued variables and "
-        f"{MINIMUM_UNLISTED_STARS} unlisted stars; AUC above chance at the 5% level and at least "
-        f"{MINIMUM_DISCRIMINATION_AUC:g} (design choice)"
+        f"at least {minimum_known_variables} catalogued variables and "
+        f"{minimum_unlisted_stars} unlisted stars; AUC above chance at the 5% level and at least "
+        f"{minimum_discrimination_auc:g} (design choice)"
     )
     skill = discrimination(known_variable_scores, unlisted_scores)
     if skill is None:
@@ -459,7 +555,7 @@ def photometry_run_gates(
             )
         )
 
-    amplitude_source = f"at most {MAXIMUM_DETECTABLE_AMPLITUDE_MAG:g} mag peak to peak (design estimate)"
+    amplitude_source = f"at most {maximum_detectable_amplitude_mag:g} mag peak to peak (design estimate)"
     if noise_floor_mag is not None:
         amplitude = minimum_detectable_amplitude_from_noise_mag(noise_floor_mag)
         amplitude_source += "; from the noise model"
@@ -476,14 +572,14 @@ def photometry_run_gates(
                 amplitude_source,
             )
         )
-    elif amplitude > MAXIMUM_DETECTABLE_AMPLITUDE_MAG:
+    elif amplitude > maximum_detectable_amplitude_mag:
         gates.append(
             failed_gate(
                 DETECTABLE_AMPLITUDE_GATE_NAME,
                 f"a variable would have to change by about {amplitude:.2f} mag peak to peak "
                 "to clear this run's noise level, so smaller variables cannot be flagged",
                 amplitude,
-                MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
+                maximum_detectable_amplitude_mag,
                 amplitude_source,
             )
         )
@@ -492,7 +588,7 @@ def photometry_run_gates(
             passed_gate(
                 DETECTABLE_AMPLITUDE_GATE_NAME,
                 amplitude,
-                MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
+                maximum_detectable_amplitude_mag,
                 amplitude_source,
             )
         )
@@ -593,10 +689,13 @@ def _registration_drift_gate(
     gate : `GateResult`
         The gate.
     """
+    unstable_tracking_drift_px = resolve(UNSTABLE_TRACKING_DRIFT_PX).value
+    maximum_corner_displacement_px = resolve(MAXIMUM_CORNER_DISPLACEMENT_PX).value
+    maximum_centroid_fallback_fraction = resolve(MAXIMUM_CENTROID_FALLBACK_FRACTION).value
     source = (
-        f"global alignment offset of at most {UNSTABLE_TRACKING_DRIFT_PX:g} px (half of the centroid search "
+        f"global alignment offset of at most {unstable_tracking_drift_px:g} px (half of the centroid search "
         f"box), 95th-percentile corner displacement from rotation and scale change of at most "
-        f"{MAXIMUM_CORNER_DISPLACEMENT_PX:g} px, and at most {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}% "
+        f"{maximum_corner_displacement_px:g} px, and at most {100 * maximum_centroid_fallback_fraction:.0f}% "
         "of star measurements falling back (designed limits)"
     )
     recorded_drifts = [drift for drift in registration_drifts_px if drift is not None]
@@ -615,28 +714,28 @@ def _registration_drift_gate(
     worst_fallback = max((summary.fallback_fraction for summary in summaries), default=None)
 
     problems: list[str] = []
-    measured, limit = worst_drift, UNSTABLE_TRACKING_DRIFT_PX
-    if worst_drift is not None and worst_drift > UNSTABLE_TRACKING_DRIFT_PX:
+    measured, limit = worst_drift, unstable_tracking_drift_px
+    if worst_drift is not None and worst_drift > unstable_tracking_drift_px:
         problems.append(
             f"frame alignment drifted up to {worst_drift:.0f} px, so tracking was probably lost "
             "and apparent brightness changes may be alignment, not the star"
         )
-    if worst_corner is not None and worst_corner > MAXIMUM_CORNER_DISPLACEMENT_PX:
+    if worst_corner is not None and worst_corner > maximum_corner_displacement_px:
         problems.append(
             f"the field rotated or changed scale during the session: a corner moves {worst_corner:.2f} px "
-            f"(limit {MAXIMUM_CORNER_DISPLACEMENT_PX:g} px). The frames were lined up with that rotation, "
+            f"(limit {maximum_corner_displacement_px:g} px). The frames were lined up with that rotation, "
             "so the apertures follow the stars, but a star lands on different pixels in each frame and the "
             "flat-field error adds scatter"
         )
         if not problems[:-1]:
-            measured, limit = worst_corner, MAXIMUM_CORNER_DISPLACEMENT_PX
-    if worst_fallback is not None and worst_fallback > MAXIMUM_CENTROID_FALLBACK_FRACTION:
+            measured, limit = worst_corner, maximum_corner_displacement_px
+    if worst_fallback is not None and worst_fallback > maximum_centroid_fallback_fraction:
         problems.append(
             f"{100.0 * worst_fallback:.1f}% of star measurements kept the aligned position because the "
-            f"star's own centroid was refused (limit {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}%)"
+            f"star's own centroid was refused (limit {100 * maximum_centroid_fallback_fraction:.0f}%)"
         )
         if not problems[:-1]:
-            measured, limit = worst_fallback, MAXIMUM_CENTROID_FALLBACK_FRACTION
+            measured, limit = worst_fallback, maximum_centroid_fallback_fraction
     if measured is None:
         measured = worst_corner if worst_corner is not None else worst_fallback
 
@@ -648,11 +747,11 @@ def _registration_drift_gate(
             REGISTRATION_DRIFT_GATE_NAME, "; ".join(problems) + suffix, measured, limit, source
         )
     if worst_drift is not None:
-        passed_limit = UNSTABLE_TRACKING_DRIFT_PX
+        passed_limit = unstable_tracking_drift_px
     elif worst_corner is not None:
-        passed_limit = MAXIMUM_CORNER_DISPLACEMENT_PX
+        passed_limit = maximum_corner_displacement_px
     else:
-        passed_limit = MAXIMUM_CENTROID_FALLBACK_FRACTION
+        passed_limit = maximum_centroid_fallback_fraction
     return passed_gate(
         REGISTRATION_DRIFT_GATE_NAME,
         measured,
@@ -687,6 +786,8 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
         or ``passed``, with the size of the smallest set as its measured
         value.
     """
+    minimum_comparison_stars = resolve(MINIMUM_COMPARISON_STARS).value
+    maximum_ensemble_scatter_over_predicted = resolve(MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED).value
     source = COMPARISON_SET_SIZE_LIMIT_SOURCE
     if not comparison_sets:
         return unchecked_gate(
@@ -694,13 +795,13 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
         )
     sizes = [len(record.star_ids) for record in comparison_sets]
     smallest = min(sizes)
-    thin = sum(1 for size in sizes if size < MINIMUM_COMPARISON_STARS)
+    thin = sum(1 for size in sizes if size < minimum_comparison_stars)
     moving = sum(1 for record in comparison_sets if not record.is_fixed)
     if thin or moving:
         problems = []
         if thin:
             problems.append(
-                f"{thin} of {len(sizes)} session(s) had fewer than {MINIMUM_COMPARISON_STARS} "
+                f"{thin} of {len(sizes)} session(s) had fewer than {minimum_comparison_stars} "
                 f"comparison stars (the smallest had {smallest})"
             )
         if moving:
@@ -711,7 +812,7 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
             COMPARISON_ENSEMBLE_GATE_NAME,
             "; ".join(problems),
             float(smallest),
-            float(MINIMUM_COMPARISON_STARS),
+            float(minimum_comparison_stars),
             source,
         )
     scatters = [record.scatter_mag for record in comparison_sets if record.scatter_mag is not None]
@@ -723,7 +824,7 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
         for record in comparison_sets
         if record.scatter_mag is not None and record.expected_error_mag
     ]
-    if ratios and max(ratios) > MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED:
+    if ratios and max(ratios) > maximum_ensemble_scatter_over_predicted:
         return failed_gate(
             COMPARISON_ENSEMBLE_GATE_NAME,
             f"the comparison stars scatter {max(ratios):.1f} times what their errors predict "
@@ -732,8 +833,8 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
             "tracking loss or a changing focus), so the light curves cannot be trusted at the level of "
             "their error bars",
             float(max(ratios)),
-            MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED,
-            f"at most {MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED:g} times the scatter the errors predict "
+            maximum_ensemble_scatter_over_predicted,
+            f"at most {maximum_ensemble_scatter_over_predicted:g} times the scatter the errors predict "
             "(design value)",
         )
     detail = (
@@ -747,7 +848,7 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
     rejected = sum(record.rejected_count for record in comparison_sets)
     detail += f"; {rejected} star(s) turned away"
     return passed_gate(
-        COMPARISON_ENSEMBLE_GATE_NAME, float(smallest), float(MINIMUM_COMPARISON_STARS), source, detail
+        COMPARISON_ENSEMBLE_GATE_NAME, float(smallest), float(minimum_comparison_stars), source, detail
     )
 
 
@@ -929,6 +1030,8 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
         checked. Other gates, and any gate that was not checked, are returned
         as they are.
     """
+    minimum_comparison_stars = resolve(MINIMUM_COMPARISON_STARS).value
+    unstable_tracking_drift_px = resolve(UNSTABLE_TRACKING_DRIFT_PX).value
     if (
         gate.name == COMPARISON_ENSEMBLE_GATE_NAME
         and gate.status is not GateStatus.NOT_CHECKED
@@ -938,7 +1041,7 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
         return gate.model_copy(
             update={
                 "measured_value": float(smallest),
-                "limit": float(MINIMUM_COMPARISON_STARS),
+                "limit": float(minimum_comparison_stars),
                 "limit_source": COMPARISON_SET_SIZE_LIMIT_SOURCE,
             }
         )
@@ -947,7 +1050,7 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
         return gate.model_copy(
             update={
                 "measured_value": float(max(recorded)) if recorded else None,
-                "limit": float(UNSTABLE_TRACKING_DRIFT_PX),
+                "limit": float(unstable_tracking_drift_px),
             }
         )
     if (

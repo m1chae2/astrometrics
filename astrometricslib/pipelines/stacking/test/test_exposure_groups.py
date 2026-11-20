@@ -322,7 +322,7 @@ def test_a_pixel_saturated_in_every_group_uses_the_shortest_exposure() -> None:
 
 def test_the_saturation_threshold_sits_below_full_scale() -> None:
     """The saturation cut-off is a fraction of the full 0-1 range."""
-    assert 0.5 < SATURATION_FRACTION_OF_FULL_SCALE < 1.0
+    assert 0.5 < SATURATION_FRACTION_OF_FULL_SCALE.default < 1.0
 
 
 def test_combining_rejects_input_that_does_not_line_up() -> None:
@@ -409,7 +409,7 @@ def test_frame_noise_is_measured_from_a_raw_frame(tmp_path: Path) -> None:
     noise, zero_fraction = measure_frame_noise(frame.path)
 
     assert noise == pytest.approx(8.0, rel=0.1)
-    assert zero_fraction < CLIPPED_FRAME_ZERO_FRACTION
+    assert zero_fraction < CLIPPED_FRAME_ZERO_FRACTION.default
 
 
 def test_a_clipped_frame_reports_many_zeros(tmp_path: Path) -> None:
@@ -418,7 +418,7 @@ def test_a_clipped_frame_reports_many_zeros(tmp_path: Path) -> None:
 
     _, zero_fraction = measure_frame_noise(frame.path)
 
-    assert zero_fraction > CLIPPED_FRAME_ZERO_FRACTION
+    assert zero_fraction > CLIPPED_FRAME_ZERO_FRACTION.default
 
 
 def test_a_clipped_group_takes_the_noise_of_the_cleanest_group(tmp_path: Path) -> None:
@@ -504,8 +504,8 @@ def test_a_ceiling_below_the_fixed_level_is_found_from_the_pixels() -> None:
 
     level = estimate_saturation_mask_level(image)
 
-    assert level == pytest.approx(0.81 * SATURATION_MASK_FRACTION_OF_CEILING, rel=0.03)
-    assert level < SATURATION_FRACTION_OF_FULL_SCALE
+    assert level == pytest.approx(0.81 * SATURATION_MASK_FRACTION_OF_CEILING.default, rel=0.03)
+    assert level < SATURATION_FRACTION_OF_FULL_SCALE.default
 
 
 def test_a_clipped_core_at_full_scale_is_masked_a_little_below_it() -> None:
@@ -513,7 +513,7 @@ def test_a_clipped_core_at_full_scale_is_masked_a_little_below_it() -> None:
     image = _stack_with_saturated_core(ceiling=1.0, seed=12)
 
     assert estimate_saturation_mask_level(image) == pytest.approx(
-        SATURATION_MASK_FRACTION_OF_CEILING, rel=0.03
+        SATURATION_MASK_FRACTION_OF_CEILING.default, rel=0.03
     )
 
 
@@ -522,7 +522,7 @@ def test_a_real_bright_peak_is_not_mistaken_for_a_ceiling() -> None:
     rows, columns = np.mgrid[0:200, 0:200]
     star = 0.7 * np.exp(-(((rows - 100) ** 2 + (columns - 100) ** 2) / (2 * 2.0**2)))
 
-    assert estimate_saturation_mask_level(star) == SATURATION_FRACTION_OF_FULL_SCALE
+    assert estimate_saturation_mask_level(star) == SATURATION_FRACTION_OF_FULL_SCALE.default
 
 
 def _sky_and_stars(seed: int, shape: tuple[int, int] = (300, 300), stars: int = 150) -> np.ndarray:
@@ -628,7 +628,7 @@ def test_an_implausible_gain_is_replaced_by_one_and_cannot_blow_up_the_image() -
     gains = _group_gains([truth, nearly_empty], [np.ones(truth.shape, bool)] * 2, 0)
 
     assert gains == [1.0, 1.0]
-    assert PLAUSIBLE_GAIN_RANGE[0] < 0.7 < PLAUSIBLE_GAIN_RANGE[1]
+    assert PLAUSIBLE_GAIN_RANGE.default[0] < 0.7 < PLAUSIBLE_GAIN_RANGE.default[1]
 
 
 def test_the_combined_image_stays_finite_when_a_short_group_is_nearly_empty() -> None:
@@ -684,7 +684,7 @@ def test_measured_zero_fractions_say_which_groups_are_clipped(tmp_path: Path) ->
 
     noises, zero_fractions = measure_group_frames([clipped, clean])
 
-    assert zero_fractions[0] > CLIPPED_FRAME_ZERO_FRACTION > zero_fractions[1]
+    assert zero_fractions[0] > CLIPPED_FRAME_ZERO_FRACTION.default > zero_fractions[1]
     assert noises[0] == pytest.approx(noises[1])
 
 
@@ -705,7 +705,7 @@ def _clipped_and_clean_stacks(rate_counts_per_second: float) -> tuple[list[np.nd
     for exposure, count in zip(exposures, frame_counts, strict=True):
         mean_counts = rate_counts_per_second * exposure
         frames = np.clip(generator.normal(mean_counts, noise_counts, (count, 80, 80)), 0, None)
-        images.append(frames.mean(axis=0) / FULL_SCALE_COUNTS)
+        images.append(frames.mean(axis=0) / FULL_SCALE_COUNTS.default)
     return images, exposures, noise_counts
 
 
@@ -719,7 +719,7 @@ def test_a_clipped_group_no_longer_biases_faint_pixels_upward() -> None:
     rate = 6.0
     images, exposures, noise_counts = _clipped_and_clean_stacks(rate)
     frame_counts = [100, 2]
-    expected = rate / FULL_SCALE_COUNTS * float(np.average(exposures, weights=frame_counts))
+    expected = rate / FULL_SCALE_COUNTS.default * float(np.average(exposures, weights=frame_counts))
 
     unaware = combine_exposure_group_images(
         images, exposures, frame_counts, frame_noises=[noise_counts] * 2
@@ -737,7 +737,7 @@ def test_a_clipped_group_no_longer_biases_faint_pixels_upward() -> None:
     # cannot tell a clipping bias from a brightness scale, so it removes the
     # bias by rescaling the group.
     clipped_stack_rate = float(np.mean(images[0])) / exposures[0]
-    assert clipped_stack_rate > 1.15 * rate / FULL_SCALE_COUNTS
+    assert clipped_stack_rate > 1.15 * rate / FULL_SCALE_COUNTS.default
     assert np.isfinite(unaware).all()
     assert float(np.mean(aware)) == pytest.approx(expected, rel=0.06)
 
@@ -909,9 +909,12 @@ def test_the_representative_exposure_ignores_unreadable_frames() -> None:
 
 def test_describe_group_clipping_lists_every_group_and_the_clipped_ones() -> None:
     """Every group gets an entry; only those above the limit are clipped."""
-    measured, clipped = describe_group_clipping([0.5, 5.0], [0.7123, CLIPPED_FRAME_ZERO_FRACTION])
+    measured, clipped = describe_group_clipping([0.5, 5.0], [0.7123, CLIPPED_FRAME_ZERO_FRACTION.default])
 
-    assert [entry["frame_zero_fraction"] for entry in measured] == [0.712, CLIPPED_FRAME_ZERO_FRACTION]
+    assert [entry["frame_zero_fraction"] for entry in measured] == [
+        0.712,
+        CLIPPED_FRAME_ZERO_FRACTION.default,
+    ]
     assert clipped == [{"exposure_seconds": 0.5, "frame_zero_fraction": 0.712}]
 
 

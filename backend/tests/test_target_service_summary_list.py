@@ -100,3 +100,17 @@ def test_an_unknown_detail_is_refused() -> None:
     """Only ``full`` and ``summary`` are offered."""
     with pytest.raises(InvalidArgumentError, match="detail"):
         _service_with(_target("M 33")).get_targets(detail="frames")
+
+
+def test_the_file_list_sends_each_frames_focal_length() -> None:
+    """Each file carries its focal length as a float, or None if unknown."""
+    target = _target("M 27")
+    target.frames = [
+        FrameRecord(path="/lens.fits", focalLengthMm=300.0),
+        FrameRecord(path="/scope.fits", focalLengthMm=405.2),
+        FrameRecord(path="/unknown.fits"),
+    ]
+    files = _service_with(target).get_file_list("M 27")["files"]
+
+    assert [file["focalLengthMm"] for file in files] == [300.0, 405.2, None]
+    assert all(value is None or type(value) is float for value in (file["focalLengthMm"] for file in files))

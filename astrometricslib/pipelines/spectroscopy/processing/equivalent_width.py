@@ -65,26 +65,84 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # How many line-spread widths (full widths at half maximum) either side of
 # the line's center the EW integrates over. A Gaussian line is down to 0.04
 # percent of its area outside this window (erf(2.5) = 0.99959).
-EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS = 1.5
+EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS = TunedParameter(
+    name="spectroscopy.equivalent_width_window_line_spreads",
+    default=1.5,
+    unit="× FWHM",
+    description=(
+        "How many line-spread widths either side of the line centre the equivalent width integrates over."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-23",
+)
 
 # The fewest samples in the continuum bands, and in the window, for a
 # measurement. The continuum has three coefficients, and the same minimum as
 # the feature detector's bands keeps the fit steady.
-_MINIMUM_BAND_POINTS = 8
-_MINIMUM_WINDOW_POINTS = 3
+_MINIMUM_BAND_POINTS = TunedParameter(
+    name="spectroscopy.minimum_band_points",
+    default=8,
+    unit="count",
+    description="The fewest samples in the continuum bands for an equivalent width.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D39",
+)
+_MINIMUM_WINDOW_POINTS = TunedParameter(
+    name="spectroscopy.minimum_window_points",
+    default=3,
+    unit="count",
+    description="The fewest samples in the window for an equivalent width.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D39",
+)
 
 # The window must be covered by samples to this fraction of its width, so a
 # line at the edge of the spectrum does not report the part it can see.
-_MINIMUM_WINDOW_COVERAGE = 0.9
+_MINIMUM_WINDOW_COVERAGE = TunedParameter(
+    name="spectroscopy.minimum_window_coverage",
+    default=0.9,
+    unit="fraction",
+    description="The least fraction of the window's width the samples must cover.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D39",
+)
 
 # The reduced chi-square of the continuum fit must exceed 1 by this many
 # standard deviations before it inflates the continuum error. The standard
 # deviation of a reduced chi-square with `n` degrees of freedom is
 # sqrt(2 / n).
-_EXCESS_SCATTER_SIGMA = 3.0
+_EXCESS_SCATTER_SIGMA = TunedParameter(
+    name="spectroscopy.excess_scatter_sigma",
+    default=3.0,
+    unit="sigma",
+    description=(
+        "How many standard deviations the reduced chi-square "
+        "must exceed 1 before it inflates the continuum error."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D39",
+)
 
 
 @dataclass(frozen=True)
@@ -119,7 +177,7 @@ def measure_equivalent_width(
     line_spread_angstrom: float,
     inner_band_edge_angstrom: float,
     band_width_angstrom: float,
-    polynomial_degree: int = 2,
+    polynomial_degree: int,
 ) -> EquivalentWidthMeasurement | None:
     """Measure the equivalent width of one feature and its error.
 
@@ -143,8 +201,10 @@ def measure_equivalent_width(
         edge.
     band_width_angstrom : `float`
         How wide each continuum band is, in Angstroms.
-    polynomial_degree : `int`, optional
-        The degree of the continuum polynomial (default 2).
+    polynomial_degree : `int`
+        The degree of the continuum polynomial. The feature detector passes
+        `CONTINUUM_POLYNOMIAL_DEGREE`, so the continuum is fitted the same
+        way for the window and for the detector's own dip search.
 
     Returns
     -------
@@ -159,13 +219,16 @@ def measure_equivalent_width(
     usable = np.isfinite(wavelength) & np.isfinite(values) & np.isfinite(sigma) & (sigma >= 0)
     wavelength, values, sigma = wavelength[usable], values[usable], sigma[usable]
 
-    window_half_width = EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS * line_spread_angstrom
+    window_half_width = resolve(EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS).value * line_spread_angstrom
     inner = max(inner_band_edge_angstrom, window_half_width)
     outer = inner + band_width_angstrom
     distance = np.abs(wavelength - center_angstrom)
     in_window = distance <= window_half_width
     in_band = (distance > inner) & (distance <= outer)
-    if in_window.sum() < _MINIMUM_WINDOW_POINTS or in_band.sum() < _MINIMUM_BAND_POINTS:
+    if (
+        in_window.sum() < resolve(_MINIMUM_WINDOW_POINTS).value
+        or in_band.sum() < resolve(_MINIMUM_BAND_POINTS).value
+    ):
         return None
     band_wavelength = wavelength[in_band]
     if not ((band_wavelength < center_angstrom).any() and (band_wavelength > center_angstrom).any()):
@@ -174,7 +237,7 @@ def measure_equivalent_width(
     window_wavelength = wavelength[in_window]
     spacing = np.gradient(window_wavelength)
     covered = float(np.sum(spacing))
-    if covered < _MINIMUM_WINDOW_COVERAGE * 2.0 * window_half_width:
+    if covered < resolve(_MINIMUM_WINDOW_COVERAGE).value * 2.0 * window_half_width:
         return None
 
     # Centering the wavelengths on the feature keeps the fit well behaved,
@@ -211,7 +274,9 @@ def measure_equivalent_width(
     positive_sigma = sigma[in_band] > 0
     if degrees_of_freedom > 0 and positive_sigma.all():
         reduced_chi_square = float(np.sum((residuals / sigma[in_band]) ** 2)) / degrees_of_freedom
-        if reduced_chi_square > 1.0 + _EXCESS_SCATTER_SIGMA * math.sqrt(2.0 / degrees_of_freedom):
+        if reduced_chi_square > 1.0 + resolve(_EXCESS_SCATTER_SIGMA).value * math.sqrt(
+            2.0 / degrees_of_freedom
+        ):
             inflation = math.sqrt(reduced_chi_square)
 
     total_variance = window_variance + inflation**2 * continuum_variance

@@ -384,7 +384,7 @@ def test_the_search_recovers_a_known_shift_and_rotation(
     assert outcome.best_correlation > 0.8
     assert outcome.best_correlation > outcome.correlation_at_zero + 0.02
     assert outcome.search_excess_sigmas is not None
-    assert outcome.search_excess_sigmas >= flat_match.PLACEMENT_LIMIT_SIGMAS
+    assert outcome.search_excess_sigmas >= flat_match.PLACEMENT_LIMIT_SIGMAS.default
     assert outcome.split_half_correlation is not None and outcome.split_half_correlation > 0.8
     assert outcome.flat_shadow_count is not None and outcome.flat_shadow_count >= 3
 
@@ -395,15 +395,15 @@ def test_the_uncertainty_holds_the_method_error_as_well_as_the_split_half_disagr
     """The odd/even difference sees noise only; the method error joins it."""
     outcome = _measure(flats, _light_paths(tmp_path, donuts, (12.0, 8.0), 0.5), biases)
     assert outcome.shift_x_uncertainty_px is not None
-    assert outcome.shift_x_uncertainty_px >= flat_match.METHOD_SHIFT_ERROR_PX
+    assert outcome.shift_x_uncertainty_px >= flat_match.METHOD_SHIFT_ERROR_PX.default
     assert outcome.rotation_uncertainty_deg is not None
-    assert outcome.rotation_uncertainty_deg >= flat_match.METHOD_ROTATION_ERROR_DEG
+    assert outcome.rotation_uncertainty_deg >= flat_match.METHOD_ROTATION_ERROR_DEG.default
     odd = SimpleNamespace(shift_x_px=3.0, shift_y_px=0.0, rotation_deg=0.0, at_edge=False)
     even = SimpleNamespace(shift_x_px=-3.0, shift_y_px=0.0, rotation_deg=0.0, at_edge=False)
     x, y, rotation = flat_match._placement_uncertainty(odd, even)
-    assert x == pytest.approx(math.hypot(3.0, flat_match.METHOD_SHIFT_ERROR_PX))
-    assert y == pytest.approx(flat_match.METHOD_SHIFT_ERROR_PX)
-    assert rotation == pytest.approx(flat_match.METHOD_ROTATION_ERROR_DEG)
+    assert x == pytest.approx(math.hypot(3.0, flat_match.METHOD_SHIFT_ERROR_PX.default))
+    assert y == pytest.approx(flat_match.METHOD_SHIFT_ERROR_PX.default)
+    assert rotation == pytest.approx(flat_match.METHOD_ROTATION_ERROR_DEG.default)
 
 
 def test_the_search_recovers_a_negative_rotation(
@@ -488,7 +488,7 @@ def test_lights_with_other_dust_give_a_low_excess_and_no_placement(
     assert outcome.shift_x_px is None and outcome.rotation_deg is None
     assert outcome.displaced_correlation_std is not None
     assert outcome.search_excess_sigmas is not None
-    assert outcome.search_excess_sigmas < flat_match.PLACEMENT_LIMIT_SIGMAS
+    assert outcome.search_excess_sigmas < flat_match.PLACEMENT_LIMIT_SIGMAS.default
     assert "null spreads" in outcome.reasons[flat_match.STACKING_FLAT_LIGHT_BEST_SHIFT_X_PX]
 
 
@@ -588,10 +588,10 @@ def test_the_target_disc_is_set_aside_in_every_frame(tmp_path: Path, donuts: lis
     disc = flat_match._target_disc(maps.full_map.shape, 12.0)
     assert disc.sum() > 400
     assert np.isnan(maps.full_map[disc]).all()
-    margin = flat_match.EDGE_MARGIN_CELLS
+    margin = flat_match.EDGE_MARGIN_CELLS.default
     outside = maps.full_map[margin:-margin, margin:-margin][~disc[margin:-margin, margin:-margin]]
     assert np.isfinite(outside).mean() > 0.8
-    assert flat_match.TARGET_MASK_RADIUS_CELLS == pytest.approx(25.0)
+    assert flat_match.TARGET_MASK_RADIUS_CELLS.reference_value == pytest.approx(25.0)
 
 
 def test_the_time_limit_is_checked_before_each_frame(
@@ -696,7 +696,7 @@ def easy_sky(monkeypatch: pytest.MonkeyPatch) -> None:
         Used to replace the camera profile lookup.
     """
     monkeypatch.setattr(flat_match, "sky_requirement_for_frame", lambda _frame: EASY_SKY)
-    monkeypatch.setattr(flat_match, "TARGET_MASK_RADIUS_CELLS", TEST_DISC_CELLS)
+    monkeypatch.setattr(flat_match, "target_mask_radius_cells", lambda: TEST_DISC_CELLS)
 
 
 def test_rows_cover_every_metric_and_are_accepted_by_the_registry(
@@ -835,7 +835,7 @@ def test_a_spectral_stack_and_a_failure_are_not_measured(
 
 def test_the_band_pass_removes_vignetting_and_keeps_donuts() -> None:
     """A vignetting that is not a polynomial goes to under 0.2%."""
-    cells = SENSOR_PX // MAP_CELL_PX
+    cells = SENSOR_PX // MAP_CELL_PX.default
     row_grid, column_grid = np.meshgrid(np.arange(cells), np.arange(cells), indexing="ij")
     radius = np.hypot(row_grid - cells / 2, column_grid - cells / 2) / (cells / 2)
     level = (1.0 / (1.0 + (radius / 2.0) ** 2) ** 2).astype(np.float32)
@@ -847,7 +847,7 @@ def test_the_band_pass_removes_vignetting_and_keeps_donuts() -> None:
     assert float(band[100, 100]) < -0.03
     count, depth = count_dust_shadows(band, valid)
     assert count == 1
-    assert depth >= flat_match.SHADOW_MINIMUM_DEPTH_FRACTION
+    assert depth >= flat_match.SHADOW_MINIMUM_DEPTH_FRACTION.default
     shadows = find_dust_shadows(band, valid)
     assert shadows.count == 1 and shadows.mask[100, 100] and shadows.mask.sum() >= 25
 
@@ -871,7 +871,7 @@ def test_the_match_of_a_map_with_itself_is_one_at_zero() -> None:
     assert match.correlation_at_zero == pytest.approx(1.0)
     assert match.shift_x_px == pytest.approx(0.0, abs=0.5)
     assert match.rotation_deg == pytest.approx(0.0, abs=0.05)
-    assert match.excess_sigmas is not None and match.excess_sigmas > flat_match.PLACEMENT_LIMIT_SIGMAS
+    assert match.excess_sigmas is not None and match.excess_sigmas > flat_match.PLACEMENT_LIMIT_SIGMAS.default
     without_null = match_dust_maps(band, valid, band, valid, with_null=False)
     assert without_null is not None
     assert without_null.excess_sigmas is None and without_null.displaced_std is None

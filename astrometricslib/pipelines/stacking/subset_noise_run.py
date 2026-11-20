@@ -84,6 +84,7 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import get_current_job
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import (
     MeasurementStatus,
     QualityMeasurement,
@@ -98,6 +99,12 @@ from astrometricslib.models.quality.subset_stacks import (
     SubsetStackResult,
 )
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
@@ -185,11 +192,29 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # the library stack as the fifth, are enough to see whether the noise still
 # falls like 1 / sqrt(frames) or has flattened, and each point costs one stack.
 # A design choice; no data set decided it.
-DEFAULT_GROWTH_STEPS = 4
+DEFAULT_GROWTH_STEPS = TunedParameter(
+    name="stacking.default_growth_steps",
+    default=4,
+    unit="subset stacks",
+    description="Number of subset stacks the growth series makes by default.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-37",
+)
 
 # The parts of one night's frames, in time order, used when a target has a
 # single night: a quarter, a half and three quarters.
-SINGLE_NIGHT_FRACTIONS = (0.25, 0.5, 0.75)
+SINGLE_NIGHT_FRACTIONS = TunedParameter(
+    name="stacking.single_night_fractions",
+    default=(0.25, 0.5, 0.75),
+    unit="fraction",
+    description="Parts of one night's frames, in time order, used when a target has a single night.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-37",
+)
 
 
 @dataclass(frozen=True)
@@ -322,7 +347,7 @@ def _spread(candidates: list[GrowthStep], maximum: int) -> list[GrowthStep]:
 
 
 def plan_growth_steps(
-    nights: dict[str, list[FrameRecord]], maximum_steps: int = DEFAULT_GROWTH_STEPS
+    nights: dict[str, list[FrameRecord]], maximum_steps: int | None = None
 ) -> list[GrowthStep]:
     """Choose the subsets of the noise-against-frame-count series.
 
@@ -348,6 +373,10 @@ def plan_growth_steps(
     InvalidArgumentError
         If ``maximum_steps`` is below 1.
     """
+    if maximum_steps is None:
+        maximum_steps = resolve(DEFAULT_GROWTH_STEPS).value
+    single_night_fractions = resolve(SINGLE_NIGHT_FRACTIONS).value
+    minimum_subset_frames = resolve(MINIMUM_SUBSET_FRAMES).value
     if maximum_steps < 1:
         raise InvalidArgumentError("maximum_steps must be at least 1.")
     names = list(nights)
@@ -358,7 +387,7 @@ def plan_growth_steps(
             candidates.append(GrowthStep(f"nights-{count}", frames))
     elif len(names) == 1:
         only = nights[names[0]]
-        for fraction in SINGLE_NIGHT_FRACTIONS:
+        for fraction in single_night_fractions:
             count = math.floor(len(only) * fraction)
             # Frames spread evenly through the night, not the first ones: the
             # sky and the seeing drift, and the first part of the night would
@@ -371,7 +400,7 @@ def plan_growth_steps(
             candidates.append(
                 GrowthStep(f"fraction-{round(fraction * 100)}", tuple(only[pick] for pick in picks))
             )
-    candidates = [step for step in candidates if len(step.frames) >= MINIMUM_SUBSET_FRAMES]
+    candidates = [step for step in candidates if len(step.frames) >= minimum_subset_frames]
     return _spread(candidates, maximum_steps)
 
 
@@ -1049,7 +1078,7 @@ def run_noise_growth(
     configuration: Any,
     drivers: Drivers | None,
     stacking_slot: Callable[[], AbstractContextManager],
-    maximum_steps: int = DEFAULT_GROWTH_STEPS,
+    maximum_steps: int | None = None,
 ) -> NoiseGrowthResult:
     """Stack growing subsets of the library stack's frames and measure each.
 
@@ -1075,6 +1104,8 @@ def run_noise_growth(
     result : `NoiseGrowthResult`
         The subsets, smallest first, and notes about steps left out or failed.
     """
+    if maximum_steps is None:
+        maximum_steps = resolve(DEFAULT_GROWTH_STEPS).value
     with subset_job_guard(target.id):
         library = read_library_run(target, library_stack_path, configuration)
         nights, undated = frames_by_night(library.members)
@@ -1084,7 +1115,8 @@ def run_noise_growth(
         steps = plan_growth_steps(nights, maximum_steps)
         if not steps:
             notes.append(
-                f"No subset has at least {MINIMUM_SUBSET_FRAMES} frames, so no subset stack was made."
+                f"No subset has at least {resolve(MINIMUM_SUBSET_FRAMES).value} frames, "
+                "so no subset stack was made."
             )
         stem = stack_stem(library_stack_path)
         subsets = []
@@ -1190,6 +1222,7 @@ def _run_night_contributions(
     result : `NightContributionResult`
         One entry for each night.
     """
+    minimum_subset_frames = resolve(MINIMUM_SUBSET_FRAMES).value
     library = read_library_run(target, library_stack_path, configuration)
     nights, undated = frames_by_night(library.members)
     notes: list[str] = list(library.notes)
@@ -1248,14 +1281,14 @@ def _run_night_contributions(
                 library_noise_sums=library.noise_sums,
             )
 
-        if len(remaining) < MINIMUM_SUBSET_FRAMES:
+        if len(remaining) < minimum_subset_frames:
             subset = None
             notes.append(
                 f"Without the night {night} only {len(remaining)} frame(s) would be left, "
-                f"fewer than the {MINIMUM_SUBSET_FRAMES} a stack needs."
+                f"fewer than the {minimum_subset_frames} a stack needs."
             )
             if context is not None:
-                reason = f"fewer than {MINIMUM_SUBSET_FRAMES} frames would be left without this night"
+                reason = f"fewer than {minimum_subset_frames} frames would be left without this night"
                 skipped = SubsetStackResult(targetId=target.id, label=label)
                 rows = night_measurements(
                     context,

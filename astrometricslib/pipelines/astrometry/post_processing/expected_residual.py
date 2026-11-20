@@ -48,7 +48,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_EXPECTED_CENTROID_NOISE_RMS_ARCSEC,
     ASTROMETRY_EXPECTED_GAIA_EPOCH_ERROR_RMS_ARCSEC,
@@ -94,15 +101,39 @@ CRAMER_RAO_PEAK_FACTOR = math.sqrt(2.0 / math.pi)
 # telescope's stars lie. Below 1.5 px the finder's kernel no longer fits the
 # star and above 5 px no star of this telescope was seen, so the table stops
 # there.
-PIXEL_PHASE_RMS_PX_BY_FWHM_PX: tuple[tuple[float, float], ...] = (
-    (1.5, 0.0918),
-    (1.75, 0.0503),
-    (2.0, 0.0331),
-    (2.25, 0.0272),
-    (2.5, 0.0260),
-    (3.0, 0.0216),
-    (4.0, 0.0144),
-    (5.0, 0.0082),
+# The table is two parallel declarations, the widths and the errors, because a
+# registered value is one number or one tuple of numbers. The numbers come
+# from the star finder's own behavior (a method property, not the equipment),
+# so they are hardcoded statistics.
+PIXEL_PHASE_FWHM_PX = TunedParameter(
+    name="astrometry.pixel_phase_fwhm_px",
+    default=(1.5, 1.75, 2.0, 2.25, 2.5, 3.0, 4.0, 5.0),
+    unit="pixels",
+    description="Star widths (FWHM) at which the star finder's pixel-phase error was measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-21",
+)
+
+PIXEL_PHASE_RMS_PX = TunedParameter(
+    name="astrometry.pixel_phase_rms_px",
+    default=(0.0918, 0.0503, 0.0331, 0.0272, 0.0260, 0.0216, 0.0144, 0.0082),
+    unit="pixels",
+    description="Pixel-phase error of the star finder along one axis, at each width of the width table.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-21",
+)
+
+# The widths and errors as pairs, the shape the reader below uses.
+PIXEL_PHASE_RMS_PX_BY_FWHM_PX: tuple[tuple[float, float], ...] = tuple(
+    zip(
+        (float(width) for width in resolve(PIXEL_PHASE_FWHM_PX).value),
+        (float(error) for error in resolve(PIXEL_PHASE_RMS_PX).value),
+        strict=True,
+    )
 )
 
 GAIA_EPOCH_ERROR_REASON = (

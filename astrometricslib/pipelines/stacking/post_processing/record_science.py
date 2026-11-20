@@ -41,6 +41,7 @@ from typing import Any
 from astrometricslib._internal.drivers.calibration_library import DARK_FRAME_PATHS_KEY
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.quality_store import QualityStore
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import (
     MeasurementStatus,
     QualityMeasurement,
@@ -987,14 +988,15 @@ def group_peak_measurements(
     largest_ratio = group.peak_largest_estimate_to_room_ratio
     checked_range = group.peak_checked_range_room_multiples
     beyond_range = estimated > 0 and largest_ratio is not None and largest_ratio > checked_range
-    low, middle, high = CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS
+    low, middle, high = resolve(CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS).value
     estimate_note = (
         f"{estimated} of {with_peak} sampled frame(s) have a clipped star, whose peak is estimated from the "
         "pixels around its core with a Moffat profile (beta 3), not measured; estimates up to "
         f"{checked_range:.0f} times the room were checked: they grew within "
-        f"{CHECKED_ESTIMATE_ERROR_FRACTION:.0%} of the exposure ratio in "
-        f"{CHECKED_ESTIMATE_SHARE_WITHIN_ERROR:.0%} of cases, but against an unclipped star at a shorter "
-        f"exposure they were a median {middle:.2f} ({low:.2f} to {high:.1f}) of its measured peak "
+        f"{resolve(CHECKED_ESTIMATE_ERROR_FRACTION).value:.0%} of the exposure ratio in "
+        f"{resolve(CHECKED_ESTIMATE_SHARE_WITHIN_ERROR).value:.0%} of cases, but against an unclipped "
+        f"star at a shorter exposure they were a median {middle:.2f} ({low:.2f} to {high:.1f}) "
+        "of its measured peak "
         "(register entry STK-41)"
     )
     beyond_note = (

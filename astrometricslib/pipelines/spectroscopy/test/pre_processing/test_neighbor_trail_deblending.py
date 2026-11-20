@@ -215,7 +215,7 @@ def test_fit_finds_the_focus_change_and_is_called_reliable() -> None:
     image, _, _, _ = make_pair(scale=1.1)
     fit = fit_the_pair(image, blur, [0.0, GAP_PX])
     assert abs(fit.dilation - 1.1) < 0.1
-    assert fit.relative_residual < MAXIMUM_TRUSTED_RELATIVE_RESIDUAL
+    assert fit.relative_residual < MAXIMUM_TRUSTED_RELATIVE_RESIDUAL.default
     assert fit.is_reliable
 
 

@@ -49,7 +49,7 @@ The package root holds 16 names:
 - the core records: `Target`, `FrameRecord`, `StellarObject` and
   `FilterType`.
 
-Four public modules hold the rest:
+Five public modules hold the rest:
 
 - `astrometricslib.exceptions`: the errors a script catches, and the helpers
   that turn an error into a plain record and back;
@@ -59,6 +59,8 @@ Four public modules hold the rest:
   as a tracked background job;
 - `astrometricslib.drivers`: the data store and file tools that other apps
   share.
+- `astrometricslib.parameters`: the tuned-parameter declaration, its
+  registry and the resolver that finds each parameter's value.
 
 Everything else is private, including `astrometricslib._internal`. Only
 `astrometricslib` itself may import it. The result models that the calls
@@ -250,6 +252,7 @@ class Astrometrics:
             targets=self.targets,
             calibration_library=lambda: self.processing.calibration._calibration_library,
             drivers=drivers,
+            owner=lambda: self,
         )
         self.jobs = Jobs(self.config, self._catalog_access)
 

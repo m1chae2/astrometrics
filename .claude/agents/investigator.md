@@ -11,9 +11,11 @@ tools:
   - mcp__astrometricslib-core__processing_stack_summary
   - mcp__astrometricslib-core__quality_calibration_identities
   - mcp__astrometricslib-core__quality_capture_settings
+  - mcp__astrometricslib-core__quality_measure_detections
   - mcp__astrometricslib-core__quality_measure_folder
   - mcp__astrometricslib-core__quality_measure_frames
   - mcp__astrometricslib-core__quality_measure_stack
+  - mcp__astrometricslib-core__quality_measure_star_profile
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows
@@ -25,6 +27,7 @@ tools:
   - mcp__astrometricslib-core__target_imaged_field_centers
   - mcp__astrometricslib-core__target_query
   - mcp__astrometricslib-core__target_sessions
+  - mcp__astrometricslib-core__typegen_contract_validator
   - mcp__astrometricslib-core__visualization_plot
   - mcp__astrometricslib-core__visualization_render_fits
   - mcp__wayfindinglib-core__observatory_equipment_status
@@ -61,6 +64,8 @@ tools:
   - mcp__astrometrics-backend__app_controls
   - mcp__astrometrics-backend__app_status
   - mcp__astrometrics-backend__docs_get
+  - mcp__astrometrics-backend__terminal_add_script
+  - mcp__astrometrics-backend__terminal_get_recent_runs
   - mcp__astrometrics-gaps__list_capability_gaps
   - mcp__astrometrics-gaps__report_capability_gap
 ---

@@ -22,6 +22,7 @@ import statistics
 from collections import defaultdict
 from collections.abc import Sequence
 
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.capture_history import (
     SATURATED_FRACTION_METRIC,
@@ -216,7 +217,7 @@ def measure_star_quality(
         return quality
     usable = usable_star_frames(frames, minimum_exposure_seconds)
     quality.frames = len(usable)
-    if len(usable) < MINIMUM_FRAMES_PER_NIGHT:
+    if len(usable) < resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
         return quality
     quality.median_star_width_arcsec = statistics.median(frame.star_width_arcsec for frame in usable)
     widths = {frame.path: frame.star_width_arcsec for frame in usable}
@@ -225,7 +226,7 @@ def measure_star_quality(
         STAR_WIDTH_METRIC,
     )
     with_roundness = [frame for frame in usable if frame.roundness is not None]
-    if len(with_roundness) >= MINIMUM_FRAMES_PER_NIGHT:
+    if len(with_roundness) >= resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
         quality.median_roundness = statistics.median(frame.roundness for frame in with_roundness)
         roundness_values = {frame.path: frame.roundness for frame in with_roundness}
         quality.roundness_evidence = _references(

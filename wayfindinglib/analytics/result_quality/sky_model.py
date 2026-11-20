@@ -54,6 +54,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from scipy.optimize import nnls
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.result_quality.observing_values import (
     SkyGeometry,
     airmass_from_altitude,
@@ -62,23 +70,64 @@ from wayfindinglib.analytics.result_quality.observing_values import (
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
 
-MINIMUM_NIGHTS_FOR_SKY_MODEL = 5
+MINIMUM_NIGHTS_FOR_SKY_MODEL = TunedParameter(
+    name="wayfinding.minimum_nights_for_sky_model",
+    default=5,
+    unit="nights",
+    description="Fewest nights that make a sky model.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D29",
+)
 """Fewest nights that make a sky model. The fit has three coefficients, and
 leaving one night out for the check must leave several nights to fit. Five
 nights leave four. Design estimate, register row WAY-D29."""
 
-MINIMUM_FRAMES_FOR_SKY_MODEL = 20
+MINIMUM_FRAMES_FOR_SKY_MODEL = TunedParameter(
+    name="wayfinding.minimum_frames_for_sky_model",
+    default=20,
+    unit="frames",
+    description=(
+        "Fewest frames that make a sky model, so that the airmass term has a range of airmasses to fit."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D29",
+)
 """Fewest frames that make a sky model, so that the airmass term has a range of
 airmasses to fit. Design estimate, register row WAY-D29."""
 
-MINIMUM_MOON_NIGHTS = 2
+MINIMUM_MOON_NIGHTS = TunedParameter(
+    name="wayfinding.minimum_moon_nights",
+    default=2,
+    unit="nights",
+    description=(
+        "The Moon coefficient is fitted only when at least this many nights have a Moon term above "
+        "`MOON_TERM_MINIMUM`."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D29",
+)
 """The Moon coefficient is fitted only when at least this many nights have a
 Moon
 term above `MOON_TERM_MINIMUM`. With fewer, the coefficient would rest on one
 night and could copy that night's other conditions. The coefficient is then
 held at 0 and the model says so. Design estimate, register row WAY-D29."""
 
-MOON_TERM_MINIMUM = 0.02
+MOON_TERM_MINIMUM = TunedParameter(
+    name="wayfinding.moon_term_minimum",
+    default=0.02,
+    unit="fraction",
+    description="A frame counts as moonlit for the check above when its Moon term is at least this.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D29",
+)
 """A frame counts as moonlit for the check above when its Moon term is at least
 this. The term runs up to about 3 for a full Moon high in the sky, 30 degrees
 from the target, and 0.02 is about 0.7 percent of that: a thin crescent or a
@@ -91,7 +140,21 @@ MOON_PHASE_QUARTIC_COEFFICIENT = 4.0e-9
 ``10^(-0.4 (3.84 + 0.026 |alpha| + 4e-9 alpha^4))`` with the phase angle alpha
 in degrees. Published values; register row WAY-D29."""
 
-MOON_EXTINCTION_PER_AIRMASS = 0.2
+MOON_EXTINCTION_PER_AIRMASS = TunedParameter(
+    name="wayfinding.moon_extinction_per_airmass",
+    default=0.2,
+    unit="mag per airmass",
+    description=(
+        "The extinction coefficient k, in magnitudes per airmass, used for the Moon's own light on its "
+        "way to the air above the target."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.SITE}),
+    register_entry="WAY-D29",
+    allowed_range=(0.0, 0.6),
+    minimum_sample=5,  # a sample is one observing night with frames of a capture setting
+)
 """The extinction coefficient k, in magnitudes per airmass, used for the Moon's
 own light on its way to the air above the target. A typical V-band value for a
 dry mountain site (0.15 to 0.25). Design estimate; the true value changes from
@@ -280,13 +343,19 @@ def moon_phase_function(phase_angle_deg: float) -> float:
     return 10.0 ** (-0.4 * magnitudes)
 
 
-def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
+def sky_features(
+    geometry: SkyGeometry, extinction_per_airmass: float | None = None
+) -> tuple[float, float, float] | None:
     """Give the three model features of one moment.
 
     Parameters
     ----------
     geometry : `SkyGeometry`
         The target's and the Moon's place in the sky.
+    extinction_per_airmass : `float`, optional
+        The Moon's extinction coefficient k, in magnitudes per airmass. The
+        tuner of `MOON_EXTINCTION_PER_AIRMASS` passes trial values; leave it
+        out to use the resolved parameter.
 
     Returns
     -------
@@ -296,6 +365,8 @@ def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
     """
     if geometry.airmass is None:
         return None
+    if extinction_per_airmass is None:
+        extinction_per_airmass = resolve_parameter(MOON_EXTINCTION_PER_AIRMASS).value
     moon_airmass = airmass_from_altitude(geometry.moon_altitude_deg)
     if moon_airmass is None:
         moon_term = 0.0
@@ -303,7 +374,7 @@ def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
         moon_term = (
             moon_phase_function(moon_phase_angle_deg(geometry.moon_illumination_fraction))
             * moon_scatter_shape(geometry.moon_separation_deg)
-            * 10.0 ** (-0.4 * MOON_EXTINCTION_PER_AIRMASS * moon_airmass)
+            * 10.0 ** (-0.4 * extinction_per_airmass * moon_airmass)
             * geometry.airmass
         )
     return 1.0, geometry.airmass - 1.0, moon_term
@@ -362,6 +433,9 @@ def fit_sky_model(
     latitude_deg: float,
     longitude_deg: float,
     elevation_m: float,
+    *,
+    extinction_per_airmass: float | None = None,
+    geometries: Sequence[SkyGeometry] | None = None,
 ) -> SkyModelOutcome:
     """Fit the sky model for one capture setting.
 
@@ -375,6 +449,13 @@ def fit_sky_model(
         The key of that setting, kept on the model.
     latitude_deg, longitude_deg, elevation_m : `float`
         The observing site.
+    extinction_per_airmass : `float`, optional
+        A trial value of the Moon's extinction coefficient, used by the
+        tuner of `MOON_EXTINCTION_PER_AIRMASS`. The resolved parameter is
+        used when it is left out.
+    geometries : `Sequence` [`SkyGeometry`], optional
+        The sky geometry of each sample, when the caller has already worked
+        it out (it is the slow step), in the order of `samples`.
 
     Returns
     -------
@@ -383,41 +464,47 @@ def fit_sky_model(
         there are fewer than `MINIMUM_NIGHTS_FOR_SKY_MODEL` nights or
         `MINIMUM_FRAMES_FOR_SKY_MODEL` frames above the horizon.
     """
-    geometries = sky_geometry(
-        [s.epoch_seconds for s in samples],
-        [s.ra_deg for s in samples],
-        [s.dec_deg for s in samples],
-        latitude_deg,
-        longitude_deg,
-        elevation_m,
-    )
+    if geometries is None:
+        geometries = sky_geometry(
+            [s.epoch_seconds for s in samples],
+            [s.ra_deg for s in samples],
+            [s.dec_deg for s in samples],
+            latitude_deg,
+            longitude_deg,
+            elevation_m,
+        )
     rows: list[tuple[str, tuple[float, float, float], float]] = []
     skipped = 0
     for sample, geometry in zip(samples, geometries, strict=True):
-        found = sky_features(geometry)
+        found = sky_features(geometry, extinction_per_airmass)
         if found is None:
             skipped += 1
             continue
         rows.append((sample.night_id, found, sample.sky_rate_e_per_s_per_px))
     nights = sorted({row[0] for row in rows})
-    if len(nights) < MINIMUM_NIGHTS_FOR_SKY_MODEL:
+    if len(nights) < resolve_parameter(MINIMUM_NIGHTS_FOR_SKY_MODEL).value:
         return SkyModelOutcome(
             reason=(
-                f"The sky model needs {MINIMUM_NIGHTS_FOR_SKY_MODEL} nights; "
+                f"The sky model needs {resolve_parameter(MINIMUM_NIGHTS_FOR_SKY_MODEL).value} nights; "
                 f"{len(nights)} have usable frames."
             ),
             frames_skipped=skipped,
         )
-    if len(rows) < MINIMUM_FRAMES_FOR_SKY_MODEL:
+    if len(rows) < resolve_parameter(MINIMUM_FRAMES_FOR_SKY_MODEL).value:
         return SkyModelOutcome(
-            reason=f"The sky model needs {MINIMUM_FRAMES_FOR_SKY_MODEL} frames; {len(rows)} are usable.",
+            reason=(
+                f"The sky model needs {resolve_parameter(MINIMUM_FRAMES_FOR_SKY_MODEL).value} frames; "
+                f"{len(rows)} are usable."
+            ),
             frames_skipped=skipped,
         )
     night_of = np.array([row[0] for row in rows])
     features = np.array([row[1] for row in rows], dtype=float)
     rates = np.array([row[2] for row in rows], dtype=float)
-    moonlit_nights = {night for night, feature, _rate in rows if feature[2] >= MOON_TERM_MINIMUM}
-    fit_moon = len(moonlit_nights) >= MINIMUM_MOON_NIGHTS
+    moonlit_nights = {
+        night for night, feature, _rate in rows if feature[2] >= resolve_parameter(MOON_TERM_MINIMUM).value
+    }
+    fit_moon = len(moonlit_nights) >= resolve_parameter(MINIMUM_MOON_NIGHTS).value
     coefficients = _fit_coefficients(features, rates, fit_moon=fit_moon)
     in_sample = float(math.sqrt(np.mean(_relative_errors(coefficients, features, rates) ** 2)))
     held_out_errors: list[np.ndarray] = []
@@ -425,9 +512,15 @@ def fit_sky_model(
         held = night_of == night
         if held.all() or (~held).sum() < 3:
             continue
-        others_moonlit = {n for n, feature, _r in rows if n != night and feature[2] >= MOON_TERM_MINIMUM}
+        others_moonlit = {
+            n
+            for n, feature, _r in rows
+            if n != night and feature[2] >= resolve_parameter(MOON_TERM_MINIMUM).value
+        }
         partial = _fit_coefficients(
-            features[~held], rates[~held], fit_moon=len(others_moonlit) >= MINIMUM_MOON_NIGHTS
+            features[~held],
+            rates[~held],
+            fit_moon=len(others_moonlit) >= resolve_parameter(MINIMUM_MOON_NIGHTS).value,
         )
         held_out_errors.append(_relative_errors(partial, features[held], rates[held]))
     held_out = float(np.median([math.sqrt(np.mean(errors**2)) for errors in held_out_errors]))
@@ -473,7 +566,7 @@ def predict_sky_rate(model: SkyModel, geometry: SkyGeometry) -> SkyPrediction:
         )
     moonless = model.constant + model.airmass_coefficient * features[1]
     total = moonless + model.moon_coefficient * features[2]
-    reliable = model.moon_fitted or features[2] < MOON_TERM_MINIMUM
+    reliable = model.moon_fitted or features[2] < resolve_parameter(MOON_TERM_MINIMUM).value
     return SkyPrediction(
         sky_rate_e_per_s_per_px=total,
         moonless_sky_rate_e_per_s_per_px=moonless,

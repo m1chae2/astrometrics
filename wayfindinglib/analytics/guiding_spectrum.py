@@ -27,25 +27,71 @@ from typing import Any
 import numpy as np
 from scipy.signal import find_peaks, lombscargle
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 from wayfindinglib.models.session.telemetry import (
     GuidingSpectrumAnalysis,
     GuidingSpectrumPeak,
 )
 
-SEGMENT_BREAK_SECONDS = 60.0
+SEGMENT_BREAK_SECONDS = TunedParameter(
+    name="wayfinding.segment_break_seconds",
+    default=factor_for(60.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
+    description="A pause of at least this long between samples ends a continuous stretch.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="WAY-D126",
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=60.0,
+)
 """A pause of at least this long between samples ends a continuous stretch.
 
 The guide cycle is 2 to 6 seconds, so a pause of a minute is a stop in guiding,
 not a slow cycle.
 """
 
-MINIMUM_SAMPLES = 16
+MINIMUM_SAMPLES = TunedParameter(
+    name="wayfinding.minimum_samples",
+    default=16,
+    unit="samples",
+    description="Fewest samples in a stretch for its spectrum to be worked out.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D127",
+)
 """Fewest samples in a stretch for its spectrum to be worked out."""
 
-MINIMUM_STRETCH_SECONDS = 10.0
+MINIMUM_STRETCH_SECONDS = TunedParameter(
+    name="wayfinding.minimum_stretch_seconds",
+    default=10.0,
+    unit="s",
+    description="Shortest stretch whose spectrum is worked out.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D127",
+)
 """Shortest stretch whose spectrum is worked out."""
 
-MINIMUM_CYCLES = 2
+MINIMUM_CYCLES = TunedParameter(
+    name="wayfinding.minimum_cycles",
+    default=2,
+    unit="cycles",
+    description="A stretch counts toward a period only if it holds at least this many cycles.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D127",
+)
 """A stretch counts toward a period only if it holds at least this many cycles.
 
 With fewer, the fit cannot tell the period from a trend.
@@ -67,7 +113,16 @@ _MAXIMUM_PEAKS = 5
 SLOW_DRIFT = "Slow Drift (not a gear period)"
 """The label for a peak slower than any gear in the mount's drive train."""
 
-_LONGEST_MECHANICAL_PERIOD_SECONDS = 650.0
+_LONGEST_MECHANICAL_PERIOD_SECONDS = TunedParameter(
+    name="wayfinding.longest_mechanical_period_seconds",
+    default=650.0,
+    unit="s",
+    description="The longest period attributed to the mount's gears.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D127",
+)
 """The longest period attributed to the mount's gears.
 
 The worm gear turns once in 8 to 10 minutes on mounts of this class, so a
@@ -87,7 +142,7 @@ def _split_into_stretches(
         The times, RA errors and Dec pulses (three arrays) of each continuous
         stretch.
     """
-    breaks = np.flatnonzero(np.diff(times) >= SEGMENT_BREAK_SECONDS) + 1
+    breaks = np.flatnonzero(np.diff(times) >= resolve_parameter(SEGMENT_BREAK_SECONDS).value) + 1
     starts = np.concatenate([[0], breaks])
     ends = np.concatenate([breaks, [times.size]])
     return [(times[a:b], dra[a:b], pulse_dec[a:b]) for a, b in zip(starts, ends, strict=True)]
@@ -151,12 +206,15 @@ def analyze_guiding_telemetry(
                 })
 
     n = len(valid_samples)
-    if n < MINIMUM_SAMPLES:
+    if n < resolve_parameter(MINIMUM_SAMPLES).value:
         return GuidingSpectrumAnalysis(
             sample_count=n,
             duration_seconds=0.0,
             periodic_error_peak_to_peak_arcsec=0.0,
-            message=f"Need at least {MINIMUM_SAMPLES} guiding samples for frequency analysis; found {n}.",
+            message=(
+                f"Need at least {resolve_parameter(MINIMUM_SAMPLES).value} guiding samples "
+                f"for frequency analysis; found {n}."
+            ),
         )
 
     valid_samples.sort(key=lambda x: x["time"])
@@ -167,7 +225,8 @@ def analyze_guiding_telemetry(
     stretches = [
         stretch
         for stretch in _split_into_stretches(times, dra_values, pulses)
-        if stretch[0].size >= MINIMUM_SAMPLES and stretch[0][-1] - stretch[0][0] > MINIMUM_STRETCH_SECONDS
+        if stretch[0].size >= resolve_parameter(MINIMUM_SAMPLES).value
+        and stretch[0][-1] - stretch[0][0] > resolve_parameter(MINIMUM_STRETCH_SECONDS).value
     ]
     if not stretches:
         return GuidingSpectrumAnalysis(
@@ -175,8 +234,10 @@ def analyze_guiding_telemetry(
             duration_seconds=0.0,
             periodic_error_peak_to_peak_arcsec=0.0,
             message=(
-                f"No continuous stretch of guiding has {MINIMUM_SAMPLES} samples and lasts more than "
-                f"{MINIMUM_STRETCH_SECONDS:g} seconds, so no frequency analysis is possible."
+                f"No continuous stretch of guiding has "
+                f"{resolve_parameter(MINIMUM_SAMPLES).value} samples and lasts more than "
+                f"{resolve_parameter(MINIMUM_STRETCH_SECONDS).value:g} seconds, so no frequency analysis is "
+                f"possible."
             ),
         )
 
@@ -185,7 +246,7 @@ def analyze_guiding_telemetry(
     guided_seconds = float(durations.sum())
     cadence = float(np.median(np.concatenate([np.diff(stretch[0]) for stretch in stretches])))
     f_max = min(_MAXIMUM_FREQUENCY_HZ, 0.5 / max(cadence, 1e-3))
-    f_min = MINIMUM_CYCLES / float(durations.max())
+    f_min = resolve_parameter(MINIMUM_CYCLES).value / float(durations.max())
     if f_min >= f_max:
         f_min = f_max / 10.0
     frequencies = np.geomspace(f_min, f_max, _FREQUENCY_POINTS)
@@ -201,7 +262,7 @@ def analyze_guiding_telemetry(
         peak_to_peak_values.append(float(np.percentile(residual, 97.5) - np.percentile(residual, 2.5)))
         power = lombscargle(relative_time, residual - residual.mean(), angular, normalize=False)
         amplitude_squared = 4.0 * power / count
-        long_enough = frequencies * duration >= MINIMUM_CYCLES
+        long_enough = frequencies * duration >= resolve_parameter(MINIMUM_CYCLES).value
         squared_amplitude[long_enough] += count * amplitude_squared[long_enough]
         weight[long_enough] += count
     covered = weight > 0
@@ -225,7 +286,7 @@ def analyze_guiding_telemetry(
                 source = "Gear Transfer / Pulley"
             elif period < 60.0:
                 source = "Seeing / Atmospheric Scintillation"
-            elif period > _LONGEST_MECHANICAL_PERIOD_SECONDS:
+            elif period > resolve_parameter(_LONGEST_MECHANICAL_PERIOD_SECONDS).value:
                 source = SLOW_DRIFT
             else:
                 source = "Worm Harmonic"

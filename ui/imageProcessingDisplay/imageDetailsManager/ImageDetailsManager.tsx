@@ -30,6 +30,10 @@ export interface ImageDetailsManagerProps {
   hasMultipleCameras?: boolean;
   /** List of camera names currently selected. */
   selectedCameras?: string[];
+  /** Whether the frames come from more than one optic (focal length). */
+  hasMultipleOptics?: boolean;
+  /** The focal lengths in mm of the frames to stack. */
+  selectedOptics?: number[];
   /** Whether no files are selected/present for processing. */
   hasNoFiles?: boolean;
   /** Callback to start analysis. */
@@ -66,6 +70,8 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   isProcessing,
   hasMultipleCameras,
   selectedCameras,
+  hasMultipleOptics,
+  selectedOptics,
   hasNoFiles,
   onAnalyze,
   onAnalyzeTemporalVariation,
@@ -129,10 +135,16 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
             {onProcess && !isProcessing && (
               <Button
                 onClick={onProcess}
-                disabled={hasMultipleCameras || hasNoFiles || isAnalyzing}
-                title={hasMultipleCameras ? `Mixed Sensors: ${selectedCameras?.join(', ')}` : "Stack the frames"}
+                disabled={hasMultipleCameras || hasMultipleOptics || hasNoFiles || isAnalyzing}
+                title={hasMultipleCameras
+                  ? `Mixed Sensors: ${selectedCameras?.join(', ')}`
+                  : hasMultipleOptics
+                    ? `These frames come from more than one optic (${selectedOptics?.join(', ')} mm). Pick one optic to stack.`
+                    : "Stack the frames"}
               >
-                {hasMultipleCameras ? "⚠️ Stacking requires matching cameras" : "Stack Frames"}
+                {hasMultipleCameras
+                  ? "⚠️ Stacking requires matching cameras"
+                  : hasMultipleOptics ? "⚠️ Pick one optic to stack" : "Stack Frames"}
               </Button>
             )}
             {isProcessing && onCancel && (

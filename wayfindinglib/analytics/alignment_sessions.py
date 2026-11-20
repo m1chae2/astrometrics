@@ -33,6 +33,15 @@ from __future__ import annotations
 import itertools
 import math
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
+from wayfindinglib.analytics.line_fit import significant_slope
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentTargetSession,
@@ -41,20 +50,79 @@ from wayfindinglib.models.session.telemetry import (
 
 __all__ = ["group_alignment_attempts", "mean_position_deg", "pooled_jitter_arcsec"]
 
-SAME_TARGET_RADIUS_DEG = 0.5
+SAME_TARGET_RADIUS_DEG = TunedParameter(
+    name="wayfinding.same_target_radius_deg",
+    default=0.5,
+    unit="deg",
+    description="An unnamed solve within this distance of a group's first solve joins it.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    allowed_range=(0.05, 2.0),
+    minimum_sample=30,  # a sample is one solve after the first of its target and night
+)
 """An unnamed solve within this distance of a group's first solve joins it."""
 
-RUN_GAP_SECONDS = 7200.0
+RUN_GAP_SECONDS = TunedParameter(
+    name="wayfinding.run_gap_seconds",
+    default=7200.0,
+    unit="s",
+    description="A gap longer than this (two hours) between solves starts a new run.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    allowed_range=(600.0, 43200.0),
+    minimum_sample=100,  # a sample is one pause between neighboring solves of a target on a night
+)
 """A gap longer than this (two hours) between solves starts a new run."""
 
-SLEW_ERROR_ARCSEC = 120.0
+SLEW_ERROR_ARCSEC = TunedParameter(
+    name="wayfinding.slew_error_arcsec",
+    default=120.0,
+    unit="arcsec",
+    description="A solve further off than this is a slew, not tracking.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    allowed_range=(30.0, 600.0),
+    minimum_sample=100,  # a sample is one solve after the settling solve of a run
+)
 """A solve further off than this is a slew, not tracking."""
 
-ASSUMED_CADENCE_SECONDS = 5.0
+ASSUMED_CADENCE_SECONDS = TunedParameter(
+    name="wayfinding.assumed_cadence_seconds",
+    default=5.0,
+    unit="s",
+    description="Spacing assumed between solves that carry no time.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    allowed_range=(1.0, 300.0),
+    minimum_sample=100,  # a sample is one pause between neighboring solves
+)
 """Spacing assumed between solves that carry no time."""
 
-MINIMUM_DRIFT_SPAN_SECONDS = 10.0
-"""A drift rate is fitted only over more time than this."""
+DRIFT_SIGNIFICANCE_SIGMAS = TunedParameter(
+    name="wayfinding.drift_significance_sigmas",
+    default=3.0,
+    unit="standard errors",
+    description="A fitted drift counts only when it stands this many standard errors from zero.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D123",
+)
+"""A fitted drift counts only when this many standard errors from zero.
+
+It replaces a fixed shortest span (10 s): whether a drift shows depends on the
+scatter of the solves and how many there are, which the standard error
+measures. 3 standard errors is the significance used for drift elsewhere
+(`stacking.drift_significance`).
+"""
 
 
 def mean_position_deg(positions: list[tuple[float, float]]) -> tuple[float | None, float | None]:
@@ -168,7 +236,7 @@ def _group_by_target(attempts: list[AlignmentAttempt]) -> list[list[AlignmentAtt
         key = (attempt.target_name or "").strip()
         if not key:
             ra, dec = attempt.ra % 360.0, attempt.dec
-            nearest, nearest_distance = None, SAME_TARGET_RADIUS_DEG
+            nearest, nearest_distance = None, resolve_parameter(SAME_TARGET_RADIUS_DEG).value
             for existing_key, group in groups.items():
                 distance = _separation_deg(ra, dec, group[0].ra % 360.0, group[0].dec)
                 if distance < nearest_distance:
@@ -194,7 +262,11 @@ def _split_runs(attempts: list[AlignmentAttempt]) -> list[list[AlignmentAttempt]
     runs = [[attempts[0]]]
     for previous, current in itertools.pairwise(attempts):
         gap = (current.timestamp or 0.0) - (previous.timestamp or 0.0)
-        if previous.timestamp is not None and current.timestamp is not None and gap > RUN_GAP_SECONDS:
+        if (
+            previous.timestamp is not None
+            and current.timestamp is not None
+            and gap > resolve_parameter(RUN_GAP_SECONDS).value
+        ):
             runs.append([current])
         else:
             runs[-1].append(current)
@@ -222,7 +294,9 @@ def _jitter(runs: list[list[AlignmentAttempt]]) -> tuple[float, float, float]:
         if len(run) < 2:
             continue
         start, end = run[0].timestamp or 0.0, run[-1].timestamp or 0.0
-        elapsed += end - start if end >= start else (len(run) - 1) * ASSUMED_CADENCE_SECONDS
+        elapsed += (
+            end - start if end >= start else (len(run) - 1) * resolve_parameter(ASSUMED_CADENCE_SECONDS).value
+        )
         settled = run[1:] if len(run) >= 3 else run
         count = len(settled)
         mean_ra = sum(a.delta_ra_arcsec or 0.0 for a in settled) / count
@@ -236,36 +310,28 @@ def _jitter(runs: list[list[AlignmentAttempt]]) -> tuple[float, float, float]:
 
 
 def _drift(points: list[AlignmentTrackPoint], elapsed_seconds: float) -> tuple[float, float]:
-    """Fit straight lines to the offsets against time.
+    """Fit lines to the offsets against time, keeping real drifts only.
 
     Parameters
     ----------
     points : `list` [`AlignmentTrackPoint`]
         The target's solves.
     elapsed_seconds : `float`
-        Time spent tracking. No drift is fitted for ten seconds or less.
+        Time spent tracking; not used for the decision, which rests on the
+        slope's standard error (`DRIFT_SIGNIFICANCE_SIGMAS`).
 
     Returns
     -------
     drift_ra, drift_dec : `float`
-        The slopes in arcseconds per minute, or 0 when they cannot be fitted.
+        The slopes in arcseconds per minute, each 0 when it is within
+        `DRIFT_SIGNIFICANCE_SIGMAS` standard errors of zero or cannot be
+        fitted (fewer than three solves).
     """
-    if len(points) < 2 or elapsed_seconds <= MINIMUM_DRIFT_SPAN_SECONDS:
-        return 0.0, 0.0
-    count = len(points)
+    sigmas = float(resolve_parameter(DRIFT_SIGNIFICANCE_SIGMAS).value)
     minutes = [p.elapsed_seconds / 60.0 for p in points]
-    sum_t = sum(minutes)
-    sum_tt = sum(t * t for t in minutes)
-    denominator = count * sum_tt - sum_t * sum_t
-    if abs(denominator) <= 1e-6:
-        return 0.0, 0.0
-    sum_ra = sum(p.delta_ra_arcsec for p in points)
-    sum_dec = sum(p.delta_dec_arcsec for p in points)
-    sum_t_ra = sum(t * p.delta_ra_arcsec for t, p in zip(minutes, points, strict=True))
-    sum_t_dec = sum(t * p.delta_dec_arcsec for t, p in zip(minutes, points, strict=True))
     return (
-        (count * sum_t_ra - sum_t * sum_ra) / denominator,
-        (count * sum_t_dec - sum_t * sum_dec) / denominator,
+        significant_slope(minutes, [p.delta_ra_arcsec for p in points], sigmas),
+        significant_slope(minutes, [p.delta_dec_arcsec for p in points], sigmas),
     )
 
 
@@ -288,16 +354,22 @@ def _summarize(group: list[AlignmentAttempt], index: int) -> AlignmentTargetSess
     fallback_name = f"Target Session #{index + 1}" if len(group) > 1 else f"Sync #{index + 1}"
     mean_ra, mean_dec = mean_position_deg([(a.ra, a.dec) for a in group])
 
-    tracking = [a for a in group if a.status != "warning" and _total_error(a) <= SLEW_ERROR_ARCSEC]
+    tracking = [
+        a
+        for a in group
+        if a.status != "warning" and _total_error(a) <= resolve_parameter(SLEW_ERROR_ARCSEC).value
+    ]
     elapsed, rms_ra, rms_dec = _jitter(_split_runs(tracking or group))
     if elapsed <= 0:
-        elapsed = (len(group) - 1) * ASSUMED_CADENCE_SECONDS
+        elapsed = (len(group) - 1) * resolve_parameter(ASSUMED_CADENCE_SECONDS).value
 
     t0 = first.timestamp or 0.0
     points = []
     for position, attempt in enumerate(group):
         timestamp = (
-            attempt.timestamp if attempt.timestamp is not None else t0 + position * ASSUMED_CADENCE_SECONDS
+            attempt.timestamp
+            if attempt.timestamp is not None
+            else t0 + position * resolve_parameter(ASSUMED_CADENCE_SECONDS).value
         )
         points.append(
             AlignmentTrackPoint(

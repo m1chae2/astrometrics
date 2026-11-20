@@ -87,7 +87,7 @@ def test_served_tools_are_the_public_api_minus_the_decisions_table(server: str) 
     )
 
     manifest = load_manifest(RUNTIME_MANIFEST_PATHS[server])
-    withheld = find_withheld_tools(sorted(reflected), manifest, "developer")
+    withheld = find_withheld_tools(sorted(reflected), manifest)
     served = reflected - withheld.keys()
     not_served_by_decision = {name for name in reflected if DECISIONS[name].disposition != "keep"}
     assert served == reflected - not_served_by_decision - INTERIM_BLOCKS.keys()

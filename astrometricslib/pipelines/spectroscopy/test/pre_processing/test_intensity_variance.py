@@ -371,7 +371,9 @@ def test_traced_dispersion_line_errors_match_the_scatter() -> None:
     profiles = []
     variances = []
     for frame in _noisy_frames(60):
-        profile, _, _ = extractor.extract_line_traced(frame, (50.0, 48.0), direction, 16)
+        profile, _, _ = extractor.extract_line_traced(
+            frame, (50.0, 48.0), direction, 16, centerline_polynomial_degree=2
+        )
         profiles.append(profile)
         variances.append(extractor.last_diagnostics.sample_variance)
 
@@ -386,7 +388,7 @@ def test_traced_flare_mask_gives_one_finite_variance_per_sample() -> None:
     frame = _noisy_frames(1)[0]
 
     profile, _, _, _, _ = extractor.extract_with_flare_mask_traced(
-        frame, ZERO_ORDER_XY, 30, 60, 8, "horizontal", angle_degrees=-2.0
+        frame, ZERO_ORDER_XY, 30, 60, 8, "horizontal", angle_degrees=-2.0, centerline_polynomial_degree=2
     )
     variance = np.array(extractor.last_diagnostics.sample_variance)
 

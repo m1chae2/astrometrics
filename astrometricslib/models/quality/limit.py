@@ -13,8 +13,12 @@ phase that migrates its users.
 
 import math
 from enum import StrEnum
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from astrometricslib.foundation.parameters import ResolvedValue
+from astrometricslib.models.tuned_parameter import ParameterSource, TunedParameter
 
 
 class LimitTier(StrEnum):
@@ -26,6 +30,40 @@ class LimitTier(StrEnum):
     DESIGN_ESTIMATE = "design_estimate"
     OWN_BASELINE = "own_baseline"
     VALIDATED_DATASET = "validated_dataset"
+    PROCESSING_SETTING = "processing_setting"
+    TUNED_PARAMETER = "tuned_parameter"
+
+
+def limit_tier_for(source: ParameterSource, status: str | None) -> LimitTier:
+    """Choose the limit tier that matches where a parameter value came from.
+
+    Parameters
+    ----------
+    source : `ParameterSource`
+        Where the value comes from.
+    status : `str` or `None`
+        The validation status of the register entry, such as ``"Measured"``,
+        ``"Partly measured"`` or ``"Design estimate"``. Only a hardcoded
+        value uses it.
+
+    Returns
+    -------
+    tier : `LimitTier`
+        The tier. A hardcoded value is ``validated_dataset`` only when its
+        status is ``Measured``; any other status, or none, gives
+        ``design_estimate``.
+    """
+    if source is ParameterSource.EQUIPMENT_PROFILE:
+        return LimitTier.SENSOR_PROFILE
+    if source is ParameterSource.TUNED_PARAMETER:
+        return LimitTier.TUNED_PARAMETER
+    if source is ParameterSource.PROCESSING_SETTING:
+        return LimitTier.PROCESSING_SETTING
+    if source is ParameterSource.DETERMINED_EACH_RUN:
+        return LimitTier.PHYSICAL_BUDGET
+    if status == "Measured":
+        return LimitTier.VALIDATED_DATASET
+    return LimitTier.DESIGN_ESTIMATE
 
 
 class QualityLimit(BaseModel):
@@ -56,6 +94,53 @@ class QualityLimit(BaseModel):
     derivation: str
     sample_count: int | None = Field(default=None, alias="sampleCount")
     register_entry: str | None = Field(default=None, alias="registerEntry")
+
+    @classmethod
+    def from_parameter(
+        cls,
+        parameter: TunedParameter,
+        resolved: ResolvedValue,
+        *,
+        status: str | None = None,
+        derivation: str | None = None,
+    ) -> Self:
+        """Build a limit from a declared parameter and its resolved value.
+
+        Parameters
+        ----------
+        parameter : `TunedParameter`
+            The declaration, which gives the unit, the register entry and
+            the default derivation text.
+        resolved : `ResolvedValue`
+            The value the resolver chose. When its origin is ``default``
+            (a value was missing), the tier is the one for ``hardcoded``.
+        status : `str`, optional
+            The validation status of the register entry, used for a
+            hardcoded value.
+        derivation : `str`, optional
+            How the value was found. Defaults to the parameter description.
+
+        Returns
+        -------
+        limit : `QualityLimit`
+            The limit.
+
+        Raises
+        ------
+        ValueError
+            If the value is a tuple, or the tier is ``validated_dataset``
+            and the parameter has no register entry.
+        """
+        if isinstance(resolved.value, tuple):
+            raise ValueError(f"{parameter.name}: a limit needs a single number, not a tuple")
+        origin = ParameterSource.HARDCODED if resolved.origin == "default" else resolved.origin
+        return cls(
+            value=float(resolved.value),
+            unit=parameter.unit,
+            tier=limit_tier_for(origin, status),
+            derivation=derivation if derivation is not None else parameter.description,
+            registerEntry=parameter.register_entry,
+        )
 
     @field_validator("value")
     @classmethod

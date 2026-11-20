@@ -1158,7 +1158,7 @@ def test_measure_frame_uses_the_offset_fallback_for_an_unclipped_frame(round_fra
         _run(
             round_frame_path,
             camera_profile=_profile_at_offset_ten(),
-            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION.default,
         )
     )
     assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.MEASURED
@@ -1179,7 +1179,7 @@ def test_measure_frame_refuses_the_offset_fallback_without_a_limit_or_for_a_clip
         _run(
             clipped_path,
             camera_profile=_profile_at_offset_ten(),
-            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION.default,
         )
     )
     assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.NOT_MEASURED

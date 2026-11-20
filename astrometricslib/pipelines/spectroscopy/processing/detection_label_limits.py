@@ -8,6 +8,7 @@ module reads the constants and the validation register ids once and returns
 one small record to store with the spectrum. It changes no limit and no label.
 """
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import (
     AbsorptionFeatureLimits,
     DetectionLabelLimits,
@@ -35,19 +36,23 @@ def build_detection_label_limits() -> DetectionLabelLimits:
     """
     return DetectionLabelLimits(
         absorption_features=AbsorptionFeatureLimits(
-            detected_p_value=spectral_feature_detector.DETECTED_P_VALUE,
-            possible_p_value=spectral_feature_detector.POSSIBLE_P_VALUE,
-            inconclusive_p_value=spectral_feature_detector.INCONCLUSIVE_P_VALUE,
-            inconclusive_minimum_depth=spectral_feature_detector.INCONCLUSIVE_MINIMUM_DEPTH,
-            minimum_reported_depth=spectral_feature_detector.MINIMUM_REPORTED_DEPTH,
-            maximum_depth_uncertainty_for_label=spectral_feature_detector.MAXIMUM_UNCERTAINTY_FOR_A_VERDICT,
+            detected_p_value=resolve(spectral_feature_detector.DETECTED_P_VALUE).value,
+            possible_p_value=resolve(spectral_feature_detector.POSSIBLE_P_VALUE).value,
+            inconclusive_p_value=resolve(spectral_feature_detector.INCONCLUSIVE_P_VALUE).value,
+            inconclusive_minimum_depth=resolve(spectral_feature_detector.INCONCLUSIVE_MINIMUM_DEPTH).value,
+            minimum_reported_depth=resolve(spectral_feature_detector.MINIMUM_REPORTED_DEPTH).value,
+            maximum_depth_uncertainty_for_label=resolve(
+                spectral_feature_detector.MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
+            ).value,
             register_entry=ABSORPTION_FEATURE_REGISTER_ENTRY,
         ),
         emission_lines=EmissionLineLimits(
-            detected_significance=emission_line_detector.DETECTED_SIGNIFICANCE,
-            unclear_significance=emission_line_detector.UNCLEAR_SIGNIFICANCE,
-            minimum_covered_fraction=emission_line_detector.MINIMUM_COVERED_FRACTION,
-            minimum_detected_for_emission_source=emission_line_detector.MINIMUM_DETECTED_FOR_EMISSION_SOURCE,
+            detected_significance=resolve(emission_line_detector.DETECTED_SIGNIFICANCE).value,
+            unclear_significance=resolve(emission_line_detector.UNCLEAR_SIGNIFICANCE).value,
+            minimum_covered_fraction=resolve(emission_line_detector.MINIMUM_COVERED_FRACTION).value,
+            minimum_detected_for_emission_source=resolve(
+                emission_line_detector.MINIMUM_DETECTED_FOR_EMISSION_SOURCE
+            ).value,
             register_entry=EMISSION_LINE_REGISTER_ENTRY,
         ),
     )

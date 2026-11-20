@@ -20,37 +20,98 @@ Everything here works on arrays of star positions and returns arrays.
 import numpy as np
 from scipy.spatial import cKDTree
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
+
 # Only the brightest stars of each list are used to build triangles. Stacks of
 # different exposure times do not agree on which stars are brightest (a long
 # exposure saturates its brightest stars, which are then skipped), so a short
 # list misses the overlap. On the Nikon D5300 group pairs of M 106, NGC 7023,
 # M 51 and NGC 6992 (2026-10-13), 60 stars found a correct match for none of
 # the four, while 150 found one for all four (197 to 250 stars lined up).
-PATTERN_STAR_COUNT = 150
+PATTERN_STAR_COUNT = TunedParameter(
+    name="stacking.pattern_star_count",
+    default=150,
+    unit="stars",
+    description="Number of the brightest stars of each list used to build triangles.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D14",
+)
 
 # Each star forms triangles with pairs chosen from its nearest neighbours.
 # Eight neighbours give 28 triangles per star (about 4,200 triangles for 150
 # stars), plenty for the same triangle to appear in both lists even when a few
 # stars are missing from one of them.
-PATTERN_NEIGHBOUR_COUNT = 8
+PATTERN_NEIGHBOUR_COUNT = TunedParameter(
+    name="stacking.pattern_neighbour_count",
+    default=8,
+    unit="stars",
+    description="Number of nearest neighbours each star forms triangles with.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D14",
+)
 
 # Two triangles match when both side ratios agree to this much. Star centres
 # are good to about 0.1 px; on a triangle whose shortest side is 20 px that is
 # a ratio error of about 0.005 to 0.01. Looser than this gives many false
 # matches; the caller checks every guess against all the stars, so a few
 # false ones cost time and nothing else.
-PATTERN_RATIO_TOLERANCE = 0.01
+PATTERN_RATIO_TOLERANCE = TunedParameter(
+    name="stacking.pattern_ratio_tolerance",
+    default=0.01,
+    unit="ratio",
+    description="Largest difference in side ratios at which two triangles match.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D14",
+)
 
 # Triangles with a longest side under this many pixels are skipped: their
 # shape is dominated by the error in the star centres.
-PATTERN_MINIMUM_LONGEST_SIDE_PIXELS = 20.0
+#
+# Stands for the side length below which center errors spoil the triangle
+# ratio, so it is a multiple of the star width and follows it.
+PATTERN_MINIMUM_LONGEST_SIDE_PIXELS = TunedParameter(
+    name="stacking.pattern_minimum_longest_side_pixels",
+    default=factor_for(20.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Shortest longest side a triangle may have before it is skipped.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D14",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=20.0,
+)
 
 # A guess that changes the scale by more than this fraction is dropped before
 # it is checked. Both stacks come from the same telescope, and the largest
 # scale change between nights seen so far is 0.14% (M 51, 2026-10-13); 10% is
 # a very wide net for the noisy three-star estimate, and the caller applies a
 # much tighter limit to the final fit.
-PATTERN_MAXIMUM_SCALE_DEVIATION = 0.1
+PATTERN_MAXIMUM_SCALE_DEVIATION = TunedParameter(
+    name="stacking.pattern_maximum_scale_deviation",
+    default=0.1,
+    unit="fraction",
+    description="Largest scale change a star-pattern guess may have before it is dropped.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D14",
+)
 
 
 def _triangle_shapes(stars: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -73,9 +134,10 @@ def _triangle_shapes(stars: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
     positions : `numpy.ndarray`
         The star positions as complex numbers ``column + 1j * row``.
     """
-    used = stars[:PATTERN_STAR_COUNT]
+    pattern_minimum_longest_side_pixels = resolve(PATTERN_MINIMUM_LONGEST_SIDE_PIXELS).value
+    used = stars[: resolve(PATTERN_STAR_COUNT).value]
     positions = used[:, 1] + 1j * used[:, 0]
-    neighbour_count = min(PATTERN_NEIGHBOUR_COUNT, len(used) - 1)
+    neighbour_count = min(resolve(PATTERN_NEIGHBOUR_COUNT).value, len(used) - 1)
     if neighbour_count < 2:
         return np.empty((0, 2)), np.empty((0, 3), dtype=int), positions
     _, neighbours = cKDTree(used).query(used, k=neighbour_count + 1)
@@ -95,7 +157,7 @@ def _triangle_shapes(stars: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
                 ])
                 order = np.argsort(sides)
                 shortest, middle, longest = sides[order]
-                if longest < PATTERN_MINIMUM_LONGEST_SIDE_PIXELS or shortest <= 0.0:
+                if longest < pattern_minimum_longest_side_pixels or shortest <= 0.0:
                     continue
                 shapes.append((shortest / longest, middle / longest))
                 corners.append([triple[corner] for corner in order])
@@ -123,12 +185,13 @@ def candidate_similarity_transforms(reference_stars: np.ndarray, image_stars: np
         there are too few stars to form triangles. Most candidates are wrong;
         every one must be checked against the full star lists.
     """
+    pattern_maximum_scale_deviation = resolve(PATTERN_MAXIMUM_SCALE_DEVIATION).value
     reference_shapes, reference_corners, reference_positions = _triangle_shapes(reference_stars)
     image_shapes, image_corners, image_positions = _triangle_shapes(image_stars)
     if len(reference_shapes) == 0 or len(image_shapes) == 0:
         return np.empty((0, 2), dtype=complex)
     distances, partners = cKDTree(reference_shapes).query(
-        image_shapes, distance_upper_bound=PATTERN_RATIO_TOLERANCE
+        image_shapes, distance_upper_bound=resolve(PATTERN_RATIO_TOLERANCE).value
     )
     candidates = []
     for image_triangle in np.nonzero(np.isfinite(distances))[0]:
@@ -137,6 +200,6 @@ def candidate_similarity_transforms(reference_stars: np.ndarray, image_stars: np
         # Solve target = a * source + b for the three corner pairs.
         design = np.vstack([source, np.ones(3, dtype=complex)]).T
         (a, b), *_ = np.linalg.lstsq(design, target, rcond=None)
-        if abs(abs(a) - 1.0) <= PATTERN_MAXIMUM_SCALE_DEVIATION:
+        if abs(abs(a) - 1.0) <= pattern_maximum_scale_deviation:
             candidates.append((a, b))
     return np.array(candidates, dtype=complex).reshape(-1, 2)

@@ -35,7 +35,7 @@ from astrometricslib.foundation.run_abandonment import (
     stop_process_group,
 )
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
-from astrometricslib.foundation.system import split_program_command
+from astrometricslib.foundation.system import child_process_options, split_program_command
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +468,7 @@ class SirilSession:
         # Registered with the run this thread belongs to, if any, so giving up
         # on the run stops this process (and refuses a start after that).
         process = launch_registered(
-            lambda: subprocess.Popen(args, stdout=stdout, stderr=stderr, start_new_session=True)
+            lambda: subprocess.Popen(args, stdout=stdout, stderr=stderr, **child_process_options())
         )
         self.subprocesses.append(process)
         time.sleep(2)

@@ -1,10 +1,10 @@
 # Documentation conventions
 
-*Version 1.1 · 2026-10-15 · Status: current*
+*Version 1.5 · 2026-11-15 · Status: current*
 
 ## Abstract
 
-This page is the single reference for how the Astrometrics documentation is organized and written. It covers where each kind of content lives, the layout of each document type, and the spelling, terms, units and Markdown rules. The two style skills used by AI assistants (`.claude/skills/documentation-style/` and `.claude/skills/code-documentation-style/`) summarize this page and point back to it. Tests and linters enforce most of the rules; Section 9 lists which.
+This file, kept with the `documentation-style` skill for AI assistants, is the single reference for how the Astrometrics documentation is organized and written. It covers where each kind of content lives, the layout of each document type, and the spelling, terms, units and Markdown rules. The two style skills (`.claude/skills/documentation-style/` and `.claude/skills/code-documentation-style/`) summarize it and point back to it. Tests and linters enforce most of the rules; Section 9 lists which.
 
 ## 1. Where content lives
 
@@ -33,7 +33,7 @@ Rules:
 
 ### 1.1 The site's sections
 
-The Sphinx site has seven sections: Get started, Tutorials, How-to guides, Explanation, Reference, Evidence and About the docs. Each has a section page (`get_started.md`, `tutorials.md`, `how_to/index.md`, `explanation.md`, `reference.md`, `evidence.md`, `about.md`) that introduces the section and lists its pages; the root `index.rst` lists only the section pages.
+The Sphinx site has seven sections: Get started, Tutorials, How-to guides, Application Overview, Reference, Evidence and About the docs. Each has a section page (`get_started.md`, `tutorials.md`, `how_to/index.md`, `explanation.md`, `reference.md`, `evidence.md`, `about.md`) that introduces the section and lists its pages; the root `index.rst` lists only the section pages. The Application Overview section holds the explanation pages, and its section page opens with an overview of the whole application.
 
 - Each page belongs to exactly one section, chosen by its kind, and appears in exactly one toctree. A page reached only by links is marked `:orphan:`.
 - A page has one name. Toctree entries are bare paths, so the navigation shows the page's own title, and a section page links each page by that exact title.
@@ -47,7 +47,12 @@ Every tuned value of the Astrometrics library carries exactly one of three label
 - **Partly measured.** Backed by an incomplete measurement (synthetic data only, one target, a small sample, or a model of an outside tool).
 - **Design estimate.** Chosen by reasoning and not yet measured.
 
-The Wayfinding library has no validation register yet. Its implementation paper says once that its settings are design choices not yet measured, and its values carry no labels.
+The Wayfinding library's values use the same labels, in their own register file (`library_design/validation/wayfinding.md`).
+
+Each tuned setting also has a role: automatic, when the software acts on it with no person checking (it sets data aside, gives a verdict, limits hardware or shapes results), or advisory, when it only changes advice a person reads before acting. Each setting's role, source and equipment are recorded on its declaration in the code (`astrometricslib.parameters`). The rule:
+
+- An automatic value needs a Measured entry.
+- An advisory value may stay Partly measured or Design estimate.
 
 No other labels are used (for example `designed`, `design value`, `empirical` or `provisional`). Plain qualifiers after a label, such as "not validated on real fields", are fine.
 

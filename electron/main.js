@@ -19,6 +19,7 @@ import { PythonTerminalManager } from './python_terminal_manager.js';
 import { loadWindowState, trackWindowState } from './window_state.js';
 import { backendBaseUrl, backendPort } from './backend_client.js';
 import { figureWindowContentSize, resolveFigureTarget } from './figure_target.js';
+import { createFigureWindowRegistry } from './figure_windows.js';
 import { startPerfMetrics } from './perf_metrics.js';
 import { checkGpuAtStartup } from './gpu_startup_check.js';
 import { APP_SCHEME_PRIVILEGES, chooseUiSource, createAppProtocolHandler } from './app_protocol.js';
@@ -579,8 +580,12 @@ function createDisplayWindow(options = {}) {
   return win;
 }
 
+/** One open window per figure, so a figure shown again reuses its window. */
+const figureWindows = createFigureWindowRegistry();
+
 /**
- * Creates an independent pop-up figure window for Matplotlib plots.
+ * Opens a pop-up figure window for a Matplotlib plot, or brings forward the
+ * window that already shows it (it is reloaded to show the latest drawing).
  * Supports both interactive WebAgg URLs and fallback static PNG images.
  *
  * Only the backend's own `/figure/<number>` page, or a PNG file in the
@@ -589,7 +594,7 @@ function createDisplayWindow(options = {}) {
  *
  * @param {string|{plotPath?: string, interactiveUrl?: string}} target
  *   Filesystem path, interactive URL, or descriptor object.
- * @returns {BrowserWindow|null} The new window, or null when the target was refused.
+ * @returns {BrowserWindow|null} The window that shows the figure, or null when the target was refused.
  */
 function createFigureWindow(target) {
   const { interactiveUrl, plotPath, figureSize, rejected } = resolveFigureTarget(target);
@@ -600,6 +605,30 @@ function createFigureWindow(target) {
     return null;
   }
 
+  const figureKey = interactiveUrl || plotPath;
+  return figureWindows.openOrReuse(
+    figureKey,
+    () => buildFigureWindow(interactiveUrl, plotPath, figureSize),
+    (win) => {
+      if (interactiveUrl) {
+        win.loadURL(interactiveUrl);
+      } else {
+        win.loadURL(figureImagePageUrl(plotPath));
+      }
+    }
+  );
+}
+
+/**
+ * Makes the window for one figure and loads the figure into it.
+ *
+ * @param {string|null} interactiveUrl The figure's interactive page, if any.
+ * @param {string|null} plotPath The figure's PNG file, used without a page.
+ * @param {{width: number, height: number}|null} figureSize The figure's size
+ *   in pixels, used to fit the window to the interactive page.
+ * @returns {BrowserWindow} The new window.
+ */
+function buildFigureWindow(interactiveUrl, plotPath, figureSize) {
   // Fit the window to the interactive page, which draws the figure at its
   // own size. The PNG page shrinks its picture to fit, so it keeps the usual
   // size. The work area comes from the screen the app window is on.
@@ -627,6 +656,26 @@ function createFigureWindow(target) {
   if (interactiveUrl) {
     figureWin.loadURL(interactiveUrl);
   } else {
+    figureWin.loadURL(figureImagePageUrl(plotPath));
+  }
+
+  const windowId = `figure-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  auxiliaryWindows.set(windowId, figureWin);
+
+  figureWin.on('closed', () => {
+    auxiliaryWindows.delete(windowId);
+  });
+
+  return figureWin;
+}
+
+/**
+ * Builds the page that shows a figure's PNG picture.
+ *
+ * @param {string} plotPath The PNG file to show.
+ * @returns {string} A `data:` address of the page.
+ */
+function figureImagePageUrl(plotPath) {
     let imageSrc = '';
     try {
       const imgBuffer = fs.readFileSync(plotPath);
@@ -666,17 +715,7 @@ function createFigureWindow(target) {
         </body>
       </html>
     `;
-    figureWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-  }
-
-  const windowId = `figure-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  auxiliaryWindows.set(windowId, figureWin);
-
-  figureWin.on('closed', () => {
-    auxiliaryWindows.delete(windowId);
-  });
-
-  return figureWin;
+    return `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`;
 }
 
 /**

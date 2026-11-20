@@ -28,6 +28,13 @@ from typing import NamedTuple
 import numpy as np
 
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import MINIMUM_USABLE_APERTURES
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSetMismatchError
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -69,7 +76,16 @@ __all__ = [
 # and again whenever the stacker's rejection settings change. Status: Design
 # estimate (no measurement yet). If the script finds the camera matters, the
 # value belongs in the camera profile instead of here.
-ODD_EVEN_DIFFERENCE_NOISE_BIAS = 1.0
+ODD_EVEN_DIFFERENCE_NOISE_BIAS = TunedParameter(
+    name="stacking.odd_even_difference_noise_bias",
+    default=1.0,
+    unit="ratio",
+    description="Ratio of the odd-even difference's measured noise to the true random noise.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D31",
+)
 
 # Two stacks measured in the same apertures can be compared aperture by
 # aperture. The library stack's per-aperture sums are kept in a file beside the
@@ -82,7 +98,16 @@ NOISE_SUMS_SUFFIX = "_noise_sums.json"
 # from B resamples is 1 / sqrt(2 (B - 1)) of itself: 2.2% for 1000, small
 # against the 12% error of the noise itself. The fixed seed makes the number
 # repeat exactly.
-PAIRED_BOOTSTRAP_COUNT = 1000
+PAIRED_BOOTSTRAP_COUNT = TunedParameter(
+    name="stacking.paired_bootstrap_count",
+    default=1000,
+    unit="resamples",
+    description="How many bootstrap resamples the paired stack comparison uses.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D31",
+)
 PAIRED_BOOTSTRAP_SEED = 20261024
 
 
@@ -95,7 +120,7 @@ def measure_difference_noise(
     first_plane: np.ndarray | None = None,
     second_plane: np.ndarray | None = None,
     target_sky_deg: tuple[float, float] | None = None,
-    bias: float = ODD_EVEN_DIFFERENCE_NOISE_BIAS,
+    bias: float | None = None,
     drivers: Drivers | None = None,
 ) -> StackNoiseOutcome:
     """Measure the noise of the difference of two stacks in empty sky.
@@ -135,6 +160,7 @@ def measure_difference_noise(
         and their uncertainties are divided by it. The bias measurement itself
         passes 1 to see the uncorrected noise. The per-aperture sums are never
         corrected.
+        If `None`, the value of `ODD_EVEN_DIFFERENCE_NOISE_BIAS` is used.
     drivers : `Drivers`, optional
         The outside services the caller chose. A plate solve of the stack
         uses its plate solver and SIMBAD driver. Any left out is the
@@ -152,6 +178,8 @@ def measure_difference_noise(
     ValueError
         If ``bias`` is not a positive number.
     """
+    if bias is None:
+        bias = resolve(ODD_EVEN_DIFFERENCE_NOISE_BIAS).value
     if not (math.isfinite(bias) and bias > 0):
         raise ValueError(f"the bias must be a positive number, not {bias!r}")
     if first_plane is None or second_plane is None:
@@ -362,7 +390,7 @@ def _paired_scaled_sums(
     if full_sums.shape != other_sums.shape or full_flux <= 0 or other_flux <= 0:
         return None
     usable = np.isfinite(full_sums) & np.isfinite(other_sums)
-    if int(np.count_nonzero(usable)) < MINIMUM_USABLE_APERTURES:
+    if int(np.count_nonzero(usable)) < resolve(MINIMUM_USABLE_APERTURES).value:
         return None
     return full_sums[usable] / full_flux, other_sums[usable] / other_flux
 
@@ -416,7 +444,7 @@ def paired_noise_difference(
     first, second = scaled
     difference = float(_robust_spread(second) - _robust_spread(first))
     draws = np.random.default_rng(PAIRED_BOOTSTRAP_SEED).integers(
-        0, first.size, size=(PAIRED_BOOTSTRAP_COUNT, first.size)
+        0, first.size, size=(resolve(PAIRED_BOOTSTRAP_COUNT).value, first.size)
     )
     error = float(np.std(_robust_spread(second[draws]) - _robust_spread(first[draws]), ddof=1))
     return difference, error, int(first.size)
@@ -466,7 +494,7 @@ def paired_noise_ratio(
         return None
     ratio = float(_robust_spread(second)) / first_spread
     draws = np.random.default_rng(PAIRED_BOOTSTRAP_SEED).integers(
-        0, first.size, size=(PAIRED_BOOTSTRAP_COUNT, first.size)
+        0, first.size, size=(resolve(PAIRED_BOOTSTRAP_COUNT).value, first.size)
     )
     first_draws = _robust_spread(first[draws])
     valid = first_draws > 0

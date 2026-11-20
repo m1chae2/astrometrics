@@ -155,6 +155,8 @@
   --warning-amber: #f6d32d;
   --warning-orange: #ff9800;      /* caution, one step worse than amber */
   --accent-sky: #4fc1ff;          /* light blue for sky-map overlays, links and selections */
+  --detection-marker-color: #ffd54a;         /* circle on a star the star finder detected */
+  --detection-merged-color: #ff6ec7;         /* diamond on a star reported twice and merged */
   --danger-red: #e01b24;
 
   /* ------------------------------------------------------------------

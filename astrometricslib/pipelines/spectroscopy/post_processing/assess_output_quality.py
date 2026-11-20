@@ -31,6 +31,7 @@ instrument response, the airmass correction and the wavelength scale.
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
@@ -70,7 +71,7 @@ def is_classification_poor_match(classification_rms: float | None) -> bool:
         `NO_GOOD_MATCH_RMS`. `False` for an unclassified star (`None`) --
         that is a separate "nothing to compare" case, not a shaky match.
     """
-    return classification_rms is not None and classification_rms > NO_GOOD_MATCH_RMS
+    return classification_rms is not None and classification_rms > resolve(NO_GOOD_MATCH_RMS).value
 
 
 def is_classification_class_ambiguous(ranked_types: Iterable[dict[str, object]]) -> bool:
@@ -227,7 +228,7 @@ def output_quality_checkpoint(
             "catalog_type_steps_apart",
             steps_apart,
             "subtype steps",
-            limit=DIFFERS_FROM_CATALOG_SUBTYPES,
+            limit=resolve(DIFFERS_FROM_CATALOG_SUBTYPES).value,
             higher_is_better=False,
             note="ten steps make one spectral class, so B0 is 10 and A5 is 25",
         ),
@@ -235,14 +236,14 @@ def output_quality_checkpoint(
             "rms_gap_to_second_best",
             when_classified(classification.get("rms_gap_to_second_best")),
             "relative RMS",
-            limit=AMBIGUOUS_RMS_GAP,
+            limit=resolve(AMBIGUOUS_RMS_GAP).value,
             note="limit is AMBIGUOUS_RMS_GAP; a smaller gap means the subtype is uncertain",
         ),
         metric(
             "colour_difference_mag",
             colour_difference,
             "magnitude",
-            limit=COLOUR_DISAGREEMENT_MAGNITUDES,
+            limit=resolve(COLOUR_DISAGREEMENT_MAGNITUDES).value,
             higher_is_better=False,
             note="size of the spectrum's B-V minus the catalog B-V; limit is COLOUR_DISAGREEMENT_MAGNITUDES",
         ),

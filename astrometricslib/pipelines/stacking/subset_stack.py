@@ -31,7 +31,14 @@ from typing import Any
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     registration_reference_from_diagnostics,
@@ -58,7 +65,16 @@ SUBSET_FOLDER_NAME = "_subsets"
 # three frames one bad value is a third of the sample, and the spread is itself
 # barely known. Four is the smallest count where one frame can be rejected and
 # the rest still give a spread. A design choice; no data set decided it.
-MINIMUM_SUBSET_FRAMES = 4
+MINIMUM_SUBSET_FRAMES = TunedParameter(
+    name="stacking.minimum_subset_frames",
+    default=4,
+    unit="frames",
+    description="Fewest frames a subset stack is made from.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-37",
+)
 
 # A label is a file-name piece: letters, digits, dot, underscore and hyphen,
 # and it may not start with a dot (so it never names a hidden file or ``..``).
@@ -258,20 +274,24 @@ def stack_frame_subset(
         path is not absolute.
     """
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
     from astrometricslib.pipelines.stacking.stack_settings import (
         choose_weight_for_frames,
         trim_noisy_stack_edges,
     )
 
-    if len(frames) < MINIMUM_SUBSET_FRAMES:
+    minimum_subset_frames = resolve(MINIMUM_SUBSET_FRAMES).value
+
+    if len(frames) < minimum_subset_frames:
         raise InvalidArgumentError(
-            f"A subset stack needs at least {MINIMUM_SUBSET_FRAMES} frames, but {len(frames)} were given."
+            f"A subset stack needs at least {minimum_subset_frames} frames, but {len(frames)} were given."
         )
     if not os.path.isabs(output_path):
         raise InvalidArgumentError("The subset stack's output path must be absolute.")
     frames_to_stack = [frame.model_copy(deep=True) for frame in frames]
     ensure_single_camera(frames_to_stack)
+    ensure_single_optic(frames_to_stack)
     is_spectral = any(frame_is_spectral(frame) for frame in frames_to_stack)
     # The library stack's own helper makes the choice, so a subset is weighted
     # exactly as the library stack is.

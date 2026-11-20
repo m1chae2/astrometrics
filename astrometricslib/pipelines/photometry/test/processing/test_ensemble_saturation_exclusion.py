@@ -100,7 +100,7 @@ def test_every_frame_records_the_same_comparison_set_size() -> None:
     analyzer = _run_analyzer(stars, timestamps)
 
     sizes = {composition.ensemble_size for composition in analyzer.frame_ensemble_composition}
-    assert sizes == {DEFAULT_MAXIMUM_COMPARISON_STARS}
+    assert sizes == {DEFAULT_MAXIMUM_COMPARISON_STARS.default}
     assert len(analyzer.frame_ensemble_composition) == _FRAME_COUNT
     assert all(
         composition.excluded_comparison_star_ids == [] for composition in analyzer.frame_ensemble_composition
@@ -141,7 +141,7 @@ def test_a_persistently_saturated_star_is_kept_out_of_the_set() -> None:
     assert analyzer.comparison_set is not None
     assert always_saturated.id not in analyzer.comparison_set.star_ids
     assert always_saturated.id not in analyzer.comparison_set.rejected_ids
-    assert len(analyzer.comparison_set.star_ids) == DEFAULT_MAXIMUM_COMPARISON_STARS
+    assert len(analyzer.comparison_set.star_ids) == DEFAULT_MAXIMUM_COMPARISON_STARS.default
 
 
 def test_the_set_size_cap_can_be_changed() -> None:

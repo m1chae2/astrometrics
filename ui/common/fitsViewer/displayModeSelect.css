@@ -1,0 +1,5 @@
+/* The word "Display" before the display choice, small and muted. */
+.display-mode-select__label {
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+}

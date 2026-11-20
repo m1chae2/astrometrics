@@ -521,8 +521,8 @@ def test_the_hour_uses_the_cadence_of_the_capture_overheads_module() -> None:
     """The ranking and the report share one dither and focus cadence."""
     from wayfindinglib.analytics.result_quality import capture_overheads
 
-    assert tr.DITHER_EVERY_FRAMES == capture_overheads.DITHER_EVERY_FRAMES
-    assert tr.AUTOFOCUS_RUNS_PER_HOUR == capture_overheads.AUTOFOCUS_RUNS_PER_HOUR
+    assert tr.DITHER_EVERY_FRAMES.default == capture_overheads.DITHER_EVERY_FRAMES.default
+    assert tr.AUTOFOCUS_RUNS_PER_HOUR.default == capture_overheads.AUTOFOCUS_RUNS_PER_HOUR.default
 
 
 def _group_stack_library(measured: float, expected: float) -> FakeLibrary:

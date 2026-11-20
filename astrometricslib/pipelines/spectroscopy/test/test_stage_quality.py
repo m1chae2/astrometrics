@@ -207,7 +207,7 @@ def test_raw_frame_checkpoint_reuses_the_extraction_numbers() -> None:
 def test_raw_frame_saturation_fails_at_the_gate_limit() -> None:
     """A saturated fraction at the run gate's limit fails, as the gate does."""
     checkpoint = assess_raw_frame_quality(
-        zero_order_saturated_pixel_fraction=DEFAULT_SATURATION_FLAG_THRESHOLD,
+        zero_order_saturated_pixel_fraction=DEFAULT_SATURATION_FLAG_THRESHOLD.default,
         valid_fraction=1.0,
         trail_width_px=None,
         extraction_diagnostics=None,
@@ -248,7 +248,7 @@ def test_input_quality_checkpoint_carries_the_assessments_numbers() -> None:
         is_resolution_measured=False,
         zero_order_saturated_pixel_fraction=0.0,
         valid_fraction=1.0,
-        signal_to_noise=MINIMUM_SPECTRUM_SIGNAL_TO_NOISE - 0.1,
+        signal_to_noise=MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default - 0.1,
     )
     checkpoint = input_quality_checkpoint(assessment)
     metrics = by_name(checkpoint)
@@ -257,7 +257,7 @@ def test_input_quality_checkpoint_carries_the_assessments_numbers() -> None:
     assert metrics["resolution_element"].value == pytest.approx(48.0)
     assert metrics["resolution_measured"].value == pytest.approx(0.0)
     assert metrics["signal_to_noise"].passed is False
-    assert metrics["signal_to_noise"].limit == MINIMUM_SPECTRUM_SIGNAL_TO_NOISE
+    assert metrics["signal_to_noise"].limit == MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default
     assert checkpoint.flags == ["resolution_assumed", "low_signal_to_noise"]
 
 
@@ -287,9 +287,9 @@ def test_processing_checkpoint_passes_a_clean_classification() -> None:
 
     assert checkpoint.stage == "processing"
     assert checkpoint.has_failed_metric is False
-    assert metrics["classification_rms"].limit == NO_GOOD_MATCH_RMS
+    assert metrics["classification_rms"].limit == NO_GOOD_MATCH_RMS.default
     assert metrics["rms_gap_to_second_best"].limit is None
-    assert metrics["rms_gap_to_next_class"].limit == AMBIGUOUS_RMS_GAP
+    assert metrics["rms_gap_to_next_class"].limit == AMBIGUOUS_RMS_GAP.default
     assert metrics["significant_feature_count"].value == pytest.approx(1.0)
     assert metrics["best_feature_p_value"].value == pytest.approx(0.001)
     assert metrics["synthetic_colour_measured"].value == pytest.approx(1.0)
@@ -302,7 +302,7 @@ def test_processing_checkpoint_passes_a_clean_classification() -> None:
 @pytest.mark.parametrize(
     ("change", "failed_metric"),
     [
-        ({"classification_rms": NO_GOOD_MATCH_RMS + 0.01}, "classification_rms"),
+        ({"classification_rms": NO_GOOD_MATCH_RMS.default + 0.01}, "classification_rms"),
         ({"rms_gap_to_next_class": 0.0}, "rms_gap_to_next_class"),
     ],
 )
@@ -332,7 +332,7 @@ def test_processing_checkpoint_sits_on_the_limits_without_failing() -> None:
     """A value exactly at a classification limit passes."""
     checkpoint = processing_checkpoint(
         classification=good_classification(
-            classification_rms=NO_GOOD_MATCH_RMS, rms_gap_to_second_best=AMBIGUOUS_RMS_GAP
+            classification_rms=NO_GOOD_MATCH_RMS.default, rms_gap_to_second_best=AMBIGUOUS_RMS_GAP.default
         )
     )
 
@@ -608,7 +608,9 @@ def checkpoints_for(processing_rms: float | None, colour: float | None) -> list[
         StageQualityCheckpoint(
             stage="processing",
             metrics=[
-                metric("classification_rms", processing_rms, "relative RMS", NO_GOOD_MATCH_RMS, False),
+                metric(
+                    "classification_rms", processing_rms, "relative RMS", NO_GOOD_MATCH_RMS.default, False
+                ),
                 metric("synthetic_b_minus_v", colour, "magnitude"),
             ],
         ),

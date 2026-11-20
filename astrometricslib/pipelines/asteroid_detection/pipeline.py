@@ -27,10 +27,21 @@ from astrometricslib._internal.drivers.fits_access import (
     read_header_and_data,
 )
 from astrometricslib.foundation.errors import ConflictError
+from astrometricslib.foundation.parameter_context import record_basis
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
     MovingObjectConfigLoader,
+)
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
 )
 from astrometricslib.pipelines.asteroid_detection.detection import (
     MovingObjectDetector,
@@ -66,7 +77,18 @@ logger = logging.getLogger(__name__)
 # wide radius admits in a dense field -- see `_estimate_bulk_pointing_
 # correction_deg`. Not yet validated against a range of real mount
 # pointing errors beyond this one target.
-_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC = 300.0
+_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC = TunedParameter(
+    name="asteroid_detection.pointing_correction_search_radius_arcsec",
+    default=300.0,
+    unit="arcsec",
+    description=(
+        "How far a detection may sit from a reference star and still vote on the frame's pointing offset."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="MOV-05",
+)
 # Bin width for the offset-voting histogram below. A plain "nearest
 # reference star" match was tried first and rejected: on real NGC 2403
 # data (median 48 arcsec star spacing, comparable to the mount's own
@@ -78,19 +100,60 @@ _POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC = 300.0
 # wrong, since only the real matches all land in the same bin. 5 arcsec
 # is small enough to separate the true peak from this field's spacing,
 # comfortably larger than DAOStarFinder's sub-arcsec centroiding noise.
-_POINTING_CORRECTION_VOTE_BIN_ARCSEC = 5.0
+# It stands for a few pixels of the sky (5 on the reference setup, 2.6 × the
+# plate scale), so it follows the plate scale the run measures.
+_POINTING_CORRECTION_VOTE_BIN_ARCSEC = TunedParameter(
+    name="asteroid_detection.pointing_correction_vote_bin_arcsec",
+    default=factor_for(5.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="× plate scale",
+    description="Bin width of the histogram that votes on the frame's pointing offset.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="MOV-05",
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=5.0,
+)
 # Below this many candidate pairs landing in the winning bin (plus its
 # immediate neighbors), the vote would be too noisy to trust as a real
 # peak rather than a chance cluster -- the frame is left with its raw
 # mount-pointing WCS rather than applying an unreliable correction.
-_POINTING_CORRECTION_MIN_VOTES = 5
+_POINTING_CORRECTION_MIN_VOTES = TunedParameter(
+    name="asteroid_detection.pointing_correction_min_votes",
+    default=5,
+    unit="pairs",
+    description=(
+        "The fewest candidate pairs in the winning vote bin for the pointing correction to be trusted."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="MOV-D08",
+)
 # After the bulk shift is applied, each detection is compared with its
 # nearest reference star. Pairs farther apart than this are treated as a
 # wrong star and left out of the position-error estimate. Three vote bins is
 # wide enough to keep the spread of the right pairs, narrow enough that most
 # wrong pairs fall outside. If a frame's true error is near or above this
 # radius, the estimate reads low (the far tail is cut off).
-_POSITION_ERROR_MATCH_RADIUS_ARCSEC = 3.0 * _POINTING_CORRECTION_VOTE_BIN_ARCSEC
+_POSITION_ERROR_MATCH_RADIUS_VOTE_BINS = 3.0
+
+
+def _position_error_match_radius_arcsec() -> float:
+    """Return the match radius of the position-error estimate.
+
+    It is three vote bins, so it follows the vote bin, which follows the
+    plate scale of the run.
+
+    Returns
+    -------
+    radius_arcsec : `float`
+        The farthest a detection may sit from its nearest reference star and
+        still count, in arcseconds on the sky.
+    """
+    return _POSITION_ERROR_MATCH_RADIUS_VOTE_BINS * resolve(_POINTING_CORRECTION_VOTE_BIN_ARCSEC).value
+
+
 # Scale factor that turns a median absolute deviation into the standard
 # deviation of a normal distribution.
 _MAD_TO_SIGMA = 1.4826
@@ -219,10 +282,14 @@ def _estimate_bulk_pointing_correction_deg(
         deviation of the nearest-star residuals on each axis, and the
         correlation between the axes. `None` when there was no correction, or
         fewer than `_POINTING_CORRECTION_MIN_VOTES` detections had a
-        reference star within `_POSITION_ERROR_MATCH_RADIUS_ARCSEC`.
+        reference star within `_position_error_match_radius_arcsec`.
     """
     if not detection_positions_deg or reference_ra_deg.size == 0:
         return 0.0, 0.0, None
+
+    search_radius_arcsec = resolve(_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC).value
+    vote_bin_arcsec = resolve(_POINTING_CORRECTION_VOTE_BIN_ARCSEC).value
+    minimum_votes = resolve(_POINTING_CORRECTION_MIN_VOTES).value
 
     detection_array = np.array(detection_positions_deg)
     # Measure every RA from one centre, wrapped, so a field across
@@ -233,7 +300,7 @@ def _estimate_bulk_pointing_correction_deg(
         detection_array[:, 1] * 3600.0,
     ))
     candidate_reference_indices_per_detection = reference_tree.query_ball_point(
-        query_points, r=_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC
+        query_points, r=search_radius_arcsec
     )
 
     ra_offset_arcsec_per_pair = []
@@ -258,28 +325,28 @@ def _estimate_bulk_pointing_correction_deg(
     ra_offsets_arcsec = np.concatenate(ra_offset_arcsec_per_pair)
     dec_offsets_arcsec = np.concatenate(dec_offset_arcsec_per_pair)
 
-    bin_count = int(2 * _POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC / _POINTING_CORRECTION_VOTE_BIN_ARCSEC)
+    bin_count = int(2 * search_radius_arcsec / vote_bin_arcsec)
     vote_histogram, ra_bin_edges, dec_bin_edges = np.histogram2d(
         ra_offsets_arcsec,
         dec_offsets_arcsec,
         bins=bin_count,
         range=[
-            [-_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC, _POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC],
-            [-_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC, _POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC],
+            [-search_radius_arcsec, search_radius_arcsec],
+            [-search_radius_arcsec, search_radius_arcsec],
         ],
     )
     peak_ra_bin, peak_dec_bin = np.unravel_index(np.argmax(vote_histogram), vote_histogram.shape)
 
     # Widen by one bin on each side so real matches that straddled a bin
     # edge aren't dropped out of the refinement.
-    bin_width = _POINTING_CORRECTION_VOTE_BIN_ARCSEC
+    bin_width = vote_bin_arcsec
     near_peak = (
         (ra_offsets_arcsec >= ra_bin_edges[peak_ra_bin] - bin_width)
         & (ra_offsets_arcsec <= ra_bin_edges[peak_ra_bin + 1] + bin_width)
         & (dec_offsets_arcsec >= dec_bin_edges[peak_dec_bin] - bin_width)
         & (dec_offsets_arcsec <= dec_bin_edges[peak_dec_bin + 1] + bin_width)
     )
-    if int(np.count_nonzero(near_peak)) < _POINTING_CORRECTION_MIN_VOTES:
+    if int(np.count_nonzero(near_peak)) < minimum_votes:
         return 0.0, 0.0, None
 
     ra_shift_arcsec = float(np.median(ra_offsets_arcsec[near_peak]))
@@ -290,11 +357,11 @@ def _estimate_bulk_pointing_correction_deg(
     # tree returns an index equal to its size when nothing is in range.
     shifted_query_points = query_points + np.array([ra_shift_arcsec, dec_shift_arcsec])
     _distances, nearest_indices = reference_tree.query(
-        shifted_query_points, distance_upper_bound=_POSITION_ERROR_MATCH_RADIUS_ARCSEC
+        shifted_query_points, distance_upper_bound=_position_error_match_radius_arcsec()
     )
     matched = nearest_indices < reference_tree.n
     position_error_arcsec = None
-    if int(np.count_nonzero(matched)) >= _POINTING_CORRECTION_MIN_VOTES:
+    if int(np.count_nonzero(matched)) >= minimum_votes:
         residuals = reference_tree.data[nearest_indices[matched]] - shifted_query_points[matched]
         per_axis_sigma_arcsec = [
             _MAD_TO_SIGMA * float(np.median(np.abs(axis_residuals - np.median(axis_residuals))))
@@ -530,6 +597,9 @@ def _detect_sources_in_one_frame(
 class AsteroidDetectionPipeline:
     """The main factory line for finding asteroids in our photos.
 
+    This search is experimental: its false-positive rate is not measured on
+    real data, so a person should check its results.
+
     Parameters
     ----------
     config : `MovingObjectConfig`, optional
@@ -590,6 +660,11 @@ class AsteroidDetectionPipeline:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FITSFixedWarning)
             stack_wcs = WCS(stack_header, naxis=2)
+        # The stack's plate solution gives the run's plate scale. Record it
+        # once, so the values that scale with it follow this run.
+        record_basis(
+            RunBasis.PLATE_SCALE_ARCSEC_PER_PX, float(np.mean(proj_plane_pixel_scales(stack_wcs))) * 3600.0
+        )
 
         reference_star_index = self._build_reference_stars(stacked_image_path, stack_wcs)
 

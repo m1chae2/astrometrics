@@ -287,7 +287,7 @@ class StellarCatalog:
         spectral_type: str | None = None,
         magnitude: float | None = None,
         target_id: str | None = None,
-        tolerance_arcsec: float = 5.0,
+        tolerance_arcsec: float | None = None,
     ) -> StellarObject:
         """Find the star at a spot on the sky, or record a new one there.
 
@@ -313,14 +313,20 @@ class StellarCatalog:
             Target to add to the star's list of targets.
         tolerance_arcsec : `float`, optional
             How close in position counts as the same star, in arcseconds.
+            By default the library's registered same-star distance (2
+            arcseconds), the one every other star-recording step uses.
 
         Returns
         -------
         star : `StellarObject`
             The star that was found or created.
         """
+        from astrometricslib.foundation.parameters import resolve
+        from astrometricslib.pipelines.shared.catalog_star_identity import SAME_STAR_POSITION_TOLERANCE_ARCSEC
         from astrometricslib.pipelines.shared.star_catalog_queries import find_or_create_star
 
+        if tolerance_arcsec is None:
+            tolerance_arcsec = float(resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value)
         return find_or_create_star(
             self._catalog_access,
             self.update,

@@ -792,9 +792,13 @@ def _assert_not_measured(library: _Library, reason_part: str, result: Any) -> No
 
 def test_too_few_frames_in_a_half_is_not_measured(tmp_path: Path) -> None:
     """Under the minimum per half, nothing is stacked."""
-    library = _Library(tmp_path, count=2 * ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF - 4, reference_index=2)
+    library = _Library(
+        tmp_path, count=2 * ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF.default - 4, reference_index=2
+    )
     result = library.run()
-    _assert_not_measured(library, f"fewer than the {ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF}", result)
+    _assert_not_measured(
+        library, f"fewer than the {ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF.default}", result
+    )
     assert library.stacker.calls == []
 
 
@@ -1212,4 +1216,4 @@ def test_the_shipped_bias_is_one_until_it_has_been_measured() -> None:
         ODD_EVEN_DIFFERENCE_NOISE_BIAS,
     )
 
-    assert ODD_EVEN_DIFFERENCE_NOISE_BIAS == pytest.approx(1.0)
+    assert ODD_EVEN_DIFFERENCE_NOISE_BIAS.default == pytest.approx(1.0)

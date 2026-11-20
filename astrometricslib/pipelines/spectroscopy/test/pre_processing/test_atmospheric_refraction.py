@@ -170,7 +170,7 @@ def test_refraction_grows_with_the_tangent_of_the_zenith_distance() -> None:
 
 def test_a_target_below_the_minimum_altitude_is_refused() -> None:
     """The plane-parallel model raises below 20 degrees altitude."""
-    limit = 90.0 - MINIMUM_ALTITUDE_DEGREES
+    limit = 90.0 - MINIMUM_ALTITUDE_DEGREES.default
 
     assert refraction_arcsec(5000.0, limit, SEA_LEVEL) > 0.0
     with pytest.raises(ValueError, match="plane-parallel"):

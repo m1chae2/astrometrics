@@ -61,7 +61,14 @@ import numpy as np
 from astropy.timeseries import BoxLeastSquares, LombScargle
 from scipy.stats import median_abs_deviation
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import PeriodogramResult, TransitCandidate
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 VERDICT_DETECTED = "detected"
 VERDICT_POSSIBLE = "possible"
@@ -72,11 +79,29 @@ VERDICT_INSUFFICIENT_DATA = "insufficient_data"
 # measurements. Two measurements per cycle is the theoretical limit
 # (the Nyquist limit); three leaves a margin for the uneven spacing real
 # observing has, where the limit is not exact.
-_MINIMUM_PERIOD_CADENCES = 3.0
+_MINIMUM_PERIOD_CADENCES = TunedParameter(
+    name="photometry.minimum_period_cadences",
+    default=3.0,
+    unit="cadences",
+    description="Shortest period searched, in multiples of the typical gap between measurements.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D31",
+)
 
 # At least this many full cycles must fit inside the observed time for a
 # period to be searched. One cycle cannot show that anything repeats.
-_MINIMUM_CYCLES_IN_SPAN = 2.0
+_MINIMUM_CYCLES_IN_SPAN = TunedParameter(
+    name="photometry.minimum_cycles_in_span",
+    default=2.0,
+    unit="cycles",
+    description="Fewest full cycles that must fit inside the observed time for a period to be searched.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D31",
+)
 
 # The largest ratio allowed between the longest and shortest period this
 # search will try. Both lomb_scargle_search's frequency grid and
@@ -95,30 +120,104 @@ _MINIMUM_CYCLES_IN_SPAN = 2.0
 # ratio, by never letting the effective cadence used for grid sizing be
 # finer than the span allows, bounds both regardless of how tightly
 # spaced any one burst of real measurements happens to be.
-_MAXIMUM_PERIOD_RATIO = 2000.0
+_MAXIMUM_PERIOD_RATIO = TunedParameter(
+    name="photometry.maximum_period_ratio",
+    default=2000.0,
+    unit="ratio",
+    description="Largest ratio allowed between the longest and shortest period the search tries.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D31",
+)
 
 # Cycles that must have been observed for a result to be called
 # "detected" rather than "possible".
-_CYCLES_FOR_DETECTION = 3.0
+_CYCLES_FOR_DETECTION = TunedParameter(
+    name="photometry.cycles_for_detection",
+    default=3.0,
+    unit="cycles",
+    description=(
+        "Cycles that must have been observed for a result to be called detected rather than possible."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-12",
+)
 
 # Fewest repeat events (dips) for "possible", and for "detected". One
 # dip is a single event, not a period.
-_EVENTS_FOR_POSSIBLE = 2
-_EVENTS_FOR_DETECTION = 3
+_EVENTS_FOR_POSSIBLE = TunedParameter(
+    name="photometry.events_for_possible",
+    default=2,
+    unit="events",
+    description="Fewest repeat events (dips) for a possible result.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D33",
+)
+_EVENTS_FOR_DETECTION = TunedParameter(
+    name="photometry.events_for_detection",
+    default=3,
+    unit="events",
+    description="Fewest repeat events (dips) for a detected result.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D33",
+)
 
 # Fewest measurements inside the dips, summed over all events, for
 # "possible" (the same count for "detected" is twice this).
-_POINTS_IN_DIP_FOR_POSSIBLE = 3
+_POINTS_IN_DIP_FOR_POSSIBLE = TunedParameter(
+    name="photometry.points_in_dip_for_possible",
+    default=3,
+    unit="points",
+    description="Fewest measurements inside the dips, summed over all events, for a possible result.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D33",
+)
 
 # False-alarm probability cutoffs for the verdicts. 0.01 means noise
 # matches the result in about 1 shuffle in 100.
-_FALSE_ALARM_FOR_DETECTION = 0.01
-_FALSE_ALARM_FOR_POSSIBLE = 0.05
+_FALSE_ALARM_FOR_DETECTION = TunedParameter(
+    name="photometry.false_alarm_for_detection",
+    default=0.01,
+    unit="probability",
+    description="Largest false-alarm probability for a detected result.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-12",
+)
+_FALSE_ALARM_FOR_POSSIBLE = TunedParameter(
+    name="photometry.false_alarm_for_possible",
+    default=0.05,
+    unit="probability",
+    description="Largest false-alarm probability for a possible result.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-12",
+)
 
 # How many times the data is shuffled. With 300 shuffles the smallest
 # false-alarm probability that can be reported is 1/301, about 0.003,
 # which is below the 0.01 cutoff.
-_SHUFFLE_COUNT = 300
+_SHUFFLE_COUNT = TunedParameter(
+    name="photometry.shuffle_count",
+    default=300,
+    unit="shuffles",
+    description="How many times the data is shuffled to find the false-alarm probability.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-12",
+)
 
 # Long light curves make each search slow (a 400-measurement dip search
 # takes about 16 seconds with 300 shuffles), so fewer shuffles are used
@@ -131,7 +230,16 @@ _REDUCED_SHUFFLE_COUNT = 150
 # The autocorrelation (how much each measurement resembles the one `lag`
 # steps later) below which the correlation is called gone. 0.2 is a common
 # convention and a design choice.
-_CORRELATION_GONE_BELOW = 0.2
+_CORRELATION_GONE_BELOW = TunedParameter(
+    name="photometry.correlation_gone_below",
+    default=0.2,
+    unit="correlation",
+    description="Autocorrelation below which the correlation between measurements is called gone.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-11",
+)
 
 # How many correlation lengths one block spans. Measured on 60 simulated
 # light curves of pure correlated noise (AR(1), three nights of 25
@@ -144,16 +252,43 @@ _CORRELATION_GONE_BELOW = 0.2
 #
 # (A plain point shuffle gave 97% and 100%.) One or two lags is too
 # permissive; three is slightly conservative, which is the safe side.
-_BLOCK_LENGTH_IN_CORRELATION_LENGTHS = 3
+_BLOCK_LENGTH_IN_CORRELATION_LENGTHS = TunedParameter(
+    name="photometry.block_length_in_correlation_lengths",
+    default=3,
+    unit="correlation lengths",
+    description="How many correlation lengths one shuffled block spans.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-11",
+)
 
 # The longest block, as a fraction of the measurements. A block longer than
 # a quarter of the data leaves too few blocks to shuffle into new orders.
-_LONGEST_BLOCK_FRACTION = 0.25
+_LONGEST_BLOCK_FRACTION = TunedParameter(
+    name="photometry.longest_block_fraction",
+    default=0.25,
+    unit="fraction",
+    description="Longest shuffled block, as a fraction of the measurements.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-11",
+)
 
 # How many box widths the transit search tries, from the shortest a
 # dip can be seen at (two measurements wide) up to the longest allowed
 # below.
-_DURATION_COUNT = 5
+_DURATION_COUNT = TunedParameter(
+    name="photometry.duration_count",
+    default=5,
+    unit="widths",
+    description="How many box widths the transit search tries.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D32",
+)
 
 # The longest dip searched, in multiples of the gap between measurements.
 # A dip that lasts more than about 12 measurements is a slow dimming
@@ -161,7 +296,16 @@ _DURATION_COUNT = 5
 # dips would also rule out short periods, since a dip must be shorter than
 # the period it repeats with. It is also capped at a quarter of the
 # longest period searched.
-_LONGEST_DIP_CADENCES = 12.0
+_LONGEST_DIP_CADENCES = TunedParameter(
+    name="photometry.longest_dip_cadences",
+    default=12.0,
+    unit="cadences",
+    description="Longest dip searched, in multiples of the gap between measurements.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D32",
+)
 
 # The search grid (frequencies for Lomb-Scargle, periods for the box
 # search) is otherwise sized from minimum_period_days/maximum_period_days
@@ -238,6 +382,9 @@ def build_search_grid(time_days: np.ndarray) -> SearchGrid | None:
         little to search any period (fewer than two full cycles of even
         the shortest allowed period, or no spacing between points).
     """
+    minimum_cycles_in_span = resolve(_MINIMUM_CYCLES_IN_SPAN).value
+    maximum_period_ratio = resolve(_MAXIMUM_PERIOD_RATIO).value
+    minimum_period_cadences = resolve(_MINIMUM_PERIOD_CADENCES).value
     ordered = np.sort(np.asarray(time_days, dtype=float))
     gaps = np.diff(ordered)
     gaps = gaps[gaps > 0]
@@ -245,14 +392,14 @@ def build_search_grid(time_days: np.ndarray) -> SearchGrid | None:
         return None
     cadence = float(np.median(gaps))
     span = float(ordered[-1] - ordered[0])
-    maximum_period = span / _MINIMUM_CYCLES_IN_SPAN
+    maximum_period = span / minimum_cycles_in_span
     # See _MAXIMUM_PERIOD_RATIO: never let the cadence used for grid
     # sizing be finer than the span allows, so a burst of tightly-spaced
     # measurements within an otherwise widely-spaced dataset cannot
     # blow up the search grid on its own.
-    minimum_cadence = maximum_period / (_MAXIMUM_PERIOD_RATIO * _MINIMUM_PERIOD_CADENCES)
+    minimum_cadence = maximum_period / (maximum_period_ratio * minimum_period_cadences)
     cadence = max(cadence, minimum_cadence)
-    minimum_period = _MINIMUM_PERIOD_CADENCES * cadence
+    minimum_period = minimum_period_cadences * cadence
     if maximum_period <= minimum_period:
         return None
     return SearchGrid(span, cadence, minimum_period, maximum_period)
@@ -502,19 +649,25 @@ def _verdict_from(
     verdict : `str`
         `VERDICT_DETECTED`, `VERDICT_POSSIBLE` or `VERDICT_NOT_DETECTED`.
     """
-    if false_alarm > _FALSE_ALARM_FOR_POSSIBLE:
+    false_alarm_for_possible = resolve(_FALSE_ALARM_FOR_POSSIBLE).value
+    events_for_possible = resolve(_EVENTS_FOR_POSSIBLE).value
+    points_in_dip_for_possible = resolve(_POINTS_IN_DIP_FOR_POSSIBLE).value
+    false_alarm_for_detection = resolve(_FALSE_ALARM_FOR_DETECTION).value
+    events_for_detection = resolve(_EVENTS_FOR_DETECTION).value
+    cycles_for_detection = resolve(_CYCLES_FOR_DETECTION).value
+    if false_alarm > false_alarm_for_possible:
         return VERDICT_NOT_DETECTED
     if events is not None:
-        if events < _EVENTS_FOR_POSSIBLE or (dip_points or 0) < _POINTS_IN_DIP_FOR_POSSIBLE:
+        if events < events_for_possible or (dip_points or 0) < points_in_dip_for_possible:
             return VERDICT_NOT_DETECTED
         if (
-            false_alarm <= _FALSE_ALARM_FOR_DETECTION
-            and events >= _EVENTS_FOR_DETECTION
-            and (dip_points or 0) >= 2 * _POINTS_IN_DIP_FOR_POSSIBLE
+            false_alarm <= false_alarm_for_detection
+            and events >= events_for_detection
+            and (dip_points or 0) >= 2 * points_in_dip_for_possible
         ):
             return VERDICT_DETECTED
         return VERDICT_POSSIBLE
-    if false_alarm <= _FALSE_ALARM_FOR_DETECTION and cycles >= _CYCLES_FOR_DETECTION:
+    if false_alarm <= false_alarm_for_detection and cycles >= cycles_for_detection:
         return VERDICT_DETECTED
     return VERDICT_POSSIBLE
 
@@ -527,11 +680,12 @@ def _insufficient_note(time_days: np.ndarray) -> str:
     note : `str`
         A sentence saying how long the data spans and what is needed.
     """
+    minimum_period_cadences = resolve(_MINIMUM_PERIOD_CADENCES).value
     span = float(np.max(time_days) - np.min(time_days))
     span_text = f"{span * 24 * 60:.0f} min" if span < 0.1 else f"{span:.2f} d"
     return (
         f"The measurements span {span_text}, too short to see two full cycles of any period "
-        f"longer than {_MINIMUM_PERIOD_CADENCES:.0f} measurements. Observe over a longer time."
+        f"longer than {minimum_period_cadences:.0f} measurements. Observe over a longer time."
     )
 
 
@@ -553,17 +707,20 @@ def correlation_block_length(flux: np.ndarray) -> int:
     block_length : `int`
         At least 1, and at most `_LONGEST_BLOCK_FRACTION` of the measurements.
     """
+    longest_block_fraction = resolve(_LONGEST_BLOCK_FRACTION).value
+    correlation_gone_below = resolve(_CORRELATION_GONE_BELOW).value
+    block_length_in_correlation_lengths = resolve(_BLOCK_LENGTH_IN_CORRELATION_LENGTHS).value
     flux = np.asarray(flux, dtype=float)
     count = flux.size
-    longest = max(1, int(count * _LONGEST_BLOCK_FRACTION))
+    longest = max(1, int(count * longest_block_fraction))
     centred = flux - np.mean(flux)
     variance = float(np.dot(centred, centred))
     if count < 8 or variance <= 0.0:
         return 1
     for lag in range(1, longest + 1):
         correlation = float(np.dot(centred[:-lag], centred[lag:])) / variance
-        if correlation < _CORRELATION_GONE_BELOW:
-            return 1 if lag == 1 else min(longest, _BLOCK_LENGTH_IN_CORRELATION_LENGTHS * lag)
+        if correlation < correlation_gone_below:
+            return 1 if lag == 1 else min(longest, block_length_in_correlation_lengths * lag)
     return longest
 
 
@@ -598,7 +755,7 @@ def null_flux(flux: np.ndarray, random_generator: np.random.Generator, block_len
     return np.concatenate([blocks[index] for index in order])
 
 
-FALSE_ALARM_FOR_DETECTION = _FALSE_ALARM_FOR_DETECTION
+FALSE_ALARM_FOR_DETECTION = resolve(_FALSE_ALARM_FOR_DETECTION).value
 
 
 def verdict_from_false_alarm(
@@ -734,6 +891,7 @@ def lomb_scargle_search(
         The strongest cycle with its false-alarm probability and verdict,
         or an ``insufficient_data`` result carrying a note and no period.
     """
+    shuffle_count_value = resolve(_SHUFFLE_COUNT).value
     time_days = np.asarray(time_days, dtype=float)
     flux = np.asarray(flux, dtype=float)
     grid = build_search_grid(time_days)
@@ -749,7 +907,7 @@ def lomb_scargle_search(
     # A fixed seed makes repeated searches of the same data agree.
     random_generator = np.random.default_rng(time_days.size)
     shuffles = shuffle_count or (
-        _SHUFFLE_COUNT
+        shuffle_count_value
         if time_days.size * plan.coarse_frequency.size <= _SLOW_SEARCH_WORK_LIMIT
         else _REDUCED_SHUFFLE_COUNT
     )
@@ -835,6 +993,10 @@ def box_search(
         count and verdict, or an ``insufficient_data`` result carrying a
         note and no period.
     """
+    longest_dip_cadences = resolve(_LONGEST_DIP_CADENCES).value
+    duration_count = resolve(_DURATION_COUNT).value
+    shuffle_count_value = resolve(_SHUFFLE_COUNT).value
+    events_for_possible = resolve(_EVENTS_FOR_POSSIBLE).value
     time_days = np.asarray(time_days, dtype=float)
     flux = np.asarray(flux, dtype=float)
     normalized = flux / np.median(flux)
@@ -843,8 +1005,8 @@ def box_search(
         return TransitCandidate(verdict=VERDICT_INSUFFICIENT_DATA, note=_insufficient_note(time_days))
 
     shortest_dip = 2.0 * grid.cadence_days
-    longest_dip = min(_LONGEST_DIP_CADENCES * grid.cadence_days, 0.25 * grid.maximum_period_days)
-    durations = np.geomspace(shortest_dip, max(longest_dip, shortest_dip * 1.01), _DURATION_COUNT)
+    longest_dip = min(longest_dip_cadences * grid.cadence_days, 0.25 * grid.maximum_period_days)
+    durations = np.geomspace(shortest_dip, max(longest_dip, shortest_dip * 1.01), duration_count)
     # A dip must be shorter than the period it repeats with.
     minimum_period = max(grid.minimum_period_days, 1.5 * float(durations.max()))
     if minimum_period >= grid.maximum_period_days:
@@ -888,7 +1050,9 @@ def box_search(
     random_generator = np.random.default_rng(time_days.size)
     periods = results.period
     shuffles = shuffle_count or (
-        _SHUFFLE_COUNT if time_days.size * periods.size <= _SLOW_SEARCH_WORK_LIMIT else _REDUCED_SHUFFLE_COUNT
+        shuffle_count_value
+        if time_days.size * periods.size <= _SLOW_SEARCH_WORK_LIMIT
+        else _REDUCED_SHUFFLE_COUNT
     )
     block = block_length or correlation_block_length(normalized)
     at_least_as_strong = 0
@@ -907,7 +1071,7 @@ def box_search(
         else VERDICT_NOT_DETECTED
     )
     note = ""
-    if event_count < _EVENTS_FOR_POSSIBLE:
+    if event_count < events_for_possible:
         note = "The dip was seen only once, which is a single event, not a repeating pattern."
     return TransitCandidate(
         period_days=best_period,

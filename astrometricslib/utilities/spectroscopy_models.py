@@ -8,6 +8,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.foundation.parameter_context import run_basis_value
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import REFERENCE_SETUP_BASES, factor_for, scale_by_basis
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
+
 logger = logging.getLogger(__name__)
 
 # --- Placeholder values for a camera that is missing from the config --------
@@ -19,13 +30,83 @@ logger = logging.getLogger(__name__)
 # made-up camera. `FALLBACK_PIXEL_SIZE_UM` is the ZWO ASI533MM Pro's pixel
 # size, kept from before the warning existed so that nothing changed. The
 # others are generic guesses that were never checked against any camera.
-FALLBACK_PIXEL_SIZE_UM = 3.76
-FALLBACK_SENSOR_WIDTH_PX = 3000
-FALLBACK_SENSOR_HEIGHT_PX = 2000
-FALLBACK_SENSOR_MIN_WAVELENGTH_NM = 350.0
-FALLBACK_SENSOR_MAX_WAVELENGTH_NM = 900.0
-FALLBACK_GRATING_LINES_PER_MM = 100.0
-FALLBACK_GRATING_DISTANCE_MM = 0.0
+FALLBACK_PIXEL_SIZE_UM = TunedParameter(
+    name="utilities.fallback_pixel_size_um",
+    default=3.76,
+    unit="µm",
+    description="Pixel size used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_pixel_size_um"),
+)
+FALLBACK_SENSOR_WIDTH_PX = TunedParameter(
+    name="utilities.fallback_sensor_width_px",
+    default=3000,
+    unit="pixels",
+    description="Sensor width used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_sensor_width_px"),
+)
+FALLBACK_SENSOR_HEIGHT_PX = TunedParameter(
+    name="utilities.fallback_sensor_height_px",
+    default=2000,
+    unit="pixels",
+    description="Sensor height used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_sensor_height_px"),
+)
+FALLBACK_SENSOR_MIN_WAVELENGTH_NM = TunedParameter(
+    name="utilities.fallback_sensor_min_wavelength_nm",
+    default=350.0,
+    unit="nm",
+    description="Shortest sensor wavelength used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_sensor_min_wavelength_nm"),
+)
+FALLBACK_SENSOR_MAX_WAVELENGTH_NM = TunedParameter(
+    name="utilities.fallback_sensor_max_wavelength_nm",
+    default=900.0,
+    unit="nm",
+    description="Longest sensor wavelength used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_sensor_max_wavelength_nm"),
+)
+FALLBACK_GRATING_LINES_PER_MM = TunedParameter(
+    name="utilities.fallback_grating_lines_per_mm",
+    default=100.0,
+    unit="lines/mm",
+    description="Grating line density used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_grating_lines_per_mm"),
+)
+FALLBACK_GRATING_DISTANCE_MM = TunedParameter(
+    name="utilities.fallback_grating_distance_mm",
+    default=0.0,
+    unit="mm",
+    description="Grating-to-sensor distance used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "fallback_grating_distance_mm"),
+)
 FALLBACK_DISPERSION_ORIENTATION = "horizontal"
 FALLBACK_DISPERSION_DIRECTION = "negative"
 
@@ -33,7 +114,77 @@ FALLBACK_DISPERSION_DIRECTION = "negative"
 # spectrum at (see `SpectroscopyConfig.extraction_start_wavelength_nm`). It is
 # the start of the visible spectrum. It was chosen, not measured. The
 # instrument response and the classifier only use light redder than 420 nm.
-DEFAULT_EXTRACTION_START_WAVELENGTH_NM = 380.0
+DEFAULT_EXTRACTION_START_WAVELENGTH_NM = TunedParameter(
+    name="utilities.default_extraction_start_wavelength_nm",
+    default=380.0,
+    unit="nm",
+    description="Wavelength at which spectrum extraction starts when the settings give none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    config_key=("Processing.Spectroscopy", "default_extraction_start_wavelength_nm"),
+)
+
+
+# The half-width of the reading box for a star's spectrum, and the most the
+# box may ever grow to (the traced extraction shrinks the box to follow the
+# trail's own width, 2.5 sigma, so this is the upper bound, see
+# `APERTURE_SIGMA_MULTIPLIER` and SPE-04). 10 px held the whole trail and its
+# wings on the reference setup, whose trail is 6.81 px wide (FWHM). It was
+# chosen by judgment when the extractor was first written, not swept.
+# It stands for about one and a half trail widths (10 on the reference setup,
+# 1.47 × the trail width), so it follows the trail width the run measures.
+# A value set in the camera's config section still overrides it.
+EXTRACTION_RADIUS_PX = TunedParameter(
+    name="spectroscopy.extraction_radius_px",
+    default=factor_for(10, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="The half-width of the box that reads a star's spectrum, and the most it may grow to.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-04",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=10,
+)
+
+
+def default_extraction_radius() -> int:
+    """Give the extraction radius for the trail width known now, quietly.
+
+    The config is usually built outside a run, before any trail is
+    measured. Then the setup's typical trail width (a tuned value) stands
+    in, and the reference setup's when even that is unknown. Unlike
+    `resolve`, this logs no warning, because loading the config with no
+    measured trail is the normal case, not a problem.
+
+    Returns
+    -------
+    radius_px : `int`
+        `EXTRACTION_RADIUS_PX` scaled by the trail width, rounded.
+    """
+    trail_width = run_basis_value(RunBasis.TRAIL_WIDTH_PX) or REFERENCE_SETUP_BASES[RunBasis.TRAIL_WIDTH_PX]
+    return round(float(scale_by_basis(EXTRACTION_RADIUS_PX, trail_width)))
+
+
+# The degree of the polynomial that smooths the traced trail's centers. 2 (a
+# gentle curve) lets the smooth trail bend a little, as a tilted grating or
+# lens distortion makes it, without following step-to-step noise (a
+# straight line would be degree 1; a higher degree follows the noise). It is
+# a judgment from when the traced extraction was written, and no sweep of the
+# degree was run. A value set in the camera's config section overrides it.
+CENTERLINE_POLYNOMIAL_DEGREE = TunedParameter(
+    name="utilities.centerline_polynomial_degree",
+    default=2,
+    unit="degree",
+    description="Degree of the polynomial fitted to the traced trail's centers.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D58",
+    config_key=("Processing.Spectroscopy", "centerline_polynomial_degree"),
+)
 
 
 class CameraConfig(BaseModel):
@@ -50,13 +201,14 @@ class CameraConfig(BaseModel):
     sensor_height_px : `int`
         Sensor height in pixels.
     grating_distance_mm : `float`
-        Default grating distance for this camera, by default 0.0.
+        Default grating distance for this camera, by default
+        `FALLBACK_GRATING_DISTANCE_MM` (0, reported as missing).
     sensor_min_wavelength : `float`
         Minimum wavelength sensor is sensitive to (nm), by default
-        350.0.
+        `FALLBACK_SENSOR_MIN_WAVELENGTH_NM` (350).
     sensor_max_wavelength : `float`
         Maximum wavelength sensor is sensitive to (nm), by default
-        900.0.
+        `FALLBACK_SENSOR_MAX_WAVELENGTH_NM` (900).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -66,9 +218,21 @@ class CameraConfig(BaseModel):
     sensor_height_px: int = Field(..., description="Sensor height in pixels")
 
     # Spectroscopy specific defaults that can be overridden
-    grating_distance_mm: float = Field(0.0, description="Default grating distance for this camera")
-    sensor_min_wavelength: float = Field(350.0, description="Minimum wavelength sensor is sensitive to (nm)")
-    sensor_max_wavelength: float = Field(900.0, description="Maximum wavelength sensor is sensitive to (nm)")
+    # The defaults are the stand-in values the config loader also uses
+    # (`FALLBACK_*`, register SPE-D56), so a camera built in code and one read
+    # from an incomplete config get the same values.
+    grating_distance_mm: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_GRATING_DISTANCE_MM).value),
+        description="Default grating distance for this camera",
+    )
+    sensor_min_wavelength: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_SENSOR_MIN_WAVELENGTH_NM).value),
+        description="Minimum wavelength sensor is sensitive to (nm)",
+    )
+    sensor_max_wavelength: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_SENSOR_MAX_WAVELENGTH_NM).value),
+        description="Maximum wavelength sensor is sensitive to (nm)",
+    )
 
 
 class SpectroscopyConfig(BaseModel):
@@ -79,7 +243,8 @@ class SpectroscopyConfig(BaseModel):
     camera : `CameraConfig`
         Camera sensor configuration used for this session.
     grating_lines_per_mm : `float`
-        Lines per mm of the grating filter, by default 100.0.
+        Lines per mm of the grating filter, by default
+        `FALLBACK_GRATING_LINES_PER_MM` (100).
     grating_distance_mm : `float`
         Current physical distance between grating and sensor. Normally
         fitted from a calibration frame by
@@ -87,10 +252,10 @@ class SpectroscopyConfig(BaseModel):
         hand-set.
     dispersion_orientation : {"horizontal", "vertical"}
         Orientation of the dispersion axis, by default
-        ``"horizontal"``.
+        `FALLBACK_DISPERSION_ORIENTATION` (``"horizontal"``).
     dispersion_direction : {"positive", "negative"}
         Direction of increasing wavelength along the dispersion axis,
-        by default ``"negative"``.
+        by default `FALLBACK_DISPERSION_DIRECTION` (``"negative"``).
     dispersion_start_px : `float` or `None`
         Manual zero-order offset override, by default `None`. Normally
         fitted from a calibration frame by
@@ -111,10 +276,10 @@ class SpectroscopyConfig(BaseModel):
         start of the spectrum when it works out where extraction begins,
         by default 380.0. Set it per camera in the config file with the key
         ``extraction_start_wavelength_nm``.
-    expected_fwhm : `float`
-        Expected FWHM of stars in pixels, by default 8.0.
     extraction_radius : `int`
-        Radius for spectrum extraction box, by default 10.
+        Radius for spectrum extraction box. By default it is the value of
+        `EXTRACTION_RADIUS_PX` (10 on the reference setup), which follows
+        the trail width the run measures.
     extraction_method : {"fixed", "traced"}
         "traced" (default) fits a per-position Gaussian cross-section,
         smoothed into a trail-centerline polynomial, with an aperture
@@ -184,14 +349,17 @@ class SpectroscopyConfig(BaseModel):
     camera: CameraConfig
 
     # Grating properties
-    grating_lines_per_mm: float = Field(100.0, description="Lines per mm of the grating filter")
+    grating_lines_per_mm: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_GRATING_LINES_PER_MM).value),
+        description="Lines per mm of the grating filter",
+    )
     grating_distance_mm: float = Field(
         ..., description="Current physical distance between grating and sensor"
     )
 
     # Dispersion characteristics
-    dispersion_orientation: Literal["horizontal", "vertical"] = Field("horizontal")
-    dispersion_direction: Literal["positive", "negative"] = Field("negative")
+    dispersion_orientation: Literal["horizontal", "vertical"] = Field(FALLBACK_DISPERSION_ORIENTATION)
+    dispersion_direction: Literal["positive", "negative"] = Field(FALLBACK_DISPERSION_DIRECTION)
     dispersion_start_px: float | None = Field(None, description="Manual zero-order offset override")
     dispersion_offset_x: float = Field(0.0, description="Fine-tuning horizontal offset of the dispersion box")
     dispersion_offset_y: float = Field(0.0, description="Fine-tuning vertical offset of the dispersion box")
@@ -200,19 +368,22 @@ class SpectroscopyConfig(BaseModel):
     )
 
     extraction_start_wavelength_nm: float = Field(
-        DEFAULT_EXTRACTION_START_WAVELENGTH_NM,
+        resolve(DEFAULT_EXTRACTION_START_WAVELENGTH_NM).value,
         gt=0.0,
         description="Wavelength the calibration tuner treats as the start of the spectrum (nm)",
     )
 
     # Processing hints
-    expected_fwhm: float = Field(8.0, description="Expected FWHM of stars in pixels")
-    extraction_radius: int = Field(10, description="Radius for spectrum extraction box")
+    extraction_radius: int = Field(
+        default_factory=default_extraction_radius,
+        description="Radius for spectrum extraction box (follows the trail width unless set)",
+    )
     extraction_method: Literal["fixed", "traced"] = Field(
         "traced", description="Traced (rung 3, adaptive) or fixed (rung 1, original) extraction"
     )
     centerline_polynomial_degree: int = Field(
-        2, description="Polynomial degree for the traced-extraction trail centerline fit"
+        resolve(CENTERLINE_POLYNOMIAL_DEGREE).value,
+        description="Polynomial degree for the traced-extraction trail centerline fit",
     )
     subtract_sky_background: bool = Field(
         True,
@@ -393,28 +564,36 @@ class ConfigLoader:
             return str(value).strip().lower() in ("1", "true", "yes", "on")
 
         grating_distance_mm = get_f(
-            "grating_distance_mm", FALLBACK_GRATING_DISTANCE_MM, is_hardware_setting=True
+            "grating_distance_mm", resolve(FALLBACK_GRATING_DISTANCE_MM).value, is_hardware_setting=True
         )
         camera = CameraConfig(
             name=resolved_camera_name,
-            pixel_size_um=get_f("pixel_size_μm", FALLBACK_PIXEL_SIZE_UM, is_hardware_setting=True),
-            sensor_width_px=int(get_f("sensor_width_px", FALLBACK_SENSOR_WIDTH_PX, is_hardware_setting=True)),
+            pixel_size_um=get_f(
+                "pixel_size_μm", resolve(FALLBACK_PIXEL_SIZE_UM).value, is_hardware_setting=True
+            ),
+            sensor_width_px=int(
+                get_f("sensor_width_px", resolve(FALLBACK_SENSOR_WIDTH_PX).value, is_hardware_setting=True)
+            ),
             sensor_height_px=int(
-                get_f("sensor_height_px", FALLBACK_SENSOR_HEIGHT_PX, is_hardware_setting=True)
+                get_f("sensor_height_px", resolve(FALLBACK_SENSOR_HEIGHT_PX).value, is_hardware_setting=True)
             ),
             grating_distance_mm=grating_distance_mm,
             sensor_min_wavelength=get_f(
-                "sensor_min_wavelength", FALLBACK_SENSOR_MIN_WAVELENGTH_NM, is_hardware_setting=True
+                "sensor_min_wavelength",
+                resolve(FALLBACK_SENSOR_MIN_WAVELENGTH_NM).value,
+                is_hardware_setting=True,
             ),
             sensor_max_wavelength=get_f(
-                "sensor_max_wavelength", FALLBACK_SENSOR_MAX_WAVELENGTH_NM, is_hardware_setting=True
+                "sensor_max_wavelength",
+                resolve(FALLBACK_SENSOR_MAX_WAVELENGTH_NM).value,
+                is_hardware_setting=True,
             ),
         )
 
         spectroscopy_config = SpectroscopyConfig(
             camera=camera,
             grating_lines_per_mm=get_f(
-                "grating_lines_per_mm", FALLBACK_GRATING_LINES_PER_MM, is_hardware_setting=True
+                "grating_lines_per_mm", resolve(FALLBACK_GRATING_LINES_PER_MM).value, is_hardware_setting=True
             ),
             grating_distance_mm=grating_distance_mm,
             dispersion_orientation=get_s(
@@ -430,12 +609,13 @@ class ConfigLoader:
             dispersion_offset_y=get_f("dispersion_offset_y", 0.0),
             dispersion_angle_degrees=get_f("dispersion_angle_degrees", 0.0),
             extraction_start_wavelength_nm=get_f(
-                "extraction_start_wavelength_nm", DEFAULT_EXTRACTION_START_WAVELENGTH_NM
+                "extraction_start_wavelength_nm", resolve(DEFAULT_EXTRACTION_START_WAVELENGTH_NM).value
             ),
-            expected_fwhm=get_f("expected_fwhm", 8.0),
-            extraction_radius=int(get_f("extraction_radius", 10)),
+            extraction_radius=int(get_f("extraction_radius", default_extraction_radius())),
             extraction_method=get_s("extraction_method", "traced"),
-            centerline_polynomial_degree=int(get_f("centerline_polynomial_degree", 2)),
+            centerline_polynomial_degree=int(
+                get_f("centerline_polynomial_degree", resolve(CENTERLINE_POLYNOMIAL_DEGREE).value)
+            ),
             subtract_sky_background=get_bool("subtract_sky_background", True),
             reject_narrow_contaminants=get_bool("reject_narrow_contaminants", False),
             use_flare_mask_extraction=get_bool("use_flare_mask_extraction", False),

@@ -43,6 +43,16 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
@@ -181,8 +191,17 @@ def read_observation_time(header: Any) -> datetime:
     return parse_observation_time(value)
 
 
+# Half-width, in pixels, of the box around a star's expected position that
+# `locate_star_centroid` searches. The unstable-tracking limit in
+# `assess_input_quality` is a fraction of it.
+CENTROID_SEARCH_HALF_WIDTH_PX = 40
+
+
 def locate_star_centroid(
-    data: np.ndarray, expected_x: float, expected_y: float, search_half_width: int = 40
+    data: np.ndarray,
+    expected_x: float,
+    expected_y: float,
+    search_half_width: int = CENTROID_SEARCH_HALF_WIDTH_PX,
 ) -> tuple[float, float] | None:
     """Find the exact center of a star if we already know roughly where it is.
 
@@ -224,12 +243,32 @@ def locate_star_centroid(
 
 # The fewest located anchors for which a frame's alignment is fitted at all.
 # With fewer, the frame is taken as not shifted rather than guessed.
-MINIMUM_ANCHORS_FOR_SHIFT = 5
+MINIMUM_ANCHORS_FOR_SHIFT = TunedParameter(
+    name="photometry.minimum_anchors_for_shift",
+    default=5,
+    unit="stars",
+    description="Fewest located anchor stars for which a frame's alignment is fitted at all.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D04",
+)
 
 # The fewest located anchors for which a rotation and a scale change are
 # fitted as well as the shift. A similarity transform has four numbers, so
 # ten stars leave six more than the fit needs.
-MINIMUM_ANCHORS_FOR_SIMILARITY = 10
+MINIMUM_ANCHORS_FOR_SIMILARITY = TunedParameter(
+    name="photometry.minimum_anchors_for_similarity",
+    default=10,
+    unit="stars",
+    description=(
+        "Fewest located anchor stars for which a rotation and a scale change are fitted as well as the shift."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D04",
+)
 
 # The least spread of the anchors, as a fraction of the distance from the
 # middle of the frame to a corner, for which a rotation and a scale change are
@@ -239,15 +278,48 @@ MINIMUM_ANCHORS_FOR_SIMILARITY = 10
 # ten anchors then moves a corner by about 0.1 / (0.07 * sqrt(10)) = 0.45
 # pixel, under half of the 1 pixel the `registration_drift` gate allows. A
 # design estimate.
-MINIMUM_ANCHOR_SPREAD_FRACTION = 0.07
+MINIMUM_ANCHOR_SPREAD_FRACTION = TunedParameter(
+    name="photometry.minimum_anchor_spread_fraction",
+    default=0.07,
+    unit="fraction",
+    description=(
+        "Least spread of the anchors, as a fraction of the half-diagonal, for which a rotation "
+        "and scale change are fitted."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D04",
+)
 
 # Anchors that sit farther than this many scaled median absolute deviations
 # from the fitted alignment are left out of the fit, then the fit is made
 # again. This is the usual cut for a mistaken star (a blend or a hot pixel).
-ALIGNMENT_CLIP_SIGMAS = 3.0
+ALIGNMENT_CLIP_SIGMAS = TunedParameter(
+    name="photometry.alignment_clip_sigmas",
+    default=3.0,
+    unit="sigma",
+    description=(
+        "Distance, in scaled median absolute deviations, beyond which an anchor is left out of "
+        "the alignment fit."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D04",
+)
 
 # How many times the fit is made again with the clipped anchors.
-ALIGNMENT_CLIP_PASSES = 3
+ALIGNMENT_CLIP_PASSES = TunedParameter(
+    name="photometry.alignment_clip_passes",
+    default=3,
+    unit="passes",
+    description="How many times the alignment is fitted again with the clipped anchors.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D04",
+)
 
 # How many times the anchors are re-centered and the rotation and scale fitted
 # again (see `calculate_frame_alignment`). The first pass starts from the
@@ -255,7 +327,16 @@ ALIGNMENT_CLIP_PASSES = 3
 # box. On NGC 2403 the rotation puts the corners 2.5 px from the shifted
 # positions. Each pass brings more anchors within reach. Three passes were
 # enough to bring in all of them there. A design estimate.
-ALIGNMENT_REFINEMENT_PASSES = 3
+ALIGNMENT_REFINEMENT_PASSES = TunedParameter(
+    name="photometry.alignment_refinement_passes",
+    default=3,
+    unit="passes",
+    description="How many times the anchors are re-centered and the rotation and scale fitted again.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-04",
+)
 
 # How far, in pixels, an anchor's centroid may sit from where the alignment so
 # far puts it and still be used in the fit, when the usual reach
@@ -266,7 +347,23 @@ ALIGNMENT_REFINEMENT_PASSES = 3
 # displacement came out 0.9 px with the usual reach and 1.3 to 1.6 px with 3
 # to 4 px, where an independent fit on 800 bright stars gave about 0.6 px.
 # The fit's own clipping cuts the blends that remain. A design estimate.
-ALIGNMENT_ANCHOR_REACH_PX = 4.0
+# The reach stands for about 1.3 star widths (4 px at the reference setup's 3
+# px width) and follows the measured star width.
+ALIGNMENT_ANCHOR_REACH_PX = TunedParameter(
+    name="photometry.alignment_anchor_reach_px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=4.0,
+    unit="× star width",
+    description=(
+        "How far an anchor's centroid may sit from where the alignment so far puts it when the "
+        "usual reach leaves too few anchors."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-04",
+)
 
 
 @dataclass(frozen=True)
@@ -379,11 +476,16 @@ def fit_frame_alignment(
         The fit. It has no shift when fewer than `MINIMUM_ANCHORS_FOR_SHIFT`
         anchors were located.
     """
+    minimum_anchors_for_shift = resolve(MINIMUM_ANCHORS_FOR_SHIFT).value
+    minimum_anchors_for_similarity = resolve(MINIMUM_ANCHORS_FOR_SIMILARITY).value
+    minimum_anchor_spread_fraction = resolve(MINIMUM_ANCHOR_SPREAD_FRACTION).value
+    alignment_clip_passes = resolve(ALIGNMENT_CLIP_PASSES).value
+    alignment_clip_sigmas = resolve(ALIGNMENT_CLIP_SIGMAS).value
     height, width = image_shape
     centre_x, centre_y = (width - 1) / 2.0, (height - 1) / 2.0
     half_diagonal = math.hypot(centre_x, centre_y)
     pairs = [(anchor, found) for anchor, found in zip(anchors, located, strict=True) if found is not None]
-    if len(pairs) < MINIMUM_ANCHORS_FOR_SHIFT:
+    if len(pairs) < minimum_anchors_for_shift:
         return FrameAlignment(0.0, 0.0, centre_x, centre_y, half_diagonal_px=half_diagonal)
 
     reference = np.array([anchor for anchor, _ in pairs], dtype=float)
@@ -396,15 +498,15 @@ def fit_frame_alignment(
     spread = float(np.sqrt(np.var(reference[:, 0]) + np.var(reference[:, 1])))
     if (
         not fit_similarity
-        or len(pairs) < MINIMUM_ANCHORS_FOR_SIMILARITY
-        or spread < MINIMUM_ANCHOR_SPREAD_FRACTION * half_diagonal
+        or len(pairs) < minimum_anchors_for_similarity
+        or spread < minimum_anchor_spread_fraction * half_diagonal
     ):
         return shift_only
 
     relative_x, relative_y = reference[:, 0] - centre_x, reference[:, 1] - centre_y
     keep = np.ones(len(pairs), dtype=bool)
     parameters = np.array([median_x, median_y, 0.0, 0.0])
-    for _ in range(ALIGNMENT_CLIP_PASSES + 1):
+    for _ in range(alignment_clip_passes + 1):
         rows_x = np.column_stack([np.ones(len(pairs)), np.zeros(len(pairs)), relative_x, -relative_y])
         rows_y = np.column_stack([np.zeros(len(pairs)), np.ones(len(pairs)), relative_y, relative_x])
         design = np.vstack([rows_x[keep], rows_y[keep]])
@@ -416,8 +518,8 @@ def fit_frame_alignment(
         scatter = 1.4826 * float(np.median(residual[keep]))
         if scatter <= 0:
             break
-        updated = residual <= ALIGNMENT_CLIP_SIGMAS * max(scatter, 1e-3)
-        if updated.sum() < MINIMUM_ANCHORS_FOR_SIMILARITY:
+        updated = residual <= alignment_clip_sigmas * max(scatter, 1e-3)
+        if updated.sum() < minimum_anchors_for_similarity:
             return shift_only
         if np.array_equal(updated, keep):
             break
@@ -480,15 +582,19 @@ def calculate_frame_alignment(
     alignment : `FrameAlignment`
         The fit.
     """
+    minimum_anchors_for_similarity = resolve(MINIMUM_ANCHORS_FOR_SIMILARITY).value
+    alignment_refinement_passes = resolve(ALIGNMENT_REFINEMENT_PASSES).value
+    max_centroid_shift_px = resolve(MAX_CENTROID_SHIFT_PX).value
+    alignment_anchor_reach_px = resolve(ALIGNMENT_ANCHOR_REACH_PX).value
     anchors = [(reference_x, reference_y) for reference_x, reference_y, _ in reference_top_refs_minimal]
     located = [locate_star_centroid(data, reference_x, reference_y) for reference_x, reference_y in anchors]
     image_shape = (data.shape[0], data.shape[1])
     alignment = fit_frame_alignment(anchors, located, image_shape, fit_similarity=False)
-    if alignment.anchor_count < MINIMUM_ANCHORS_FOR_SIMILARITY:
+    if alignment.anchor_count < minimum_anchors_for_similarity:
         return alignment
 
-    for _ in range(ALIGNMENT_REFINEMENT_PASSES):
-        for reach in (MAX_CENTROID_SHIFT_PX, ALIGNMENT_ANCHOR_REACH_PX):
+    for _ in range(alignment_refinement_passes):
+        for reach in (max_centroid_shift_px, alignment_anchor_reach_px):
             refined: list[tuple[float, float] | None] = []
             for reference_x, reference_y in anchors:
                 expected_x, expected_y = alignment.predict(reference_x, reference_y)
@@ -500,7 +606,7 @@ def calculate_frame_alignment(
                     max_shift_px=reach,
                 )
                 refined.append((position.x, position.y) if position.is_refined else None)
-            if sum(position is not None for position in refined) >= MINIMUM_ANCHORS_FOR_SIMILARITY:
+            if sum(position is not None for position in refined) >= minimum_anchors_for_similarity:
                 break
         fitted = fit_frame_alignment(anchors, refined, image_shape)
         if not fitted.includes_similarity:
@@ -515,29 +621,89 @@ ANCHOR_RULE_SIGNAL_TO_NOISE = "signal-to-noise ranked"
 ANCHOR_RULE_RANK_BAND = "detections ranked 50 to 100"
 
 # How many alignment anchors to take.
-ALIGNMENT_ANCHOR_COUNT = 50
+ALIGNMENT_ANCHOR_COUNT = TunedParameter(
+    name="photometry.alignment_anchor_count",
+    default=50,
+    unit="stars",
+    description="How many alignment anchors to take.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-05",
+)
 
 # The share of the brightest unsaturated detections that is skipped. The
 # brightest stars are the ones most likely to be nearly saturated, and a
 # flattened core gives a poor centroid. A design estimate.
-ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION = 0.05
+ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION = TunedParameter(
+    name="photometry.alignment_anchor_skipped_brightest_fraction",
+    default=0.05,
+    unit="fraction",
+    description="Share of the brightest unsaturated detections skipped when choosing anchors.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-05",
+)
 
 # The least peak signal-to-noise (the detection's peak above the sky, divided
 # by the sky noise per pixel) an anchor may have. At 20 the centroid of a
 # star is good to a small fraction of a pixel, and a noise peak is far below
 # it. A design estimate.
-ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR = 20.0
+ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR = TunedParameter(
+    name="photometry.alignment_anchor_minimum_peak_snr",
+    default=20.0,
+    unit="ratio",
+    description="Least peak signal-to-noise a detection needs to be an alignment anchor.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-05",
+)
 
 # The fewest anchors the signal-to-noise rule must find. With fewer, the
 # median shift rests on too few stars, and the older rank band is used.
-ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING = 10
+ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING = TunedParameter(
+    name="photometry.alignment_anchor_minimum_qualifying",
+    default=10,
+    unit="stars",
+    description=(
+        "Fewest anchors the signal-to-noise rule must find before the older rank band is used instead."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-05",
+)
 
 # Half-width, in pixels, of the box around a detection searched for a
 # saturated pixel.
-ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX = 3
+# The half-width stands for one star width (3 px at the reference setup's 3 px
+# width) and follows the measured star width.
+ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX = TunedParameter(
+    name="photometry.alignment_anchor_saturation_box_half_width_px",
+    default=factor_for(3, RunBasis.STAR_WIDTH_PX),
+    reference_value=3,
+    unit="× star width",
+    description="Half-width of the box around a detection that is searched for a saturated pixel.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D03",
+)
 
 # The older rule's band of detections, ranked by flux, brightest first.
-ALIGNMENT_ANCHOR_FALLBACK_BAND = (50, 100)
+ALIGNMENT_ANCHOR_FALLBACK_BAND = TunedParameter(
+    name="photometry.alignment_anchor_fallback_band",
+    default=(50, 100),
+    unit="rank",
+    description="First and last flux rank, brightest first, of the older rule's band of detections.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D03",
+)
 
 
 @dataclass(frozen=True)
@@ -624,9 +790,17 @@ def select_alignment_anchors(
     anchors : `AlignmentAnchors`
         The anchors and the rule that chose them.
     """
+    alignment_anchor_saturation_box_half_width_px = resolve(
+        ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX
+    ).value
+    alignment_anchor_minimum_peak_snr = resolve(ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR).value
+    alignment_anchor_skipped_brightest_fraction = resolve(ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION).value
+    alignment_anchor_count = resolve(ALIGNMENT_ANCHOR_COUNT).value
+    alignment_anchor_minimum_qualifying = resolve(ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING).value
+    alignment_anchor_fallback_band = resolve(ALIGNMENT_ANCHOR_FALLBACK_BAND).value
     height, width = data.shape
     noise = estimate_pixel_noise(data)
-    box = ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX
+    box = alignment_anchor_saturation_box_half_width_px
     unsaturated: list[tuple[float, float, float, float]] = []
     for detection in detections:
         x = detection.get("xcentroid", detection.get("x_centroid"))
@@ -654,14 +828,14 @@ def select_alignment_anchors(
     bright_enough = [
         (x, y, flux)
         for x, y, flux, peak in unsaturated
-        if noise > 0 and peak >= ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR * noise
+        if noise > 0 and peak >= alignment_anchor_minimum_peak_snr * noise
     ]
-    skipped = int(ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION * len(bright_enough))
-    chosen = bright_enough[skipped : skipped + ALIGNMENT_ANCHOR_COUNT]
-    if len(chosen) >= ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING:
+    skipped = int(alignment_anchor_skipped_brightest_fraction * len(bright_enough))
+    chosen = bright_enough[skipped : skipped + alignment_anchor_count]
+    if len(chosen) >= alignment_anchor_minimum_qualifying:
         return AlignmentAnchors(tuple(chosen), ANCHOR_RULE_SIGNAL_TO_NOISE)
 
-    first, last = ALIGNMENT_ANCHOR_FALLBACK_BAND
+    first, last = alignment_anchor_fallback_band
     band: list[tuple[float, float, float]] = []
     for detection in detections[first:last]:
         x = detection.get("xcentroid", detection.get("x_centroid"))
@@ -709,7 +883,20 @@ def compute_frame_airmass(header: fits.Header) -> float:
 # width at half maximum, the star's apparent size) the default aperture is
 # sized for. A box much narrower than 2 FWHM cuts off the star's wings
 # unevenly, which pulls the centroid toward the box center.
-CENTROID_BOX_HALF_WIDTH_PX = 5
+# The half-width stands for about 1.7 star widths (5 px at the reference
+# setup's 3 px width) and follows the measured star width.
+CENTROID_BOX_HALF_WIDTH_PX = TunedParameter(
+    name="photometry.centroid_box_half_width_px",
+    default=factor_for(5, RunBasis.STAR_WIDTH_PX),
+    reference_value=5,
+    unit="× star width",
+    description="Half-width of the square box used to re-center one star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D02",
+)
 
 # The largest move, in pixels, a re-centering may make from the shifted
 # reference position. A larger move means the box found a neighbor, a hot
@@ -717,15 +904,50 @@ CENTROID_BOX_HALF_WIDTH_PX = 5
 # design estimate: the global shift is good to well under a pixel on a
 # clean frame, so 1.5 px leaves room for an imperfect shift but not for
 # jumping to another star.
-MAX_CENTROID_SHIFT_PX = 1.5
+# The move stands for half a star width (1.5 px at the reference setup's 3 px
+# width) and follows the measured star width.
+MAX_CENTROID_SHIFT_PX = TunedParameter(
+    name="photometry.max_centroid_shift_px",
+    default=factor_for(1.5, RunBasis.STAR_WIDTH_PX),
+    reference_value=1.5,
+    unit="× star width",
+    description="Largest move a re-centering may make from the shifted reference position.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-04",
+)
 
 # Half-width, in pixels, of the square cutout whose median is the local sky.
-CENTROID_SKY_CUTOUT_HALF_WIDTH_PX = 15
+# The half-width stands for five star widths (15 px at the reference setup's 3
+# px width) and follows the measured star width.
+CENTROID_SKY_CUTOUT_HALF_WIDTH_PX = TunedParameter(
+    name="photometry.centroid_sky_cutout_half_width_px",
+    default=factor_for(15, RunBasis.STAR_WIDTH_PX),
+    reference_value=15,
+    unit="× star width",
+    description="Half-width of the square cutout whose median is the local sky.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D02",
+)
 
 # How many times the centroid box is re-centered on its own result. One
 # pass is biased when the star sits off the box center, because the box then
 # cuts more of the wings on one side. Three passes remove that bias.
-CENTROID_REFINEMENT_PASSES = 3
+CENTROID_REFINEMENT_PASSES = TunedParameter(
+    name="photometry.centroid_refinement_passes",
+    default=3,
+    unit="passes",
+    description="How many times the centroid box is re-centered on its own result.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D02",
+)
 
 
 @dataclass(frozen=True)
@@ -767,8 +989,8 @@ def refine_star_centroid(
     y: float,
     *,
     saturation_threshold_adu: float,
-    box_half_width: int = CENTROID_BOX_HALF_WIDTH_PX,
-    max_shift_px: float = MAX_CENTROID_SHIFT_PX,
+    box_half_width: int | None = None,
+    max_shift_px: float | None = None,
 ) -> StarPosition:
     """Re-center one star on its brightness-weighted centroid.
 
@@ -813,9 +1035,15 @@ def refine_star_centroid(
         The centroid, or the starting position with the reason the
         centroid was refused.
     """
+    centroid_refinement_passes = resolve(CENTROID_REFINEMENT_PASSES).value
+    centroid_sky_cutout_half_width_px = resolve(CENTROID_SKY_CUTOUT_HALF_WIDTH_PX).value
+    if box_half_width is None:
+        box_half_width = resolve(CENTROID_BOX_HALF_WIDTH_PX).value
+    if max_shift_px is None:
+        max_shift_px = resolve(MAX_CENTROID_SHIFT_PX).value
     height, width = data.shape
     centre_x, centre_y = x, y
-    for _ in range(CENTROID_REFINEMENT_PASSES):
+    for _ in range(centroid_refinement_passes):
         ix, iy = round(centre_x), round(centre_y)
         x0, x1 = ix - box_half_width, ix + box_half_width + 1
         y0, y1 = iy - box_half_width, iy + box_half_width + 1
@@ -827,12 +1055,12 @@ def refine_star_centroid(
             return StarPosition(x, y, "saturated pixel in the centroid box")
 
         sky_x0, sky_x1 = (
-            max(0, ix - CENTROID_SKY_CUTOUT_HALF_WIDTH_PX),
-            min(width, ix + CENTROID_SKY_CUTOUT_HALF_WIDTH_PX + 1),
+            max(0, ix - centroid_sky_cutout_half_width_px),
+            min(width, ix + centroid_sky_cutout_half_width_px + 1),
         )
         sky_y0, sky_y1 = (
-            max(0, iy - CENTROID_SKY_CUTOUT_HALF_WIDTH_PX),
-            min(height, iy + CENTROID_SKY_CUTOUT_HALF_WIDTH_PX + 1),
+            max(0, iy - centroid_sky_cutout_half_width_px),
+            min(height, iy + centroid_sky_cutout_half_width_px + 1),
         )
         sky_level = np.median(data[sky_y0:sky_y1, sky_x0:sky_x1])
 
@@ -1052,9 +1280,49 @@ def summarize_centroid_shifts(
 # which keeps it clear of the star's wings. These are the defaults of
 # `measure_aperture_photometry` and the geometry behind the noise budget in
 # `processing/noise_budget.py`, so they are defined once, here.
-APERTURE_RADIUS_PX = 4.0
-SKY_ANNULUS_INNER_RADIUS_PX = 7.0
-SKY_ANNULUS_OUTER_RADIUS_PX = 12.0
+# The radius stands for about 1.3 star widths (4 px at the reference setup's 3
+# px width) and follows the measured star width. The two sky ring radii below
+# follow it the same way.
+APERTURE_RADIUS_PX = TunedParameter(
+    name="photometry.aperture_radius_px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=4.0,
+    unit="× star width",
+    description="Radius of the circle in which photometry measures every star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D01",
+)
+# The inner radius stands for about 2.3 star widths (7 px at the reference
+# setup) and follows the measured star width.
+SKY_ANNULUS_INNER_RADIUS_PX = TunedParameter(
+    name="photometry.sky_annulus_inner_radius_px",
+    default=factor_for(7.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=7.0,
+    unit="× star width",
+    description="Inner radius of the sky ring around a star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D01",
+)
+# The outer radius stands for four star widths (12 px at the reference setup)
+# and follows the measured star width.
+SKY_ANNULUS_OUTER_RADIUS_PX = TunedParameter(
+    name="photometry.sky_annulus_outer_radius_px",
+    default=factor_for(12.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=12.0,
+    unit="× star width",
+    description="Outer radius of the sky ring around a star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D01",
+)
 
 
 def aperture_flux_error_adu(
@@ -1158,10 +1426,10 @@ def measure_aperture_photometry(
     data: np.ndarray,
     x: float,
     y: float,
-    radius: float = APERTURE_RADIUS_PX,
-    annulus_inner: float = SKY_ANNULUS_INNER_RADIUS_PX,
-    annulus_outer: float = SKY_ANNULUS_OUTER_RADIUS_PX,
-    cutout_radius: int = 15,
+    radius: float | None = None,
+    annulus_inner: float | None = None,
+    annulus_outer: float | None = None,
+    cutout_radius: int | None = None,
     fallback_background: float | None = None,
     *,
     saturation_threshold_adu: float,
@@ -1199,6 +1467,9 @@ def measure_aperture_photometry(
         The inner and outer radius of the sky ring, in pixels.
     cutout_radius : `int`, optional
         The star must be at least this far from the frame edge, in pixels.
+        By default one pixel more than the outer radius of the sky ring
+        (rounded up), so the whole ring fits in the frame. That is 13 px on
+        the reference setup (the ring's outer radius is 12 px).
     fallback_background : `float`, optional
         The sky level, in ADU per pixel, to use if the ring holds no pixels.
     saturation_threshold_adu : `float`
@@ -1214,6 +1485,14 @@ def measure_aperture_photometry(
     measurement : `ApertureMeasurement`
         The flux, its uncertainty and the saturation flag.
     """
+    if radius is None:
+        radius = resolve(APERTURE_RADIUS_PX).value
+    if annulus_inner is None:
+        annulus_inner = resolve(SKY_ANNULUS_INNER_RADIUS_PX).value
+    if annulus_outer is None:
+        annulus_outer = resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value
+    if cutout_radius is None:
+        cutout_radius = math.ceil(annulus_outer) + 1
     height, width = data.shape
     noise = noise if noise is not None else DetectorNoise()
     # The whole-pixel position is used only for the bounds check and the
@@ -1286,10 +1565,10 @@ def _measure_aperture_flux(
     data: np.ndarray,
     x: float,
     y: float,
-    radius: float = APERTURE_RADIUS_PX,
-    annulus_inner: float = SKY_ANNULUS_INNER_RADIUS_PX,
-    annulus_outer: float = SKY_ANNULUS_OUTER_RADIUS_PX,
-    cutout_radius: int = 15,
+    radius: float | None = None,
+    annulus_inner: float | None = None,
+    annulus_outer: float | None = None,
+    cutout_radius: int | None = None,
     fallback_background: float | None = None,
     *,
     saturation_threshold_adu: float,
@@ -1305,6 +1584,12 @@ def _measure_aperture_flux(
         The total brightness, and a True/False flag if the star was
         too bright (saturated).
     """
+    if radius is None:
+        radius = resolve(APERTURE_RADIUS_PX).value
+    if annulus_inner is None:
+        annulus_inner = resolve(SKY_ANNULUS_INNER_RADIUS_PX).value
+    if annulus_outer is None:
+        annulus_outer = resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value
     measurement = measure_aperture_photometry(
         data,
         x,

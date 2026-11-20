@@ -17,6 +17,8 @@ export interface PopoverSelectOption {
     label: string;
     /** Smaller text after the label. Optional. */
     detail?: string;
+    /** A tooltip that explains the choice. Optional. It also becomes the button's tooltip while the choice is picked. */
+    title?: string;
 }
 
 export interface PopoverSelectProps {
@@ -86,7 +88,7 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
                         aria-expanded={isOpen}
                         disabled={disabled}
                         aria-label={`${label}: ${selectedText}`}
-                        title={label}
+                        title={selectedOption?.title ?? label}
                     >
                         <span>{selectedText}</span>
                         <span className="popover-select__chevron" aria-hidden="true">{isOpen ? '▲' : '▼'}</span>
@@ -121,6 +123,7 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
                                 key={option.id}
                                 className={`popover-select__option${selectedId === option.id ? ' popover-select__option--selected' : ''}`}
                                 aria-pressed={selectedId === option.id}
+                                title={option.title}
                                 onClick={() => { onSelect(option.id); close(); }}
                             >
                                 <span>{option.label}</span>

@@ -95,7 +95,7 @@ def test_the_supported_exposure_is_the_longest_that_reaches_the_target() -> None
 
     assert outcome.result is not None
     assert outcome.result.supported_exposure_seconds == pytest.approx(30.0)
-    assert outcome.result.used.sharp_fraction < TARGET_SHARP_FRACTION
+    assert outcome.result.used.sharp_fraction < TARGET_SHARP_FRACTION.default
     assert outcome.result.nights == ["2026-10-01"]
 
 

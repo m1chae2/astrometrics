@@ -69,7 +69,17 @@ from typing import NamedTuple
 import numpy as np
 from scipy.ndimage import binary_erosion, gaussian_filter, shift
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
@@ -95,13 +105,13 @@ __all__ = [
     "MINIMUM_PIXELS",
     "MINIMUM_TILES",
     "PATTERN_ROW_NAMES",
-    "SOURCE_CLEARANCE_PX",
     "TILE_PX",
     "WALKING_LAG_PX",
     "HalfPatternOutcome",
     "HalfPatternResult",
     "half_pattern_measurements",
     "measure_half_pattern",
+    "source_clearance_px",
 ]
 
 _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
@@ -112,31 +122,90 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # observatory's good nights). 3 px keeps scales up to about 7 px FWHM out
 # of the result, which includes a star's wings and the pattern of a smooth
 # sky.
-FINE_SCALE_SIGMA_PX = 3.0
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+FINE_SCALE_SIGMA_PX = TunedParameter(
+    name="stacking.fine_scale_sigma_px",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
+    description="Width of the Gaussian whose smooth image is taken away in the half-pattern test.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D50",
+)
+
 
 # Pixels closer than this to a flagged faint source are left out. A Gaussian of
 # sigma 3 px has fallen to 1% of its peak at 3 sigma (9 px); one more pixel
 # covers the flagged pixel's own width, so the clearance is 10 px. The aperture
 # rule uses 13 px for a 12 px ring, which this measurement does not have.
-SOURCE_CLEARANCE_PX = 3.0 * FINE_SCALE_SIGMA_PX + 1.0
+def source_clearance_px() -> float:
+    """Give how far a pixel must be from a flagged faint source.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return 3.0 * resolve(FINE_SCALE_SIGMA_PX).value + 1.0
+
 
 # The tiles the bootstrap resamples. 64 px is wider than 20 filter widths of a
 # hot pixel's correlation (3 px) so the tiles are close to independent, and
 # gives about 2,200 tiles on a 3008 x 3008 image, enough for a stable
 # bootstrap.
-TILE_PX = 64
+TILE_PX = TunedParameter(
+    name="stacking.tile_px",
+    default=64,
+    unit="pixels",
+    description="Side of the tiles the bootstrap resamples.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D50",
+)
 
 # Fewest tiles holding usable pixels for the errors to mean anything. With
 # fewer than 30 the bootstrap of the tile sums is too coarse.
-MINIMUM_TILES = 30
+MINIMUM_TILES = TunedParameter(
+    name="stacking.minimum_tiles",
+    default=30,
+    unit="tiles",
+    description="Fewest tiles holding usable pixels for the errors to mean anything.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D50",
+)
 
 # Fewest usable pixels. A covariance of fewer than 1e5 pixels has an error of
 # about 0.3 of the variance, from 1 / sqrt(n).
-MINIMUM_PIXELS = 100_000
+MINIMUM_PIXELS = TunedParameter(
+    name="stacking.minimum_pixels",
+    default=100_000,
+    unit="pixels",
+    description="Fewest usable pixels for the half-pattern test.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D50",
+)
 
 # The number of bootstrap resamples of the tiles. 400 give the error of a
 # standard deviation to about 3.5% (1 / sqrt(2 x 400)).
-BOOTSTRAP_COUNT = 400
+BOOTSTRAP_COUNT = TunedParameter(
+    name="stacking.half_pattern.bootstrap_count",
+    default=400,
+    unit="resamples",
+    description="Number of bootstrap resamples of the tiles.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D50",
+)
 BOOTSTRAP_SEED = 20261024
 
 # The lag, in pixels, at which the halves' correlation along and across the
@@ -144,12 +213,30 @@ BOOTSTRAP_SEED = 20261024
 # high-pass leaves negative side lobes within about two widths of a source),
 # and shorter than the pointing range along the drift or a smear cannot
 # reach it. 6 px is twice the filter width.
-WALKING_LAG_PX = 6.0
+WALKING_LAG_PX = TunedParameter(
+    name="stacking.walking_lag_px",
+    default=6.0,
+    unit="pixels",
+    description="Lag at which the halves' correlation along and across the drift is compared.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D50",
+)
 
 # The pointing range along the drift must be at least this many lags for the
 # comparison to be made: a smear of length L carries correlation out to a lag
 # of about L. At 2 the smear is twice the lag.
-MINIMUM_EXTENT_IN_LAGS = 2.0
+MINIMUM_EXTENT_IN_LAGS = TunedParameter(
+    name="stacking.minimum_extent_in_lags",
+    default=2.0,
+    unit="lags",
+    description="Fewest lags the pointing range along the drift must span.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D50",
+)
 
 # A shifted pixel counts only when all four pixels it is interpolated from are
 # in the mask. The mask is shifted as numbers 0 to 1 and a pixel needs this
@@ -278,7 +365,7 @@ class HalfPatternResult:
     along_error: float | None = None
     across_error: float | None = None
     excess_error: float | None = None
-    lag_px: float = WALKING_LAG_PX
+    lag_px: float = resolve(WALKING_LAG_PX).value
     walking_reason: str = ""
 
 
@@ -316,7 +403,7 @@ def _fine_scale(plane: np.ndarray, usable: np.ndarray) -> np.ndarray:
         The image minus its Gaussian smoothing, 32-bit.
     """
     filled = np.where(usable, plane, np.median(plane[usable])).astype(np.float32)
-    residual = filled - gaussian_filter(filled, FINE_SCALE_SIGMA_PX)
+    residual = filled - gaussian_filter(filled, resolve(FINE_SCALE_SIGMA_PX).value)
     return residual.astype(np.float32, copy=False)
 
 
@@ -336,10 +423,11 @@ def _tile_sums(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
         One float64 sum for each tile, flattened. The right and bottom
         remainders narrower than a tile are left out.
     """
-    rows = (values.shape[0] // TILE_PX) * TILE_PX
-    columns = (values.shape[1] // TILE_PX) * TILE_PX
+    tile_px = resolve(TILE_PX).value
+    rows = (values.shape[0] // tile_px) * tile_px
+    columns = (values.shape[1] // tile_px) * tile_px
     masked = np.where(mask[:rows, :columns], values[:rows, :columns], 0.0)
-    tiles = masked.reshape(rows // TILE_PX, TILE_PX, columns // TILE_PX, TILE_PX)
+    tiles = masked.reshape(rows // tile_px, tile_px, columns // tile_px, tile_px)
     return tiles.sum(axis=(1, 3), dtype=np.float64).ravel()
 
 
@@ -357,9 +445,10 @@ def _tile_counts(mask: np.ndarray) -> np.ndarray:
         One float64 count for each tile, flattened, laid out as `_tile_sums`
         lays out its sums. No array of ones is made.
     """
-    rows = (mask.shape[0] // TILE_PX) * TILE_PX
-    columns = (mask.shape[1] // TILE_PX) * TILE_PX
-    tiles = mask[:rows, :columns].reshape(rows // TILE_PX, TILE_PX, columns // TILE_PX, TILE_PX)
+    tile_px = resolve(TILE_PX).value
+    rows = (mask.shape[0] // tile_px) * tile_px
+    columns = (mask.shape[1] // tile_px) * tile_px
+    tiles = mask[:rows, :columns].reshape(rows // tile_px, tile_px, columns // tile_px, tile_px)
     return tiles.sum(axis=(1, 3), dtype=np.int64).ravel().astype(np.float64)
 
 
@@ -406,7 +495,7 @@ def _bootstrap_indices(tile_count: int) -> np.ndarray:
         drawn with replacement from a generator with a fixed seed.
     """
     generator = np.random.default_rng(BOOTSTRAP_SEED)
-    return generator.integers(0, tile_count, size=(BOOTSTRAP_COUNT, tile_count))
+    return generator.integers(0, tile_count, size=(resolve(BOOTSTRAP_COUNT).value, tile_count))
 
 
 def measure_half_pattern(
@@ -448,6 +537,11 @@ def measure_half_pattern(
         are missing, with the reason, when the drift axis or extent is
         unknown or the extent is shorter than `MINIMUM_EXTENT_IN_LAGS` lags.
     """
+    minimum_pixels = resolve(MINIMUM_PIXELS).value
+    minimum_tiles = resolve(MINIMUM_TILES).value
+    bootstrap_count = resolve(BOOTSTRAP_COUNT).value
+    walking_lag_px = resolve(WALKING_LAG_PX).value
+    minimum_extent_in_lags = resolve(MINIMUM_EXTENT_IN_LAGS).value
     if odd_plane.shape != even_plane.shape:
         return HalfPatternOutcome(None, "the two half stacks are on different pixel grids")
     if variance_factor is None or effective_count is None or None in shared_fractions:
@@ -464,15 +558,15 @@ def measure_half_pattern(
     detection[~usable] = 0.0
     distance = analyze_faint_sources(detection).distance
     del detection
-    margin = math.ceil(3.0 * FINE_SCALE_SIGMA_PX)
-    mask = binary_erosion(usable, iterations=margin) & (distance > SOURCE_CLEARANCE_PX)
+    margin = math.ceil(3.0 * resolve(FINE_SCALE_SIGMA_PX).value)
+    mask = binary_erosion(usable, iterations=margin) & (distance > source_clearance_px())
     del distance
     pixel_count = int(mask.sum())
-    if pixel_count < MINIMUM_PIXELS:
+    if pixel_count < minimum_pixels:
         return HalfPatternOutcome(
             None,
             f"only {pixel_count} pixels are left clear of sources and the edge; "
-            f"at least {MINIMUM_PIXELS} are needed",
+            f"at least {minimum_pixels} are needed",
         )
     odd = _fine_scale(odd_plane, usable)
     even = _fine_scale(even_plane, usable)
@@ -486,9 +580,9 @@ def measure_half_pattern(
     odd_square = _tile_sums(odd * odd, mask)
     even_square = _tile_sums(even * even, mask)
     used = count > 0
-    if int(used.sum()) < MINIMUM_TILES:
+    if int(used.sum()) < minimum_tiles:
         return HalfPatternOutcome(
-            None, f"only {int(used.sum())} tiles hold usable pixels; {MINIMUM_TILES} are needed"
+            None, f"only {int(used.sum())} tiles hold usable pixels; {minimum_tiles} are needed"
         )
     count, cross, odd_square, even_square = (array[used] for array in (count, cross, odd_square, even_square))
     shared_odd, shared_even = (float(value) for value in shared_fractions if value is not None)
@@ -537,12 +631,12 @@ def measure_half_pattern(
     if not (random_variance > 0.0 and terms.halves > 0.0):
         return HalfPatternOutcome(None, "the halves' difference has no variance")
     draws = _bootstrap_indices(count.size)
-    covariance_draws = np.empty(BOOTSTRAP_COUNT)
-    difference_draws = np.empty(BOOTSTRAP_COUNT)
-    correction_draws = np.empty(BOOTSTRAP_COUNT)
-    pattern_draws = np.empty(BOOTSTRAP_COUNT)
-    ratio_draws = np.empty(BOOTSTRAP_COUNT)
-    for index in range(BOOTSTRAP_COUNT):
+    covariance_draws = np.empty(bootstrap_count)
+    difference_draws = np.empty(bootstrap_count)
+    correction_draws = np.empty(bootstrap_count)
+    pattern_draws = np.empty(bootstrap_count)
+    ratio_draws = np.empty(bootstrap_count)
+    for index in range(bootstrap_count):
         draw = lag_zero_terms(draws[index])
         covariance_draws[index] = draw.covariance
         difference_draws[index] = draw.difference_variance
@@ -572,17 +666,17 @@ def measure_half_pattern(
     walking_reason = ""
     if drift_axis_deg is None or drift_extent_px is None:
         walking_reason = drift_reason or "the drift axis of the frames is unknown"
-    elif drift_extent_px < MINIMUM_EXTENT_IN_LAGS * WALKING_LAG_PX:
+    elif drift_extent_px < minimum_extent_in_lags * walking_lag_px:
         walking_reason = (
             f"the pointings cover {drift_extent_px:.1f} px along the drift, less than "
-            f"{MINIMUM_EXTENT_IN_LAGS:.0f} lags of {WALKING_LAG_PX:.0f} px, so a smear cannot reach the lag"
+            f"{minimum_extent_in_lags:.0f} lags of {walking_lag_px:.0f} px, so a smear cannot reach the lag"
         )
     if walking_reason:
         return HalfPatternOutcome(HalfPatternResult(**result_kwargs, walking_reason=walking_reason))
 
     axis = math.radians(float(drift_axis_deg))
-    along = (WALKING_LAG_PX * math.sin(axis), WALKING_LAG_PX * math.cos(axis))  # (row, column) lag
-    across = (WALKING_LAG_PX * math.cos(axis), -WALKING_LAG_PX * math.sin(axis))
+    along = (walking_lag_px * math.sin(axis), walking_lag_px * math.cos(axis))  # (row, column) lag
+    across = (walking_lag_px * math.cos(axis), -walking_lag_px * math.sin(axis))
     lagged_counts: list[np.ndarray] = []
     lagged_cross: list[np.ndarray] = []
     for lag in (along, across):
@@ -621,9 +715,9 @@ def measure_half_pattern(
         return values[0], values[1]
 
     along_value, across_value = correlations(everything)
-    along_draws = np.empty(BOOTSTRAP_COUNT)
-    across_draws = np.empty(BOOTSTRAP_COUNT)
-    for index in range(BOOTSTRAP_COUNT):
+    along_draws = np.empty(bootstrap_count)
+    across_draws = np.empty(bootstrap_count)
+    for index in range(bootstrap_count):
         along_draws[index], across_draws[index] = correlations(draws[index])
     excess_draws = along_draws - across_draws
     return HalfPatternOutcome(
@@ -704,8 +798,8 @@ def half_pattern_measurements(
         (result.excess, result.excess_error, walking, ""),
     )
     detail = (
-        f"{note} {result.pixel_count} pixels in {result.tile_count} tiles of {TILE_PX} px, "
-        f"Gaussian high-pass sigma {FINE_SCALE_SIGMA_PX:.0f} px, lag {result.lag_px:.0f} px."
+        f"{note} {result.pixel_count} pixels in {result.tile_count} tiles of {resolve(TILE_PX).value} px, "
+        f"Gaussian high-pass sigma {resolve(FINE_SCALE_SIGMA_PX).value:.0f} px, lag {result.lag_px:.0f} px."
     ).strip()
     return [
         build_measurement(

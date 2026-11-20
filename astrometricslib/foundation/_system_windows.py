@@ -8,6 +8,7 @@ import contextlib
 import os
 import shlex
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- stopping our own processes
+from typing import Any
 
 import psutil
 
@@ -78,3 +79,20 @@ def stop_process_tree(process: subprocess.Popen, grace_seconds: float, reap_time
         )
     with contextlib.suppress(OSError, subprocess.TimeoutExpired):
         process.wait(timeout=reap_timeout_seconds)
+
+
+def child_process_options() -> dict[str, Any]:
+    """Give the keyword arguments for starting a helper program.
+
+    Windows has no process groups of the Linux kind, and ``taskkill /T``
+    stops the tree (`stop_process_tree`). A helper that the backend starts
+    is stopped with the backend by the job object the backend joins at
+    start-up, so no option is needed here.
+
+    Returns
+    -------
+    options : `dict` [`str`, `object`]
+        Keyword arguments for `subprocess.Popen`; ``start_new_session`` is
+        accepted and ignored on Windows, as before.
+    """
+    return {"start_new_session": True}

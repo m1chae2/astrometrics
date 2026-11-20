@@ -24,6 +24,14 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
+from astrometricslib.parameters import (
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.capture_history import (
     collect_capture_baseline_values,
     collect_capture_frames,
@@ -50,10 +58,29 @@ from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURC
 
 logger = logging.getLogger(__name__)
 
-SESSION_WINDOW_MARGIN_SECONDS = 1800.0
+SESSION_WINDOW_MARGIN_SECONDS = TunedParameter(
+    name="wayfinding.session_window_margin_seconds",
+    default=1800.0,
+    unit="s beyond the session span",
+    description="How far outside a session's own time span a guide sample still counts.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="WAY-D126",
+    config_key=("Wayfinding.Planning", "session_window_margin_seconds"),
+)
 """How far outside a session's own time span a guide sample still counts."""
 
-_MAXIMUM_CADENCE_GAP_SECONDS = 60.0
+_MAXIMUM_CADENCE_GAP_SECONDS = TunedParameter(
+    name="wayfinding.maximum_cadence_gap_seconds",
+    default=factor_for(60.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
+    description="A gap between samples longer than this is a pause, not the guide cadence.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="WAY-D126",
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=60.0,
+)
 """A gap between samples longer than this is a pause, not the guide cadence."""
 
 _SAMPLE_READ_LIMIT = 200000
@@ -191,8 +218,8 @@ def _matching_windows_by_night(
         if context.equipment is None or context.equipment.equipment_fingerprint != equipment_fingerprint:
             continue
         windows_by_night.setdefault(context.session_id, []).append((
-            context.started_at - SESSION_WINDOW_MARGIN_SECONDS,
-            context.ended_at + SESSION_WINDOW_MARGIN_SECONDS,
+            context.started_at - resolve_parameter(SESSION_WINDOW_MARGIN_SECONDS).value,
+            context.ended_at + resolve_parameter(SESSION_WINDOW_MARGIN_SECONDS).value,
         ))
     return windows_by_night
 
@@ -287,7 +314,7 @@ def collect_night_baselines(
     nights: list[NightGuidingBaseline] = []
     for night, windows in sorted(windows_by_night.items()):
         samples = _night_samples(records, night, windows)
-        if len(samples) < MINIMUM_SAMPLES_PER_SESSION:
+        if len(samples) < resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value:
             continue
         snr = [sample["snr"] for sample in samples if sample.get("snr") is not None]
         _, ra_spread = robust_median_and_spread([sample["dra"] for sample in samples])
@@ -308,7 +335,9 @@ def collect_night_baselines(
                 star_mass=float(np.median(star_mass)) if star_mass else None,
                 rms=float(np.sqrt((ra_spread**2 + dec_spread**2) / 2.0)),
                 # A gap over a minute is a break between runs, not the cadence.
-                cadence_seconds=float(np.median(gaps[gaps < _MAXIMUM_CADENCE_GAP_SECONDS])),
+                cadence_seconds=float(
+                    np.median(gaps[gaps < resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value])
+                ),
                 lost_fraction=(sum(run.frames_lost for run in night_runs) / frames_total)
                 if frames_total
                 else None,
@@ -561,7 +590,9 @@ def assemble_performance_envelope(
         if excluded:
             capture_frames = [frame for frame in capture_frames if night_of(frame) not in excluded]
     minimum_exposure_seconds = (
-        None if guide_cadence is None else MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence
+        None
+        if guide_cadence is None
+        else resolve_parameter(MINIMUM_GUIDE_CYCLES_PER_EXPOSURE).value * guide_cadence
     )
     if minimum_exposure_seconds is not None:
         measured_image_quality = image_quality_from_frames(capture_frames, minimum_exposure_seconds)
@@ -594,7 +625,7 @@ def assemble_performance_envelope(
             baseline_values=values,
             guide_cadence_seconds=guide_cadence,
             blur_tolerance_fraction=(
-                DEFAULT_BLUR_TOLERANCE_FRACTION
+                resolve_parameter(DEFAULT_BLUR_TOLERANCE_FRACTION).value
                 if blur_tolerance_fraction is None
                 else blur_tolerance_fraction
             ),

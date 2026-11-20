@@ -5,7 +5,7 @@ description: House documentation conventions for the Astrometrics documentation.
 
 # Astrometrics Documentation Style
 
-> **Source of truth.** The full conventions (where content lives, status labels, document layouts, US spelling, terms, units, Markdown mechanics, and which test or linter enforces each rule) are in `documentation/Documentation_Conventions.md`. This skill summarizes them; when the two differ, the conventions page wins and this skill should be updated to match.
+> **Source of truth.** The full conventions (where content lives, status labels, document layouts, US spelling, terms, units, Markdown mechanics, and which test or linter enforces each rule) are in `.claude/skills/documentation-style/CONVENTIONS.md`. This skill summarizes them; when the two differ, the conventions page wins and this skill should be updated to match.
 
 Conventions for everything under `documentation/`. Modeled on the Siril, Astropy, photutils,
 and specutils documentation ecosystems, adapted to a markdown-in-repo setting.

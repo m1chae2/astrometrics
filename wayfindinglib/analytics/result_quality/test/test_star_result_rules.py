@@ -154,7 +154,7 @@ def test_an_ambiguous_subtype_warns_even_when_the_class_is_clear() -> None:
 def test_a_subtype_gap_at_the_limit_does_not_warn() -> None:
     """A gap equal to the limit, or a lone candidate, makes no warning."""
     at_limit = sr.judge_star_record(
-        STAR, _spectrum(rms=0.05, second=0.05 + sr.AMBIGUOUS_RMS_GAP_LIMIT, next_class=0.30), None
+        STAR, _spectrum(rms=0.05, second=0.05 + sr.AMBIGUOUS_RMS_GAP_LIMIT.default, next_class=0.30), None
     )
     assert sr.SPECTRAL_SUBTYPE_AMBIGUOUS not in _rules(at_limit)
 
@@ -323,5 +323,6 @@ def test_period_results_use_the_result_kind() -> None:
 
 def test_the_copied_match_limits_agree_with_the_spectroscopy_pipeline() -> None:
     """The rule table's copies equal the spectroscopy pipeline's limits."""
-    assert sr.POOR_MATCH_RMS_LIMIT == NO_GOOD_MATCH_RMS
-    assert sr.AMBIGUOUS_RMS_GAP_LIMIT == AMBIGUOUS_RMS_GAP
+    # The pipeline's limits are declared parameters; compare their defaults.
+    assert sr.POOR_MATCH_RMS_LIMIT.default == NO_GOOD_MATCH_RMS.default
+    assert sr.AMBIGUOUS_RMS_GAP_LIMIT.default == AMBIGUOUS_RMS_GAP.default

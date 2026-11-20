@@ -39,6 +39,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import AstrometricsError, ConfigurationError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import CaptureSetting, QualityMeasurement
 from wayfindinglib.analytics.capture_history import equipment_spellings, normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, baseline_key
@@ -66,7 +73,16 @@ metric) is ``m + 2.5 log10(flux in ADU per second)`` for a star of magnitude
 ``m``, so a star of magnitude ``m`` gives ``10**(0.4 * (zero_point - m))`` ADU
 per second. Gaia G is the band of the star catalog used for the count."""
 
-EXPOSURE_LADDER_SECONDS: tuple[float, ...] = (1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0)
+EXPOSURE_LADDER_SECONDS = TunedParameter(
+    name="wayfinding.centering_exposure.exposure_ladder_seconds",
+    default=(1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0),
+    unit="seconds",
+    description="The exposures the centering model tries, shortest first.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D122",
+)
 """The exposures tried, shortest first. The first is 1 s, the exposure
 centering used before this model and the shortest worth the settle and
 readout time. The steps grow by a factor of 1.5 to 2, which is 0.4 to 0.75
@@ -76,29 +92,74 @@ centering is unguided, and at an assumed drift of a few arcseconds over 30 s a
 star stays within a few pixels at 1.9 arcsec per pixel (the drift is not yet
 measured for this mount). Design estimate, register row WAY-D122."""
 
-TARGET_STAR_COUNT = 15
+TARGET_STAR_COUNT = TunedParameter(
+    name="wayfinding.target_star_count",
+    default=15,
+    unit="stars",
+    description="Detectable catalog stars the centering exposure should reach.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D122",
+)
 """Detectable catalog stars the exposure should reach. The local solver
 needs at least 10 detected sources (`MINIMUM_SOURCES_FOR_LOCAL_SOLVE`), and a
 detection list also holds hot pixels and merged pairs and misses stars the
 model counts, so 15 leaves a margin of half again. Design estimate, register
 row WAY-D122."""
 
-DETECTION_SIGNAL_TO_NOISE = 5.0
+DETECTION_SIGNAL_TO_NOISE = TunedParameter(
+    name="wayfinding.detection_signal_to_noise",
+    default=5.0,
+    unit="signal-to-noise ratio",
+    description="Signal-to-noise ratio at which the star detector finds a star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D122",
+)
 """Signal-to-noise ratio at which the star detector finds a star. It is the
 default ``threshold_sigma`` of `SourceDetector`, which the plate solve uses
 (`StarIdentifier` builds `SourceDetector()` with defaults)."""
 
-ZERO_POINT_LOOKBACK_DAYS = 180.0
+ZERO_POINT_LOOKBACK_DAYS = TunedParameter(
+    name="wayfinding.zero_point_lookback_days",
+    default=180.0,
+    unit="days",
+    description="How far back frames count when the zero point and star width are taken.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D122",
+)
 """How far back frames count. About one observing season: long enough to hold
 several nights of a part-time observatory, short enough that a cleaned mirror
 or a new filter shows. Design estimate, register row WAY-D122."""
 
-MAXIMUM_FRAMES_USED = 300
+MAXIMUM_FRAMES_USED = TunedParameter(
+    name="wayfinding.maximum_frames_used",
+    default=300,
+    unit="frames",
+    description="The most recent frames whose zero point and star width are medians.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D122",
+)
 """The most recent frames whose zero point and star width are medians. A night
 has 20 to 100 frames, so this is a few nights, and the median shrugs off the
 cloudy frames among them. Design estimate, register row WAY-D122."""
 
-MINIMUM_FRAMES_USED = 5
+MINIMUM_FRAMES_USED = TunedParameter(
+    name="wayfinding.minimum_frames_used",
+    default=5,
+    unit="frames",
+    description="Fewest frames that make the median trustworthy.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D122",
+)
 """Fewest frames that make the median trustworthy. With fewer, the fixed
 setting is used. Design estimate, register row WAY-D122."""
 
@@ -197,7 +258,7 @@ def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sens
 
 
 def limiting_magnitude(
-    exposure_seconds: float, sensor: SensorAndSky, signal_to_noise: float = DETECTION_SIGNAL_TO_NOISE
+    exposure_seconds: float, sensor: SensorAndSky, signal_to_noise: float | None = None
 ) -> float:
     """Give the faintest magnitude that reaches a signal-to-noise ratio.
 
@@ -212,13 +273,15 @@ def limiting_magnitude(
     sensor : `SensorAndSky`
         The camera, sky and star-width numbers.
     signal_to_noise : `float`, optional
-        The ratio a star must reach, `DETECTION_SIGNAL_TO_NOISE` by default.
+        The ratio a star must reach, `DETECTION_SIGNAL_TO_NOISE` when omitted.
 
     Returns
     -------
     magnitude : `float`
         Gaia G magnitude. It rises with exposure time.
     """
+    if signal_to_noise is None:
+        signal_to_noise = resolve_parameter(DETECTION_SIGNAL_TO_NOISE).value
     background = sensor.sky_rate_e_per_s_per_px * exposure_seconds + sensor.read_noise_e**2
     square = signal_to_noise**2
     electrons = (square + math.sqrt(square * square + 4.0 * square * sensor.noise_pixels * background)) / 2.0
@@ -231,8 +294,8 @@ def choose_exposure(
     magnitudes: Sequence[float],
     catalog_limit_magnitude: float | None = None,
     catalog_complete: bool = True,
-    target_star_count: int = TARGET_STAR_COUNT,
-    ladder: Sequence[float] = EXPOSURE_LADDER_SECONDS,
+    target_star_count: int | None = None,
+    ladder: Sequence[float] | None = None,
 ) -> tuple[float, list[CenteringExposureTrial], bool, bool]:
     """Pick the shortest exposure on the ladder that shows enough stars.
 
@@ -247,9 +310,10 @@ def choose_exposure(
     catalog_complete : `bool`, optional
         Whether the whole sky is downloaded.
     target_star_count : `int`, optional
-        Stars the exposure should reach.
+        Stars the exposure should reach. `TARGET_STAR_COUNT` when omitted.
     ladder : `Sequence` [`float`], optional
-        Candidate exposures, shortest first.
+        Candidate exposures, shortest first. `EXPOSURE_LADDER_SECONDS` when
+        omitted.
 
     Returns
     -------
@@ -263,6 +327,10 @@ def choose_exposure(
         Whether the catalog is partly downloaded or shallower than the
         chosen step's limiting magnitude, so the count is a lower bound.
     """
+    if target_star_count is None:
+        target_star_count = resolve_parameter(TARGET_STAR_COUNT).value
+    if ladder is None:
+        ladder = resolve_parameter(EXPOSURE_LADDER_SECONDS).value
     ordered = sorted(magnitudes)
     trials: list[CenteringExposureTrial] = []
     lower_bound = False
@@ -296,11 +364,12 @@ def _median_recent(rows: Sequence[QualityMeasurement]) -> tuple[float, int] | No
         The median of the newest `MAXIMUM_FRAMES_USED` values and how many
         values it used, or `None` when no row holds a number.
     """
+    maximum_frames_used = resolve_parameter(MAXIMUM_FRAMES_USED).value
     values = [
         row.value
         for row in sorted(rows, key=lambda item: item.measured_at, reverse=True)
         if row.value is not None and math.isfinite(row.value)
-    ][:MAXIMUM_FRAMES_USED]
+    ][:maximum_frames_used]
     if not values:
         return None
     return statistics.median(values), len(values)
@@ -397,7 +466,7 @@ def _library_rows(
     from datetime import UTC, datetime
 
     astrometrics = context.astrometrics
-    since = datetime.fromtimestamp(now - ZERO_POINT_LOOKBACK_DAYS * 86400.0, UTC)
+    since = datetime.fromtimestamp(now - resolve_parameter(ZERO_POINT_LOOKBACK_DAYS).value * 86400.0, UTC)
     settings = astrometrics.quality.capture_settings()
     camera_names = equipment_spellings(astrometrics, equipment.camera_name)
     telescope_name = normalize_name(equipment.telescope_name)
@@ -481,10 +550,11 @@ def _sensor_numbers(
     _MissingInputError
         If a number is missing.
     """
+    minimum_frames_used = resolve_parameter(MINIMUM_FRAMES_USED).value
     zero_point = _median_recent(zero_point_rows)
-    if zero_point is None or zero_point[1] < MINIMUM_FRAMES_USED:
+    if zero_point is None or zero_point[1] < minimum_frames_used:
         raise _MissingInputError(
-            f"fewer than {MINIMUM_FRAMES_USED} recent frames have a Gaia G zero point for this equipment"
+            f"fewer than {minimum_frames_used} recent frames have a Gaia G zero point for this equipment"
         )
     width = _median_recent(width_rows)
     if width is None:
@@ -545,7 +615,7 @@ def _fallback(context: ControlContext, reason: str) -> CenteringExposure:
         exposure_seconds=exposure,
         source="fallback",
         reason=f"Used the fixed {exposure:g} s setting (alignment_exposure_seconds) because {reason}.",
-        target_star_count=TARGET_STAR_COUNT,
+        target_star_count=resolve_parameter(TARGET_STAR_COUNT).value,
     )
 
 
@@ -556,7 +626,7 @@ def _gather_inputs(
     filter_name: str | None,
     find_stars: Callable[..., list[tuple[int, float, float, float]] | None],
     catalog_status: Callable[[Any], dict[str, Any]],
-    deepest_exposure: float = EXPOSURE_LADDER_SECONDS[-1],
+    deepest_exposure: float | None = None,
 ) -> tuple[SensorAndSky, dict[str, Any], list[tuple[int, float, float, float]], dict[str, Any]]:
     """Read every input of the calculation.
 
@@ -576,7 +646,8 @@ def _gather_inputs(
         Reads how much of the star catalog is installed.
     deepest_exposure : `float`, optional
         The longest exposure that will be asked about, in seconds. Stars are
-        read down to its limiting magnitude.
+        read down to its limiting magnitude. The last step of
+        `EXPOSURE_LADDER_SECONDS` when omitted.
 
     Returns
     -------
@@ -589,6 +660,8 @@ def _gather_inputs(
     _MissingInputError
         If an input is missing; the message says which.
     """
+    if deepest_exposure is None:
+        deepest_exposure = resolve_parameter(EXPOSURE_LADDER_SECONDS).value[-1]
     equipment = _active_equipment(context)
     setting, zero_point_rows, width_rows = _library_rows(context, equipment, now, filter_name)
     sensor, facts = _sensor_numbers(context, equipment, setting, zero_point_rows, width_rows, position, now)
@@ -707,6 +780,7 @@ def choose_centering_exposure(
         the numbers used. A missing input never raises; it gives the
         fallback.
     """
+    target_star_count = resolve_parameter(TARGET_STAR_COUNT).value
     from wayfindinglib.drivers.catalog import deep_star_store
 
     now = time.time() if epoch_seconds is None else epoch_seconds
@@ -734,11 +808,11 @@ def choose_centering_exposure(
     last = trials[-1]
     reason = (
         f"{exposure:g} s is the shortest exposure expected to show {last.expected_star_count} "
-        f"catalog stars (target {TARGET_STAR_COUNT}), detectable down to "
+        f"catalog stars (target {target_star_count}), detectable down to "
         f"Gaia G {last.limiting_magnitude:.1f}."
         if reaches
         else f"Even {exposure:g} s is expected to show only {last.expected_star_count} catalog stars "
-        f"(target {TARGET_STAR_COUNT}), so the longest exposure is used and the solve may fail."
+        f"(target {target_star_count}), so the longest exposure is used and the solve may fail."
     )
     if lower_bound:
         reason += (
@@ -749,7 +823,7 @@ def choose_centering_exposure(
         exposure_seconds=exposure,
         source="computed",
         reason=reason,
-        target_star_count=TARGET_STAR_COUNT,
+        target_star_count=target_star_count,
         limiting_magnitude=last.limiting_magnitude,
         expected_star_count=last.expected_star_count,
         reaches_target=reaches,

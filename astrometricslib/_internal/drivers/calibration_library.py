@@ -34,24 +34,16 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity, record_name_for_camera
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.camera_setting_text import UNBINNED_TEXT, canonical_binning_setting
 
 logger = logging.getLogger(__name__)
-
-
-# Standard-system transformation coefficients derived for ZWO
-# ASI533MM Pro with Baader UBVR Bessel filter set (Antonov 2026,
-# JAAVSO Vol. 54).
-BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS = {
-    "T_bv": {"value": 1.095, "error": 0.009},
-    "T_b_bv": {"value": 0.080, "error": 0.012},
-    "T_br": {"value": 1.144, "error": 0.013},
-    "T_b_br": {"value": 0.050, "error": 0.006},
-    "T_v_bv": {"value": -0.008, "error": 0.015},
-    "T_vr": {"value": 1.255, "error": 0.033},
-    "T_v_vr": {"value": -0.012, "error": 0.025},
-    "T_r_vr": {"value": -0.221, "error": 0.030},
-}
 
 
 # How many degrees C a dark's capture temperature may differ from the light
@@ -66,7 +58,16 @@ BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS = {
 # between, while its light frames drifted from -2.9C to -10.7C, and Siril
 # reported 57-64% negative pixels after dark subtraction against the
 # resulting mixed-temperature master.
-DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = 3.0
+DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = TunedParameter(
+    name="internal.default_dark_temperature_tolerance_c",
+    default=3.0,
+    unit="deg C",
+    description="Largest sensor temperature difference at which a dark frame still matches.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-06",
+)
 
 # The key in `ImageProcessing.last_run_diagnostics` that holds the blocking
 # calibration match flags, one sentence each. A flag here means a calibration
@@ -226,9 +227,7 @@ def header_temperature_c(header: Any) -> float | None:
     return None
 
 
-def temperature_slot_c(
-    temperature_c: float | None, tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
-) -> float | None:
+def temperature_slot_c(temperature_c: float | None, tolerance_c: float | None = None) -> float | None:
     """Round a sensor temperature to the middle of its temperature slot.
 
     Slots are `tolerance_c` wide, so darks whose temperatures round to the
@@ -243,12 +242,15 @@ def temperature_slot_c(
         The frame's sensor temperature in degrees C.
     tolerance_c : `float`, optional
         The slot width in degrees C. Zero or less rounds to 0.1 C instead.
+        Defaults to `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
 
     Returns
     -------
     slot_c : `float` or `None`
         The slot's middle, or `None` if the temperature is unknown.
     """
+    if tolerance_c is None:
+        tolerance_c = resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     if temperature_c is None or not math.isfinite(temperature_c):
         return None
     if tolerance_c <= 0:
@@ -261,7 +263,7 @@ def calibration_setting_key(
     offset: Any = None,
     binning: Any = None,
     temperature_c: float | None = None,
-    temperature_tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    temperature_tolerance_c: float | None = None,
 ) -> str:
     """Build the library key for a calibration frame's camera settings.
 
@@ -288,7 +290,8 @@ def calibration_setting_key(
         `temperature_tolerance_c` wide (see `temperature_slot_c`). Leave it
         out for bias and flat frames and for darks with no temperature.
     temperature_tolerance_c : `float`, optional
-        The slot width in degrees C.
+        The slot width in degrees C. Defaults to
+        `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
 
     Returns
     -------
@@ -297,6 +300,8 @@ def calibration_setting_key(
         a nonzero number, ``@bin=<binning>`` when the binning is not 1x1, and
         ``@temp=<slot>`` when a temperature is given.
     """
+    if temperature_tolerance_c is None:
+        temperature_tolerance_c = resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     key = str(gain)
     offset_value = _as_float(offset)
     # A missing or zero offset adds nothing to the key.
@@ -714,7 +719,7 @@ def _read_dark_temperature(path: str) -> float | None:
 def dark_temperature_flag(
     light_temperature_c: float,
     dark_paths: list[str],
-    tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    tolerance_c: float | None = None,
     light_label: str = _DEFAULT_LIGHT_LABEL,
 ) -> str | None:
     """Say whether a dark master is too far from the lights' temperature.
@@ -732,7 +737,8 @@ def dark_temperature_flag(
     dark_paths : `list` [`str`]
         The dark frames that make the master.
     tolerance_c : `float`, optional
-        How many degrees C the master may differ from the lights.
+        How many degrees C the master may differ from the lights. Defaults to
+        `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
     light_label : `str`, optional
         How the sentence names the lights.
 
@@ -744,6 +750,8 @@ def dark_temperature_flag(
         `None` when it is within the tolerance, or when no dark records a
         temperature (there is nothing to judge).
     """
+    if tolerance_c is None:
+        tolerance_c = resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     temperatures = [t for t in map(_read_dark_temperature, dark_paths) if t is not None]
     if not temperatures:
         return None
@@ -1212,7 +1220,7 @@ class CalibrationLibrary(BaseModel):
         offset: Any | None = None,
         binning: Any | None = None,
         temperature_c: float | None = None,
-        temperature_tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        temperature_tolerance_c: float | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
     ) -> CalibrationSelection:
         """Choose the dark frames for a batch of lights, and how well they fit.
@@ -1261,7 +1269,8 @@ class CalibrationLibrary(BaseModel):
             with a soft flag.
         temperature_tolerance_c : `float`, optional
             How many degrees C the dark master may differ from the lights
-            before it is flagged.
+            before it is flagged. Defaults to
+            `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
         light_label : `str`, optional
             How the flag sentences name the lights.
 
@@ -1270,6 +1279,8 @@ class CalibrationLibrary(BaseModel):
         selection : `CalibrationSelection`
             The dark file paths, with the soft and blocking flag sentences.
         """
+        if temperature_tolerance_c is None:
+            temperature_tolerance_c = resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
         return self._select_dark_frames(
             camera,
             exposure,
@@ -1423,7 +1434,7 @@ class CalibrationLibrary(BaseModel):
             offset,
             binning,
             temperature_c,
-            DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
             _DEFAULT_LIGHT_LABEL,
             judge_temperature=temperature_c is not None,
         ).frames
@@ -1940,7 +1951,7 @@ def flat_filter_names(filter_type: Any) -> list[str]:
 def is_dark_calibration_temperature_compatible(
     light_temperature_c: float | None,
     master_temperature_c: float | None,
-    temperature_tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    temperature_tolerance_c: float | None = None,
 ) -> bool:
     """Check if a dark master's capture temperature suits the light frames.
 
@@ -1963,7 +1974,7 @@ def is_dark_calibration_temperature_compatible(
         never recorded.
     temperature_tolerance_c : `float`, optional
         How many degrees C apart they may be before this reports
-        incompatible.
+        incompatible. Defaults to `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
 
     Returns
     -------
@@ -1971,6 +1982,8 @@ def is_dark_calibration_temperature_compatible(
         True if either temperature is unknown (nothing to judge) or
         they are within tolerance of each other.
     """
+    if temperature_tolerance_c is None:
+        temperature_tolerance_c = resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     if light_temperature_c is None or master_temperature_c is None:
         return True
     return abs(light_temperature_c - master_temperature_c) <= temperature_tolerance_c

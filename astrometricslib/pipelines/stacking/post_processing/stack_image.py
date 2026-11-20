@@ -29,6 +29,17 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from photutils.aperture import CircularAnnulus, CircularAperture
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib.foundation.parameter_context import record_basis
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 
 __all__ = [
     "APERTURE_RADIUS_PX",
@@ -49,17 +60,78 @@ __all__ = [
 # The aperture and sky ring are the defaults of `measure_aperture_photometry`
 # (the photometry pipeline's star aperture), so the noise is the noise of a
 # faint star's brightness measured the way the pipeline measures it.
-APERTURE_RADIUS_PX = 4.0
-RING_INNER_PX = 7.0
-RING_OUTER_PX = 12.0
+# On the reference setup this stands for 4.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+APERTURE_RADIUS_PX = TunedParameter(
+    name="stacking.aperture_radius_px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
+    unit="× star width",
+    description="Radius of the star aperture used to measure the noise.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-36",
+)
+# On the reference setup this stands for 7.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+RING_INNER_PX = TunedParameter(
+    name="stacking.ring_inner_px",
+    default=factor_for(7.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=7.0,
+    unit="× star width",
+    description="Inner radius of the sky ring.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D23",
+)
+# On the reference setup this stands for 12.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+RING_OUTER_PX = TunedParameter(
+    name="stacking.ring_outer_px",
+    default=factor_for(12.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=12.0,
+    unit="× star width",
+    description="Outer radius of the sky ring.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D23",
+)
 
 # A ring must be this full of pixels (not off the stack, not empty edge).
-MINIMUM_RING_FILL = 0.9
+MINIMUM_RING_FILL = TunedParameter(
+    name="stacking.minimum_ring_fill",
+    default=0.9,
+    unit="fraction",
+    description="Least share of a sky ring that must hold usable pixels.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D23",
+)
 
 # A star is called saturated in the registration reference frame when its
 # peak within this many pixels of its position reaches the camera's saturation
 # level.
-SATURATION_PEAK_HALF_WINDOW_PX = 3
+# On the reference setup this stands for 3 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+SATURATION_PEAK_HALF_WINDOW_PX = TunedParameter(
+    name="stacking.saturation_peak_half_window_px",
+    default=factor_for(3, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3,
+    unit="× star width",
+    description="Half width of the window in which a star's peak is checked for saturation.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D60",
+)
 
 # A robust standard deviation from the median absolute deviation (MAD) of a
 # bell curve: sigma = 1.4826 MAD.
@@ -148,7 +220,7 @@ class SaturationCheck:
         """
         frame_row = round(row) + self.crop_offset[1]
         frame_column = round(column) + self.crop_offset[0]
-        half = SATURATION_PEAK_HALF_WINDOW_PX
+        half = resolve(SATURATION_PEAK_HALF_WINDOW_PX).value
         height, width = self.frame_plane.shape
         if not (half <= frame_row < height - half and half <= frame_column < width - half):
             return None
@@ -179,9 +251,9 @@ def signed_aperture_sum(
     plane: np.ndarray,
     x: float,
     y: float,
-    radius: float = APERTURE_RADIUS_PX,
-    ring_inner: float = RING_INNER_PX,
-    ring_outer: float = RING_OUTER_PX,
+    radius: float | None = None,
+    ring_inner: float | None = None,
+    ring_outer: float | None = None,
 ) -> float | None:
     """Sum the light in one circle after subtracting the sky from its ring.
 
@@ -200,6 +272,7 @@ def signed_aperture_sum(
         The circle's radius in pixels. The noise aperture's by default.
     ring_inner, ring_outer : `float`, optional
         The sky ring's inner and outer radius in pixels.
+        If `None`, the values of RING_INNER_PX and RING_OUTER_PX are used.
 
     Returns
     -------
@@ -209,6 +282,12 @@ def signed_aperture_sum(
         exactly-zero pixels (the empty edge of a stack, or the pixels of a
         difference image that one of its two stacks does not cover).
     """
+    if radius is None:
+        radius = resolve(APERTURE_RADIUS_PX).value
+    if ring_inner is None:
+        ring_inner = resolve(RING_INNER_PX).value
+    if ring_outer is None:
+        ring_outer = resolve(RING_OUTER_PX).value
     height, width = plane.shape
     reach = ring_outer + 1.0
     if x < reach or y < reach or x > width - 1 - reach or y > height - 1 - reach:
@@ -217,7 +296,7 @@ def signed_aperture_sum(
     annulus = CircularAnnulus((x, y), r_in=ring_inner, r_out=ring_outer)
     ring_values = annulus.to_mask(method="center").get_values(plane)
     expected_ring_pixels = math.pi * (ring_outer**2 - ring_inner**2)
-    if ring_values.size < MINIMUM_RING_FILL * expected_ring_pixels:
+    if ring_values.size < resolve(MINIMUM_RING_FILL).value * expected_ring_pixels:
         return None
     if not np.all(np.isfinite(ring_values)) or np.any(ring_values == 0):
         return None
@@ -312,7 +391,9 @@ def pixel_scale_arcsec(wcs: WCS) -> float:
     scale : `float`
         Arcseconds per pixel.
     """
-    return float(np.mean(proj_plane_pixel_scales(wcs)) * 3600.0)
+    scale = float(np.mean(proj_plane_pixel_scales(wcs)) * 3600.0)
+    record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, scale)
+    return scale
 
 
 def pixels_to_sky(wcs: WCS, pixels: np.ndarray) -> np.ndarray:

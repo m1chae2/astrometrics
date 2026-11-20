@@ -5,7 +5,7 @@
 # Runs Vale (prose: spelling, terms, units, status labels, voice) and
 # markdownlint-cli2 (Markdown mechanics) over the files listed in
 # .markdownlint-cli2.jsonc and the same set for Vale. The rules are explained
-# in documentation/Documentation_Conventions.md.
+# in .claude/skills/documentation-style/CONVENTIONS.md.
 #
 # Usage: build/documentation/lint_docs.sh [--fix]
 #   --fix   let markdownlint repair what it can (list markers, blank lines).

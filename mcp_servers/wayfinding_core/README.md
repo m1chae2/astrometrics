@@ -10,7 +10,7 @@ This folder exposes the Wayfinder interface (observatory control, planning, exec
 
 ## Which tools the server offers
 
-When the server starts, it removes every tool that the manifest does not allow for the chosen profile. The profile comes from the `ASTROMETRICS_MCP_PROFILE` environment variable. The default is `investigator`, which offers tools that look things up, calculate or measure, plus one write: bringing a target's new frames from the telescope computer into the library (class `ingest`, tool `observatory_remote_sync_frames`), which adds files and records and never deletes. It offers no tool that commands a device, changes settings, or runs code. The `developer` profile also offers the tools that run the project's tests and builds.
+When the server starts, it removes every tool that the manifest does not allow for the profile. There is one profile, `investigator`, and it offers tools that look things up, calculate or measure, plus one write: bringing a target's new frames from the telescope computer into the library (class `ingest`, tool `observatory_remote_sync_frames`), which adds files and records and never deletes. It offers no tool that commands a device, changes settings, or runs code. This server has no tool of class `develop` or `author`.
 
 The rules fail closed. A tool that is missing from the manifest is not offered, so a new public method stays hidden until someone reviews it. A missing manifest withholds every tool. A tool can also carry an `interim_block`, which hides a read-only tool until a known problem is fixed.
 

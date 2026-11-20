@@ -51,6 +51,14 @@ interface Props {
   previewBlob?: Blob | null;
   /** Whether this viewer keeps pictures decoded ahead of time. */
   acceptPrefetch?: boolean;
+  /** True while the Detections overlay is on; see `FitsRenderer`. */
+  showDetections?: boolean;
+  /** Finds the file path of the image on screen, for the star profile; see `FitsRenderer`. */
+  resolveMeasurePath?: () => Promise<string | null>;
+  /** What the star profile panel says when the image holds no pixel values; see `FitsRenderer`. */
+  noPixelDataMessage?: string;
+  /** A sentence about the picture shown in the star profile panel; see `FitsRenderer`. */
+  starProfilePictureNote?: string;
 }
 
 /**
@@ -74,7 +82,11 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   onStarClick,
   selectedStarId,
   previewBlob,
-  acceptPrefetch
+  acceptPrefetch,
+  showDetections,
+  resolveMeasurePath,
+  noPixelDataMessage,
+  starProfilePictureNote
 }, ref) => {
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
   if (imageUrl || imageBlob || previewBlob) {
@@ -98,6 +110,10 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         selectedStarId={selectedStarId}
         previewBlob={previewBlob ?? null}
         acceptPrefetch={acceptPrefetch}
+        showDetections={showDetections}
+        resolveMeasurePath={resolveMeasurePath}
+        noPixelDataMessage={noPixelDataMessage}
+        starProfilePictureNote={starProfilePictureNote}
       />
     );
   }

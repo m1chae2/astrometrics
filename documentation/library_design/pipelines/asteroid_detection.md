@@ -20,6 +20,8 @@ The result is a list of moving objects, each matched to a known body or marked a
 
 **Statement of need.** Asteroids and comets move against the stars, so they show up as point sources (star-like dots) that shift from frame to frame. The pipeline finds those sources, links them into straight-line tracks and asks the IMCCE SkyBoT service (an online list of where every known solar-system body is at a given time) which known bodies were there. A confirmed mover with no match is a lead for a person to check.
 
+**Experimental.** This search is experimental. The app does not show its results, and it runs only when a person asks for it. Its false-positive rate on real data (how often it confirms a mover that is not real) is not measured, so a person should check every result.
+
 The diagram shows one run. The left branch prepares the reference stars; the right branch prepares each frame.
 
 ```mermaid

@@ -20,6 +20,14 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
+
 __all__ = [
     "GUIDE_RATE_ARCSEC_PER_S",
     "PULSE_MERGE_WINDOW_SECONDS",
@@ -30,19 +38,37 @@ __all__ = [
     "signed_pulses_ms",
 ]
 
-GUIDE_RATE_ARCSEC_PER_S = 7.52
+GUIDE_RATE_ARCSEC_PER_S = TunedParameter(
+    name="wayfinding.guide_rate_arcsec_per_s",
+    default=7.52,
+    unit="arcsec/s",
+    description="Sky motion during a guide pulse at half the sidereal rate, in arcsec/s.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D128",
+)
 """Sky motion during a guide pulse at half the sidereal rate, in arcsec/s.
 
 The sidereal rate is about 15.04 arcseconds per second; most mounts guide
 at half of it."""
 
-PULSE_MERGE_WINDOW_SECONDS = 0.8
+PULSE_MERGE_WINDOW_SECONDS = TunedParameter(
+    name="wayfinding.pulse_merge_window_seconds",
+    default=0.8,
+    unit="s",
+    description="Pulses closer together than this belong to the same correction.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D128",
+)
 """Pulses closer together than this belong to the same correction."""
 
 _DIRECTION_KEYS = ("pulse_n", "pulse_s", "pulse_w", "pulse_e")
 
 
-def pulse_ms_to_arcsec(duration_ms: float, guide_rate_arcsec_per_s: float = GUIDE_RATE_ARCSEC_PER_S) -> float:
+def pulse_ms_to_arcsec(duration_ms: float, guide_rate_arcsec_per_s: float | None = None) -> float:
     """Return the sky motion a guide pulse causes.
 
     Parameters
@@ -51,18 +77,19 @@ def pulse_ms_to_arcsec(duration_ms: float, guide_rate_arcsec_per_s: float = GUID
         Signed pulse length in milliseconds.
     guide_rate_arcsec_per_s : `float`, optional
         The mount's guide rate.
+        When omitted, `GUIDE_RATE_ARCSEC_PER_S` is used.
 
     Returns
     -------
     motion_arcsec : `float`
         The motion in arcseconds, with the sign of `duration_ms`.
     """
+    if guide_rate_arcsec_per_s is None:
+        guide_rate_arcsec_per_s = resolve_parameter(GUIDE_RATE_ARCSEC_PER_S).value
     return duration_ms / 1000.0 * guide_rate_arcsec_per_s
 
 
-def arcsec_to_pulse_ms(
-    motion_arcsec: float, guide_rate_arcsec_per_s: float = GUIDE_RATE_ARCSEC_PER_S
-) -> float:
+def arcsec_to_pulse_ms(motion_arcsec: float, guide_rate_arcsec_per_s: float | None = None) -> float:
     """Return the pulse length that moves the mount by `motion_arcsec`.
 
     Parameters
@@ -71,17 +98,20 @@ def arcsec_to_pulse_ms(
         The wanted motion in arcseconds.
     guide_rate_arcsec_per_s : `float`, optional
         The mount's guide rate.
+        When omitted, `GUIDE_RATE_ARCSEC_PER_S` is used.
 
     Returns
     -------
     duration_ms : `float`
         The pulse length in milliseconds, with the sign of `motion_arcsec`.
     """
+    if guide_rate_arcsec_per_s is None:
+        guide_rate_arcsec_per_s = resolve_parameter(GUIDE_RATE_ARCSEC_PER_S).value
     return motion_arcsec / guide_rate_arcsec_per_s * 1000.0
 
 
 def merge_close_pulses(
-    pulses: Iterable[dict[str, Any]], window_seconds: float = PULSE_MERGE_WINDOW_SECONDS
+    pulses: Iterable[dict[str, Any]], window_seconds: float | None = None
 ) -> list[dict[str, Any]]:
     """Join pulses sent within `window_seconds` of each other into one.
 
@@ -97,6 +127,7 @@ def merge_close_pulses(
         Pulse records in time order.
     window_seconds : `float`, optional
         How close two records must be to join.
+        When omitted, `PULSE_MERGE_WINDOW_SECONDS` is used.
 
     Returns
     -------
@@ -104,6 +135,8 @@ def merge_close_pulses(
         One record per correction. A later pulse on the same direction
         replaces the earlier length.
     """
+    if window_seconds is None:
+        window_seconds = resolve_parameter(PULSE_MERGE_WINDOW_SECONDS).value
     merged: list[dict[str, Any]] = []
     for pulse in pulses:
         if merged and abs(pulse.get("time", 0.0) - merged[-1].get("time", 0.0)) < window_seconds:

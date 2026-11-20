@@ -34,6 +34,8 @@ import astropy.units as u
 from astropy.table import Table
 
 from astrometricslib.foundation.offline import require_online
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.known_variability import (
     NO_GAIA_MATCH,
     NOT_IN_VSX,
@@ -41,18 +43,47 @@ from astrometricslib.models.known_variability import (
     VSX_LISTED_WITHOUT_TYPE,
     VSX_UNCERTAIN_CONSTANT_TYPE,
 )
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 
 VSX_CATALOG = "vizier:B/vsx/vsx"
 GAIA_CATALOG = "vizier:I/355/gaiadr3"
 
 # How far a catalog entry may lie from the star, in arcseconds.
-MATCH_RADIUS_ARCSEC = 3.0
+# Stands for the sky distance for the cross-match with the variable-star
+# catalog. It follows the plate scale: the value is a factor times the plate
+# scale the run measured (3.0 on the reference setup).
+MATCH_RADIUS_ARCSEC = TunedParameter(
+    name="shared.match_radius_arcsec",
+    default=factor_for(3.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="× plate scale",
+    description="Radius within which a star is matched to a variable star catalog entry.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=3.0,
+    register_entry="AST-12",
+)
 
 # The largest allowed difference between a star's own magnitude and the G
 # magnitude of the Gaia source matched to it. A colour term can make G
 # differ from V by one magnitude or a little more for very red stars, so a
 # difference past 2 magnitudes is a different object.
-MAXIMUM_MAGNITUDE_DIFFERENCE = 2.0
+MAXIMUM_MAGNITUDE_DIFFERENCE = TunedParameter(
+    name="shared.maximum_magnitude_difference",
+    default=2.0,
+    unit="mag",
+    description="Largest magnitude difference at which a variable star catalog match is accepted.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-12",
+)
 
 # The VSX type text that means "no type given".
 _UNTYPED_VSX_TYPES = ("", "*", "--")
@@ -111,7 +142,7 @@ def run_crossmatch(xmatch_query: XMatchQuery, positions: Table, catalog: str) ->
     return xmatch_query(
         cat1=positions,
         cat2=catalog,
-        max_distance=MATCH_RADIUS_ARCSEC * u.arcsec,
+        max_distance=resolve(MATCH_RADIUS_ARCSEC).value * u.arcsec,
         colRA1="ra",
         colDec1="dec",
     )
@@ -361,7 +392,7 @@ def gaia_flags_from_matches(
         if (
             star_magnitude is not None
             and g_magnitude is not None
-            and abs(g_magnitude - star_magnitude) > MAXIMUM_MAGNITUDE_DIFFERENCE
+            and abs(g_magnitude - star_magnitude) > resolve(MAXIMUM_MAGNITUDE_DIFFERENCE).value
         ):
             result[star_id] = NO_GAIA_MATCH
         else:

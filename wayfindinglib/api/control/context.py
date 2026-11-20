@@ -65,9 +65,6 @@ __all__ = ["ControlChild", "ControlContext", "require_text"]
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LATITUDE_DEG = 45.0
-"""Latitude used by the pointing fits when no observer location is known."""
-
 
 class ControlContext:
     """Configuration, storage and drivers shared by `control` and its children.
@@ -854,7 +851,11 @@ class ControlContext:
         return hardware_operations.observer_location(self)
 
     def observer_latitude_deg(self) -> float:
-        """Return the observer latitude, or 45 degrees when it is unknown.
+        """Return the observer latitude, or the fallback site's if unknown.
+
+        The fallback is `site_profile_reader.FALLBACK_SITE`, the same stand-in
+        site that visibility and rise and set times use, so a pointing fit and
+        a plan never assume two different places.
 
         Returns
         -------
@@ -862,7 +863,9 @@ class ControlContext:
             Latitude in degrees.
         """
         location = self.observer_location()
-        return location["latitude"] if location else DEFAULT_LATITUDE_DEG
+        from wayfindinglib.data_access.site_profile_reader import FALLBACK_SITE
+
+        return location["latitude"] if location else FALLBACK_SITE["latitude"]
 
     def ekos_log_directory(self) -> str:
         """Return the local folder that holds downloaded Ekos logs.

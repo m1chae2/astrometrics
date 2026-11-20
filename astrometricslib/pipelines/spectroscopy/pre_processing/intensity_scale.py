@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
+from astrometricslib.foundation.parameters import resolve
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def counts_per_second_factor(header: Any) -> float | None:
     if exposure_seconds <= 0:
         return None
     if bits_per_pixel == FLOAT_STACK_BITPIX and stack_count > 0:
-        return FULL_SCALE_COUNTS / (exposure_seconds / stack_count)
+        return resolve(FULL_SCALE_COUNTS).value / (exposure_seconds / stack_count)
     if bits_per_pixel > 0 and stack_count == 0:
         return 1.0 / exposure_seconds
     return None

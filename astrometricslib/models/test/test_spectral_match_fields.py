@@ -100,8 +100,8 @@ def test_with_one_class_compared_there_is_no_class_gap() -> None:
 
 def test_a_gap_is_ambiguous_only_below_the_single_ambiguity_limit() -> None:
     """A gap at `AMBIGUOUS_RMS_GAP` is not ambiguous; just under it is."""
-    assert is_rms_gap_ambiguous(AMBIGUOUS_RMS_GAP) is False
-    assert is_rms_gap_ambiguous(AMBIGUOUS_RMS_GAP * 0.99) is True
+    assert is_rms_gap_ambiguous(AMBIGUOUS_RMS_GAP.default) is False
+    assert is_rms_gap_ambiguous(AMBIGUOUS_RMS_GAP.default * 0.99) is True
     assert is_rms_gap_ambiguous(0.0) is True
 
 
@@ -115,7 +115,7 @@ def test_types_differ_on_ladder_needs_both_types_on_the_ladder() -> None:
 
 def test_the_catalog_limit_is_the_measured_twenty_steps() -> None:
     """F8 matched as K0 (12 steps) agrees; 21 steps apart differs."""
-    assert DIFFERS_FROM_CATALOG_SUBTYPES == pytest.approx(20.0)
+    assert DIFFERS_FROM_CATALOG_SUBTYPES.default == pytest.approx(20.0)
     assert types_differ_on_ladder("K0V", "F8V") is False
     assert types_differ_on_ladder("F0V", "B0V") is False  # exactly 20 steps
     assert types_differ_on_ladder("F1V", "B0V") is True

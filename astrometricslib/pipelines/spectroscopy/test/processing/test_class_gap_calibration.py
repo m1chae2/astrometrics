@@ -254,7 +254,7 @@ def _stored_table(path: Path, **overrides: object) -> None:
     record = {
         "camera": CAMERA_NAME,
         "definition_version": CLASS_GAP_DEFINITION_VERSION,
-        "ambiguous_rms_gap": AMBIGUOUS_RMS_GAP,
+        "ambiguous_rms_gap": AMBIGUOUS_RMS_GAP.default,
         "snr_estimator": CLASS_GAP_SNR_ESTIMATOR,
         "rows": rows,
         "class_reachable_snr": 5.0,
@@ -298,7 +298,7 @@ def test_with_no_stored_table_the_lookup_gives_none_and_a_reason(tmp_path: Path)
     [
         ({"camera": "Nikon D5300"}, "made for Nikon D5300"),
         ({"definition_version": CLASS_GAP_DEFINITION_VERSION + 1}, "definition version"),
-        ({"ambiguous_rms_gap": AMBIGUOUS_RMS_GAP * 2}, "ambiguity threshold"),
+        ({"ambiguous_rms_gap": AMBIGUOUS_RMS_GAP.default * 2}, "ambiguity threshold"),
         ({"snr_estimator": "something_else"}, "estimator"),
     ],
 )
@@ -354,6 +354,6 @@ def test_the_threshold_is_the_one_the_classifier_uses() -> None:
         snr_grid=(20.0,),
         draws_per_spectrum=1,
         bootstrap_count=5,
-        classifier=_fake_classifier(AMBIGUOUS_RMS_GAP * 0.5),
+        classifier=_fake_classifier(AMBIGUOUS_RMS_GAP.default * 0.5),
     )
     assert table.rows[0].class_separated_share == pytest.approx(0.0)

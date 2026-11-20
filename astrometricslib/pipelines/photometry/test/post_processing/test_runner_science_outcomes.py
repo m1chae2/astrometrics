@@ -102,14 +102,14 @@ def test_the_run_stores_the_noise_model_the_alias_rows_and_the_amplitude_rows(
     rows = {
         row.metric: row for row in store.query(target_id="M 99", latest_only=False) if row.run_id == "job-11"
     }
-    for magnitude in NOISE_MODEL_MAGNITUDES:
+    for magnitude in NOISE_MODEL_MAGNITUDES.default:
         for part in NOISE_MODEL_PARTS:
             assert rows[model_noise_metric_name(part, magnitude)].value is not None
     scintillation = rows[PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG]
     assert scintillation.status is MeasurementStatus.ASSUMED
     assert "site height" in scintillation.reason
     assert scintillation.sample_count == 2
-    for rank in WINDOW_ALIAS_RANKS:
+    for rank in WINDOW_ALIAS_RANKS.default:
         assert rows[window_alias_frequency_metric_name(rank)].value is None
     assert rows[PHOTOMETRY_TARGET_CATALOG_AMPLITUDE_MAG].value is None
 

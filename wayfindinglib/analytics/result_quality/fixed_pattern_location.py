@@ -83,6 +83,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from scipy import stats
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.result_quality.noise_growth import (
     MODEL_AGREEMENT_SIGMAS,
     aperture_noise_relative_error,
@@ -94,7 +101,16 @@ FIXED_PATTERN_LOCATION_ENTRY = "WAY-D32"
 """Register row behind the shape tests (a design estimate; a row of its own is
 to be added)."""
 
-SHAPE_SIGMAS = 2.0
+SHAPE_SIGMAS = TunedParameter(
+    name="wayfinding.shape_sigmas",
+    default=2.0,
+    unit="sigma",
+    description="A shape is called found when its test is above 0 by this many standard errors.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D91",
+)
 """A shape is called found when its test is above 0 by this many standard
 errors. It equals `MODEL_AGREEMENT_SIGMAS` on purpose, so the shape tests and
 the test that found the fixed-pattern noise use one width. Four shapes are
@@ -104,7 +120,7 @@ for the two-sided radial test; the advice is a recommendation to look, not an
 order. Design estimate (issue #134, 2026-10-26); not tuned on data, register
 row to be added."""
 
-STRIPE_SIGMAS = SHAPE_SIGMAS
+STRIPE_SIGMAS = resolve_parameter(SHAPE_SIGMAS).value
 """Banding needs the log of the row ratio and the log of the column ratio
 (sum scatter over difference scatter) to differ by this many standard errors.
 Each log ratio has the error ``sqrt(2) * 1.17 / sqrt(n)`` (n = the line
@@ -115,7 +131,18 @@ added in quadrature. Design estimate; evidence: on the library copy
 errors allow for light that is not white, so `STRIPE_MINIMUM_RATIO_OF_RATIOS`
 is also needed. Not yet validated against a stack with known bands."""
 
-STRIPE_MINIMUM_RATIO_OF_RATIOS = 1.25
+STRIPE_MINIMUM_RATIO_OF_RATIOS = TunedParameter(
+    name="wayfinding.stripe_minimum_ratio_of_ratios",
+    default=1.25,
+    unit="ratio",
+    description=(
+        "Banding also needs the larger axis's ratio to be at least this many times the smaller axis's ratio."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D91",
+)
 """Banding also needs the larger axis's ratio to be at least this many times
 the smaller axis's ratio. Extended light that leaks past the star mask gave
 1.01 to 1.18 on the library copy (2026-10-27: M 13, M 27 1.11, M 42, M 52,
@@ -124,14 +151,35 @@ M 57 1.15, M 81 1.11, NGC 1893, NGC 2403, NGC 2903, NGC 7331 1.18, Albireo
 (Schedar, Mirfak, Mirach, Navi), all with the excess in the columns. Design
 estimate, set from those 15 stacks (a held-out check has not been made)."""
 
-MINIMUM_SHAPE_APERTURES = 20
+MINIMUM_SHAPE_APERTURES = TunedParameter(
+    name="wayfinding.minimum_shape_apertures",
+    default=20,
+    unit="apertures",
+    description="The aperture tests need at least this many apertures with both values.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D91",
+)
 """The aperture tests need at least this many apertures with both values. The
 rank correlation's standard error ``1 / sqrt(n - 1)`` is then 0.23, so a
 correlation of 0.46 is the least that reaches `SHAPE_SIGMAS`. The same minimum
 as the number of lines the line-pattern scatter needs (``MINIMUM_LINES`` in
 astrometricslib). Design estimate."""
 
-COLLINEAR_DISTANCE_CORRELATION = 0.9
+COLLINEAR_DISTANCE_CORRELATION = TunedParameter(
+    name="wayfinding.collinear_distance_correlation",
+    default=0.9,
+    unit="fraction",
+    description=(
+        "The distance from the target and the distance from the center are called the same measurement "
+        "when their rank correlation is at least this."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D91",
+)
 """The distance from the target and the distance from the center are called
 the same measurement when their rank correlation is at least this. Above it
 the partial correlation divides by ``sqrt(1 - 0.81) = 0.44`` or less and
@@ -341,7 +389,7 @@ class FixedPatternLocation(BaseModel):
             return "Where the fixed pattern is could not be tested: " + self.tests[0].reason
         return (
             f"None of the tested shapes (trend from the center, gradient, rise near the target, banding) "
-            f"was found at {SHAPE_SIGMAS:g} standard errors.{suffix}{explanations}"
+            f"was found at {resolve_parameter(SHAPE_SIGMAS).value:g} standard errors.{suffix}{explanations}"
         )
 
 
@@ -653,12 +701,18 @@ def _radial_and_target_tests(apertures: Sequence[FixedPatternAperture]) -> tuple
     excess = _plane_free_excess(apertures)
     center = np.array([a.distance_from_center_px for a in apertures])
     with_target = [a for a in apertures if a.distance_from_target_px is not None]
-    use_target = len(with_target) == len(apertures) and len(apertures) >= MINIMUM_SHAPE_APERTURES
+    use_target = (
+        len(with_target) == len(apertures)
+        and len(apertures) >= resolve_parameter(MINIMUM_SHAPE_APERTURES).value
+    )
     target = (
         np.array([a.distance_from_target_px for a in apertures], dtype=float) if use_target else np.array([])
     )
     count = len(apertures)
-    collinear = use_target and abs(_rank_correlation(center, target)) >= COLLINEAR_DISTANCE_CORRELATION
+    collinear = (
+        use_target
+        and abs(_rank_correlation(center, target)) >= resolve_parameter(COLLINEAR_DISTANCE_CORRELATION).value
+    )
     if use_target and not collinear:
         radial_rho = _partial_rank_correlation(excess, center, target)
         radial_z = radial_rho * math.sqrt(max(1, count - 3))
@@ -672,7 +726,7 @@ def _radial_and_target_tests(apertures: Sequence[FixedPatternAperture]) -> tuple
     radial = ShapeTest(
         shape=FixedPatternShape.RADIAL_TREND,
         sigmas=radial_sigmas,
-        significant=radial_sigmas >= SHAPE_SIGMAS,
+        significant=radial_sigmas >= resolve_parameter(SHAPE_SIGMAS).value,
         statistic=(
             f"rank correlation of the excess with the distance from the center{radial_note}: "
             f"{radial_rho:+.2f}"
@@ -701,7 +755,7 @@ def _radial_and_target_tests(apertures: Sequence[FixedPatternAperture]) -> tuple
     near = ShapeTest(
         shape=FixedPatternShape.NEAR_TARGET,
         sigmas=near_sigmas,
-        significant=near_sigmas >= SHAPE_SIGMAS,
+        significant=near_sigmas >= resolve_parameter(SHAPE_SIGMAS).value,
         statistic=f"rank correlation of the excess with the distance from the target{note}: {near_rho:+.2f}",
         reason=(
             f"The excess {'grows' if near_rho < 0.0 else 'falls'} toward the target "
@@ -754,7 +808,7 @@ def _gradient_test(apertures: Sequence[FixedPatternAperture]) -> ShapeTest:
     return ShapeTest(
         shape=FixedPatternShape.GRADIENT,
         sigmas=sigmas,
-        significant=sigmas >= SHAPE_SIGMAS,
+        significant=sigmas >= resolve_parameter(SHAPE_SIGMAS).value,
         statistic=(
             "Wald statistic of the plane's slope difference (sum minus difference): "
             f"{wald:.1f}, 2 degrees of freedom"
@@ -806,9 +860,9 @@ def _banding_test(scatters: LinePatternScatters | None) -> ShapeTest:
     excess_sigmas = _sigmas_from_z(log_ratios[name] / errors[name])
     contrast_sigmas = (log_ratios[name] - log_ratios[other]) / math.hypot(errors[name], errors[other])
     stripe = (
-        excess_sigmas >= SHAPE_SIGMAS
+        excess_sigmas >= resolve_parameter(SHAPE_SIGMAS).value
         and contrast_sigmas >= STRIPE_SIGMAS
-        and ratio / other_ratio >= STRIPE_MINIMUM_RATIO_OF_RATIOS
+        and ratio / other_ratio >= resolve_parameter(STRIPE_MINIMUM_RATIO_OF_RATIOS).value
     )
     statistic = (
         f"scatter of the {name} averages, sum over difference: {ratio:.2f}; of the {other} averages: "
@@ -828,7 +882,10 @@ def _banding_test(scatters: LinePatternScatters | None) -> ShapeTest:
         )
     explanation = ""
     other_sigmas = log_ratios[other] / errors[other]
-    if excess_sigmas >= SHAPE_SIGMAS and other_sigmas >= SHAPE_SIGMAS:
+    if (
+        excess_sigmas >= resolve_parameter(SHAPE_SIGMAS).value
+        and other_sigmas >= resolve_parameter(SHAPE_SIGMAS).value
+    ):
         explanation = (
             "The sky has structure on all scales (the rows and the columns both scatter more in the sum), "
             "likely faint real light or a residual gradient, not banding."
@@ -868,9 +925,10 @@ def locate_fixed_pattern(
         the three aperture tests are not made.
     """
     count = len(apertures)
-    if count < MINIMUM_SHAPE_APERTURES:
+    if count < resolve_parameter(MINIMUM_SHAPE_APERTURES).value:
         too_few = (
-            f"only {count} apertures have both values; the aperture tests need {MINIMUM_SHAPE_APERTURES}."
+            f"only {count} apertures have both values; "
+            f"the aperture tests need {resolve_parameter(MINIMUM_SHAPE_APERTURES).value}."
         )
         tests = [
             ShapeTest(shape=shape, tested=False, reason=too_few)
@@ -973,7 +1031,7 @@ def explain_with_calibration_masters(
         explained_variance=explained,
         remaining_variance=remaining,
         remaining_sigmas=sigmas,
-        consistent_with_zero=abs(sigmas) <= MODEL_AGREEMENT_SIGMAS,
+        consistent_with_zero=abs(sigmas) <= resolve_parameter(MODEL_AGREEMENT_SIGMAS).value,
     )
 
 

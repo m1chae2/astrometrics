@@ -35,6 +35,7 @@ _PUBLIC_MODULES = {
         "astrometricslib.reports",
         "astrometricslib.jobs",
         "astrometricslib.drivers",
+        "astrometricslib.parameters",
     ),
     "wayfindinglib": ("wayfindinglib", "wayfindinglib.exceptions", "wayfindinglib.reports"),
 }

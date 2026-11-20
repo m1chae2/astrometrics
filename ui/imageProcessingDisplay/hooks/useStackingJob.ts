@@ -11,6 +11,7 @@ import {
 } from '../../common/types/backendTypes';
 import { fetchFrameStatsGrouped } from '../../common/services/targetService';
 import { reportError } from '../../common/utils/reportError';
+import { emitToast } from '../../common/utils/emitToast';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
@@ -276,7 +277,12 @@ export function useStackingJob(
     const cancelProcessingJob = async () => {
         if (!selectedTarget) return;
         try {
-            await cancelProcessing(selectedTarget);
+            const result = await cancelProcessing(selectedTarget);
+            // A job that runs in another program keeps running: say so and keep showing it.
+            if (result && result.status === 'other_process' && result.message) {
+                emitToast(result.message, 'warning', 'cancelProcessingJob');
+                return;
+            }
             setIsProcessing(false);
         } catch (err) { /* Reported by API */ }
     };

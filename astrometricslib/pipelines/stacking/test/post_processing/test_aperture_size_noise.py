@@ -51,7 +51,9 @@ def test_white_noise_grows_with_the_square_root_of_the_area() -> None:
 
     assert outcome.result is not None
     result = outcome.result
-    assert result.radii_px == tuple(multiple * APERTURE_RADIUS_PX for multiple in SIZE_RADIUS_MULTIPLES)
+    assert result.radii_px == tuple(
+        multiple * APERTURE_RADIUS_PX.reference_value for multiple in SIZE_RADIUS_MULTIPLES.default
+    )
     assert result.aperture_count >= 300
     # Independent pixels: variance = sigma^2 x effective area.
     expected_noises = [

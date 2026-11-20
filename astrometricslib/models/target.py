@@ -373,6 +373,13 @@ class Target(BaseModel):
     # and by `astrometricslib.scripts.backfill_target_object_types` for targets
     # saved before it was recorded. `target_object_category` groups the codes.
     simbad_object_type: str | None = Field(default=None, alias="simbadObjectType")
+    # SIMBAD's major axis of the object (``galdim_majaxis``), in arcminutes,
+    # or None for a point source, an object SIMBAD gives no size for, or a
+    # target saved before it was recorded
+    # (`astrometricslib.scripts.backfill_target_sizes` fills those in). A run
+    # records it as the target-size basis (issue #175), so the values sized to
+    # the target follow it.
+    major_axis_arcmin: float | None = Field(default=None, alias="majorAxisArcmin")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

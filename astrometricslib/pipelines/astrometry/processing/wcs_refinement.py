@@ -39,36 +39,126 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from astropy.wcs.utils import fit_wcs_from_points, proj_plane_pixel_scales
 
+from astrometricslib.foundation.parameter_context import record_basis
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
+
 # The fewest matched stars with which a second-order SIP fit is attempted. The
 # fit has two linear and ten distortion terms for each axis plus the reference
 # point; 40 stars leaves a wide margin, and fewer leave the high-order terms
 # free to follow noise. A design value, not tuned.
-MINIMUM_MATCHED_STARS = 40
+MINIMUM_MATCHED_STARS = TunedParameter(
+    name="astrometry.wcs_refinement.minimum_matched_stars",
+    default=40,
+    unit="stars",
+    description="Fewest matched stars with which a second-order SIP fit is attempted.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-03",
+)
 
 # The degree of the SIP distortion. The solver's own solutions use 2 and the
 # M 13 stack showed up to 1.8 arcseconds of distortion at a corner.
-SIP_DEGREE = 2
+SIP_DEGREE = TunedParameter(
+    name="astrometry.sip_degree",
+    default=2,
+    unit="degree",
+    description="Degree of the SIP distortion fitted to the matched stars.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-02",
+)
 
 # A match is first accepted within this many pixels of the old solution. It
 # must be larger than the old solution's error (up to 2 pixels was found) and
 # small enough that a neighbouring star is rarely mistaken for the right one.
 # Later passes use `REFINED_MATCH_RADIUS_PIXELS`.
-INITIAL_MATCH_RADIUS_PIXELS = 4.0
-REFINED_MATCH_RADIUS_PIXELS = 1.5
+# Stands for the first match radius, in pixels of the solution's scale. It
+# follows the star width: the value is a factor times the star width the run
+# measured (4.0 on the reference setup).
+INITIAL_MATCH_RADIUS_PIXELS = TunedParameter(
+    name="astrometry.initial_match_radius_pixels",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="How far from the old solution a first-pass match may sit.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    register_entry="AST-02",
+)
+# Stands for the match radius after the fit. It follows the star width: the
+# value is a factor times the star width the run measured (1.5 on the
+# reference setup).
+REFINED_MATCH_RADIUS_PIXELS = TunedParameter(
+    name="astrometry.refined_match_radius_pixels",
+    default=factor_for(1.5, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="How far from the new solution a later-pass match may sit.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=1.5,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    register_entry="AST-02",
+)
 
 # Stars farther than this many robust standard deviations (1.4826 times the
 # median absolute deviation) from the fit are left out of it. 3 keeps 99.7
 # percent of Gaussian errors.
-CLIP_SIGMAS = 3.0
+CLIP_SIGMAS = TunedParameter(
+    name="astrometry.clip_sigmas",
+    default=3.0,
+    unit="robust sigma",
+    description="How many robust standard deviations from the fit a star may sit before it is left out.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-02",
+)
 
 # The most passes of match, fit and clip.
-MAXIMUM_PASSES = 5
+MAXIMUM_PASSES = TunedParameter(
+    name="astrometry.maximum_passes",
+    default=5,
+    unit="passes",
+    description="The most passes of match, fit and clip.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-02",
+)
 
 # A refined solution that moves any of a 5 by 5 grid of points in the image by
 # more than this is refused. A solved field is already near the truth, so a
 # larger change means the fit followed wrong matches. 30 arcseconds is more
 # than ten times the largest error seen (2.7 arcseconds).
-MAXIMUM_SHIFT_ARCSEC = 30.0
+# Stands for the largest field shift the refinement accepts. It follows the
+# plate scale: the value is a factor times the plate scale the run measured
+# (30.0 on the reference setup).
+MAXIMUM_SHIFT_ARCSEC = TunedParameter(
+    name="astrometry.maximum_shift_arcsec",
+    default=factor_for(30.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="× plate scale",
+    description="Largest shift of the field a refined solution may cause before it is refused.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=30.0,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    register_entry="AST-02",
+)
 
 
 @dataclass
@@ -142,13 +232,16 @@ def _separations_arcsec(
     return np.flatnonzero(within), nearest[within], separation.arcsec[within]
 
 
-def _clip(separations_arcsec: np.ndarray) -> np.ndarray:
+def _clip(separations_arcsec: np.ndarray, clip_sigmas: float) -> np.ndarray:
     """Find the matches that sit near the bulk of the distances.
 
     Parameters
     ----------
     separations_arcsec : `numpy.ndarray`
         The distance of each match.
+    clip_sigmas : `float`
+        How many robust standard deviations from the median still count
+        (`CLIP_SIGMAS`).
 
     Returns
     -------
@@ -160,7 +253,7 @@ def _clip(separations_arcsec: np.ndarray) -> np.ndarray:
     spread = 1.4826 * np.median(np.abs(separations_arcsec - median))
     if spread <= 0:
         return np.ones(separations_arcsec.size, dtype=bool)
-    return np.abs(separations_arcsec - median) <= CLIP_SIGMAS * spread
+    return np.abs(separations_arcsec - median) <= clip_sigmas * spread
 
 
 def _grid_shift_arcsec(first: WCS, second: WCS, image_shape: tuple[int, int]) -> float:
@@ -190,6 +283,33 @@ def _grid_shift_arcsec(first: WCS, second: WCS, image_shape: tuple[int, int]) ->
     return float(np.max(separation.arcsec))
 
 
+def record_plate_scale(wcs: WCS) -> float | None:
+    """Record the plate scale of a plate solution for the rest of the run.
+
+    The run's plate scale is what the sky-angle limits (match radii, the
+    largest field shift) follow. The call does nothing outside a run.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        A plate solution.
+
+    Returns
+    -------
+    scale_arcsec : `float` or `None`
+        The mean pixel scale in arcseconds per pixel, or `None` when the
+        solution has no usable scale.
+    """
+    try:
+        scale_arcsec = float(np.mean(proj_plane_pixel_scales(wcs))) * 3600.0
+    except ValueError, TypeError, np.linalg.LinAlgError:
+        return None
+    if not np.isfinite(scale_arcsec) or scale_arcsec <= 0.0:
+        return None
+    record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, scale_arcsec)
+    return scale_arcsec
+
+
 def refine_wcs_with_gaia(
     wcs: WCS,
     pixel_positions: np.ndarray,
@@ -216,26 +336,37 @@ def refine_wcs_with_gaia(
         back unchanged, with a reason, when there are too few matched stars,
         the fit is not better than the old one, or it moves the field too far.
     """
+    # The solution's own scale is the run's plate scale, so record it before
+    # the limits that follow the scale are read.
+    scale_arcsec = record_plate_scale(wcs)
+    minimum_matched_stars = resolve(MINIMUM_MATCHED_STARS).value
+    sip_degree = resolve(SIP_DEGREE).value
+    initial_match_radius_pixels = resolve(INITIAL_MATCH_RADIUS_PIXELS).value
+    refined_match_radius_pixels = resolve(REFINED_MATCH_RADIUS_PIXELS).value
+    clip_sigmas = resolve(CLIP_SIGMAS).value
+    maximum_passes = resolve(MAXIMUM_PASSES).value
+    maximum_shift_arcsec = resolve(MAXIMUM_SHIFT_ARCSEC).value
     positions = np.asarray(pixel_positions, dtype=float)
-    if positions.ndim != 2 or positions.shape[0] < MINIMUM_MATCHED_STARS or len(gaia_coordinates) == 0:
+    if positions.ndim != 2 or positions.shape[0] < minimum_matched_stars or len(gaia_coordinates) == 0:
         return WcsRefinement(wcs, False, "too few detected stars or no Gaia stars to match")
 
-    scale_arcsec = float(np.mean(proj_plane_pixel_scales(wcs))) * 3600.0
-    radius_arcsec = INITIAL_MATCH_RADIUS_PIXELS * scale_arcsec
+    if scale_arcsec is None:
+        return WcsRefinement(wcs, False, "the solution has no usable pixel scale")
+    radius_arcsec = initial_match_radius_pixels * scale_arcsec
     projection_point = SkyCoord(wcs.wcs.crval[0] * u.deg, wcs.wcs.crval[1] * u.deg)
     current = wcs
     used: np.ndarray | None = None
     fitted: WCS | None = None
 
-    for _ in range(MAXIMUM_PASSES):
+    for _ in range(maximum_passes):
         star_indices, gaia_indices, separations = _separations_arcsec(
             current, positions, gaia_coordinates, radius_arcsec
         )
-        if star_indices.size < MINIMUM_MATCHED_STARS:
+        if star_indices.size < minimum_matched_stars:
             return WcsRefinement(wcs, False, f"only {star_indices.size} stars matched Gaia")
-        keep = _clip(separations)
+        keep = _clip(separations, clip_sigmas)
         star_indices, gaia_indices = star_indices[keep], gaia_indices[keep]
-        if star_indices.size < MINIMUM_MATCHED_STARS:
+        if star_indices.size < minimum_matched_stars:
             return WcsRefinement(wcs, False, f"only {star_indices.size} stars were left after clipping")
         try:
             fitted = fit_wcs_from_points(
@@ -243,14 +374,14 @@ def refine_wcs_with_gaia(
                 gaia_coordinates[gaia_indices],
                 proj_point=projection_point,
                 projection="TAN",
-                sip_degree=SIP_DEGREE,
+                sip_degree=sip_degree,
             )
         except (ValueError, np.linalg.LinAlgError) as error:
             return WcsRefinement(wcs, False, f"the fit failed: {error}")
         stable = used is not None and np.array_equal(used, star_indices)
         used = star_indices
         current = fitted
-        radius_arcsec = REFINED_MATCH_RADIUS_PIXELS * scale_arcsec
+        radius_arcsec = refined_match_radius_pixels * scale_arcsec
         if stable:
             break
 
@@ -275,8 +406,8 @@ def refine_wcs_with_gaia(
         shift_arcsec=shift,
         fit_star_indices=tuple(int(index) for index in used),
     )
-    if shift > MAXIMUM_SHIFT_ARCSEC:
-        outcome.reason = f"the fit moved the field by {shift:.1f} arcsec, more than {MAXIMUM_SHIFT_ARCSEC:g}"
+    if shift > maximum_shift_arcsec:
+        outcome.reason = f"the fit moved the field by {shift:.1f} arcsec, more than {maximum_shift_arcsec:g}"
         return outcome
     if rms_after >= rms_before:
         outcome.reason = "the refined solution does not fit Gaia better than the given one"

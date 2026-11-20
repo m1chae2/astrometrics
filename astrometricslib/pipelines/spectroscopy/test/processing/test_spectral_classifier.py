@@ -188,7 +188,7 @@ def test_a_spectrum_unlike_every_reference_is_flagged_as_a_poor_match() -> None:
 
     result = classify_spectral_type(wavelength, tilted)
 
-    assert result["classification_rms"] > NO_GOOD_MATCH_RMS
+    assert result["classification_rms"] > NO_GOOD_MATCH_RMS.default
 
 
 def test_the_score_separates_types_that_correlation_cannot() -> None:
@@ -289,7 +289,7 @@ def test_a_close_match_is_still_classified_below_the_unreliable_cut() -> None:
     assert result["spectral_type"] != "Unknown"
     rms = result["classification_rms"]
     assert isinstance(rms, float)
-    assert rms < UNRELIABLE_MATCH_RMS
+    assert rms < UNRELIABLE_MATCH_RMS.default
 
 
 def test_giant_references_are_only_used_when_asked_for() -> None:
@@ -370,9 +370,9 @@ def test_an_adjacent_subtype_pair_has_a_gap_below_the_ambiguity_limit() -> None:
     )
 
     assert {entry["spectral_type"] for entry in result["ranked_types"][:2]} == {"A0V", "A2V"}
-    assert result["rms_gap_to_second_best"] < AMBIGUOUS_RMS_GAP
+    assert result["rms_gap_to_second_best"] < AMBIGUOUS_RMS_GAP.default
     # Both candidates are A stars, so the nearest other class is further off.
-    assert result["rms_gap_to_next_class"] > AMBIGUOUS_RMS_GAP
+    assert result["rms_gap_to_next_class"] > AMBIGUOUS_RMS_GAP.default
 
 
 def test_a_cross_class_pair_has_a_gap_below_the_limit_at_both_levels() -> None:
@@ -388,8 +388,8 @@ def test_a_cross_class_pair_has_a_gap_below_the_limit_at_both_levels() -> None:
     )
 
     assert {entry["spectral_type"] for entry in result["ranked_types"][:2]} == {"F8V", "G0V"}
-    assert result["rms_gap_to_second_best"] < AMBIGUOUS_RMS_GAP
-    assert result["rms_gap_to_next_class"] < AMBIGUOUS_RMS_GAP
+    assert result["rms_gap_to_second_best"] < AMBIGUOUS_RMS_GAP.default
+    assert result["rms_gap_to_next_class"] < AMBIGUOUS_RMS_GAP.default
 
 
 def test_a_hot_versus_cool_pair_has_a_large_gap() -> None:
@@ -407,8 +407,8 @@ def test_a_hot_versus_cool_pair_has_a_large_gap() -> None:
     )
 
     assert result["spectral_type"] == "O5V"
-    assert result["rms_gap_to_second_best"] > 50 * AMBIGUOUS_RMS_GAP
-    assert result["rms_gap_to_next_class"] > 50 * AMBIGUOUS_RMS_GAP
+    assert result["rms_gap_to_second_best"] > 50 * AMBIGUOUS_RMS_GAP.default
+    assert result["rms_gap_to_next_class"] > 50 * AMBIGUOUS_RMS_GAP.default
 
 
 def test_a_single_reference_gives_no_gap() -> None:

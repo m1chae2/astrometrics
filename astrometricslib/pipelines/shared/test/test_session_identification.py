@@ -368,7 +368,7 @@ class TestReusedHeaderWcsVerification:
         image = _make_fake_image(wcs=header_wcs)
         # Below MIN_STARS_TO_VERIFY_REUSED_WCS, so a 0% match rate is
         # treated as uninformative rather than as a broken WCS.
-        self._prepare(identifier, session_identification.MIN_STARS_TO_VERIFY_REUSED_WCS - 1)
+        self._prepare(identifier, session_identification.MIN_STARS_TO_VERIFY_REUSED_WCS.default - 1)
         identifier.solver.solve = MagicMock()
         monkeypatch.setattr(
             identifier, "identify_stars_with_wcs", MagicMock(side_effect=self._identify_marking(0))

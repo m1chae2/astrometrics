@@ -119,6 +119,8 @@ REVIEW_MEMBERS = frozenset({
     "measure_guiding_spectrum",
     "measure_focus_temperature_coefficient",
     "get_sky_rate_prediction",
+    # The wayfinding tuned values, worked out from the stored records.
+    "measure_tuned_parameters",
 })
 """The public members of `ObservationReview`."""
 

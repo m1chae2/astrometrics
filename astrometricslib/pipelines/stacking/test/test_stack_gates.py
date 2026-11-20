@@ -195,7 +195,7 @@ def test_flat_gates_fail_on_a_faint_noisy_flat(tmp_path: Path) -> None:
 
     assert gates["flat_level"].status is GateStatus.FAILED
     assert gates["flat_noise"].status is GateStatus.FAILED
-    assert gates["flat_noise"].limit == pytest.approx(flat_calibration.MAXIMUM_FLAT_NOISE_FRACTION)
+    assert gates["flat_noise"].limit == pytest.approx(flat_calibration.MAXIMUM_FLAT_NOISE_FRACTION.default)
 
 
 def test_flat_level_gate_fails_on_a_flat_near_saturation(tmp_path: Path) -> None:
@@ -385,11 +385,11 @@ def test_spectral_zero_fraction_gate_uses_its_own_limit() -> None:
         spectrum.zero_pixel_fraction = bad_fraction
         gate = output_gates(spectrum)[aoq.ZERO_FRACTION_GATE_NAME]
         assert gate.status is GateStatus.FAILED
-        assert gate.limit == SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD
+        assert gate.limit == SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD.default
 
     # An image stack keeps the 50% limit: 35% zero is not a blank image.
-    assert zero_fraction_threshold(False) == pytest.approx(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD)
-    assert DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD == pytest.approx(0.5)
+    assert zero_fraction_threshold(False) == pytest.approx(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD.default)
+    assert DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD.default == pytest.approx(0.5)
     assert 0.35 < zero_fraction_threshold(False)
 
 
@@ -419,7 +419,7 @@ def test_raw_frame_clipping_gate_passes_when_no_group_is_clipped() -> None:
     gate = raw_frame_clipping_gate(_zero_fraction_entries((2.0, 0.01), (5.0, 0.0)))
     assert gate.status is GateStatus.PASSED
     assert gate.measured_value == pytest.approx(0.01)
-    assert gate.limit == CLIPPED_FRAME_ZERO_FRACTION
+    assert gate.limit == CLIPPED_FRAME_ZERO_FRACTION.default
 
 
 def test_raw_frame_clipping_gate_fails_softly_when_longer_groups_can_replace_the_pixels() -> None:

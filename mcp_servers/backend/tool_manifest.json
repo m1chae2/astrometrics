@@ -44,6 +44,20 @@
       "interim_block": "",
       "note": "Runs AI-written Python inside the backend."
     },
+    "terminal_add_script": {
+      "tool_class": "author",
+      "category": "app",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-15. Saves a new script to the Command Console's User Scripts for the person to review and run. It cannot run it or replace a script."
+    },
+    "terminal_get_recent_runs": {
+      "tool_class": "observe",
+      "category": "app",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-15. Reads what the person's recent Command Console runs printed and drew. Read-only."
+    },
     "terminal_get_workspace": {
       "tool_class": "observe",
       "category": "app",

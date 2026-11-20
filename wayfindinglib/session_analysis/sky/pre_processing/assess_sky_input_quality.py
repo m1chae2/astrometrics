@@ -12,11 +12,27 @@ telescope has not been tried in.
 from collections import defaultdict
 from collections.abc import Sequence
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.performance_envelope import MINIMUM_BASELINE_SESSIONS
 from wayfindinglib.models.session.sky_quality import SkyCoverageBin, SkyInputQuality, SkySample
 from wayfindinglib.session_analysis.sky.sky_bins import bins_of, reachable_bins
 
-MINIMUM_NIGHTS_PER_BIN = 3
+MINIMUM_NIGHTS_PER_BIN = TunedParameter(
+    name="wayfinding.minimum_nights_per_bin",
+    default=3,
+    unit="nights",
+    description="Fewest nights a part of the sky needs before it is judged.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D137",
+)
 """Fewest nights a part of the sky needs before it is judged.
 
 The nights are the independent samples: frames within a night share its
@@ -90,8 +106,12 @@ def assess_sky_input_quality(
         guiding_nights_excluded=guiding_nights_excluded,
         altitude_range_degrees=[min(altitudes), max(altitudes)] if altitudes else [],
         coverage=coverage,
-        gaps=[f"{bin_.dimension} {bin_.label}" for bin_ in coverage if bin_.nights < MINIMUM_NIGHTS_PER_BIN],
-        minimum_nights_per_bin=MINIMUM_NIGHTS_PER_BIN,
+        gaps=[
+            f"{bin_.dimension} {bin_.label}"
+            for bin_ in coverage
+            if bin_.nights < resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value
+        ],
+        minimum_nights_per_bin=resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value,
         configured_minimum_altitude_degrees=minimum_altitude_degrees,
-        has_enough_data=len(nights) >= MINIMUM_BASELINE_SESSIONS,
+        has_enough_data=len(nights) >= resolve_parameter(MINIMUM_BASELINE_SESSIONS).value,
     )

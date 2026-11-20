@@ -82,6 +82,16 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
     MEDIAN_STANDARD_ERROR_FACTOR,
     SKY_BAND_GAP_PX,
@@ -100,15 +110,65 @@ _FINE_SAMPLES_PER_PIXEL = 12
 # the sky came from where the wings still hold light, took it off, and the
 # predicted neighbour light ran 15% too low; widening the window to 75 px
 # brought it to 10% too low.
-DEFAULT_HALF_WIDTH_PX = 75
-SKY_EDGE_SAMPLES = 8
+# It stands for how far the blur of a star reaches on each side of its streak
+# (75 on the reference setup, 19 × the trail width), so it follows the trail
+# width the run measures.
+DEFAULT_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.default_half_width_px",
+    default=factor_for(75, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="The default half-width of the window and sky used when deblending neighbour trails.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D49",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=75,
+)
+SKY_EDGE_SAMPLES = TunedParameter(
+    name="spectroscopy.sky_edge_samples",
+    default=8,
+    unit="px",
+    description="How many samples at each window edge are used to measure the sky.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D49",
+)
 
 # The centre of a star's streak is found from the middle few pixels.
-_CENTROID_HALF_WIDTH_PX = 4
+# It stands for about one trail width on each side of the streak centre (4 on
+# the reference setup, 1 × the trail width), so it follows the trail width
+# the run measures.
+_CENTROID_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.centroid_half_width_px",
+    default=factor_for(4, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="The half-width of the middle strip used to find a streak centre.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D49",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=4,
+)
 
 # How far a star's fitted position may move from where the centre line says,
 # in pixels. The centre lines are measured, so this is only a small correction.
-_MAXIMUM_CENTRE_SHIFT_PX = 2.0
+# It stands for about half a trail width (2 on the reference setup, 0.51 ×
+# the trail width), so it follows the trail width the run measures.
+_MAXIMUM_CENTRE_SHIFT_PX = TunedParameter(
+    name="spectroscopy.maximum_centre_shift_px",
+    default=factor_for(2.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="How far a star's fitted position may move from where the centre line says.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D49",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=2.0,
+)
 
 # How many places along the streak `sky_aware_neighbor_wing_flux` works out
 # the sky strips at. The light in the strips changes slowly along the streak,
@@ -121,8 +181,26 @@ _SKY_AWARE_PLACE_COUNT = 20
 # image. Across the 2026-09-25 stars the stretch needed was 1.0-1.4 for a
 # 4 C change of focuser temperature; a fit that reaches either limit is
 # not describing a focus change.
-MINIMUM_DILATION = 0.6
-MAXIMUM_DILATION = 2.0
+MINIMUM_DILATION = TunedParameter(
+    name="spectroscopy.minimum_dilation",
+    default=0.6,
+    unit="ratio",
+    description="The least the measured blur may be squeezed to match the crowded image.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D49",
+)
+MAXIMUM_DILATION = TunedParameter(
+    name="spectroscopy.maximum_dilation",
+    default=2.0,
+    unit="ratio",
+    description="The most the measured blur may be stretched to match the crowded image.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D49",
+)
 
 # A fit is only trusted when the profile is matched to within this fraction
 # of the brightest star's peak, judged by the root-mean-square residual over
@@ -135,7 +213,19 @@ MAXIMUM_DILATION = 2.0
 # no correction (validation entry SPE-34), so the limit does not tell good
 # corrections from bad ones. It is kept for the day the correction is
 # switched back on.
-MAXIMUM_TRUSTED_RELATIVE_RESIDUAL = 0.02
+MAXIMUM_TRUSTED_RELATIVE_RESIDUAL = TunedParameter(
+    name="spectroscopy.maximum_trusted_relative_residual",
+    default=0.02,
+    unit="fraction",
+    description=(
+        "A deblending fit is trusted only when its residual is "
+        "within this fraction of the brightest star's peak."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-34",
+)
 
 
 @dataclass(frozen=True)
@@ -199,7 +289,7 @@ def measure_empirical_blur(
     centre_at_rows_px: np.ndarray,
     band_edges: np.ndarray,
     zero_order_position_px: float,
-    half_width_px: int = DEFAULT_HALF_WIDTH_PX,
+    half_width_px: int | None = None,
 ) -> EmpiricalBlur:
     """Measure the blur of the equipment from an isolated star's streak.
 
@@ -233,20 +323,28 @@ def measure_empirical_blur(
     blur : `EmpiricalBlur`
         The measured shape in every band.
     """
+    sky_edge_samples = resolve(SKY_EDGE_SAMPLES).value
+    if half_width_px is None:
+        half_width_px = resolve(DEFAULT_HALF_WIDTH_PX).value
     image = plane if is_vertical_dispersion else plane.T
     cross_positions = np.arange(image.shape[1])
     offsets_px = np.arange(-half_width_px, half_width_px + 1)
     n_bands = len(band_edges) - 1
     profiles = np.zeros((n_bands, len(offsets_px)))
     band_positions = np.zeros(n_bands)
-    middle = np.abs(offsets_px) <= _CENTROID_HALF_WIDTH_PX
+    middle = np.abs(offsets_px) <= resolve(_CENTROID_HALF_WIDTH_PX).value
     for band_index in range(n_bands):
         rows = np.arange(int(band_edges[band_index]), int(band_edges[band_index + 1]))
         summed = np.zeros(len(offsets_px))
         for row in rows:
             summed += np.interp(centre_at_rows_px[row] + offsets_px, cross_positions, image[row])
         summed /= len(rows)
-        sky = np.median(np.concatenate([summed[:SKY_EDGE_SAMPLES], summed[-SKY_EDGE_SAMPLES:]]))
+        sky = np.median(
+            np.concatenate([
+                summed[:sky_edge_samples],
+                summed[-sky_edge_samples:],
+            ])
+        )
         signal = summed - sky
         centroid = float((offsets_px[middle] * signal[middle]).sum() / signal[middle].sum())
         recentred = np.interp(offsets_px + centroid, offsets_px, signal, left=0.0, right=0.0)
@@ -485,7 +583,7 @@ def build_band_profiles(
     reference_centre_at_rows_px: np.ndarray,
     band_edges: np.ndarray,
     zero_order_position_px: float,
-    half_width_px: int = DEFAULT_HALF_WIDTH_PX,
+    half_width_px: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Average a crowded image across the streaks in bands along them.
 
@@ -518,6 +616,8 @@ def build_band_profiles(
     band_positions_px : `numpy.ndarray`
         How far along the streak each band is, from the zero-order star.
     """
+    if half_width_px is None:
+        half_width_px = resolve(DEFAULT_HALF_WIDTH_PX).value
     image = plane if is_vertical_dispersion else plane.T
     cross_positions = np.arange(image.shape[1])
     offsets_px = np.arange(-half_width_px, half_width_px + 1)
@@ -751,8 +851,8 @@ def fit_neighbor_amplitudes(
         )
         return residuals.ravel()
 
-    lower = [MINIMUM_DILATION, *([-_MAXIMUM_CENTRE_SHIFT_PX] * (n_stars - 1))]
-    upper = [MAXIMUM_DILATION, *([_MAXIMUM_CENTRE_SHIFT_PX] * (n_stars - 1))]
+    lower = [resolve(MINIMUM_DILATION).value, *([-resolve(_MAXIMUM_CENTRE_SHIFT_PX).value] * (n_stars - 1))]
+    upper = [resolve(MAXIMUM_DILATION).value, *([resolve(_MAXIMUM_CENTRE_SHIFT_PX).value] * (n_stars - 1))]
     result = least_squares(residual_vector, [1.0, *([0.0] * (n_stars - 1))], bounds=(lower, upper))
     dilation = float(result.x[0])
     shifts = shifts_from(result.x)
@@ -791,14 +891,18 @@ def fit_neighbor_amplitudes(
         misfit[band_index] = profiles[band_index] - model
     peak = float(np.max(profiles - np.median(profiles, axis=1, keepdims=True)))
     relative_residual = float(np.sqrt(np.mean(misfit**2)) / peak) if peak > 0 else float("inf")
-    dilation_is_plausible = MINIMUM_DILATION * 1.001 < dilation < MAXIMUM_DILATION * 0.999
+    dilation_is_plausible = (
+        resolve(MINIMUM_DILATION).value * 1.001 < dilation < resolve(MAXIMUM_DILATION).value * 0.999
+    )
     return NeighborFit(
         dilation=dilation,
         centre_shifts_px=shifts,
         amplitudes=amplitudes,
         sky_levels=sky_levels,
         relative_residual=relative_residual,
-        is_reliable=bool(relative_residual <= MAXIMUM_TRUSTED_RELATIVE_RESIDUAL and dilation_is_plausible),
+        is_reliable=bool(
+            relative_residual <= resolve(MAXIMUM_TRUSTED_RELATIVE_RESIDUAL).value and dilation_is_plausible
+        ),
     )
 
 
@@ -931,21 +1035,23 @@ def sky_aware_neighbor_wing_flux(
         It can be negative where the sky level taken off is larger than the
         light in the box.
     """
+    sky_band_width_px = resolve(SKY_BAND_WIDTH_PX).value
+    sky_band_gap_px = resolve(SKY_BAND_GAP_PX).value
     sample_count = positions_px.size
     places = np.linspace(0, sample_count - 1, _SKY_AWARE_PLACE_COUNT).astype(int)
     strip_noise_limit = (
-        SKY_CONTAMINATION_SIGMA
+        resolve(SKY_CONTAMINATION_SIGMA).value
         * MEDIAN_STANDARD_ERROR_FACTOR
-        * np.sqrt(2.0 / SKY_BAND_WIDTH_PX)
+        * np.sqrt(2.0 / sky_band_width_px)
         * sky_scatter_px
     )
     lower_strip, upper_strip, inside_target, inside_neighbor = [], [], [], []
     for place in places:
         position = float(positions_px[place])
         offset = float(neighbor_offset_px[place])
-        nearest_edge = int(np.ceil(target_box_half_width_px[place])) + SKY_BAND_GAP_PX
-        lower_pixels = np.arange(-(nearest_edge + SKY_BAND_WIDTH_PX), -nearest_edge, dtype=float)
-        upper_pixels = np.arange(nearest_edge + 1, nearest_edge + SKY_BAND_WIDTH_PX + 1, dtype=float)
+        nearest_edge = int(np.ceil(target_box_half_width_px[place])) + sky_band_gap_px
+        lower_pixels = np.arange(-(nearest_edge + sky_band_width_px), -nearest_edge, dtype=float)
+        upper_pixels = np.arange(nearest_edge + 1, nearest_edge + sky_band_width_px + 1, dtype=float)
         spline = _profile_spline(blur, position)
         lower_strip.append(np.median(pixel_profile(blur, position, dilation, offset, lower_pixels, spline)))
         upper_strip.append(np.median(pixel_profile(blur, position, dilation, offset, upper_pixels, spline)))

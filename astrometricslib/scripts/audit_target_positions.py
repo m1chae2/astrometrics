@@ -42,6 +42,7 @@ from pathlib import Path
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.target_position import (
     POSITION_TOLERANCE_FLOOR_ARCMIN,
     format_position,
@@ -83,7 +84,7 @@ class PositionFinding:
     separation_arcmin: float | None
     position_unverified: bool
     status: str
-    tolerance_arcmin: float = POSITION_TOLERANCE_FLOOR_ARCMIN
+    tolerance_arcmin: float = resolve(POSITION_TOLERANCE_FLOOR_ARCMIN).value
 
 
 STATUS_MATCH = "match"
@@ -153,7 +154,7 @@ def load_stored_targets(database_path: str | Path) -> list[StoredTarget]:
 def audit_positions(
     targets: Sequence[StoredTarget],
     simbad: SimbadDriver,
-    floor_arcmin: float = POSITION_TOLERANCE_FLOOR_ARCMIN,
+    floor_arcmin: float | None = None,
 ) -> list[PositionFinding]:
     """Compare each stored position with the catalog position of its name.
 
@@ -166,12 +167,15 @@ def audit_positions(
     floor_arcmin : `float`, optional
         The smallest tolerance. The tolerance of an extended object is its
         radius when that is larger (see `position_tolerance_arcmin`).
+        Defaults to `POSITION_TOLERANCE_FLOOR_ARCMIN`.
 
     Returns
     -------
     findings : `list` [`PositionFinding`]
         One per target, in the order given.
     """
+    if floor_arcmin is None:
+        floor_arcmin = resolve(POSITION_TOLERANCE_FLOOR_ARCMIN).value
     findings = []
     for stored in targets:
         stored_position = parse_position_text(stored.ra, stored.dec)
@@ -280,7 +284,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--floor-arcmin",
         type=float,
-        default=POSITION_TOLERANCE_FLOOR_ARCMIN,
+        default=resolve(POSITION_TOLERANCE_FLOOR_ARCMIN).value,
         help="Smallest tolerance; extended objects get their own radius if larger.",
     )
     parser.add_argument("--all", action="store_true", dest="show_all", help="Also list targets that match.")

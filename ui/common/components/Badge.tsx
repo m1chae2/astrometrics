@@ -19,6 +19,8 @@ export interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 
     onClick?: React.MouseEventHandler<HTMLButtonElement>;
     /** Draws the edge dashed or dotted, for readers who cannot tell the tints apart. */
     edge?: 'solid' | 'dashed' | 'dotted';
+    /** Draws the tint over a solid dark base, so what is behind the badge (such as stars) does not show through. */
+    opaque?: boolean;
     /** The text of the badge. */
     children?: React.ReactNode;
 }
@@ -29,11 +31,12 @@ export interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 
  * @return The badge element.
  */
 export const Badge: React.FC<BadgeProps> = ({
-    tone = 'neutral', icon, onClick, edge = 'solid', className = '', children, ...elementProps
+    tone = 'neutral', icon, onClick, edge = 'solid', opaque = false, className = '', children, ...elementProps
 }) => {
     const classes = [
         'badge', `badge--${tone}`,
         edge !== 'solid' ? `badge--${edge}` : '',
+        opaque ? 'badge--opaque' : '',
         onClick ? 'badge--clickable' : '',
         className,
     ].filter(Boolean).join(' ');

@@ -30,6 +30,7 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.pipelines.photometry.metrics import (
     NOISE_MODEL_MAGNITUDES,
@@ -342,6 +343,7 @@ def noise_budget_measurements(
         ``not_measured`` with the reason; a value that rests on an
         assumption is ``assumed`` and the reason names the assumption.
     """
+    noise_model_magnitudes = resolve(NOISE_MODEL_MAGNITUDES).value
     subject = context.run_subject()
     if inputs is None:
         inputs = NoiseBudgetInputs(session=None)
@@ -350,9 +352,9 @@ def noise_budget_measurements(
 
     variances_by_magnitude: dict[int, NoiseVariances | None] = {
         magnitude: noise_variances_at_magnitude(float(magnitude), inputs)
-        for magnitude in NOISE_MODEL_MAGNITUDES
+        for magnitude in noise_model_magnitudes
     }
-    for magnitude in NOISE_MODEL_MAGNITUDES:
+    for magnitude in noise_model_magnitudes:
         variances = variances_by_magnitude[magnitude]
         for part in NOISE_MODEL_PARTS:
             value: float | None = None

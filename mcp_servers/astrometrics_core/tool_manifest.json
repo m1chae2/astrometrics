@@ -170,6 +170,13 @@
       "interim_block": "",
       "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
     },
+    "quality_measure_detections": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; nothing is stored."
+    },
     "quality_measure_folder": {
       "tool_class": "compute",
       "category": "image-processing",
@@ -190,6 +197,20 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with the previous stack or another stack file. Saves nothing."
+    },
+    "quality_measure_star_profile": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored."
+    },
+    "quality_measure_tuned_parameters": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs up and writes the configuration file. The AI does not change settings."
     },
     "quality_metrics": {
       "tool_class": "observe",

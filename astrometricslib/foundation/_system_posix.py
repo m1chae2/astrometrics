@@ -6,14 +6,45 @@ version in `_system_windows`.
 """
 
 import contextlib
+import ctypes
 import logging
 import os
 import shlex
 import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- stopping our own processes
+import sys
 import time
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# The Linux ``prctl`` option that asks the kernel to send a signal to this
+# process when its parent dies (see ``man prctl``, PR_SET_PDEATHSIG).
+PR_SET_PDEATHSIG = 1
+
+
+def _load_prctl() -> Callable[..., int] | None:
+    """Find the C library's ``prctl`` function, on Linux only.
+
+    It is loaded here, when the module is imported, and not in the child
+    process after a fork: loading a library in a forked child of a threaded
+    program can deadlock.
+
+    Returns
+    -------
+    prctl : `collections.abc.Callable` or `None`
+        The function, or `None` on other systems or when it is missing.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        return ctypes.CDLL(None, use_errno=True).prctl
+    except OSError, AttributeError:
+        return None
+
+
+_prctl = _load_prctl()
 
 
 def split_program_command(text: str) -> list[str]:
@@ -80,3 +111,42 @@ def stop_process_tree(process: subprocess.Popen, grace_seconds: float, reap_time
             time.sleep(grace_seconds)
     with contextlib.suppress(OSError, subprocess.TimeoutExpired):
         process.wait(timeout=reap_timeout_seconds)
+
+
+def child_process_options() -> dict[str, Any]:
+    """Give the keyword arguments for starting a helper program.
+
+    The helper leads a process group of its own (``start_new_session=True``),
+    so `stop_process_tree` can stop its whole tree. On Linux it also gets a
+    ``preexec_fn`` that asks the kernel to send it SIGTERM when its parent
+    dies, so a backend that crashes or is killed (SIGKILL, out of memory)
+    does not leave helpers running.
+
+    The kernel ties the signal to the *thread* that started the child, not to
+    the process. It fires if that thread ends while the child runs.
+    `run_registered` waits for the child in the starting thread, so it is
+    safe. A Siril session lives as long as the stack run that opened it, on
+    that run's worker thread. Do not start a helper from a thread that
+    then returns while the helper keeps running.
+
+    Returns
+    -------
+    options : `dict` [`str`, `object`]
+        Keyword arguments for `subprocess.Popen`. On macOS and other systems
+        without ``prctl`` only the new session is set, so helpers there still
+        rely on the caller to stop them.
+    """
+    if _prctl is None:
+        return {"start_new_session": True}
+    parent_process_id = os.getpid()
+    prctl = _prctl
+
+    def exit_with_parent() -> None:
+        """Ask for SIGTERM when the parent dies; exit now if it already did."""
+        prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+        # The parent may have died between the fork and the call above, and
+        # then the kernel would never send the signal.
+        if os.getppid() != parent_process_id:
+            os._exit(1)
+
+    return {"start_new_session": True, "preexec_fn": exit_with_parent}

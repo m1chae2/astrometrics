@@ -215,8 +215,8 @@ def test_the_catalog_band_follows_the_match_source() -> None:
 def test_stars_outside_the_central_region_and_ambiguous_matches_are_left_out() -> None:
     """Only central, unambiguous stars with a catalog source qualify."""
     half_diagonal = float(np.hypot(*FRAME_SHAPE) / 2.0)
-    inside = CENTER_PX[0] + 0.9 * CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION * half_diagonal
-    outside = CENTER_PX[0] + 1.1 * CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION * half_diagonal
+    inside = CENTER_PX[0] + 0.9 * CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION.default * half_diagonal
+    outside = CENTER_PX[0] + 1.1 * CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION.default * half_diagonal
     stars = [
         make_star(0, 11.0, "gaia", x_px=inside),
         make_star(1, 11.0, "gaia", x_px=outside),
@@ -232,9 +232,9 @@ def test_stars_outside_the_central_region_and_ambiguous_matches_are_left_out() -
 
 def test_gaia_g_is_preferred_whenever_it_has_enough_stars_even_with_fewer_than_v() -> None:
     """Twelve Gaia G stars beat thirty SIMBAD V stars; nine fall back to V."""
-    enough = [*make_stars(30, "simbad"), *make_stars(MINIMUM_STARS_FOR_ZERO_POINT + 2, "gaia")]
+    enough = [*make_stars(30, "simbad"), *make_stars(MINIMUM_STARS_FOR_ZERO_POINT.default + 2, "gaia")]
     assert run_session(enough).band is CatalogBand.GAIA_G
-    too_few = [*make_stars(30, "simbad"), *make_stars(MINIMUM_STARS_FOR_ZERO_POINT - 1, "gaia")]
+    too_few = [*make_stars(30, "simbad"), *make_stars(MINIMUM_STARS_FOR_ZERO_POINT.default - 1, "gaia")]
     session = run_session(too_few)
     assert session.band is CatalogBand.SIMBAD_V
     assert session.star_set_size == 30
@@ -300,7 +300,7 @@ def test_a_frame_with_too_few_passing_stars_has_no_value_and_a_reason() -> None:
     thin = session.frames[2].estimate
     assert thin.zero_point_mag is None
     assert thin.star_count == 5
-    assert f"at least {MINIMUM_STARS_FOR_ZERO_POINT} are needed" in thin.reason
+    assert f"at least {MINIMUM_STARS_FOR_ZERO_POINT.default} are needed" in thin.reason
     assert session.frames[1].estimate.zero_point_mag == pytest.approx(TRUE_ZERO_POINT_MAG)
 
 
@@ -309,7 +309,7 @@ def test_a_star_that_fails_the_cuts_in_too_many_frames_is_not_in_the_fixed_set()
     stars = [make_star(i, 10.0 + 0.1 * i, "gaia") for i in range(30)]
     stars[0].photometry.is_saturated = [False, True, True, False, False]
     stars[1].photometry.is_saturated = [False, True, False, False, False]
-    assert SESSION_STAR_FRAME_SHARE == pytest.approx(0.8)
+    assert SESSION_STAR_FRAME_SHARE.default == pytest.approx(0.8)
     session = run_session(stars)
     assert session.star_set_size == 29
     assert session.frames[1].estimate.star_count == 28
@@ -438,10 +438,10 @@ def test_the_spread_is_the_robust_sigma_and_ignores_a_cloudy_outlier() -> None:
 
 def test_too_few_frames_give_no_spread() -> None:
     """Below the minimum number of frames there is no spread and a reason."""
-    scatter = zero_point_scatter([21.0] * (MINIMUM_FRAMES_FOR_SCATTER - 1))
+    scatter = zero_point_scatter([21.0] * (MINIMUM_FRAMES_FOR_SCATTER.default - 1))
     assert scatter.value_mag is None
     assert scatter.error_mag is None
-    assert str(MINIMUM_FRAMES_FOR_SCATTER) in scatter.reason
+    assert str(MINIMUM_FRAMES_FOR_SCATTER.default) in scatter.reason
 
 
 def test_the_analyzer_records_zero_points_before_any_frame_is_dropped(

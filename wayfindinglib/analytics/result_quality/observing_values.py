@@ -29,6 +29,14 @@ from astropy.time import Time
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.astronomy.coordinate_transforms import (
     angular_separation_arcsec,
     earth_location,
@@ -45,14 +53,39 @@ formula ``X = 1 / (sin(h) + 0.50572 (h + 6.07995)^-1.6364)`` with the altitude
 h in degrees. It stays accurate to the horizon, unlike the plain ``1 /
 sin(h)``. Published values, register row WAY-D26."""
 
-DEW_SPREAD_LIMIT_C = 3.0
+DEW_SPREAD_LIMIT_C = TunedParameter(
+    name="wayfinding.dew_spread_limit_c",
+    default=3.0,
+    unit="deg C",
+    description=(
+        "The dew risk is raised when the ambient temperature is within this many degrees Celsius of the "
+        "dew point."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-D27",
+)
 """The dew risk is raised when the ambient temperature is within this many
-degrees
-Celsius of the dew point. Optics cool below the air by a few degrees on a clear
-night, so dew can form before the air reaches its dew point. A common rule of
-thumb for dew heaters; design estimate, register row WAY-D27."""
+degrees Celsius of the dew point. Optics cool below the air by a few degrees
+on a clear night, so dew can form before the air reaches its dew point. A
+common rule of thumb for dew heaters; design estimate, register row WAY-D27.
+Hardcoded: no session records a dew point or when dew formed, so it cannot
+be tuned."""
 
-MINIMUM_HOUR_ANGLE_SPAN_DEG = 45.0
+MINIMUM_HOUR_ANGLE_SPAN_DEG = TunedParameter(
+    name="wayfinding.minimum_hour_angle_span_deg",
+    default=45.0,
+    unit="deg",
+    description=(
+        "The polar-alignment fit separates its altitude and azimuth parts only when a guiding run covers"
+        " at least this span of hour angle."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D28",
+)
 """The polar-alignment fit separates its altitude and azimuth parts only when
 the
 frames of a guiding run cover at least this span of hour angle (45 degrees is 3
@@ -61,13 +94,34 @@ differ in how they depend on cos(H) and sin(H), and over a short arc these two
 look alike; at 45 degrees the condition number of the design matrix stays below
 about 10 for mid-sky fields. Design estimate, register row WAY-D28."""
 
-MINIMUM_POLAR_SAMPLES_PER_RUN = 5
+MINIMUM_POLAR_SAMPLES_PER_RUN = TunedParameter(
+    name="wayfinding.minimum_polar_samples_per_run",
+    default=5,
+    unit="samples",
+    description="Fewest rotation samples in one guiding run for the polar-alignment fit.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D28",
+)
 """Fewest rotation samples in one guiding run for the polar-alignment fit. The
 fit
 of a run needs its own offset and a slope; five samples leave three degrees of
 freedom to judge the scatter. Design estimate, register row WAY-D28."""
 
-MINIMUM_COS_DECLINATION = 0.17
+MINIMUM_COS_DECLINATION = TunedParameter(
+    name="wayfinding.minimum_cos_declination",
+    default=0.17,
+    unit="cosine of declination",
+    description=(
+        "The guided field rotation rate from a polar error scales with 1/cos(declination), so the signal"
+        " is largest near the pole."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D28",
+)
 """The guided field rotation rate from a polar error scales with
 1/cos(declination), so the signal is largest near the pole. The limit is not
 there to save signal. Below cos = 0.17 (about 80 degrees of declination) the
@@ -234,7 +288,7 @@ def dew_risk(ambient_c: float | None, dew_point_c: float | None) -> DewRisk:
         missing = "ambient temperature" if ambient_c is None else "dew point"
         return DewRisk(reason=f"The {missing} was not recorded, so the dew risk cannot be found.")
     spread = ambient_c - dew_point_c
-    return DewRisk(spread_c=spread, at_risk=spread <= DEW_SPREAD_LIMIT_C)
+    return DewRisk(spread_c=spread, at_risk=spread <= resolve_parameter(DEW_SPREAD_LIMIT_C).value)
 
 
 def pointing_error_arcsec(
@@ -522,17 +576,27 @@ def polar_alignment_from_rotation(
         The estimate, labeled exploratory.
     """
     location = earth_location(latitude_deg, longitude_deg, elevation_m)
-    usable = [s for s in samples if math.cos(math.radians(s.dec_deg)) >= MINIMUM_COS_DECLINATION]
+    usable = [
+        s
+        for s in samples
+        if math.cos(math.radians(s.dec_deg)) >= resolve_parameter(MINIMUM_COS_DECLINATION).value
+    ]
     runs: dict[str, list[RotationSample]] = {}
     for sample in usable:
         runs.setdefault(sample.guiding_run_id, []).append(sample)
-    runs = {name: items for name, items in runs.items() if len(items) >= MINIMUM_POLAR_SAMPLES_PER_RUN}
+    runs = {
+        name: items
+        for name, items in runs.items()
+        if len(items) >= resolve_parameter(MINIMUM_POLAR_SAMPLES_PER_RUN).value
+    }
     if not runs:
         return PolarAlignmentEstimate(
             kind="insufficient_data",
             sample_count=0,
             reason=(
-                f"No guiding run has {MINIMUM_POLAR_SAMPLES_PER_RUN} rotation samples away from the pole."
+                f"No guiding run has "
+                f"{resolve_parameter(MINIMUM_POLAR_SAMPLES_PER_RUN).value} rotation samples away from the "
+                f"pole."
             ),
         )
 
@@ -547,7 +611,7 @@ def polar_alignment_from_rotation(
     widest = max(spans.values())
     sample_count = sum(len(items) for items in runs.values())
 
-    if widest < MINIMUM_HOUR_ANGLE_SPAN_DEG:
+    if widest < resolve_parameter(MINIMUM_HOUR_ANGLE_SPAN_DEG).value:
         lower = 0.0
         for name, items in runs.items():
             hour = hour_angles[name]
@@ -562,7 +626,8 @@ def polar_alignment_from_rotation(
             sample_count=sample_count,
             reason=(
                 f"The widest run covers {widest:.0f} degrees of hour angle, below "
-                f"{MINIMUM_HOUR_ANGLE_SPAN_DEG:.0f}, so the altitude and azimuth parts cannot be told apart."
+                f"{resolve_parameter(MINIMUM_HOUR_ANGLE_SPAN_DEG).value:.0f}, so the altitude and azimuth "
+                f"parts cannot be told apart."
             ),
         )
 

@@ -94,7 +94,7 @@ def test_light_above_the_limit_is_ignored() -> None:
     first = detect_emission_lines(WAVELENGTHS, base, HALF_WIDTH)
     second = detect_emission_lines(WAVELENGTHS, boosted, HALF_WIDTH)
     assert first == second
-    assert MAXIMUM_FITTED_WAVELENGTH_ANGSTROM == pytest.approx(8000.0)
+    assert MAXIMUM_FITTED_WAVELENGTH_ANGSTROM.default == pytest.approx(8000.0)
 
 
 def test_lines_outside_the_spectrum_are_not_covered() -> None:

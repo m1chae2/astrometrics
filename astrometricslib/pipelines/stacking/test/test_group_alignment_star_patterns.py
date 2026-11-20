@@ -117,7 +117,7 @@ def test_a_known_move_is_recovered_with_no_first_guess(
     shift = expected_centre_shift(a, offset)
     assert result.shift_columns_pixels == pytest.approx(shift.real, abs=0.3)
     assert result.shift_rows_pixels == pytest.approx(shift.imag, abs=0.3)
-    assert result.star_pairs >= REFINEMENT_MINIMUM_PAIRS
+    assert result.star_pairs >= REFINEMENT_MINIMUM_PAIRS.default
     assert result.residual_pixels < 0.3
 
 
@@ -139,7 +139,7 @@ def test_stars_missing_from_one_image_and_extras_in_the_other_are_tolerated() ->
 
     assert result is not None
     assert result.rotation_degrees == pytest.approx(2.0, abs=0.02)
-    assert result.star_pairs >= REFINEMENT_MINIMUM_PAIRS
+    assert result.star_pairs >= REFINEMENT_MINIMUM_PAIRS.default
 
 
 def test_too_few_stars_are_refused() -> None:

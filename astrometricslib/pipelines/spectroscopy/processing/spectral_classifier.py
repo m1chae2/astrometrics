@@ -100,10 +100,17 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import (
     UNRELIABLE_MATCH_RMS,
     rms_gap_to_next_class,
     rms_gap_to_second_best,
+)
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import atmospheric_band_mask
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -239,7 +246,19 @@ GIANT_REFERENCE_SPECTRAL_TYPES: tuple[str, ...] = (
 )
 
 # Below this many overlapping points, a comparison is too noisy to trust.
-_MINIMUM_OVERLAP_POINTS = 20
+_MINIMUM_OVERLAP_POINTS = TunedParameter(
+    name="spectroscopy.minimum_overlap_points",
+    default=20,
+    unit="count",
+    description="Below this many overlapping points a classification comparison is too noisy to trust.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D47",
+    allowed_range=(5, 300),
+    # A sample is a well-matched stored star spectrum.
+    minimum_sample=10,
+)
 
 # The widest range a comparison can use: where the reference spectra exist,
 # which is also the camera's wavelength range (3000-10000 A for the ASI533MM
@@ -247,7 +266,19 @@ _MINIMUM_OVERLAP_POINTS = 20
 # marks the samples it does not cover as unusable (4200-8000 A by default,
 # see `instrument_response.DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM`), and
 # only finite samples are compared.
-CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = (3000.0, 10000.0)
+CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = TunedParameter(
+    name="spectroscopy.classification_wavelength_range_angstrom",
+    default=(3000.0, 10000.0),
+    unit="Å",
+    description="The widest wavelength range a classification comparison can use.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D47",
+    allowed_range=(2500.0, 11000.0),
+    # A sample is a well-matched stored star spectrum.
+    minimum_sample=10,
+)
 
 # The observed spectrum must cover at least this much (in Angstroms) to be
 # classified at all. Telling hot stars from cool ones depends on the slope
@@ -255,7 +286,19 @@ CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = (3000.0, 10000.0)
 # near the image edge, which only reaches 6800 A) cannot separate them.
 # Two thirds of the 3800 A default comparison range (4200-8000 A) is
 # required.
-MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = 2500.0
+MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = TunedParameter(
+    name="spectroscopy.minimum_classification_coverage_angstrom",
+    default=2500.0,
+    unit="Å",
+    description="The observed spectrum must cover at least this much to be classified.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D47",
+    allowed_range=(1000.0, 3600.0),
+    # A sample is a well-matched stored star spectrum.
+    minimum_sample=10,
+)
 
 # The limits that the match scores are checked against live in
 # `astrometricslib.models.stellar_source` (`NO_GOOD_MATCH_RMS`,
@@ -473,7 +516,7 @@ def _get_blurred_templates(
 
 def blurred_reference_spectrum(
     spectral_type: str,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Give one bundled reference spectrum, blurred to the resolution.
@@ -497,6 +540,8 @@ def blurred_reference_spectrum(
     wavelength_angstrom, flux : `tuple` [`np.ndarray`, `np.ndarray`]
         The reference's wavelength grid and its blurred flux.
     """
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelength, flux = _get_reference_templates()[spectral_type]
     if resolution_profile is not None:
         return wavelength, blur_to_resolution_profile(wavelength, flux, resolution_profile)
@@ -626,7 +671,7 @@ def _reduced_chi_square(
         keep &= ~atmospheric_band_mask(observed_wavelength)
     for window_low, window_high in excluded_windows:
         keep &= (observed_wavelength < window_low) | (observed_wavelength > window_high)
-    if keep.sum() < _MINIMUM_OVERLAP_POINTS:
+    if keep.sum() < resolve(_MINIMUM_OVERLAP_POINTS).value:
         return None
     template_on_observed = np.interp(observed_wavelength[keep], template_wavelength, template_flux)
     residual = (observed[keep] - scale * template_on_observed) / observed_errors[keep]
@@ -636,7 +681,7 @@ def _reduced_chi_square(
 def classify_spectral_type(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     exclude_atmospheric_bands: bool = True,
     reference_types: Iterable[str] | None = None,
     excluded_windows_angstrom: Sequence[tuple[float, float]] | None = None,
@@ -726,6 +771,10 @@ def classify_spectral_type(
         ``"excluded_windows_angstrom"``: the windows left out of the
         comparison, as (low, high) pairs (empty when there were none).
     """
+    minimum_overlap_points = resolve(_MINIMUM_OVERLAP_POINTS).value
+    minimum_classification_coverage_angstrom = resolve(MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM).value
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
     sample_errors = (
@@ -738,9 +787,9 @@ def classify_spectral_type(
     intensity = intensity[valid]
     sample_errors = sample_errors[valid]
 
-    low, high = CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM
+    low, high = resolve(CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM).value
     in_range = (wavelength_angstrom >= low) & (wavelength_angstrom <= high)
-    if in_range.sum() < _MINIMUM_OVERLAP_POINTS:
+    if in_range.sum() < minimum_overlap_points:
         return unclassified_result("too few samples inside the comparison range")
     order = np.argsort(wavelength_angstrom)
     wavelength_angstrom = wavelength_angstrom[order]
@@ -748,10 +797,10 @@ def classify_spectral_type(
     sample_errors = sample_errors[order]
 
     coverage = min(wavelength_angstrom.max(), high) - max(wavelength_angstrom.min(), low)
-    if coverage < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
+    if coverage < minimum_classification_coverage_angstrom:
         return unclassified_result(
             f"the spectrum covers only {max(coverage, 0.0):.0f} A, and at least "
-            f"{MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:.0f} A is needed"
+            f"{minimum_classification_coverage_angstrom:.0f} A is needed"
         )
 
     excluded_windows = [
@@ -768,7 +817,7 @@ def classify_spectral_type(
             continue
         overlap_min = max(wavelength_angstrom.min(), template_wavelength.min(), low)
         overlap_max = min(wavelength_angstrom.max(), template_wavelength.max(), high)
-        if overlap_max - overlap_min < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
+        if overlap_max - overlap_min < minimum_classification_coverage_angstrom:
             continue
         common_grid = template_wavelength[
             (template_wavelength >= overlap_min) & (template_wavelength <= overlap_max)
@@ -777,7 +826,7 @@ def classify_spectral_type(
             common_grid = common_grid[~atmospheric_band_mask(common_grid)]
         for window_low, window_high in excluded_windows:
             common_grid = common_grid[(common_grid < window_low) | (common_grid > window_high)]
-        if len(common_grid) < _MINIMUM_OVERLAP_POINTS:
+        if len(common_grid) < minimum_overlap_points:
             continue
 
         observed_on_grid = np.interp(common_grid, wavelength_angstrom, intensity)
@@ -817,10 +866,10 @@ def classify_spectral_type(
 
     best_type = min(rms_by_type, key=rms_by_type.get)
     best_rms = rms_by_type[best_type]
-    if best_rms > UNRELIABLE_MATCH_RMS:
+    if best_rms > resolve(UNRELIABLE_MATCH_RMS).value:
         return unclassified_result(
             f"no reference matches this spectrum: even the closest ({best_type}) is off by "
-            f"{best_rms:.0%} of its brightness, and more than {UNRELIABLE_MATCH_RMS:.0%} "
+            f"{best_rms:.0%} of its brightness, and more than {resolve(UNRELIABLE_MATCH_RMS).value:.0%} "
             "is too far to call a match"
         )
     rms_gap = rms_gap_to_second_best(rms_by_type.values())

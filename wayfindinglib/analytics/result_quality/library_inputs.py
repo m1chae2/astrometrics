@@ -49,6 +49,13 @@ from typing import Any
 from astrometricslib import Target
 from astrometricslib.drivers import VersionedCache, get_camera_data_versions
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel, observing_night_id
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -103,7 +110,16 @@ progress is not read (register row WAY-D107)."""
 DEFAULT_SITE_PROFILE_ID = "default"
 """The id of the stored default site."""
 
-SITE_AGREEMENT_DEG = 0.01
+SITE_AGREEMENT_DEG = TunedParameter(
+    name="wayfinding.site_agreement_deg",
+    default=0.01,
+    unit="deg",
+    description="Two site positions closer than this in latitude and longitude count as the same place.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D82",
+)
 """Two site positions closer than this in latitude and longitude count as the
 same place. 0.01 degree is about 1 km, far finer than anything the sky model
 or the airmass depends on. Design estimate, register row WAY-D82."""
@@ -371,8 +387,9 @@ def stored_site(butler: Any, config: Any, notes: list[str] | None = None) -> Sit
         configured = resolve_site_location(config)
     elif stored is not None:
         differs = (
-            abs(stored.latitude_deg - configured["latitude"]) > SITE_AGREEMENT_DEG
-            or abs(stored.longitude_deg - configured["longitude"]) > SITE_AGREEMENT_DEG
+            abs(stored.latitude_deg - configured["latitude"]) > resolve_parameter(SITE_AGREEMENT_DEG).value
+            or abs(stored.longitude_deg - configured["longitude"])
+            > resolve_parameter(SITE_AGREEMENT_DEG).value
         )
         if differs and notes is not None:
             notes.append(

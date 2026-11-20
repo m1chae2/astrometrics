@@ -8,6 +8,11 @@
 * Live: `measure_frames` and `measure_stack` measure raw frames and finished
   stacks now, without changing anything. `measure_folder` measures any folder
   of FITS files with the stored `frame.*` metric set and returns the numbers.
+* One star: `measure_star_profile` measures the radial profile of the star at a
+  clicked position, with fitted Moffat and Gaussian widths, and a straight cut
+  through it.
+* Detections: `measure_detections` lists the stars the astrometry run's star
+  finder detects in one image, so a viewer can draw them.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
 
@@ -27,9 +32,11 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.foundation.tuning import TuningReport
 from astrometricslib.models.quality.aperture_record import OddEvenApertureRecord
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.quality.detections import DetectionsMeasurement
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrameRecord
 from astrometricslib.models.quality.folder_measurement import FolderMeasurementReport
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
@@ -43,6 +50,7 @@ from astrometricslib.models.quality.quality_reports import (
 )
 from astrometricslib.models.quality.query_result import QualityQueryResult
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
+from astrometricslib.models.quality.star_profile import StarProfileMeasurement
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -130,6 +138,9 @@ class QualityRecords:
     drivers : `Drivers`, optional
         The outside services the caller chose, for the checks that plate-solve
         or measure spectra. Any left out is the built-in one.
+    owner : `Callable`, optional
+        Gives the `Astrometrics` this belongs to, which the tuners of
+        `measure_tuned_parameters` read stored spectra through.
     """
 
     def __init__(
@@ -140,12 +151,70 @@ class QualityRecords:
         targets: TargetLookup | None = None,
         calibration_library: Callable[[], Any] | None = None,
         drivers: Drivers | None = None,
+        owner: Callable[[], Any] | None = None,
     ) -> None:
         self._drivers = drivers
         self._config = config
         self._storage = storage
         self._targets = targets
         self._calibration_library_provider = calibration_library
+        self._owner_provider = owner
+
+    def measure_tuned_parameters(
+        self,
+        setup: str | None = None,
+        only: list[str] | None = None,
+        save: bool = False,
+    ) -> TuningReport:
+        """Work out this library's tuned values from the observatory's data.
+
+        Each tuner (see `astrometricslib.parameters.collect_tuners`) reads
+        the stored data of one setup and derives one family of values. Each
+        value is checked against its allowed range and smallest sample.
+        Nothing is saved unless ``save`` is set; then the config is backed up
+        and each value is written with where it came from.
+
+        Parameters
+        ----------
+        setup : `str`, optional
+            The setup to tune. The active setup when left out.
+        only : `list` [`str`], optional
+            Run only the tuners with these names.
+        save : `bool`, optional
+            Write the values to the config.
+
+        Returns
+        -------
+        report : `TuningReport`
+            The values that would be set or moved, and those skipped,
+            refused or unchanged.
+
+        Raises
+        ------
+        NotFoundError
+            If the setup is not in the config, or there is no active setup.
+        InvalidArgumentError
+            If ``only`` names a tuner that does not exist.
+        """
+        import datetime
+
+        from astrometricslib.foundation.errors import NotFoundError
+        from astrometricslib.foundation.tuning import collect_tuners, run_tuning
+
+        tuners = collect_tuners(("astrometricslib",))
+        if only:
+            unknown = sorted(set(only) - {tuner.name for tuner in tuners})
+            if unknown:
+                raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
+            tuners = [tuner for tuner in tuners if tuner.name in set(only)]
+        setups = self._config.get_observatory_setups()
+        chosen = setups.setup_named(setup) if setup else setups.active_setup()
+        if chosen is None:
+            raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
+        services = {"astrometrics": self._owner_provider()} if self._owner_provider else {}
+        return run_tuning(
+            tuners, chosen, self._config, services=services, today=datetime.date.today(), write=save
+        )
 
     def query(
         self,
@@ -541,8 +610,8 @@ class QualityRecords:
         last_file: str | None = None,
         since: TimeInput = None,
         until: TimeInput = None,
-        trend_frames: int = 10,
-        trend_threshold_percent: float = 15.0,
+        trend_frames: int | None = None,
+        trend_threshold_percent: float | None = None,
         exposure_seconds: float | None = None,
         predict_exposure_seconds: float | None = None,
         register_job: bool = True,
@@ -625,10 +694,11 @@ class QualityRecords:
             Only frames taken at or before this time.
         trend_frames : `int`, optional
             How many of the newest measured frames to check for a slow
-            drift. Defaults to 10.
+            drift. Defaults to `TREND_WINDOW_FRAMES` (10).
         trend_threshold_percent : `float`, optional
             How far, as a percentage of its starting level, a number must
-            move across those frames to count as a drift. Defaults to 15.
+            move across those frames to count as a drift. Defaults to the
+            tuned `TREND_THRESHOLD_PERCENT` (15 until tuned).
         exposure_seconds : `float`, optional
             Applies to ``"spectral"`` only. Only frames with this exposure
             length.
@@ -671,8 +741,8 @@ class QualityRecords:
                 "last_file": last_file is not None,
                 "since": since is not None,
                 "until": until is not None,
-                "trend_frames": trend_frames != 10,
-                "trend_threshold_percent": abs(trend_threshold_percent - 15.0) > 1e-9,
+                "trend_frames": trend_frames is not None,
+                "trend_threshold_percent": trend_threshold_percent is not None,
                 "exposure_seconds": exposure_seconds is not None,
                 "predict_exposure_seconds": predict_exposure_seconds is not None,
             },
@@ -684,6 +754,17 @@ class QualityRecords:
                 f"kind={kind!r} needs a target" + (" or a folder_path." if kind == "raw_check" else ".")
             )
         limit = _clamp(limit, 1, 100 if kind == "spectral" else 300)
+        if trend_frames is None or trend_threshold_percent is None:
+            from astrometricslib.foundation.parameters import resolve
+            from astrometricslib.pipelines.shared.quality.frame_trends import (
+                TREND_THRESHOLD_PERCENT,
+                TREND_WINDOW_FRAMES,
+            )
+
+            if trend_frames is None:
+                trend_frames = int(resolve(TREND_WINDOW_FRAMES).value)
+            if trend_threshold_percent is None:
+                trend_threshold_percent = float(resolve(TREND_THRESHOLD_PERCENT).value)
         selection = make_frame_selection(
             filter_name, first_file, last_file, since, until, kind == "spectral" or "spectra" in sections
         )
@@ -917,6 +998,120 @@ class QualityRecords:
         return build_set_aside_records(
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
+
+    def measure_star_profile(
+        self,
+        path: str,
+        x: float,
+        y: float,
+        radius_px: float | None = None,
+        cut_angle_degrees: float = 0.0,
+        cut_half_length_px: float | None = None,
+        search_radius_px: float | None = None,
+    ) -> StarProfileMeasurement:
+        """Measure one star's radial profile and a straight cut through it.
+
+        Nothing is stored. The clicked position is refined to the
+        brightness-weighted centroid in a small box. The sky is the
+        sigma-clipped median of a ring just outside the radius. The radial
+        profile lists every pixel within the radius with its distance from
+        the center and its value above the sky, and fits a round Moffat curve
+        and a round Gaussian curve. The cut reads values along a straight
+        line through the center (bilinear interpolation), which shows a
+        one-sided flare or a close pair. A color image is averaged over its
+        channels, and the result says so. A position outside the image, a
+        radius under 3 pixels or a number that is not finite raises
+        `InvalidArgumentError`; a missing file raises `NotFoundError`.
+
+        Parameters
+        ----------
+        path : `str`
+            A FITS image.
+        x, y : `float`
+            The star's position in 1-based pixels (as in FITS and DS9):
+            the center of the first pixel is (1, 1).
+        radius_px : `float`, optional
+            The radius of the profile, at least 3 pixels. Taken from the
+            star width when left out.
+        cut_angle_degrees : `float`, optional
+            The cut's direction, measured from +y (increasing row) toward
+            +x (increasing column), in image pixel axes. 0 runs along a
+            column, 90 along a row. Defaults to 0.
+        cut_half_length_px : `float`, optional
+            How far the cut reaches each way from the center. Taken from
+            the star width when left out.
+        search_radius_px : `float`, optional
+            When given, the position first moves to the brightest peak of
+            the lightly smoothed image within this many pixels (capped at
+            50), so a click that lands beside a star still finds it.
+            Left out, only the small centroid box refines the click.
+
+        Returns
+        -------
+        profile : `StarProfileMeasurement`
+            Fields: ``clicked_x``, ``clicked_y``, ``center_x``, ``center_y``,
+            ``sky``, ``sky_noise``, ``profile_radius_px`` and
+            ``profile_values``, ``peak``, ``clipped`` with ``clipped_reason``,
+            ``moffat`` and ``gaussian`` (each with ``fwhm_px``,
+            ``fwhm_arcsec``, ``peak``, ``beta``, curve points and
+            ``r_squared``), ``cut_distance_px`` and ``cut_values``, then
+            ``cutout`` (with ``cutout_origin_x`` and ``cutout_origin_y``, so
+            any cut can be rebuilt), ``snapped``, ``snap_distance_px``,
+            ``star_found`` and ``not_a_star_reason``. The ring around the star
+            ("around the star" view) is in the ``ring_*`` fields:
+            ``ring_inner_px`` and ``ring_outer_px`` (sized from the measured
+            pixels, not from the fit), the 5 degree direction bins
+            (``ring_bin_angle_degrees``, ``ring_bin_values``,
+            ``ring_bin_counts``), the Fourier terms ``ring_harmonics`` (orders
+            1 to 8: ``amplitude`` as a fraction, ``amplitude_error``,
+            ``amplitude_debiased``, ``significance`` and
+            ``direction_degrees``), the neighbor stars left out
+            (``ring_neighbors``, ``ring_masked_neighbor_count``,
+            ``ring_masked_fraction``) and ``ring_note``. Angles run from +y
+            toward +x, like the cut.
+
+        """
+        from astrometricslib.pipelines.astrometry.processing.detections import find_star_centers
+        from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
+
+        return measure_star_profile_in_file(
+            path,
+            x,
+            y,
+            radius_px,
+            cut_angle_degrees,
+            cut_half_length_px,
+            search_radius_px,
+            find_neighbors=find_star_centers,
+        )
+
+    def measure_detections(self, path: str) -> DetectionsMeasurement:
+        """List the stars the astrometry run's star finder detects in an image.
+
+        Nothing is stored. The image is searched now, with the same function
+        the astrometry run uses (the star-width-scaled kernel, the merge of a
+        star reported twice, and the averaged copy of a color image), so a
+        marker drawn from the result is a star the run finds. A missing file
+        raises `NotFoundError`; an image with no pixels raises
+        `InvalidArgumentError`.
+
+        Parameters
+        ----------
+        path : `str`
+            A FITS image.
+
+        Returns
+        -------
+        detections : `DetectionsMeasurement`
+            Fields: ``path``, ``width`` and ``height``, ``detections`` (each
+            with ``x`` and ``y`` in 1-based pixels as in
+            `measure_star_profile`, ``flux`` and ``merged``, `True` when two
+            reports of one star were merged), ``detection_count``,
+            ``merged_count``, ``kernel_fwhm_px`` and ``binned_on_color``.
+        """
+        from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
+
+        return measure_detections_in_file(path)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack(

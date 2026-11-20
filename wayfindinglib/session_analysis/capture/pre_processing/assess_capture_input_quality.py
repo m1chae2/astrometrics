@@ -27,6 +27,13 @@ import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.capture_history import capture_kind
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
@@ -34,7 +41,16 @@ from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import CaptureInputQuality, CaptureLimits
 from wayfindinglib.models.session.ekos_session import EkosCapture
 
-MATCH_WINDOW_SECONDS = 30.0
+MATCH_WINDOW_SECONDS = TunedParameter(
+    name="wayfinding.match_window_seconds",
+    default=30.0,
+    unit="seconds",
+    description="Farthest apart an Ekos exposure and a frame may start and still match.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D47",
+)
 """Farthest apart an Ekos exposure and a frame may start and still match.
 
 Real nights show the two starting within about 2 seconds of each other (the
@@ -83,12 +99,13 @@ def match_captures_to_frames(captures: Sequence[EkosCapture], frames: Sequence[C
     match : `CaptureMatch`
         The pairs and what is left over on each side.
     """
+    match_window_seconds = resolve_parameter(MATCH_WINDOW_SECONDS).value
     candidates = []
     for capture_index, capture in enumerate(captures):
         started_at = capture.completed_at - capture.exposure_seconds
         for frame_index, frame in enumerate(frames):
             offset = frame.timestamp - started_at
-            if abs(offset) <= MATCH_WINDOW_SECONDS:
+            if abs(offset) <= match_window_seconds:
                 candidates.append((abs(offset), offset, capture_index, frame_index))
     candidates.sort()
     used_captures: set[int] = set()
@@ -185,7 +202,7 @@ def assess_capture_input_quality(
         spectral_frames=sum(1 for frame in frames if frame.is_spectral),
         imaging_frames=sum(1 for frame in frames if not frame.is_spectral),
         has_ekos_record=has_ekos_record,
-        has_enough_frames=len(frames) >= MINIMUM_FRAMES_PER_NIGHT,
+        has_enough_frames=len(frames) >= resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value,
         limits_equipment_match=limits_equipment_match,
         dark_temperature_tolerance_c=limits.dark_temperature_tolerance_c,
     )
@@ -209,7 +226,7 @@ def assess_capture_input_quality(
     quality.ekos_light_captures = len(light_captures)
     quality.ekos_calibration_captures = len(captures) - len(light_captures)
     match = match_captures_to_frames(light_captures, frames)
-    quality.match_window_seconds = MATCH_WINDOW_SECONDS
+    quality.match_window_seconds = resolve_parameter(MATCH_WINDOW_SECONDS).value
     quality.captures_without_frame = sum(
         1 for capture in match.unmatched_captures if capture_kind(capture) == "light"
     )

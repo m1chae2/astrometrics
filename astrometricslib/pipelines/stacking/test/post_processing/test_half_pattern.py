@@ -138,7 +138,7 @@ def test_noise_alone_shares_nothing() -> None:
     result = outcome.result
     assert abs(result.variance_ratio) < 3.0 * result.variance_ratio_error
     assert result.variance_ratio_error < 0.02
-    assert result.pixel_count >= MINIMUM_PIXELS
+    assert result.pixel_count >= MINIMUM_PIXELS.default
 
 
 def test_a_shared_pixel_pattern_is_found_with_its_size() -> None:
@@ -242,7 +242,7 @@ def test_the_lagged_correlations_need_an_axis_and_a_long_enough_drift() -> None:
     assert unknown.result is not None
     assert unknown.result.excess is None
     assert unknown.result.walking_reason == "no night drifts"
-    short = _measure(odd, even, drift_extent_px=2.0 * WALKING_LAG_PX - 1.0)
+    short = _measure(odd, even, drift_extent_px=2.0 * WALKING_LAG_PX.default - 1.0)
     assert short.result is not None
     assert short.result.excess is None
     assert "cannot reach the lag" in short.result.walking_reason

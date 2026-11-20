@@ -439,7 +439,7 @@ def test_with_fewer_than_three_other_targets_there_is_no_history() -> None:
     rows, identities = _library({"T1": 0.2, "T2": 0.3})
     history = fc.fixed_pattern_shares_by_setup(rows, identities)
     run = _run_of("T0", _target_rows("T0", 0.0))
-    assert MINIMUM_HISTORY_TARGETS == 3
+    assert MINIMUM_HISTORY_TARGETS.default == 3
     assert fc.history_fixed_pattern_noise(history, run, "T0") is None
 
 

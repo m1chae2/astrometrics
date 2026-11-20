@@ -1,7 +1,15 @@
 """Purpose: Equipment Catalog Resolution.
 
 Description: Resolves the configured `Telescope`/`Camera` specifications
-and which of each is active, from `astrometrics.config.toml`. Foundation
+and which of each is active, from `astrometrics.config.toml`.
+
+When the config lists setups (``[Observatory.Setups]``, read through
+`AppConfiguration.get_observatory_setups`), they are the one equipment model
+(issue #175): there is one `Telescope` per optic, the active telescope and
+camera are those of the active setup, and a telescope's safety limits and
+protocols are read from the ``[Observatory.Mount.<name>]`` section of the
+setup's mount, falling back to the sections below. The rest of this
+description is the rule for a config with no setups. Foundation
 concern -- both peer functions need the active specifications; changing
 which entry is active is a Control operation
 (`Wayfinding_Library_Architecture.md` Sections 3.2 and 6.1).
@@ -37,6 +45,13 @@ from typing import Any
 
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.equipment_and_site.driver_protocols import (
     CAMERA_PROTOCOLS,
     FILTER_WHEEL_PROTOCOLS,
@@ -69,7 +84,16 @@ ACTIVE_GUIDE_SCOPE_KEY = "active_guide_scope"
 
 _BOOL_TRUE_STRINGS = {"true", "1", "yes", "on"}
 
-DEFAULT_MERIDIAN_FLIP_DELAY_MIN = 5.0
+DEFAULT_MERIDIAN_FLIP_DELAY_MIN = TunedParameter(
+    name="wayfinding.default_meridian_flip_delay_min",
+    default=5.0,
+    unit="min",
+    description="Meridian-flip delay used when the configuration does not set one.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D131",
+)
 """Meridian-flip delay used when the configuration does not set one."""
 
 
@@ -86,6 +110,71 @@ def _as_bool(value: str | bool | None, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     return value.strip().lower() in _BOOL_TRUE_STRINGS
+
+
+MOUNT_SECTION_PREFIX = "Observatory.Mount"
+
+
+def _setups(config: AppConfiguration) -> Any:
+    """Read the setups, or `None` when the config lists no optics or setups.
+
+    Returns
+    -------
+    setups : `ObservatorySetups` or `None`
+        The setups, when there is at least one optic and one setup.
+    """
+    setups = config.get_observatory_setups()
+    return setups if setups.optics and setups.setups else None
+
+
+def _setup_for_optic(setups: Any, optic_name: str) -> Any:
+    """Choose the setup whose mount carries an optic.
+
+    The active setup wins when it uses the optic; otherwise the first setup
+    that uses the optic and names a mount; otherwise the first that uses it.
+
+    Returns
+    -------
+    setup : `SetupConfig` or `None`
+        The setup, or `None` when no setup uses the optic.
+    """
+    using = [setup for setup in setups.setups if setup.optic_name == optic_name]
+    active = setups.active_setup()
+    if active is not None and active in using:
+        return active
+    with_mount = [setup for setup in using if setup.mount_name]
+    return (with_mount or using or [None])[0]
+
+
+def mount_section_name_for(config: AppConfiguration, telescope_name: str) -> str | None:
+    """Return the mount section that holds an optic's safety limits.
+
+    Returns
+    -------
+    section_name : `str` or `None`
+        ``Observatory.Mount.<mount>`` of the setup that carries the optic, or
+        `None` when the config has no setups or that setup names no mount.
+    """
+    setups = _setups(config)
+    if setups is None:
+        return None
+    setup = _setup_for_optic(setups, telescope_name)
+    if setup is None or not setup.mount_name:
+        return None
+    return f"{MOUNT_SECTION_PREFIX}.{setup.mount_name}"
+
+
+def _section_values(config: AppConfiguration, section_name: str | None) -> dict[str, str]:
+    """Read a whole config section, or nothing when it does not exist.
+
+    Returns
+    -------
+    values : `dict` [`str`, `str`]
+        The section's keys and values.
+    """
+    if section_name is None or section_name not in config.app_config:
+        return {}
+    return dict(config.app_config[section_name])
 
 
 def _telescope_section_for_name(config: AppConfiguration, telescope_name: str) -> dict[str, str]:
@@ -180,9 +269,10 @@ def _build_telescope(
 def list_telescopes(config: AppConfiguration) -> list[Telescope]:
     """Return every configured `Telescope`.
 
-    Reads the comma-separated ``models`` list under
-    ``[Observatory.Telescope]``. Where no such list is configured,
-    falls back to one telescope built from the existing flat
+    With setups, there is one telescope per optic. Otherwise reads the
+    comma-separated ``models`` list under ``[Observatory.Telescope]``.
+    Where no such list is configured, falls back to one telescope built
+    from the existing flat
     ``[Observatory.Telescope]`` section, so an unconfigured catalog
     behaves exactly as the single pre-existing telescope did.
 
@@ -191,6 +281,23 @@ def list_telescopes(config: AppConfiguration) -> list[Telescope]:
     telescopes : `list` [`Telescope`]
         Every configured telescope.
     """
+    setups = _setups(config)
+    if setups is not None:
+        telescopes = []
+        for optic in setups.optics:
+            # The optic gives the focal geometry; the mount section, then the
+            # old telescope section, give the limits and protocols.
+            section = {
+                **_telescope_section_for_name(config, optic.name),
+                **_section_values(config, mount_section_name_for(config, optic.name)),
+                "focal_length_mm": str(optic.focal_length_mm),
+                "focal_ratio": str(optic.focal_ratio or 0.0),
+            }
+            telescope = _build_telescope(config, optic.name, section)
+            if telescope is not None:
+                telescopes.append(telescope)
+        return telescopes
+
     models_str = config.get_value(TELESCOPE_SECTION, "models")
     telescope_names = [m.strip() for m in models_str.split(",") if m.strip()] if models_str else []
 
@@ -214,8 +321,13 @@ def get_active_telescope_id(config: AppConfiguration) -> str | None:
     Returns
     -------
     telescope_id : `str` or `None`
-        The configured active telescope id, or `None` if unset.
+        The active setup's optic when the config has setups, otherwise the
+        configured active telescope id, or `None` if unset.
     """
+    setups = _setups(config)
+    if setups is not None:
+        active = setups.active_setup()
+        return active.optic_name if active is not None else None
     return config.get_value(TELESCOPE_SECTION, ACTIVE_TELESCOPE_KEY)
 
 
@@ -259,9 +371,39 @@ def get_active_camera_id(config: AppConfiguration) -> str | None:
     Returns
     -------
     camera_id : `str` or `None`
-        The configured active camera id, or `None` if unset.
+        The active setup's camera when the config has setups (written as the
+        camera list writes it), otherwise the configured active camera id, or
+        `None` if unset.
     """
+    setups = _setups(config)
+    if setups is not None:
+        active = setups.active_setup()
+        return camera_id_for(config, active.camera_name) if active is not None else None
     return config.get_value(CAMERA_SECTION, ACTIVE_CAMERA_KEY)
+
+
+def camera_key(camera_name: str) -> str:
+    """Reduce a camera name to lowercase letters and digits.
+
+    Returns
+    -------
+    key : `str`
+        The name without spaces, punctuation or case.
+    """
+    return "".join(character for character in camera_name.lower() if character.isalnum())
+
+
+def camera_id_for(config: AppConfiguration, camera_name: str) -> str:
+    """Return the camera list's spelling of a camera named in a setup.
+
+    Returns
+    -------
+    camera_id : `str`
+        The matching name from ``[Observatory.Camera] models`` (spaces and
+        case ignored), or ``camera_name`` itself when none matches.
+    """
+    key = camera_key(camera_name)
+    return next((name for name in config.get_available_cameras() if camera_key(name) == key), camera_name)
 
 
 def _build_guide_scope(guide_scope_name: str, section: dict[str, str]) -> GuideScope | None:
@@ -465,6 +607,8 @@ def get_meridian_flip_delay_min(config: Any) -> float:
     """
     return float(
         config.app_config.get(
-            TELESCOPE_SECTION, "meridian_flip_delay_min", fallback=str(DEFAULT_MERIDIAN_FLIP_DELAY_MIN)
+            TELESCOPE_SECTION,
+            "meridian_flip_delay_min",
+            fallback=str(resolve_parameter(DEFAULT_MERIDIAN_FLIP_DELAY_MIN).value),
         )
     )

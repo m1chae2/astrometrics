@@ -292,7 +292,7 @@ def test_ensemble_gate_goes_red_when_the_comparison_stars_scatter_far_above_thei
 
     assert failed.status is GateStatus.FAILED
     assert failed.measured_value == pytest.approx(0.0655 / 0.0036)
-    assert failed.limit == pytest.approx(rg.MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED)
+    assert failed.limit == pytest.approx(rg.MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED.default)
     assert "18.2 times what their errors predict" in failed.detail
     assert "patchy cloud" in failed.detail
     assert m13.status is GateStatus.PASSED
@@ -360,7 +360,7 @@ def test_drift_gate_goes_red_when_the_field_rotated_too_much() -> None:
 
     assert gate.status is GateStatus.FAILED
     assert gate.measured_value == pytest.approx(1.8)
-    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX)
+    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value)
     assert "a corner moves 1.80 px" in gate.detail
     assert "rotation and scale change move a corner 1.80 px (95th percentile over 35 frames)" in gate.detail
 
@@ -391,7 +391,7 @@ def test_drift_gate_goes_red_when_more_than_a_fifth_of_the_stars_fell_back() -> 
 
     assert failed.status is GateStatus.FAILED
     assert failed.measured_value == pytest.approx(0.25)
-    assert failed.limit == pytest.approx(rg.MAXIMUM_CENTROID_FALLBACK_FRACTION)
+    assert failed.limit == pytest.approx(rg.MAXIMUM_CENTROID_FALLBACK_FRACTION.default)
     assert "25.0% of star measurements kept the aligned position" in failed.detail
     assert edge.status is GateStatus.PASSED
 
@@ -427,7 +427,7 @@ def test_drift_gate_can_run_on_the_per_star_summary_alone() -> None:
 
     assert gate.status is GateStatus.PASSED
     assert gate.measured_value == pytest.approx(0.1)
-    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX)
+    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value)
 
 
 def test_scatter_population_gate_is_not_checked_with_few_stars() -> None:
@@ -479,14 +479,14 @@ def test_the_discrimination_gate_goes_red_below_the_auc_floor_even_when_it_beats
     unlisted = list(generator.normal(0.0, 1.0, 600))
     skill = discrimination(known, unlisted)
     assert skill is not None
-    assert skill.required_auc < skill.auc < MINIMUM_DISCRIMINATION_AUC
+    assert skill.required_auc < skill.auc < MINIMUM_DISCRIMINATION_AUC.default
 
     gate = good_run(known_variable_scores=known, unlisted_scores=unlisted)[
         rg.VARIABILITY_DISCRIMINATION_GATE_NAME
     ]
 
     assert gate.status is GateStatus.FAILED
-    assert gate.limit == pytest.approx(MINIMUM_DISCRIMINATION_AUC)
+    assert gate.limit == pytest.approx(MINIMUM_DISCRIMINATION_AUC.default)
     assert "needs 0.70" in gate.detail
 
 

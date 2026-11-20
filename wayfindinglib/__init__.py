@@ -210,7 +210,7 @@ class Wayfinder:
             open_port_forwards=open_port_forwards,
         )
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
-        self.review = ObservationReview(self.control)
+        self.review = ObservationReview(self.control, owner=lambda: self)
         self.execution = ObservationExecution(
             self.config, butler, astrometrics=self.astrometrics, control=self.control
         )

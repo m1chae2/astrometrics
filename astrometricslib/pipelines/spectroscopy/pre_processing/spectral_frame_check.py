@@ -29,34 +29,110 @@ from scipy import ndimage
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_ADU,
     resolve_saturation_threshold,
 )
 
-ZERO_ORDER_PEAK_HALF_WINDOW_PX = 6
+# It stands for about two star widths (6 on the reference setup, 2 × the star
+# width), so it follows the star width the run measures.
+ZERO_ORDER_PEAK_HALF_WINDOW_PX = TunedParameter(
+    name="spectroscopy.zero_order_peak_half_window_px",
+    default=factor_for(6, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Half-size of the box around the zero order in which its peak is read.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D36",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=6,
+)
 """Half-size of the box around the zero order in which its peak is read."""
 
-BAND_ALONG_PX = 10
+BAND_ALONG_PX = TunedParameter(
+    name="spectroscopy.band_along_px",
+    default=10,
+    unit="px",
+    description="Length along the streak of each band used to follow it and measure its width.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D36",
+)
 """Length along the streak of each band used to follow it and measure its
 width. Ten rows average away pixel noise and still resolve the change in
 width along a streak a few hundred pixels long."""
 
-TRACE_SEARCH_HALF_WIDTH_PX = 80
+TRACE_SEARCH_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.trace_search_half_width_px",
+    default=80,
+    unit="px",
+    description="How far across from the zero order's column the streak is looked for in each band.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D36",
+)
 """How far across, from the zero order's own column, the streak is looked
 for in each band. A tilt of 5 degrees moves a 630 px streak by 55 px."""
 
-MINIMUM_BAND_PEAK_SIGMA = 5.0
+MINIMUM_BAND_PEAK_SIGMA = TunedParameter(
+    name="spectroscopy.minimum_band_peak_sigma",
+    default=5.0,
+    unit="noise sigma",
+    description="A band counts as holding the streak when its peak stands this far above the sky.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D36",
+)
 """A band counts as holding the streak when its peak stands this many noise
 units above the sky."""
 
-CENTRE_SMOOTHING_SIGMA_PX = 1.5
+# It stands for a fraction of a trail width (1.5 on the reference setup, 0.38
+# × the trail width), so it follows the trail width the run measures.
+CENTRE_SMOOTHING_SIGMA_PX = TunedParameter(
+    name="spectroscopy.centre_smoothing_sigma_px",
+    default=factor_for(1.5, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="Smoothing used only to locate the streak centre in a noisy band.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D36",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=1.5,
+)
 """Smoothing used only to locate the streak's centre in a noisy band."""
 
 MAXIMUM_BLOBS_REPORTED = 5
 """Most saturated patches listed for one frame."""
 
-ZERO_ORDER_SATURATION_RADIUS_PX = 12
+# It stands for about four star widths (12 on the reference setup, 4 × the
+# star width), so it follows the star width the run measures.
+ZERO_ORDER_SATURATION_RADIUS_PX = TunedParameter(
+    name="spectroscopy.zero_order_saturation_radius_px",
+    default=factor_for(12, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="A saturated patch this close to the zero order is taken to be the zero order itself.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D36",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=12,
+)
 """A saturated patch this close to the zero order is the zero order itself."""
 
 _MAD_TO_SIGMA = 1.4826
@@ -106,8 +182,8 @@ def analyze_spectral_frame(
     length_px: float,
     exposure_seconds: float,
     predict_exposure_seconds: float | None = None,
-    saturation_threshold_adu: float = SATURATION_ADU,
-    saturation_source: str = f"default {SATURATION_ADU:g} ADU (no camera profile given)",
+    saturation_threshold_adu: float | None = None,
+    saturation_source: str | None = None,
 ) -> dict[str, Any]:
     """Measure the zero order, the streak and the saturation of one frame.
 
@@ -134,7 +210,8 @@ def analyze_spectral_frame(
         Pixels at or above this value count as saturated. See
         `resolve_saturation_threshold`. Defaults to `SATURATION_ADU`.
     saturation_source : `str`, optional
-        Where that level came from, copied into the result.
+        Where that level came from, copied into the result. Defaults to a
+        note that the `SATURATION_ADU` default was used.
 
     Returns
     -------
@@ -145,6 +222,15 @@ def analyze_spectral_frame(
         saturation level used and its source are in
         ``saturation_threshold_adu`` and ``saturation_threshold_source``.
     """
+    zero_order_saturation_radius_px = resolve(ZERO_ORDER_SATURATION_RADIUS_PX).value
+    band_along_px = resolve(BAND_ALONG_PX).value
+    trace_search_half_width_px = resolve(TRACE_SEARCH_HALF_WIDTH_PX).value
+    centre_smoothing_sigma_px = resolve(CENTRE_SMOOTHING_SIGMA_PX).value
+    minimum_band_peak_sigma = resolve(MINIMUM_BAND_PEAK_SIGMA).value
+    if saturation_threshold_adu is None:
+        saturation_threshold_adu = resolve(SATURATION_ADU).value
+    if saturation_source is None:
+        saturation_source = f"default {resolve(SATURATION_ADU).value:g} ADU (no camera profile given)"
     image = np.asarray(data, dtype=np.float64)
     along_image = image if vertical else image.T
     row, column = zero_order_row_column
@@ -166,7 +252,7 @@ def analyze_spectral_frame(
             distance = (blob_along - zero_along) * direction
             if (
                 np.hypot(blob_along - zero_along, blob_across - zero_across)
-                <= ZERO_ORDER_SATURATION_RADIUS_PX
+                <= zero_order_saturation_radius_px
             ):
                 zero_order_saturated = True
                 continue
@@ -177,12 +263,12 @@ def analyze_spectral_frame(
     ]
 
     row_slice = slice(
-        max(round(row) - ZERO_ORDER_PEAK_HALF_WINDOW_PX, 0),
-        round(row) + ZERO_ORDER_PEAK_HALF_WINDOW_PX + 1,
+        max(round(row) - resolve(ZERO_ORDER_PEAK_HALF_WINDOW_PX).value, 0),
+        round(row) + resolve(ZERO_ORDER_PEAK_HALF_WINDOW_PX).value + 1,
     )
     column_slice = slice(
-        max(round(column) - ZERO_ORDER_PEAK_HALF_WINDOW_PX, 0),
-        round(column) + ZERO_ORDER_PEAK_HALF_WINDOW_PX + 1,
+        max(round(column) - resolve(ZERO_ORDER_PEAK_HALF_WINDOW_PX).value, 0),
+        round(column) + resolve(ZERO_ORDER_PEAK_HALF_WINDOW_PX).value + 1,
     )
     zero_order_peak = float(image[row_slice, column_slice].max())
 
@@ -191,17 +277,17 @@ def analyze_spectral_frame(
     bands = []
     start, end = (first, stop) if positive else (stop, first)
     start, end = max(start, 0), min(end, along_image.shape[0])
-    for band_start in range(start, end - BAND_ALONG_PX + 1, BAND_ALONG_PX):
-        strip = along_image[band_start : band_start + BAND_ALONG_PX].mean(axis=0) - sky
-        low = max(round(zero_across) - TRACE_SEARCH_HALF_WIDTH_PX, 0)
-        high = min(round(zero_across) + TRACE_SEARCH_HALF_WIDTH_PX + 1, strip.size)
+    for band_start in range(start, end - band_along_px + 1, band_along_px):
+        strip = along_image[band_start : band_start + band_along_px].mean(axis=0) - sky
+        low = max(round(zero_across) - trace_search_half_width_px, 0)
+        high = min(round(zero_across) + trace_search_half_width_px + 1, strip.size)
         window = strip[low:high]
         # Smoothing only finds where the streak is. The width and the peak
         # are read from the unsmoothed profile, since smoothing widens a
         # narrow streak and lowers its peak.
-        smoothed = ndimage.gaussian_filter1d(window, CENTRE_SMOOTHING_SIGMA_PX)
+        smoothed = ndimage.gaussian_filter1d(window, centre_smoothing_sigma_px)
         found = int(np.argmax(smoothed))
-        if smoothed[found] < MINIMUM_BAND_PEAK_SIGMA * sigma / np.sqrt(BAND_ALONG_PX):
+        if smoothed[found] < minimum_band_peak_sigma * sigma / np.sqrt(band_along_px):
             continue
         near = slice(max(found - 2, 0), found + 3)
         centre = max(found - 2, 0) + int(np.argmax(window[near]))
@@ -525,7 +611,7 @@ def check_spectral_frames(
         target_id=target.id,
         frames_matching=matching,
         frames_measured=len(rows),
-        summary=summarize_spectral_frames(rows, MINIMUM_TRAIL_CONTRAST_SIGMA),
+        summary=summarize_spectral_frames(rows, resolve(MINIMUM_TRAIL_CONTRAST_SIGMA).value),
         frames=rows,
         note=(
             "Nothing was saved. Peaks at or above the saturation level are lower bounds; "

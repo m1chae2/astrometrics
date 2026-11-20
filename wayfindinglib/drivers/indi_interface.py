@@ -21,6 +21,13 @@ from astropy.time import Time
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import AppConfiguration
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
 from .indi import coordinate_utils
@@ -51,7 +58,17 @@ logger = logging.getLogger(__name__)
 # countdown clock before the clock is moved to match. About one poll interval
 # plus transport delay; stale readings are always too high, so they never
 # reach this rule.
-_EXPOSURE_CLOCK_TOLERANCE_SECONDS = 3.0
+_EXPOSURE_CLOCK_TOLERANCE_SECONDS = TunedParameter(
+    name="wayfinding.exposure_clock_tolerance_seconds",
+    default=3.0,
+    unit="seconds",
+    description="How far the camera's remaining time may fall below the countdown clock before it is moved.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="WAY-D134",
+    config_key=("Wayfinding.Control", "exposure_clock_tolerance_seconds"),
+)
 
 
 class TelescopeStatus(BaseModel):
@@ -1161,7 +1178,7 @@ class IndiInterface(IndiClient):
                 # The camera says the exposure is over; hold the clock at zero.
                 self._exposure_start_time = now - length
             remaining = max(0.0, length - (now - self._exposure_start_time))
-            if val > 0 and val < remaining - _EXPOSURE_CLOCK_TOLERANCE_SECONDS:
+            if val > 0 and val < remaining - resolve_parameter(_EXPOSURE_CLOCK_TOLERANCE_SECONDS).value:
                 # The camera is ahead of the clock, so move the clock forward.
                 self._exposure_start_time = now - (length - val)
                 remaining = val

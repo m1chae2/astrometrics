@@ -19,8 +19,18 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 
 WAVELENGTH_SCALE_GATE_NAME = "wavelength_scale"
@@ -30,11 +40,34 @@ WAVELENGTH_SCALE_GATE_NAME = "wavelength_scale"
 # A per pixel (see `spectral_resolution`). A designed limit, not a measured
 # one: a scale that is off by more than one pixel puts a line in the wrong
 # sample.
-WAVELENGTH_SCALE_LIMIT_ANGSTROM = 11.0
+# It stands for about one pixel of dispersion in wavelength (11 on the
+# reference setup, 0.97 × the dispersion), so it follows the dispersion the
+# run measures.
+WAVELENGTH_SCALE_LIMIT_ANGSTROM = TunedParameter(
+    name="spectroscopy.wavelength_scale_limit_angstrom",
+    default=factor_for(11.0, RunBasis.DISPERSION_ANGSTROM_PER_PX),
+    unit="× dispersion",
+    description="The largest RMS of the wavelength offsets left after correction before the gate fails.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D12",
+    basis=RunBasis.DISPERSION_ANGSTROM_PER_PX,
+    reference_value=11.0,
+)
 
 # The fewest spectra with a measured offset needed before the gate judges the
 # run. The RMS of one or two numbers says nothing about scatter.
-MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE = 3
+MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE = TunedParameter(
+    name="spectroscopy.minimum_spectra_for_wavelength_scale",
+    default=3,
+    unit="count",
+    description="The fewest spectra with a measured offset needed before the gate judges the run.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D12",
+)
 
 _OFFSET_METRIC = "wavelength_zero_point_offset_angstrom"
 _UNCERTAINTY_METRIC = "wavelength_zero_point_uncertainty_angstrom"
@@ -86,7 +119,7 @@ def _correlation(first: list[float], second: list[float]) -> float | None:
         The correlation, from -1 to 1. `None` when there are fewer than three
         pairs or either list is constant.
     """
-    if len(first) < MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE:
+    if len(first) < resolve(MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE).value:
         return None
     first_values = np.asarray(first, dtype=float)
     second_values = np.asarray(second, dtype=float)
@@ -173,14 +206,15 @@ def wavelength_scale_gate(summary: WavelengthScaleSummary | None) -> GateResult:
     """
     source = (
         f"RMS of the per-spectrum wavelength offsets left after correction, at most "
-        f"{WAVELENGTH_SCALE_LIMIT_ANGSTROM:g} A (one pixel of dispersion; designed, not measured)"
+        f"{resolve(WAVELENGTH_SCALE_LIMIT_ANGSTROM).value:g} "
+        f"A (one pixel of dispersion; designed, not measured)"
     )
-    if summary is None or summary.spectrum_count < MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE:
+    if summary is None or summary.spectrum_count < resolve(MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE).value:
         found = 0 if summary is None else summary.spectrum_count
         return unchecked_gate(
             WAVELENGTH_SCALE_GATE_NAME,
             f"only {found} spectrum(s) had a measured wavelength offset; "
-            f"at least {MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE} are needed",
+            f"at least {resolve(MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE).value} are needed",
             source,
         )
     detail = (
@@ -188,18 +222,18 @@ def wavelength_scale_gate(summary: WavelengthScaleSummary | None) -> GateResult:
         f"{summary.rms_after_correction_angstrom:.1f} A after correction over "
         f"{summary.spectrum_count} spectra; the offset was applied to {summary.applied_count}"
     )
-    if summary.rms_after_correction_angstrom > WAVELENGTH_SCALE_LIMIT_ANGSTROM:
+    if summary.rms_after_correction_angstrom > resolve(WAVELENGTH_SCALE_LIMIT_ANGSTROM).value:
         return failed_gate(
             WAVELENGTH_SCALE_GATE_NAME,
             "the wavelength scale scatters between spectra: " + detail,
             summary.rms_after_correction_angstrom,
-            WAVELENGTH_SCALE_LIMIT_ANGSTROM,
+            resolve(WAVELENGTH_SCALE_LIMIT_ANGSTROM).value,
             source,
         )
     return passed_gate(
         WAVELENGTH_SCALE_GATE_NAME,
         summary.rms_after_correction_angstrom,
-        WAVELENGTH_SCALE_LIMIT_ANGSTROM,
+        resolve(WAVELENGTH_SCALE_LIMIT_ANGSTROM).value,
         source,
         detail,
     )

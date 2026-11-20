@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
     FALSE_DISCOVERY_LEVEL,
@@ -221,7 +222,7 @@ def is_flagged(star: StellarObject) -> bool:
         photometry.variability_score is not None
         and photometry.variability_score > 1.0
         and photometry.false_discovery_q_value is not None
-        and photometry.false_discovery_q_value < FALSE_DISCOVERY_LEVEL
+        and photometry.false_discovery_q_value < resolve(FALSE_DISCOVERY_LEVEL).value
     )
 
 
@@ -344,7 +345,7 @@ def format_report(result: InjectionResult, target: str) -> str:
     """
     lines = [
         f"{target}: {result.field_size} stars with light curves, {result.hosts} able to host a signal.",
-        f"Rule: score above 1 and false discovery q-value below {FALSE_DISCOVERY_LEVEL:g}.",
+        f"Rule: score above 1 and false discovery q-value below {resolve(FALSE_DISCOVERY_LEVEL).value:g}.",
     ]
     edges = result.brightness_edges
     for shape in SIGNAL_SHAPES:

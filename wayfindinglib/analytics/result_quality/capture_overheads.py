@@ -35,61 +35,163 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
 
-DEFAULT_DOWNLOAD_SECONDS = 5.0
+DEFAULT_DOWNLOAD_SECONDS = TunedParameter(
+    name="wayfinding.default_download_seconds",
+    default=5.0,
+    unit="s per frame (the camera download time)",
+    description="Download time per frame when none is recorded, in seconds.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """Download time per frame when none is recorded, in seconds. A USB 3 astronomy
 camera reads out in 1 to 2 s and the file is saved in about as long; a DSLR
 takes 5 to 10 s. Design estimate, register row WAY-D33."""
 
-DEFAULT_DITHER_SETTLE_SECONDS = 20.0
+DEFAULT_DITHER_SETTLE_SECONDS = TunedParameter(
+    name="wayfinding.default_dither_settle_seconds",
+    default=20.0,
+    unit="s per dither (the guider settle time)",
+    description="Dither settle time when none is recorded, in seconds.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """Dither settle time when none is recorded, in seconds. The guider must move
 the
 star and settle within its tolerance; 15 to 30 s is typical. Design estimate,
 register row WAY-D33."""
 
-DEFAULT_AUTOFOCUS_SECONDS = 120.0
+DEFAULT_AUTOFOCUS_SECONDS = TunedParameter(
+    name="wayfinding.default_autofocus_seconds",
+    default=120.0,
+    unit="s per autofocus run (the focuser)",
+    description="Autofocus run time when none is recorded, in seconds.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """Autofocus run time when none is recorded, in seconds. A V-curve of about 9
 points of 3 to 5 s frames and moves takes 1.5 to 3 minutes. Design estimate,
 register row WAY-D33."""
 
-DITHER_EVERY_FRAMES = 3
+DITHER_EVERY_FRAMES = TunedParameter(
+    name="wayfinding.dither_every_frames",
+    default=3,
+    unit="frames between dithers",
+    description="Frames between dithers, when a run of frames is priced and the sequence says nothing else.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="WAY-D71",
+    config_key=("Wayfinding.Planning", "dither_every_frames"),
+)
 """Frames between dithers, when a run of frames is priced and the sequence says
 nothing else. It is the cadence of the wall-clock example (60 frames of
 30 s with a dither every 3 frames). The target report and tonight's ranking
 both use it, so they price the same hour. Design estimate, register row
 WAY-D71."""
 
-AUTOFOCUS_RUNS_PER_HOUR = 1
+AUTOFOCUS_RUNS_PER_HOUR = TunedParameter(
+    name="wayfinding.autofocus_runs_per_hour",
+    default=1,
+    unit="runs per hour of imaging",
+    description=(
+        "Autofocus runs per hour of imaging, when a run of frames is priced and the plan says nothing else."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="WAY-D71",
+    config_key=("Wayfinding.Planning", "autofocus_runs_per_hour"),
+)
 """Autofocus runs per hour of imaging, when a run of frames is priced and the
 plan says nothing else. Ekos refocuses on a filter change or a temperature
 change, about once an hour on a cooling night. The target report and tonight's
 ranking both use it. Design estimate, register row WAY-D71."""
 
-DOWNLOAD_PERCENTILE = 10.0
+DOWNLOAD_PERCENTILE = TunedParameter(
+    name="wayfinding.download_percentile",
+    default=10.0,
+    unit="percentile of the recorded gaps",
+    description="The download time is this percentile of the plain gaps: the quickest gaps hold no dither.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """The download time is this percentile of the plain gaps: the quickest gaps
 hold
 no dither. Design estimate, register row WAY-D33."""
 
-DITHER_DETECTION_SECONDS = 3.0
+DITHER_DETECTION_SECONDS = TunedParameter(
+    name="wayfinding.dither_detection_seconds",
+    default=3.0,
+    unit="s beyond the download time",
+    description="A gap this much longer than the download counts as holding a dither.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """A gap this much longer than the download counts as holding a dither. The
 download time varies by about a second, so 3 s separates a dither from that
 scatter. Design estimate, register row WAY-D33."""
 
-PAUSE_SECONDS = 600.0
+PAUSE_SECONDS = TunedParameter(
+    name="wayfinding.pause_seconds",
+    default=600.0,
+    unit="s (scales with the sequence overheads)",
+    description=(
+        "A gap longer than this (10 minutes) is a pause, a meridian flip or a stop, not an overhead of "
+        "the sequence."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """A gap longer than this (10 minutes) is a pause, a meridian flip or a stop,
 not
 an overhead of the sequence. It is left out. Design estimate, register row
 WAY-D33."""
 
-MINIMUM_GAPS = 10
+MINIMUM_GAPS = TunedParameter(
+    name="wayfinding.minimum_gaps",
+    default=10,
+    unit="recorded gaps",
+    description="Fewest gaps that make the download estimate.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """Fewest gaps that make the download estimate. With fewer, the 10th percentile
 is
 just the smallest gap. Design estimate, register row WAY-D33."""
 
-EXPOSURE_MATCH_SECONDS = 0.5
+EXPOSURE_MATCH_SECONDS = TunedParameter(
+    name="wayfinding.exposure_match_seconds",
+    default=0.5,
+    unit="s (scales with the exposure display precision)",
+    description="Exposures within this many seconds count as the same setting.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D33",
+)
 """Exposures within this many seconds count as the same setting. Ekos rounds
 exposures to the displayed precision. Design choice, register row WAY-D33."""
 
@@ -196,7 +298,8 @@ def estimate_capture_overheads(
                 for capture in context.captures
                 if (
                     exposure_seconds is None
-                    or abs(capture.exposure_seconds - exposure_seconds) <= EXPOSURE_MATCH_SECONDS
+                    or abs(capture.exposure_seconds - exposure_seconds)
+                    <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
                 )
                 and (filter_name is None or capture.filter_name == filter_name)
             ),
@@ -205,18 +308,22 @@ def estimate_capture_overheads(
         focus_times = [run.timestamp for run in context.autofocus_runs]
         for previous, current in pairwise(captures):
             gap = current.completed_at - previous.completed_at - current.exposure_seconds
-            if gap < 0.0 or gap > PAUSE_SECONDS:
+            if gap < 0.0 or gap > resolve_parameter(PAUSE_SECONDS).value:
                 continue
             has_focus = any(previous.completed_at <= time <= current.completed_at for time in focus_times)
             all_gaps.append((gap, has_focus))
     plain_gaps = [gap for gap, has_focus in all_gaps if not has_focus]
-    download_from_records = len(plain_gaps) >= MINIMUM_GAPS
+    download_from_records = len(plain_gaps) >= resolve_parameter(MINIMUM_GAPS).value
     download = (
-        float(np.percentile(plain_gaps, DOWNLOAD_PERCENTILE))
+        float(np.percentile(plain_gaps, resolve_parameter(DOWNLOAD_PERCENTILE).value))
         if download_from_records
-        else DEFAULT_DOWNLOAD_SECONDS
+        else resolve_parameter(DEFAULT_DOWNLOAD_SECONDS).value
     )
-    dither_gaps = [gap - download for gap in plain_gaps if gap - download > DITHER_DETECTION_SECONDS]
+    dither_gaps = [
+        gap - download
+        for gap in plain_gaps
+        if gap - download > resolve_parameter(DITHER_DETECTION_SECONDS).value
+    ]
     focus_gaps = [gap - download for gap, has_focus in all_gaps if has_focus and gap - download > 0.0]
     dither_from_records = download_from_records and bool(dither_gaps)
     autofocus_from_records = download_from_records and bool(focus_gaps)
@@ -224,8 +331,10 @@ def estimate_capture_overheads(
         download_seconds=download,
         dither_settle_seconds=float(np.mean(dither_gaps))
         if dither_from_records
-        else DEFAULT_DITHER_SETTLE_SECONDS,
-        autofocus_seconds=float(np.mean(focus_gaps)) if autofocus_from_records else DEFAULT_AUTOFOCUS_SECONDS,
+        else resolve_parameter(DEFAULT_DITHER_SETTLE_SECONDS).value,
+        autofocus_seconds=float(np.mean(focus_gaps))
+        if autofocus_from_records
+        else resolve_parameter(DEFAULT_AUTOFOCUS_SECONDS).value,
         download_from_records=download_from_records,
         dither_from_records=dither_from_records,
         autofocus_from_records=autofocus_from_records,

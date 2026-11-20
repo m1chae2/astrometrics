@@ -509,7 +509,7 @@ def test_a_rule_suggestion_becomes_a_suggested_package_with_a_keyed_row(fixture:
     assert entry.event == SuggestionEvent.CREATED
     assert sorted(entry.evidence_row_ids) == [5, 900]
     assert entry.values["noise"] == pytest.approx(3e-4)
-    assert entry.values["noise_goal"] == pytest.approx(DEFAULT_NOISE_GOAL)
+    assert entry.values["noise_goal"] == pytest.approx(DEFAULT_NOISE_GOAL.default)
 
 
 def test_a_second_refresh_with_the_same_evidence_changes_nothing(fixture: Fixture) -> None:
@@ -539,7 +539,7 @@ def test_a_target_below_the_noise_goal_gets_no_suggestion_and_loses_its_old_one(
     """A noise at or below the goal deletes the suggestion."""
     fixture.statements["M 81"] = [more_frames(40)]
     fixture.planning.refresh_suggestions(["M 81"], register_job=False)
-    fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL * 0.9)]
+    fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL.default * 0.9)]
     change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
     assert len(change.deleted) == 1 and suggested(fixture) == []
     assert ("deleted", "the noise goal is met") in log_events(fixture)
@@ -612,7 +612,7 @@ def test_a_reached_depth_goal_deletes_the_suggestion_even_above_the_noise_goal(f
 
 def test_a_depth_below_the_goal_keeps_a_suggestion_the_noise_goal_would_end(fixture: Fixture) -> None:
     """A noise at the old goal does not end a suggestion if depth is short."""
-    fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL * 0.9), depth_row(24.2)]
+    fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL.default * 0.9), depth_row(24.2)]
     fixture.statements["M 81"] = [more_frames(40)]
     change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
     assert len(change.added) == 1

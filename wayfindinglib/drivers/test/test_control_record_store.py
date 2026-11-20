@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 
 from astrometricslib.exceptions import InvalidArgumentError, StorageError
-from wayfindinglib.drivers.control_record_store import ControlRecordStore
+from astrometricslib.parameters import RunBasis, parameter_context, record_basis, resolve_parameter
+from wayfindinglib.drivers.control_record_store import SPURIOUS_ALIGNMENT_ERROR_ARCSEC, ControlRecordStore
 
 
 @pytest.fixture
@@ -549,3 +550,11 @@ def test_recorded_session_nights_reads_only_the_session_ids(store: ControlRecord
         frozenset({"2026-10-01", "2026-10-03"}),
         frozenset({"2026-10-02"}),
     )
+
+
+def test_spurious_sync_limit_follows_the_plate_scale() -> None:
+    """The echo limit is 0.5 arcsec at 1.915 arcsec/px and doubles at 2x."""
+    with parameter_context():
+        assert resolve_parameter(SPURIOUS_ALIGNMENT_ERROR_ARCSEC).value == pytest.approx(0.5)
+        record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, 2.0 * 1.915)
+        assert resolve_parameter(SPURIOUS_ALIGNMENT_ERROR_ARCSEC).value == pytest.approx(1.0, rel=1e-3)

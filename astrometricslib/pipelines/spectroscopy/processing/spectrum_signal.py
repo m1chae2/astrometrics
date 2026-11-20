@@ -13,6 +13,14 @@ import math
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # A spectrum whose typical resolution element is less than this many times
 # the scatter between neighbouring elements has no measurable continuum. The
 # depth of a dip is measured against the continuum, so its uncertainty is
@@ -29,7 +37,16 @@ import numpy as np
 # 3.1 and 3.7; the new estimate reads about 0.66 of the old one on noisy
 # spectra). Only two pure-noise spectra exist in that set, so the cut is not
 # tested against a broader mix of faint stars.
-MINIMUM_SPECTRUM_SIGNAL_TO_NOISE = 1.5
+MINIMUM_SPECTRUM_SIGNAL_TO_NOISE = TunedParameter(
+    name="spectroscopy.minimum_spectrum_signal_to_noise",
+    default=1.5,
+    unit="signal-to-noise",
+    description="A spectrum below this signal-to-noise per resolution element has no measurable continuum.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-10",
+)
 
 # A spectrum below this signal-to-noise per resolution element keeps its
 # extracted spectrum and its emission-line test (floor above, validation
@@ -52,7 +69,16 @@ MINIMUM_SPECTRUM_SIGNAL_TO_NOISE = 1.5
 # a ceiling of the detector in general. Below about 7 no realistic line is
 # found, so the absorption analysis is not run. An extended target is not held
 # to this cut (see `analyze_spectrum`).
-MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE = 7.0
+MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE = TunedParameter(
+    name="spectroscopy.minimum_feature_analysis_signal_to_noise",
+    default=7.0,
+    unit="signal-to-noise",
+    description="A spectrum below this signal-to-noise per resolution element skips feature analysis.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-31",
+)
 
 # The scatter between neighbouring elements is measured from their second
 # difference (an element minus the mean of its two neighbours), which is zero
@@ -69,7 +95,16 @@ _SECOND_DIFFERENCE_NOISE_FACTOR = math.sqrt(1.5)
 
 # Fewest resolution elements needed to say anything about the signal. With
 # fewer, no verdict is given (the spectrum is not called empty).
-_MINIMUM_ELEMENTS = 8
+_MINIMUM_ELEMENTS = TunedParameter(
+    name="spectroscopy.spectrum_signal.minimum_elements",
+    default=8,
+    unit="count",
+    description="The fewest resolution elements needed to say anything about the signal.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D38",
+)
 
 
 def estimate_spectrum_signal_to_noise(
@@ -111,7 +146,7 @@ def estimate_spectrum_signal_to_noise(
 
     element_index = np.floor((wavelength - wavelength[0]) / resolution_element_angstrom).astype(int)
     elements = np.array([values[element_index == index].mean() for index in np.unique(element_index)])
-    if elements.size < _MINIMUM_ELEMENTS:
+    if elements.size < resolve(_MINIMUM_ELEMENTS).value:
         return None
 
     second_difference = elements[1:-1] - 0.5 * (elements[:-2] + elements[2:])

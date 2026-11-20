@@ -18,7 +18,17 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.wcs.utils import fit_wcs_from_points
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import CLIP_SIGMAS, MAXIMUM_PASSES
 from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
 
@@ -29,7 +39,18 @@ logger = logging.getLogger(__name__)
 # here avoids running (and logging) a doomed attempt on a field with
 # only a handful of detections, where 3 points can't disambiguate a
 # unique transform from noise.
-_MIN_CONTROL_POINTS = 4
+_MIN_CONTROL_POINTS = TunedParameter(
+    name="spectroscopy.min_control_points",
+    default=4,
+    unit="count",
+    description="The fewest control points a spectral-to-reference registration needs.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D50",
+    allowed_range=(3, 12),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
+)
 
 # Default nearest-neighbour cutoff, in pixels, for accepting a
 # registered spectral star as the same star as a reference-field match.
@@ -38,21 +59,56 @@ _MIN_CONTROL_POINTS = 4
 # rejected, tight enough that projecting through a poorly-constrained
 # transform (few control points) doesn't confidently pair two
 # unrelated stars.
-_DEFAULT_MAX_MATCH_DISTANCE_PX = 15.0
+_DEFAULT_MAX_MATCH_DISTANCE_PX = TunedParameter(
+    name="spectroscopy.default_max_match_distance_px",
+    default=15.0,
+    unit="px",
+    description=(
+        "Nearest-neighbour cutoff for accepting a registered spectral star as a reference-field match."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D50",
+    allowed_range=(3.0, 40.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
+)
 
 # Default search window, in pixels, for the translation-only offset
 # vote. Generous relative to typical guiding RMS (sub-pixel to a few
 # pixels) to also absorb a modest, consistent mechanical shift from
 # swapping the grating accessory in/out between sessions, while still
 # far more constrained than a blind full-field search.
-_DEFAULT_MAX_TRANSLATION_OFFSET_PX = 300.0
+_DEFAULT_MAX_TRANSLATION_OFFSET_PX = TunedParameter(
+    name="spectroscopy.default_max_translation_offset_px",
+    default=300.0,
+    unit="px",
+    description="Search window for the translation-only offset vote.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D50",
+    allowed_range=(50.0, 1000.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
+)
 
 # Bin width, in pixels, for the offset-vote histogram. Wide enough to
 # absorb per-star centroid noise (a spectral zero-order centroid is
 # noisier than a normal point-source centroid) without splitting one
 # true offset across adjacent bins, narrow enough that an unrelated
 # star field wouldn't coincidentally pile up in a single bin.
-_TRANSLATION_BIN_PX = 6.0
+_TRANSLATION_BIN_PX = TunedParameter(
+    name="spectroscopy.translation_bin_px",
+    default=6.0,
+    unit="px",
+    description="Bin width of the offset-vote histogram.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D50",
+    allowed_range=(2.0, 20.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
+)
 
 # Search window, in pixels, for the shift between a target's solved standard
 # stack and its spectral stack when the plate solution places the stars. The
@@ -62,7 +118,18 @@ _TRANSLATION_BIN_PX = 6.0
 # solution places every catalog star exactly, and a shift needs at least
 # `_MIN_CONTROL_POINTS` pairs to agree on it, so a wide window is safe.
 # 1000 px is a third of the sensor.
-_SOLUTION_MAX_TRANSLATION_OFFSET_PX = 1000.0
+_SOLUTION_MAX_TRANSLATION_OFFSET_PX = TunedParameter(
+    name="spectroscopy.solution_max_translation_offset_px",
+    default=1000.0,
+    unit="px",
+    description="Search window for the shift between a solved standard stack and the spectral stack.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D50",
+    allowed_range=(200.0, 2000.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
+)
 
 # Two catalog stars at least this far apart are resolved (two separate zero
 # orders); closer ones are one blob to the detector. Navi's primary and
@@ -70,18 +137,53 @@ _SOLUTION_MAX_TRANSLATION_OFFSET_PX = 1000.0
 # and the detector found a single detection for both, which took B's name and
 # left A unnamed. 8 px is about twice a zero order's width (FWHM about 4 px),
 # a judgement, not tuned.
-_RESOLVED_PAIR_MINIMUM_SEPARATION_PX = 8.0
+# It stands for about two trail widths (8 on the reference setup, 2 × the
+# trail width), so it follows the trail width the run measures.
+_RESOLVED_PAIR_MINIMUM_SEPARATION_PX = TunedParameter(
+    name="spectroscopy.resolved_pair_minimum_separation_px",
+    default=factor_for(8.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="Two catalog stars at least this far apart are resolved into separate zero orders.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D51",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=8.0,
+)
 
 # How far from a named detection a second catalog star may be to be counted
 # as part of the same blob. A little more than a bright star's zero order
 # wings reach; Albireo's pair is 17 px apart.
-_BLENDED_PAIR_SEARCH_RADIUS_PX = 25.0
+# It stands for several trail widths (25 on the reference setup, 6.4 × the
+# trail width), so it follows the trail width the run measures.
+_BLENDED_PAIR_SEARCH_RADIUS_PX = TunedParameter(
+    name="spectroscopy.blended_pair_search_radius_px",
+    default=factor_for(25.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="How far from a detection a second catalog star may be to count as part of the same blob.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D51",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=25.0,
+)
 
 # A companion is only split out if it is at most this many magnitudes
 # fainter than the star that took the detection: a much fainter star is not
 # what makes the blob and would have no zero order of its own to extract.
 # Albireo B is 2 magnitudes fainter than A.
-_BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE = 4.0
+_BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE = TunedParameter(
+    name="spectroscopy.blended_pair_maximum_magnitude_difference",
+    default=4.0,
+    unit="mag",
+    description="A companion is split out only if it is at most this many magnitudes fainter.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D51",
+)
 
 # The fewest registered stars that may set a sky map fitted in the spectral
 # image. The map has six free numbers, so this is two stars for each. Measured
@@ -90,35 +192,101 @@ _BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE = 4.0
 # at most 1.02 px (M 27) and 2.08 px (Mirach), inside
 # `_SKY_MAP_MATCH_RADIUS_PX`.
 # With 8 stars Mirach reached 2.67 px and with 6 it reached 3.44 px.
-_SKY_MAP_MINIMUM_STARS = 12
+_SKY_MAP_MINIMUM_STARS = TunedParameter(
+    name="spectroscopy.sky_map_minimum_stars",
+    default=12,
+    unit="count",
+    description="The fewest registered stars that may set a sky map.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-33",
+)
 
 # The most typical error, in pixels, a fitted sky map may have. Measured median
 # errors: M 27 0.10 px and Mirach 0.65 px. A map typically wrong by more than a
 # third of `_SKY_MAP_MATCH_RADIUS_PX` would lose real matches. A design limit.
-_SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX = 1.0
+# It stands for about a quarter of a trail width (1 on the reference setup,
+# 0.26 × the trail width), so it follows the trail width the run measures.
+_SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX = TunedParameter(
+    name="spectroscopy.sky_map_maximum_median_error_px",
+    default=factor_for(1.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="The largest typical error a fitted sky map may have.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-33",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=1.0,
+)
 
 # How far from its mapped position a detection may be and still take a star's
 # name. On M 27 the number of matches is flat from 1.5 to 6 px (330 of 432
 # unnamed detections), so nothing real is lost by stopping at 3 px. Shifting
 # the detections by eight known offsets gave 0.9 chance matches on average at
 # 3 px (2 at most), against 2.0 at 4 px and 23.6 at the 15 px geometric limit.
-_SKY_MAP_MATCH_RADIUS_PX = 3.0
+# It stands for less than one trail width (3 on the reference setup, 0.77 ×
+# the trail width), so it follows the trail width the run measures.
+_SKY_MAP_MATCH_RADIUS_PX = TunedParameter(
+    name="spectroscopy.sky_map_match_radius_px",
+    default=factor_for(3.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="How far from its mapped position a detection may be and still take a star's name.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-33",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=3.0,
+)
 
 # A star closer than this to the fit is never clipped. Clipping by the spread
 # alone would drop real stars when the fit is very good: the M 27 map has a
 # median error of 0.10 px while its held-out stars reach 0.92 px.
-_SKY_MAP_CLIP_FLOOR_PX = 1.0
+# It stands for about a quarter of a trail width (1 on the reference setup,
+# 0.26 × the trail width), so it follows the trail width the run measures.
+_SKY_MAP_CLIP_FLOOR_PX = TunedParameter(
+    name="spectroscopy.sky_map_clip_floor_px",
+    default=factor_for(1.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="A star closer than this to the sky-map fit is never clipped.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-33",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=1.0,
+)
 
 # Registered names can be chance matches, so at least this share of them must
 # agree with the fit. A map supported by a minority could be fitted to the
 # wrong stars. M 27 kept 78% (14 of its 67 names were chance matches on an old
 # pixel grid) and Mirach 98%. A design limit.
-_SKY_MAP_MINIMUM_KEPT_FRACTION = 0.5
+_SKY_MAP_MINIMUM_KEPT_FRACTION = TunedParameter(
+    name="spectroscopy.sky_map_minimum_kept_fraction",
+    default=0.5,
+    unit="fraction",
+    description="The least share of registered names that must agree with the sky-map fit.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-33",
+)
 
 # The fitted stars must span at least this share of the detections' range along
 # each axis, so the map is not extended far past the stars that set it. M 27
 # spans 96% and Mirach 93%. A design limit.
-_SKY_MAP_MINIMUM_SPAN_FRACTION = 0.5
+_SKY_MAP_MINIMUM_SPAN_FRACTION = TunedParameter(
+    name="spectroscopy.sky_map_minimum_span_fraction",
+    default=0.5,
+    unit="fraction",
+    description="The least share of the detections' range the fitted stars must span on each axis.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-33",
+)
 
 
 def _pixel_position(obj: StellarObject) -> tuple[float, float] | None:
@@ -164,7 +332,7 @@ def _estimate_translation_offset(
     histogram, x_edges, y_edges = np.histogram2d(diffs[:, 0], diffs[:, 1], bins=[bin_edges, bin_edges])
     peak_x_index, peak_y_index = np.unravel_index(np.argmax(histogram), histogram.shape)
     peak_votes = histogram[peak_x_index, peak_y_index]
-    if peak_votes < _MIN_CONTROL_POINTS:
+    if peak_votes < resolve(_MIN_CONTROL_POINTS).value:
         return None
 
     peak_x_center = (x_edges[peak_x_index] + x_edges[peak_x_index + 1]) / 2.0
@@ -252,8 +420,8 @@ def _apply_matches(
 def identify_spectral_stars_via_registration(
     spectral_stellar_objects: list[StellarObject],
     reference_stellar_objects: list[StellarObject],
-    max_match_distance_px: float = _DEFAULT_MAX_MATCH_DISTANCE_PX,
-    max_translation_offset_px: float = _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
+    max_match_distance_px: float | None = None,
+    max_translation_offset_px: float | None = None,
 ) -> int:
     """Give names to the stars in the spectroscopy image.
 
@@ -278,17 +446,24 @@ def identify_spectral_stars_via_registration(
     matched_count : `int`
         How many unnamed stars were successfully given names.
     """
+    if max_match_distance_px is None:
+        max_match_distance_px = resolve(_DEFAULT_MAX_MATCH_DISTANCE_PX).value
+    if max_translation_offset_px is None:
+        max_translation_offset_px = resolve(_DEFAULT_MAX_TRANSLATION_OFFSET_PX).value
     spectral_positions = {id(obj): pos for obj in spectral_stellar_objects if (pos := _pixel_position(obj))}
     reference_positions = {id(obj): pos for obj in reference_stellar_objects if (pos := _pixel_position(obj))}
 
-    if len(spectral_positions) < _MIN_CONTROL_POINTS or len(reference_positions) < _MIN_CONTROL_POINTS:
+    if (
+        len(spectral_positions) < resolve(_MIN_CONTROL_POINTS).value
+        or len(reference_positions) < resolve(_MIN_CONTROL_POINTS).value
+    ):
         logger.info(
             "Not enough positioned stars to register the spectral field against a reference field "
             "(%s spectral, %s reference; need >= %s each) -- leaving spectroscopy stars "
             "unidentified.",
             len(spectral_positions),
             len(reference_positions),
-            _MIN_CONTROL_POINTS,
+            resolve(_MIN_CONTROL_POINTS).value,
         )
         return 0
 
@@ -298,7 +473,7 @@ def identify_spectral_stars_via_registration(
     target_points = np.array([reference_positions[id(obj)] for obj in reference_objs])
 
     offset = _estimate_translation_offset(
-        source_points, target_points, max_translation_offset_px, _TRANSLATION_BIN_PX
+        source_points, target_points, max_translation_offset_px, resolve(_TRANSLATION_BIN_PX).value
     )
     if offset is not None:
         matched_count = _apply_matches(
@@ -349,7 +524,7 @@ def identify_spectral_stars_via_solution(
     spectral_stellar_objects: list[StellarObject],
     reference_stellar_objects: list[StellarObject],
     reference_wcs: Any,
-    max_match_distance_px: float = _DEFAULT_MAX_MATCH_DISTANCE_PX,
+    max_match_distance_px: float | None = None,
     solution_fits_this_image: bool = False,
 ) -> int | None:
     """Name a spectroscopy image's stars from a plate solution's sky positions.
@@ -392,6 +567,8 @@ def identify_spectral_stars_via_solution(
         cannot be lined up with the solution by a shift or a
         rotation, so the solution cannot be used.
     """
+    if max_match_distance_px is None:
+        max_match_distance_px = resolve(_DEFAULT_MAX_MATCH_DISTANCE_PX).value
     reference_by_id = {
         star.id: star for star in reference_stellar_objects if star.id and star.right_ascension is not None
     }
@@ -413,7 +590,7 @@ def identify_spectral_stars_via_solution(
             spectral_stellar_objects,
             reference_stellar_objects,
             reference_wcs,
-            _SOLUTION_MAX_TRANSLATION_OFFSET_PX,
+            resolve(_SOLUTION_MAX_TRANSLATION_OFFSET_PX).value,
         )
     )
     if solution_fits_this_image:
@@ -504,6 +681,10 @@ def _fit_sky_map_from_named_detections(
         The fitted tangent-plane map, or `None` when the fit fails one of the
         `_SKY_MAP_*` limits.
     """
+    sky_map_minimum_stars = resolve(_SKY_MAP_MINIMUM_STARS).value
+    maximum_passes = resolve(MAXIMUM_PASSES).value
+    clip_sigmas = resolve(CLIP_SIGMAS).value
+    sky_map_clip_floor_px = resolve(_SKY_MAP_CLIP_FLOOR_PX).value
     sky_by_id = {
         star.id: (float(star.right_ascension), float(star.declination))
         for star in reference_stellar_objects
@@ -517,8 +698,8 @@ def _fit_sky_map_from_named_detections(
         and names.count(detection.id) == 1
         and (position := _pixel_position(detection)) is not None
     ]
-    if len(rows) < _SKY_MAP_MINIMUM_STARS:
-        logger.info("No sky map: only %s registered stars, need %s.", len(rows), _SKY_MAP_MINIMUM_STARS)
+    if len(rows) < sky_map_minimum_stars:
+        logger.info("No sky map: only %s registered stars, need %s.", len(rows), sky_map_minimum_stars)
         return None
     pairs = np.array(rows)
     sky = SkyCoord(pairs[:, 2] * u.deg, pairs[:, 3] * u.deg)
@@ -526,8 +707,8 @@ def _fit_sky_map_from_named_detections(
     keep = np.ones(len(pairs), dtype=bool)
     sky_map = None
     errors = np.zeros(len(pairs))
-    for _ in range(MAXIMUM_PASSES):
-        if keep.sum() < _SKY_MAP_MINIMUM_STARS:
+    for _ in range(maximum_passes):
+        if keep.sum() < sky_map_minimum_stars:
             break
         try:
             sky_map = fit_wcs_from_points(
@@ -540,7 +721,7 @@ def _fit_sky_map_from_named_detections(
         errors = np.hypot(mapped_x - pairs[:, 0], mapped_y - pairs[:, 1])
         median = np.median(errors[keep])
         spread = 1.4826 * np.median(np.abs(errors[keep] - median))
-        new_keep = errors <= max(median + CLIP_SIGMAS * spread, _SKY_MAP_CLIP_FLOOR_PX)
+        new_keep = errors <= max(median + clip_sigmas * spread, sky_map_clip_floor_px)
         if np.array_equal(new_keep, keep):
             break
         keep = new_keep
@@ -550,14 +731,15 @@ def _fit_sky_map_from_named_detections(
     all_positions = np.array([pos for star in all_detections if (pos := _pixel_position(star))])
     too_small_a_span = kept_count > 0 and bool(
         np.any(
-            np.ptp(pairs[keep, :2], axis=0) < _SKY_MAP_MINIMUM_SPAN_FRACTION * np.ptp(all_positions, axis=0)
+            np.ptp(pairs[keep, :2], axis=0)
+            < resolve(_SKY_MAP_MINIMUM_SPAN_FRACTION).value * np.ptp(all_positions, axis=0)
         )
     )
     if (
         sky_map is None
-        or kept_count < _SKY_MAP_MINIMUM_STARS
-        or kept_count < _SKY_MAP_MINIMUM_KEPT_FRACTION * len(pairs)
-        or median_error > _SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX
+        or kept_count < sky_map_minimum_stars
+        or kept_count < resolve(_SKY_MAP_MINIMUM_KEPT_FRACTION).value * len(pairs)
+        or median_error > resolve(_SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX).value
         or too_small_a_span
     ):
         logger.info(
@@ -630,7 +812,7 @@ def identify_spectral_stars_via_registered_sky_map(
         spectral_stellar_objects,
         reference_stellar_objects,
         sky_map,
-        max_match_distance_px=_SKY_MAP_MATCH_RADIUS_PX,
+        max_match_distance_px=resolve(_SKY_MAP_MATCH_RADIUS_PX).value,
         solution_fits_this_image=True,
     )
     return matched_count or 0, sky_map
@@ -662,7 +844,7 @@ def solution_shifted_onto_spectral_image(
         spectral_stellar_objects,
         reference_stellar_objects,
         reference_wcs,
-        _SOLUTION_MAX_TRANSLATION_OFFSET_PX,
+        resolve(_SOLUTION_MAX_TRANSLATION_OFFSET_PX).value,
     )
     return None if offset is None else shift_wcs_to_frame(reference_wcs, offset)
 
@@ -742,6 +924,9 @@ def _split_blended_pairs(
     added_count : `int`
         How many companions were added as new detections.
     """
+    resolved_pair_minimum_separation_px = resolve(_RESOLVED_PAIR_MINIMUM_SEPARATION_PX).value
+    blended_pair_search_radius_px = resolve(_BLENDED_PAIR_SEARCH_RADIUS_PX).value
+    blended_pair_maximum_magnitude_difference = resolve(_BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE).value
     shift = np.array(offset)
     added = 0
     handled: set[str] = set()
@@ -756,7 +941,7 @@ def _split_blended_pairs(
                 continue
             other_position = np.array(placed[other_id]) + shift
             separation = float(np.hypot(*(other_position - star_position)))
-            if not _RESOLVED_PAIR_MINIMUM_SEPARATION_PX <= separation <= _BLENDED_PAIR_SEARCH_RADIUS_PX:
+            if not resolved_pair_minimum_separation_px <= separation <= blended_pair_search_radius_px:
                 continue
             if any(
                 other_id == used.id or float(np.hypot(*(np.array(pos) - other_position))) < 5.0
@@ -767,7 +952,7 @@ def _split_blended_pairs(
             if (
                 star.magnitude is not None
                 and other.magnitude is not None
-                and other.magnitude - star.magnitude > _BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE
+                and other.magnitude - star.magnitude > blended_pair_maximum_magnitude_difference
             ):
                 continue
             companion = detection.model_copy(deep=True)
@@ -800,8 +985,10 @@ def _set_pixel_position(obj: StellarObject, position: np.ndarray) -> None:
 
 
 # The fewest identified stars needed to trust an offset between the two star
-# fields. Below this, one bad match could move the median.
-_MINIMUM_OFFSET_PAIR_COUNT = 4
+# fields. Below this, one bad match could move the median. It is the same
+# limit, for the same reason, as the fewest votes the offset search needs
+# (`_MIN_CONTROL_POINTS`), so the two share one declaration and one tuner.
+_MINIMUM_OFFSET_PAIR_COUNT = _MIN_CONTROL_POINTS
 
 
 def _positions_through_wcs(stellar_objects: list[StellarObject], wcs: Any) -> dict[str, tuple[float, float]]:
@@ -836,7 +1023,7 @@ def estimate_registration_offset(
     spectral_stellar_objects: list[StellarObject],
     reference_stellar_objects: list[StellarObject],
     reference_wcs: Any | None = None,
-    max_offset_px: float = _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
+    max_offset_px: float | None = None,
 ) -> tuple[float, float] | None:
     """Measure how far the spectroscopy image sits from the reference image.
 
@@ -877,6 +1064,8 @@ def estimate_registration_offset(
         matching spectroscopy-image position, or `None` when there are too
         few pairs or they do not agree on a single shift.
     """
+    if max_offset_px is None:
+        max_offset_px = resolve(_DEFAULT_MAX_TRANSLATION_OFFSET_PX).value
     if reference_wcs is not None:
         reference_points = np.array(
             list(_positions_through_wcs(reference_stellar_objects, reference_wcs).values())
@@ -885,15 +1074,15 @@ def estimate_registration_offset(
             list({pos for obj in spectral_stellar_objects if (pos := _pixel_position(obj))})
         )
         if (
-            len(reference_points) < _MINIMUM_OFFSET_PAIR_COUNT
-            or len(spectral_points) < _MINIMUM_OFFSET_PAIR_COUNT
+            len(reference_points) < resolve(_MINIMUM_OFFSET_PAIR_COUNT).value
+            or len(spectral_points) < resolve(_MINIMUM_OFFSET_PAIR_COUNT).value
         ):
             return None
         return _estimate_translation_offset(
             reference_points,
             spectral_points,
             max_offset_px,
-            _TRANSLATION_BIN_PX,
+            resolve(_TRANSLATION_BIN_PX).value,
         )
 
     reference_positions = {
@@ -909,13 +1098,13 @@ def estimate_registration_offset(
             spectral_position[0] - reference_position[0],
             spectral_position[1] - reference_position[1],
         ))
-    if len(differences) < _MINIMUM_OFFSET_PAIR_COUNT:
+    if len(differences) < resolve(_MINIMUM_OFFSET_PAIR_COUNT).value:
         return None
 
     differences_array = np.array(differences)
     median_offset = np.median(differences_array, axis=0)
     typical_disagreement = np.median(np.abs(differences_array - median_offset), axis=0)
-    if np.any(typical_disagreement > _TRANSLATION_BIN_PX):
+    if np.any(typical_disagreement > resolve(_TRANSLATION_BIN_PX).value):
         return None
     return float(median_offset[0]), float(median_offset[1])
 

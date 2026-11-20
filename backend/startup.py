@@ -16,7 +16,9 @@ functions. They:
 """
 
 import asyncio
+import ctypes
 import logging
+import sys
 import threading
 import time
 
@@ -253,3 +255,127 @@ def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> None:
             len(targets),
             time.monotonic() - started_at,
         )
+
+
+# Windows job object limit flag: end every process in the job when the last
+# handle to the job closes (``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``).
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+# ``JobObjectExtendedLimitInformation`` in ``SetInformationJobObject``.
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+
+# Keeps the job handle open as long as the backend runs. The system closes it
+# when the backend ends for any reason, and that is what ends the helpers.
+_backend_job_handle: int | None = None
+
+
+def bind_helper_programs_to_backend_lifetime() -> bool:
+    """On Windows, end every helper program when the backend ends.
+
+    The backend joins a job object whose limit is "kill on job close". Every
+    program the backend starts afterwards (Siril, GraXpert, ``solve-field``)
+    joins the same job, because children inherit it unless started with
+    ``CREATE_BREAKAWAY_FROM_JOB``, which the library never uses. The backend's
+    children use no creation flags beyond the defaults, so they work in the
+    job as before. When the backend ends, even by a crash or a kill, Windows
+    closes the job handle and stops the helpers. On Linux the library asks
+    the kernel to do this for each helper (``child_process_options`` in
+    ``astrometricslib.foundation.system``); macOS has no such step.
+
+    This is not a user error when it fails (the backend may already be in a
+    job that forbids this, as under some launchers), so a failure is logged
+    at a low level and start-up goes on.
+
+    Returns
+    -------
+    bound : `bool`
+        `True` when the backend joined the job, `False` on other systems or
+        when Windows refused.
+    """
+    global _backend_job_handle
+    if sys.platform != "win32":
+        return False
+    if _backend_job_handle is not None:
+        return True
+    try:
+        from ctypes import wintypes
+
+        class BasicLimits(ctypes.Structure):
+            """The ``JOBOBJECT_BASIC_LIMIT_INFORMATION`` structure."""
+
+            _fields_ = (
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            )
+
+        class IoCounters(ctypes.Structure):
+            """The ``IO_COUNTERS`` structure."""
+
+            _fields_ = tuple(
+                (name, ctypes.c_uint64)
+                for name in (
+                    "ReadOperationCount",
+                    "WriteOperationCount",
+                    "OtherOperationCount",
+                    "ReadTransferCount",
+                    "WriteTransferCount",
+                    "OtherTransferCount",
+                )
+            )
+
+        class ExtendedLimits(ctypes.Structure):
+            """The ``JOBOBJECT_EXTENDED_LIMIT_INFORMATION`` structure."""
+
+            _fields_ = (
+                ("BasicLimitInformation", BasicLimits),
+                ("IoInfo", IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            )
+
+        def raise_job_error() -> None:
+            """Turn the last Windows error code into an `OSError`.
+
+            Raises
+            ------
+            OSError
+                Always.
+            """
+            raise OSError(ctypes.get_last_error(), "Windows refused the job object call")
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+        kernel32.SetInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        )
+        kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            raise_job_error()
+        limits = ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            raise_job_error()
+        if not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
+            raise_job_error()
+    except (OSError, AttributeError, ValueError) as job_error:
+        logger.warning("Helper programs are not tied to the backend's lifetime: %s", job_error)
+        return False
+    _backend_job_handle = job
+    logger.info("Helper programs will end when the backend ends")
+    return True

@@ -52,9 +52,16 @@ import numpy as np
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.subset_stacks import OddEvenDifferenceNoiseResult
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
@@ -153,7 +160,18 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # half's weight when the weights are equal, a small effect that
 # `full_stack_noise_equivalent` takes into account. A design choice; no data
 # set decided it.
-ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF = 8
+ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF = TunedParameter(
+    name="stacking.odd_even_difference_minimum_frames_per_half",
+    default=8,
+    unit="frames",
+    description=(
+        "Fewest frames in each half of the odd-even difference noise, counting the shared reference frame."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D25",
+)
 
 
 @dataclass(frozen=True)
@@ -1328,6 +1346,7 @@ def _prepare_halves(
     prepared : `_PreparedHalves`
         The halves and the apertures file, or the reason the job cannot go on.
     """
+    odd_even_difference_minimum_frames_per_half = resolve(ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF).value
     if any(frame_is_spectral(frame) for frame in library.members):
         return _PreparedHalves("the odd–even difference noise is measured for imaging stacks only")
     if library.noise_sums is None:
@@ -1352,10 +1371,10 @@ def _prepare_halves(
     if split.left_out:
         result.notes.append(f"{split.left_out} frame(s) have no timestamp and were left out of both halves.")
     smaller = min(len(split.odd), len(split.even))
-    if smaller < ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF:
+    if smaller < odd_even_difference_minimum_frames_per_half:
         return _PreparedHalves(
             f"a half would have {smaller} frames, fewer than the "
-            f"{ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} "
+            f"{odd_even_difference_minimum_frames_per_half} "
             "the odd–even difference noise needs"
         )
     apertures_path = os.path.join(os.path.dirname(library_stack_path), APERTURE_FILE_NAME)

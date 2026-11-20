@@ -36,6 +36,14 @@ import numpy as np
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +54,16 @@ logger = logging.getLogger(__name__)
 # invisible. The master flat of the single-flat library measured 4.5%, and
 # the fixed pattern accounted for 86% of the fine-scale noise of the
 # undithered M 101 stack. Smoothing that flat halved the stack's noise.
-MAXIMUM_FLAT_NOISE_FRACTION = 0.005
+MAXIMUM_FLAT_NOISE_FRACTION = TunedParameter(
+    name="stacking.maximum_flat_noise_fraction",
+    default=0.005,
+    unit="fraction",
+    description="Largest relative noise a master flat may have before it is smoothed.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-05",
+)
 
 # Flat frames should sit well above the read noise and well below the
 # point where the pixels stop responding linearly. These two limits are
@@ -55,8 +72,26 @@ MAXIMUM_FLAT_NOISE_FRACTION = 0.005
 # comfortable. They are design estimates and have not been validated on
 # this observatory's data. The one flat measured here sat at 1% of full
 # scale.
-MINIMUM_FLAT_LEVEL_FRACTION = 0.10
-MAXIMUM_FLAT_LEVEL_FRACTION = 0.90
+MINIMUM_FLAT_LEVEL_FRACTION = TunedParameter(
+    name="stacking.minimum_flat_level_fraction",
+    default=0.10,
+    unit="fraction of full scale",
+    description="Lowest flat level, as a share of full scale, that is accepted.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D05",
+)
+MAXIMUM_FLAT_LEVEL_FRACTION = TunedParameter(
+    name="stacking.maximum_flat_level_fraction",
+    default=0.90,
+    unit="fraction of full scale",
+    description="Highest flat level, as a share of full scale, that is accepted.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D05",
+)
 
 # The smoothing width is kept between these limits, in pixels. Below 1
 # pixel the blur does nothing useful. Above 8 pixels it starts to blur dust
@@ -69,14 +104,41 @@ BRIGHT_FLAT_ISSUE_PREFIX = "flats are bright:"
 NOISY_FLAT_ISSUE_PREFIX = "master flat noise is"
 UNREADABLE_FLATS_ISSUE = "no flat frame could be read"
 
-MINIMUM_SMOOTHING_SIGMA_PIXELS = 1.0
-MAXIMUM_SMOOTHING_SIGMA_PIXELS = 8.0
+MINIMUM_SMOOTHING_SIGMA_PIXELS = TunedParameter(
+    name="stacking.minimum_smoothing_sigma_pixels",
+    default=1.0,
+    unit="px",
+    description="Narrowest Gaussian width used when a noisy master flat is smoothed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D06",
+)
+MAXIMUM_SMOOTHING_SIGMA_PIXELS = TunedParameter(
+    name="stacking.maximum_smoothing_sigma_pixels",
+    default=8.0,
+    unit="px",
+    description="Widest Gaussian width used when a noisy master flat is smoothed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D06",
+)
 
 # The expected noise of the master flat divides one frame's noise by the square
 # root of the frame count, counting at most this many frames. A set of more
 # frames is already far below the noise limit, and rejection of outliers in
 # Siril's stack makes the true figure only a little better than the estimate.
-MAXIMUM_FRAMES_AVERAGED = 32
+MAXIMUM_FRAMES_AVERAGED = TunedParameter(
+    name="stacking.maximum_frames_averaged",
+    default=32,
+    unit="frames",
+    description="Most frames counted when the expected noise of a master flat is worked out.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D63",
+)
 
 # The sources `FlatAssessment.full_scale_source` can name. The first is the
 # sensor's own clip level from its camera profile. The other two are guesses
@@ -86,7 +148,16 @@ FULL_SCALE_SOURCE_FLOAT_RANGE = "guess: pixel values within 0-1 (floating-point 
 FULL_SCALE_SOURCE_16_BIT_GUESS = "guess: 16-bit counts (no camera profile applies)"
 
 # A flat pixel at or above this fraction of full scale counts as saturated.
-_SATURATED_FRACTION_OF_FULL_SCALE = 0.98
+_SATURATED_FRACTION_OF_FULL_SCALE = TunedParameter(
+    name="stacking.saturated_fraction_of_full_scale",
+    default=0.98,
+    unit="fraction of full scale",
+    description="Share of full scale at or above which a flat pixel counts as saturated.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D18",
+)
 
 
 @dataclass(frozen=True)
@@ -269,10 +340,14 @@ def smoothing_sigma_for_noise(noise_fraction: float) -> float | None:
         `MAXIMUM_SMOOTHING_SIGMA_PIXELS`. `None` if the noise is already
         within the limit.
     """
-    if noise_fraction <= MAXIMUM_FLAT_NOISE_FRACTION:
+    maximum_flat_noise_fraction = resolve(MAXIMUM_FLAT_NOISE_FRACTION).value
+    if noise_fraction <= maximum_flat_noise_fraction:
         return None
-    sigma = noise_fraction / (MAXIMUM_FLAT_NOISE_FRACTION * 2.0 * math.sqrt(math.pi))
-    return min(MAXIMUM_SMOOTHING_SIGMA_PIXELS, max(MINIMUM_SMOOTHING_SIGMA_PIXELS, sigma))
+    sigma = noise_fraction / (maximum_flat_noise_fraction * 2.0 * math.sqrt(math.pi))
+    return min(
+        resolve(MAXIMUM_SMOOTHING_SIGMA_PIXELS).value,
+        max(resolve(MINIMUM_SMOOTHING_SIGMA_PIXELS).value, sigma),
+    )
 
 
 def _unique_files(paths: list[str]) -> list[str]:
@@ -331,6 +406,7 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         `FlatAssessment.full_scale_source` records where the full-scale
         value came from.
     """
+    minimum_flat_level_fraction = resolve(MINIMUM_FLAT_LEVEL_FRACTION).value
     flat_paths = _unique_files(flat_paths)
     frame_count = len(flat_paths)
     first = _read_frame(flat_paths[0]) if flat_paths else None
@@ -340,13 +416,13 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
     issues: list[str] = []
     full_scale, full_scale_source = _full_scale(first, camera)
     level_fraction = float(np.nanmean(first)) / full_scale
-    if level_fraction < MINIMUM_FLAT_LEVEL_FRACTION:
+    if level_fraction < minimum_flat_level_fraction:
         issues.append(
             f"{FAINT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale ({full_scale:g}, "
-            f"{full_scale_source}), below {MINIMUM_FLAT_LEVEL_FRACTION:.0%}, so their noise is high"
+            f"{full_scale_source}), below {minimum_flat_level_fraction:.0%}, so their noise is high"
         )
-    saturated = float(np.mean(first >= _SATURATED_FRACTION_OF_FULL_SCALE * full_scale))
-    if level_fraction > MAXIMUM_FLAT_LEVEL_FRACTION or saturated > 0.001:
+    saturated = float(np.mean(first >= resolve(_SATURATED_FRACTION_OF_FULL_SCALE).value * full_scale))
+    if level_fraction > resolve(MAXIMUM_FLAT_LEVEL_FRACTION).value or saturated > 0.001:
         issues.append(
             f"{BRIGHT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale ({full_scale:g}, "
             f"{full_scale_source}) with {saturated:.2%} of pixels saturated, so the response may "
@@ -373,12 +449,14 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
     noise_fraction = None
     sigma = None
     if single_frame_noise is not None:
-        noise_fraction = single_frame_noise / math.sqrt(max(1, min(frame_count, MAXIMUM_FRAMES_AVERAGED)))
+        noise_fraction = single_frame_noise / math.sqrt(
+            max(1, min(frame_count, resolve(MAXIMUM_FRAMES_AVERAGED).value))
+        )
         sigma = smoothing_sigma_for_noise(noise_fraction)
         if sigma is not None:
             issues.append(
                 f"{NOISY_FLAT_ISSUE_PREFIX} {noise_fraction:.2%} from {frame_count} frame(s), above the "
-                f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit"
+                f"{resolve(MAXIMUM_FLAT_NOISE_FRACTION).value:.1%} limit"
             )
     return FlatAssessment(
         frame_count,

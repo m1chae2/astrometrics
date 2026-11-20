@@ -12,12 +12,22 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameter_context import record_basis
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.quality_summary import (
     SPECTROSCOPY_PIPELINE_VERSION,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
 )
 from astrometricslib.models.target import Target
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -44,6 +54,10 @@ from astrometricslib.pipelines.spectroscopy.post_processing.record_quality impor
 from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
     summarize_wavelength_scale,
 )
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
+    FWHM_PER_SIGMA,
+    estimate_resolution_element_angstrom,
+)
 from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
     record_and_flag_spectroscopy_stars,
 )
@@ -56,7 +70,23 @@ from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars i
 # no stars of its own was registered against every named star in the catalog,
 # and on 2026-09-24 25 of 69 stored spectra (Albireo, Alnath and M 57 fields)
 # carried the name of a star 6 to 145 degrees away.
-REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
+# It stands for about the field of view (1.5 on the reference setup, 0.94 ×
+# the field of view), so it follows the field of view the run measures.
+REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = TunedParameter(
+    name="spectroscopy.registration_reference_field_radius_deg",
+    default=factor_for(1.5, RunBasis.FIELD_OF_VIEW_DEG),
+    unit="× field of view",
+    description=(
+        "How far from the frame centre a reference star may "
+        "be and still be used to name spectral-frame stars."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D53",
+    basis=RunBasis.FIELD_OF_VIEW_DEG,
+    reference_value=1.5,
+)
 
 # How many stars are read from the database at once when every
 # catalog-identified star must be examined. Small enough that the stars that
@@ -211,7 +241,7 @@ def _within_field(stellar_object: Any, field_center: tuple[float, float] | None)
         dec_center
     ) * np.cos(ra_star - ra_center)
     separation_deg = float(np.degrees(np.arccos(np.clip(cosine_separation, -1.0, 1.0))))
-    return separation_deg <= REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+    return separation_deg <= resolve(REGISTRATION_REFERENCE_FIELD_RADIUS_DEG).value
 
 
 # Ids that mark a detection nobody has named: the blind detector's
@@ -299,6 +329,7 @@ def _registration_reference_candidates(
         with no normal-image pixel position is skipped later by the
         registration itself.
     """
+    registration_reference_field_radius_deg = resolve(REGISTRATION_REFERENCE_FIELD_RADIUS_DEG).value
     if field_center is not None:
         # Read only the stars in this field, straight from the database's
         # sky-position index. This used to read every star in the catalog
@@ -307,7 +338,7 @@ def _registration_reference_candidates(
         field_star_ids = [
             summary.id
             for summary in catalog_access.list_stars_in_region(
-                field_center[0], field_center[1], REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+                field_center[0], field_center[1], registration_reference_field_radius_deg
             )
         ]
         catalog_identified = [
@@ -341,6 +372,46 @@ def _registration_reference_candidates(
         )
         if _can_be_a_reference_star(stellar_object)
     ]
+
+
+def record_measured_spectral_bases(stellar_objects: list[Any]) -> None:
+    """Record the run's typical trail width, dispersion and line spread.
+
+    Each is the median over the run's spectra, recorded once, so the values
+    that scale with them (the wavelength limits, the sky bands and the
+    neighbor distances) follow the run's own data. Nothing is recorded for a
+    quantity no spectrum measured. Outside a run this does nothing.
+
+    Parameters
+    ----------
+    stellar_objects : `list`
+        The stars of the run, with the spectra the extraction produced.
+    """
+    trail_widths_px: list[float] = []
+    dispersions: list[float] = []
+    resolution_elements: list[float] = []
+    for stellar_object in stellar_objects:
+        spectrum = stellar_object.spectroscopy
+        if spectrum is None or not spectrum.wavelengths_angstrom:
+            continue
+        widths = [width for width in (spectrum.trail_width_px or []) if width > 0.0]
+        trail_widths_px.extend(widths)
+        wavelengths = np.asarray(spectrum.wavelengths_angstrom, dtype=float)
+        finite_wavelengths = np.sort(wavelengths[np.isfinite(wavelengths)])
+        if finite_wavelengths.size >= 2:
+            # One step along the trail is one pixel, so the gap between
+            # neighboring wavelengths is the Angstroms one pixel covers.
+            dispersions.append(float(np.median(np.abs(np.diff(finite_wavelengths)))))
+        resolution_element = estimate_resolution_element_angstrom(wavelengths, spectrum.trail_width_px)
+        if resolution_element is not None:
+            resolution_elements.append(resolution_element)
+    if trail_widths_px:
+        # The trail width is stored as a sigma; the basis is the FWHM.
+        record_basis(RunBasis.TRAIL_WIDTH_PX, FWHM_PER_SIGMA * statistics.median(trail_widths_px))
+    if dispersions:
+        record_basis(RunBasis.DISPERSION_ANGSTROM_PER_PX, statistics.median(dispersions))
+    if resolution_elements:
+        record_basis(RunBasis.SPECTRAL_RESOLUTION_ANGSTROM, statistics.median(resolution_elements))
 
 
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
@@ -475,6 +546,8 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 target_id=target.id,
             )
         )
+
+        record_measured_spectral_bases(stellar_objects)
 
         return Result(
             context=context,

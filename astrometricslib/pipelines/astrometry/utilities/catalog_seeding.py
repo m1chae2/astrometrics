@@ -18,6 +18,16 @@ from astropy.coordinates import SkyCoord
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -36,22 +46,56 @@ __all__ = [
 # the radius already present in every `cached_regions` row written by
 # `astrometry_pipeline`, so seeded regions share the existing key format
 # rather than creating a second, near-duplicate set.
-DEFAULT_FIELD_RADIUS_DEGREES = 0.8
+# Stands for the radius of the catalog download around a field center. It
+# follows the field of view: the value is a factor times the field of view
+# the run measured (0.8 on the reference setup).
+DEFAULT_FIELD_RADIUS_DEGREES = TunedParameter(
+    name="astrometry.default_field_radius_degrees",
+    default=factor_for(0.8, RunBasis.FIELD_OF_VIEW_DEG),
+    unit="× field of view",
+    description="Radius of the sky area downloaded around each field center.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.FIELD_OF_VIEW_DEG,
+    reference_value=0.8,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D20",
+)
 
 # Gaia DR3 is essentially complete to G=20, but sources fainter than the
 # stacks' own detection limit only inflate the cache. G=18 is the
 # threshold `star_identifier._seed_gaia_cache_for_field` has always
 # used; keeping it identical means a seeded region and an
 # opportunistically cached one hold the same population.
-DEFAULT_MAGNITUDE_LIMIT = 18.0
+DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
+    name="astrometry.default_magnitude_limit",
+    default=18.0,
+    unit="magnitude",
+    description="Faintest Gaia G magnitude stored for a seeded field.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D20",
+)
+
 
 # Two image centers that are very close to each other will look at mostly
 # the same stars. If they are closer than half the field radius, we treat
 # them as the same location to avoid downloading the same data twice.
 # This successfully combines separate sessions of the same target (where
 # the telescope pointing drifts slightly) without accidentally merging
-# two different targets.
-DEFAULT_DEDUPLICATION_SEPARATION_DEGREES = DEFAULT_FIELD_RADIUS_DEGREES / 2
+# two different targets. The field radius follows the field of view, so this
+# is a function and not a constant fixed at import.
+def default_deduplication_separation_degrees() -> float:
+    """Return half the field radius, below which two field centers merge.
+
+    Returns
+    -------
+    separation_degrees : `float`
+        Half of the current field radius, in degrees.
+    """
+    return float(resolve(DEFAULT_FIELD_RADIUS_DEGREES).value) / 2
+
 
 # Serial pacing is the whole point of this module -- see the module
 # docstring. Two seconds between requests keeps a full catalog sweep to
@@ -147,7 +191,7 @@ def _angular_separation_degrees(
 def derive_field_centers(
     targets: list[Any],
     max_frames_per_target: int = 12,
-    separation_threshold_degrees: float = DEFAULT_DEDUPLICATION_SEPARATION_DEGREES,
+    separation_threshold_degrees: float | None = None,
 ) -> list[dict[str, Any]]:
     """Make a list of all the unique places pictures were taken of.
 
@@ -164,12 +208,15 @@ def derive_field_centers(
         How many photos to check per target before we get the idea.
     separation_threshold_degrees : `float`, optional
         If two spots are closer than this, we treat them as the same spot.
+        When not given, half the field radius is used.
 
     Returns
     -------
     field_centers : `list` [`dict`]
         A clean list of the unique sky coordinates needed to download.
     """
+    if separation_threshold_degrees is None:
+        separation_threshold_degrees = default_deduplication_separation_degrees()
     field_centers: list[dict[str, Any]] = []
 
     for target in targets:
@@ -224,8 +271,8 @@ def derive_field_centers(
 
 def seed_local_gaia_catalog(
     targets: list[Any],
-    radius_degrees: float = DEFAULT_FIELD_RADIUS_DEGREES,
-    magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
+    radius_degrees: float | None = None,
+    magnitude_limit: float | None = None,
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -241,9 +288,11 @@ def seed_local_gaia_catalog(
     targets : `list`
         The list of targets (folders of photos) to process.
     radius_degrees : `float`, optional
-        How wide of an area to download around each spot.
+        How wide of an area to download around each spot. Defaults to
+        `DEFAULT_FIELD_RADIUS_DEGREES`.
     magnitude_limit : `float`, optional
         How dim of a star we care about (ignore the super faint ones).
+        Defaults to `DEFAULT_MAGNITUDE_LIMIT`.
     request_delay_seconds : `float`, optional
         How long to wait between downloads so we don't overwhelm the server.
     max_attempts : `int`, optional
@@ -258,6 +307,11 @@ def seed_local_gaia_catalog(
         failed, and how many new stars were added to the database.
     """
     from astrometricslib._internal.drivers.catalog_store import summarize_catalog_coverage
+
+    if radius_degrees is None:
+        radius_degrees = resolve(DEFAULT_FIELD_RADIUS_DEGREES).value
+    if magnitude_limit is None:
+        magnitude_limit = resolve(DEFAULT_MAGNITUDE_LIMIT).value
 
     field_centers = derive_field_centers(targets)
     report: dict[str, Any] = {

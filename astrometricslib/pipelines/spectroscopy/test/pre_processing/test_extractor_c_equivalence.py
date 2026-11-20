@@ -182,9 +182,9 @@ def test_extractor_c_matches_python_on_non_finite_pixel(non_finite_value) -> Non
 @pytest.mark.parametrize(
     ("true_sigma", "should_be_accepted"),
     [
-        (se._MINIMUM_FIT_SIGMA_PX - 0.01, False),
-        (se._MINIMUM_FIT_SIGMA_PX, True),
-        (se._MINIMUM_FIT_SIGMA_PX + 0.01, True),
+        (se._MINIMUM_FIT_SIGMA_PX.default - 0.01, False),
+        (se._MINIMUM_FIT_SIGMA_PX.default, True),
+        (se._MINIMUM_FIT_SIGMA_PX.default + 0.01, True),
     ],
 )
 def test_extractor_c_matches_python_at_minimum_sigma_floor(true_sigma, should_be_accepted) -> None:  # ruff: ignore[missing-type-function-argument]

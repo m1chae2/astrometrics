@@ -5,17 +5,8 @@
  * Do not edit by hand. Change the Python file and run the generator again.
  */
 
-/** Environment variable that chooses the profile when the server starts. */
-export const PROFILE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_MCP_PROFILE";
-
-/** The profile used when the variable is unset or not recognized. */
-export const DEFAULT_PROFILE = "investigator";
-
-/** Profile name -> the tool classes it may use. */
-export const PROFILE_CLASSES: Readonly<Record<string, ReadonlySet<string>>> = {
-  investigator: new Set(["compute", "ingest", "observe", "process", "ui-control"]),
-  developer: new Set(["compute", "develop", "ingest", "observe", "process", "ui-control"]),
-};
+/** The tool classes the profile may use. */
+export const OFFERED_CLASSES: ReadonlySet<string> = new Set(["author", "compute", "develop", "ingest", "observe", "process", "ui-control"]);
 
 /** Dispositions a client may use. */
 export const SERVED_DISPOSITIONS: ReadonlySet<string> = new Set(["keep"]);

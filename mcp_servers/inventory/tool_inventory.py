@@ -105,6 +105,7 @@ TOOL_CLASSES = {
     "safe-stop": "Stops motion or puts the equipment in a safe state. Always allowed.",
     "ui-control": "Changes what the person sees in the app, not the saved data.",
     "develop": "Runs the project's own code, such as tests and builds.",
+    "author": "Saves a new file for the person to review and run. The AI cannot run it.",
     "unrestricted": "Runs code or any backend call. Reaches whatever the backend reaches.",
     "unclassified": "No rule matched. A person must choose a class.",
 }
@@ -178,6 +179,12 @@ CLASSIFICATION_RULES = (
         "Builds Python code from its argument and runs it in the backend.",
     ),
     _rule(r"^terminal_get_workspace$", "observe", "medium", "Lists variables held in the backend."),
+    _rule(
+        r"^terminal_get_recent_runs$",
+        "observe",
+        "high",
+        "Reads the text and figures of the person's recent Command Console runs. Never runs code.",
+    ),
     _rule(r"^backend_health_check$", "observe", "high", "Reports whether the backend answers."),
     _rule(r"^docs_get$", "observe", "medium", "Returns documentation text."),
     _rule(
@@ -198,6 +205,12 @@ CLASSIFICATION_RULES = (
         "develop",
         "high",
         "Runs the front end's own tests, checks or build.",
+    ),
+    _rule(
+        r"^terminal_add_script$",
+        "author",
+        "high",
+        "Saves a new user script for the person to review. Never runs it and never overwrites.",
     ),
     _rule(r"^typegen_contract_validator$", "develop", "high", "Developer check of model contracts."),
     # Writes to saved data.

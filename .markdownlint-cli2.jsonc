@@ -1,4 +1,4 @@
-// markdownlint for the documentation site and the library READMEs (see documentation/Documentation_Conventions.md §6).
+// markdownlint for the documentation site and the library READMEs (see .claude/skills/documentation-style/CONVENTIONS.md §6).
 // Run: build/documentation/lint_docs.sh
 {
   "config": {

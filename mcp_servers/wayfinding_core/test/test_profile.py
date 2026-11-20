@@ -2,7 +2,7 @@
 
 Description: The server must offer an AI client only read-only tools. These
 tests check that the committed manifest covers every tool the server
-registers, and that the investigator profile offers no tool that commands a
+registers, and that the profile offers no tool that commands a
 device, writes data, or is marked dropped.
 """
 
@@ -11,8 +11,8 @@ from mcp_servers.common.tool_registry import ToolRegistry
 from mcp_servers.wayfinding_core.definition import MANIFEST_PATH
 
 
-def _investigator_copy(registry: ToolRegistry) -> ToolRegistry:
-    """Copy the registry and apply the investigator profile to the copy.
+def _profile_copy(registry: ToolRegistry) -> ToolRegistry:
+    """Copy the registry and apply the profile to the copy.
 
     Parameters
     ----------
@@ -22,11 +22,11 @@ def _investigator_copy(registry: ToolRegistry) -> ToolRegistry:
     Returns
     -------
     copy : `ToolRegistry`
-        A registry holding only the tools the investigator may use.
+        A registry holding only the tools the profile may use.
     """
     copy = ToolRegistry()
     copy.tools = dict(registry.tools)
-    copy.apply_profile(MANIFEST_PATH, "investigator")
+    copy.apply_profile(MANIFEST_PATH)
     return copy
 
 
@@ -39,9 +39,9 @@ def test_manifest_covers_every_registered_tool(registry: ToolRegistry) -> None:
     assert set(manifest["tools"]) - registered == set(), "Manifest entries with no tool"
 
 
-def test_investigator_profile_offers_no_device_command_or_writer(registry: ToolRegistry) -> None:
+def test_profile_offers_no_device_command_or_writer(registry: ToolRegistry) -> None:
     """Hardware commands, writers and dropped tools are all withheld."""
-    copy = _investigator_copy(registry)
+    copy = _profile_copy(registry)
     manifest = load_manifest(MANIFEST_PATH)
     assert copy.tools
     for name in copy.tools:
@@ -54,6 +54,6 @@ def test_investigator_profile_offers_no_device_command_or_writer(registry: ToolR
 
 def test_tools_with_a_known_hazard_are_blocked_for_now(registry: ToolRegistry) -> None:
     """A read-only tool with an interim block is not offered."""
-    copy = _investigator_copy(registry)
+    copy = _profile_copy(registry)
     assert "observatory_mount_status" not in copy.tools
     assert "observatory_mount_status" in copy.withheld

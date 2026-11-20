@@ -10,7 +10,14 @@ lives here so two scripts share it without importing each other.
 import numpy as np
 
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 # How far, in pixels, the standard star's zero order may sit from the frame
 # centre before the script refuses to guess. The telescope is pointed at the
@@ -18,14 +25,27 @@ from astrometricslib.models.stellar_source import StellarObject
 # original stack put the star 10 px from the centre, and in the rebuilt stack
 # (where the star was not detected) the nearest wrong source was 33 px away.
 # 25 px falls between those two cases; it has not been tested on other stars.
-MAXIMUM_STAR_OFFSET_FROM_CENTER_PX = 25.0
+MAXIMUM_STAR_OFFSET_FROM_CENTER_PX = TunedParameter(
+    name="spectroscopy.maximum_star_offset_from_center_px",
+    default=25.0,
+    unit="px",
+    description=(
+        "How far the standard star's zero order may sit from the frame centre before the script refuses."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D52",
+    allowed_range=(5.0, 100.0),
+    minimum_sample=5,  # a sample is a target whose own star has a stored zero-order position
+)
 
 
 def select_standard_star(
     stellar_objects: list[StellarObject],
     image_shape: tuple[int, int],
     star_position: tuple[float, float] | None = None,
-    maximum_offset_px: float = MAXIMUM_STAR_OFFSET_FROM_CENTER_PX,
+    maximum_offset_px: float | None = None,
 ) -> StellarObject:
     """Choose which detected source is the standard star.
 
@@ -59,6 +79,8 @@ def select_standard_star(
         If no source lies within ``maximum_offset_px`` of the frame centre
         and no position was given.
     """
+    if maximum_offset_px is None:
+        maximum_offset_px = resolve(MAXIMUM_STAR_OFFSET_FROM_CENTER_PX).value
     if star_position is not None:
         x_position, y_position = float(star_position[0]), float(star_position[1])
         return StellarObject(

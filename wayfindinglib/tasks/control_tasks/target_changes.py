@@ -35,6 +35,13 @@ from astropy.coordinates import AltAz, SkyCoord
 from astropy.time import Time
 
 from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.astronomy.coordinate_transforms import angular_separation_arcsec, earth_location
 from wayfindinglib.models.session.night_list import TargetChange
 
@@ -50,16 +57,37 @@ __all__ = [
     "POSITION_WINDOW_SECONDS",
     "find_target_changes",
     "match_library_target",
+    "slew_end_positions",
 ]
 
-MATCH_RADIUS_DEGREES = 0.5
+MATCH_RADIUS_DEGREES = TunedParameter(
+    name="wayfinding.match_radius_degrees",
+    default=0.5,
+    unit="degrees",
+    description="A pointing matches a library target only inside this distance.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D55",
+)
 """A pointing matches a library target only inside this distance, in degrees.
 Design estimate, register entry WAY-D55: a mount that has not been
 plate-solved points within a few tenths of a degree of its goal, and
 0.5 degrees stays under the 0.6 degree gap between neighboring objects
 such as M 81 and M 82."""
 
-NEW_POSITION_DEGREES = 0.25
+NEW_POSITION_DEGREES = TunedParameter(
+    name="wayfinding.new_position_degrees",
+    default=0.25,
+    unit="degrees",
+    description="A slew counts as a new target only if it ends this far from the last listed change.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D56",
+    allowed_range=(0.02, 2.0),
+    minimum_sample=10,  # a sample is one distance between the ends of two slews that follow each other
+)
 """A slew counts as a new target only if it ends this far from the last
 listed change, in degrees. Design estimate, register entry WAY-D56: centering
 steps and a meridian flip end within a few arcminutes of the earlier
@@ -132,7 +160,7 @@ def match_library_target(
         Its distance from the pointing, in degrees, or `None`.
     """
     best_id: str | None = None
-    best_separation = MATCH_RADIUS_DEGREES
+    best_separation = resolve_parameter(MATCH_RADIUS_DEGREES).value
     for target_id, target_ra, target_dec in positions:
         separation = angular_separation_arcsec(ra_deg, dec_deg, target_ra, target_dec) / 3600.0
         if separation <= best_separation:
@@ -211,6 +239,33 @@ def _pointing_at(
     return float(sky.ra.deg), float(sky.dec.deg), None
 
 
+def slew_end_positions(context: ControlContext) -> list[tuple[float, float]]:
+    """List where every recorded slew ended, in time order.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the recorded Ekos sessions and the observer location.
+
+    Returns
+    -------
+    positions : `list` [`tuple` [`float`, `float`]]
+        Right ascension and declination in degrees of each slew whose end
+        position could be worked out. Empty without an observer location.
+    """
+    location = context.observer_location()
+    if location is None:
+        return []
+    records = sorted(context.butler.get_all("ekos_session_context"), key=lambda record: record.started_at)
+    positions = []
+    for record in records:
+        for slew_started_at, tracking_at in _slew_ends(record):
+            ra_deg, dec_deg, _note = _pointing_at(record, slew_started_at, tracking_at, location)
+            if ra_deg is not None and dec_deg is not None:
+                positions.append((ra_deg, dec_deg))
+    return positions
+
+
 def find_target_changes(
     context: ControlContext, session_id: str | None = None, limit: int = 10
 ) -> list[TargetChange]:
@@ -243,12 +298,13 @@ def find_target_changes(
     positions = library_target_positions(context)
     changes: list[TargetChange] = []
     last_listed: tuple[float, float] | None = None
+    new_position_degrees = resolve_parameter(NEW_POSITION_DEGREES).value
     for record, slew_started_at, tracking_at in slews:
         ra_deg, dec_deg, note = _pointing_at(record, slew_started_at, tracking_at, location)
         if ra_deg is not None and dec_deg is not None:
             if (
                 last_listed is not None
-                and angular_separation_arcsec(*last_listed, ra_deg, dec_deg) / 3600.0 < NEW_POSITION_DEGREES
+                and angular_separation_arcsec(*last_listed, ra_deg, dec_deg) / 3600.0 < new_position_degrees
             ):
                 continue
             last_listed = (ra_deg, dec_deg)

@@ -17,6 +17,8 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.observatory_site import ObservatorySite
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import (
     DifferentialRefractionRecord,
@@ -25,6 +27,13 @@ from astrometricslib.models.stellar_source import (
     SpectralNoiseModelRecord,
     SpectroscopyResult,
     StellarObject,
+)
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
 )
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
@@ -139,13 +148,41 @@ logger = logging.getLogger(__name__)
 # dispersion axis, when it fits a line through the brightest pixels to
 # measure the grating's tilt. Unvalidated beyond visual inspection of the
 # streaks it was written for.
-DISPERSION_ANGLE_ROI_HALF_WIDTH_PX = 20
+DISPERSION_ANGLE_ROI_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.dispersion_angle_roi_half_width_px",
+    default=20,
+    unit="px",
+    description="How far the dispersion-angle fit looks to each side of a star, across the dispersion axis.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # The least `DISPERSION_ANGLE_ROI_HALF_WIDTH_PX` is ever shrunk to, so a very
 # close neighbour still leaves enough width to catch a few pixels per row.
 # Below this, `detect_dispersion_angle`'s own "fewer than 10 bright pixels
 # found" check already refuses cleanly instead of fitting noise.
-DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = 3.0
+DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.dispersion_angle_roi_minimum_half_width_px",
+    default=3.0,
+    unit="px",
+    description="The least the dispersion-angle search half-width is shrunk to when a neighbour is close.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # Below this DAOStarFinder "sharpness" value, a detection is not compact
 # enough to trust as a real point source. Found on real data: a bright
@@ -158,7 +195,21 @@ DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = 3.0
 # measured 0.72. 0.5 sits roughly in the middle of that gap: comfortably
 # above the trail artifacts seen so far, comfortably below every real star
 # seen so far.
-TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS = 0.5
+TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS = TunedParameter(
+    name="spectroscopy.trail_contamination_maximum_sharpness",
+    default=0.5,
+    unit="DAOStarFinder sharpness",
+    description="Below this sharpness a detection is not compact enough to be a real point source.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 
 # The steepest tilt, in degrees, the angle fit will accept. The strip that
@@ -167,7 +218,21 @@ TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS = 0.5
 # neighbour, or noise). Trails measured so far lean between 2 and 3 degrees
 # (Vega 2.1, Albireo 2.7, M 57 about 2.5), so 10 leaves a wide margin.
 # Not validated beyond those three stacks.
-DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES = 10.0
+DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES = TunedParameter(
+    name="spectroscopy.dispersion_angle_maximum_tilt_degrees",
+    default=10.0,
+    unit="degrees",
+    description="The steepest trail tilt the dispersion-angle fit accepts.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # How many times the angle fit re-centres its strip on the previous fit
 # before stopping. The fit moves less each time; on the Albireo, Vega and
@@ -179,23 +244,79 @@ DISPERSION_ANGLE_MAXIMUM_REFIT_COUNT = 8
 # centre moves by well under a pixel per band) while keeping about 15 bands
 # along a 630 px trail so the tilt is well constrained. Chosen by judgement,
 # then checked against direct centroids on the Albireo, Vega and M 57 stacks.
-DISPERSION_ANGLE_BAND_LENGTH_PX = 40
+DISPERSION_ANGLE_BAND_LENGTH_PX = TunedParameter(
+    name="spectroscopy.dispersion_angle_band_length_px",
+    default=40,
+    unit="px",
+    description="How many pixels along the trail each band spans when the streak position is measured.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # The brightness, in noise sigmas of a band's averaged profile, its peak must
 # reach for the band to count. Pure noise peaks at about 2 sigma across the
 # few dozen pixels of a profile, so 3 keeps noise bands out. A judgement, not
 # tuned on data.
-DISPERSION_ANGLE_MINIMUM_BAND_SIGMA = 3.0
+DISPERSION_ANGLE_MINIMUM_BAND_SIGMA = TunedParameter(
+    name="spectroscopy.dispersion_angle_minimum_band_sigma",
+    default=3.0,
+    unit="noise sigma",
+    description="The brightness, in noise sigmas, a band's peak must reach for the band to count.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # How many candidate tilts the search tries before it starts following the
 # trail. 41 across plus or minus 10 degrees is a step of 0.5 degrees, well
 # inside what one strip half-width of 3 px can still follow over the first
 # bands. Chosen by judgement.
-DISPERSION_ANGLE_SEED_SLOPE_COUNT = 41
+DISPERSION_ANGLE_SEED_SLOPE_COUNT = TunedParameter(
+    name="spectroscopy.dispersion_angle_seed_slope_count",
+    default=41,
+    unit="count",
+    description="How many candidate tilts the search tries before it follows the trail.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # The fewest bands that must show the streak for an angle to be reported.
 # Fewer than this and one odd band could set the whole slope.
-DISPERSION_ANGLE_MINIMUM_BAND_COUNT = 4
+DISPERSION_ANGLE_MINIMUM_BAND_COUNT = TunedParameter(
+    name="spectroscopy.dispersion_angle_minimum_band_count",
+    default=4,
+    unit="count",
+    description="The fewest bands that must show the streak for an angle to be reported.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 # The change in slope (across-pixels per along-pixel) below which the fit
 # counts as settled. 0.001 is 0.06 degrees, far below the 0.1 degree scatter
@@ -214,14 +335,49 @@ DISPERSION_ANGLE_REFIT_TOLERANCE = 0.001
 # the trails on the Albireo, Vega and M 57 stacks score in the hundreds to
 # thousands, and pure noise returns no measurement at all. 5.0 is a wide
 # margin either way. Validated on those three stacks only.
-DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA = 5.0
+DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA = TunedParameter(
+    name="spectroscopy.dispersion_angle_minimum_trail_contrast_sigma",
+    default=5.0,
+    unit="noise sigma",
+    description=(
+        "The least trail contrast a star's angle measurement needs before the batch-wide angle trusts it."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({
+        EquipmentKind.MOUNT,
+        EquipmentKind.TELESCOPE,
+        EquipmentKind.CAMERA,
+        EquipmentKind.FILTER_OR_GRATING,
+    }),
+    register_entry="SPE-D33",
+)
 
 
 # The smallest extraction radius a star's aperture is ever shrunk to when a
 # neighbour's trail runs alongside. Below this the aperture (2 * radius + 1
 # wide) is too narrow to hold a trail whose own width is a few pixels.
 # Not tuned beyond that geometric reasoning.
-EXTRACTION_RADIUS_MINIMUM_PX = 3
+# It stands for under half a trail width (3 on the reference setup, 0.44 × the
+# trail width of 6.81 px), so it follows the trail width the run measures.
+# The aperture it gives (7 px wide) is about one trail width, the full width
+# at half maximum. An earlier note said 0.77 × the trail width; that did not
+# follow from 3 and 6.81 and its source is not recorded, so it was corrected.
+EXTRACTION_RADIUS_MINIMUM_PX = TunedParameter(
+    name="spectroscopy.extraction_radius_minimum_px",
+    default=factor_for(3, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description=(
+        "The smallest extraction radius a star's aperture is "
+        "shrunk to when a neighbour's trail runs alongside."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D35",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=3,
+)
 
 
 def _capped_extraction_radius_px(
@@ -274,7 +430,7 @@ def _capped_extraction_radius_px(
     if not np.isfinite(nearest_separation):
         return default_radius_px
     fitting_radius = int(np.floor((nearest_separation - 1.0) / 2.0))
-    return max(EXTRACTION_RADIUS_MINIMUM_PX, min(default_radius_px, fitting_radius))
+    return max(resolve(EXTRACTION_RADIUS_MINIMUM_PX).value, min(default_radius_px, fitting_radius))
 
 
 def _safe_dispersion_angle_roi_half_width_px(
@@ -282,7 +438,7 @@ def _safe_dispersion_angle_roi_half_width_px(
     neighbor_positions: list[tuple[float, float]],
     orientation: str,
     trail_length_px: float,
-    default_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+    default_half_width_px: float | None = None,
 ) -> float:
     """Shrink the angle-detection ROI so it can never reach a close neighbour.
 
@@ -337,6 +493,8 @@ def _safe_dispersion_angle_roi_half_width_px(
         closer than twice that, never below
         `DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX`.
     """
+    if default_half_width_px is None:
+        default_half_width_px = resolve(DISPERSION_ANGLE_ROI_HALF_WIDTH_PX).value
     axis_index = 0 if orientation == "vertical" else 1
     dispersion_axis_index = 1 - axis_index
     relevant_neighbor_positions = [
@@ -348,7 +506,10 @@ def _safe_dispersion_angle_roi_half_width_px(
         (abs(star_pos[axis_index] - neighbor[axis_index]) for neighbor in relevant_neighbor_positions),
         default=float("inf"),
     )
-    return max(DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX, min(default_half_width_px, nearest_distance / 2.0))
+    return max(
+        resolve(DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX).value,
+        min(default_half_width_px, nearest_distance / 2.0),
+    )
 
 
 def _read_xy_source_position(source: Any) -> tuple[Any, Any]:
@@ -605,7 +766,7 @@ def _drop_spurious_trail_detections(
     offset_px: float,
     length_px: float,
     perpendicular_tolerance_px: float,
-    maximum_sharpness: float = TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS,
+    maximum_sharpness: float | None = None,
 ) -> list[Any]:
     """Drop candidates that are just a bright point in a brighter star's trail.
 
@@ -644,6 +805,8 @@ def _drop_spurious_trail_detections(
     kept_stars : `list`
         `stars`, with spurious trail detections removed.
     """
+    if maximum_sharpness is None:
+        maximum_sharpness = resolve(TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS).value
     kept: list[Any] = []
     kept_positions: list[tuple[float, float]] = []
     for star in stars:
@@ -1259,6 +1422,7 @@ class SpectroscopyPipeline:
         `DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA`, the configured
         angle is left unchanged instead of adopting a noise fit.
         """
+        dispersion_angle_roi_half_width_px = resolve(DISPERSION_ANGLE_ROI_HALF_WIDTH_PX).value
         offset_px = self.instrument.zero_order_offset_px
         length_px = self.instrument.expected_length_px
         orient = self.config.dispersion_orientation
@@ -1291,8 +1455,8 @@ class SpectroscopyPipeline:
                 if (
                     y_start >= 0
                     and y_end <= h
-                    and x_star - DISPERSION_ANGLE_ROI_HALF_WIDTH_PX >= 0
-                    and x_star + DISPERSION_ANGLE_ROI_HALF_WIDTH_PX <= w
+                    and x_star - dispersion_angle_roi_half_width_px >= 0
+                    and x_star + dispersion_angle_roi_half_width_px <= w
                 ):
                     candidate_positions.append((x_star, y_star))
             else:
@@ -1306,8 +1470,8 @@ class SpectroscopyPipeline:
                 if (
                     x_start >= 0
                     and x_end <= w
-                    and y_star - DISPERSION_ANGLE_ROI_HALF_WIDTH_PX >= 0
-                    and y_star + DISPERSION_ANGLE_ROI_HALF_WIDTH_PX <= h
+                    and y_star - dispersion_angle_roi_half_width_px >= 0
+                    and y_star + dispersion_angle_roi_half_width_px <= h
                 ):
                     candidate_positions.append((x_star, y_star))
 
@@ -1338,12 +1502,12 @@ class SpectroscopyPipeline:
             return
 
         global_angle, contrast_sigma, best_star_pos, roi_half_width_px = best_measurement
-        if contrast_sigma < DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA:
+        if contrast_sigma < resolve(DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA).value:
             logger.warning(
                 "No star showed a clear dispersion streak (best contrast %.1f sigma < %.1f); "
                 "keeping the configured angle %.2f degrees",
                 contrast_sigma,
-                DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA,
+                resolve(DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA).value,
                 self.config.dispersion_angle_degrees,
             )
             return
@@ -1531,7 +1695,10 @@ class SpectroscopyPipeline:
         result["neighbor_wing_status"] = _NEIGHBORS_NOT_CHECKED_STATUS
         self._apply_result_to_stellar_object(star, result, image)
         signal_to_noise = star.spectroscopy.input_quality.signal_to_noise
-        if signal_to_noise is None or signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:
+        if (
+            signal_to_noise is None
+            or signal_to_noise < resolve(MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE).value
+        ):
             star.spectroscopy = earlier_spectroscopy
             star.star_data = earlier_star_data
             self.last_run_below_feature_limit_count = earlier_below_limit_count
@@ -1861,7 +2028,7 @@ class SpectroscopyPipeline:
         if (
             star.stellar_spectral_type != EXTENDED_TARGET_SPECTRAL_TYPE
             and analysis.signal_to_noise is not None
-            and analysis.signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+            and analysis.signal_to_noise < resolve(MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE).value
         ):
             self.last_run_below_feature_limit_count += 1
 
@@ -2532,7 +2699,7 @@ class SpectroscopyPipeline:
         self,
         image: AstrometricsImage,
         star_pos: tuple[float, float],
-        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+        roi_half_width_px: float | None = None,
     ) -> tuple[float, float]:
         """Measure the tilt of a star's spectrum streak and how clear it is.
 
@@ -2564,6 +2731,11 @@ class SpectroscopyPipeline:
             streak scores in the hundreds; 0.0 when no streak could be
             followed (pure noise returns 0.0).
         """
+        dispersion_angle_band_length_px = resolve(DISPERSION_ANGLE_BAND_LENGTH_PX).value
+        dispersion_angle_minimum_band_sigma = resolve(DISPERSION_ANGLE_MINIMUM_BAND_SIGMA).value
+        dispersion_angle_minimum_band_count = resolve(DISPERSION_ANGLE_MINIMUM_BAND_COUNT).value
+        if roi_half_width_px is None:
+            roi_half_width_px = resolve(DISPERSION_ANGLE_ROI_HALF_WIDTH_PX).value
         data = image.data
         x_star, y_star = star_pos
 
@@ -2591,7 +2763,7 @@ class SpectroscopyPipeline:
 
         # The strip that follows the trail can wander this far from the star's
         # own line, so the pixel block is cut wide enough to hold any of them.
-        maximum_slope = float(np.tan(np.radians(DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES)))
+        maximum_slope = float(np.tan(np.radians(resolve(DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES).value)))
         reach_px = int(np.ceil(roi_half_width_px + maximum_slope * length_px))
         across_start = max(0, int(across_star - reach_px))
         across_end = min(image_array.shape[1], int(across_star + reach_px) + 1)
@@ -2619,12 +2791,14 @@ class SpectroscopyPipeline:
         if noise_sigma <= 0.0:
             return 0.0, 0.0
 
-        band_edges = np.arange(0, along_coordinates.size, DISPERSION_ANGLE_BAND_LENGTH_PX)
+        band_edges = np.arange(0, along_coordinates.size, dispersion_angle_band_length_px)
         offsets = np.arange(-int(np.ceil(roi_half_width_px)), int(np.ceil(roi_half_width_px)) + 1)
         # A narrow strip can only follow a trail it already overlaps, so the
         # search starts from the best of a few lines through the star, one per
         # candidate tilt (a real trail leans about the star's zero order).
-        candidate_slopes = np.linspace(-maximum_slope, maximum_slope, DISPERSION_ANGLE_SEED_SLOPE_COUNT)
+        candidate_slopes = np.linspace(
+            -maximum_slope, maximum_slope, resolve(DISPERSION_ANGLE_SEED_SLOPE_COUNT).value
+        )
         seed_offsets = np.arange(-1, 2)
         seed_scores = []
         for candidate_slope in candidate_slopes:
@@ -2648,9 +2822,10 @@ class SpectroscopyPipeline:
             band_contrasts = []
             for band_start in band_edges:
                 rows = np.arange(
-                    band_start, min(band_start + DISPERSION_ANGLE_BAND_LENGTH_PX, along_coordinates.size)
+                    band_start,
+                    min(band_start + dispersion_angle_band_length_px, along_coordinates.size),
                 )
-                if rows.size < DISPERSION_ANGLE_BAND_LENGTH_PX // 2:
+                if rows.size < dispersion_angle_band_length_px // 2:
                     continue
                 line_centre = np.rint(intercept + slope * along_coordinates[rows]).astype(int)
                 columns = line_centre[:, None] + offsets[None, :] - across_start
@@ -2659,7 +2834,7 @@ class SpectroscopyPipeline:
                     continue
                 profile = pixel_block[rows[:, None], columns].mean(axis=0) - background_level
                 band_noise = noise_sigma / np.sqrt(rows.size)
-                if profile.max() < DISPERSION_ANGLE_MINIMUM_BAND_SIGMA * band_noise:
+                if profile.max() < dispersion_angle_minimum_band_sigma * band_noise:
                     continue
                 weights = np.clip(profile, 0.0, None)
                 sideways_position = float((offsets * weights).sum() / weights.sum())
@@ -2667,7 +2842,7 @@ class SpectroscopyPipeline:
                 band_centres.append(float(line_centre.mean() + sideways_position))
                 band_signals.append(float(weights.sum()))
                 band_contrasts.append(float(profile.max() / band_noise))
-            if len(band_middles) < DISPERSION_ANGLE_MINIMUM_BAND_COUNT:
+            if len(band_middles) < dispersion_angle_minimum_band_count:
                 return 0.0, 0.0
             try:
                 fitted_slope, fitted_intercept = np.polyfit(
@@ -2708,7 +2883,7 @@ class SpectroscopyPipeline:
         self,
         image: AstrometricsImage,
         star_pos: tuple[float, float],
-        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+        roi_half_width_px: float | None = None,
     ) -> float:
         """Figure out exactly how much the camera is tilted.
 
@@ -2727,6 +2902,8 @@ class SpectroscopyPipeline:
         angle_degrees : `float`
             The tilt of the camera, in degrees.
         """
+        if roi_half_width_px is None:
+            roi_half_width_px = resolve(DISPERSION_ANGLE_ROI_HALF_WIDTH_PX).value
         return self.measure_dispersion_trail(image, star_pos, roi_half_width_px)[0]
 
     def create_extended_target_object(

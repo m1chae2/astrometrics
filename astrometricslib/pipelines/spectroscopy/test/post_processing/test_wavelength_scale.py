@@ -237,10 +237,10 @@ def test_the_correlation_is_none_when_it_is_undefined() -> None:
 
 def test_a_saturated_spectrum_flag_level_is_the_run_flag_level() -> None:
     """The correlation reads the saturated fraction the checkpoint holds."""
-    checkpoint = checkpoint_for(5.0, saturation=DEFAULT_SATURATION_FLAG_THRESHOLD)
+    checkpoint = checkpoint_for(5.0, saturation=DEFAULT_SATURATION_FLAG_THRESHOLD.default)
     saturation = next(entry for entry in checkpoint.metrics if entry.name == "zero_order_saturated_fraction")
 
-    assert saturation.value == pytest.approx(DEFAULT_SATURATION_FLAG_THRESHOLD)
+    assert saturation.value == pytest.approx(DEFAULT_SATURATION_FLAG_THRESHOLD.default)
 
 
 # -------------------------------------------------------------- the gate
@@ -253,7 +253,7 @@ def test_the_wavelength_scale_gate_goes_red_when_the_rms_after_correction_is_ove
     assert gate.name == WAVELENGTH_SCALE_GATE_NAME
     assert gate.status is GateStatus.FAILED
     assert gate.measured_value == pytest.approx(15.0)
-    assert gate.limit == pytest.approx(WAVELENGTH_SCALE_LIMIT_ANGSTROM)
+    assert gate.limit == pytest.approx(WAVELENGTH_SCALE_LIMIT_ANGSTROM.reference_value)
     assert "designed" in (gate.limit_source or "")
 
 
@@ -265,12 +265,14 @@ def test_the_wavelength_scale_gate_is_not_checked_with_fewer_than_three_spectra(
     assert without_summary.name == WAVELENGTH_SCALE_GATE_NAME
     assert without_summary.status is GateStatus.NOT_CHECKED
     assert two_spectra.status is GateStatus.NOT_CHECKED
-    assert MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE == 3
+    assert MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE.default == 3
 
 
 def test_the_wavelength_scale_gate_passes_at_and_below_the_limit() -> None:
     """Exactly 11 A is not over the limit; 3 spectra are enough."""
-    at_limit = wavelength_scale_gate(summary_with_rms_after(WAVELENGTH_SCALE_LIMIT_ANGSTROM, 3))
+    at_limit = wavelength_scale_gate(
+        summary_with_rms_after(WAVELENGTH_SCALE_LIMIT_ANGSTROM.reference_value, 3)
+    )
     below = wavelength_scale_gate(summary_with_rms_after(2.0))
 
     assert at_limit.status is GateStatus.PASSED
@@ -280,7 +282,7 @@ def test_the_wavelength_scale_gate_passes_at_and_below_the_limit() -> None:
 
 def test_the_designed_limit_is_one_pixel_of_dispersion() -> None:
     """The limit is 11 A, the dispersion of one pixel."""
-    assert WAVELENGTH_SCALE_LIMIT_ANGSTROM == pytest.approx(11.0)
+    assert WAVELENGTH_SCALE_LIMIT_ANGSTROM.reference_value == pytest.approx(11.0)
 
 
 def test_uncorrected_spectra_with_large_offsets_fail_the_gate_end_to_end() -> None:

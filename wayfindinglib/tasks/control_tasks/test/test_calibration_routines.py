@@ -9,10 +9,17 @@ is a thin, correctly-parameterized wrapper over `fit_pointing_model`.
 import pytest
 
 from astrometricslib.exceptions import HardwareError, ProcessingError
+from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.tasks.control_tasks.calibration_routines import (
+    BACKLASH_MAX_TEST_PULSES,
+    BACKLASH_MOTION_THRESHOLD_PX,
+    BACKLASH_REVERSAL_TEST_PULSE_SECONDS,
+    BACKLASH_SETTLE_PULSE_SECONDS,
+    CALIBRATION_MOVE_GUIDE_PX,
     BacklashCalibrationSteps,
     GuiderCalibrationSteps,
+    calibration_pulse_seconds,
     run_backlash_calibration,
     run_guider_calibration,
     run_polar_alignment_assist,
@@ -45,13 +52,68 @@ def test_run_guider_calibration_sequences_ra_then_dec_pulses() -> None:
         pulse_ra=pulse_ra, pulse_dec=pulse_dec, measure_guide_star_centroid=lambda: next(centroids)
     )
 
-    calibration = run_guider_calibration(steps, "cal-1", "cam-1", "scope-1", arcsec_per_pixel=2.0)
+    calibration = run_guider_calibration(
+        steps,
+        "cal-1",
+        "cam-1",
+        "scope-1",
+        arcsec_per_pixel=2.0,
+        ra_pulse_duration_sec=3.0,
+        dec_pulse_duration_sec=3.0,
+    )
 
     assert call_order == ["pulse_ra", "pulse_dec"]
     assert isinstance(calibration, GuiderCalibration)
     assert calibration.id == "cal-1"
     assert calibration.ra_rate_arcsec_per_sec == pytest.approx((10.0 * 2.0) / 3.0)
     assert calibration.dec_rate_arcsec_per_sec == pytest.approx((8.0 * 2.0) / 3.0)
+
+
+def test_calibration_pulse_moves_the_star_the_declared_distance() -> None:
+    """The pulse is the move, times the plate scale, over the guide rate."""
+    move_px = CALIBRATION_MOVE_GUIDE_PX.default
+
+    pulse_seconds = calibration_pulse_seconds(4.0, guide_rate_arcsec_per_s=8.0)
+
+    assert pulse_seconds == pytest.approx(move_px * 4.0 / 8.0)
+
+
+def test_calibration_pulse_keeps_three_seconds_for_the_reference_setup() -> None:
+    """The Apertura 32 mm and ASI120MC-S setup gets the old 3.0 s."""
+    plate_scale = 206.265 * 3.75 / 121.05
+
+    pulse_seconds = calibration_pulse_seconds(plate_scale, guide_rate_arcsec_per_s=7.52)
+
+    assert pulse_seconds == pytest.approx(3.0, abs=0.01)
+
+
+def test_calibration_pulse_reads_the_equipment_guide_rate_by_default() -> None:
+    """Leaving the rate out uses the declared mount guide rate."""
+    plate_scale = 6.39
+
+    assert calibration_pulse_seconds(plate_scale) == pytest.approx(
+        calibration_pulse_seconds(plate_scale, GUIDE_RATE_ARCSEC_PER_S.default)
+    )
+
+
+def test_run_guider_calibration_derives_the_pulse_when_none_is_given() -> None:
+    """Both axis pulses get the derived length when none is named."""
+    centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0), (10.0, 8.0)])
+    durations: list[float] = []
+
+    def record_pulse(duration_sec: float) -> bool:
+        durations.append(duration_sec)
+        return True
+
+    steps = GuiderCalibrationSteps(
+        pulse_ra=record_pulse, pulse_dec=record_pulse, measure_guide_star_centroid=lambda: next(centroids)
+    )
+
+    run_guider_calibration(steps, "cal-d", "cam-1", "scope-1", arcsec_per_pixel=6.39)
+
+    expected = calibration_pulse_seconds(6.39)
+    assert durations == [pytest.approx(expected), pytest.approx(expected)]
+    assert expected == pytest.approx(3.0, abs=0.01)
 
 
 def test_run_guider_calibration_raises_when_ra_pulse_command_fails() -> None:
@@ -128,6 +190,39 @@ def test_run_backlash_calibration_reports_full_budget_if_motion_never_detected()
     assert backlash_ms == pytest.approx(10 * 0.05 * 1000.0)
 
 
+def test_run_backlash_calibration_uses_the_declared_values_by_default() -> None:
+    """Leaving every limit out uses the declared values."""
+    pulse_calls: list[tuple[str, float]] = []
+
+    def pulse_dec(direction: str, duration_sec: float) -> bool:
+        pulse_calls.append((direction, duration_sec))
+        return True
+
+    steps = BacklashCalibrationSteps(pulse_dec=pulse_dec, measure_guide_star_centroid=lambda: (0.0, 0.0))
+
+    backlash_ms = run_backlash_calibration(steps)
+
+    test_pulse_seconds = BACKLASH_REVERSAL_TEST_PULSE_SECONDS.default
+    test_pulse_count = int(BACKLASH_MAX_TEST_PULSES.default)
+    assert pulse_calls[0] == ("north", pytest.approx(BACKLASH_SETTLE_PULSE_SECONDS.default))
+    assert len(pulse_calls) == 1 + test_pulse_count
+    assert backlash_ms == pytest.approx(test_pulse_count * test_pulse_seconds * 1000.0)
+    assert BACKLASH_MOTION_THRESHOLD_PX.default == pytest.approx(0.5)
+
+
+def test_run_backlash_calibration_stops_at_the_declared_motion_threshold() -> None:
+    """A move over the declared threshold ends the probe; under it does not."""
+    threshold = BACKLASH_MOTION_THRESHOLD_PX.default
+    centroids = iter([(0.0, 0.0), (0.0, threshold * 0.9), (0.0, threshold * 0.9 + threshold * 1.1)])
+    steps = BacklashCalibrationSteps(
+        pulse_dec=lambda direction, duration_sec: True, measure_guide_star_centroid=lambda: next(centroids)
+    )
+
+    backlash_ms = run_backlash_calibration(steps)
+
+    assert backlash_ms == pytest.approx(2 * BACKLASH_REVERSAL_TEST_PULSE_SECONDS.default * 1000.0)
+
+
 def test_run_polar_alignment_assist_fits_from_the_given_attempts() -> None:
     """Verify the assist routine fits directly from the passed-in attempts."""
     model = run_polar_alignment_assist(_ATTEMPTS, latitude_deg=39.7)
@@ -138,6 +233,6 @@ def test_run_polar_alignment_assist_fits_from_the_given_attempts() -> None:
 
 def test_run_polar_alignment_assist_reports_insufficient_data_early() -> None:
     """Verify fewer than 4 attempts reports insufficient_data, not a fit."""
-    model = run_polar_alignment_assist(_ATTEMPTS[:2])
+    model = run_polar_alignment_assist(_ATTEMPTS[:2], latitude_deg=45.0)
 
     assert model.confidence == "insufficient_data"

@@ -30,8 +30,9 @@ DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
 WAYFINDING_QUALITY_JUDGMENT = DESIGN_DIR / "Wayfinding_Quality_Judgment.md"
-# Length limits for the papers (documentation/Documentation_Conventions.md,
-# Section 3.4). A journal paper on scientific software runs 5,000 to 10,000
+# Length limits for the papers
+# (.claude/skills/documentation-style/CONVENTIONS.md, Section 3.4).
+# A journal paper on scientific software runs 5,000 to 10,000
 # words; the implementation paper is an index into the code, not a second
 # paper. References and hidden <!-- impl: --> comments do not count.
 ARCHITECTURE_WORD_LIMIT = 10_000

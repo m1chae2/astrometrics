@@ -108,6 +108,15 @@ DECISIONS = {
         "(plan:edit, plan:tick_checklist_item).",
     ),
     "terminal_inspect_api": ToolDecision("withhold", "Builds Python code from its argument. Console only."),
+    "terminal_get_recent_runs": ToolDecision(
+        "keep",
+        "Built 2026-11-15. Reads what the person's recent Command Console runs printed and drew. Read-only.",
+    ),
+    "terminal_add_script": ToolDecision(
+        "keep",
+        "Built 2026-11-15. Saves a new script to the Command Console's User Scripts for the person to "
+        "review and run. It cannot run it or replace a script.",
+    ),
     "terminal_get_workspace": ToolDecision("withhold", "Console only. Has no use without the code runner."),
     "ui_editor_sync": ToolDecision("withhold", "Console code editor. Has no use without the code runner."),
     "ui_inspect_variable": ToolDecision(
@@ -317,6 +326,21 @@ DECISIONS = {
         "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
         "reloads the index into memory and writes nothing.",
     ),
+    "quality_measure_star_profile": ToolDecision(
+        "keep",
+        "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
+        "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
+    ),
+    "quality_measure_detections": ToolDecision(
+        "keep",
+        "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
+        "nothing is stored.",
+    ),
+    "quality_measure_tuned_parameters": ToolDecision(
+        "withhold",
+        "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "
+        "up and writes the configuration file. The AI does not change settings.",
+    ),
     "quality_measure_stack": ToolDecision(
         "keep",
         "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
@@ -451,6 +475,11 @@ DECISIONS = {
         "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own "
         "error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history.",
         "observe",
+    ),
+    "review_measure_tuned_parameters": ToolDecision(
+        "withhold",
+        "Built 2026-11-16 (#175). Works out the wayfinding tuned values; with save=True it backs up and "
+        "writes the configuration file. The AI does not change settings.",
     ),
     "review_measure_guiding_spectrum": ToolDecision(
         "keep",

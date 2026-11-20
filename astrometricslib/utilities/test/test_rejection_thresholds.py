@@ -112,4 +112,4 @@ def test_rejection_bounds_reject_invalid_settings(floor: float, low_extra: float
 def test_rejection_bounds_reject_non_positive_frame_counts() -> None:
     """Verifies zero frames raises, as chauvenet_sigma does."""
     with pytest.raises(InvalidArgumentError):
-        rejection_bounds(0)
+        rejection_bounds(0, floor=2.5, low_extra=0.5)

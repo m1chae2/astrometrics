@@ -31,6 +31,17 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from astrometricslib.exceptions import ConflictError, ExternalServiceError, HardwareError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    WhenMissing,
+    factor_for,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.guide_pulses import rms_arcsec
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
 from wayfindinglib.models.session.telemetry import GuidingSample, GuidingStats, LiveGuidingStatus
@@ -46,16 +57,58 @@ logger = logging.getLogger(__name__)
 HISTORY_LIMIT = 100
 """How many of the newest samples the monitor keeps."""
 
-ACTIVE_WINDOW_SECONDS = 5.0
+ACTIVE_WINDOW_SECONDS = TunedParameter(
+    name="wayfinding.active_window_seconds",
+    default=factor_for(5.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
+    description="A guide sample newer than this means another guider is guiding now.",
+    role=ParameterRole.HARDWARE_LIMIT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D140",
+    when_missing=WhenMissing.REFUSE,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=5.0,
+)
 """A sample newer than this means another guider is guiding now."""
 
-TRACKING_CHECKS = 5
+TRACKING_CHECKS = TunedParameter(
+    name="wayfinding.tracking_checks",
+    default=5,
+    unit="checks",
+    description="How many times the loop checks that the mount tracks before it starts.",
+    role=ParameterRole.HARDWARE_LIMIT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D140",
+    when_missing=WhenMissing.REFUSE,
+)
 """How many times the loop checks that the mount tracks before it starts."""
 
-TRACKING_RETRY_SECONDS = 0.5
+TRACKING_RETRY_SECONDS = TunedParameter(
+    name="wayfinding.tracking_retry_seconds",
+    default=0.5,
+    unit="seconds",
+    description="Wait between the tracking checks.",
+    role=ParameterRole.HARDWARE_LIMIT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D140",
+    when_missing=WhenMissing.REFUSE,
+)
 """Wait between those checks."""
 
-LOST_TRACKING_LIMIT = 3
+LOST_TRACKING_LIMIT = TunedParameter(
+    name="wayfinding.lost_tracking_limit",
+    default=3,
+    unit="cycles",
+    description="Cycles in a row without tracking after which the guide loop stops.",
+    role=ParameterRole.HARDWARE_LIMIT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D140",
+    when_missing=WhenMissing.REFUSE,
+)
 """Cycles in a row without tracking after which the loop stops."""
 
 RETRY_SECONDS = 1.0
@@ -141,7 +194,7 @@ class LiveGuidingMonitor:
         with self._lock:
             history = list(self._history)
             stats = self._stats.model_copy()
-        recent = bool(history) and now - history[-1].time < ACTIVE_WINDOW_SECONDS
+        recent = bool(history) and now - history[-1].time < resolve_parameter(ACTIVE_WINDOW_SECONDS).value
         return LiveGuidingStatus(
             is_guiding=self.running or recent,
             stats=stats,
@@ -211,13 +264,14 @@ def _wait_for_tracking(context: ControlContext, sleep: Callable[[float], None]) 
     ConflictError
         If the mount does not track after `TRACKING_CHECKS` checks.
     """
+    tracking_retry_seconds = resolve_parameter(TRACKING_RETRY_SECONDS).value
     status = "Unknown"
-    for _ in range(TRACKING_CHECKS):
+    for _ in range(resolve_parameter(TRACKING_CHECKS).value):
         status = _tracking_status(context)
         if status == "Tracking":
             return
         hardware_operations.connect(context)
-        sleep(TRACKING_RETRY_SECONDS)
+        sleep(tracking_retry_seconds)
     raise ConflictError(
         f"Cannot start guiding: the mount is not tracking (status: {status}).", details={"status": status}
     )
@@ -260,13 +314,14 @@ def run_loop(
         sleep=sleep,
     )
     lost_tracking = 0
+    lost_tracking_limit = resolve_parameter(LOST_TRACKING_LIMIT).value
     logger.info("Guide loop started: %s s exposures, gain %s", monitor.exposure_seconds, monitor.gain)
     try:
         while not stop.is_set():
             status = _tracking_status(context)
             if status != "Tracking":
                 lost_tracking += 1
-                if lost_tracking >= LOST_TRACKING_LIMIT:
+                if lost_tracking >= lost_tracking_limit:
                     logger.warning("Guide loop stopped: the mount stopped tracking (%s).", status)
                     return
                 sleep(RETRY_SECONDS)

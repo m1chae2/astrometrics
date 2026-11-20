@@ -1807,7 +1807,7 @@ def _subset_pair(runs: list[fc.StackRunRecord]) -> list[fc.StackRunRecord]:
         The same runs with the first marked as a subset.
     """
     subset = runs[0].model_copy(
-        update={"is_earlier_nights_subset": True, "frames_stacked": fc.MINIMUM_EARLIER_NIGHTS_FRAMES}
+        update={"is_earlier_nights_subset": True, "frames_stacked": fc.MINIMUM_EARLIER_NIGHTS_FRAMES.default}
     )
     return [subset, runs[1]]
 

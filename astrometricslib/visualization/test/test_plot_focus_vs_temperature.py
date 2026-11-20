@@ -129,7 +129,7 @@ def test_without_star_widths_the_panel_says_how_to_get_them() -> None:
 
 def test_too_few_frames_or_too_little_temperature_change_shows_no_trend_line() -> None:
     """A trend is not fitted from fewer than the minimum frames."""
-    frames = make_frames(MINIMUM_FRAMES_FOR_WIDTH_TREND - 1, width_slope_px_per_c=0.7)
+    frames = make_frames(MINIMUM_FRAMES_FOR_WIDTH_TREND.default - 1, width_slope_px_per_c=0.7)
     figure = plot_focus_vs_temperature(SimpleNamespace(id="Vega", frames=frames))
     try:
         assert "px per C" not in figure.axes[-1].get_title()

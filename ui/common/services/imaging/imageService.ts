@@ -1,6 +1,7 @@
 import { callBackend, fetchImageFile, loadStaticMounts, resolveImageSrc } from '../backendApi';
 import { reportError } from '../../utils/reportError';
 import { dataUrlToBlob } from '../../utils/dataUrl';
+import { pickProcessedImagePath } from './measurementPath';
 
 /**
  * @fileoverview Service for managing, retrieving, and converting FITS files and target images.
@@ -72,17 +73,7 @@ export async function fetchProcessedImage(
             return null;
         }
 
-        let imagePath = target.stacking?.processedImage || target.stacking?.stackedImage || target.spectralStacking?.stackedImage;
-
-        if (!imagePath && target.frames) {
-            const stackedFrame = target.frames.find(f =>
-                f.path.toLowerCase().includes('stacked') ||
-                f.path.toLowerCase().includes('processed')
-            );
-            if (stackedFrame) {
-                imagePath = stackedFrame.path;
-            }
-        }
+        const imagePath = pickProcessedImagePath(target);
 
         if (!imagePath) {
             return null;
@@ -145,6 +136,52 @@ export async function fetchProcessedImage(
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
         throw err;
     }
+}
+
+/**
+ * Reads a FITS file from the folders the backend serves, as a blob the viewer decodes as FITS.
+ *
+ * @param path Path of the FITS file on the backend's computer.
+ * @param signal Cancels the download when signalled.
+ * @returns The file's bytes, typed as FITS (a static server may label them as a picture, which the viewer would try to draw).
+ */
+export async function fetchFitsFileByPath(path: string, signal?: AbortSignal): Promise<Blob> {
+    await loadStaticMounts();
+    const src = resolveImageSrc(path);
+    if (!src) {
+        throw new Error(`The backend serves no folder that holds ${path}`);
+    }
+    const response = await fetchImageFile(src, signal, true);
+    if (!response.ok) {
+        throw new Error(`Failed to read ${path}: ${response.status} ${response.statusText}`);
+    }
+    return new Blob([await response.arrayBuffer()], { type: FITS_BLOB_TYPE });
+}
+
+/**
+ * Reads one of a target's FITS frames, chosen by gain, exposure and order, as FITS data.
+ *
+ * @param objectId The target.
+ * @param iso Gain or ISO of the frame.
+ * @param exposure Exposure length of the frame.
+ * @param index Which matching frame, by order.
+ * @param signal Cancels the download when signalled.
+ * @returns The file's bytes, typed as FITS.
+ */
+export async function fetchTargetFrameAsFits(
+    objectId: string,
+    iso: string,
+    exposure: string,
+    index = 0,
+    signal?: AbortSignal
+): Promise<Blob> {
+    const path = await callBackend("images:get_target_frame", {
+        target_id: objectId,
+        iso,
+        exposure,
+        index
+    });
+    return fetchFitsFileByPath(path, signal);
 }
 
 /**

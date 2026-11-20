@@ -364,6 +364,7 @@ class TargetService:
                 "exposure": frame.exposure,
                 "filter": filter_str,
                 "date": frame.date,
+                "focalLengthMm": None if frame.focal_length_mm is None else float(frame.focal_length_mm),
             })
 
         return {

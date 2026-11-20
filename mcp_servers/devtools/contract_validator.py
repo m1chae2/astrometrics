@@ -4,7 +4,7 @@ Description: Scans every Pydantic model in astrometricslib for fields that
 may hold scientific types JSON cannot carry (NumPy scalars, Astropy
 quantities). Such a field breaks the type generation for the UI and any
 reply sent over MCP or RPC. The astrometricslib-core server offers it as
-``typegen_contract_validator`` to the developer profile.
+``typegen_contract_validator``.
 """
 
 import ast

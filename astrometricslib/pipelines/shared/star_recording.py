@@ -28,6 +28,7 @@ from typing import Any, NamedTuple
 
 from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
@@ -232,12 +233,13 @@ def _reconcile_position_only_star_ids(
 
     reused_ids: set[str] = set()
     reused_count = 0
+    match_radius_arcsec = resolve(CATALOG_MATCH_RADIUS_ARCSEC).value
     for stellar_object in position_only_stars:
         star_coord = SkyCoord(
             ra=stellar_object.right_ascension * u.deg, dec=stellar_object.declination * u.deg
         )
         idx, d2d, _ = star_coord.match_to_catalog_sky(existing_coords)
-        if d2d >= CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+        if d2d >= match_radius_arcsec * u.arcsec:
             continue
 
         existing_id = existing_position_only[idx].id
@@ -263,7 +265,7 @@ def _reconcile_position_only_star_ids(
             "arcsec, instead of minting new ones.",
             target_id,
             reused_count,
-            CATALOG_MATCH_RADIUS_ARCSEC,
+            resolve(CATALOG_MATCH_RADIUS_ARCSEC).value,
         )
     return stellar_objects
 
@@ -404,7 +406,8 @@ def _reconcile_identified_star_ids(
     center_declination = math.degrees(math.atan2(average_z, math.hypot(average_x, average_y)))
     center = SkyCoord(ra=center_right_ascension * u.deg, dec=center_declination * u.deg)
     search_radius_degrees = (
-        float(star_coordinates.separation(center).deg.max()) + SAME_STAR_POSITION_TOLERANCE_ARCSEC / 3600.0
+        float(star_coordinates.separation(center).deg.max())
+        + resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value / 3600.0
     )
 
     try:
@@ -427,7 +430,7 @@ def _reconcile_identified_star_ids(
         dec=[row.declination for row in nearby_rows] * u.deg,
     )
     star_indices, row_indices, _, _ = search_around_sky(
-        star_coordinates, row_coordinates, SAME_STAR_POSITION_TOLERANCE_ARCSEC * u.arcsec
+        star_coordinates, row_coordinates, resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value * u.arcsec
     )
     rows_near_star: dict[int, list] = {}
     for star_index, row_index in zip(star_indices, row_indices, strict=True):
@@ -446,7 +449,7 @@ def _reconcile_identified_star_ids(
                 target_id,
                 stellar_object.id,
                 len(rows_here),
-                SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+                resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value,
             )
             continue
         saved_row = rows_here[0]
@@ -478,7 +481,7 @@ def _reconcile_identified_star_ids(
             "(%s reused the saved name, %s renamed the saved row), instead of saving a second row.",
             target_id,
             reused_count + renamed_count,
-            SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+            resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value,
             reused_count,
             renamed_count,
         )

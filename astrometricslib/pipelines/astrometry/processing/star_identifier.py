@@ -12,6 +12,7 @@ This makes sure every star gets a stable, consistent name before it is saved to
 the database, replacing temporary labels so duplicates are not saved.
 """
 
+import contextvars
 import logging
 import math
 import queue
@@ -20,6 +21,7 @@ import sqlite3
 import threading
 import warnings
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -43,11 +45,25 @@ from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDri
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.offline import network_is_offline
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import WcsRefinement, refine_wcs_with_gaia
+from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
+    WcsRefinement,
+    record_plate_scale,
+    refine_wcs_with_gaia,
+)
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     gaia_dr3_source_id_from_names,
@@ -65,7 +81,21 @@ logger = logging.getLogger(__name__)
 # per pixel. The correct Vega match is 25 arcsec from the solved stack's
 # centre, and the wrong one (TYC 3105-827-1) was 145 arcsec from the mount's
 # reported position, so 30 lies between the two cases seen.
-HINT_MATCH_WARNING_ARCSEC = 30.0
+HINT_MATCH_WARNING_ARCSEC = TunedParameter(
+    name="astrometry.hint_match_warning_arcsec",
+    default=30.0,
+    unit="arcsec",
+    description=(
+        "Distance from the position hint beyond which a centre-star match is reported as a probable mislabel."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="AST-D14",
+    allowed_range=(5.0, 300.0),
+    # A sample is one target (spectral stack plus solved stack).
+    minimum_sample=5,
+)
 
 # How far from the position hint the star at the frame centre may really be,
 # when the star is picked by name or by brightness instead of by distance. The
@@ -75,7 +105,22 @@ HINT_MATCH_WARNING_ARCSEC = 30.0
 # was 145 arcseconds from the mount's position. 300 arcseconds (5 arcminutes)
 # covers every case seen with about twice the largest error, and stays well
 # inside the 12 arcminute SIMBAD region searched on the hint path.
-POINTING_ERROR_SEARCH_RADIUS_ARCSEC = 300.0
+POINTING_ERROR_SEARCH_RADIUS_ARCSEC = TunedParameter(
+    name="astrometry.pointing_error_search_radius_arcsec",
+    default=300.0,
+    unit="arcsec",
+    description=(
+        "How far from the position hint the centre star "
+        "may really be, allowing for the mount's pointing error."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="AST-09",
+    allowed_range=(60.0, 700.0),
+    # A sample is one target (spectral stack plus solved stack).
+    minimum_sample=5,
+)
 
 # When the centre star is named by the target's name or by brightness, the
 # name goes to the brightest detection within this fraction of the frame's
@@ -84,7 +129,22 @@ POINTING_ERROR_SEARCH_RADIUS_ARCSEC = 300.0
 # so 5 percent of a 3008 pixel frame) plus a re-centring or drift sets the
 # size: on 2026-10-04 the Sirius zero order sat 151 pixels from the centre.
 # 10 percent (about 300 pixels) covers that with margin.
-CENTRE_STAR_SEARCH_RADIUS_FRACTION = 0.10
+CENTRE_STAR_SEARCH_RADIUS_FRACTION = TunedParameter(
+    name="astrometry.centre_star_search_radius_fraction",
+    default=0.1,
+    unit="× shorter frame side",
+    description=(
+        "How far from the frame centre, as a fraction "
+        "of the shorter side, the target's detection is looked for."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="AST-09",
+    allowed_range=(0.02, 0.4),
+    # A sample is one target (spectral stack plus solved stack).
+    minimum_sample=5,
+)
 
 # The detection that gets the target's name must reach at least this fraction
 # of the frame's brightest pixel. The target of a spectral frame makes the
@@ -93,7 +153,19 @@ CENTRE_STAR_SEARCH_RADIUS_FRACTION = 0.10
 # to 1.0 of the brightest pixel; the noise detections near the centre of the
 # Sirius stack (whose zero order was not detected) reached 0.00003. 10 percent
 # lies between the two cases.
-CENTRE_STAR_MINIMUM_PEAK_FRACTION = 0.10
+CENTRE_STAR_MINIMUM_PEAK_FRACTION = TunedParameter(
+    name="astrometry.centre_star_minimum_peak_fraction",
+    default=0.1,
+    unit="× brightest pixel",
+    description=(
+        "Smallest peak, as a fraction of the frame's brightest "
+        "pixel, for a detection to be named as the target."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-09",
+)
 
 # SIMBAD columns that may hold a star's V magnitude, tried in order.
 _SIMBAD_V_MAGNITUDE_COLUMNS = ["V", "FLUX_V", "flux_v", "flux(V)"]
@@ -112,7 +184,16 @@ _SIMBAD_V_MAGNITUDE_COLUMNS = ["V", "FLUX_V", "flux_v", "flux(V)"]
 # before looking for stars. Tests prove this successfully breaks up
 # the noise clumps without missing any real stars, dropping false
 # detections significantly.
-_COLOR_DETECTION_BIN_FACTOR = 2
+_COLOR_DETECTION_BIN_FACTOR = TunedParameter(
+    name="astrometry.color_detection_bin_factor",
+    default=2,
+    unit="px per bin side",
+    description="How many pixels per side are averaged into one before stars are found in a color frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="AST-D03",
+)
 
 # SIMBAD's client configuration, request timeout and thread lock live in
 # drivers/astroquery_simbad_driver.py, alongside every other external-service
@@ -146,7 +227,21 @@ MAXIMUM_PLATE_SOLVE_SOURCES = 100
 # that showed the problem: the spectrum was K-type, but the star was named
 # after the companion because it happened to be nearer by a fraction of a
 # pixel. A judgement call, checked on that one pair.
-UNRESOLVED_COMPANION_RADIUS_ARCSEC = 3.0
+# Stands for the sky distance within which a catalog neighbor blends with a
+# star. It follows the star width: the value is a factor times the star
+# width the run measured (3.0 on the reference setup).
+UNRESOLVED_COMPANION_RADIUS_ARCSEC = TunedParameter(
+    name="astrometry.unresolved_companion_radius_arcsec",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Catalog entries closer together than this cannot be told apart in a frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    register_entry="AST-10",
+)
 
 # --- Gaia Search Depth and Epoch --------------------------------------------
 #
@@ -165,11 +260,56 @@ UNRESOLVED_COMPANION_RADIUS_ARCSEC = 3.0
 # Without enough SIMBAD-matched stars to fit, the limit is
 # `GAIA_DEFAULT_MAGNITUDE_LIMIT`, which is also the depth the bulk cache
 # seed uses.
-GAIA_DEFAULT_MAGNITUDE_LIMIT = 18.0
-GAIA_MAGNITUDE_LIMIT_MARGIN = 1.0
-GAIA_MINIMUM_MAGNITUDE_LIMIT = 14.0
-GAIA_MAXIMUM_MAGNITUDE_LIMIT = 20.0
-MINIMUM_STARS_FOR_DEPTH_ESTIMATE = 5
+GAIA_DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
+    name="astrometry.gaia_default_magnitude_limit",
+    default=18.0,
+    unit="magnitude",
+    description="Gaia G magnitude limit used when the frame gives no depth estimate.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D11",
+)
+GAIA_MAGNITUDE_LIMIT_MARGIN = TunedParameter(
+    name="astrometry.gaia_magnitude_limit_margin",
+    default=1.0,
+    unit="magnitudes",
+    description="Margin added to the faintest detected star's magnitude to set the Gaia search depth.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D11",
+)
+GAIA_MINIMUM_MAGNITUDE_LIMIT = TunedParameter(
+    name="astrometry.gaia_minimum_magnitude_limit",
+    default=14.0,
+    unit="magnitude",
+    description="Brightest Gaia search depth the frame estimate may give.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D11",
+)
+GAIA_MAXIMUM_MAGNITUDE_LIMIT = TunedParameter(
+    name="astrometry.gaia_maximum_magnitude_limit",
+    default=20.0,
+    unit="magnitude",
+    description="Faintest Gaia search depth the frame estimate may give.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D11",
+)
+MINIMUM_STARS_FOR_DEPTH_ESTIMATE = TunedParameter(
+    name="astrometry.minimum_stars_for_depth_estimate",
+    default=5,
+    unit="stars",
+    description="Fewest catalog-identified stars needed to estimate the Gaia search depth from the frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-D11",
+)
 
 # The most rows one Gaia cone search may return. The old limit was 10,000.
 # A one-degree-radius field at G < 18 near the galactic plane holds tens of
@@ -204,32 +344,88 @@ FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
 # validated over many nights.
 GAIA_VIZIER_TIMEOUT_SECONDS = 45
 GAIA_ESA_TIMEOUT_SECONDS = 60
-GAIA_DEPTH_STEP_MAGNITUDES = 1.0
-GAIA_DEPTH_STEPS_DOWN = 2
+GAIA_DEPTH_STEP_MAGNITUDES = TunedParameter(
+    name="astrometry.gaia_depth_step_magnitudes",
+    default=1.0,
+    unit="magnitudes",
+    description="How much brighter each repeat Gaia query is than the one before it.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-08",
+)
+GAIA_DEPTH_STEPS_DOWN = TunedParameter(
+    name="astrometry.gaia_depth_steps_down",
+    default=2,
+    unit="steps",
+    description="Most brighter repeat Gaia queries made after the requested depth fails.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-08",
+)
 
-_gaia_failure_state_lock = threading.Lock()
-_gaia_consecutive_failures = 0
-_gaia_circuit_open = False
 
-# The services (`"VizieR"`, `"ESA Gaia archive"`) that could not be reached
-# during the current run: the name did not resolve, the connection was
-# refused, or the connection attempt timed out. Such a service stays dead for
-# the rest of the run, because asking it again at a brighter limit only
-# repeats the wait. A service that was reached but answered too slowly (a
-# read timeout, or no answer within the deadline) is NOT added: the brighter
-# limits ask for fewer stars and may finish in time. The set is cleared when
-# a new run starts (`reset_gaia_query_statistics`), so the next target tries
-# each service again. This is a design choice, not a measured limit.
-_gaia_unreachable_services: set[str] = set()
+@dataclass
+class _GaiaRunState:
+    """The Gaia connection health of one run.
 
-# Cumulative per-process tallies, distinct from the consecutive-failure
-# counter above (which resets on any success). These record what the run
-# as a whole experienced, so a quality summary can say whether the
-# catalog service was healthy -- without them, a run where every query
-# failed looks identical to one where the fields genuinely held no
-# catalog stars.
-_gaia_queries_attempted = 0
-_gaia_queries_failed = 0
+    Each run keeps its own copy, so two runs in one process (the backend runs
+    jobs on threads) do not trip or reopen each other's safety switch or mix
+    their query counts.
+
+    Attributes
+    ----------
+    lock : `threading.Lock`
+        Guards every other field, because a run's worker threads share it.
+    consecutive_failures : `int`
+        Failed queries in a row. Any success sets it back to zero.
+    circuit_open : `bool`
+        True once `GAIA_CONSECUTIVE_FAILURE_LIMIT` queries failed in a row.
+    queries_attempted, queries_failed : `int`
+        Tallies for the whole run (not reset by a success). They let a
+        quality summary say whether the catalog service was healthy: without
+        them, a run where every query failed looks the same as one where the
+        fields held no catalog stars.
+    unreachable_services : `set` [`str`]
+        The services (`"VizieR"`, `"ESA Gaia archive"`) that could not be
+        reached during the run: the name did not resolve, the connection was
+        refused, or the connection attempt timed out. Such a service stays
+        dead for the rest of the run, because asking it again at a brighter
+        limit only repeats the wait. A service that was reached but answered
+        too slowly is NOT added: the brighter limits ask for fewer stars and
+        may finish in time. This is a design choice, not a measured limit.
+    """
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    consecutive_failures: int = 0
+    circuit_open: bool = False
+    queries_attempted: int = 0
+    queries_failed: int = 0
+    unreachable_services: set[str] = field(default_factory=set)
+
+
+# The state used outside any run (scripts, tests), so existing callers work.
+_process_default_gaia_state = _GaiaRunState()
+
+# The current run's state. `reset_gaia_query_statistics` installs a fresh one.
+# A new thread does not inherit a context variable, so a thread that works
+# for a run must start inside `contextvars.copy_context()`.
+_current_gaia_state: contextvars.ContextVar[_GaiaRunState | None] = contextvars.ContextVar(
+    "current_gaia_state", default=None
+)
+
+
+def _gaia_state() -> _GaiaRunState:
+    """Get the Gaia state of the current run.
+
+    Returns
+    -------
+    state : `_GaiaRunState`
+        The state installed for this run, or the process default when no run
+        has installed one.
+    """
+    return _current_gaia_state.get() or _process_default_gaia_state
 
 
 def _record_gaia_failure(context: str) -> None:
@@ -240,28 +436,28 @@ def _record_gaia_failure(context: str) -> None:
     context : `str`
         What was being attempted when it failed.
     """
-    global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
-    with _gaia_failure_state_lock:
-        _gaia_queries_attempted += 1
-        _gaia_queries_failed += 1
-        _gaia_consecutive_failures += 1
-        if not _gaia_circuit_open and _gaia_consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
-            _gaia_circuit_open = True
+    state = _gaia_state()
+    with state.lock:
+        state.queries_attempted += 1
+        state.queries_failed += 1
+        state.consecutive_failures += 1
+        if not state.circuit_open and state.consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
+            state.circuit_open = True
             logger.warning(
-                "Gaia remote queries disabled for the rest of this process after %s consecutive "
+                "Gaia remote queries disabled for the rest of this run after %s consecutive "
                 "failures (last: %s). Locally cached Gaia data is still used; SIMBAD "
                 "identification is unaffected.",
-                _gaia_consecutive_failures,
+                state.consecutive_failures,
                 context,
             )
 
 
 def _record_gaia_success() -> None:
     """Reset the failure counter back to zero after a successful connection."""
-    global _gaia_consecutive_failures, _gaia_queries_attempted
-    with _gaia_failure_state_lock:
-        _gaia_queries_attempted += 1
-        _gaia_consecutive_failures = 0
+    state = _gaia_state()
+    with state.lock:
+        state.queries_attempted += 1
+        state.consecutive_failures = 0
 
 
 def _is_connection_failure(error: BaseException) -> bool:
@@ -303,8 +499,9 @@ def _mark_gaia_service_unreachable(service: str) -> None:
     service : `str`
         The service's name, as used in `_fetch_gaia_cone`.
     """
-    with _gaia_failure_state_lock:
-        _gaia_unreachable_services.add(service)
+    state = _gaia_state()
+    with state.lock:
+        state.unreachable_services.add(service)
 
 
 def _is_gaia_service_unreachable(service: str) -> bool:
@@ -321,8 +518,9 @@ def _is_gaia_service_unreachable(service: str) -> bool:
         True if the service timed out or refused a connection since the run
         started.
     """
-    with _gaia_failure_state_lock:
-        return service in _gaia_unreachable_services
+    state = _gaia_state()
+    with state.lock:
+        return service in state.unreachable_services
 
 
 def _fetch_gaia_cone(
@@ -339,8 +537,8 @@ def _fetch_gaia_cone(
     then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits. The
     first answer wins. A service that cannot be reached (a connection
     failure) is skipped for the rest of the run (see
-    `_gaia_unreachable_services`), so its later, brighter attempts are not
-    made. A service that was reached but was slow keeps its brighter
+    `_GaiaRunState.unreachable_services`), so its later, brighter attempts
+    are not made. A service that was reached but was slow keeps its brighter
     attempts. The whole attempt counts as one success or one failure for
     the circuit breaker.
 
@@ -372,8 +570,9 @@ def _fetch_gaia_cone(
         return None
 
     attempts: list[tuple[str, float, Callable[[], Any], int]] = []
-    for step in range(GAIA_DEPTH_STEPS_DOWN + 1):
-        magnitude = max_magnitude - step * GAIA_DEPTH_STEP_MAGNITUDES
+    depth_step_magnitudes = resolve(GAIA_DEPTH_STEP_MAGNITUDES).value
+    for step in range(resolve(GAIA_DEPTH_STEPS_DOWN).value + 1):
+        magnitude = max_magnitude - step * depth_step_magnitudes
 
         def vizier(magnitude: float = magnitude) -> Any:
             """Ask VizieR at this depth.
@@ -455,11 +654,12 @@ def get_gaia_query_statistics() -> dict[str, int | bool]:
         How many times the connection was attempted, how many times it failed,
         and whether the safety switch has flipped.
     """
-    with _gaia_failure_state_lock:
+    state = _gaia_state()
+    with state.lock:
         return {
-            "attempted": _gaia_queries_attempted,
-            "failed": _gaia_queries_failed,
-            "circuit_breaker_tripped": _gaia_circuit_open,
+            "attempted": state.queries_attempted,
+            "failed": state.queries_failed,
+            "circuit_breaker_tripped": state.circuit_open,
         }
 
 
@@ -471,34 +671,34 @@ def _gaia_remote_queries_disabled() -> bool:
     disabled : `bool`
         True if the connection failed too many times in a row.
     """
-    with _gaia_failure_state_lock:
-        return _gaia_circuit_open
+    state = _gaia_state()
+    with state.lock:
+        return state.circuit_open
 
 
 def reset_gaia_circuit_breaker() -> None:
-    """Reset the safety switch to allow trying to connect to Gaia again."""
-    global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
-    with _gaia_failure_state_lock:
-        _gaia_consecutive_failures = 0
-        _gaia_circuit_open = False
-        _gaia_queries_attempted = 0
-        _gaia_queries_failed = 0
-        _gaia_unreachable_services.clear()
+    """Reset the safety switch to allow trying to connect to Gaia again.
+
+    Only the current run's state is cleared (the process default outside a
+    run), so another run's breaker is not touched.
+    """
+    state = _gaia_state()
+    with state.lock:
+        state.consecutive_failures = 0
+        state.circuit_open = False
+        state.queries_attempted = 0
+        state.queries_failed = 0
+        state.unreachable_services.clear()
 
 
 def reset_gaia_query_statistics() -> None:
-    """Reset the tracking stats back to zero for a new run.
+    """Start a new run's Gaia state: fresh tallies and a closed safety switch.
 
-    This does NOT reset the safety switch. If Gaia was offline for the
-    last image, we assume it's still offline and don't bother trying again.
-    It does forget which services failed during the last run, so the new run
-    tries each service once more.
+    Installs a new state for the current run (the current thread's context),
+    so it never changes another run's switch or counts. A run therefore
+    begins with each service tried once more.
     """
-    global _gaia_queries_attempted, _gaia_queries_failed
-    with _gaia_failure_state_lock:
-        _gaia_unreachable_services.clear()
-        _gaia_queries_attempted = 0
-        _gaia_queries_failed = 0
+    _current_gaia_state.set(_GaiaRunState())
 
 
 def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_seconds: float) -> Any:
@@ -538,7 +738,10 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
             logger.debug("The background query raised an error.", exc_info=True)
             result_queue.put((False, query_error))
 
-    threading.Thread(target=_run_and_report, daemon=True).start()
+    # A new thread does not inherit context variables, so the query runs
+    # inside a copy of this run's context to see the run's Gaia state.
+    run_context = contextvars.copy_context()
+    threading.Thread(target=run_context.run, args=(_run_and_report,), daemon=True).start()
 
     try:
         succeeded, payload = result_queue.get(timeout=timeout_seconds)
@@ -698,7 +901,7 @@ def brightest_unresolved_entry_index(
         An entry with no magnitude is treated as the faintest.
     """
     separations = star_coord.separation(simbad_coords).arcsec
-    candidates = np.flatnonzero(separations <= UNRESOLVED_COMPANION_RADIUS_ARCSEC)
+    candidates = np.flatnonzero(separations <= resolve(UNRESOLVED_COMPANION_RADIUS_ARCSEC).value)
     if candidates.size < 2:
         return nearest_index
     magnitudes = [
@@ -730,7 +933,7 @@ def _is_unresolved_match(star_coord: SkyCoord, simbad_coords: SkyCoord) -> bool:
         `UNRESOLVED_COMPANION_RADIUS_ARCSEC` of the star.
     """
     separations = star_coord.separation(simbad_coords).arcsec
-    return int(np.count_nonzero(separations <= UNRESOLVED_COMPANION_RADIUS_ARCSEC)) >= 2
+    return int(np.count_nonzero(separations <= resolve(UNRESOLVED_COMPANION_RADIUS_ARCSEC).value)) >= 2
 
 
 def _catalog_ra_ranges(ra_center: float, dec_center: float, radius_deg: float) -> list[tuple[float, float]]:
@@ -883,11 +1086,71 @@ def estimate_gaia_magnitude_limit(stellar_objects: list[StellarObject]) -> float
         magnitude = _optional_float(star.magnitude)
         if star.is_catalog_identified and magnitude is not None:
             zero_points.append(magnitude + 2.5 * math.log10(flux))
-    if len(zero_points) < MINIMUM_STARS_FOR_DEPTH_ESTIMATE:
+    if len(zero_points) < resolve(MINIMUM_STARS_FOR_DEPTH_ESTIMATE).value:
         return None
     faintest_magnitude = float(np.median(zero_points)) - 2.5 * math.log10(min(fluxes))
-    limit = faintest_magnitude + GAIA_MAGNITUDE_LIMIT_MARGIN
-    return float(min(max(limit, GAIA_MINIMUM_MAGNITUDE_LIMIT), GAIA_MAXIMUM_MAGNITUDE_LIMIT))
+    limit = faintest_magnitude + resolve(GAIA_MAGNITUDE_LIMIT_MARGIN).value
+    return float(
+        min(
+            max(limit, resolve(GAIA_MINIMUM_MAGNITUDE_LIMIT).value),
+            resolve(GAIA_MAXIMUM_MAGNITUDE_LIMIT).value,
+        )
+    )
+
+
+def find_unique_stars(
+    detector: SourceDetector, data: np.ndarray, is_color_frame: bool = False
+) -> tuple[list[dict], list[dict]]:
+    """Find the stars of an image the way the astrometry run does.
+
+    The run (`StarIdentifier.detect_stars`) and the viewer's detection
+    overlay both call this one function, so the markers the viewer draws are
+    the stars the run finds. A color frame is averaged in blocks first. A
+    black-and-white frame sizes the finder's kernel from the star width
+    measured in the image. Then the finder runs, and two reports of one star
+    are merged into one.
+
+    Parameters
+    ----------
+    detector : `SourceDetector`
+        The star finder. Its ``fwhm`` is set from the image when the width
+        can be measured, so the caller may read the width actually used.
+    data : `numpy.ndarray`
+        The image to search, two-dimensional.
+    is_color_frame : `bool`, optional
+        True if the image started as a color image.
+
+    Returns
+    -------
+    sources : `list` [`dict`]
+        Everything the finder reported.
+    unique_sources : `list` [`dict`]
+        The same list with each star reported twice merged into one.
+    """
+    if is_color_frame and data is not None:
+        bin_factor = resolve(_COLOR_DETECTION_BIN_FACTOR).value
+        binned = _block_average(data, bin_factor)
+        sources = detector.detect(binned)
+        unique_sources = detector.deduplicate(sources)
+        _rescale_source_centroids(sources, bin_factor)
+        _rescale_source_centroids(unique_sources, bin_factor)
+        return sources, unique_sources
+
+    try:
+        blob_width = measure_blob_width_from_data(data) if data is not None else None
+    except DATA_ERRORS as width_error:
+        logger.debug(
+            "Could not measure the detection kernel width, keeping the configured default: %s",
+            width_error,
+        )
+        blob_width = None
+    if blob_width is not None:
+        logger.debug("Sizing the detection kernel from the measured blob width: %.2fpx", blob_width)
+        detector.fwhm = blob_width
+
+    sources = detector.detect(data)
+    unique_sources = detector.deduplicate(sources)
+    return sources, unique_sources
 
 
 class StarIdentifier:
@@ -1045,29 +1308,7 @@ class StarIdentifier:
         unique_sources : `list` [`dict`]
             The same list, but with duplicates removed.
         """
-        if is_color_frame and data is not None:
-            binned = _block_average(data, _COLOR_DETECTION_BIN_FACTOR)
-            sources = self.detector.detect(binned)
-            unique_sources = self.detector.deduplicate(sources)
-            _rescale_source_centroids(sources, _COLOR_DETECTION_BIN_FACTOR)
-            _rescale_source_centroids(unique_sources, _COLOR_DETECTION_BIN_FACTOR)
-            return sources, unique_sources
-
-        try:
-            blob_width = measure_blob_width_from_data(data) if data is not None else None
-        except DATA_ERRORS as width_error:
-            logger.debug(
-                "Could not measure the detection kernel width, keeping the configured default: %s",
-                width_error,
-            )
-            blob_width = None
-        if blob_width is not None:
-            logger.debug("Sizing the detection kernel from the measured blob width: %.2fpx", blob_width)
-            self.detector.fwhm = blob_width
-
-        sources = self.detector.detect(data)
-        unique_sources = self.detector.deduplicate(sources)
-        return sources, unique_sources
+        return find_unique_stars(self.detector, data, is_color_frame=is_color_frame)
 
     def _read_axis_mean(self, header: Any, x_keyword: str, y_keyword: str) -> float | None:
         """Read a per-axis header value, averaging the X and Y cards.
@@ -1370,6 +1611,7 @@ class StarIdentifier:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", FITSFixedWarning)
                         wcs = WCS(solved_header, naxis=2)
+                    record_plate_scale(wcs)
                     if solve_only:
                         if refit_from_cache:
                             wcs = self._refine_wcs_against_gaia(
@@ -1437,6 +1679,7 @@ class StarIdentifier:
             logger.exception("Could not place the solved image on the sky; the Gaia refit is skipped.")
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
             return wcs
+        default_magnitude_limit = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
         if cache_only:
             from astrometricslib.foundation.config import get_configuration
 
@@ -1445,12 +1688,12 @@ class StarIdentifier:
                 float(centre.ra.deg),
                 float(centre.dec.deg),
                 radius_deg,
-                GAIA_DEFAULT_MAGNITUDE_LIMIT,
+                default_magnitude_limit,
             )
             gaia_table, gaia_coords = cached if cached is not None else (None, None)
         else:
             gaia_table, gaia_coords = self._query_gaia_region(
-                float(centre.ra.deg), float(centre.dec.deg), radius_deg, GAIA_DEFAULT_MAGNITUDE_LIMIT
+                float(centre.ra.deg), float(centre.dec.deg), radius_deg, default_magnitude_limit
             )
         if gaia_table is None or gaia_coords is None:
             logger.warning("No Gaia stars for the refit of the solution; the solver's solution is kept.")
@@ -1630,7 +1873,7 @@ class StarIdentifier:
         ra_center: float,
         dec_center: float,
         radius_deg: float = 0.5,
-        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        max_magnitude: float | None = None,
     ) -> int:
         """Download and save Gaia DR3 stars for a specific area of the sky.
 
@@ -1649,13 +1892,16 @@ class StarIdentifier:
         radius_deg : `float`, optional
             How wide of an area to search.
         max_magnitude : `float`, optional
-            How faint of a star to care about.
+            How faint of a star to care about. Defaults to
+            `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
 
         Returns
         -------
         count : `int`
             How many stars we downloaded or found in the cache.
         """
+        if max_magnitude is None:
+            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
         from astropy.table import Table
 
         from astrometricslib._internal.drivers import catalog_store
@@ -1741,7 +1987,7 @@ class StarIdentifier:
         ra_center: float,
         dec_center: float,
         radius_deg: float,
-        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        max_magnitude: float | None = None,
     ) -> tuple[Any, SkyCoord] | tuple[None, None]:
         """Search the Gaia DR3 database for stars in a circular area.
 
@@ -1761,7 +2007,8 @@ class StarIdentifier:
             How wide of an area to search.
         max_magnitude : `float`, optional
             Only stars brighter than this Gaia G magnitude are returned,
-            whether they come from the cache or the download.
+            whether they come from the cache or the download. Defaults to
+            `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
 
         Returns
         -------
@@ -1772,6 +2019,8 @@ class StarIdentifier:
             rows, so it may be cut short) and ``proper_motion_known``
             (whether any row has a proper motion).
         """
+        if max_magnitude is None:
+            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
         from astrometricslib.foundation.config import get_configuration
 
         radius_deg = min(radius_deg, 1.0)
@@ -1855,7 +2104,7 @@ class StarIdentifier:
         ra_center: float,
         dec_center: float,
         radius_deg: float,
-        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        max_magnitude: float | None = None,
     ) -> tuple[Any, SkyCoord] | None:
         """Look for cached Gaia DR3 sources covering this region.
 
@@ -1869,6 +2118,7 @@ class StarIdentifier:
             Cached stars fainter than this Gaia G magnitude are left out. A
             star stored without a magnitude (stored as 0) is kept. The cache
             is also used only if a recorded download is at least this deep.
+            Defaults to `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
 
         Returns
         -------
@@ -1883,6 +2133,8 @@ class StarIdentifier:
             proper motion for the star) and its ``meta["proper_motion_known"]``
             says whether any star has one.
         """
+        if max_magnitude is None:
+            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
         from astropy.table import Table
 
         from astrometricslib._internal.drivers import catalog_store
@@ -1953,7 +2205,7 @@ class StarIdentifier:
         ra_center: float,
         dec_center: float,
         radius_deg: float,
-        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        max_magnitude: float | None = None,
         row_limit: int = GAIA_ROW_LIMIT,
     ) -> Any | None:
         """Download Gaia DR3 sources for a region from VizieR or ESA.
@@ -1971,6 +2223,7 @@ class StarIdentifier:
             The search circle in degrees.
         max_magnitude : `float`, optional
             Only stars brighter than this Gaia G magnitude are returned.
+            Defaults to `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
         row_limit : `int`, optional
             The most rows to return.
 
@@ -1981,6 +2234,8 @@ class StarIdentifier:
             or failed. ``meta`` holds the keys `_fetch_gaia_cone` sets,
             including ``row_limit_reached`` and the depth actually fetched.
         """
+        if max_magnitude is None:
+            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
         logger.info(
             "Querying Gaia DR3 region at %.4f, %.4f with %.3f degree radius (G < %.1f)...",
             ra_center,
@@ -2140,6 +2395,7 @@ class StarIdentifier:
         if not stellar_objects:
             return stellar_objects
 
+        record_plate_scale(wcs)
         logger.info("Starting SIMBAD identification for %s sources...", len(stellar_objects))
 
         try:
@@ -2270,6 +2526,7 @@ class StarIdentifier:
         )
 
         unmatched_after_simbad: list[StellarObject] = []
+        match_radius_arcsec = resolve(CATALOG_MATCH_RADIUS_ARCSEC).value
 
         logger.info(
             "Matching %s detected stars against %s SIMBAD entries...",
@@ -2288,7 +2545,7 @@ class StarIdentifier:
 
             if simbad_coords is not None and result_table is not None:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
-                if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+                if d2d < match_radius_arcsec * u.arcsec:
                     is_ambiguous = _is_unresolved_match(star_coord, simbad_coords)
                     idx = brightest_unresolved_entry_index(
                         star_coord, int(np.ravel(idx)[0]), simbad_coords, result_table
@@ -2383,7 +2640,7 @@ class StarIdentifier:
             ra_center,
             dec_center,
             radius_deg,
-            GAIA_DEFAULT_MAGNITUDE_LIMIT if magnitude_limit is None else magnitude_limit,
+            resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value if magnitude_limit is None else magnitude_limit,
         )
         if gaia_table is not None and gaia_coords is not None:
             if gaia_table.meta.get("row_limit_reached"):
@@ -2393,6 +2650,7 @@ class StarIdentifier:
             gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 
         still_unmatched: list[StellarObject] = []
+        match_radius_arcsec = resolve(CATALOG_MATCH_RADIUS_ARCSEC).value
         if gaia_table is not None and gaia_coords is not None:
             logger.info(
                 "Matching %s stars against %s Gaia DR3 sources...",
@@ -2408,7 +2666,7 @@ class StarIdentifier:
                 star_coord = SkyCoord(ra * u.deg, dec * u.deg)
                 idx, d2d, _ = star_coord.match_to_catalog_sky(gaia_coords)
 
-                if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+                if d2d < match_radius_arcsec * u.arcsec:
                     row = gaia_table[idx]
                     self._apply_gaia_match(stellar_object, row, ra, dec)
                     # Same reason as the SIMBAD match above: the residual
@@ -2592,7 +2850,7 @@ class StarIdentifier:
                     )
                     return
                 center_star_obj = target_star
-            if basis == "nearest" and hint_offset_arcsec > HINT_MATCH_WARNING_ARCSEC:
+            if basis == "nearest" and hint_offset_arcsec > resolve(HINT_MATCH_WARNING_ARCSEC).value:
                 logger.warning(
                     "The nearest stellar SIMBAD entry is %.0f arcsec from the position hint, so the star at "
                     "the frame centre may be labelled with the wrong catalog star. Check the hint: the FITS "
@@ -2659,6 +2917,7 @@ class StarIdentifier:
             ``"target name"``, ``"brightest"`` or ``"nearest"``: how the row
             was chosen.
         """
+        search_radius_arcsec = resolve(POINTING_ERROR_SEARCH_RADIUS_ARCSEC).value
         separations_arcsec = np.atleast_1d(hint_coord.separation(simbad_coords).arcsec)
         nearest_index = int(np.argmin(separations_arcsec))
         if not target_name:
@@ -2669,14 +2928,11 @@ class StarIdentifier:
             return nearest_index, "nearest"
         if status == "resolved":
             named_index = self._entry_at_position(named_coord, simbad_coords)
-            if (
-                named_index is not None
-                and separations_arcsec[named_index] <= POINTING_ERROR_SEARCH_RADIUS_ARCSEC
-            ):
+            if named_index is not None and separations_arcsec[named_index] <= search_radius_arcsec:
                 return named_index, "target name"
             return nearest_index, "nearest"
 
-        nearby_indices = np.flatnonzero(separations_arcsec <= POINTING_ERROR_SEARCH_RADIUS_ARCSEC)
+        nearby_indices = np.flatnonzero(separations_arcsec <= search_radius_arcsec)
         brightest_index = self._brightest_entry_index(result_table, nearby_indices)
         if brightest_index is not None:
             return brightest_index, "brightest"
@@ -2704,7 +2960,7 @@ class StarIdentifier:
         star : `StellarObject` or `None`
             The detection to name, or `None` when no detection qualifies.
         """
-        radius_px = CENTRE_STAR_SEARCH_RADIUS_FRACTION * min(width, height)
+        radius_px = resolve(CENTRE_STAR_SEARCH_RADIUS_FRACTION).value * min(width, height)
         candidates = [
             star
             for star in self.stellar_objects
@@ -2715,7 +2971,8 @@ class StarIdentifier:
         brightest = max(candidates, key=lambda star: star.star_data.get("peak", 0.0))
         if (
             self.frame_peak
-            and brightest.star_data.get("peak", 0.0) < CENTRE_STAR_MINIMUM_PEAK_FRACTION * self.frame_peak
+            and brightest.star_data.get("peak", 0.0)
+            < resolve(CENTRE_STAR_MINIMUM_PEAK_FRACTION).value * self.frame_peak
         ):
             return None
         return brightest
@@ -2774,7 +3031,7 @@ class StarIdentifier:
             `None` when there is none.
         """
         index, separation, _ = position.match_to_catalog_sky(simbad_coords)
-        if float(np.ravel(separation.arcsec)[0]) <= CATALOG_MATCH_RADIUS_ARCSEC:
+        if float(np.ravel(separation.arcsec)[0]) <= resolve(CATALOG_MATCH_RADIUS_ARCSEC).value:
             return int(np.ravel(index)[0])
         return None
 

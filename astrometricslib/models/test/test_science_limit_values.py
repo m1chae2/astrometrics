@@ -28,8 +28,8 @@ def test_the_saturated_pixel_metric_lists_the_saturation_limits() -> None:
     spec = next(spec for spec in FRAME_METRICS if spec.name == FRAME_SATURATED_PIXEL_FRACTION)
     values = {limit.unit: limit.value for limit in spec.limits}
     assert values == {
-        "pixels": float(SATURATED_BLOB_MINIMUM_PIXELS),
-        "fraction": SATURATED_FRAME_FRACTION,
+        "pixels": float(SATURATED_BLOB_MINIMUM_PIXELS.default),
+        "fraction": SATURATED_FRAME_FRACTION.default,
     }
     assert all(limit.derivation for limit in spec.limits)
 

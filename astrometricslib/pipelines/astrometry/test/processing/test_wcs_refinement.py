@@ -176,7 +176,7 @@ def test_too_few_detected_stars_leave_the_solution_alone() -> None:
     solver = alnath_like_solution()
 
     refinement = wcs_refinement.refine_wcs_with_gaia(
-        solver, measured[: wcs_refinement.MINIMUM_MATCHED_STARS - 1], gaia, IMAGE_SHAPE
+        solver, measured[: wcs_refinement.MINIMUM_MATCHED_STARS.default - 1], gaia, IMAGE_SHAPE
     )
 
     assert not refinement.applied

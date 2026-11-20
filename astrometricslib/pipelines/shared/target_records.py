@@ -600,6 +600,9 @@ def create_target_from_catalog(api: Any, target_id: str, simbad: Any) -> Any:
     new_target = create_target(api, normalized_id, ra=ra_text, dec=dec_text)
     if position.object_type:
         new_target.simbad_object_type = position.object_type
+    if position.major_axis_arcmin:
+        new_target.major_axis_arcmin = position.major_axis_arcmin
+    if position.object_type or position.major_axis_arcmin:
         _mark_touched(api, new_target.id)
         save_targets(api)
     return new_target

@@ -84,11 +84,23 @@ def test_rotating_about_a_point_leaves_that_point_in_place() -> None:
     assert rotated[150, 150] == pytest.approx(image[150, 150], abs=0.05)
 
 
+def test_the_default_rotation_order_is_the_registered_cubic_order() -> None:
+    """The default order gives the cubic result, which order 1 does not."""
+    image = _tilted_streak(300, 150.0, 150.0, 8.0)
+
+    default = rotate_about_point(image, 150.0, 150.0, 15.0)
+    cubic = rotate_about_point(image, 150.0, 150.0, 15.0, order=3)
+    linear = rotate_about_point(image, 150.0, 150.0, 15.0, order=1)
+
+    assert np.array_equal(default, cubic)
+    assert not np.array_equal(default, linear)
+
+
 def test_a_negligible_angle_returns_the_image_unchanged() -> None:
     """An angle under the negligible threshold is not resampled at all."""
     image = _tilted_streak(300, 150.0, 150.0, 3.0)
 
-    rotated = rotate_about_point(image, 150.0, 150.0, NEGLIGIBLE_ROTATION_DEGREES / 2.0)
+    rotated = rotate_about_point(image, 150.0, 150.0, NEGLIGIBLE_ROTATION_DEGREES.default / 2.0)
 
     assert np.array_equal(rotated, image.astype(np.float32))
 

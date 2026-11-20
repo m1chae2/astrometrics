@@ -21,6 +21,8 @@ export interface ParsedFitsData {
     cdelt1?: number;
     cdelt2?: number;
     roworder?: string;
+    /** The header's number and text cards, by upper-case name; the sky map for the pixel readout is worked out from them. */
+    header?: Readonly<Record<string, string | number>>;
 }
 
 /** Source of fresh ids for decoded images, unique across every viewer on the page. */
@@ -88,6 +90,11 @@ export function decodeFitsBlob(blob: Blob, getWorker: () => Worker | null): Fits
                     headerEnd = true;
                     break;
                 }
+                if (key === 'HISTORY') {
+                    // History lines carry no value, so they are kept together as one text (the pixel readout looks for the "stretched picture" note).
+                    headerInfo['HISTORY'] = `${headerInfo['HISTORY'] ?? ''} ${line.slice(8).trim()}`.trim();
+                    continue;
+                }
                 if (line[8] === '=') {
                     const valPart = line.slice(9).split('/')[0].trim();
                     if (valPart.startsWith("'")) {
@@ -149,6 +156,7 @@ export function decodeFitsBlob(blob: Blob, getWorker: () => Worker | null): Fits
                         cdelt1: headerInfo['CDELT1'] !== undefined ? Number(headerInfo['CDELT1']) : undefined,
                         cdelt2: headerInfo['CDELT2'] !== undefined ? Number(headerInfo['CDELT2']) : undefined,
                         roworder: headerInfo['ROWORDER'] !== undefined ? String(headerInfo['ROWORDER']).trim() : undefined,
+                        header: headerInfo,
                     };
                     if (parsed.cdelt1 === undefined && headerInfo['SCALE'] !== undefined) {
                         parsed.cdelt1 = -Number(headerInfo['SCALE']) / 3600.0;

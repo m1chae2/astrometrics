@@ -21,6 +21,14 @@ from typing import Any
 import numpy as np
 from photutils.detection import DAOStarFinder
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 __all__ = ["STAR_SHARPNESS_RANGE", "find_sources_above_background"]
 
 # DAOStarFinder's sharpness is the ratio of a source's central pixel to its
@@ -29,7 +37,16 @@ __all__ = ["STAR_SHARPNESS_RANGE", "find_sources_above_background"]
 # source detector has used for the astrometry stage since it was written (see
 # AST-16 in the validation register), and the frame measurement uses the same
 # one so the two find the same kind of object.
-STAR_SHARPNESS_RANGE = (0.2, 1.0)
+STAR_SHARPNESS_RANGE = TunedParameter(
+    name="shared.star_sharpness_range",
+    default=(0.2, 1.0),
+    unit="ratio",
+    description="Window of star sharpness that rejects hot pixels and broad glow.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D01",
+)
 
 
 def find_sources_above_background(
@@ -73,7 +90,7 @@ def find_sources_above_background(
         fwhm=expected_fwhm_px,
         threshold=threshold_sigma * noise,
         exclude_border=True,
-        sharpness_range=STAR_SHARPNESS_RANGE,
+        sharpness_range=resolve(STAR_SHARPNESS_RANGE).value,
         roundness_range=roundness_range,
     )
     found = finder(background_subtracted, mask=mask)

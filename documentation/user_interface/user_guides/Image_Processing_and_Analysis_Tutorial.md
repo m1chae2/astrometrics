@@ -42,7 +42,7 @@ Stacking lines up your frames so each star falls on the same pixel, and then com
 3. In the Frame Analysis panel, click the Analysis tab.
 4. Watch the status box until it reads Processing Successful.
 
-**What you should see.** The status box reads Processing Active with a spinner, and the log fills with lines from the job. When the job ends, the box reads Processing Successful and the log ends with a success line. If the button reads Stacking requires matching cameras, your frames come from more than one camera. Tick the frames of one camera and try again.
+**What you should see.** The status box reads Processing Active with a spinner, and the log fills with lines from the job. When the job ends, the box reads Processing Successful and the log ends with a success line. If the button reads Stacking requires matching cameras, your frames come from more than one camera. Tick the frames of one camera and try again. If it reads Pick one optic to stack, your frames were taken through more than one telescope or lens. Choose one in the Optic picker above the File Browser, or tick the frames of one optic, and try again.
 
 Now look at the result.
 

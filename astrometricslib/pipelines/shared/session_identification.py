@@ -28,7 +28,14 @@ from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
     read_fit_statistics,
 )
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +103,31 @@ class SessionStarIdentifier(Protocol):
 # Setting the limit to 0.10 (10%) easily separates the good from the bad,
 # ensuring a correct solution isn't accidentally thrown away just
 # because the star field is sparse.
-MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = 0.10
+MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = TunedParameter(
+    name="shared.min_catalog_match_fraction_for_reused_wcs",
+    default=0.10,
+    unit="fraction",
+    description="Smallest share of stars that must match the catalog for a reused plate solution to stand.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D19",
+)
 
 # Below this many identified stars the match fraction is too noisy to judge
 # a WCS by -- a handful of stars can miss every catalog match by chance.
 # The value 20 is small enough to include very sparse star fields, but
 # large enough to give a reliable percentage.
-MIN_STARS_TO_VERIFY_REUSED_WCS = 20
+MIN_STARS_TO_VERIFY_REUSED_WCS = TunedParameter(
+    name="shared.min_stars_to_verify_reused_wcs",
+    default=20,
+    unit="stars",
+    description="Fewest stars needed to check a reused plate solution.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D19",
+)
 
 
 # The keywords that describe where an image points on the sky, for the first
@@ -381,10 +406,10 @@ def _reused_wcs_looks_untrustworthy(stellar_objects: list[StellarObject]) -> boo
         True if the saved map is so bad it needs to be thrown out and
         recalculated.
     """
-    if len(stellar_objects) < MIN_STARS_TO_VERIFY_REUSED_WCS:
+    if len(stellar_objects) < resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value:
         return False
     matched_fraction = _catalog_matched_count(stellar_objects) / len(stellar_objects)
-    return matched_fraction < MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS
+    return matched_fraction < resolve(MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS).value
 
 
 @dataclass

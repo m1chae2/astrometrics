@@ -1,0 +1,224 @@
+/*
+ * The star profile panel: a card over the top right of the FITS viewer. It has the same
+ * background and corners as the app's other panels, and is as tall as its contents, so the
+ * image shows below it. In a short viewer it stops at the bottom edge and the plot gives up
+ * height first.
+ */
+.star-profile {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(360px, 90%);
+  max-height: calc(100% - 16px);
+  padding: 8px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  /* Solid, so the stars under the panel do not show through it. */
+  background: var(--grey-dark);
+  box-shadow: var(--shadow-card);
+}
+
+.star-profile__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.star-profile__title,
+.star-profile__width {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The reason a profile is not a star: plain text, since it is not a failure. */
+.star-profile__width--plain {
+  font-weight: normal;
+}
+
+/* The body holds the tabs, the plot and the sliders. */
+.star-profile__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+/* The old numbers stay on screen, dimmed, while the next measurement is on its way. */
+.star-profile__body--updating {
+  opacity: 0.6;
+}
+
+.star-profile__message,
+.star-profile__note {
+  margin: 0;
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+}
+
+.star-profile__message {
+  color: var(--text-primary);
+}
+
+.star-profile__message--error {
+  color: var(--danger-red);
+}
+
+.star-profile__angle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--small-font-size);
+  white-space: nowrap;
+}
+
+.star-profile__angle input {
+  flex: 1;
+  min-width: 0;
+}
+
+.star-profile__plot-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.star-profile__caption {
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+}
+
+.star-profile__tabpanel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.star-profile__plot-area--ring {
+  position: relative;
+}
+
+/* The bar chart of the Fourier terms is short and fixed in height, so the ring plot keeps the room. */
+.star-profile__plot-area--bars {
+  flex: 0 0 110px;
+  min-height: 110px;
+}
+
+.star-profile__summary {
+  color: var(--text-primary);
+}
+
+.star-profile__ring-note {
+  position: absolute;
+  top: 2px;
+  left: 60px;
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* The plot is 260 px tall when there is room and shrinks to 140 px in a short viewer. */
+.star-profile__plot-area {
+  flex: 1 1 260px;
+  min-height: 140px;
+}
+
+/* The marker drawn on the image while the panel is open: a ring at the center and the cut line. */
+.fits-renderer__profile-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fits-renderer__profile-ring {
+  fill: none;
+  stroke: var(--accent-sky);
+  stroke-width: 1.5;
+  /* Only the stroke takes the pointer, so the tooltip shows and clicks still reach the viewer. */
+  pointer-events: stroke;
+}
+
+/* A ring under about 4 screen pixels keeps its true size and gets a thicker line instead. */
+.fits-renderer__profile-ring--small {
+  stroke-width: 3;
+}
+
+.fits-renderer__profile-ring--neutral {
+  stroke: var(--text-muted);
+}
+
+.fits-renderer__profile-band {
+  fill: none;
+  stroke: var(--accent-blue);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+/* A neighbor star that the ring analysis left out: a faint dashed circle of its mask radius. */
+.fits-renderer__profile-neighbor {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.7;
+}
+
+.fits-renderer__profile-cut {
+  stroke: var(--plot-orange);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+/* The Detections overlay: one path of circles for single stars and one of diamonds for merged stars. */
+.fits-renderer__detections {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fits-renderer__detection {
+  fill: none;
+  stroke: var(--detection-marker-color);
+  stroke-width: 1.25;
+}
+
+.fits-renderer__detection--merged {
+  stroke: var(--detection-merged-color);
+  stroke-width: 1.75;
+}
+
+/* The count (or "Finding stars…") in a corner of the viewer while the overlay is on. */
+.fits-renderer__detections-note {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+  pointer-events: none;
+}
+
+.fits-renderer__detections-note--error {
+  color: var(--danger-red);
+}

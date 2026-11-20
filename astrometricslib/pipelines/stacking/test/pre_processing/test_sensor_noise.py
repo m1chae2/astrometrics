@@ -158,18 +158,18 @@ def test_the_region_is_clipped_to_a_small_frame() -> None:
 
 def test_too_few_flat_pairs_is_not_measured() -> None:
     """Below the minimum flat pairs, nothing is measured."""
-    flat_pairs, bias_pairs = make_pairs(seed=4, flat_pair_count=MINIMUM_FLAT_PAIRS - 1)
+    flat_pairs, bias_pairs = make_pairs(seed=4, flat_pair_count=MINIMUM_FLAT_PAIRS.default - 1)
 
     result = measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON)
 
     assert result.status == MeasurementStatus.NOT_MEASURED
     assert result.gain_e_per_adu is None
-    assert f"at least {MINIMUM_FLAT_PAIRS}" in result.reason
+    assert f"at least {MINIMUM_FLAT_PAIRS.default}" in result.reason
 
 
 def test_too_few_bias_pairs_is_not_measured() -> None:
     """Below the minimum bias pairs nothing is measured."""
-    flat_pairs, bias_pairs = make_pairs(seed=5, bias_pair_count=MINIMUM_BIAS_PAIRS - 1)
+    flat_pairs, bias_pairs = make_pairs(seed=5, bias_pair_count=MINIMUM_BIAS_PAIRS.default - 1)
 
     result = measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON)
 
@@ -180,7 +180,7 @@ def test_too_few_bias_pairs_is_not_measured() -> None:
 def test_the_minimum_pair_counts_are_accepted() -> None:
     """Exactly the minimum number of pairs is enough."""
     flat_pairs, bias_pairs = make_pairs(
-        seed=6, flat_pair_count=MINIMUM_FLAT_PAIRS, bias_pair_count=MINIMUM_BIAS_PAIRS
+        seed=6, flat_pair_count=MINIMUM_FLAT_PAIRS.default, bias_pair_count=MINIMUM_BIAS_PAIRS.default
     )
     assert (
         measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON).status
@@ -302,7 +302,7 @@ def test_flats_are_paired_inside_a_session_never_across_two() -> None:
     assert pairing.unpaired_count == 1
     assert pairing.undated_count == 0
     for first, second in pairing.pairs:
-        assert abs(second.observed_at - first.observed_at) <= MAXIMUM_PAIR_GAP_SECONDS
+        assert abs(second.observed_at - first.observed_at) <= MAXIMUM_PAIR_GAP_SECONDS.default
         first_in_a = any(first is frame for frame in session_a)
         second_in_a = any(second is frame for frame in session_a)
         assert first_in_a == second_in_a

@@ -24,7 +24,29 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-_EDGE_MARGIN_SECONDS = 5.0
+from astrometricslib.parameters import (
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
+
+_EDGE_MARGIN_SECONDS = TunedParameter(
+    name="wayfinding.edge_margin_seconds",
+    default=factor_for(5.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
+    description=(
+        "How far before the first frame and after the last frame the caller should read guiding samples,"
+        " in seconds."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="WAY-D126",
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=5.0,
+)
 """How far before the first frame and after the last frame the caller should
 read
 guiding samples, in seconds. A sample just outside a window can still be the
@@ -176,6 +198,6 @@ def guiding_read_range(windows: Sequence[FrameWindow]) -> tuple[float, float] | 
     if not windows:
         return None
     return (
-        min(window.start_epoch_seconds for window in windows) - _EDGE_MARGIN_SECONDS,
-        max(window.end_epoch_seconds for window in windows) + _EDGE_MARGIN_SECONDS,
+        min(window.start_epoch_seconds for window in windows) - resolve_parameter(_EDGE_MARGIN_SECONDS).value,
+        max(window.end_epoch_seconds for window in windows) + resolve_parameter(_EDGE_MARGIN_SECONDS).value,
     )

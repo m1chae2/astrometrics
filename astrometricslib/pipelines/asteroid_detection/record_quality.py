@@ -72,7 +72,7 @@ def asteroid_run_gates(
     metrics: Mapping[str, float],
     minimum_frames_for_a_track: int,
     candidates_awaiting_recovery: int,
-    residual_rms_max_multiple: float = 2.0,
+    residual_rms_max_multiple: float,
 ) -> list[GateResult]:
     """Build the gates for one asteroid-detection run.
 
@@ -86,7 +86,7 @@ def asteroid_run_gates(
     candidates_awaiting_recovery : `int`
         Movers confirmed as moving in a straight line but not matched to a
         known asteroid.
-    residual_rms_max_multiple : `float`, optional
+    residual_rms_max_multiple : `float`
         How many times the position error a track's RMS residual may be
         (the ``residual_rms_max_multiple`` setting). Quoted as the limit of
         the ``track_residuals`` gate.

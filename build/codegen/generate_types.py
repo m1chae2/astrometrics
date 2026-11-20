@@ -37,6 +37,7 @@ from astrometricslib.models.moving_object import (
 from astrometricslib.models.processing_results import PreviewRemakeResult
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
@@ -92,6 +93,12 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityCheckpoint,
     StageQualityMetric,
     StageQualityRollup,
+)
+from astrometricslib.models.quality.star_profile import (
+    ProfileFit,
+    RingHarmonic,
+    RingNeighbor,
+    StarProfileMeasurement,
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
@@ -200,6 +207,27 @@ from wayfindinglib.models.session.telemetry import (
 )
 
 
+def _array_of(item_type: str) -> str:
+    """Write an array type, parenthesizing a union at the top level.
+
+    Returns
+    -------
+    array_type : `str`
+        ``(A | B)[]`` for a union item, ``A[]`` otherwise. A ``|`` inside
+        ``<...>``, ``(...)`` or ``{...}`` belongs to the inner type and needs
+        no parentheses.
+    """
+    depth = 0
+    for character in item_type:
+        if character in "<({":
+            depth += 1
+        elif character in ">)}":
+            depth -= 1
+        elif character == "|" and depth == 0:
+            return f"({item_type})[]"
+    return f"{item_type}[]"
+
+
 def get_ts_type(py_type: Any) -> str:
     """Map a Python type to its equivalent TypeScript type.
 
@@ -249,11 +277,13 @@ def get_ts_type(py_type: Any) -> str:
 
     if origin in (list, set, frozenset):
         item_type = get_ts_type(args[0]) if args else "any"
-        return f"{item_type}[]"
+        # A union inside an array needs parentheses: (A | B)[], not A | B[].
+        return _array_of(item_type)
 
     if origin is tuple and len(args) == 2 and args[1] is Ellipsis:
         # `tuple[X, ...]` is a list of X of any length.
-        return f"{get_ts_type(args[0])}[]"
+        item_type = get_ts_type(args[0])
+        return _array_of(item_type)
 
     if origin is dict or origin is dict:
         key_type = get_ts_type(args[0]) if args else "string"
@@ -636,6 +666,12 @@ def render_types() -> str:
         generate_interface(MetricSpec, "MetricSpec"),
         generate_interface(MetricSummary, "MetricSummary"),
         generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
+        generate_interface(ProfileFit, "ProfileFit"),
+        generate_interface(RingHarmonic, "RingHarmonic"),
+        generate_interface(RingNeighbor, "RingNeighbor"),
+        generate_interface(StarDetection, "StarDetection"),
+        generate_interface(DetectionsMeasurement, "DetectionsMeasurement"),
+        generate_interface(StarProfileMeasurement, "StarProfileMeasurement"),
     ]
 
     # The night plan, its change record, the sequence summary and the target

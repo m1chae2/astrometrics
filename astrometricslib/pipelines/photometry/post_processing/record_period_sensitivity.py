@@ -16,6 +16,7 @@ from datetime import datetime
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.photometry.metrics import (
@@ -79,10 +80,11 @@ def window_alias_measurements(time_days: np.ndarray, context: PipelineRunContext
         A frequency and a power for each rank. A rank the window does not
         have is ``not_measured`` with the reason.
     """
+    window_alias_ranks = resolve(WINDOW_ALIAS_RANKS).value
     subject = context.run_subject()
-    peaks, reason = strongest_window_peaks(time_days, len(WINDOW_ALIAS_RANKS))
+    peaks, reason = strongest_window_peaks(time_days, len(window_alias_ranks))
     measurements: list[QualityMeasurement] = []
-    for rank in WINDOW_ALIAS_RANKS:
+    for rank in window_alias_ranks:
         peak = peaks[rank - 1] if rank <= len(peaks) else None
         missing = reason or "the window has no such peak"
         measurements.append(

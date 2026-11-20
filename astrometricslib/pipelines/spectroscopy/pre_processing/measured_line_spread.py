@@ -39,8 +39,16 @@ other unless the pipeline is built with `use_measured_line_spread=True`.
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FWHM_PER_SIGMA,
     MINIMUM_RESOLUTION_ELEMENT_PIXELS,
@@ -53,24 +61,102 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
 # so it is 200 A wide. A 400 A band holds about 35 samples at 11.4 A per
 # pixel, enough for a steady median; 400 A is also about the width over which
 # the stored profile changes by 10 A in the blue. Chosen by judgement.
-PROFILE_START_ANGSTROM = 4200.0
-PROFILE_END_ANGSTROM = 8000.0
-PROFILE_BAND_ANGSTROM = 400.0
+PROFILE_START_ANGSTROM = TunedParameter(
+    name="spectroscopy.profile_start_angstrom",
+    default=4200.0,
+    unit="Å",
+    description="The short end of the wavelength profile of the line spread.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    allowed_range=(3800.0, 5000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
+PROFILE_END_ANGSTROM = TunedParameter(
+    name="spectroscopy.profile_end_angstrom",
+    default=8000.0,
+    unit="Å",
+    description="The long end of the wavelength profile of the line spread.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    allowed_range=(7000.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
+PROFILE_BAND_ANGSTROM = TunedParameter(
+    name="spectroscopy.profile_band_angstrom",
+    default=400.0,
+    unit="Å",
+    description="Width of each wavelength band in the line spread profile.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D37",
+)
 
 # The fewest working width fits a band needs. A failed fit is stored as 0.0
 # and is not counted. Fewer than this and a few noisy fits would set the
 # band's median. About a third of a full band. Chosen by judgement.
-MINIMUM_SAMPLES_PER_BAND = 10
+MINIMUM_SAMPLES_PER_BAND = TunedParameter(
+    name="spectroscopy.minimum_samples_per_band",
+    default=10,
+    unit="count",
+    description="The fewest working width fits a profile band needs.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D37",
+)
 
 # The two windows whose widths are compared for the chromatic defocus check.
 # Each is 800 A wide, about 70 samples, so the median is steady. The blue
 # window sits in the Balmer-line region and the red one stays clear of the
 # H-alpha line and of the oxygen band at 7600 A.
-BLUE_WINDOW_ANGSTROM = (4200.0, 5000.0)
-RED_WINDOW_ANGSTROM = (6200.0, 7000.0)
+BLUE_WINDOW_ANGSTROM = TunedParameter(
+    name="spectroscopy.blue_window_angstrom",
+    default=(4200.0, 5000.0),
+    unit="Å",
+    description="The blue window whose width is compared in the chromatic defocus check.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D09",
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
+RED_WINDOW_ANGSTROM = TunedParameter(
+    name="spectroscopy.red_window_angstrom",
+    default=(6200.0, 7000.0),
+    unit="Å",
+    description="The red window whose width is compared in the chromatic defocus check.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D09",
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
 
 # The fewest working width fits a window needs for its median to be used.
-MINIMUM_SAMPLES_PER_WINDOW = 20
+MINIMUM_SAMPLES_PER_WINDOW = TunedParameter(
+    name="spectroscopy.minimum_samples_per_window",
+    default=20,
+    unit="count",
+    description="The fewest working width fits a window needs for its median to be used.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D09",
+    allowed_range=(3, 60),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
 
 # H-alpha, where the measured and stored profiles are compared. The stored
 # profile has its widest value (148 A) at this wavelength.
@@ -86,7 +172,19 @@ HALPHA_ANGSTROM = 6563.0
 # an in-focus spectrum would show. It is a round number chosen well clear of
 # the in-focus value, not fitted to any observed spectra. It needs to be
 # checked against real focus sweeps (`scripts/spectral_focus_sweep.py`).
-CHROMATIC_DEFOCUS_RATIO_LIMIT = 1.3
+CHROMATIC_DEFOCUS_RATIO_LIMIT = TunedParameter(
+    name="spectroscopy.chromatic_defocus_ratio_limit",
+    default=1.3,
+    unit="ratio",
+    description="The red-to-blue width ratio above which the spectrum is flagged for chromatic defocus.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D09",
+    allowed_range=(1.05, 2.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
 
 
 def _local_dispersion_angstrom_per_step(
@@ -197,6 +295,10 @@ def measure_line_spread(
         with the wavelengths, or when fewer than two bands have
         `MINIMUM_SAMPLES_PER_BAND` working fits.
     """
+    profile_start_angstrom = resolve(PROFILE_START_ANGSTROM).value
+    profile_end_angstrom = resolve(PROFILE_END_ANGSTROM).value
+    profile_band_angstrom = resolve(PROFILE_BAND_ANGSTROM).value
+    minimum_samples_per_band = resolve(MINIMUM_SAMPLES_PER_BAND).value
     samples = _usable_samples(wavelength_angstrom, trail_width_px, sample_distances_px)
     if samples is None:
         return None
@@ -207,10 +309,14 @@ def measure_line_spread(
     fwhm_pixels: list[float] = []
     scatter: list[float] = []
     counts: list[int] = []
-    for low in np.arange(PROFILE_START_ANGSTROM, PROFILE_END_ANGSTROM, PROFILE_BAND_ANGSTROM):
-        high = min(float(low) + PROFILE_BAND_ANGSTROM, PROFILE_END_ANGSTROM)
+    for low in np.arange(
+        profile_start_angstrom,
+        profile_end_angstrom,
+        profile_band_angstrom,
+    ):
+        high = min(float(low) + profile_band_angstrom, profile_end_angstrom)
         in_band = (wavelengths >= low) & (wavelengths < high)
-        if int(in_band.sum()) < MINIMUM_SAMPLES_PER_BAND:
+        if int(in_band.sum()) < minimum_samples_per_band:
             continue
         band_fwhm = fwhm_px[in_band]
         median_fwhm = float(np.median(band_fwhm))
@@ -259,7 +365,7 @@ def median_fwhm_px(
         return None
     wavelengths, fwhm_px, _ = samples
     in_window = (wavelengths >= window_angstrom[0]) & (wavelengths < window_angstrom[1])
-    if int(in_window.sum()) < MINIMUM_SAMPLES_PER_WINDOW:
+    if int(in_window.sum()) < resolve(MINIMUM_SAMPLES_PER_WINDOW).value:
         return None
     return float(np.median(fwhm_px[in_window]))
 
@@ -361,8 +467,8 @@ def line_spread_checkpoint_items(
         ``["chromatic_defocus"]`` when the ratio is above its limit,
         otherwise empty.
     """
-    blue = median_fwhm_px(wavelength_angstrom, trail_width_px, BLUE_WINDOW_ANGSTROM)
-    red = median_fwhm_px(wavelength_angstrom, trail_width_px, RED_WINDOW_ANGSTROM)
+    blue = median_fwhm_px(wavelength_angstrom, trail_width_px, resolve(BLUE_WINDOW_ANGSTROM).value)
+    red = median_fwhm_px(wavelength_angstrom, trail_width_px, resolve(RED_WINDOW_ANGSTROM).value)
     ratio = red / blue if blue is not None and red is not None and blue > 0 else None
 
     measured_halpha = measured_fwhm_angstrom_at(measured_profile, HALPHA_ANGSTROM)
@@ -377,7 +483,7 @@ def line_spread_checkpoint_items(
         "chromatic_defocus_ratio",
         ratio,
         "ratio",
-        limit=CHROMATIC_DEFOCUS_RATIO_LIMIT,
+        limit=resolve(CHROMATIC_DEFOCUS_RATIO_LIMIT).value,
         higher_is_better=False,
         note=(
             "red (6200-7000 A) over blue (4200-5000 A) trail FWHM; the limit is designed, not measured: "

@@ -44,12 +44,15 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, ladder_position
 from astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration import (
+    BOOTSTRAP_COUNT,
     CAMERA_NAME,
     CLASS_GAP_DEFINITION_VERSION,
     CLASS_GAP_SNR_ESTIMATOR,
     DEFAULT_SNR_GRID,
+    DRAWS_PER_SPECTRUM,
     REACHED_SHARE,
     ClassGapTable,
     SpectrumSample,
@@ -153,8 +156,8 @@ def table_record(
         "created": datetime.date.today().isoformat(),
         "camera": arguments.camera,
         "definition_version": CLASS_GAP_DEFINITION_VERSION,
-        "ambiguous_rms_gap": AMBIGUOUS_RMS_GAP,
-        "reached_share": REACHED_SHARE,
+        "ambiguous_rms_gap": resolve(AMBIGUOUS_RMS_GAP).value,
+        "reached_share": resolve(REACHED_SHARE).value,
         "minimum_native_snr": MINIMUM_NATIVE_SNR,
         "snr_estimator": CLASS_GAP_SNR_ESTIMATOR,
         "interval_percentiles": [16, 84],
@@ -266,14 +269,24 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="Write the table. Without this it is only printed."
     )
     parser.add_argument(
-        "--draws", type=int, default=5, help="Noise draws per spectrum at each value. Default 5."
+        "--draws",
+        type=int,
+        default=resolve(DRAWS_PER_SPECTRUM).value,
+        help="Noise draws per spectrum at each value. Default: the declared value (5).",
     )
     parser.add_argument(
-        "--bootstrap", type=int, default=400, help="Field resamples for the range. Default 400."
+        "--bootstrap",
+        type=int,
+        default=resolve(BOOTSTRAP_COUNT).value,
+        help="Field resamples for the range. Default: the declared value (400).",
     )
     parser.add_argument("--seed", type=int, default=20261024, help="Random seed. Default 20261024.")
     parser.add_argument(
-        "--grid", type=float, nargs="+", default=list(DEFAULT_SNR_GRID), help="Signal-to-noise values."
+        "--grid",
+        type=float,
+        nargs="+",
+        default=list(resolve(DEFAULT_SNR_GRID).value),
+        help="Signal-to-noise values.",
     )
     parser.add_argument(
         "--camera", default=CAMERA_NAME, help="The camera the spectra were taken with. Names the file."

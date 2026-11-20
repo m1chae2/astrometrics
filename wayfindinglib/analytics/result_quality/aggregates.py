@@ -24,6 +24,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.efficiency import (
     CAUSE_UNKNOWN,
@@ -109,7 +110,9 @@ class MeasuredNoiseCheck(BaseModel):
 
     variance_ratio: float = Field(gt=0.0)
     variance_ratio_error: float = Field(ge=0.0)
-    expected_noise_relative_error: float = Field(default=EXPECTED_NOISE_MODEL_RELATIVE_ERROR, ge=0.0)
+    expected_noise_relative_error: float = Field(
+        default=resolve_parameter(EXPECTED_NOISE_MODEL_RELATIVE_ERROR).value, ge=0.0
+    )
     model_error_basis: str = NOISE_MODEL_ERROR_STAND_IN_TEXT
     basis: str = FIXED_PATTERN_BASIS_MODEL
     log_ratio_error: float | None = None
@@ -169,8 +172,14 @@ class MeasuredNoiseCheck(BaseModel):
             error included).
         """
         if self.basis == FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE and self.log_ratio_error is not None:
-            return math.log(self.variance_ratio) > MODEL_AGREEMENT_SIGMAS * self.log_ratio_error
-        return self.variance_ratio - 1.0 > MODEL_AGREEMENT_SIGMAS * self.total_variance_ratio_error
+            return (
+                math.log(self.variance_ratio)
+                > resolve_parameter(MODEL_AGREEMENT_SIGMAS).value * self.log_ratio_error
+            )
+        return (
+            self.variance_ratio - 1.0
+            > resolve_parameter(MODEL_AGREEMENT_SIGMAS).value * self.total_variance_ratio_error
+        )
 
     @property
     def sigmas(self) -> float:
@@ -200,7 +209,9 @@ class MeasuredNoiseCheck(BaseModel):
             `POSSIBLE_FIXED_PATTERN_SIGMAS` standard errors, the same band
             `noise_growth` uses for a possible fixed-pattern noise.
         """
-        return not self.is_significant and self.sigmas >= POSSIBLE_FIXED_PATTERN_SIGMAS
+        return (
+            not self.is_significant and self.sigmas >= resolve_parameter(POSSIBLE_FIXED_PATTERN_SIGMAS).value
+        )
 
     @property
     def total_variance_ratio_error(self) -> float:
@@ -348,7 +359,8 @@ def _unknown_part(effective_by_factors: float, check: MeasuredNoiseCheck | None)
         )
         return 0.0, (
             f"Possible fixed-pattern noise: the stack's measured noise is {check.sigmas:.1f} standard errors "
-            f"above {against}, below the {MODEL_AGREEMENT_SIGMAS:g} needed to call it found. It is not "
+            f"above {against}, below the "
+            f"{resolve_parameter(MODEL_AGREEMENT_SIGMAS).value:g} needed to call it found. It is not "
             "counted as a loss."
         )
     if not check.is_significant:

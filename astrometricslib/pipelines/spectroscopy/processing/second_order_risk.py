@@ -19,6 +19,15 @@ field: a person reading a spectrum can see which red wavelengths to distrust.
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # The most second-order light we cannot rule out, as a fraction of the
 # first-order brightness at half the wavelength. Measured on 2026-09-23 by
 # fitting the stored spectra of catalog-typed stars in the Albireo and Vega
@@ -27,13 +36,37 @@ import numpy as np
 # less certain (4% to 8% half-widths, driven by giants matched to dwarf
 # templates), so it gives no tighter limit. 2% is therefore the largest
 # value seen, not a measured value. Validated on those two stacks only.
-SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION = 0.02
+SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION = TunedParameter(
+    name="spectroscopy.second_order_maximum_plausible_fraction",
+    default=0.02,
+    unit="fraction",
+    description=(
+        "The most second-order light that cannot be ruled out, as a "
+        "fraction of first-order brightness at half the wavelength."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-26",
+)
 
 # The share of a wavelength's brightness that second-order light must be
 # able to add before that wavelength is called risky. 10% is a judgement
 # call, not a derived number: it is roughly where an added signal starts to
-# change a spectrum's shape visibly. Not validated against any data.
-SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS = 0.10
+# change a spectrum's shape visibly. It is hardcoded (a design estimate, not
+# validated against any data).
+SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS = TunedParameter(
+    name="spectroscopy.second_order_risky_share_of_brightness",
+    default=0.10,
+    unit="fraction",
+    description=(
+        "The share of a wavelength's brightness that second-order light must add before it is called risky."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D18",
+)
 
 # The largest ratio that is ever stored. Where the star is dim or
 # negative at a red wavelength the true ratio is huge or undefined, so the
@@ -102,5 +135,5 @@ def is_second_order_risky(ratio: np.ndarray) -> np.ndarray:
         could add at least `SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS` of the
         red brightness.
     """
-    possible_share = SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION * np.asarray(ratio, dtype=float)
-    return possible_share >= SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS
+    possible_share = resolve(SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION).value * np.asarray(ratio, dtype=float)
+    return possible_share >= resolve(SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS).value

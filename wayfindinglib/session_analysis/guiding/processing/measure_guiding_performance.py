@@ -24,6 +24,16 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.performance_envelope import (
     SIDEREAL_RATE_ARCSEC_PER_SECOND,
     SIGMA_TO_FWHM,
@@ -36,7 +46,18 @@ from wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibil
     measure_exposure_feasibility,
 )
 
-MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE = 600.0
+MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE = TunedParameter(
+    name="wayfinding.minimum_run_seconds_for_correction_rate",
+    default=factor_for(600.0, RunBasis.PERIODIC_ERROR_PERIOD_SECONDS),
+    unit="× periodic-error period",
+    description="Shortest guiding run whose net declination correction is used.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D135",
+    basis=RunBasis.PERIODIC_ERROR_PERIOD_SECONDS,
+    reference_value=600.0,
+)
 """Shortest guiding run whose net declination correction is used.
 
 A mount's periodic error (the worm gear's once-per-turn error) repeats about
@@ -45,7 +66,16 @@ declination too. A rate measured over less than one period mixes that error
 in. This is a design estimate, not a measurement of this mount.
 """
 
-MINIMUM_SAMPLES_PER_RUN = 20
+MINIMUM_SAMPLES_PER_RUN = TunedParameter(
+    name="wayfinding.minimum_samples_per_run",
+    default=20,
+    unit="guide samples in a run",
+    description="Fewest samples a run needs to get its own guiding error.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D135",
+)
 """Fewest samples a run needs to get its own guiding error.
 
 With fewer, a robust spread is not stable.
@@ -92,7 +122,7 @@ def _net_dec_correction_arcsec_per_minute(
         corrections.
     """
     duration = run.duration_seconds
-    if duration is None or duration < MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE:
+    if duration is None or duration < resolve_parameter(MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE).value:
         return None
     speed = run.dec_rate_arcsec_per_second
     if speed is None or not 0.0 < speed <= SIDEREAL_RATE_ARCSEC_PER_SECOND:
@@ -177,7 +207,7 @@ def measure_guiding_performance(
     for index, run in enumerate(runs):
         run_samples = samples_by_run[index]
         run_rms = None
-        if len(run_samples) >= MINIMUM_SAMPLES_PER_RUN:
+        if len(run_samples) >= resolve_parameter(MINIMUM_SAMPLES_PER_RUN).value:
             _, _, run_rms = _per_axis_error(run_samples)
         rate = _net_dec_correction_arcsec_per_minute(run, run_samples)
         if rate is not None and run.duration_seconds is not None:

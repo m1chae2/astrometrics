@@ -736,12 +736,13 @@ class StellarService:
         spectral_type: str | None = None,
         magnitude: float | None = None,
         target_id: str | None = None,
-        tolerance_arcsec: float = 5.0,
+        tolerance_arcsec: float | None = None,
     ) -> StellarObject:
         """Find or create a StellarObject near (ra, dec).
 
         Delegates to the astrometrics library, which owns the catalog and
-        looks only at the stars near that position.
+        looks only at the stars near that position. When ``tolerance_arcsec``
+        is left out, the library uses its registered same-star distance.
 
         Returns
         -------

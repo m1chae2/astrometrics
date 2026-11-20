@@ -37,8 +37,8 @@ function renderPanel(overlayReason: string | null, showAstrometryOverlay = true)
             selectedTarget="M 31"
             autoPanTrigger={0}
             disableStretch={false}
-            stretch={true}
-            toggleStretch={() => {}}
+            displayMode="auto-stretch"
+            onDisplayModeChange={() => {}}
             showAstrometryOverlay={showAstrometryOverlay}
             overlayReason={overlayReason}
             allFiles={[]}

@@ -3,34 +3,39 @@
  * @description Provides a live preview of the last image captured by the camera.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button } from '../common/components/Button';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { FitsRenderer } from '../common/fitsViewer/FitsRenderer';
-import { fetchLastImage } from '../common/services/imaging/imageService';
+import { DisplayModeSelect } from '../common/fitsViewer/DisplayModeSelect';
+import { DEFAULT_DISPLAY_MODE } from '../common/fitsViewer/displayMode';
+import type { DisplayMode } from '../common/fitsViewer/displayMode';
+import { fetchLastImage, fetchFitsFileByPath } from '../common/services/imaging/imageService';
 import { socketClient } from '../common/utils/socketClient';
 import './observationManager.css';
 
 import { Skeleton } from '../common/components/Skeleton';
 export const LastImageViewer: React.FC = () => {
     const [imageData, setImageData] = useState<string | null>(null);
-    const [isStretched, setIsStretched] = useState(true);
+    const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_DISPLAY_MODE);
+    // The FITS file itself, read in Linear mode so the viewer holds its pixel values.
+    const [fitsFile, setFitsFile] = useState<Blob | null>(null);
     const [loading, setLoading] = useState(false);
     const [imagePath, setImagePath] = useState<string>('');
 
     const loadLastImage = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await fetchLastImage(isStretched);
+            const data = await fetchLastImage(true);
             if (data) {
                 setImageData(data.image_data);
                 setImagePath(data.path);
+                setFitsFile(displayMode === 'linear' ? await fetchFitsFileByPath(data.path) : null);
             }
         } catch (error) {
             console.error("Failed to fetch last image:", error);
         } finally {
             setLoading(false);
         }
-    }, [isStretched]);
+    }, [displayMode]);
 
     // Initial load
     useEffect(() => {
@@ -49,23 +54,12 @@ export const LastImageViewer: React.FC = () => {
         };
     }, [loadLastImage]);
 
-    const toggleStretch = () => {
-        setIsStretched(!isStretched);
-    };
-
     return (
         <SectionPanel
             title="Last Image"
             className="last-image-viewer"
             headerContent={
-                <Button
-                    size="small"
-                    variant={isStretched ? 'primary' : 'secondary'}
-                    onClick={toggleStretch}
-                    title={isStretched ? 'Switch to Linear View' : 'Switch to Auto-Stretched View'}
-                >
-                    {isStretched ? 'Stretch' : 'Linear'}
-                </Button>
+                <DisplayModeSelect mode={displayMode} onChange={setDisplayMode} />
             }
         >
             <div className="last-image-viewer__container">
@@ -78,14 +72,14 @@ export const LastImageViewer: React.FC = () => {
                 {imageData && (
                     <div className="last-image-viewer__frame">
                         <FitsRenderer
-                            imageUrl={imageData}
-                            imageBlob={null}
+                            imageUrl={displayMode === 'linear' && fitsFile ? null : imageData}
+                            imageBlob={displayMode === 'linear' ? fitsFile : null}
                             frameInfo={null}
                             loading={loading}
                             error={null}
                             selectedTarget={null}
                             autoPanTrigger={0}
-                            stretch={isStretched}
+                            stretch={displayMode === 'auto-stretch'}
                         />
                     </div>
                 )}

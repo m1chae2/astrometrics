@@ -404,7 +404,7 @@ def test_take_more_in_groups_never_asks_for_fewer_than_five_of_a_new_length() ->
     )
     assert result.new_exposure_group
     assert result.frames_needed is not None
-    assert result.frames_needed >= ng.MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH
+    assert result.frames_needed >= ng.MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH.default
 
 
 def test_take_more_in_groups_for_an_existing_length_matches_the_plan() -> None:
@@ -511,7 +511,7 @@ def test_m13_has_no_fixed_pattern_noise_once_the_models_own_error_is_counted() -
     assert not fixed_pattern.fixed_pattern_noise_detected
     ratio = (0.835e-3 / 0.598e-3) ** 2
     aperture_error = 2.0 * ng.aperture_noise_relative_error(APERTURES_FOR_11_7_PERCENT) * ratio
-    assert ratio - 1.0 > ng.FIXED_PATTERN_SIGMAS * aperture_error
+    assert ratio - 1.0 > ng.FIXED_PATTERN_SIGMAS.default * aperture_error
     check = MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
     unknown_seconds, _ = _unknown_part(100.0, check)
     assert unknown_seconds == pytest.approx(0.0)
@@ -1004,7 +1004,7 @@ def test_a_tiny_doubling_gain_is_not_worthwhile() -> None:
     result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, fixed_pattern=fixed_pattern)
     assert result.practical_limit_applied
     assert result.doubling_noise_cut is not None
-    assert result.doubling_noise_cut < ng.MINIMUM_DOUBLING_GAIN_FRACTION
+    assert result.doubling_noise_cut < ng.MINIMUM_DOUBLING_GAIN_FRACTION.default
     assert not result.doubling_worthwhile
 
 
@@ -1089,7 +1089,7 @@ def test_fewer_than_five_targets_keep_the_stand_in_and_say_so() -> None:
     error = ng.measure_noise_model_error(_samples([-0.5, -0.2, 0.1, 0.4]))
 
     assert not error.measured
-    assert error.relative_error == ng.EXPECTED_NOISE_MODEL_RELATIVE_ERROR
+    assert error.relative_error == ng.EXPECTED_NOISE_MODEL_RELATIVE_ERROR.default
     assert error.target_count == 4
     assert error.mean_log_ratio is None
     assert "stand-in" in error.basis_text
@@ -1211,7 +1211,7 @@ def _graded(fixed_pattern: ng.StackFixedPatternNoise | None, fraction: float) ->
         _synthetic_ratio(fraction),
         fixed_pattern=fixed_pattern,
         minimum_count=1,
-        maximum_count=ng.MAXIMUM_NEW_FRAMES,
+        maximum_count=ng.MAXIMUM_NEW_FRAMES.default,
         target_noise_ratio=ng.TARGET_NOISE_RATIO,
         exposure_seconds=30.0,
         held_exposure_seconds=44 * 30.0,
@@ -1275,7 +1275,7 @@ def test_a_low_end_that_would_say_more_frames_will_not_help_is_flagged_but_keeps
 
     assert result.frames_needed is not None
     assert result.possible_low_end_not_worthwhile
-    assert (result.possible_low_doubling_cut or 1.0) < ng.MINIMUM_DOUBLING_GAIN_FRACTION
+    assert (result.possible_low_doubling_cut or 1.0) < ng.MINIMUM_DOUBLING_GAIN_FRACTION.default
 
 
 def test_the_ranking_uses_the_midpoint_of_the_log_gains() -> None:

@@ -96,7 +96,7 @@ def best_type(wavelength: np.ndarray, spectrum: np.ndarray, profile: ResolutionP
         The best template type.
     """
     result = classify_spectral_type(
-        wavelength, spectrum, FALLBACK_RESOLUTION_ELEMENT_ANGSTROM, resolution_profile=profile
+        wavelength, spectrum, FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default, resolution_profile=profile
     )
     return str(result["spectral_type"])
 
@@ -112,7 +112,7 @@ def test_a_reddened_g0v_is_classified_several_subtypes_too_late_without_deredden
     reddened = redden_spectrum(wavelength, flux, EBV)
 
     observed = classify_spectral_type(
-        wavelength, reddened, FALLBACK_RESOLUTION_ELEMENT_ANGSTROM, resolution_profile=line_spread
+        wavelength, reddened, FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default, resolution_profile=line_spread
     )
 
     steps_too_late = ladder_steps_between("G0V", str(observed["spectral_type"]))
@@ -128,7 +128,7 @@ def test_dereddening_with_the_known_colour_excess_recovers_g0v(line_spread: Reso
     dereddened = classify_spectral_type(
         wavelength,
         deredden_spectrum(wavelength, reddened, EBV),
-        FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+        FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default,
         resolution_profile=line_spread,
     )
 

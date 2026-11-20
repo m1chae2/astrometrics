@@ -31,6 +31,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 - `sensor_noise_measurement.py` — `SensorNoiseMeasurement`, the result of measuring a camera setting's gain and read noise from flat and bias frames: the numbers, their pair-to-pair spread, the frame counts, a source sentence for the camera profile, and the reason when nothing could be measured.
 - `applied_camera_profile.py` — `AppliedCameraProfile`, the short copy of a camera profile that each pipeline's quality summary carries, so a reader can see which camera facts a result rests on.
 - `provenance.py` — the IVOA (International Virtual Observatory Alliance) Provenance Data Model (PROV-DM) classes recording which run, at what software version, consuming which inputs, produced a given result. See `astrometricslib/_internal/drivers/provenance_store.py` for where this is stored and queried.
+- `tuned_parameter.py` — `TunedParameter`, the declaration of one tuned number: its default, unit, role (what it is used for), source (where its value comes from), the equipment it depends on, and the register entry that holds the evidence. The model refuses a combination that cannot work, such as a hardcoded value that depends on equipment. `foundation/parameters.py` collects the declarations and gives each one's value.
 - `quality/` — the quality records: gate results, batch-wide quality summaries, per-pipeline input and output quality assessments, and the report shapes that quality tools return. See [quality/README.md](quality/README.md).
 
 For exact behavior, read the code.

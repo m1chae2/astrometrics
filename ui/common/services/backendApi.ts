@@ -45,6 +45,22 @@ import {
 
 
 /** Summary of one persisted observation session, from execution:list_sessions. */
+/** Answer to a request to stop a stacking job. */
+export interface CancelProcessingResult {
+    /** `cancelled`, `other_process` (the job runs in another program) or `none`. */
+    status: string;
+    /** Why the job was not stopped; null when it was. */
+    message?: string | null;
+}
+
+/** Answer to a request to stop an analysis job. */
+export interface CancelAnalysisResult {
+    /** True if the job was stopped. */
+    cancelled: boolean;
+    /** Why the job was not stopped; null when it was. */
+    reason?: string | null;
+}
+
 export interface ObservationSessionSummary {
     id: string;
     status: string;
@@ -330,7 +346,7 @@ export interface ActionRegistry {
     // Processing
     "processing:stack": { payload: { target_id: string; image_files?: string[]; log_file?: string }; response: ProcessStatus };
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
-    "processing:cancel": { payload: { target_id: string }; response: ProcessStatus | null };
+    "processing:cancel": { payload: { target_id: string }; response: CancelProcessingResult };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
     "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number; before?: string }; response: ProcessingJob[] };
     "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
@@ -363,7 +379,7 @@ export interface ActionRegistry {
     // Analysis
     "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
-    "analysis:cancel": { payload: { target_id: string }; response: boolean };
+    "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
 
     // Imaging
     // Matches ImagingService.capture_sequence. An earlier declaration listed
@@ -378,6 +394,9 @@ export interface ActionRegistry {
     "images:get_light_frame_data": { payload: { target_id: string; iso: string; exposure: string; index?: number; stretch?: boolean }; response: RenderedImage };
     "images:convert_fits": { payload: { path: string; stretch?: boolean }; response: RenderedImage };
     "images:get_fits_header": { payload: { path: string }; response: FitsHeaderEntry[] };
+    "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_degrees?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
+    "images:map_position": { payload: { from_path: string; x: number; y: number; to_path: string }; response: { x: number | null; y: number | null; method: string; note: string } };
+    "images:measure_detections": { payload: { path: string }; response: import('../types/backendTypes').DetectionsMeasurement };
     "images:delete": { payload: { paths: string[]; target_id?: string }; response: { deleted: string[]; failed: { path: string; reason: string }[] } };
     "images:last": { payload: { stretch?: boolean }; response: { id: string; min: number; max: number; image_data: string; path: string } | null };
 
@@ -403,8 +422,9 @@ export interface ActionRegistry {
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
 
     // Terminal, Console & Documentation
-    "terminal:execute": { payload: { code_str: string; source?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
+    "terminal:execute": { payload: { code_str: string; source?: string; label?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
     "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:get_recent_runs": { payload: { limit?: number }; response: Array<{ ran_at: string; label: string; source: string; source_code: string; status: string; stdout: string; stderr: string; plot_paths: string[]; execution_time_ms: number }> };
     "terminal:completions": { payload: { text: string }; response: string[] };
     "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
     "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };

@@ -118,7 +118,7 @@ def test_dithers_follow_the_cadence_and_pattern(commands: list, plate_scale: Non
     result = imaging_capture.capture_frames(_context(), 10.0, count=5, dither=config)
 
     pulses = [argument for command, argument in commands if command == "pulse"]
-    expected_ms = 3.0 * 2.0 / GUIDE_RATE_ARCSEC_PER_S * 1000.0
+    expected_ms = 3.0 * 2.0 / GUIDE_RATE_ARCSEC_PER_S.default * 1000.0
     assert [direction for direction, _ in pulses] == ["north", "west", "south", "east"]
     assert all(duration == pytest.approx(expected_ms) for _, duration in pulses)
     assert result.dithers == 2

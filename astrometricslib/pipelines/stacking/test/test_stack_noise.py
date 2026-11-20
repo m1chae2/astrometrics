@@ -21,11 +21,11 @@ from astropy.wcs import WCS
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.stacking.post_processing import aperture_placement
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
-    APERTURE_SEPARATION_PX,
-    FAINT_SOURCE_CLEARANCE_PX,
     MINIMUM_USABLE_APERTURES,
     FaintSourceAnalysis,
     analyze_faint_sources,
+    aperture_separation_px,
+    faint_source_clearance_px,
     faint_source_distance,
     place_empty_apertures,
 )
@@ -172,8 +172,8 @@ def test_noise_of_white_sky_is_recovered_within_its_uncertainty(tmp_path: Path) 
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is not None
-    area = math.pi * APERTURE_RADIUS_PX**2
-    ring_pixels = math.pi * (RING_OUTER_PX**2 - RING_INNER_PX**2)
+    area = math.pi * APERTURE_RADIUS_PX.reference_value**2
+    ring_pixels = math.pi * (RING_OUTER_PX.reference_value**2 - RING_INNER_PX.reference_value**2)
     expected = 2.0 * math.sqrt(area + area**2 / ring_pixels)
     result = outcome.result
     assert result.aperture_count >= 90
@@ -208,7 +208,7 @@ def test_apertures_are_reused_by_a_later_stack_of_the_target(tmp_path: Path) -> 
     )
     assert load_apertures(apertures).created_from == "first.fits"
     stored_set = next(iter(json.loads(stored)["sets"].values()))
-    assert stored_set["aperture_radius_px"] == APERTURE_RADIUS_PX
+    assert stored_set["aperture_radius_px"] == APERTURE_RADIUS_PX.reference_value
 
 
 def test_apertures_follow_the_sky_when_the_stack_is_shifted(tmp_path: Path) -> None:
@@ -616,8 +616,8 @@ def test_apertures_are_at_least_the_separation_apart(tmp_path: Path) -> None:
     points = np.column_stack([columns, rows])
     distances = np.hypot(*(points[:, None, :] - points[None, :, :]).transpose(2, 0, 1))
     np.fill_diagonal(distances, np.inf)
-    assert distances.min() >= APERTURE_SEPARATION_PX - 1e-6
-    assert APERTURE_SEPARATION_PX >= 2 * RING_OUTER_PX
+    assert distances.min() >= aperture_separation_px() - 1e-6
+    assert aperture_separation_px() >= 2 * RING_OUTER_PX.reference_value
 
 
 def test_each_camera_and_optic_keeps_its_own_apertures_and_they_can_be_reset(tmp_path: Path) -> None:
@@ -742,9 +742,9 @@ def test_a_faint_source_keeps_the_apertures_away() -> None:
     distance = faint_source_distance(image)
     assert distance[300, 600] == 0
     positions = place_empty_apertures(image, np.empty((0, 2)))
-    assert len(positions) >= MINIMUM_USABLE_APERTURES
+    assert len(positions) >= MINIMUM_USABLE_APERTURES.default
     nearest = min(math.hypot(row - 300, column - 600) for row, column in positions)
-    assert nearest > FAINT_SOURCE_CLEARANCE_PX
+    assert nearest > faint_source_clearance_px()
 
 
 def test_the_mask_on_pure_noise_leaves_the_noise_unbiased_within_its_error() -> None:
@@ -772,7 +772,7 @@ def test_faint_stars_and_a_nebula_no_longer_inflate_the_noise() -> None:
         old_positions = [tuple(generator.uniform(20, SIZE - 20, 2)) for _ in range(300)]
         old_excess.append(_spread_of_sums(image, old_positions) / truth)
         new_positions = place_empty_apertures(image, np.empty((0, 2)))
-        assert len(new_positions) >= MINIMUM_USABLE_APERTURES
+        assert len(new_positions) >= MINIMUM_USABLE_APERTURES.default
         new_ratios.append(_spread_of_sums(image, new_positions) / truth)
     assert float(np.mean(old_excess)) > 1.15
     # Measured over 6 fields: the ratio is within 1.10 (the margin covers the
@@ -841,7 +841,7 @@ def _identity_stack(tmp_path: Path, name: str, seed: int, center_ra: float = 150
 
 def test_the_mask_clearance_covers_the_rounding_of_the_center() -> None:
     """The clearance is the ring's outer radius plus one pixel."""
-    assert FAINT_SOURCE_CLEARANCE_PX == pytest.approx(RING_OUTER_PX + 1.0)
+    assert faint_source_clearance_px() == pytest.approx(RING_OUTER_PX.reference_value + 1.0)
 
 
 def test_the_mask_scale_ignores_the_empty_edge() -> None:
@@ -903,12 +903,12 @@ def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(
     old = measure_stack_noise(first, None, apertures, depth=StackDepth(10, 10.0)).result
     nearly = _identity_stack(tmp_path, "nearly.fits", seed=2, center_ra=150.3)
     kept = measure_stack_noise(
-        nearly, None, apertures, depth=StackDepth(19, 0.99 * REPLACEMENT_DEPTH_FACTOR * 10.0)
+        nearly, None, apertures, depth=StackDepth(19, 0.99 * REPLACEMENT_DEPTH_FACTOR.default * 10.0)
     ).result
     assert kept.aperture_identity == old.aperture_identity and not kept.apertures_created
     deep = _identity_stack(tmp_path, "deep.fits", seed=3, center_ra=150.3)
     new = measure_stack_noise(
-        deep, None, apertures, depth=StackDepth(20, REPLACEMENT_DEPTH_FACTOR * 10.0)
+        deep, None, apertures, depth=StackDepth(20, REPLACEMENT_DEPTH_FACTOR.default * 10.0)
     ).result
     assert new.apertures_created and new.aperture_identity != old.aperture_identity
     assert load_apertures(apertures).identity == new.aperture_identity
@@ -1700,8 +1700,8 @@ def test_a_negligible_fitted_move_returns_the_solution_unchanged() -> None:
     moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
     assert moved is not None, reason
     assert alignment is not None and alignment.left_unchanged
-    assert math.hypot(alignment.shift_row, alignment.shift_column) < NEGLIGIBLE_SHIFT_PX
-    assert abs(alignment.rotation_deg) < NEGLIGIBLE_ROTATION_DEG
+    assert math.hypot(alignment.shift_row, alignment.shift_column) < NEGLIGIBLE_SHIFT_PX.default
+    assert abs(alignment.rotation_deg) < NEGLIGIBLE_ROTATION_DEG.default
     np.testing.assert_array_equal(moved.wcs.crpix, guess.wcs.crpix)
     np.testing.assert_array_equal(moved.wcs.get_pc(), guess.wcs.get_pc())
     assert "left as they were" in alignment.describe()
@@ -2105,7 +2105,10 @@ def test_a_good_fit_does_not_plate_solve(monkeypatch: pytest.MonkeyPatch) -> Non
     first = WCS(_sky_header())
     solve = _FakePlateSolve(WCS(_sky_header()))
     wcs, source, _note, failure = _run_alignment_with_fake_moves(
-        monkeypatch, True, [(first, "", _alignment_for_poor_fit_tests(POOR_ALIGNMENT_RMS_PX - 0.1))], solve
+        monkeypatch,
+        True,
+        [(first, "", _alignment_for_poor_fit_tests(POOR_ALIGNMENT_RMS_PX.default - 0.1))],
+        solve,
     )
     assert failure is None and wcs is first
     assert source == "registration reference frame"

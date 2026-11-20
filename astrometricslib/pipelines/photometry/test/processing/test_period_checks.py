@@ -297,7 +297,7 @@ def test_the_training_window_step_stays_within_a_fifth_of_a_peak_width() -> None
         frequency = checks._training_frequency_window(span, centre)
 
         assert float(np.diff(frequency).max()) <= 1.0 / (5.0 * span) * (1 + 1e-9)
-        assert frequency.size <= checks._MAXIMUM_WINDOW_POINTS
+        assert frequency.size <= checks._MAXIMUM_WINDOW_POINTS.default
         assert frequency[frequency.size // 2] == np.float64(centre)
         assert frequency.min() > 0.0
 
@@ -309,10 +309,10 @@ def test_a_very_long_span_narrows_the_training_window_instead_of_coarsening_the_
 
     frequency = checks._training_frequency_window(span, centre)
 
-    assert frequency.size >= checks._MAXIMUM_WINDOW_POINTS - 1
-    assert frequency.size <= checks._MAXIMUM_WINDOW_POINTS
+    assert frequency.size >= checks._MAXIMUM_WINDOW_POINTS.default - 1
+    assert frequency.size <= checks._MAXIMUM_WINDOW_POINTS.default
     assert float(np.diff(frequency).max()) <= 1.0 / (5.0 * span) * (1 + 1e-9)
-    assert frequency[-1] - frequency[0] < 2 * checks._FREQUENCY_WINDOW * centre
+    assert frequency[-1] - frequency[0] < 2 * checks._FREQUENCY_WINDOW.default * centre
     assert frequency[0] < centre < frequency[-1]
     assert (frequency[-1] - frequency[0]) * span > 6.0  # still several peak widths either side
 

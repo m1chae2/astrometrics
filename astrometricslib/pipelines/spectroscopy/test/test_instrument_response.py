@@ -104,7 +104,7 @@ def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record() 
 
     assert analysis.response_applied is True
     assert analysis.classification["spectral_type"] == "K2V"
-    assert analysis.classification["classification_rms"] <= NO_GOOD_MATCH_RMS
+    assert analysis.classification["classification_rms"] <= NO_GOOD_MATCH_RMS.default
     assert len(analysis.features) == 8
 
 

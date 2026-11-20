@@ -36,6 +36,7 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityCheckpoint,
     StageQualityMetric,
@@ -188,7 +189,7 @@ def _cross_check_metrics(
             "index_vs_template_type_steps",
             index_steps,
             "subtype steps",
-            limit=DIFFERS_FROM_CATALOG_SUBTYPES,
+            limit=resolve(DIFFERS_FROM_CATALOG_SUBTYPES).value,
             higher_is_better=False,
             note=(
                 "limit is DIFFERS_FROM_CATALOG_SUBTYPES; steps between the type the line indices "
@@ -333,7 +334,7 @@ def assess_processing_quality(
             "classification_rms",
             rms,
             "relative RMS",
-            limit=NO_GOOD_MATCH_RMS,
+            limit=resolve(NO_GOOD_MATCH_RMS).value,
             higher_is_better=False,
             note="limit is NO_GOOD_MATCH_RMS; lower means the best reference fits more closely",
         ),
@@ -350,7 +351,7 @@ def assess_processing_quality(
             "rms_gap_to_next_class",
             gap_class,
             "relative RMS",
-            limit=AMBIGUOUS_RMS_GAP,
+            limit=resolve(AMBIGUOUS_RMS_GAP).value,
             note="limit is AMBIGUOUS_RMS_GAP; a smaller gap means the class letter is uncertain",
         ),
         metric(

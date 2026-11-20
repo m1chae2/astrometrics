@@ -22,13 +22,38 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 # The fewest frames with a star-image width that are worth fitting a line
 # through, and the smallest temperature change that makes the slope
 # meaningful. With fewer frames, or with the temperature almost unchanged,
 # the fitted slope is mostly noise, so the plot shows the points without it.
-MINIMUM_FRAMES_FOR_WIDTH_TREND = 5
-MINIMUM_TEMPERATURE_SPAN_FOR_TREND_C = 0.5
+MINIMUM_FRAMES_FOR_WIDTH_TREND = TunedParameter(
+    name="visualization.minimum_frames_for_width_trend",
+    default=5,
+    unit="frames",
+    description="Fewest frames with a star width needed to fit a width trend.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D143",
+)
+MINIMUM_TEMPERATURE_SPAN_FOR_TREND_C = TunedParameter(
+    name="visualization.minimum_temperature_span_for_trend_c",
+    default=0.5,
+    unit="deg C",
+    description="Smallest temperature change that makes a fitted width slope meaningful.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D143",
+)
 
 
 def _collect_focus_samples(target: Any) -> dict[str, np.ndarray]:
@@ -165,8 +190,8 @@ def plot_focus_vs_temperature(target: Any, figsize: tuple[int, int] = (14, 9)) -
     ax_width.set_ylabel("Star-image width (px)")
     if has_width.any():
         ax_width.scatter(temperature[has_width], width[has_width], s=12, color="tab:green")
-        enough_frames = has_width.sum() >= MINIMUM_FRAMES_FOR_WIDTH_TREND
-        wide_enough = np.ptp(temperature[has_width]) >= MINIMUM_TEMPERATURE_SPAN_FOR_TREND_C
+        enough_frames = has_width.sum() >= resolve(MINIMUM_FRAMES_FOR_WIDTH_TREND).value
+        wide_enough = np.ptp(temperature[has_width]) >= resolve(MINIMUM_TEMPERATURE_SPAN_FOR_TREND_C).value
         if enough_frames and wide_enough:
             slope, intercept = np.polyfit(temperature[has_width], width[has_width], 1)
             line_x = np.array([temperature[has_width].min(), temperature[has_width].max()])

@@ -27,6 +27,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import LimitTier, QualityLimit
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, GuideScope
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
@@ -58,7 +66,16 @@ Every limit in the envelope names the entry that holds its evidence
 entry tells how well that way has been checked.
 """
 
-DEFAULT_BLUR_TOLERANCE_FRACTION = 0.10
+DEFAULT_BLUR_TOLERANCE_FRACTION = TunedParameter(
+    name="wayfinding.default_blur_tolerance_fraction",
+    default=0.1,
+    unit="fraction",
+    description="Most that guiding error or trailing may widen a star image, as a fraction.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D40",
+)
 """Most that guiding error or trailing may widen a star image, as a fraction.
 
 This is a policy choice, not a measurement: it says how much loss of
@@ -85,7 +102,16 @@ The Earth turns 360 degrees in one sidereal day of 86164.0905 seconds.
 MAD_TO_SIGMA = 1.4826
 """Scales a median absolute deviation to a standard deviation (normal data)."""
 
-BASELINE_SPREAD_MULTIPLIER = 3.0
+BASELINE_SPREAD_MULTIPLIER = TunedParameter(
+    name="wayfinding.baseline_spread_multiplier",
+    default=3.0,
+    unit="× robust standard deviation of the equipment history",
+    description="How many robust standard deviations from the median count as unusual.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D42",
+)
 """How many robust standard deviations from the median count as unusual.
 
 3 is the usual outlier convention. If the history were normally
@@ -93,7 +119,16 @@ distributed, about 1 session in 740 would land beyond it by chance in one
 direction.
 """
 
-EXCURSION_SIGMA_MULTIPLE = 5.0
+EXCURSION_SIGMA_MULTIPLE = TunedParameter(
+    name="wayfinding.excursion_sigma_multiple",
+    default=5.0,
+    unit="× acceptable guiding error",
+    description="How many times the acceptable guiding error counts as an excursion.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D41",
+)
 """How many times the acceptable guiding error counts as an excursion.
 
 A guide error of 5 standard deviations or more happens by chance about once
@@ -102,7 +137,16 @@ level. A sample that far out is therefore an event (a lock on the wrong
 star, a jump), not noise, and pre-processing counts it separately.
 """
 
-BASELINE_FRACTION_PERCENTILE = 90
+BASELINE_FRACTION_PERCENTILE = TunedParameter(
+    name="wayfinding.baseline_fraction_percentile",
+    default=90,
+    unit="percentile of the equipment nights",
+    description="Percentile of the equipment's own nights that a bad fraction must exceed.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D43",
+)
 """Percentile of the equipment's own nights that a bad fraction must exceed.
 
 Fractions such as the share of lost frames are zero on most good nights, so a
@@ -111,7 +155,16 @@ would count as unusual. A percentile has no such problem. A night is unusual
 if it is worse than 90 percent of this equipment's earlier nights.
 """
 
-MINIMUM_GUIDE_CYCLES_PER_EXPOSURE = 3
+MINIMUM_GUIDE_CYCLES_PER_EXPOSURE = TunedParameter(
+    name="wayfinding.minimum_guide_cycles_per_exposure",
+    default=3,
+    unit="guide cycles of the guider",
+    description="Fewest guide cycles an exposure must span for guiding error to show in it.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="WAY-D44",
+)
 """Fewest guide cycles an exposure must span for guiding error to show in it.
 
 The guider measures and corrects once per cycle, so guiding error changes
@@ -121,14 +174,32 @@ rather than the guiding RMS. Three cycles is the smallest span that can show
 the error varying at all.
 """
 
-MINIMUM_IMAGE_QUALITY_SAMPLES = 20
+MINIMUM_IMAGE_QUALITY_SAMPLES = TunedParameter(
+    name="wayfinding.minimum_image_quality_samples",
+    default=20,
+    unit="samples",
+    description="Fewest frames the measured star width must rest on.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D45",
+)
 """Fewest frames the measured star width must rest on.
 
 A median of fewer than 20 frames can be shifted by a single poor-seeing
 night. 20 frames is about one night of one target.
 """
 
-MINIMUM_SAMPLES_PER_SESSION = 100
+MINIMUM_SAMPLES_PER_SESSION = TunedParameter(
+    name="wayfinding.minimum_samples_per_session",
+    default=100,
+    unit="samples",
+    description="Fewest guide samples a night needs to be analysed or to join a baseline.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D45",
+)
 """Fewest guide samples a night needs to be analysed or to join a baseline.
 
 The guider takes a sample every 3 to 4 seconds, so 100 samples is about six
@@ -136,7 +207,16 @@ minutes of guiding. A shorter run is a test or a false start, not a session
 that says anything about how this equipment guides.
 """
 
-MINIMUM_FRAMES_PER_NIGHT = 10
+MINIMUM_FRAMES_PER_NIGHT = TunedParameter(
+    name="wayfinding.minimum_frames_per_night",
+    default=10,
+    unit="frames",
+    description="Fewest measured frames a night needs to join a star-quality baseline.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D45",
+)
 """Fewest measured frames a night needs to join a star-quality baseline.
 
 The median of 10 frames has a standard error of about 40 percent of one
@@ -144,14 +224,32 @@ frame's scatter (1.25 / sqrt(10)). Fewer would let the scatter of a handful
 of frames, not the night, set the baseline.
 """
 
-MINIMUM_ATTEMPTS_PER_NIGHT = 20
+MINIMUM_ATTEMPTS_PER_NIGHT = TunedParameter(
+    name="wayfinding.minimum_attempts_per_night",
+    default=20,
+    unit="attempts",
+    description="Fewest exposures a night needs to join the cancelled-exposure baseline.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D45",
+)
 """Fewest exposures a night needs to join the cancelled-exposure baseline.
 
 A share of cancelled exposures from fewer than 20 attempts moves in steps of
 5 percent or more, so one cancellation would look like a bad night.
 """
 
-MINIMUM_BASELINE_SESSIONS = 5
+MINIMUM_BASELINE_SESSIONS = TunedParameter(
+    name="wayfinding.minimum_baseline_sessions",
+    default=5,
+    unit="sessions of the equipment",
+    description="Fewest sessions a baseline limit must rest on.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D42",
+)
 """Fewest sessions a baseline limit must rest on.
 
 With fewer than 5, a robust spread (a median absolute deviation) is not
@@ -508,10 +606,11 @@ def _exposure_threshold(guide_cadence_seconds: float | None) -> _DerivedLimit:
         )
     return _derived(
         name,
-        MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence_seconds,
+        resolve_parameter(MINIMUM_GUIDE_CYCLES_PER_EXPOSURE).value * guide_cadence_seconds,
         "s",
         LimitTier.OWN_BASELINE,
-        f"{MINIMUM_GUIDE_CYCLES_PER_EXPOSURE} guide cycles of this equipment's own guider: the "
+        f"{resolve_parameter(MINIMUM_GUIDE_CYCLES_PER_EXPOSURE).value} guide cycles of this equipment's own "
+        f"guider: the "
         "shortest exposure in which guiding error has time to vary.",
         {"guide_cadence_seconds": guide_cadence_seconds},
     )
@@ -543,13 +642,13 @@ def _excursion_threshold(guide_plate_scale: float, guiding_rms_limit: _DerivedLi
             "size of a statistical excursion cannot be worked out.",
             {"guide_plate_scale": guide_plate_scale},
         )
-    statistical = EXCURSION_SIGMA_MULTIPLE * guiding_rms_limit.limit.value
+    statistical = resolve_parameter(EXCURSION_SIGMA_MULTIPLE).value * guiding_rms_limit.limit.value
     return _derived(
         "guide_excursion_limit",
         max(statistical, pixel),
         "arcsec",
         LimitTier.PHYSICAL_BUDGET,
-        f"The larger of {EXCURSION_SIGMA_MULTIPLE:g} x the acceptable guiding error "
+        f"The larger of {resolve_parameter(EXCURSION_SIGMA_MULTIPLE).value:g} x the acceptable guiding error "
         f"({statistical:.2f} arcsec) and one guide pixel ({pixel:.2f} arcsec). An error "
         "this large is an event, not noise.",
         {"guiding_rms_limit": guiding_rms_limit.limit.value, "guide_plate_scale": guide_plate_scale},
@@ -621,14 +720,17 @@ def _baseline_thresholds(
             )
             continue
         log_median, log_spread = robust_median_and_spread([math.log(value) for value in values])
-        limit = math.exp(log_median + direction * BASELINE_SPREAD_MULTIPLIER * log_spread)
+        limit = math.exp(
+            log_median + direction * resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value * log_spread
+        )
         thresholds.append(
             _derived(
                 limit_name,
                 limit,
                 unit,
                 LimitTier.OWN_BASELINE,
-                f"Median of this equipment's sessions times exp({direction * BASELINE_SPREAD_MULTIPLIER:+g} "
+                "Median of this equipment's sessions times "
+                f"exp({direction * resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value:+g} "
                 f"x the robust spread of their logarithms): {meaning} this is unusual for this equipment.",
                 {"median": math.exp(log_median), "log_spread": log_spread},
                 len(values),
@@ -679,16 +781,22 @@ def _percentile_baseline_thresholds(
                 )
             )
             continue
-        limit = float(np.percentile(values, BASELINE_FRACTION_PERCENTILE, method="inverted_cdf"))
+        limit = float(
+            np.percentile(
+                values, resolve_parameter(BASELINE_FRACTION_PERCENTILE).value, method="inverted_cdf"
+            )
+        )
         thresholds.append(
             _derived(
                 limit_name,
                 limit,
                 "fraction",
                 LimitTier.OWN_BASELINE,
-                f"The {BASELINE_FRACTION_PERCENTILE}th percentile of {meaning} across this "
+                f"The "
+                f"{resolve_parameter(BASELINE_FRACTION_PERCENTILE).value}th percentile of {meaning} across "
+                f"this "
                 "equipment's sessions: a session above it is worse than 90 percent of the earlier ones.",
-                {"percentile": float(BASELINE_FRACTION_PERCENTILE)},
+                {"percentile": float(resolve_parameter(BASELINE_FRACTION_PERCENTILE).value)},
                 len(values),
             )
         )
@@ -704,9 +812,9 @@ def derive_performance_envelope(
     measured_image_quality: MeasuredImageQuality | None = None,
     baseline_values: Mapping[str, Sequence[float]] | None = None,
     guide_cadence_seconds: float | None = None,
-    blur_tolerance_fraction: float = DEFAULT_BLUR_TOLERANCE_FRACTION,
-    minimum_image_quality_samples: int = MINIMUM_IMAGE_QUALITY_SAMPLES,
-    minimum_baseline_sessions: int = MINIMUM_BASELINE_SESSIONS,
+    blur_tolerance_fraction: float | None = None,
+    minimum_image_quality_samples: int | None = None,
+    minimum_baseline_sessions: int | None = None,
 ) -> PerformanceEnvelope:
     """Work out every limit for the equipment described by the inputs.
 
@@ -736,10 +844,13 @@ def derive_performance_envelope(
         The equipment's median time between guide samples.
     blur_tolerance_fraction : `float`, optional
         The most guiding error and trailing may widen a star image.
+        When omitted, `DEFAULT_BLUR_TOLERANCE_FRACTION` is used.
     minimum_image_quality_samples : `int`, optional
         Fewest frames the measured star width must rest on.
+        When omitted, `MINIMUM_IMAGE_QUALITY_SAMPLES` is used.
     minimum_baseline_sessions : `int`, optional
         Fewest sessions a baseline limit must rest on.
+        When omitted, `MINIMUM_BASELINE_SESSIONS` is used.
 
     Returns
     -------
@@ -747,6 +858,12 @@ def derive_performance_envelope(
         Every limit. A limit that could not be worked out has no value and
         says why.
     """
+    if blur_tolerance_fraction is None:
+        blur_tolerance_fraction = resolve_parameter(DEFAULT_BLUR_TOLERANCE_FRACTION).value
+    if minimum_image_quality_samples is None:
+        minimum_image_quality_samples = resolve_parameter(MINIMUM_IMAGE_QUALITY_SAMPLES).value
+    if minimum_baseline_sessions is None:
+        minimum_baseline_sessions = resolve_parameter(MINIMUM_BASELINE_SESSIONS).value
     geometry = _geometry_thresholds(equipment, guide_scope, guide_camera)
     budget = _budget_thresholds(
         measured_image_quality, blur_tolerance_fraction, minimum_image_quality_samples

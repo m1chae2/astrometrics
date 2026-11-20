@@ -340,6 +340,7 @@ def main() -> None:
     host = os.environ.get("ASTROMETRICS_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("ASTROMETRICS_PORT", "5000"))
     register_thread_dump_signal()
+    startup.bind_helper_programs_to_backend_lifetime()
     logger.info("Starting Astrometrics backend on %s:%s", host, port)
     # Requests still running when a stop signal arrives (such as a hardware
     # poll the app window sent just before it closed) get a few seconds to

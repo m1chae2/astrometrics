@@ -597,6 +597,13 @@
       "interim_block": "",
       "note": "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing."
     },
+    "review_measure_tuned_parameters": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Built 2026-11-16 (#175). Works out the wayfinding tuned values; with save=True it backs up and writes the configuration file. The AI does not change settings."
+    },
     "review_measure_unguided_mount_error": {
       "tool_class": "observe",
       "category": "observatory-status",

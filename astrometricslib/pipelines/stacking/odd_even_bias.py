@@ -85,7 +85,16 @@ from scipy.ndimage import gaussian_filter
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import open_primary_hdu, write_image
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
@@ -142,13 +151,41 @@ __all__ = [
 # for s = 3 px, under 1% of the variance. A wider smoothing would leave less
 # but would flatten more of the sky's real structure. Design estimate; no data
 # set chose it.
-SMOOTHING_SIGMA_PX = 3.0
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+SMOOTHING_SIGMA_PX = TunedParameter(
+    name="stacking.smoothing_sigma_px",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
+    description=(
+        "Width of the Gaussian that smooths the sky of a real frame before the odd-even bias is judged."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D35",
+)
 
 # Real pixels are kept within this distance of any pixel the faint-source mask
 # flags (stars included), so a star keeps its real core and wings. The empty
 # apertures stay 13 px from flagged pixels, so none of their pixels is a real
 # one. Design estimate; no data set chose it.
-KEEP_RADIUS_PX = 4.0
+# On the reference setup this stands for 4.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+KEEP_RADIUS_PX = TunedParameter(
+    name="stacking.keep_radius_px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
+    unit="× star width",
+    description="Distance around flagged pixels within which real pixels are kept in the odd-even bias test.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D35",
+)
 
 
 @dataclass(frozen=True)
@@ -270,14 +307,15 @@ def smoothed_sky_frame(data: np.ndarray, bayer: bool) -> np.ndarray:
     smoothed : `numpy.ndarray`
         A 32-bit float array of the same shape.
     """
+    smoothing_sigma_px = resolve(SMOOTHING_SIGMA_PX).value
     image = np.asarray(data, dtype=np.float32)
     if not bayer:
-        return gaussian_filter(image, SMOOTHING_SIGMA_PX)
+        return gaussian_filter(image, smoothing_sigma_px)
     out = np.empty_like(image)
     for row_offset in (0, 1):
         for column_offset in (0, 1):
             plane = image[row_offset::2, column_offset::2]
-            out[row_offset::2, column_offset::2] = gaussian_filter(plane, SMOOTHING_SIGMA_PX / 2.0)
+            out[row_offset::2, column_offset::2] = gaussian_filter(plane, smoothing_sigma_px / 2.0)
     return out
 
 
@@ -370,6 +408,7 @@ def simulate_frame(real_path: str, output_path: str, sigma_adu: float, rng: np.r
     InvalidArgumentError
         If the frame is not a 2-D image.
     """
+    smoothing_sigma_px = resolve(SMOOTHING_SIGMA_PX).value
     with open_primary_hdu(real_path) as hdu:
         if hdu.data is None or hdu.data.ndim != 2:
             raise InvalidArgumentError(f"{real_path} is not a 2-D raw image, so it cannot be simulated.")
@@ -377,8 +416,8 @@ def simulate_frame(real_path: str, output_path: str, sigma_adu: float, rng: np.r
         header = hdu.header.copy()
     bayer = bool(str(header.get("BAYERPAT", "")).strip())
     smooth = smoothed_sky_frame(data, bayer)
-    keep = faint_source_distance(np.asarray(data, dtype=np.float32)) <= KEEP_RADIUS_PX
-    leftover = smoothed_noise_factor(SMOOTHING_SIGMA_PX / 2.0 if bayer else SMOOTHING_SIGMA_PX)
+    keep = faint_source_distance(np.asarray(data, dtype=np.float32)) <= resolve(KEEP_RADIUS_PX).value
+    leftover = smoothed_noise_factor(smoothing_sigma_px / 2.0 if bayer else smoothing_sigma_px)
     added_sigma = sigma_adu * math.sqrt(max(1.0 - leftover**2, 0.0))
     simulated = np.where(keep, np.asarray(data, dtype=np.float32), smooth)
     simulated = simulated + rng.normal(0.0, added_sigma, size=simulated.shape).astype(np.float32)
@@ -515,6 +554,7 @@ def measure_odd_even_bias(
         If the library stack has no saved noise sums or apertures, or the
         frames' predicted noise is not available.
     """
+    odd_even_difference_minimum_frames_per_half = resolve(ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF).value
 
     def say(text: str) -> None:
         """Report a step.
@@ -544,10 +584,10 @@ def measure_odd_even_bias(
             raise InvalidArgumentError("the library stack's registration reference frame is not recorded")
         split = split_into_halves(library.members, reference_path)
         smaller = min(len(split.odd), len(split.even))
-        if smaller < ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF:
+        if smaller < odd_even_difference_minimum_frames_per_half:
             raise InvalidArgumentError(
                 f"a half would have {smaller} frames, fewer than the "
-                f"{ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} the odd–even difference needs"
+                f"{odd_even_difference_minimum_frames_per_half} the odd–even difference needs"
             )
         library_folder = os.path.dirname(library_stack_path)
         apertures_path = os.path.join(library_folder, APERTURE_FILE_NAME)

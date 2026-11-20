@@ -62,7 +62,14 @@ from datetime import datetime
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
     is_listed_as_variable,
 )
@@ -70,39 +77,116 @@ from astrometricslib.pipelines.photometry.post_processing.known_variability_labe
 # The fewest comparison stars a session may end with. Below this, the
 # ensemble's own noise and its chance of containing a variable star are too
 # large to trust. Vetting stops dropping stars at this size.
-MINIMUM_COMPARISON_STARS = 5
+MINIMUM_COMPARISON_STARS = TunedParameter(
+    name="photometry.minimum_comparison_stars",
+    default=5,
+    unit="stars",
+    description="Fewest comparison stars a session may end with.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-01",
+)
 
 # The default cap on the comparison set. More stars lower the ensemble noise
 # as 1 / sqrt(N), but the extra stars are fainter and noisier, so the gain
 # shrinks quickly. A design choice.
-DEFAULT_MAXIMUM_COMPARISON_STARS = 20
+DEFAULT_MAXIMUM_COMPARISON_STARS = TunedParameter(
+    name="photometry.default_maximum_comparison_stars",
+    default=20,
+    unit="stars",
+    description="Default cap on the size of the comparison set.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-01",
+)
 
 # The share of the brightest candidates that is skipped. Stars this bright are
 # the likeliest to be close to saturation, where a flux no longer rises in
 # step with the star's brightness. A design choice.
-BRIGHTEST_SKIPPED_FRACTION = 0.02
+BRIGHTEST_SKIPPED_FRACTION = TunedParameter(
+    name="photometry.brightest_skipped_fraction",
+    default=0.02,
+    unit="fraction",
+    description="Share of the brightest candidate comparison stars that is skipped.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-01",
+)
 
 # The brightness rank, as a share of the candidates, at which the band ends.
 # A design choice.
-FAINTEST_BAND_FRACTION = 0.30
+FAINTEST_BAND_FRACTION = TunedParameter(
+    name="photometry.faintest_band_fraction",
+    default=0.30,
+    unit="fraction",
+    description=(
+        "Brightness rank, as a share of the candidates, at which the band of candidate comparison stars ends."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-01",
+)
 
 # The band is widened to at least this many candidates, so vetting has stars
 # to drop. A field with fewer candidates than this uses all of them.
-MINIMUM_VETTING_CANDIDATES = 10
+MINIMUM_VETTING_CANDIDATES = TunedParameter(
+    name="photometry.minimum_vetting_candidates",
+    default=10,
+    unit="stars",
+    description="Fewest candidates that go into vetting, so vetting has stars to drop.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D05",
+)
 
 # The most candidates that go into vetting. Each round of vetting looks at
 # every pair of stars, so the cost grows with the square of this number.
-MAXIMUM_VETTING_CANDIDATES = 100
+MAXIMUM_VETTING_CANDIDATES = TunedParameter(
+    name="photometry.maximum_vetting_candidates",
+    default=100,
+    unit="stars",
+    description="Most candidates that go into vetting, which bounds its cost.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D05",
+)
 
 # A frame is usable when at least this share of the typical number of
 # measured stars has a positive flux in it. A frame where tracking failed or
 # a cloud hid the field has far fewer, and is left out of the whole session.
-MINIMUM_USABLE_FRAME_FRACTION = 0.5
+MINIMUM_USABLE_FRAME_FRACTION = TunedParameter(
+    name="photometry.minimum_usable_frame_fraction",
+    default=0.5,
+    unit="fraction",
+    description="Share of the typical number of measured stars a frame needs to count as usable.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D07",
+)
 
 # A star is too scattered when its reduced chi-square is more than this many
 # standard deviations above the reference value. The standard deviation of a
 # reduced chi-square with N - 1 degrees of freedom is sqrt(2 / (N - 1)).
-EXCESS_SCATTER_SIGMA = 3.0
+EXCESS_SCATTER_SIGMA = TunedParameter(
+    name="photometry.excess_scatter_sigma",
+    default=3.0,
+    unit="sigma",
+    description=(
+        "How many standard deviations above the reference reduced chi-square a comparison star "
+        "may sit before it counts as too scattered."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-01",
+)
 
 # The smallest fractional noise a star may be given. It stops a perfectly
 # constant light curve (a test fixture, never real data) from dividing by zero.
@@ -120,7 +204,16 @@ _CONSISTENT_CHI_SQUARE = 1.0
 _MAD_TO_SIGMA = 1.4826
 
 # The fewest frames for which a consistency test is meaningful.
-_MINIMUM_FRAMES_FOR_VETTING = 4
+_MINIMUM_FRAMES_FOR_VETTING = TunedParameter(
+    name="photometry.minimum_frames_for_vetting",
+    default=4,
+    unit="frames",
+    description="Fewest frames for which the comparison-star consistency test is meaningful.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D07",
+)
 
 
 def fractional_to_magnitudes(fraction: float) -> float:
@@ -308,6 +401,7 @@ def build_flux_table(stars: list[StellarObject]) -> FluxTable | None:
         `None` when no star has a measurement, or when no frame has a
         positive flux.
     """
+    minimum_usable_frame_fraction = resolve(MINIMUM_USABLE_FRAME_FRACTION).value
     tracked = [star for star in stars if star.photometry is not None and star.photometry.fluxes]
     stamps = sorted({stamp for star in tracked for stamp in star.photometry.timestamps})
     if not stamps:
@@ -345,7 +439,7 @@ def build_flux_table(stars: list[StellarObject]) -> FluxTable | None:
     typical = float(np.median(measured_per_frame))
     if typical <= 0:
         return None
-    usable = measured_per_frame >= MINIMUM_USABLE_FRAME_FRACTION * typical
+    usable = measured_per_frame >= minimum_usable_frame_fraction * typical
     return FluxTable(
         star_ids=tuple(star.id for star in tracked),
         timestamps=tuple(stamp for stamp, keep in zip(stamps, usable, strict=True) if keep),
@@ -458,6 +552,9 @@ def _vet_candidates(
         order they were dropped). If more than `maximum` remain consistent,
         the ones with the smallest errors are kept.
     """
+    minimum_frames_for_vetting = resolve(_MINIMUM_FRAMES_FOR_VETTING).value
+    minimum_comparison_stars = resolve(MINIMUM_COMPARISON_STARS).value
+    excess_scatter_sigma = resolve(EXCESS_SCATTER_SIGMA).value
     candidate_count, frame_count = fluxes.shape
     means = fluxes.mean(axis=1, keepdims=True)
     relative = fluxes / means
@@ -468,9 +565,9 @@ def _vet_candidates(
 
     active = list(range(candidate_count))
     dropped: list[int] = []
-    if frame_count >= _MINIMUM_FRAMES_FOR_VETTING:
-        limit = 1.0 + EXCESS_SCATTER_SIGMA * math.sqrt(2.0 / (frame_count - 1))
-        while len(active) > MINIMUM_COMPARISON_STARS:
+    if frame_count >= minimum_frames_for_vetting:
+        limit = 1.0 + excess_scatter_sigma * math.sqrt(2.0 / (frame_count - 1))
+        while len(active) > minimum_comparison_stars:
             chi_square = _reduced_chi_squares(relative[active], fractional_error[active])
             scale = max(float(np.median(chi_square)), _CONSISTENT_CHI_SQUARE)
             worst = int(np.argmax(chi_square))
@@ -485,9 +582,7 @@ def _vet_candidates(
     return active, dropped
 
 
-def select_comparison_set(
-    table: FluxTable, maximum: int = DEFAULT_MAXIMUM_COMPARISON_STARS
-) -> ComparisonSelection:
+def select_comparison_set(table: FluxTable, maximum: int | None = None) -> ComparisonSelection:
     """Choose the comparison stars for a session.
 
     A candidate is measured with a positive flux in every usable frame, never
@@ -510,7 +605,14 @@ def select_comparison_set(
     selection : `ComparisonSelection`
         The chosen rows and the rows turned away.
     """
-    maximum = max(maximum, MINIMUM_COMPARISON_STARS)
+    minimum_comparison_stars = resolve(MINIMUM_COMPARISON_STARS).value
+    brightest_skipped_fraction = resolve(BRIGHTEST_SKIPPED_FRACTION).value
+    faintest_band_fraction = resolve(FAINTEST_BAND_FRACTION).value
+    minimum_vetting_candidates = resolve(MINIMUM_VETTING_CANDIDATES).value
+    maximum_vetting_candidates = resolve(MAXIMUM_VETTING_CANDIDATES).value
+    if maximum is None:
+        maximum = resolve(DEFAULT_MAXIMUM_COMPARISON_STARS).value
+    maximum = max(maximum, minimum_comparison_stars)
     eligible = np.all(np.isfinite(table.fluxes), axis=1) & ~table.ever_saturated & table.saturation_trusted
     listed_rows = np.flatnonzero(eligible & table.listed_variable)
     pool = np.flatnonzero(eligible & ~table.listed_variable)
@@ -519,11 +621,11 @@ def select_comparison_set(
 
     brightness = np.median(table.fluxes[pool], axis=1)
     ranked = pool[np.argsort(-brightness, kind="stable")]
-    first = math.floor(BRIGHTEST_SKIPPED_FRACTION * ranked.size)
+    first = math.floor(brightest_skipped_fraction * ranked.size)
     last = max(
-        math.ceil(FAINTEST_BAND_FRACTION * ranked.size), min(ranked.size, first + MINIMUM_VETTING_CANDIDATES)
+        math.ceil(faintest_band_fraction * ranked.size), min(ranked.size, first + minimum_vetting_candidates)
     )
-    band = ranked[first:last][:MAXIMUM_VETTING_CANDIDATES]
+    band = ranked[first:last][:maximum_vetting_candidates]
 
     uses_errors = bool(np.all(np.isfinite(table.errors[band])))
     kept, dropped = _vet_candidates(table.fluxes[band], table.errors[band] if uses_errors else None, maximum)

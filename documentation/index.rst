@@ -79,11 +79,11 @@ Explore by section
 
         Recipes for one task each: control the observatory, tune the processing for your setup, change a tuned value.
 
-    .. grid-item-card:: Explanation
+    .. grid-item-card:: Application Overview
         :link: explanation
         :link-type: doc
 
-        How the software works and why: the theory of each library, and how the desktop app is built.
+        How the application fits together: its data models, algorithms and workflows, with the theory of each library and how the desktop app is built.
 
     .. grid-item-card:: Reference
         :link: reference

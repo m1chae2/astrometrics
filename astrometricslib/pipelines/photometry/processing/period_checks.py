@@ -28,6 +28,7 @@ from collections.abc import Sequence
 import numpy as np
 from astropy.timeseries import LombScargle
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
@@ -36,6 +37,12 @@ from astrometricslib.models.quality.gate_result import (
     unchecked_gate,
 )
 from astrometricslib.models.stellar_source import PeriodogramResult, TransitCandidate
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.processing.periodicity_search import (
     VERDICT_DETECTED,
     VERDICT_NOT_DETECTED,
@@ -47,55 +54,199 @@ HOLDOUT_GATE_NAME = "holdout_nights"
 ALIAS_GATE_NAME = "alias_ambiguity"
 
 # A gap in the measurements longer than this separates one night from the next.
-NIGHT_GAP_DAYS = 0.25
+NIGHT_GAP_DAYS = TunedParameter(
+    name="photometry.night_gap_days",
+    default=0.25,
+    unit="days",
+    description="A gap in the measurements longer than this separates one night from the next.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D34",
+)
 
 # The fewest nights a hold-out needs: one to leave out and two to find a period
 # from, so that the training nights show a repeat at all.
-MINIMUM_NIGHTS = 3
+MINIMUM_NIGHTS = TunedParameter(
+    name="photometry.minimum_nights",
+    default=3,
+    unit="nights",
+    description="Fewest nights a hold-out check needs: one to leave out and two to find a period from.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
 
 # A night must have at least this many measurements to be left out, and the
 # others together at least this many to find a period from.
-MINIMUM_HELD_OUT_POINTS = 8
-MINIMUM_TRAINING_POINTS = 15
+MINIMUM_HELD_OUT_POINTS = TunedParameter(
+    name="photometry.minimum_held_out_points",
+    default=8,
+    unit="points",
+    description=(
+        "Fewest measurements a night needs to be left out, and the other nights together need to "
+        "find a period."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
+MINIMUM_TRAINING_POINTS = TunedParameter(
+    name="photometry.minimum_training_points",
+    default=15,
+    unit="points",
+    description="Fewest measurements the training nights need to find a period.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
 
 # How much of the period the training search may range around the full-data
 # period, as a fraction of the frequency. The search finds the best period
 # near the full-data one; the check is whether it is the same period.
-_FREQUENCY_WINDOW = 0.25
+_FREQUENCY_WINDOW = TunedParameter(
+    name="photometry.frequency_window",
+    default=0.25,
+    unit="fraction",
+    description=(
+        "How much of the period the training search may range around the full-data period, as a "
+        "share of the frequency."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D23",
+)
 
 # The training search steps through frequency by at most 1/(5 T), where T is
 # the span of the training nights. A periodogram peak is about 1/T wide, so
 # this puts at least five samples across each peak. The step is set by T alone
 # and is never made coarser to save time.
-_SAMPLES_PER_PEAK = 5
+_SAMPLES_PER_PEAK = TunedParameter(
+    name="photometry.period_checks.samples_per_peak",
+    default=5,
+    unit="samples",
+    description="Samples across each periodogram peak in the training search.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D23",
+)
 
 # The most frequencies the training search evaluates. A long span needs a fine
 # step, so a wide window could need more points than this. The window then
 # narrows around the full-data frequency instead of the step growing.
-_MAXIMUM_WINDOW_POINTS = 20_000
+_MAXIMUM_WINDOW_POINTS = TunedParameter(
+    name="photometry.maximum_window_points",
+    default=20_000,
+    unit="points",
+    description="Most frequencies the training search evaluates.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D23",
+)
 
 # A held-out night agrees when the model from the other nights predicts it
 # better than a model of the same shape at a random phase does in all but this
 # share of random phases (a one-sided 5% test).
-_PERMUTATION_COUNT = 199
-_AGREEMENT_P_VALUE = 0.05
+_PERMUTATION_COUNT = TunedParameter(
+    name="photometry.permutation_count",
+    default=199,
+    unit="permutations",
+    description="Number of random phases a held-out night is compared with.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
+_AGREEMENT_P_VALUE = TunedParameter(
+    name="photometry.agreement_p_value",
+    default=0.05,
+    unit="probability",
+    description=(
+        "Share of random phases that may predict a held-out night as well as the model, for the "
+        "night to agree."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
 
 # The share of testable nights that must agree.
-_AGREEING_SHARE = 0.5
+_AGREEING_SHARE = TunedParameter(
+    name="photometry.agreeing_share",
+    default=0.5,
+    unit="fraction",
+    description="Share of testable nights that must agree.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D19",
+)
 
 # A dip is called seen in a held-out night when its depth is at least this many
 # standard errors, and it needs this many points inside the predicted dips.
-_DIP_Z_SCORE = 2.0
-_MINIMUM_POINTS_IN_DIP = 3
+_DIP_Z_SCORE = TunedParameter(
+    name="photometry.dip_z_score",
+    default=2.0,
+    unit="sigma",
+    description="Depth, in standard errors, at which a dip counts as seen in a held-out night.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
+_MINIMUM_POINTS_IN_DIP = TunedParameter(
+    name="photometry.minimum_points_in_dip",
+    default=3,
+    unit="points",
+    description="Fewest points inside the predicted dips for a night to be tested.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D34",
+)
 
 # An alias counts as a rival when its power is at least this share of the best
 # peak's, and the window (the schedule's own response) has a peak at least this
 # share of its strongest at the frequency offset.
-_RIVAL_ALIAS_POWER_SHARE = 0.9
-_SIGNIFICANT_WINDOW_PEAK_SHARE = 0.5
+_RIVAL_ALIAS_POWER_SHARE = TunedParameter(
+    name="photometry.rival_alias_power_share",
+    default=0.9,
+    unit="fraction",
+    description="Share of the best peak's power at which an alias counts as a rival.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D19",
+)
+_SIGNIFICANT_WINDOW_PEAK_SHARE = TunedParameter(
+    name="photometry.significant_window_peak_share",
+    default=0.5,
+    unit="fraction",
+    description="Share of the window's strongest peak at which a window peak counts as significant.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D19",
+)
 
 # How many of the schedule's strongest frequencies are tried as alias offsets.
-_WINDOW_PEAKS_TRIED = 3
+_WINDOW_PEAKS_TRIED = TunedParameter(
+    name="photometry.window_peaks_tried",
+    default=3,
+    unit="peaks",
+    description="How many of the schedule's strongest frequencies are tried as alias offsets.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D19",
+)
 
 _VERDICT_ORDER = (VERDICT_NOT_DETECTED, VERDICT_POSSIBLE, VERDICT_DETECTED)
 
@@ -127,7 +278,7 @@ def window_power(time_days: np.ndarray, frequency_per_day: np.ndarray) -> np.nda
     )
 
 
-def split_into_nights(time_days: np.ndarray, gap_days: float = NIGHT_GAP_DAYS) -> list[np.ndarray]:
+def split_into_nights(time_days: np.ndarray, gap_days: float | None = None) -> list[np.ndarray]:
     """Group measurement indices into nights.
 
     Parameters
@@ -142,6 +293,8 @@ def split_into_nights(time_days: np.ndarray, gap_days: float = NIGHT_GAP_DAYS) -
     nights : `list` [`numpy.ndarray`]
         The indices of each night's measurements, in time order.
     """
+    if gap_days is None:
+        gap_days = resolve(NIGHT_GAP_DAYS).value
     order = np.argsort(time_days)
     if order.size == 0:
         return []
@@ -202,8 +355,11 @@ def _training_frequency_window(span_days: float, centre: float) -> np.ndarray:
         Evenly spaced frequencies centred on `centre`, with at most
         `_MAXIMUM_WINDOW_POINTS` points.
     """
-    step = 1.0 / (_SAMPLES_PER_PEAK * span_days)
-    half_points = min(math.ceil(_FREQUENCY_WINDOW * centre / step), (_MAXIMUM_WINDOW_POINTS - 1) // 2)
+    samples_per_peak = resolve(_SAMPLES_PER_PEAK).value
+    maximum_window_points = resolve(_MAXIMUM_WINDOW_POINTS).value
+    frequency_window = resolve(_FREQUENCY_WINDOW).value
+    step = 1.0 / (samples_per_peak * span_days)
+    half_points = min(math.ceil(frequency_window * centre / step), (maximum_window_points - 1) // 2)
     return centre + step * np.arange(-half_points, half_points + 1)
 
 
@@ -254,21 +410,27 @@ def holdout_cycle(time_days: np.ndarray, flux: np.ndarray, period_days: float, s
         night can be tested; ``passed`` when more than half the testable nights
         agree; otherwise ``failed``.
     """
+    agreeing_share = resolve(_AGREEING_SHARE).value
+    minimum_nights = resolve(MINIMUM_NIGHTS).value
+    agreement_p_value = resolve(_AGREEMENT_P_VALUE).value
+    minimum_held_out_points = resolve(MINIMUM_HELD_OUT_POINTS).value
+    minimum_training_points = resolve(MINIMUM_TRAINING_POINTS).value
+    permutation_count = resolve(_PERMUTATION_COUNT).value
     time_days = np.asarray(time_days, dtype=float)
     flux = np.asarray(flux, dtype=float)
-    source = f"each night left out in turn; more than {_AGREEING_SHARE:.0%} must agree (5% level)"
+    source = f"each night left out in turn; more than {agreeing_share:.0%} must agree (5% level)"
     nights = split_into_nights(time_days)
-    if len(nights) < MINIMUM_NIGHTS:
+    if len(nights) < minimum_nights:
         return unchecked_gate(
             HOLDOUT_GATE_NAME,
-            f"only {len(nights)} night(s); {MINIMUM_NIGHTS} are needed to leave one out",
+            f"only {len(nights)} night(s); {minimum_nights} are needed to leave one out",
             source,
         )
     generator = np.random.default_rng(seed)
     tested = agreed = 0
     for held in nights:
         training_index = np.concatenate([night for night in nights if night is not held])
-        if held.size < MINIMUM_HELD_OUT_POINTS or training_index.size < MINIMUM_TRAINING_POINTS:
+        if held.size < minimum_held_out_points or training_index.size < minimum_training_points:
             continue
         train_t, train_f = time_days[training_index], flux[training_index]
         found = _train_cycle_period(train_t, train_f, period_days)
@@ -287,10 +449,10 @@ def holdout_cycle(time_days: np.ndarray, flux: np.ndarray, period_days: float, s
             _skill(
                 time_days[held], flux[held], found, coefficients, mean, generator.uniform(0.0, 2.0 * math.pi)
             )
-            for _ in range(_PERMUTATION_COUNT)
+            for _ in range(permutation_count)
         ]
-        p_value = (1 + sum(skill >= observed for skill in random_skills)) / (1 + _PERMUTATION_COUNT)
-        agreed += p_value <= _AGREEMENT_P_VALUE
+        p_value = (1 + sum(skill >= observed for skill in random_skills)) / (1 + permutation_count)
+        agreed += p_value <= agreement_p_value
     if tested < 2:
         return unchecked_gate(
             HOLDOUT_GATE_NAME,
@@ -298,16 +460,16 @@ def holdout_cycle(time_days: np.ndarray, flux: np.ndarray, period_days: float, s
             source,
         )
     share = agreed / tested
-    if share > _AGREEING_SHARE:
+    if share > agreeing_share:
         return passed_gate(
-            HOLDOUT_GATE_NAME, share, _AGREEING_SHARE, source, f"{agreed} of {tested} nights agree"
+            HOLDOUT_GATE_NAME, share, agreeing_share, source, f"{agreed} of {tested} nights agree"
         )
     return failed_gate(
         HOLDOUT_GATE_NAME,
         f"the other nights predict only {agreed} of {tested} left-out nights, so the pattern "
         "may be a feature of the nights it was found from",
         share,
-        _AGREEING_SHARE,
+        agreeing_share,
         source,
     )
 
@@ -337,20 +499,26 @@ def holdout_transit(
         left-out night has the predicted dips in it; ``passed`` when more than
         half the nights that do show them; otherwise ``failed``.
     """
+    dip_z_score = resolve(_DIP_Z_SCORE).value
+    minimum_nights = resolve(MINIMUM_NIGHTS).value
+    minimum_held_out_points = resolve(MINIMUM_HELD_OUT_POINTS).value
+    minimum_training_points = resolve(MINIMUM_TRAINING_POINTS).value
+    minimum_points_in_dip = resolve(_MINIMUM_POINTS_IN_DIP).value
+    agreeing_share = resolve(_AGREEING_SHARE).value
     time_days = np.asarray(time_days, dtype=float)
     flux = np.asarray(flux, dtype=float)
-    source = f"dips predicted from the other nights seen at {_DIP_Z_SCORE:g} standard errors in most nights"
+    source = f"dips predicted from the other nights seen at {dip_z_score:g} standard errors in most nights"
     nights = split_into_nights(time_days)
-    if len(nights) < MINIMUM_NIGHTS:
+    if len(nights) < minimum_nights:
         return unchecked_gate(
             HOLDOUT_GATE_NAME,
-            f"only {len(nights)} night(s); {MINIMUM_NIGHTS} are needed to leave one out",
+            f"only {len(nights)} night(s); {minimum_nights} are needed to leave one out",
             source,
         )
     tested = seen = 0
     for held in nights:
         training_index = np.concatenate([night for night in nights if night is not held])
-        if held.size < MINIMUM_HELD_OUT_POINTS or training_index.size < MINIMUM_TRAINING_POINTS:
+        if held.size < minimum_held_out_points or training_index.size < minimum_training_points:
             continue
         trained = box_search(time_days[training_index], flux[training_index], shuffle_count=shuffle_count)
         if not trained.period_days or abs(trained.period_days - period_days) > period_days**2 / float(
@@ -363,13 +531,13 @@ def holdout_transit(
             held_t - trained.epoch_t0 + 0.5 * trained.period_days
         ) % trained.period_days - 0.5 * trained.period_days
         in_dip = np.abs(offset) <= half_duration
-        if in_dip.sum() < _MINIMUM_POINTS_IN_DIP or (~in_dip).sum() < MINIMUM_HELD_OUT_POINTS:
+        if in_dip.sum() < minimum_points_in_dip or (~in_dip).sum() < minimum_held_out_points:
             continue
         tested += 1
         depth = float(np.mean(held_f[~in_dip]) - np.mean(held_f[in_dip]))
         scatter = float(np.std(held_f[~in_dip])) or 1e-12
         standard_error = scatter * math.sqrt(1.0 / in_dip.sum() + 1.0 / (~in_dip).sum())
-        seen += depth / standard_error >= _DIP_Z_SCORE
+        seen += depth / standard_error >= dip_z_score
     if tested == 0:
         return unchecked_gate(
             HOLDOUT_GATE_NAME,
@@ -377,15 +545,15 @@ def holdout_transit(
             source,
         )
     share = seen / tested
-    if share > _AGREEING_SHARE:
+    if share > agreeing_share:
         return passed_gate(
-            HOLDOUT_GATE_NAME, share, _AGREEING_SHARE, source, f"dips seen in {seen} of {tested} nights"
+            HOLDOUT_GATE_NAME, share, agreeing_share, source, f"dips seen in {seen} of {tested} nights"
         )
     return failed_gate(
         HOLDOUT_GATE_NAME,
         f"the dips predicted from the other nights are seen in only {seen} of {tested} left-out nights",
         share,
-        _AGREEING_SHARE,
+        agreeing_share,
         source,
     )
 
@@ -409,9 +577,12 @@ def alias_check(time_days: np.ndarray, flux: np.ndarray, period_days: float) -> 
         the best peak; ``passed`` when none does; ``not_checked`` when the
         data have no repeating schedule (a single night).
     """
+    rival_alias_power_share = resolve(_RIVAL_ALIAS_POWER_SHARE).value
+    significant_window_peak_share = resolve(_SIGNIFICANT_WINDOW_PEAK_SHARE).value
+    window_peaks_tried = resolve(_WINDOW_PEAKS_TRIED).value
     time_days = np.asarray(time_days, dtype=float)
     flux = np.asarray(flux, dtype=float)
-    source = f"no alias of the schedule at {_RIVAL_ALIAS_POWER_SHARE:.0%} or more of the best peak's power"
+    source = f"no alias of the schedule at {rival_alias_power_share:.0%} or more of the best peak's power"
     if len(split_into_nights(time_days)) < 2:
         return unchecked_gate(ALIAS_GATE_NAME, "a single night has no schedule to alias against", source)
     span = float(time_days.max() - time_days.min())
@@ -427,29 +598,29 @@ def alias_check(time_days: np.ndarray, flux: np.ndarray, period_days: float) -> 
         for index in range(1, len(window) - 1)
         if window[index] >= window[index - 1]
         and window[index] >= window[index + 1]
-        and window[index] >= _SIGNIFICANT_WINDOW_PEAK_SHARE * strongest
+        and window[index] >= significant_window_peak_share * strongest
         and frequency[index] > 2.0 * resolution
     ]
     offsets = sorted(
         (frequency[index] for index in candidates), key=lambda f: -float(np.interp(f, frequency, window))
     )
-    for offset in offsets[:_WINDOW_PEAKS_TRIED]:
+    for offset in offsets[:window_peaks_tried]:
         for sign in (-1.0, 1.0):
             alias = best + sign * offset
             if alias <= 0 or alias < frequency[0] or alias > frequency[-1]:
                 continue
             near = (frequency >= alias - resolution) & (frequency <= alias + resolution)
             ratio = float(power[near].max()) / best_power if best_power > 0 else 0.0
-            if ratio >= _RIVAL_ALIAS_POWER_SHARE:
+            if ratio >= rival_alias_power_share:
                 return failed_gate(
                     ALIAS_GATE_NAME,
                     f"a period of {1.0 / alias:.4g} d fits {ratio:.0%} as well as {period_days:.4g} d: "
                     "the two differ by the observing schedule's own frequency, so they cannot be told apart",
                     ratio,
-                    _RIVAL_ALIAS_POWER_SHARE,
+                    rival_alias_power_share,
                     source,
                 )
-    return passed_gate(ALIAS_GATE_NAME, limit=_RIVAL_ALIAS_POWER_SHARE, limit_source=source)
+    return passed_gate(ALIAS_GATE_NAME, limit=rival_alias_power_share, limit_source=source)
 
 
 def apply_verdict_checks(

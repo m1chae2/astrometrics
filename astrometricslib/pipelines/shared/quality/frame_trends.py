@@ -18,14 +18,71 @@ from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from typing import Any
 
-MINIMUM_FRAMES = 4
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
+MINIMUM_FRAMES = TunedParameter(
+    name="shared.minimum_frames",
+    default=4,
+    unit="frames",
+    description="Fewest frames needed to judge a trend across a run.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D21",
+)
 """Fewest frames a trend can be judged from. Fewer say nothing."""
 
-STEADY_STEP_FRACTION = 0.7
+STEADY_STEP_FRACTION = TunedParameter(
+    name="shared.steady_step_fraction",
+    default=0.7,
+    unit="fraction",
+    description="Fraction of steps that must go the same way for a trend to count as steady.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D21",
+)
 """The share of neighbouring-frame steps that must go the same way as the
 fitted change. Random scatter goes up and down about equally, so about half
 the steps agree; a steady drift has most steps agreeing. Chosen so a clean
 60-frame run with no drift is not flagged while a ramp with scatter is."""
+
+TREND_WINDOW_FRAMES = TunedParameter(
+    name="shared.trend_window_frames",
+    default=10,
+    unit="frames",
+    description="How many of the newest frames a trend check looks at.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D21",
+)
+"""The newest frames a trend check looks at. Ten frames give the
+pairwise-slope fit 45 slopes, enough that one bad frame cannot fake a trend,
+while still covering only the last stretch of a night."""
+
+TREND_THRESHOLD_PERCENT = TunedParameter(
+    name="shared.trend_threshold_percent",
+    default=15.0,
+    unit="percent",
+    description="Change across the window, as a percentage of its starting level, that counts as a trend.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D21",
+    allowed_range=(2.0, 100.0),
+    minimum_sample=100,
+)
+"""The change that counts as a trend. 15% is the starting value; the tuner
+`trend_tuning.TREND_THRESHOLD_TUNER` sets it to the change that ordinary
+windows of this setup's star width reach (see that module)."""
 
 DIRECTIONS = {"rising": "risen", "falling": "fallen"}
 """Words for the two directions of change."""
@@ -71,7 +128,7 @@ def describe_trend(values: Sequence[float], threshold_percent: float) -> dict[st
         too few frames only ``frames`` and ``flagged: False`` come back.
     """
     count = len(values)
-    if count < MINIMUM_FRAMES:
+    if count < resolve(MINIMUM_FRAMES).value:
         return {"frames": count, "flagged": False}
     slope = _theil_sen_slope(values)
     middle = statistics.median(values)
@@ -81,7 +138,9 @@ def describe_trend(values: Sequence[float], threshold_percent: float) -> dict[st
     steps = [later - earlier for earlier, later in pairwise(values)]
     agreeing = sum(1 for step in steps if step * slope > 0)
     steady_fraction = agreeing / len(steps)
-    flagged = abs(change_percent) >= threshold_percent and steady_fraction >= STEADY_STEP_FRACTION
+    flagged = (
+        abs(change_percent) >= threshold_percent and steady_fraction >= resolve(STEADY_STEP_FRACTION).value
+    )
     return {
         "frames": count,
         "first_level": round(first_level, 4),
@@ -120,7 +179,7 @@ def find_trends(
         `describe_trend`, plus ``direction`` and ``worrying``), and
         ``alerts``: one plain sentence for each worrying trend.
     """
-    recent = list(rows)[-max(window, MINIMUM_FRAMES) :]
+    recent = list(rows)[-max(window, resolve(MINIMUM_FRAMES).value) :]
     results: dict[str, Any] = {}
     alerts = []
     for name, worrying_direction in metrics.items():

@@ -68,6 +68,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const {
     allFiles, isLoadingFiles, filteredFiles, exposureCounts, fileFilterText, setFileFilterText,
+    selectedCamera: fileBrowserCamera, setSelectedCamera: setFileBrowserCamera,
+    selectedOptic, setSelectedOptic,
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
@@ -76,7 +78,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const {
     imageUrl, imageBlob, imageFrameInfo, autoPanTrigger, disableStretch,
-    loading, error, stretch, toggleStretch,
+    loading, error, displayMode, setDisplayMode,
     setSelectedLightRow, selectedLightRow
   } = useViewerState(selectedTarget, lightFrames, selectedFile);
 
@@ -93,7 +95,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // is a same-frame formality rather than a multi-second race.
   const hasFrameToAutoLoad = lightFrames.length > 0 && !selectedFile;
   const isViewerSettled = !loading && (
-    !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || error !== null
+    !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || imageBlob !== null || error !== null
   );
   useReportModeReady(
     'Image Processing',
@@ -164,7 +166,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
     setHeaderModalPath(path || selectedFile);
     setIsHeaderModalOpen(true);
   }, [selectedFile]);
-  const [fileBrowserCamera, setFileBrowserCamera] = useState('All');
 
   const { saveTarget, confirmDeleteTarget, handleCreateTarget } = useTargetActions();
 
@@ -427,8 +428,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       selectedTarget={selectedTarget}
       autoPanTrigger={autoPanTrigger}
       disableStretch={disableStretch}
-      stretch={stretch}
-      toggleStretch={toggleStretch}
+      displayMode={displayMode}
+      onDisplayModeChange={setDisplayMode}
       overlayStars={overlayStars}
       showAstrometryOverlay={showAstrometryOverlay}
       onToggleAstrometryOverlay={handleToggleAstrometryOverlay}
@@ -442,6 +443,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       setFileFilterText={setFileFilterText}
       fileBrowserCamera={fileBrowserCamera}
       setFileBrowserCamera={setFileBrowserCamera}
+      selectedOptic={selectedOptic}
+      setSelectedOptic={setSelectedOptic}
       checkedFiles={checkedFiles}
       handleRequestDeleteFiles={handleRequestDeleteFiles}
       onOpenHeaderModal={handleOpenHeaderModal}

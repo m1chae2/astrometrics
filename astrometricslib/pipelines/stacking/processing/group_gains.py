@@ -20,8 +20,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.config import EXPOSURE_GROUP_GAIN_TOLERANCE
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     find_saturation_plateau_ceiling,
@@ -39,7 +47,16 @@ logger = logging.getLogger(__name__)
 # clipped frames read low by up to a half or more. 0.2 sits between the 1 s
 # group (clipped) and the 2 s group (not). Unvalidated on other cameras or
 # offsets.
-CLIPPED_FRAME_ZERO_FRACTION = 0.2
+CLIPPED_FRAME_ZERO_FRACTION = TunedParameter(
+    name="stacking.clipped_frame_zero_fraction",
+    default=0.2,
+    unit="fraction",
+    description="Share of pixels at exactly zero above which a raw frame is treated as clipped.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-22",
+)
 
 # A stacked image with less than this fraction of its pixels holding data
 # (finite and not exactly zero) is treated as blank and discarded (see
@@ -57,7 +74,16 @@ CLIPPED_FRAME_ZERO_FRACTION = 0.2
 # session the good 0.02 s to 0.25 s groups held only 0.1% to 0.8% (the star
 # and its spectrum), against 76% to 100% for the 1 s to 5 s groups. Checked on
 # that one session only.
-MINIMUM_STACK_DATA_FRACTION = 0.0001
+MINIMUM_STACK_DATA_FRACTION = TunedParameter(
+    name="stacking.minimum_stack_data_fraction",
+    default=0.0001,
+    unit="fraction",
+    description="Share of pixels holding data below which a stacked image is treated as blank.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D69",
+)
 
 # A pixel in a group's stack at or above this fraction of the full scale (1.0
 # is the brightest value a 16-bit frame can hold, as Siril writes it) is
@@ -66,7 +92,16 @@ MINIMUM_STACK_DATA_FRACTION = 0.0001
 # a clipped value is not a measurement. Unvalidated: chosen a little below
 # full scale to catch stack averages that fall just short of 1.0. It has not
 # been checked against a saturated star in a stack from this pipeline.
-SATURATION_FRACTION_OF_FULL_SCALE = 0.95
+SATURATION_FRACTION_OF_FULL_SCALE = TunedParameter(
+    name="stacking.saturation_fraction_of_full_scale",
+    default=0.95,
+    unit="fraction of full scale",
+    description="Share of full scale at or above which a pixel of a group's stack counts as saturated.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D11",
+)
 
 # The plateau-ceiling constants (SATURATION_CEILING_SAMPLE_PIXELS and the
 # rest) live in astrometricslib.pipelines.shared.quality.saturation, where the
@@ -92,9 +127,27 @@ SATURATION_FRACTION_OF_FULL_SCALE = 0.95
 # GAIN_MINIMUM_PIXELS such pixels leaves the gain at 1. The percentiles and the
 # pixel count are unvalidated choices: 60% of a 3008 x 3008 image is about 5
 # million pixels.
-GAIN_MID_RANGE_PERCENTILES = (20.0, 80.0)
+GAIN_MID_RANGE_PERCENTILES = TunedParameter(
+    name="stacking.gain_mid_range_percentiles",
+    default=(20.0, 80.0),
+    unit="percentiles",
+    description="Percentile range of the reference stack used for the mid-range gain.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D10",
+)
 
-GAIN_MINIMUM_PIXELS = 200
+GAIN_MINIMUM_PIXELS = TunedParameter(
+    name="stacking.gain_minimum_pixels",
+    default=200,
+    unit="pixels",
+    description="Fewest shared pixels the pixel method needs to measure a gain.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D10",
+)
 
 # The ratio above is taken after each group's own sky level is subtracted,
 # and only over pixels whose sky-subtracted reference value is at least
@@ -108,7 +161,16 @@ GAIN_MINIMUM_PIXELS = 200
 # ratio by at most about 10%, and the median over many pixels removes most of
 # that; noise alone puts fewer than one pixel of a 9-million-pixel image
 # above it. The value is a design choice checked on those two fields.
-GAIN_SOURCE_SIGMAS = 10.0
+GAIN_SOURCE_SIGMAS = TunedParameter(
+    name="stacking.gain_source_sigmas",
+    default=10.0,
+    unit="noise sigmas",
+    description="Height, in background noise sigmas, a reference pixel must have to be used for the gain.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D10",
+)
 
 # How far from the median a neighbour difference may be, in units of the
 # rough (median absolute deviation) scale, and still count as noise in
@@ -117,15 +179,42 @@ GAIN_SOURCE_SIGMAS = 10.0
 # is 3.2 to 5 sigma: still leaves the bias under 0.5% while star pixels
 # fall outside. Checked on synthetic stepped data by
 # test_the_noise_estimate_is_fine_grained_on_stepped_data.
-NOISE_CLIP_SIGMAS = 4.0
+NOISE_CLIP_SIGMAS = TunedParameter(
+    name="stacking.noise_clip_sigmas",
+    default=4.0,
+    unit="robust sigmas",
+    description="Distance, in robust sigmas, beyond which a neighbour difference no longer counts as noise.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D26",
+)
 
 # The sky level of a group is the median of its trusted pixels after
 # repeatedly dropping pixels more than SKY_CLIP_SIGMAS spreads from it (stars
 # and the target), as in a sigma-clipped median. Five passes settle it on the
 # fields above.
-SKY_CLIP_SIGMAS = 3.0
+SKY_CLIP_SIGMAS = TunedParameter(
+    name="stacking.sky_clip_sigmas",
+    default=3.0,
+    unit="spreads",
+    description="Distance, in spreads, beyond which pixels are dropped when the sky level is found.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D10",
+)
 
-SKY_CLIP_PASSES = 5
+SKY_CLIP_PASSES = TunedParameter(
+    name="stacking.sky_clip_passes",
+    default=5,
+    unit="passes",
+    description="Number of clipping passes used when the sky level is found.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D10",
+)
 
 # In the pixel method, the brightest pixels give a second, diagnostic ratio:
 # the median ratio over the top GAIN_BRIGHTEST_FRACTION of the shared pixels
@@ -136,7 +225,16 @@ SKY_CLIP_PASSES = 5
 # camera, which is what a compressed bright end looks like and not what a gain
 # looks like. The pipeline records both ratios and compares them (see
 # DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).
-GAIN_BRIGHTEST_FRACTION = 0.01
+GAIN_BRIGHTEST_FRACTION = TunedParameter(
+    name="stacking.gain_brightest_fraction",
+    default=0.01,
+    unit="fraction",
+    description="Share of the brightest shared pixels used for the diagnostic bright-end gain.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D10",
+)
 
 # How far, in the pixel method, the bright-end ratio may differ from the
 # mid-range gain, as a fraction of the gain, before the group is treated as
@@ -145,10 +243,11 @@ GAIN_BRIGHTEST_FRACTION = 0.01
 # linear pair of groups agrees to well under 1% when the photon noise is small
 # (the unit tests reach 0.5%). 5% allows for noise in the 90,000 bright pixels
 # and for small flat-field residuals, and is far below the 35% disagreement
-# seen in the field. It is a design choice, not a validated limit;
-# `AppConfiguration.get_exposure_group_gain_tolerance` lets an observer change
-# it.
-DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = 0.05
+# seen in the field. It is a design choice, not a validated limit. It is the
+# processing setting `[Processing.Siril] exposure_group_gain_tolerance`
+# (`foundation.config.EXPOSURE_GROUP_GAIN_TOLERANCE`), so an observer can
+# change it.
+DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = EXPOSURE_GROUP_GAIN_TOLERANCE
 
 # With star fluxes (the star-flux gain below), the same tolerance bounds how
 # far the faintest or the brightest quarter of the stars may sit from the
@@ -171,7 +270,18 @@ DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = 0.05
 # is a judgement, wide enough for the real spread and far from those failures
 # (see documentation/library_design/validation/stacking.md, STK-21). It
 # applies to the star-flux gain and to the pixel gain alike.
-PLAUSIBLE_GAIN_RANGE = (0.25, 4.0)
+PLAUSIBLE_GAIN_RANGE = TunedParameter(
+    name="stacking.plausible_gain_range",
+    default=(0.25, 4.0),
+    unit="ratio",
+    description=(
+        "Range (low, high) of measured gains that are believed; outside it the group keeps a gain of 1."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-21",
+)
 
 # A group whose sky is more than SKY_RATIO_LIMIT times brighter (per second)
 # than the reference's is left out. A bright sky means a different night
@@ -191,7 +301,16 @@ PLAUSIBLE_GAIN_RANGE = (0.25, 4.0)
 # documentation/library_design/validation/stacking.md, STK-21). Only a
 # brighter sky is judged: a darker sky is no harm. The sky is compared only
 # for imaging stacks (with `use_star_fluxes`).
-SKY_RATIO_LIMIT = 3.0
+SKY_RATIO_LIMIT = TunedParameter(
+    name="stacking.sky_ratio_limit",
+    default=3.0,
+    unit="ratio",
+    description="Sky brightness ratio to the reference above which a group is left out.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-21",
+)
 
 
 def describe_group_clipping(
@@ -214,6 +333,7 @@ def describe_group_clipping(
     clipped : `list` [`dict`]
         The entries above `CLIPPED_FRAME_ZERO_FRACTION`.
     """
+    clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
     measured = [
         {"exposure_seconds": float(exposure), "frame_zero_fraction": round(float(zero_fraction), 3)}
         for exposure, zero_fraction in zip(exposures, zero_fractions, strict=True)
@@ -223,7 +343,7 @@ def describe_group_clipping(
     clipped = [
         entry
         for entry, zero_fraction in zip(measured, zero_fractions, strict=True)
-        if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION
+        if zero_fraction > clipped_frame_zero_fraction
     ]
     return measured, clipped
 
@@ -291,7 +411,7 @@ def estimate_background_noise(image: np.ndarray) -> float:
     rough_scale = 1.4826 * np.median(np.abs(differences - center))
     if rough_scale <= 0:
         return 0.0
-    kept = differences[np.abs(differences - center) <= NOISE_CLIP_SIGMAS * rough_scale]
+    kept = differences[np.abs(differences - center) <= resolve(NOISE_CLIP_SIGMAS).value * rough_scale]
     # Cutting a bell curve at 4 sigma removes 0.05% of its spread (the
     # standard deviation of a normal curve cut at +-4 sigma is 0.99947 of the
     # full one), so no correction is applied. If the rough scale is 20% off,
@@ -304,7 +424,7 @@ def estimate_background_noise(image: np.ndarray) -> float:
 
 def estimate_saturation_mask_level(
     image: np.ndarray,
-    fallback_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
+    fallback_level: float | None = None,
     clip_ceiling_adu: float | None = None,
 ) -> float:
     """Find the pixel value above which one group's stack is saturated.
@@ -336,17 +456,19 @@ def estimate_saturation_mask_level(
     level : `float`
         Pixels at or above this value should be treated as saturated.
     """
+    if fallback_level is None:
+        fallback_level = resolve(SATURATION_FRACTION_OF_FULL_SCALE).value
     ceiling = find_saturation_plateau_ceiling(image)
     if ceiling is None:
         if clip_ceiling_adu is not None and clip_ceiling_adu > 0:
-            return fallback_level * min(1.0, clip_ceiling_adu / FULL_SCALE_COUNTS)
+            return fallback_level * min(1.0, clip_ceiling_adu / resolve(FULL_SCALE_COUNTS).value)
         return fallback_level
-    return min(fallback_level, ceiling * SATURATION_MASK_FRACTION_OF_CEILING)
+    return min(fallback_level, ceiling * resolve(SATURATION_MASK_FRACTION_OF_CEILING).value)
 
 
 def saturated_pixel_mask(
     images: list[np.ndarray],
-    saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
+    saturation_level: float | None = None,
     clip_ceiling_adu: float | None = None,
 ) -> np.ndarray:
     """Mark the pixels where at least one group is left out as saturated.
@@ -378,6 +500,8 @@ def saturated_pixel_mask(
     InvalidArgumentError
         If `images` is empty.
     """
+    if saturation_level is None:
+        saturation_level = resolve(SATURATION_FRACTION_OF_FULL_SCALE).value
     mask = None
     for image in images:
         raw = np.asarray(image)
@@ -481,16 +605,18 @@ def estimate_sky_level(image: np.ndarray, mask: np.ndarray) -> float:
     sky_level : `float`
         The sky level, in the image's own units. 0.0 when no pixel is trusted.
     """
+    sky_clip_passes = resolve(SKY_CLIP_PASSES).value
+    sky_clip_sigmas = resolve(SKY_CLIP_SIGMAS).value
     values = np.asarray(image, dtype=np.float64)[np.asarray(mask, dtype=bool)]
     values = values[np.isfinite(values)]
     if values.size == 0:
         return 0.0
     level = float(np.median(values))
-    for _ in range(SKY_CLIP_PASSES):
+    for _ in range(sky_clip_passes):
         spread = 1.4826 * float(np.median(np.abs(values - level)))
         if spread <= 0:
             break
-        kept = values[np.abs(values - level) <= SKY_CLIP_SIGMAS * spread]
+        kept = values[np.abs(values - level) <= sky_clip_sigmas * spread]
         if kept.size == 0:
             break
         new_level = float(np.median(kept))
@@ -509,7 +635,7 @@ def _median_ratio(image: np.ndarray, reference: np.ndarray, selected: np.ndarray
         The median ratio, or `None` when fewer than `GAIN_MINIMUM_PIXELS`
         pixels are selected or the median is not a finite number.
     """
-    if int(np.count_nonzero(selected)) < GAIN_MINIMUM_PIXELS:
+    if int(np.count_nonzero(selected)) < resolve(GAIN_MINIMUM_PIXELS).value:
         return None
     ratio = float(np.median(image[selected] / reference[selected]))
     return ratio if np.isfinite(ratio) else None
@@ -519,7 +645,7 @@ def measure_group_gains(
     per_second_images: list[np.ndarray],
     usable_masks: list[np.ndarray],
     reference_index: int,
-    tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
+    tolerance: float | None = None,
     only: set[int] | None = None,
     sky_levels: list[float] | None = None,
 ) -> list[GroupGainMeasurement]:
@@ -572,6 +698,12 @@ def measure_group_gains(
         gain of 1 and is never marked `nonlinear`, because there is nothing
         to compare.
     """
+    if tolerance is None:
+        tolerance = resolve(DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).value
+    gain_minimum_pixels = resolve(GAIN_MINIMUM_PIXELS).value
+    gain_mid_range_percentiles = resolve(GAIN_MID_RANGE_PERCENTILES).value
+    gain_brightest_fraction = resolve(GAIN_BRIGHTEST_FRACTION).value
+    plausible_gain_range = resolve(PLAUSIBLE_GAIN_RANGE).value
     if sky_levels is None:
         sky_levels = [
             estimate_sky_level(image, mask)
@@ -579,7 +711,9 @@ def measure_group_gains(
         ]
     reference = per_second_images[reference_index] - sky_levels[reference_index]
     reference_noise = estimate_background_noise(per_second_images[reference_index])
-    source_floor = GAIN_SOURCE_SIGMAS * reference_noise if np.isfinite(reference_noise) else 0.0
+    source_floor = (
+        resolve(GAIN_SOURCE_SIGMAS).value * reference_noise if np.isfinite(reference_noise) else 0.0
+    )
     measurements = []
     for index, raw_image in enumerate(per_second_images):
         sky_level = sky_levels[index]
@@ -605,19 +739,19 @@ def measure_group_gains(
             & (reference > max(source_floor, 0.0))
             & np.isfinite(image)
         )
-        if int(np.count_nonzero(shared)) < GAIN_MINIMUM_PIXELS:
+        if int(np.count_nonzero(shared)) < gain_minimum_pixels:
             measurements.append(GroupGainMeasurement(sky_level=sky_level))
             continue
-        low, high = np.percentile(reference[shared], GAIN_MID_RANGE_PERCENTILES)
+        low, high = np.percentile(reference[shared], gain_mid_range_percentiles)
         gain = _median_ratio(image, reference, shared & (reference >= low) & (reference <= high))
-        cut = np.quantile(reference[shared], 1.0 - GAIN_BRIGHTEST_FRACTION)
+        cut = np.quantile(reference[shared], 1.0 - gain_brightest_fraction)
         bright_end_ratio = _median_ratio(image, reference, shared & (reference >= cut))
-        if gain is None or not PLAUSIBLE_GAIN_RANGE[0] <= gain <= PLAUSIBLE_GAIN_RANGE[1]:
+        if gain is None or not plausible_gain_range[0] <= gain <= plausible_gain_range[1]:
             logger.warning(
                 "Exposure group %d measured a brightness gain of %s, outside %s; using 1 instead.",
                 index,
                 "nothing" if gain is None else f"{gain:.3g}",
-                PLAUSIBLE_GAIN_RANGE,
+                plausible_gain_range,
             )
             measurements.append(GroupGainMeasurement(bright_end_ratio=bright_end_ratio, sky_level=sky_level))
             continue
@@ -685,7 +819,8 @@ def describe_bright_sky_group(measurement: GroupGainMeasurement, reference_expos
     """
     return (
         f"was left out: its sky is {measurement.sky_ratio:.1f} times brighter per second than the "
-        f"{reference_exposure_seconds:g} s group's (limit {SKY_RATIO_LIMIT:g}), so its frames were taken "
+        f"{reference_exposure_seconds:g} s group's (limit {resolve(SKY_RATIO_LIMIT).value:g}), "
+        "so its frames were taken "
         "under a flooded or foreign sky and its stars cannot be trusted to scale with the reference"
     )
 
@@ -698,7 +833,8 @@ def is_plausible_gain(gain: float) -> bool:
     plausible : `bool`
         `True` when the gain is a finite number inside the range.
     """
-    return bool(np.isfinite(gain) and PLAUSIBLE_GAIN_RANGE[0] <= gain <= PLAUSIBLE_GAIN_RANGE[1])
+    plausible_gain_range = resolve(PLAUSIBLE_GAIN_RANGE).value
+    return bool(np.isfinite(gain) and plausible_gain_range[0] <= gain <= plausible_gain_range[1])
 
 
 def record_sky_ratios(measurements: list[GroupGainMeasurement], reference_index: int) -> None:
@@ -712,10 +848,11 @@ def record_sky_ratios(measurements: list[GroupGainMeasurement], reference_index:
     reference_index : `int`
         Which entry is the reference.
     """
+    sky_ratio_limit = resolve(SKY_RATIO_LIMIT).value
     reference_sky = measurements[reference_index].sky_level
     for index, measurement in enumerate(measurements):
         if index == reference_index or reference_sky <= 0 or measurement.sky_level <= 0:
             continue
         ratio = measurement.sky_level / reference_sky
         measurement.sky_ratio = ratio
-        measurement.sky_too_bright = ratio > SKY_RATIO_LIMIT
+        measurement.sky_too_bright = ratio > sky_ratio_limit

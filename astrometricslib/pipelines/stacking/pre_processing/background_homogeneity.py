@@ -9,7 +9,14 @@ the moon rising).
 import statistics
 from typing import Any
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import describe_background_splits
 
 __all__ = [
@@ -24,11 +31,22 @@ __all__ = [
 # Tests show that normal conditions produce a ratio below 1.0, while
 # sudden cloud cover produces a ratio above 6.0. A threshold of 4.0 easily
 # separates the two cases.
-DEFAULT_GAP_RATIO_THRESHOLD = 4.0
+DEFAULT_GAP_RATIO_THRESHOLD = TunedParameter(
+    name="stacking.default_gap_ratio_threshold",
+    default=4.0,
+    unit="ratio",
+    description=(
+        "Gap ratio above which the sky brightness is judged to have changed suddenly, as when clouds roll in."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-04",
+)
 
 
 def detect_background_split(
-    background_levels: list[float], gap_ratio_threshold: float = DEFAULT_GAP_RATIO_THRESHOLD
+    background_levels: list[float], gap_ratio_threshold: float | None = None
 ) -> dict[str, Any] | None:
     """Detect a sharp two-group split in per-frame sky-background levels.
 
@@ -51,6 +69,8 @@ def detect_background_split(
         if neither side of the candidate split has more than one frame (so
         neither can show what its own normal spread looks like).
     """
+    if gap_ratio_threshold is None:
+        gap_ratio_threshold = resolve(DEFAULT_GAP_RATIO_THRESHOLD).value
     if len(background_levels) < 2:
         return None
 
@@ -101,7 +121,7 @@ def detect_background_split(
 
 
 def find_dominant_background_subset(
-    frames: list[Any], gap_ratio_threshold: float = DEFAULT_GAP_RATIO_THRESHOLD
+    frames: list[Any], gap_ratio_threshold: float | None = None
 ) -> tuple[list[Any], list[Any], dict[str, Any] | None]:
     """Split frames into the larger same-conditions group and the rest.
 
@@ -126,6 +146,8 @@ def find_dominant_background_subset(
     split_summary : `dict` [`str`, `Any`] or `None`
         Details about the split, or None if no split happened.
     """
+    if gap_ratio_threshold is None:
+        gap_ratio_threshold = resolve(DEFAULT_GAP_RATIO_THRESHOLD).value
     if not frames:
         return [], [], None
 
@@ -148,7 +170,7 @@ def find_dominant_background_subset(
 
 
 def find_dominant_background_subset_by_exposure(
-    frames: list[Any], gap_ratio_threshold: float = DEFAULT_GAP_RATIO_THRESHOLD
+    frames: list[Any], gap_ratio_threshold: float | None = None
 ) -> tuple[list[Any], list[Any], list[dict[str, Any]]]:
     """Check for a sky-background split within each exposure length.
 
@@ -178,6 +200,8 @@ def find_dominant_background_subset_by_exposure(
         by `find_dominant_background_subset` with an ``"exposure_seconds"``
         entry added.
     """
+    if gap_ratio_threshold is None:
+        gap_ratio_threshold = resolve(DEFAULT_GAP_RATIO_THRESHOLD).value
     from astrometricslib.pipelines.stacking.processing.exposure_groups import split_frames_by_exposure
 
     if not frames:
@@ -202,7 +226,16 @@ BACKGROUND_GATE_NAME = "background_homogeneity"
 # A split needs a side with more than one frame to show what normal spread
 # looks like (see `detect_background_split`), so a group of fewer than three
 # measured frames cannot be judged at all.
-MINIMUM_MEASURED_FRAMES_TO_JUDGE = 3
+MINIMUM_MEASURED_FRAMES_TO_JUDGE = TunedParameter(
+    name="stacking.minimum_measured_frames_to_judge",
+    default=3,
+    unit="frames",
+    description="Fewest measured frames a group needs before its background can be judged.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D62",
+)
 
 
 def background_homogeneity_gate(
@@ -232,9 +265,12 @@ def background_homogeneity_gate(
     """
     from astrometricslib.pipelines.stacking.processing.exposure_groups import split_frames_by_exposure
 
+    default_gap_ratio_threshold = resolve(DEFAULT_GAP_RATIO_THRESHOLD).value
+    minimum_measured_frames_to_judge = resolve(MINIMUM_MEASURED_FRAMES_TO_JUDGE).value
+
     source = (
-        f"gap ratio {DEFAULT_GAP_RATIO_THRESHOLD:g}; "
-        f"at least {MINIMUM_MEASURED_FRAMES_TO_JUDGE} measured frames"
+        f"gap ratio {default_gap_ratio_threshold:g}; "
+        f"at least {minimum_measured_frames_to_judge} measured frames"
     )
     if not enabled:
         return unchecked_gate(
@@ -244,13 +280,13 @@ def background_homogeneity_gate(
         return failed_gate(
             BACKGROUND_GATE_NAME,
             "background split: " + describe_background_splits(split_summaries) or "",
-            limit=DEFAULT_GAP_RATIO_THRESHOLD,
+            limit=default_gap_ratio_threshold,
             limit_source=source,
         )
     judged = 0
     for group in split_frames_by_exposure(frames) if frames else []:
         measured = [f for f in group.frames if f.measurements.background_level is not None]
-        if len(measured) >= MINIMUM_MEASURED_FRAMES_TO_JUDGE:
+        if len(measured) >= minimum_measured_frames_to_judge:
             judged += 1
     if judged == 0:
         return unchecked_gate(
@@ -260,7 +296,7 @@ def background_homogeneity_gate(
         )
     return passed_gate(
         BACKGROUND_GATE_NAME,
-        limit=DEFAULT_GAP_RATIO_THRESHOLD,
+        limit=default_gap_ratio_threshold,
         limit_source=source,
         detail=f"{judged} exposure length(s) checked, no split",
     )

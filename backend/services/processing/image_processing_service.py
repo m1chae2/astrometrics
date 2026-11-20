@@ -232,27 +232,42 @@ class ImageProcessingService(BaseBackgroundService):
     def cancel_processing_jobs(self, target_id: str) -> dict:
         """Cancel active stacking jobs for a target.
 
+        A job that runs in another process is left alone and reported, since
+        this process cannot stop it.
+
         Returns
         -------
         result : `dict`
-            Dict with a `"status"` key: `"cancelled"` if at least
-            one job was cancelled, otherwise `"none"`.
+            Dict with a `"status"` key: `"cancelled"` if at least one job
+            was cancelled, `"other_process"` if a job could not be stopped
+            here, otherwise `"none"`. `"message"` gives the reason for
+            anything but `"cancelled"`.
         """
         if not self._job_service:
-            return {"status": "none"}
+            return {"status": "none", "message": "No jobs are tracked."}
         active = self._job_service.get_jobs_for_target(target_id, job_type="stacking", status="started")
         if not active:
             active = self._job_service.get_jobs_for_target(target_id, job_type="stacking", status="running")
 
         cancelled = False
+        reasons: list[str] = []
         for job in active:
-            self.cancel_processing(job.id)
-            self._job_service.update_job(
-                job.id, status="cancelled", progress=0, status_message="Cancelled by user."
-            )
-            cancelled = True
+            outcome = self.cancel_processing(job.id)
+            if outcome["cancelled"] or outcome["own_process"]:
+                # A job of this process is marked cancelled even if its
+                # thread cannot be interrupted, so the list stops showing it.
+                self._job_service.update_job(
+                    job.id, status="cancelled", progress=0, status_message="Cancelled by user."
+                )
+                cancelled = True
+            else:
+                reasons.append(outcome["reason"])
 
-        return {"status": "cancelled" if cancelled else "none"}
+        if cancelled:
+            return {"status": "cancelled", "message": None}
+        if reasons:
+            return {"status": "other_process", "message": reasons[0]}
+        return {"status": "none", "message": "There is no active stacking job for this target."}
 
     def fetch_job_log_tail(self, job_id: str, lines: int = 100) -> list:
         """Fetch the tail of DB-recorded log entries for a job.

@@ -44,6 +44,7 @@ from typing import Any
 
 from astrometricslib import Astrometrics, FilterType, FrameRecord, Target
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
@@ -314,7 +315,7 @@ def frame_matches_request(frame: FrameRecord, request: ExposureRequest, equipmen
     if normalize_filter(frame.filter) != normalize_filter(request.filter):
         return False
     length = _number(frame.exposure)
-    if length is None or abs(length - request.exposure_sec) > EXPOSURE_MATCH_SECONDS:
+    if length is None or abs(length - request.exposure_sec) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value:
         return False
     for wanted, found in (
         (request.gain_setting, _number(frame.iso)),

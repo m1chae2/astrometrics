@@ -35,6 +35,13 @@ import numpy as np
 
 from astrometricslib.drivers import require_online
 from astrometricslib.exceptions import AstrometricsError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import deep_star_store
 
@@ -54,21 +61,37 @@ __all__ = [
 
 # The faintest Gaia G magnitude that is downloaded.
 #
-# Derivation: for a 30 s exposure with the 75 mm Apertura 75Q and the
-# ASI533MM Pro (1.92 arcsec per pixel), a back-of-envelope signal-to-noise
-# estimate gives a 5-sigma detection at about G = 17.5 and photometry good to
-# about 5 percent (signal-to-noise 20) at about G = 15.7. It assumes a sky of
-# about 21 mag/arcsec^2, so it is uncertain by about half a magnitude.
-# Validation: the M 13 field has photometry down to G = 17-18, but only from
-# stacked frames, which reach deeper than one 30 s frame; and
-# DEFAULT_MAGNITUDE_LIMIT in astrometricslib's catalog_seeding.py (G = 18) is
-# already described there as beyond what the stacks can detect. G = 16 keeps
-# the stars whose photometry can be trusted at about a third of the data of
-# G = 18 in the fields this library has imaged. The Planetarium reads the
-# depth back from the catalog itself; DEEP_STAR_MAX_MAGNITUDE in the UI's
-# StarOverlay.ts only mirrors this default for the moments before it has
-# done so.
-DEFAULT_MAGNITUDE_LIMIT = 16.0
+# Derivation: the value is tuned from this observatory's stored photometry
+# (`magnitude_limit_tuning`). The stored stars carry no per-star magnitude
+# error, so the tuner takes the 95th percentile of the Gaia G magnitudes of the
+# stars that have a measured light curve and rounds it up to the next half
+# magnitude: the download then reaches as deep as the stacks measure. The
+# default is the earlier design estimate: for a 30 s exposure with the 75 mm
+# Apertura 75Q and the ASI533MM Pro (1.92 arcsec per pixel), a
+# back-of-envelope signal-to-noise estimate gives photometry good to about 5
+# percent (signal-to-noise 20) at about G = 15.7, assuming a sky of about
+# 21 mag/arcsec^2, so it is uncertain by about half a magnitude.
+# Validation: on 2026-11-15 the library's 14,549 Gaia stars with a measured
+# light curve (read-only) gave a 95th percentile of G = 17.14, so G = 17.5;
+# the M 13 field has photometry down to G = 17-18, but only from stacked
+# frames, which reach deeper than one 30 s frame. DEFAULT_MAGNITUDE_LIMIT in
+# astrometricslib's catalog_seeding.py (G = 18) is already described there as
+# beyond what the stacks can detect. The Planetarium reads the depth back from
+# the catalog itself; DEEP_STAR_MAX_MAGNITUDE in the UI's StarOverlay.ts only
+# mirrors this default for the moments before it has done so. Register entry
+# WAY-D132.
+DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
+    name="wayfinding.default_magnitude_limit",
+    default=16.0,
+    unit="Gaia G magnitude",
+    description="The faintest Gaia G magnitude that is downloaded for the deep star catalog.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D132",
+    allowed_range=(12.0, 20.0),
+    minimum_sample=200,
+)
 
 # How finely the Gaia archive's own sky map is cut for the download. Level L
 # has 12 * 4**L pixels, so level 4 is 3072 pixels of about 13 square degrees.
@@ -559,7 +582,7 @@ def _download_pixel(
 def build_deep_star_catalog(
     config: Any,
     healpix_level: int = DEFAULT_HEALPIX_LEVEL,
-    magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
+    magnitude_limit: float | None = None,
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
@@ -582,7 +605,8 @@ def build_deep_star_catalog(
     healpix_level : `int`, optional
         How finely the sky is cut into chunks.
     magnitude_limit : `float`, optional
-        Only stars brighter than this Gaia G magnitude are downloaded.
+        Only stars brighter than this Gaia G magnitude are downloaded. The
+        default is `DEFAULT_MAGNITUDE_LIMIT`.
     request_delay_seconds : `float`, optional
         Seconds to pause between requests.
     max_attempts : `int`, optional
@@ -620,6 +644,9 @@ def build_deep_star_catalog(
         If an earlier catalog was made with other settings, or `pixels`
         names a chunk outside the sky.
     """
+    if magnitude_limit is None:
+        magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
+
     if gaia is None:
         from astroquery.gaia import Gaia
 
@@ -701,7 +728,7 @@ def build_deep_star_catalog(
 
 def estimate_catalog_size(
     healpix_level: int = DEFAULT_HEALPIX_LEVEL,
-    magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
+    magnitude_limit: float | None = None,
     sample_count: int = 24,
     query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS,
@@ -720,7 +747,8 @@ def estimate_catalog_size(
     healpix_level : `int`, optional
         How finely the sky is cut into chunks.
     magnitude_limit : `float`, optional
-        Only stars brighter than this Gaia G magnitude are counted.
+        Only stars brighter than this Gaia G magnitude are counted. The
+        default is `DEFAULT_MAGNITUDE_LIMIT`.
     sample_count : `int`, optional
         How many chunks to count.
     query_timeout_seconds : `float`, optional
@@ -744,6 +772,9 @@ def estimate_catalog_size(
     ExternalServiceError
         If no chunk could be counted.
     """
+    if magnitude_limit is None:
+        magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
+
     if gaia is None:
         from astroquery.gaia import Gaia
 

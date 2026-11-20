@@ -4,12 +4,12 @@ Description: Claude and Gemini each read their own settings files, and the
 project used to keep three copies of the server list that could drift apart.
 This script holds the list once and writes:
 
-* ``.mcp.json``: the servers for a normal (developer) Claude session.
-* ``.claude/companion.mcp.json``: only the servers a read-only companion
-  session may use. It leaves out the UI server, which runs the project's own
-  tests and builds.
+* ``.mcp.json``: the servers for a normal Claude session.
+* ``.claude/companion.mcp.json``: only the servers a companion session may
+  use. It leaves out the UI server, which runs the project's own tests and
+  builds.
 * ``.claude/agents/investigator.md``: a Claude agent that may use only the
-  MCP tools the servers offer to the investigator profile. It has no shell,
+  MCP tools the servers offer to the one profile. It has no shell,
   no file access and no code runner.
 * ``.gemini/settings.json``: the Gemini CLI settings, with the same tools
   listed in ``includeTools``. Paths are absolute, so the file is not tracked.
@@ -72,9 +72,6 @@ instead of naming either.
 EXAMPLE_ROOT = "/path/to/astrometrics"
 """The placeholder used in the tracked example file."""
 
-INVESTIGATOR = "investigator"
-DEVELOPER = "developer"
-
 
 @dataclass(frozen=True)
 class ServerSpec:
@@ -95,10 +92,7 @@ class ServerSpec:
     fixed_tools : `tuple` [`str`, ...]
         The tools of a server that has no manifest.
     companion : `bool`
-        `True` if a read-only companion session may use the server.
-    developer_profile : `str`
-        The profile a developer session starts the server with. Empty for a
-        server that takes no profile.
+        `True` if a companion session may use the server.
     extra_environment : `dict` [`str`, `str`]
         Environment variables besides ``PYTHONPATH`` and the profile.
     """
@@ -109,7 +103,6 @@ class ServerSpec:
     manifest: str = ""
     fixed_tools: tuple[str, ...] = ()
     companion: bool = True
-    developer_profile: str = INVESTIGATOR
     extra_environment: dict[str, str] = field(default_factory=dict)
 
 
@@ -118,7 +111,6 @@ SERVERS = (
         "astrometricslib-core",
         python_module="mcp_servers.astrometrics_core",
         manifest="mcp_servers/astrometrics_core/tool_manifest.json",
-        developer_profile=DEVELOPER,
     ),
     ServerSpec(
         "wayfindinglib-core",
@@ -136,20 +128,18 @@ SERVERS = (
         "astrometrics-gaps",
         python_module="mcp_servers.gaps",
         fixed_tools=("report_capability_gap", "list_capability_gaps"),
-        developer_profile="",
     ),
     ServerSpec(
         "astrometrics-ui",
         node_script="ui/mcp/dist/index.js",
         manifest="ui/mcp/tool_manifest.json",
         companion=False,
-        developer_profile=DEVELOPER,
     ),
 )
 """Every MCP server the project runs."""
 
 CLAUDE_OUTPUT_PATHS = {
-    "developer": ".mcp.json",
+    "claude": ".mcp.json",
     "companion": ".claude/companion.mcp.json",
     "agent": ".claude/agents/investigator.md",
     "local": "mcp_servers.json",
@@ -185,7 +175,6 @@ def build_profile_rules_typescript() -> str:
         """
         return "new Set([" + ", ".join(json.dumps(value) for value in sorted(values)) + "])"
 
-    class_lines = [f"  {name}: {as_set(classes)}," for name, classes in profile.PROFILE_CLASSES.items()]
     lines = [
         "/**",
         " * Purpose: The MCP tool profile rules for the UI MCP server.",
@@ -194,16 +183,8 @@ def build_profile_rules_typescript() -> str:
         " * Do not edit by hand. Change the Python file and run the generator again.",
         " */",
         "",
-        "/** Environment variable that chooses the profile when the server starts. */",
-        f"export const PROFILE_ENVIRONMENT_VARIABLE = {json.dumps(profile.PROFILE_ENVIRONMENT_VARIABLE)};",
-        "",
-        "/** The profile used when the variable is unset or not recognized. */",
-        f"export const DEFAULT_PROFILE = {json.dumps(profile.DEFAULT_PROFILE)};",
-        "",
-        "/** Profile name -> the tool classes it may use. */",
-        "export const PROFILE_CLASSES: Readonly<Record<string, ReadonlySet<string>>> = {",
-        *class_lines,
-        "};",
+        "/** The tool classes the profile may use. */",
+        f"export const OFFERED_CLASSES: ReadonlySet<string> = {as_set(profile.OFFERED_CLASSES)};",
         "",
         "/** Dispositions a client may use. */",
         f"export const SERVED_DISPOSITIONS: ReadonlySet<string> = {as_set(profile.SERVED_DISPOSITIONS)};",
@@ -218,7 +199,7 @@ def build_profile_rules_typescript() -> str:
 
 
 def investigator_tools(spec: ServerSpec, root: Path = PROJECT_ROOT) -> list[str]:
-    """List the tools a server offers to the investigator profile.
+    """List the tools a server offers under the profile.
 
     Parameters
     ----------
@@ -238,14 +219,10 @@ def investigator_tools(spec: ServerSpec, root: Path = PROJECT_ROOT) -> list[str]
     if not spec.manifest:
         return sorted(spec.fixed_tools)
     manifest = json.loads((root / spec.manifest).read_text(encoding="utf-8"))
-    return sorted(
-        name for name, entry in manifest["tools"].items() if withheld_reason(entry, INVESTIGATOR) is None
-    )
+    return sorted(name for name, entry in manifest["tools"].items() if withheld_reason(entry) is None)
 
 
-def server_entry(
-    spec: ServerSpec, root_text: str, profile: str, absolute_python: bool = False
-) -> dict[str, Any]:
+def server_entry(spec: ServerSpec, root_text: str) -> dict[str, Any]:
     """Build one server's entry for a client config.
 
     Parameters
@@ -254,8 +231,6 @@ def server_entry(
         The server.
     root_text : `str`
         How the config refers to the project folder.
-    profile : `str`
-        The MCP profile to start the server with. Empty for none.
 
     Returns
     -------
@@ -286,11 +261,9 @@ def server_entry(
             "command": "node",
             "args": [project_path(spec.node_script)],
             **location,
-            "env": {"ASTROMETRICS_MCP_PROFILE": profile} if profile else {},
+            "env": {},
         }
     environment: dict[str, str] = {**spec.extra_environment, "PYTHONPATH": root_text}
-    if profile:
-        environment["ASTROMETRICS_MCP_PROFILE"] = profile
     # The launcher finds the Python program, which is in a different place on
     # Windows and Linux, so one config works on both.
     return {
@@ -307,8 +280,7 @@ def build_claude_config(companion: bool, root_text: str = CLAUDE_ROOT_VARIABLE) 
     Parameters
     ----------
     companion : `bool`
-        `True` for the read-only companion set, `False` for a developer
-        session.
+        `True` for the companion set, `False` for a normal session.
     root_text : `str`, optional
         How the config refers to the project folder.
 
@@ -321,8 +293,7 @@ def build_claude_config(companion: bool, root_text: str = CLAUDE_ROOT_VARIABLE) 
     for spec in SERVERS:
         if companion and not spec.companion:
             continue
-        profile = INVESTIGATOR if companion and spec.developer_profile else spec.developer_profile
-        servers[spec.name] = server_entry(spec, root_text, profile)
+        servers[spec.name] = server_entry(spec, root_text)
     return {"mcpServers": servers}
 
 
@@ -354,7 +325,7 @@ def build_gemini_settings(root: Path = PROJECT_ROOT) -> dict[str, Any]:
     Returns
     -------
     settings : `dict` [`str`, `Any`]
-        An ``mcpServers`` table whose entries list only the investigator
+        An ``mcpServers`` table whose entries list only the offered
         tools in ``includeTools`` and are not trusted, and ``tools.exclude``
         naming the built-in shell, file and web tools. The interactive
         shell is also switched off. A ``context`` table points Gemini at the
@@ -364,7 +335,7 @@ def build_gemini_settings(root: Path = PROJECT_ROOT) -> dict[str, Any]:
     for spec in SERVERS:
         if not spec.companion:
             continue
-        entry = server_entry(spec, str(root), INVESTIGATOR if spec.developer_profile else "")
+        entry = server_entry(spec, str(root))
         entry["includeTools"] = investigator_tools(spec, root)
         entry["trust"] = False
         servers[spec.name] = entry
@@ -489,10 +460,10 @@ def render_all(root: Path = PROJECT_ROOT) -> dict[str, str]:
         """
         return json.dumps(data, indent=2) + "\n"
 
-    developer = as_json(build_claude_config(companion=False, root_text=RELATIVE_ROOT))
+    claude = as_json(build_claude_config(companion=False, root_text=RELATIVE_ROOT))
     return {
-        CLAUDE_OUTPUT_PATHS["developer"]: developer,
-        CLAUDE_OUTPUT_PATHS["local"]: developer,
+        CLAUDE_OUTPUT_PATHS["claude"]: claude,
+        CLAUDE_OUTPUT_PATHS["local"]: claude,
         CLAUDE_OUTPUT_PATHS["example"]: as_json(build_claude_config(companion=False, root_text=EXAMPLE_ROOT)),
         CLAUDE_OUTPUT_PATHS["companion"]: as_json(build_claude_config(companion=True)),
         CLAUDE_OUTPUT_PATHS["agent"]: build_agent_markdown(root).rstrip("\n") + "\n",

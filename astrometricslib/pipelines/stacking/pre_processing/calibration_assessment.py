@@ -34,11 +34,19 @@ import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.calibration_ingest import CalibrationSetHealth, FlatSetAssessment, FrameConcern
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
+)
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BLOCK_RANGE,
@@ -99,37 +107,114 @@ DARK_CEILING_SHARE_CHECK_NAME = "dark_ceiling_share"
 # variance: 10 percent at N = 10. A design estimate, not a measured limit
 # (register entry STK-53). The existing minimum of
 # the configuration (default 3) stays the limit for "too few".
-THIN_SET_FRAME_COUNT = 10
+THIN_SET_FRAME_COUNT = TunedParameter(
+    name="stacking.thin_set_frame_count",
+    default=10,
+    unit="frames",
+    description="Number of unique frames below which a calibration set is called thin.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D36",
+)
 
 # A frame with this share of pixels at exactly zero (or more) is cut off at
 # zero. The 2,367 frames of the validation library have either no zero pixel or
 # at least 72 percent, so any limit in between separates them; 0.1 percent is
 # the figure the offset test of 2026-10-02 used (register entry STK-47).
-ZERO_PIXEL_FRACTION_LIMIT = 0.001
+ZERO_PIXEL_FRACTION_LIMIT = TunedParameter(
+    name="stacking.zero_pixel_fraction_limit",
+    default=0.001,
+    unit="fraction",
+    description="Share of pixels at exactly zero at or above which a frame is called cut off at zero.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-47",
+)
 
 # A dark with this share of pixels at or above the camera's saturation level
 # (or more) was struck by light. The one such dark in the library had 35
 # percent; the largest share among the others was 8.3e-5 (register entry
 # STK-52).
-CEILING_SHARE_LIMIT = 0.001
+CEILING_SHARE_LIMIT = TunedParameter(
+    name="stacking.ceiling_share_limit",
+    default=0.001,
+    unit="fraction",
+    description=(
+        "Share of pixels at or above the saturation level at or above which a dark is called light-struck."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-52",
+)
 
 # Level, light leak and bias limits are written in value steps. Two steps is
 # the distance within which the validation library's clean frames all sat
 # (largest clean difference: 3.15 ADU on the Nikon, 0.57 ADU on the ASI 533,
 # against steps of 2 and 4 ADU; register entries STK-48 to STK-51).
-VALUE_STEP_ALLOWANCE = 2.0
+VALUE_STEP_ALLOWANCE = TunedParameter(
+    name="stacking.value_step_allowance",
+    default=2.0,
+    unit="value steps",
+    description=(
+        "Number of value steps within which clean frames agree, used for level, light leak and bias limits."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-48",
+)
 
 # The noise of a frame must lie within this band around the read noise in the
 # camera profile. The observed ratio was 0.99 to 1.00 at ASI 533 offsets 10 to
 # 50; the width is a design choice (register entry STK-49).
-NOISE_RATIO_LOW = 0.9
-NOISE_RATIO_HIGH = 1.1
+NOISE_RATIO_LOW = TunedParameter(
+    name="stacking.noise_ratio_low",
+    default=0.9,
+    unit="ratio",
+    description=(
+        "Lowest ratio of a frame's noise to the camera profile's read noise that still counts as normal."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-49",
+)
+NOISE_RATIO_HIGH = TunedParameter(
+    name="stacking.noise_ratio_high",
+    default=1.1,
+    unit="ratio",
+    description=(
+        "Highest ratio of a frame's noise to the camera profile's read noise that still counts as normal."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-49",
+)
 
 # The dark current added to the allowed level difference, in ADU per second of
 # exposure. Measured on the ASI 533 at -10 C as 0.0020 ADU per second (register
 # entry STK-54), used for every camera: the term is below one value step for
 # any exposure under about 2,000 s, so a wrong figure moves no verdict.
-DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND = 0.002
+DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND = TunedParameter(
+    name="stacking.dark_current_allowance_adu_per_second",
+    default=0.002,
+    unit="ADU/s",
+    description=(
+        "Dark current added to the allowed level difference between a dark and a light, per "
+        "second of exposure."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-54",
+    allowed_range=(0.0, 0.05),
+    # A sample is one exposure group of dark frames used in the fit.
+    minimum_sample=4,
+)
 
 # The most frames of concern one set lists. A set of copies can hold hundreds.
 MAXIMUM_FRAMES_OF_CONCERN = 25
@@ -483,6 +568,7 @@ def _count_check(
         The frames with different pixels. A frame with no stored checksum
         counts as unique.
     """
+    thin_set_frame_count = resolve(THIN_SET_FRAME_COUNT).value
     seen: dict[float, str] = {}
     unique = 0
     copies: list[str] = []
@@ -502,9 +588,9 @@ def _count_check(
             "master is built from almost no data"
         )
         failed = True
-    elif unique < THIN_SET_FRAME_COUNT:
+    elif unique < thin_set_frame_count:
         detail = (
-            f"thin set: {unique} unique frame(s), fewer than {THIN_SET_FRAME_COUNT}, so the master's own "
+            f"thin set: {unique} unique frame(s), fewer than {thin_set_frame_count}, so the master's own "
             f"noise adds up to {1 / unique:.0%} of the noise variance to every light"
         )
         failed = True
@@ -523,14 +609,17 @@ def _count_check(
                 CALIBRATION_FRAME_COUNT_CHECK_NAME,
                 detail,
                 float(unique),
-                float(THIN_SET_FRAME_COUNT),
+                float(thin_set_frame_count),
                 _COUNT_SOURCE,
             ),
             unique,
         )
     return (
         check_passed(
-            CALIBRATION_FRAME_COUNT_CHECK_NAME, float(unique), float(THIN_SET_FRAME_COUNT), _COUNT_SOURCE
+            CALIBRATION_FRAME_COUNT_CHECK_NAME,
+            float(unique),
+            float(thin_set_frame_count),
+            _COUNT_SOURCE,
         ),
         unique,
     )
@@ -558,6 +647,7 @@ def _zero_check(
         Failed when any frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its
         pixels at zero. The value is the worst frame's share.
     """
+    zero_pixel_fraction_limit = resolve(ZERO_PIXEL_FRACTION_LIMIT).value
     shares = [
         (facts.values[FRAME_ZERO_PIXEL_FRACTION], facts.path)
         for facts in measured
@@ -569,7 +659,7 @@ def _zero_check(
     over = [
         (path, f"{share:.0%} of its pixels are exactly zero")
         for share, path in shares
-        if share >= ZERO_PIXEL_FRACTION_LIMIT
+        if share >= zero_pixel_fraction_limit
     ]
     if over:
         concerns.extend(over)
@@ -579,10 +669,10 @@ def _zero_check(
             f"up to {worst:.0%} of their pixels at exactly zero, so their noise is lost and the master "
             "is wrong; use a camera offset above 0",
             worst,
-            ZERO_PIXEL_FRACTION_LIMIT,
+            zero_pixel_fraction_limit,
             _ZERO_SOURCE,
         )
-    return check_passed(name, worst, ZERO_PIXEL_FRACTION_LIMIT, _ZERO_SOURCE)
+    return check_passed(name, worst, zero_pixel_fraction_limit, _ZERO_SOURCE)
 
 
 def _read_noise_adu(
@@ -646,6 +736,8 @@ def _noise_check(
     check : `GateResult`
         The value is the median frame noise divided by the read noise.
     """
+    noise_ratio_low = resolve(NOISE_RATIO_LOW).value
+    noise_ratio_high = resolve(NOISE_RATIO_HIGH).value
     source = _NOISE_SOURCE if upper_limit else _DARK_NOISE_SOURCE
     if read_noise_adu is None:
         return check_not_checked(name, reason, source)
@@ -655,26 +747,31 @@ def _noise_check(
     if not noises:
         return check_not_checked(name, "no frame has a stored noise yet", source)
     ratio = statistics.median(noises) / read_noise_adu
-    if ratio < NOISE_RATIO_LOW:
+    if ratio < noise_ratio_low:
         return check_failed(
             name,
-            f"the noise is {ratio:.2f} times the camera's read noise, below {NOISE_RATIO_LOW}: "
+            f"the noise is {ratio:.2f} times the camera's read noise, below {noise_ratio_low}: "
             "the frames are "
             "probably cut off at zero or taken at another gain",
             ratio,
-            NOISE_RATIO_LOW,
+            noise_ratio_low,
             source,
         )
-    if upper_limit and ratio > NOISE_RATIO_HIGH:
+    if upper_limit and ratio > noise_ratio_high:
         return check_failed(
             name,
-            f"the noise is {ratio:.2f} times the camera's read noise, above {NOISE_RATIO_HIGH}: the frames "
+            f"the noise is {ratio:.2f} times the camera's read noise, above {noise_ratio_high}: the frames "
             "may be taken at another gain, or the sensor has a fault",
             ratio,
-            NOISE_RATIO_HIGH,
+            noise_ratio_high,
             source,
         )
-    return check_passed(name, ratio, NOISE_RATIO_HIGH if upper_limit else NOISE_RATIO_LOW, source)
+    return check_passed(
+        name,
+        ratio,
+        noise_ratio_high if upper_limit else noise_ratio_low,
+        source,
+    )
 
 
 def _median_value_step(frames: Sequence[FrameFacts], reference: BiasReference | None) -> float | None:
@@ -724,6 +821,9 @@ def _dark_checks(
     checks : `list` [`GateResult`]
         The zero, light leak, ceiling, level and noise checks.
     """
+    zero_pixel_fraction_limit = resolve(ZERO_PIXEL_FRACTION_LIMIT).value
+    ceiling_share_limit = resolve(CEILING_SHARE_LIMIT).value
+    value_step_allowance = resolve(VALUE_STEP_ALLOWANCE).value
     checks = [_zero_check(DARK_ZERO_PIXEL_GATE_NAME, "dark", measured, concerns)]
     step = _median_value_step(measured, reference)
     no_bias = "there are no measured bias frames at this setting to compare with"
@@ -750,7 +850,7 @@ def _dark_checks(
                 f"{reference.block_range_adu:.0f} ADU",
             )
             for excess, path, value in excesses
-            if excess > VALUE_STEP_ALLOWANCE
+            if excess > value_step_allowance
         ]
         if struck:
             concerns.extend(struck)
@@ -759,15 +859,15 @@ def _dark_checks(
                     DARK_LIGHT_LEAK_GATE_NAME,
                     f"light probably reached the sensor in {len(struck)} of {len(ranges)} dark frame(s): the "
                     f"large-scale pattern is up to {worst:.1f} value steps above the bias frames' "
-                    f"({VALUE_STEP_ALLOWANCE:g} steps allowed). The master subtracts that pattern from "
+                    f"({value_step_allowance:g} steps allowed). The master subtracts that pattern from "
                     "every light",
                     worst,
-                    VALUE_STEP_ALLOWANCE,
+                    value_step_allowance,
                     _LEAK_SOURCE,
                 )
             )
         else:
-            checks.append(check_passed(DARK_LIGHT_LEAK_GATE_NAME, worst, VALUE_STEP_ALLOWANCE, _LEAK_SOURCE))
+            checks.append(check_passed(DARK_LIGHT_LEAK_GATE_NAME, worst, value_step_allowance, _LEAK_SOURCE))
 
     ceilings = [
         (f.values[FRAME_SATURATED_PIXEL_FRACTION], f.path)
@@ -786,7 +886,7 @@ def _dark_checks(
         bright = [
             (path, f"{share:.0%} of its pixels are at the saturation level")
             for share, path in ceilings
-            if share >= CEILING_SHARE_LIMIT
+            if share >= ceiling_share_limit
         ]
         if bright:
             concerns.extend(bright)
@@ -797,13 +897,18 @@ def _dark_checks(
                     "saturation "
                     "level: light reached the sensor",
                     worst_share,
-                    CEILING_SHARE_LIMIT,
+                    ceiling_share_limit,
                     _CEILING_SOURCE,
                 )
             )
         else:
             checks.append(
-                check_passed(DARK_CEILING_SHARE_CHECK_NAME, worst_share, CEILING_SHARE_LIMIT, _CEILING_SOURCE)
+                check_passed(
+                    DARK_CEILING_SHARE_CHECK_NAME,
+                    worst_share,
+                    ceiling_share_limit,
+                    _CEILING_SOURCE,
+                )
             )
 
     # Level against the bias level of the same setting.
@@ -817,7 +922,7 @@ def _dark_checks(
             )
         )
     else:
-        allowance = DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND * (exposure_seconds or 0.0)
+        allowance = resolve(DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND).value * (exposure_seconds or 0.0)
         excesses = [
             (max(abs(level - reference.level_adu) - allowance, 0.0) / step, path, level)
             for level, path in levels
@@ -828,7 +933,7 @@ def _dark_checks(
         off = [
             (path, f"mean level {level:.1f} ADU, bias level is {reference.level_adu:.1f} ADU")
             for excess, path, level in excesses
-            if excess > VALUE_STEP_ALLOWANCE
+            if excess > value_step_allowance
         ]
         if off:
             concerns.extend(off)
@@ -837,19 +942,19 @@ def _dark_checks(
                     DARK_LEVEL_GATE_NAME,
                     f"{len(off)} of {len(levels)} dark frame(s) sit up to {worst:.1f} value steps from "
                     "the bias "
-                    f"level of the same setting ({VALUE_STEP_ALLOWANCE:g} steps allowed): a wrong level "
+                    f"level of the same setting ({value_step_allowance:g} steps allowed): a wrong level "
                     "means a "
                     "wrong subtraction, and a master that is already calibrated reads near zero",
                     worst,
-                    VALUE_STEP_ALLOWANCE,
+                    value_step_allowance,
                     _DARK_LEVEL_SOURCE,
                 )
             )
         else:
-            checks.append(check_passed(DARK_LEVEL_GATE_NAME, worst, VALUE_STEP_ALLOWANCE, _DARK_LEVEL_SOURCE))
+            checks.append(check_passed(DARK_LEVEL_GATE_NAME, worst, value_step_allowance, _DARK_LEVEL_SOURCE))
 
     zero_clipped = any(
-        f.values.get(FRAME_ZERO_PIXEL_FRACTION, 0.0) >= ZERO_PIXEL_FRACTION_LIMIT for f in measured
+        f.values.get(FRAME_ZERO_PIXEL_FRACTION, 0.0) >= zero_pixel_fraction_limit for f in measured
     )
     read_noise_adu, reason = _read_noise_adu(profile, *setting, zero_clipped)
     checks.append(_noise_check(DARK_NOISE_GATE_NAME, measured, read_noise_adu, reason, upper_limit=False))
@@ -883,6 +988,8 @@ def _bias_checks(
     checks : `list` [`GateResult`]
         The zero, level and noise checks.
     """
+    value_step_allowance = resolve(VALUE_STEP_ALLOWANCE).value
+    zero_pixel_fraction_limit = resolve(ZERO_PIXEL_FRACTION_LIMIT).value
     checks = [_zero_check(BIAS_ZERO_PIXEL_GATE_NAME, "bias", measured, concerns)]
     stored = None if profile is None else profile.bias_level_for(*setting)
     levels = [f.values[FRAME_CLIPPED_MEAN_LEVEL] for f in measured]
@@ -908,26 +1015,26 @@ def _bias_checks(
         step = statistics.median(steps)
         excess = abs(statistics.median(levels) - expected) / step
         measurements["profile_bias_level_adu"] = expected
-        if excess > VALUE_STEP_ALLOWANCE:
+        if excess > value_step_allowance:
             checks.append(
                 check_failed(
                     BIAS_LEVEL_GATE_NAME,
                     f"the bias level is {statistics.median(levels):.1f} ADU, {excess:.1f} value steps "
                     "from the "
-                    f"{expected:.1f} ADU the camera profile stores ({VALUE_STEP_ALLOWANCE:g} steps "
+                    f"{expected:.1f} ADU the camera profile stores ({value_step_allowance:g} steps "
                     "allowed): the "
                     "frames may be taken at another offset, or already calibrated",
                     excess,
-                    VALUE_STEP_ALLOWANCE,
+                    value_step_allowance,
                     _BIAS_LEVEL_SOURCE,
                 )
             )
         else:
             checks.append(
-                check_passed(BIAS_LEVEL_GATE_NAME, excess, VALUE_STEP_ALLOWANCE, _BIAS_LEVEL_SOURCE)
+                check_passed(BIAS_LEVEL_GATE_NAME, excess, value_step_allowance, _BIAS_LEVEL_SOURCE)
             )
     zero_clipped = any(
-        f.values.get(FRAME_ZERO_PIXEL_FRACTION, 0.0) >= ZERO_PIXEL_FRACTION_LIMIT for f in measured
+        f.values.get(FRAME_ZERO_PIXEL_FRACTION, 0.0) >= zero_pixel_fraction_limit for f in measured
     )
     read_noise_adu, reason = _read_noise_adu(profile, *setting, zero_clipped)
     checks.append(_noise_check(BIAS_NOISE_GATE_NAME, measured, read_noise_adu, reason, upper_limit=True))

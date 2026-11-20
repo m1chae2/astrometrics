@@ -177,6 +177,7 @@ The File Browser toolbar and table have these controls.
 | Control | What it does |
 | --- | --- |
 | Camera picker | Opens a short menu of cameras. Pick one to see only its frames. All Cameras shows everything |
+| Optic picker | Appears only when the target was imaged through more than one optic, which is one telescope or lens, told apart by its focal length. Each choice shows the focal length in millimeters and its frame count, such as "405 mm (21 frames)". All optics shows everything. The optic with the most frames is picked first |
 | Search box | Filters frames. The ? button explains the syntax. Examples are `cam: zwo`, `iso > 800`, `exp >= 30`, `name includes dark` and `(iso > 100 && exp > 60)` |
 | Header Info | Opens the FITS Header dialog for the selected file |
 | Trash button with a count | Appears when frames are ticked. It deletes the ticked files after you confirm. Deleting cannot be undone |
@@ -205,7 +206,7 @@ The Image Controls panel has these buttons.
 | Analyze Target | Starts a star analysis. It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
 | Analyze Temporal Variation | Appears only for spectral frames that already have a spectral stack. It follows how each star's spectrum changes across the raw frames |
 | Cancel | Replaces Analyze Target while an analysis runs |
-| Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. |
+| Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. It is also off when the frames come from more than one optic, such as with All optics. The label then reads Pick one optic to stack, and the tooltip names the focal lengths. |
 | Open Siril | Opens Siril for the target. Siril is the outside program that does the stacking |
 | Summary lines | Show the selected Target, its Name and its Catalog ID |
 

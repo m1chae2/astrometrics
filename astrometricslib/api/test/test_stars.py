@@ -294,6 +294,22 @@ class TestFindOrCreateByPosition:
         assert found.target_ids == ["M 13"]
         assert _ids(catalog) == ["HD 1"]
 
+    def test_the_default_distance_is_the_registered_same_star_distance(self, tmp_path: Path) -> None:
+        """Verify a star 4 arcseconds away is new by default.
+
+        The default is the registered 2 arcsecond same-star distance (it was
+        5 arcseconds here, which did not match the rest of the library). An
+        explicit 5 arcseconds still reuses the nearest star, here the one the
+        first call recorded at that very spot.
+        """
+        catalog = _make_real_catalog(tmp_path, [_positioned_star("HD 1", 50.0, 20.0, name="HD 1")])
+
+        separate = catalog.find_or_create_by_position(50.0, 20.0 + 4.0 / 3600.0)
+        reused = catalog.find_or_create_by_position(50.0, 20.0 + 4.0 / 3600.0, tolerance_arcsec=5.0)
+
+        assert separate.id != "HD 1"
+        assert reused.id == separate.id
+
     def test_finds_a_star_by_its_exact_name_wherever_it_sits(self, tmp_path: Path) -> None:
         """Verify an existing id is reused wherever the position is."""
         catalog = _make_real_catalog(tmp_path, [_positioned_star("HD 1", 50.0, 20.0, name="HD 1")])

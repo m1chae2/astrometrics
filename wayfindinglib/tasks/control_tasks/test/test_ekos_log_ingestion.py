@@ -427,5 +427,5 @@ def test_frame_lookup_returns_only_light_frames_in_the_time_span() -> None:
 
 def test_module_exposes_the_documented_constants() -> None:
     """Verify the agreement and margin constants exist with sane values."""
-    assert 0.0 < ekos_log_ingestion.GUIDE_SCALE_AGREEMENT_FRACTION < 0.1
-    assert ekos_log_ingestion.SESSION_TIME_MARGIN_SECONDS >= 600.0
+    assert 0.0 < ekos_log_ingestion.GUIDE_SCALE_AGREEMENT_FRACTION.default < 0.1
+    assert ekos_log_ingestion.SESSION_TIME_MARGIN_SECONDS.default >= 600.0

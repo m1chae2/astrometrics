@@ -231,6 +231,7 @@ export interface TargetObject {
   dec?: string;
   positionUnverified?: boolean;
   simbadObjectType?: string | null;
+  majorAxisArcmin?: number | null;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;
@@ -258,6 +259,7 @@ export interface FileItem {
   exposure?: string;
   filter?: string;
   date?: string;
+  focalLengthMm?: number | null;
 }
 
 /**
@@ -2274,7 +2276,9 @@ export enum LimitTier {
   PHYSICAL_BUDGET = "physical_budget",
   DESIGN_ESTIMATE = "design_estimate",
   OWN_BASELINE = "own_baseline",
-  VALIDATED_DATASET = "validated_dataset"
+  VALIDATED_DATASET = "validated_dataset",
+  PROCESSING_SETTING = "processing_setting",
+  TUNED_PARAMETER = "tuned_parameter"
 }
 
 /**
@@ -2612,6 +2616,10 @@ export interface QualityRowResolution {
  * review_date : `datetime.date` or `None`
  * When an exploratory metric must be promoted or removed. Required for
  * exploratory.
+ * defined_by : `tuple` of `str`
+ * The names of the tuned parameters whose values define how the metric
+ * is measured. Changing one of those values means a new
+ * `definition_version`. Empty when the metric uses none.
  * limits : `tuple` of `QualityLimit`
  * The limits that decisions made from this metric apply to its values
  * (or to counts worked out from them), with the source of each. Empty
@@ -2638,6 +2646,7 @@ export interface MetricSpec {
   purposeReason?: string;
   exploratoryQuestion?: string;
   reviewDate?: string | null;
+  definedBy?: string[];
   limits?: QualityLimit[];
 }
 
@@ -2766,6 +2775,337 @@ export interface SensorNoiseMeasurement {
   saved?: boolean;
   backupPath?: string | null;
   notes?: string[];
+}
+
+/**
+ * One fitted curve of a star's radial profile.
+ *
+ * Parameters
+ * ----------
+ * model : `str`
+ * ``"moffat"`` or ``"gaussian"``.
+ * fitted : `bool`
+ * `True` when the fit worked. When `False`, the numbers are `None`
+ * and ``reason`` says why.
+ * reason : `str` or `None`
+ * Why the fit failed.
+ * fwhm_px : `float` or `None`
+ * Full width at half maximum, in pixels.
+ * fwhm_arcsec : `float` or `None`
+ * The same width in arcseconds, when the header gives a pixel scale.
+ * peak : `float` or `None`
+ * The curve's value at the center, above the sky, in image units.
+ * beta : `float` or `None`
+ * Moffat power index (the Gaussian has none).
+ * center_x, center_y : `float` or `None`
+ * The fitted center, in 1-based pixels.
+ * curve_radius_px, curve_values : `list` [`float`]
+ * The curve drawn along the distance from the center, for plotting.
+ * r_squared : `float` or `None`
+ * How much of the spread of the pixel values the curve explains.
+ */
+export interface ProfileFit {
+  model: string;
+  fitted: boolean;
+  reason?: string | null;
+  fwhm_px?: number | null;
+  fwhm_arcsec?: number | null;
+  peak?: number | null;
+  beta?: number | null;
+  center_x?: number | null;
+  center_y?: number | null;
+  curve_radius_px?: number[];
+  curve_values?: number[];
+  r_squared?: number | null;
+}
+
+/**
+ * One term of the Fourier fit to the brightness around the ring.
+ *
+ * The fit is to the ring pixels divided by the mean at their radius, as a
+ * constant plus ``a cos(m t) + b sin(m t)`` for each order ``m``, where
+ * ``t`` is the direction angle (from +y toward +x).
+ *
+ * Parameters
+ * ----------
+ * order : `int`
+ * The number of lobes: 1 is one-sided, 2 is oval, 3 is three-fold.
+ * amplitude : `float`
+ * The size of the term as a fraction of the constant term. It is
+ * biased upward when the signal is weak: noise alone gives a positive
+ * amplitude.
+ * amplitude_error : `float`
+ * The 1 sigma uncertainty of ``amplitude``, from the scatter of the
+ * fit residuals and the covariance of the fit.
+ * amplitude_debiased : `float`
+ * ``amplitude`` with the expected noise contribution removed (zero
+ * when the amplitude is below the noise).
+ * significance : `float`
+ * ``amplitude`` divided by ``amplitude_error``.
+ * significant : `bool`
+ * `True` when ``significance`` reaches the declared threshold.
+ * direction_degrees : `float`
+ * The direction of the pattern's brightest lobe, from +y toward +x,
+ * from 0 up to ``360 / order``. The other lobes follow at steps of
+ * ``360 / order``.
+ */
+export interface RingHarmonic {
+  order: number;
+  amplitude: number;
+  amplitude_error: number;
+  amplitude_debiased: number;
+  significance: number;
+  significant: boolean;
+  direction_degrees: number;
+}
+
+/**
+ * A neighbor star whose light was left out of the ring.
+ *
+ * Parameters
+ * ----------
+ * x, y : `float`
+ * The neighbor's position, in 1-based pixels.
+ * mask_radius_px : `float`
+ * Pixels within this distance of the neighbor were left out.
+ * pixels_masked : `int`
+ * How many ring pixels this neighbor's mask removed (pixels already
+ * removed by an earlier neighbor are not counted again).
+ */
+export interface RingNeighbor {
+  x: number;
+  y: number;
+  mask_radius_px: number;
+  pixels_masked: number;
+}
+
+/**
+ * One star the star finder reported.
+ *
+ * Parameters
+ * ----------
+ * x, y : `float`
+ * The star's position in 1-based pixels (as in FITS and DS9): the
+ * center of the first pixel is (1, 1). Same convention as
+ * `StarProfileMeasurement`.
+ * flux : `float`
+ * The finder's brightness for the star, in image units. For a merged
+ * star it is the sum of the reports that were merged.
+ * merged : `bool`
+ * `True` when two or more reports of one star were merged into this
+ * detection. The position is that of the brightest report.
+ */
+export interface StarDetection {
+  x: number;
+  y: number;
+  flux: number;
+  merged?: boolean;
+}
+
+/**
+ * Every star the astrometry run's star finder detects in one image.
+ *
+ * Parameters
+ * ----------
+ * path : `str`
+ * The image that was searched.
+ * width : `int`
+ * The image width in pixels.
+ * height : `int`
+ * The image height in pixels.
+ * detections : `list` [`StarDetection`]
+ * The stars, brightest first.
+ * detection_count : `int`
+ * The number of stars (the length of ``detections``).
+ * merged_count : `int`
+ * How many of them are merged detections.
+ * kernel_fwhm_px : `float`
+ * The star width, in pixels, that sized the finder's kernel. For a
+ * color image it is the width on the binned copy, in binned pixels.
+ * binned_on_color : `bool`
+ * `True` when the image has color channels and the finder searched an
+ * averaged, smaller copy, as the run does. Positions are given back
+ * in full image pixels.
+ */
+export interface DetectionsMeasurement {
+  path: string;
+  width: number;
+  height: number;
+  detections: StarDetection[];
+  detection_count: number;
+  merged_count: number;
+  kernel_fwhm_px: number;
+  binned_on_color?: boolean;
+}
+
+/**
+ * The radial profile and a straight cut for one star.
+ *
+ * A cut at any angle can be rebuilt from ``cutout``. With ``a`` the angle in
+ * radians, and ``center_x``, ``center_y`` as above, take for each
+ * ``k = -n .. n`` (``n = floor(cut_half_length_px / cut_step_px)``) the
+ * distance ``t = k * cut_step_px`` and the 1-based image position
+ * ``(center_x + t sin a, center_y + t cos a)``. Convert it to a position in
+ * the cutout, ``column = x - cutout_origin_x`` and ``row = y -
+ * cutout_origin_y`` (0-based), and read the value by bilinear
+ * interpolation of the four surrounding cutout pixels. Keep a point only
+ * when it lies inside the image (1-based x from 1 to the image width, y from
+ * 1 to the height; a point whose neighbors are `None` has no value). The
+ * value is already sky-subtracted, and ``cut_distance_px`` is ``t``.
+ *
+ * Pixel positions are 1-based, as in FITS and DS9: the center of the first
+ * pixel is (1, 1). ``x`` runs along the columns and ``y`` along the rows.
+ *
+ * Parameters
+ * ----------
+ * path : `str`
+ * The image that was measured.
+ * color_note : `str` or `None`
+ * Says that a color image was averaged over its channels. `None` for
+ * a single-channel image.
+ * clicked_x, clicked_y : `float`
+ * The position that was asked for.
+ * center_x, center_y : `float`
+ * The center after refining to the brightness-weighted centroid.
+ * radius_px : `float`
+ * The radius of the profile.
+ * radius_from_star_width : `bool`
+ * `True` when the radius, or the cut length, was taken from the star
+ * width instead of from the caller.
+ * sky : `float`
+ * The sky level (sigma-clipped median of the annulus), in image units.
+ * sky_noise : `float`
+ * The sky scatter (sigma-clipped standard deviation of the annulus).
+ * sky_pixel_count : `int`
+ * How many annulus pixels were kept for the sky.
+ * pixel_scale_arcsec : `float` or `None`
+ * The pixel scale from the header.
+ * profile_radius_px, profile_values : `list` [`float`]
+ * For each pixel within the radius: its distance from the center and
+ * its value minus the sky.
+ * peak : `float`
+ * The brightest pixel within the radius, minus the sky.
+ * peak_raw : `float`
+ * The same pixel's raw value.
+ * image_maximum : `float`
+ * The largest value in the whole image.
+ * clipped : `bool`
+ * `True` when the peak looks clipped: at least two pixels share the
+ * peak value and the peak is at or near the image maximum.
+ * clipped_reason : `str`
+ * A plain sentence about the clipped check.
+ * moffat, gaussian : `ProfileFit`
+ * The two fits.
+ * cut_angle_degrees : `float`
+ * The angle of the cut, measured from +y toward +x.
+ * cut_half_length_px : `float`
+ * How far the cut reaches each way from the center.
+ * cut_distance_px, cut_values : `list` [`float`]
+ * The cut: signed distance from the center (positive toward the
+ * direction of the angle) and value minus the sky.
+ * cut_step_px : `float`
+ * The spacing of the cut samples.
+ * cutout : `list` [`list` [`float` or `None`]]
+ * A square piece of the image, value minus the sky, as a list of rows.
+ * Its side is ``2 * ceil(cut_half_length_px) + 3`` pixels, centered on
+ * the pixel nearest the center. Rows increase with the image's y, as
+ * in the file (the first row is the lowest y), and columns with x. A
+ * pixel outside the image, or not finite, is `None`.
+ * cutout_origin_x, cutout_origin_y : `int`
+ * The 1-based image pixel of the cutout's first column and first row.
+ * They may be zero or negative when the star is near an edge.
+ * snapped : `bool`
+ * `True` when a search radius was given and the center moved at least
+ * one pixel from the click.
+ * snap_distance_px : `float`
+ * How far the final center is from the clicked position.
+ * star_found : `bool`
+ * `False` when the profile does not look like a star. The data are
+ * still returned.
+ * not_a_star_reason : `str` or `None`
+ * The sentence to show when ``star_found`` is `False`.
+ * ring_inner_px, ring_outer_px : `float`
+ * The radii of the "around the star" ring, in pixels. The inner one is
+ * where the mean brightness falls below a small fraction of the peak;
+ * the outer one is a margin beyond where it falls to twice the sky
+ * noise.
+ * ring_sky : `float`
+ * The sky level at the star's center that the ring's values are
+ * measured above. It comes from a tilted plane fitted far outside the
+ * star's glow, so it can be lower than ``sky``, and a smooth gradient
+ * of the sky is removed from the ring.
+ * ring_bin_angle_degrees, ring_bin_values, ring_bin_counts : `list`
+ * The ring's brightness by direction: for each 5 degree bin that holds
+ * a pixel, the middle angle (from +y toward +x), the mean value above
+ * the sky of its unmasked pixels, and how many pixels that is.
+ * ring_harmonics : `list` [`RingHarmonic`]
+ * The Fourier terms, orders 1 to 8. Empty when the ring could not be
+ * analyzed (see ``ring_note``).
+ * ring_constant : `float` or `None`
+ * The fitted constant term, in units of the divisor (the radial mean,
+ * held at a floor of a few sky noise). It is 1 where the divisor is
+ * the radial mean, and lower where the floor applies.
+ * ring_scale_value : `float` or `None`
+ * The mean, over the fitted pixels, of the radial mean brightness. The
+ * brightness drawn for a direction ``t`` is ``ring_scale_value *
+ * ring_constant * (1 + sum of amplitude * cos(order * (t -
+ * direction)))`` over the orders that are significant.
+ * ring_neighbors : `list` [`RingNeighbor`]
+ * The neighbor stars left out of the ring.
+ * ring_masked_neighbor_count : `int`
+ * How many neighbors removed at least one ring pixel.
+ * ring_masked_fraction : `float`
+ * The fraction of the ring's pixels that the neighbor masks removed.
+ * ring_note : `str` or `None`
+ * A sentence that says why the ring could not be analyzed, or `None`.
+ */
+export interface StarProfileMeasurement {
+  path: string;
+  color_note?: string | null;
+  clicked_x: number;
+  clicked_y: number;
+  center_x: number;
+  center_y: number;
+  radius_px: number;
+  radius_from_star_width: boolean;
+  sky: number;
+  sky_noise: number;
+  sky_pixel_count: number;
+  pixel_scale_arcsec?: number | null;
+  profile_radius_px: number[];
+  profile_values: number[];
+  peak: number;
+  peak_raw: number;
+  image_maximum: number;
+  clipped: boolean;
+  clipped_reason: string;
+  moffat: ProfileFit;
+  gaussian: ProfileFit;
+  cut_angle_degrees: number;
+  cut_half_length_px: number;
+  cut_distance_px: number[];
+  cut_values: number[];
+  cut_step_px: number;
+  cutout: (number | null)[][];
+  cutout_origin_x: number;
+  cutout_origin_y: number;
+  snapped: boolean;
+  snap_distance_px: number;
+  star_found: boolean;
+  not_a_star_reason?: string | null;
+  ring_inner_px: number;
+  ring_outer_px: number;
+  ring_sky: number;
+  ring_bin_angle_degrees: number[];
+  ring_bin_values: number[];
+  ring_bin_counts: number[];
+  ring_harmonics: RingHarmonic[];
+  ring_constant?: number | null;
+  ring_scale_value?: number | null;
+  ring_neighbors: RingNeighbor[];
+  ring_masked_neighbor_count: number;
+  ring_masked_fraction: number;
+  ring_note?: string | null;
 }
 
 /**
@@ -5716,6 +6056,7 @@ export const RPC_METHODS = [
   "system:save",
   "terminal:execute",
   "terminal:get_workspace",
+  "terminal:get_recent_runs",
   "terminal:completions",
   "terminal:list_recipes",
   "terminal:get_recipe",
@@ -5850,6 +6191,9 @@ export const RPC_METHODS = [
   "images:get_light_frame_data",
   "images:convert_fits",
   "images:get_fits_header",
+  "images:measure_star_profile",
+  "images:map_position",
+  "images:measure_detections",
   "images:delete",
   "images:last",
   "calibration:get_stats",
@@ -5935,6 +6279,8 @@ export const UI_EVENTS = {
   "terminal:plot_generated": "terminal:plot_generated",
   /** The script editor's text was replaced by another client. */
   "editor:sync": "editor:sync",
+  /** A user script was saved, so the User Scripts list is out of date. */
+  "scripts:changed": "scripts:changed",
 } as const;
 
 /** The name of one event the backend pushes to the app. */

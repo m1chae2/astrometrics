@@ -48,6 +48,14 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +80,16 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 # Angstroms per pixel. The star's blurred size (seeing, focus, the grating
 # in a converging beam) is not in the equipment specs, which is why the
 # real value is estimated from the trail width whenever it can be.
-FALLBACK_RESOLUTION_ELEMENT_ANGSTROM = 45.0
+FALLBACK_RESOLUTION_ELEMENT_ANGSTROM = TunedParameter(
+    name="spectroscopy.fallback_resolution_element_angstrom",
+    default=45.0,
+    unit="Å",
+    description="The resolution element used when the trail width was not measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-05",
+)
 
 # A gaussian's full width at half its height (FWHM) is this many times its
 # sigma: 2 * sqrt(2 * ln 2) = 2.3548. The trail width is stored as a sigma,
@@ -90,7 +107,16 @@ MINIMUM_RESOLUTION_ELEMENT_PIXELS = 2.0
 # this a handful of noisy fits could set the number. Chosen to be about a
 # tenth of a typical trail (Vega's has 563 samples). Not yet tested against
 # a set of faint stars.
-MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES = 50
+MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES = TunedParameter(
+    name="spectroscopy.minimum_fitted_trail_width_samples",
+    default=50,
+    unit="count",
+    description="The fewest trail-width fits needed before trusting their median.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D37",
+)
 
 # The fraction of the trail's samples that must have a working width fit.
 # A width fit that failed is stored as 0.0. A faint star's fits often fail,
@@ -104,7 +130,16 @@ MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES = 50
 # tested on a set of faint stars (2026-09-19, scratch check on the Vega
 # stack; see
 # documentation/evidence/spectral_resolution_estimate_vega_20260919.json).
-MINIMUM_FITTED_TRAIL_WIDTH_FRACTION = 0.5
+MINIMUM_FITTED_TRAIL_WIDTH_FRACTION = TunedParameter(
+    name="spectroscopy.minimum_fitted_trail_width_fraction",
+    default=0.5,
+    unit="fraction",
+    description="The fraction of the trail's samples that must have a working width fit.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-05",
+)
 
 
 def estimate_resolution_element_angstrom(
@@ -141,9 +176,9 @@ def estimate_resolution_element_angstrom(
         return None
 
     fitted = np.isfinite(widths) & (widths > 0)
-    if fitted.sum() < MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES:
+    if fitted.sum() < resolve(MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES).value:
         return None
-    if fitted.mean() < MINIMUM_FITTED_TRAIL_WIDTH_FRACTION:
+    if fitted.mean() < resolve(MINIMUM_FITTED_TRAIL_WIDTH_FRACTION).value:
         return None
 
     finite_wavelengths = wavelengths[np.isfinite(wavelengths)]
@@ -182,7 +217,7 @@ def resolve_resolution_element_angstrom(
     """
     estimate = estimate_resolution_element_angstrom(wavelength_angstrom, trail_width_px)
     if estimate is None:
-        return FALLBACK_RESOLUTION_ELEMENT_ANGSTROM, False
+        return resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value, False
     logger.debug("Resolution element measured from the trail width: %.1f A", estimate)
     return estimate, True
 
@@ -215,11 +250,29 @@ def blur_sigma_in_samples(resolution_element_angstrom: float, sample_spacing_ang
 # 41 A blue, 38 A middle, 52 A red), so bands of 700 A follow that change,
 # and each holds about 60 samples of the trail at 11.3 A per pixel, enough
 # for a steady median. Chosen by judgement, not tuned.
-RESOLUTION_PROFILE_BAND_ANGSTROM = 700.0
+RESOLUTION_PROFILE_BAND_ANGSTROM = TunedParameter(
+    name="spectroscopy.resolution_profile_band_angstrom",
+    default=700.0,
+    unit="Å",
+    description="Width of the wavelength bands the trail widths are grouped into for a resolution profile.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D37",
+)
 
 # The fewest working width fits a band needs to be used. Fewer than this and
 # a handful of noisy fits would set the band's value.
-MINIMUM_FITTED_SAMPLES_PER_BAND = 20
+MINIMUM_FITTED_SAMPLES_PER_BAND = TunedParameter(
+    name="spectroscopy.minimum_fitted_samples_per_band",
+    default=20,
+    unit="count",
+    description="The fewest working width fits a resolution profile band needs.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D37",
+)
 
 # A profile is blurred as a few fixed widths mixed together, not one width
 # per sample. This many widths, evenly spaced between the narrowest and the
@@ -285,19 +338,22 @@ def estimate_resolution_profile(
         made (see `estimate_resolution_element_angstrom`) or fewer than two
         bands have enough working fits; the single number applies then.
     """
+    minimum_fitted_samples_per_band = resolve(MINIMUM_FITTED_SAMPLES_PER_BAND).value
     if estimate_resolution_element_angstrom(wavelength_angstrom, trail_width_px) is None:
         return None
     wavelengths = np.asarray(wavelength_angstrom, dtype=float)
     widths = np.asarray(trail_width_px, dtype=float)
     usable = np.isfinite(wavelengths) & np.isfinite(widths) & (widths > 0)
     angstrom_per_pixel = float(np.median(np.abs(np.diff(np.sort(wavelengths[np.isfinite(wavelengths)])))))
-    band_index = np.floor((wavelengths - np.nanmin(wavelengths)) / RESOLUTION_PROFILE_BAND_ANGSTROM)
+    band_index = np.floor(
+        (wavelengths - np.nanmin(wavelengths)) / resolve(RESOLUTION_PROFILE_BAND_ANGSTROM).value
+    )
 
     centres = []
     values = []
     for band in np.unique(band_index[usable]):
         in_band = usable & (band_index == band)
-        if in_band.sum() < MINIMUM_FITTED_SAMPLES_PER_BAND:
+        if in_band.sum() < minimum_fitted_samples_per_band:
             continue
         blur_width_px = max(
             FWHM_PER_SIGMA * float(np.median(widths[in_band])), MINIMUM_RESOLUTION_ELEMENT_PIXELS

@@ -65,7 +65,7 @@ def _pointing_geometry(ra_value: float, dec_deg: float, latitude_deg: float) -> 
 
 
 def predict_pointing_error(
-    ra_value: float, dec_deg: float, model: MountPointingModel, latitude_deg: float = 45.0
+    ra_value: float, dec_deg: float, model: MountPointingModel, latitude_deg: float
 ) -> tuple[float, float]:
     """Predict the systematic pointing error `model` implies at a position.
 
@@ -85,8 +85,9 @@ def predict_pointing_error(
         Declination in decimal degrees.
     model : `MountPointingModel`
         The already-fit coefficients to evaluate.
-    latitude_deg : `float`, optional
-        Observer latitude in decimal degrees, defaults to 45.0.
+    latitude_deg : `float`
+        Observer latitude in decimal degrees. Required: the pointing terms
+        depend on the site, so no stand-in latitude is assumed.
 
     Returns
     -------
@@ -115,7 +116,7 @@ def predict_pointing_error(
 
 def fit_pointing_model(
     attempts: list[dict[str, Any]],
-    latitude_deg: float = 45.0,
+    latitude_deg: float,
 ) -> MountPointingModel:
     r"""Fit geometric mount pointing terms to a set of plate solves.
 
@@ -128,8 +129,9 @@ def fit_pointing_model(
     attempts : `list` [`dict` [`str`, `Any`]]
         Plate solve records containing `ra`, `dec`, `delta_ra_arcsec`,
         `delta_dec_arcsec`, and optionally `timestamp`.
-    latitude_deg : `float`, optional
-        Observer latitude in decimal degrees, defaults to 45.0.
+    latitude_deg : `float`
+        Observer latitude in decimal degrees. Required: the pointing terms
+        depend on the site, so no stand-in latitude is assumed.
 
     Returns
     -------

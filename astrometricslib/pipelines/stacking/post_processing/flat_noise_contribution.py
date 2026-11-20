@@ -52,6 +52,7 @@ import numpy as np
 from photutils.aperture import CircularAperture
 from scipy.ndimage import gaussian_filter
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.stacking.post_processing.stack_image import APERTURE_RADIUS_PX
 
 logger = logging.getLogger(__name__)
@@ -151,8 +152,9 @@ def _aperture_pattern_factor(sigma_px: float | None) -> float:
         blurred with the same kernel, and the squares of the result are summed.
         It is averaged over places of the circle's centre inside a pixel.
     """
+    aperture_radius_px = resolve(APERTURE_RADIUS_PX).value
     blur = sigma_px if sigma_px and sigma_px > 0 else 0.0
-    margin = math.ceil(_KERNEL_TRUNCATE * blur) + math.ceil(APERTURE_RADIUS_PX) + 2
+    margin = math.ceil(_KERNEL_TRUNCATE * blur) + math.ceil(aperture_radius_px) + 2
     size = 2 * margin + 1
     values = []
     for column_step in range(_SUBPIXEL_PLACES):
@@ -160,7 +162,7 @@ def _aperture_pattern_factor(sigma_px: float | None) -> float:
             x = margin + (column_step + 0.5) / _SUBPIXEL_PLACES - 0.5
             y = margin + (row_step + 0.5) / _SUBPIXEL_PLACES - 0.5
             weights = np.zeros((size, size))
-            mask = CircularAperture((x, y), r=APERTURE_RADIUS_PX).to_mask(method="exact")
+            mask = CircularAperture((x, y), r=aperture_radius_px).to_mask(method="exact")
             box = np.asarray(mask.data)
             x0, y0 = mask.bbox.ixmin, mask.bbox.iymin
             weights[y0 : y0 + box.shape[0], x0 : x0 + box.shape[1]] = box

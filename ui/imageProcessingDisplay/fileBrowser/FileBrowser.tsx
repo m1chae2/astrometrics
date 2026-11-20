@@ -5,6 +5,7 @@ import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { Button } from '../../common/components/Button';
 import { Checkbox } from '../../common/components/Checkbox';
 import { TextInput } from '../../common/components/TextInput';
+import { buildOpticOptions, filterFilesByCamera } from '../utils/opticSelection';
 import '../imageProcessingDisplay.css'; // Consolidated styles
 
 /** Why a frame is marked "Unusual brightness" (shown when you hover over it). */
@@ -21,6 +22,8 @@ export interface FileItem {
     exposure: string;
     filter: string;
     date: string;
+    /** Focal length in mm, when the frame header has one. */
+    focalLengthMm?: number | null;
 }
 
 export interface FileBrowserProps {
@@ -53,6 +56,10 @@ export const FileBrowserToolbar: React.FC<{
     onSearchChange: (term: string) => void;
     selectedCamera: string;
     onCameraChange: (cam: string) => void;
+    /** The chosen focal length as text ('' for all optics). */
+    selectedOptic?: string;
+    /** Called with the chosen focal length as text, or '' for all optics. */
+    onOpticChange?: (optic: string) => void;
     checkedFiles: Set<string>;
     onDeleteFiles?: (paths: string[]) => void;
     onShowHeader?: () => void;
@@ -63,6 +70,8 @@ export const FileBrowserToolbar: React.FC<{
     onSearchChange,
     selectedCamera,
     onCameraChange,
+    selectedOptic = '',
+    onOpticChange,
     checkedFiles,
     onDeleteFiles,
     onShowHeader,
@@ -75,6 +84,13 @@ export const FileBrowserToolbar: React.FC<{
             const cameras = new Set(files.map(f => f.camera));
             return Array.from(cameras).sort();
         }, [files]);
+
+        // Optic choices (with counts) are for the selected camera, and appear
+        // only when that camera's frames come from two or more optics.
+        const opticOptions = useMemo(
+            () => buildOpticOptions(filterFilesByCamera(files, selectedCamera)),
+            [files, selectedCamera],
+        );
 
         const handleDeleteClick = (e: React.MouseEvent) => {
             e.stopPropagation();
@@ -93,6 +109,16 @@ export const FileBrowserToolbar: React.FC<{
                             selectedId={selectedCamera === 'All' ? null : selectedCamera}
                             onSelect={(id) => onCameraChange(id ?? 'All')}
                             emptyLabel="All Cameras"
+                            size="compact"
+                        />
+                    )}
+                    {onOpticChange && opticOptions.length > 0 && (
+                        <PopoverSelect
+                            label="Optic"
+                            options={opticOptions}
+                            selectedId={selectedOptic || null}
+                            onSelect={(id) => onOpticChange(id ?? '')}
+                            emptyLabel="All optics"
                             size="compact"
                         />
                     )}

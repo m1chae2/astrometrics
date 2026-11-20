@@ -201,7 +201,7 @@ def test_a_step_longer_than_the_limit_is_counted_and_left_out() -> None:
     assert summary.degenerate_count == 2
     assert summary.used_count == 39 - 2
     assert summary.median_px == pytest.approx(0.2)
-    assert MAXIMUM_PLAUSIBLE_STEP_PX == pytest.approx(50.0)
+    assert MAXIMUM_PLAUSIBLE_STEP_PX.default == pytest.approx(50.0)
 
 
 def test_a_step_across_two_nights_is_not_a_dither() -> None:

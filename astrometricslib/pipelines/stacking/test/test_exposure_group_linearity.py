@@ -101,7 +101,7 @@ def make_compressed_group_b(group_a: np.ndarray) -> np.ndarray:
 
 
 def measure_pair(
-    group_b: np.ndarray, tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE
+    group_b: np.ndarray, tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE.default
 ) -> GroupGainMeasurement:
     """Measure group B against group A with the same code the combination uses.
 
@@ -149,7 +149,7 @@ def test_a_compressed_bright_end_does_not_move_the_mid_range_gain() -> None:
     assert measurement.bright_end_ratio is not None
     assert measurement.bright_end_ratio < 0.46
     assert measurement.disagreement is not None
-    assert measurement.disagreement > DEFAULT_GAIN_DISAGREEMENT_TOLERANCE
+    assert measurement.disagreement > DEFAULT_GAIN_DISAGREEMENT_TOLERANCE.default
     assert measurement.nonlinear
 
 

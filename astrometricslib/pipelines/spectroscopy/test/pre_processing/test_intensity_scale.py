@@ -35,22 +35,22 @@ def test_a_raw_frame_is_counts_per_exposure() -> None:
 def test_a_float_stack_is_full_scale_per_average_exposure() -> None:
     """Deneb's stack: 39 frames of 1 s, 1.0 is 65535 counts in one second."""
     header = _header(BITPIX=-32, EXPTIME=39.0, STACKCNT=39)
-    assert counts_per_second_factor(header) == pytest.approx(FULL_SCALE_COUNTS)
+    assert counts_per_second_factor(header) == pytest.approx(FULL_SCALE_COUNTS.default)
 
 
 def test_a_longer_average_exposure_lowers_the_rate() -> None:
     """Mirach's stack: 39 frames of 4 s, so a quarter of Deneb's factor."""
     header = _header(BITPIX=-32, EXPTIME=156.0, STACKCNT=39)
-    assert counts_per_second_factor(header) == pytest.approx(FULL_SCALE_COUNTS / 4.0)
+    assert counts_per_second_factor(header) == pytest.approx(FULL_SCALE_COUNTS.default / 4.0)
 
 
 def test_the_same_star_in_two_stacks_gives_the_same_rate() -> None:
     """A 1 s and a 4 s stack of one star agree in counts per second."""
     rate = 1000.0
-    one_second = (rate * 1.0 / FULL_SCALE_COUNTS) * counts_per_second_factor(
+    one_second = (rate * 1.0 / FULL_SCALE_COUNTS.default) * counts_per_second_factor(
         _header(BITPIX=-32, EXPTIME=10.0, STACKCNT=10)
     )
-    four_seconds = (rate * 4.0 / FULL_SCALE_COUNTS) * counts_per_second_factor(
+    four_seconds = (rate * 4.0 / FULL_SCALE_COUNTS.default) * counts_per_second_factor(
         _header(BITPIX=-32, EXPTIME=40.0, STACKCNT=10)
     )
     assert one_second == pytest.approx(rate)

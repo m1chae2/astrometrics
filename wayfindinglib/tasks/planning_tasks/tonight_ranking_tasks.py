@@ -53,6 +53,13 @@ import numpy as np
 from astropy.time import Time
 
 from astrometricslib import Target
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality.capture_overheads import (
     AUTOFOCUS_RUNS_PER_HOUR,
@@ -127,7 +134,19 @@ TONIGHT_SKY_ENTRY = "WAY-71"
 TONIGHT_RANKING_ENTRY = "WAY-72"
 """Register entry behind the ranking and its design-estimate row."""
 
-GAIN_TIE_DIGITS = 2
+GAIN_TIE_DIGITS = TunedParameter(
+    name="wayfinding.gain_tie_digits",
+    default=2,
+    unit="decimal places",
+    description=(
+        "Two gains that agree to this many decimals (the whole percent the reason text shows) count as "
+        "tied for the provisional rule."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D70",
+)
 """Two gains that agree to this many decimals (the whole percent the reason
 text shows) count as tied for the provisional rule. Among targets tied this
 way, one whose recommended additional frames are only provisional
@@ -143,7 +162,16 @@ PROVISIONAL_RANKING_REMARK = (
 CLOCK_HOUR_SECONDS = 3600.0
 """The span the gain is worked out for: one hour of real clock time."""
 
-THIN_DATASET_SECONDS = 2.0 * 3600.0
+THIN_DATASET_SECONDS = TunedParameter(
+    name="wayfinding.thin_dataset_seconds",
+    default=7200.0,
+    unit="s of exposure on a target",
+    description='A target with less exposure than this is "thin".',
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="WAY-D71",
+    config_key=("Wayfinding.Planning", "thin_dataset_seconds"),
+)
 """A target with less exposure than this is "thin". One more hour then adds at
 least half as much again as it has, so its gain per hour is large because its
 history is short, not because it is a better target tonight. Design estimate,
@@ -468,9 +496,13 @@ def score_candidate(
 
     overheads = overheads_for(setting)
     per_frame_seconds = (
-        exposure_seconds + overheads.download_seconds + overheads.dither_settle_seconds / DITHER_EVERY_FRAMES
+        exposure_seconds
+        + overheads.download_seconds
+        + overheads.dither_settle_seconds / resolve_parameter(DITHER_EVERY_FRAMES).value
     )
-    hour_for_frames = CLOCK_HOUR_SECONDS - AUTOFOCUS_RUNS_PER_HOUR * overheads.autofocus_seconds
+    hour_for_frames = (
+        CLOCK_HOUR_SECONDS - resolve_parameter(AUTOFOCUS_RUNS_PER_HOUR).value * overheads.autofocus_seconds
+    )
     frames_in_hour = int(hour_for_frames // per_frame_seconds) if hour_for_frames > 0.0 else 0
     if frames_in_hour < 1:
         return _no_forecast(
@@ -485,8 +517,8 @@ def score_candidate(
         frames_in_hour,
         exposure_seconds,
         overheads,
-        dither_every_frames=DITHER_EVERY_FRAMES,
-        autofocus_runs=AUTOFOCUS_RUNS_PER_HOUR,
+        dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
+        autofocus_runs=resolve_parameter(AUTOFOCUS_RUNS_PER_HOUR).value,
     )
     fixed_pattern = (
         fixed_pattern_noise_for_runs(
@@ -548,7 +580,7 @@ def score_candidate(
         "effective_hours_so_far": captured_seconds / 3600.0,
         "sky_rate_e_per_s_per_px": sky_rate,
         "sky_source": sky_source,
-        "thin_dataset": captured_seconds < THIN_DATASET_SECONDS,
+        "thin_dataset": captured_seconds < resolve_parameter(THIN_DATASET_SECONDS).value,
         "evidence": evidence,
     }
     stop = target_stop_signal(runs)
@@ -600,7 +632,7 @@ def build_lists(candidates: Iterable[RankedCandidate]) -> tuple[list[RankedList]
         ranked = sorted(
             (c for c in group if c.status == CandidateStatus.RANKED),
             key=lambda c: (
-                -round(c.gain_per_hour_fraction or 0.0, GAIN_TIE_DIGITS),
+                -round(c.gain_per_hour_fraction or 0.0, resolve_parameter(GAIN_TIE_DIGITS).value),
                 c.recommended_additional_frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL,
                 -(c.gain_per_hour_fraction or 0.0),
                 c.target_id,

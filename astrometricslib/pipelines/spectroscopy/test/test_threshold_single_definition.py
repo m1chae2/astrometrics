@@ -34,10 +34,10 @@ from astrometricslib.pipelines.spectroscopy.processing import assess_processing_
 
 # Each shared limit, its value, and the unit its docstring must state.
 SHARED_LIMITS: dict[str, tuple[float, str]] = {
-    "NO_GOOD_MATCH_RMS": (NO_GOOD_MATCH_RMS, "relative RMS"),
-    "UNRELIABLE_MATCH_RMS": (UNRELIABLE_MATCH_RMS, "relative RMS"),
-    "AMBIGUOUS_RMS_GAP": (AMBIGUOUS_RMS_GAP, "relative RMS"),
-    "DIFFERS_FROM_CATALOG_SUBTYPES": (DIFFERS_FROM_CATALOG_SUBTYPES, "subtype steps"),
+    "NO_GOOD_MATCH_RMS": (NO_GOOD_MATCH_RMS.default, "relative RMS"),
+    "UNRELIABLE_MATCH_RMS": (UNRELIABLE_MATCH_RMS.default, "relative RMS"),
+    "AMBIGUOUS_RMS_GAP": (AMBIGUOUS_RMS_GAP.default, "relative RMS"),
+    "DIFFERS_FROM_CATALOG_SUBTYPES": (DIFFERS_FROM_CATALOG_SUBTYPES.default, "subtype steps"),
 }
 
 # Endings of module constant names that look like a match limit.
@@ -140,10 +140,10 @@ def test_no_other_module_defines_a_limit_of_its_own(module: ModuleType) -> None:
 
 @pytest.mark.parametrize("module", MODULES_THAT_MUST_NOT_DEFINE_LIMITS, ids=lambda m: m.__name__)
 def test_a_limit_a_module_holds_is_the_one_from_stellar_source(module: ModuleType) -> None:
-    """Verify a shared limit a module exposes keeps the defined value."""
-    for name, (value, _unit) in SHARED_LIMITS.items():
+    """Verify a module exposes the shared limit of `stellar_source` itself."""
+    for name in SHARED_LIMITS:
         if hasattr(module, name):
-            assert getattr(module, name) == value
+            assert getattr(module, name) is getattr(stellar_source, name)
 
 
 @pytest.mark.parametrize("module", MODULES_THAT_MUST_NOT_DEFINE_LIMITS, ids=lambda m: m.__name__)

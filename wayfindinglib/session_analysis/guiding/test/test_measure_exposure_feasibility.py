@@ -142,8 +142,8 @@ def test_the_longest_reliable_length_needs_half_the_exposures_clean(
     feasibility, reliable = measure_exposure_feasibility(samples, [30, 120, 300], make_envelope(), "exact")
     by_length = _by_length(feasibility)
 
-    assert by_length[30].clean_fraction >= RELIABLE_CLEAN_FRACTION
-    assert by_length[300].clean_fraction < RELIABLE_CLEAN_FRACTION
+    assert by_length[30].clean_fraction >= RELIABLE_CLEAN_FRACTION.default
+    assert by_length[300].clean_fraction < RELIABLE_CLEAN_FRACTION.default
     assert reliable in (30.0, 120.0)
 
 

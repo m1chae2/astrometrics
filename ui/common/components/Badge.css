@@ -64,6 +64,16 @@
     outline: none;
 }
 
+/* Opaque: the same tint drawn over a solid dark base, for badges that sit on an image. */
+.badge--opaque {
+    background:
+        linear-gradient(
+            color-mix(in srgb, var(--badge-color) 20%, transparent),
+            color-mix(in srgb, var(--badge-color) 20%, transparent)
+        ),
+        var(--grey-darkest);
+}
+
 /* The border style repeats what the word says, for readers who cannot tell the tints apart. */
 .badge--dashed {
     border-style: dashed;

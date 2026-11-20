@@ -46,6 +46,7 @@ from astropy.stats import sigma_clipped_stats
 
 from astrometricslib._internal.drivers.calibration_library import header_temperature_c
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -53,6 +54,12 @@ from astrometricslib.models.quality.measurement import (
     QualityMeasurement,
     QualitySubject,
     SubjectLevel,
+)
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     SKY_CLIP_SIGMA,
@@ -105,8 +112,26 @@ CALIBRATION_SUBJECT_PREFIX = "calibration"
 # run on 2,367 real frames (register entry STK-50); a smaller step makes the
 # grid cost more with no gain, because the range is dominated by smooth
 # patterns that are many cells wide.
-BLOCK_RANGE_PIXEL_STEP = 3
-BLOCK_RANGE_GRID_CELLS = 12
+BLOCK_RANGE_PIXEL_STEP = TunedParameter(
+    name="shared.block_range_pixel_step",
+    default=3,
+    unit="pixels",
+    description="Step between pixels sampled when measuring the range of block means in a calibration frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D44",
+)
+BLOCK_RANGE_GRID_CELLS = TunedParameter(
+    name="shared.block_range_grid_cells",
+    default=12,
+    unit="cells",
+    description="Number of grid cells per side in the block-range measurement of a calibration frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D44",
+)
 
 # The noise estimate compares each pixel with the one two columns away. Two
 # keeps pixels of one color together on a color sensor and does no harm on a
@@ -117,8 +142,26 @@ NEIGHBOR_NOISE_COLUMN_STEP = 2
 # pixels on a side, taken from the top-left corner of the central region of
 # this many pixels on a side. 300 pixels already hold hundreds of distinct
 # values, and the step is the same everywhere on a sensor.
-VALUE_STEP_CENTRAL_REGION_PX = 1000
-VALUE_STEP_BLOCK_PX = 300
+VALUE_STEP_CENTRAL_REGION_PX = TunedParameter(
+    name="shared.value_step_central_region_px",
+    default=1000,
+    unit="pixels",
+    description="Side of the central region searched for a value step in a calibration frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D44",
+)
+VALUE_STEP_BLOCK_PX = TunedParameter(
+    name="shared.value_step_block_px",
+    default=300,
+    unit="pixels",
+    description="Side of the block compared when looking for a value step in a calibration frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D44",
+)
 
 _DEFINITION_VERSIONS = {
     spec.name: spec.definition_version for spec in (*FRAME_METRICS, *CALIBRATION_FRAME_METRICS)
@@ -262,12 +305,12 @@ def measure_block_range(data: np.ndarray) -> float:
         cut into a `BLOCK_RANGE_GRID_CELLS` x `BLOCK_RANGE_GRID_CELLS` grid.
         The value is the largest cell median minus the smallest.
     """
-    subsampled = data[::BLOCK_RANGE_PIXEL_STEP, ::BLOCK_RANGE_PIXEL_STEP]
-    row_bands = np.array_split(subsampled, BLOCK_RANGE_GRID_CELLS, axis=0)
+    pixel_step = resolve(BLOCK_RANGE_PIXEL_STEP).value
+    grid_cells = resolve(BLOCK_RANGE_GRID_CELLS).value
+    subsampled = data[::pixel_step, ::pixel_step]
+    row_bands = np.array_split(subsampled, grid_cells, axis=0)
     cell_medians = [
-        float(np.median(cell))
-        for band in row_bands
-        for cell in np.array_split(band, BLOCK_RANGE_GRID_CELLS, axis=1)
+        float(np.median(cell)) for band in row_bands for cell in np.array_split(band, grid_cells, axis=1)
     ]
     return max(cell_medians) - min(cell_medians)
 
@@ -289,9 +332,11 @@ def measure_value_step(data: np.ndarray) -> float | None:
         holds one value only.
     """
     height, width = data.shape
-    top = max(0, (height - VALUE_STEP_CENTRAL_REGION_PX) // 2)
-    left = max(0, (width - VALUE_STEP_CENTRAL_REGION_PX) // 2)
-    block = data[top : top + VALUE_STEP_BLOCK_PX, left : left + VALUE_STEP_BLOCK_PX]
+    central_region = resolve(VALUE_STEP_CENTRAL_REGION_PX).value
+    block_pixels = resolve(VALUE_STEP_BLOCK_PX).value
+    top = max(0, (height - central_region) // 2)
+    left = max(0, (width - central_region) // 2)
+    block = data[top : top + block_pixels, left : left + block_pixels]
     values = np.unique(block)
     return float(np.min(np.diff(values))) if values.size > 1 else None
 
@@ -318,7 +363,7 @@ def measure_calibration_pixels(
         The measured numbers.
     """
     data = collapse_to_2d(np.asarray(pixels, dtype=np.float32))
-    mean_adu, median_adu, _ = sigma_clipped_stats(data, sigma=SKY_CLIP_SIGMA)
+    mean_adu, median_adu, _ = sigma_clipped_stats(data, sigma=resolve(SKY_CLIP_SIGMA).value)
     return CalibrationPixelFacts(
         clipped_mean_adu=float(mean_adu),
         clipped_median_adu=float(median_adu),

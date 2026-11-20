@@ -322,11 +322,14 @@ def test_the_copied_stack_limits_agree_with_the_stacking_pipeline() -> None:
         DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
     )
 
-    assert REJECTED_PIXEL_FRACTION_LIMIT == DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD
-    assert STACK_SHARPNESS_RATIO_LIMIT == DEFAULT_FWHM_DEGRADATION_RATIO
+    # The library's limits are declared parameters; compare their defaults.
+    library_rejected_limit = DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD.default
+    library_sharpness_limit = DEFAULT_FWHM_DEGRADATION_RATIO.default
+    assert REJECTED_PIXEL_FRACTION_LIMIT.default == library_rejected_limit
+    assert STACK_SHARPNESS_RATIO_LIMIT.default == library_sharpness_limit
     limits = {rule.name: rule.limits[0].value for rule in RESULT_QUALITY_RULES if rule.limits}
-    assert limits["stack_rejected_fraction_high"] == DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD
-    assert limits["stack_sharpness_poor"] == DEFAULT_FWHM_DEGRADATION_RATIO
+    assert limits["stack_rejected_fraction_high"] == library_rejected_limit
+    assert limits["stack_sharpness_poor"] == library_sharpness_limit
 
 
 def test_missing_metric_gives_insufficient_data_that_names_it() -> None:

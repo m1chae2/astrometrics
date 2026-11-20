@@ -18,9 +18,44 @@ from typing import Any
 import numpy as np
 from astropy.stats import sigma_clip
 
-MIN_MATCHED_STAR_PAIRS = 10
-ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA = 3.0
-ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA = 2.5
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
+MIN_MATCHED_STAR_PAIRS = TunedParameter(
+    name="spectroscopy.min_matched_star_pairs",
+    default=10,
+    unit="count",
+    description="The fewest matched star pairs a registration needs to be judged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-29",
+)
+ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA = TunedParameter(
+    name="spectroscopy.zero_order_position_jump_outlier_sigma",
+    default=3.0,
+    unit="sigma",
+    description="A zero-order position jump beyond this many sigma is an outlier.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-29",
+)
+ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA = TunedParameter(
+    name="spectroscopy.zero_order_amplitude_outlier_sigma",
+    default=2.5,
+    unit="sigma",
+    description="A zero-order amplitude beyond this many sigma is an outlier.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-29",
+)
 
 # astropy.stats.sigma_clip has no "unbounded" sigma_upper/sigma_lower
 # sentinel; a very large finite bound achieves the same "don't clip on
@@ -107,6 +142,7 @@ def evaluate_spectral_registration_quality(
     The three input lists must match up perfectly (e.g., the first item in
     each list describes the first image frame).
     """
+    min_matched_star_pairs = resolve(MIN_MATCHED_STAR_PAIRS).value
     n = len(frame_paths)
     if len(seq_frames) != n or len(zero_order_stars) != n:
         return []
@@ -121,11 +157,11 @@ def evaluate_spectral_registration_quality(
         else:
             position_jumps.append(math.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"]))
 
-    low_star_count_flags = [count is not None and count < MIN_MATCHED_STAR_PAIRS for count in nb_stars]
+    low_star_count_flags = [count is not None and count < min_matched_star_pairs for count in nb_stars]
     dim_zero_order_flags = flag_outliers(
-        peak_to_background_ratios, ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA, low_is_bad=True
+        peak_to_background_ratios, resolve(ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA).value, low_is_bad=True
     )
-    position_jump_flags = flag_outliers(position_jumps, ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA)
+    position_jump_flags = flag_outliers(position_jumps, resolve(ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA).value)
 
     flagged_frames = []
     for i, path in enumerate(frame_paths):

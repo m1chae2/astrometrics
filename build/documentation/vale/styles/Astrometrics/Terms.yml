@@ -1,6 +1,6 @@
-# Documentation_Conventions.md §5: one term per concept.
+# .claude/skills/documentation-style/CONVENTIONS.md §5: one term per concept.
 extends: substitution
-message: "Use '%s' instead of '%s' (Documentation_Conventions.md §5)."
+message: "Use '%s' instead of '%s' (.claude/skills/documentation-style/CONVENTIONS.md §5)."
 level: warning
 ignorecase: true
 swap:

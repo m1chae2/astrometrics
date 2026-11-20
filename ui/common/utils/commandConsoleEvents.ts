@@ -2,7 +2,8 @@
  * @file commandConsoleEvents.ts
  * @description The shared name and shape of the events the Command Console
  * receives through the hand-off store (`displayHandoffStore.ts`): what an AI
- * agent ran in the terminal, a plot it made, and an editor change.
+ * agent ran in the terminal, a plot it made, an editor change, and a change to
+ * the saved scripts.
  */
 
 /** The hand-off kind that carries Command Console events. */

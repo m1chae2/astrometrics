@@ -41,6 +41,15 @@ of the quality code: this module imports the science library from its root.
 from collections.abc import Mapping
 from typing import Any
 
+from astrometricslib.parameters import (
+    AMBIGUOUS_RMS_GAP,
+    NO_GOOD_MATCH_RMS,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import LimitTier, MeasurementReference, StarResultReference
 from wayfindinglib.analytics.result_quality.plain_text import format_plain, spectral_type_phrase
 from wayfindinglib.analytics.result_quality.rules import build_limit
@@ -60,7 +69,16 @@ STAR_RESULT_ENTRY = "WAY-73"
 STAR_RESULT_ROW = "WAY-D73"
 """Register row behind the design estimates below."""
 
-MINIMUM_CYCLES_FOR_PERIOD = 2.0
+MINIMUM_CYCLES_FOR_PERIOD = TunedParameter(
+    name="wayfinding.minimum_cycles_for_period",
+    default=2.0,
+    unit="cycles",
+    description="The fewest full cycles of a period that the data should cover.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D73",
+)
 """The fewest full cycles of a period that the data should cover. One cycle
 shows a pattern once; two show that it repeats. This is the usual minimum
 for a period claim. Design estimate, register row WAY-D73."""
@@ -83,20 +101,17 @@ PERIOD_NOT_TESTABLE = "period_not_testable"
 NO_STAR_RESULT = "no_star_result"
 
 
-POOR_MATCH_RMS_LIMIT = 0.15
-"""Copy of the pipeline's poor-match limit (relative RMS), for the rule table.
+# The spectrum rules judge the pipeline's own results, so they use the
+# pipeline's limits themselves (one declaration each, with one tuned value),
+# not copies.
+POOR_MATCH_RMS_LIMIT = NO_GOOD_MATCH_RMS
+"""The pipeline's poor-match limit (relative RMS), `NO_GOOD_MATCH_RMS`."""
 
-A test checks it against `NO_GOOD_MATCH_RMS` in the spectroscopy pipeline.
-"""
-
-AMBIGUOUS_RMS_GAP_LIMIT = 0.02
-"""Copy of the pipeline's ambiguity limit (relative RMS), for the rule table.
-
-A test checks it against `AMBIGUOUS_RMS_GAP` in the spectroscopy pipeline.
-"""
+AMBIGUOUS_RMS_GAP_LIMIT = AMBIGUOUS_RMS_GAP
+"""The pipeline's ambiguity limit (relative RMS), `AMBIGUOUS_RMS_GAP`."""
 
 _POOR_MATCH_LIMIT = build_limit(
-    POOR_MATCH_RMS_LIMIT,
+    resolve_parameter(POOR_MATCH_RMS_LIMIT).value,
     "relative RMS",
     LimitTier.VALIDATED_DATASET,
     (
@@ -108,7 +123,7 @@ _POOR_MATCH_LIMIT = build_limit(
     14,
 )
 _AMBIGUOUS_GAP_LIMIT = build_limit(
-    AMBIGUOUS_RMS_GAP_LIMIT,
+    resolve_parameter(AMBIGUOUS_RMS_GAP_LIMIT).value,
     "relative RMS",
     LimitTier.VALIDATED_DATASET,
     (
@@ -118,7 +133,7 @@ _AMBIGUOUS_GAP_LIMIT = build_limit(
     "SPE-18",
 )
 _CYCLES_LIMIT = build_limit(
-    MINIMUM_CYCLES_FOR_PERIOD,
+    resolve_parameter(MINIMUM_CYCLES_FOR_PERIOD).value,
     "cycles",
     LimitTier.DESIGN_ESTIMATE,
     "One cycle shows a pattern once. Two show that it repeats. The usual minimum for a period claim.",
@@ -431,13 +446,13 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
         return statements
     spectral_type = spectroscopy.self_determined_spectral_type
     rms_reference = _reference(star_id, run, "spectroscopy.self_determined_spectral_type_rms")
-    if rms > POOR_MATCH_RMS_LIMIT:
+    if rms > resolve_parameter(POOR_MATCH_RMS_LIMIT).value:
         statements.append(
             _statement(
                 SPECTRAL_TYPE_POOR_MATCH,
                 (
                     f"The best reference ({spectral_type}) differs from this spectrum by {rms:.2f} "
-                    f"(relative RMS), above the {POOR_MATCH_RMS_LIMIT:.2f} limit "
+                    f"(relative RMS), above the {resolve_parameter(POOR_MATCH_RMS_LIMIT).value:.2f} limit "
                     "for a good match."
                 ),
                 "Do not claim the type: even the closest reference fits badly.",
@@ -445,19 +460,20 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
                 plain_values={
                     "type_phrase": spectral_type_phrase(spectral_type),
                     "rms": rms,
-                    "limit": POOR_MATCH_RMS_LIMIT,
+                    "limit": resolve_parameter(POOR_MATCH_RMS_LIMIT).value,
                 },
                 proposed_note=f"Do not report {spectral_type} as the star's type.",
             )
         )
     gap = spectroscopy.rms_gap_to_next_class
-    if gap is not None and gap < AMBIGUOUS_RMS_GAP_LIMIT:
+    if gap is not None and gap < resolve_parameter(AMBIGUOUS_RMS_GAP_LIMIT).value:
         statements.append(
             _statement(
                 SPECTRAL_CLASS_AMBIGUOUS,
                 (
                     f"Another spectral class fits within {gap:.3f} (relative RMS) of the best one "
-                    f"({spectral_type}), below the {AMBIGUOUS_RMS_GAP_LIMIT:.2f} gap "
+                    f"({spectral_type}), below the "
+                    f"{resolve_parameter(AMBIGUOUS_RMS_GAP_LIMIT).value:.2f} gap "
                     "needed to tell them apart."
                 ),
                 "The class letter is uncertain, not only the subtype.",
@@ -467,13 +483,14 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
             )
         )
     subtype_gap = spectroscopy.rms_gap_to_second_best
-    if subtype_gap is not None and subtype_gap < AMBIGUOUS_RMS_GAP_LIMIT:
+    if subtype_gap is not None and subtype_gap < resolve_parameter(AMBIGUOUS_RMS_GAP_LIMIT).value:
         statements.append(
             _statement(
                 SPECTRAL_SUBTYPE_AMBIGUOUS,
                 (
                     f"The second-best reference fits within {subtype_gap:.3f} (relative RMS) of the best "
-                    f"one ({spectral_type}), below the {AMBIGUOUS_RMS_GAP_LIMIT:.2f} gap needed to "
+                    f"one ({spectral_type}), below the "
+                    f"{resolve_parameter(AMBIGUOUS_RMS_GAP_LIMIT).value:.2f} gap needed to "
                     "tell them apart."
                 ),
                 "The subtype is uncertain; the class letter may still be clear.",
@@ -594,13 +611,13 @@ def judge_period_search(
             )
         )
     cycles = getattr(search, "cycles_observed", None)
-    if cycles is not None and cycles < MINIMUM_CYCLES_FOR_PERIOD:
+    if cycles is not None and cycles < resolve_parameter(MINIMUM_CYCLES_FOR_PERIOD).value:
         statements.append(
             _statement(
                 PERIOD_FEW_CYCLES,
                 (
                     f"The data cover {cycles:.1f} cycles of the {search_label}; "
-                    f"{MINIMUM_CYCLES_FOR_PERIOD:.0f} are needed to show it repeats."
+                    f"{resolve_parameter(MINIMUM_CYCLES_FOR_PERIOD).value:.0f} are needed to show it repeats."
                 ),
                 "A pattern seen for less than two cycles may be a trend.",
                 [*evidence, _reference(star_id, run_id, f"{metric_prefix}.cycles_observed")],

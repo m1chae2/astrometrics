@@ -6,6 +6,15 @@ final image is blurrier than the original single frames, and whether too
 many pixels had to be thrown out.
 """
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # From the original plan text. The ratio is the stack's FWHM divided by the
 # FWHM its input frames predict (the RMS of a sample of their FWHMs, see
 # `expected_stack_fwhm`), both measured with `measure_image_fwhm`. Measured on
@@ -17,7 +26,16 @@ many pixels had to be thrown out.
 # sensitivity -- whether 1.2x catches a *genuine* registration failure --
 # remains unvalidated: no real failed-registration session exists in the
 # library to check against.
-DEFAULT_FWHM_DEGRADATION_RATIO = 1.2
+DEFAULT_FWHM_DEGRADATION_RATIO = TunedParameter(
+    name="stacking.default_fwhm_degradation_ratio",
+    default=1.2,
+    unit="ratio",
+    description="Ratio of a frame's star width to the stack's above which the width counts as degraded.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-25",
+)
 
 # Validated against three real sessions (see stack_quality_validation_plan
 # memory / logs/rejection_threshold_analysis_*.json): rejected_fraction never
@@ -25,7 +43,16 @@ DEFAULT_FWHM_DEGRADATION_RATIO = 1.2
 # tested sigma. 15% has real headroom above normal sessions, but is also known
 # to be a weaker signal than FWHM -- NGC 2403's problem was invisible in
 # rejected_fraction and only showed up in FWHM.
-DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD = 0.15
+DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD = TunedParameter(
+    name="stacking.default_rejected_fraction_flag_threshold",
+    default=0.15,
+    unit="fraction",
+    description="Share of rejected pixels above which a stack is flagged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-24",
+)
 
 
 def expected_stack_fwhm(input_fwhms: list[float]) -> float | None:
@@ -56,7 +83,7 @@ def expected_stack_fwhm(input_fwhms: list[float]) -> float | None:
 def is_stacked_fwhm_degraded(
     stacked_fwhm: float,
     expected_fwhm: float,
-    degradation_ratio: float = DEFAULT_FWHM_DEGRADATION_RATIO,
+    degradation_ratio: float | None = None,
 ) -> bool:
     """Check if the final stacked image is blurrier than it should be.
 
@@ -74,12 +101,15 @@ def is_stacked_fwhm_degraded(
         `expected_stack_fwhm`).
     degradation_ratio : `float`, optional
         How much wider than expected counts as degraded.
+        If `None`, the value of `DEFAULT_FWHM_DEGRADATION_RATIO` is used.
 
     Returns
     -------
     is_degraded : `bool`
         True if the final image is much blurrier than expected.
     """
+    if degradation_ratio is None:
+        degradation_ratio = resolve(DEFAULT_FWHM_DEGRADATION_RATIO).value
     if expected_fwhm <= 0:
         return False
     return stacked_fwhm > expected_fwhm * degradation_ratio
@@ -87,7 +117,7 @@ def is_stacked_fwhm_degraded(
 
 def is_rejected_fraction_significant(
     rejected_fraction: float,
-    flag_threshold: float = DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
+    flag_threshold: float | None = None,
 ) -> bool:
     """Check if too many pixels were thrown out during stacking.
 
@@ -96,6 +126,8 @@ def is_rejected_fraction_significant(
     is_significant : `bool`
         True if the percentage of rejected pixels is above the warning limit.
     """
+    if flag_threshold is None:
+        flag_threshold = resolve(DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD).value
     return rejected_fraction >= flag_threshold
 
 
@@ -107,7 +139,19 @@ def is_rejected_fraction_significant(
 # fewer). 50% falls between the two groups. Spectral stacks have their own,
 # much lower limit (below): the 93% once quoted here for Vega's spectral stack
 # was a symptom (raw frames clipped at zero), not a normal sky.
-DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD = 0.5
+DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD = TunedParameter(
+    name="stacking.default_zero_fraction_flag_threshold",
+    default=0.5,
+    unit="fraction",
+    description="Share of exactly zero pixels above which a stack is flagged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-26",
+    allowed_range=(0.1, 0.95),
+    # A sample is one stack of the camera.
+    minimum_sample=10,
+)
 
 # The same test for spectral stacks. The stored zero pixel share of every
 # spectral stack in the library under stacks/ (17 stacks, read 2026-10-12):
@@ -123,12 +167,36 @@ DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD = 0.5
 # faint pixels, so this limit does NOT detect clipped raw frames: the
 # `raw_frame_clipping` gate does. Validated only on the ASI533MM Pro and the
 # Nikon D5300 stacks of this library.
-SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD = 0.05
+SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD = TunedParameter(
+    name="stacking.spectral_zero_fraction_flag_threshold",
+    default=0.05,
+    unit="fraction",
+    description="Share of exactly zero pixels above which a spectral stack is flagged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-26",
+    allowed_range=(0.005, 0.5),
+    # A sample is one stack of the camera.
+    minimum_sample=10,
+)
 
 # Siril prints "many negative pixels (N%)" after subtracting the dark. In the
 # blank D5300 runs N was 99 and 100; the ASI533 runs never printed it. 50% is
 # a stack that is mostly over-subtracted.
-DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT = 50
+DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT = TunedParameter(
+    name="stacking.default_negative_pixel_flag_percent",
+    default=50,
+    unit="percent",
+    description="Percent of negative pixels after dark subtraction above which a stack is flagged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-26",
+    allowed_range=(10, 95),
+    # A sample is one stack of the camera.
+    minimum_sample=10,
+)
 
 
 def zero_fraction_threshold(is_spectral: bool) -> float:
@@ -145,12 +213,16 @@ def zero_fraction_threshold(is_spectral: bool) -> float:
         `SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD` for a spectral stack,
         `DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD` for an image.
     """
-    return SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD if is_spectral else DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD
+    return (
+        resolve(SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD).value
+        if is_spectral
+        else resolve(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD).value
+    )
 
 
 def is_zero_fraction_significant(
     zero_fraction: float,
-    flag_threshold: float = DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD,
+    flag_threshold: float | None = None,
 ) -> bool:
     """Check if a stacked image is mostly zeros.
 
@@ -159,12 +231,14 @@ def is_zero_fraction_significant(
     is_significant : `bool`
         True if the share of exactly-zero pixels is at or above the limit.
     """
+    if flag_threshold is None:
+        flag_threshold = resolve(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD).value
     return zero_fraction >= flag_threshold
 
 
 def is_negative_pixel_percent_significant(
     negative_percent: float,
-    flag_threshold: float = DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT,
+    flag_threshold: float | None = None,
 ) -> bool:
     """Check if Siril reported most of a frame as negative after calibration.
 
@@ -173,4 +247,6 @@ def is_negative_pixel_percent_significant(
     is_significant : `bool`
         True if the reported percentage is at or above the limit.
     """
+    if flag_threshold is None:
+        flag_threshold = resolve(DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT).value
     return negative_percent >= flag_threshold

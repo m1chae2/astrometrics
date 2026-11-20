@@ -179,10 +179,10 @@ def injected_fwhm_px_by_band(
     sigma = np.asarray(frame.trace_sigma_at(columns * GENERATOR_DISPERSION_A_PER_PX))
     truth = []
     for centre in profile.wavelength_angstrom:
-        low = PROFILE_START_ANGSTROM + PROFILE_BAND_ANGSTROM * np.floor(
-            (centre - PROFILE_START_ANGSTROM) / PROFILE_BAND_ANGSTROM
+        low = PROFILE_START_ANGSTROM.default + PROFILE_BAND_ANGSTROM.default * np.floor(
+            (centre - PROFILE_START_ANGSTROM.default) / PROFILE_BAND_ANGSTROM.default
         )
-        high = min(low + PROFILE_BAND_ANGSTROM, PROFILE_END_ANGSTROM)
+        high = min(low + PROFILE_BAND_ANGSTROM.default, PROFILE_END_ANGSTROM.default)
         in_band = (wavelengths >= low) & (wavelengths < high)
         truth.append(FWHM_PER_SIGMA * float(np.median(sigma[in_band])))
     return np.array(truth)
@@ -385,8 +385,8 @@ def test_the_defocus_ratio_follows_the_injected_widths_and_flags_a_defocused_red
             * GENERATOR_DISPERSION_A_PER_PX
         )
     )
-    blue = (wavelengths >= BLUE_WINDOW_ANGSTROM[0]) & (wavelengths < BLUE_WINDOW_ANGSTROM[1])
-    red = (wavelengths >= RED_WINDOW_ANGSTROM[0]) & (wavelengths < RED_WINDOW_ANGSTROM[1])
+    blue = (wavelengths >= BLUE_WINDOW_ANGSTROM.default[0]) & (wavelengths < BLUE_WINDOW_ANGSTROM.default[1])
+    red = (wavelengths >= RED_WINDOW_ANGSTROM.default[0]) & (wavelengths < RED_WINDOW_ANGSTROM.default[1])
     true_blue = FWHM_PER_SIGMA * float(np.median(sigma[blue]))
     true_red = FWHM_PER_SIGMA * float(np.median(sigma[red]))
 
@@ -394,8 +394,8 @@ def test_the_defocus_ratio_follows_the_injected_widths_and_flags_a_defocused_red
     assert metrics["trail_fwhm_red_px"].value == pytest.approx(true_red, rel=BAND_TOLERANCE)
     ratio = metrics["chromatic_defocus_ratio"]
     assert ratio.value == pytest.approx(true_red / true_blue, rel=BAND_TOLERANCE)
-    assert ratio.value > CHROMATIC_DEFOCUS_RATIO_LIMIT
-    assert ratio.limit == CHROMATIC_DEFOCUS_RATIO_LIMIT
+    assert ratio.value > CHROMATIC_DEFOCUS_RATIO_LIMIT.default
+    assert ratio.limit == CHROMATIC_DEFOCUS_RATIO_LIMIT.default
     assert ratio.passed is False
     assert "designed" in ratio.note
     assert "chromatic_defocus" in checkpoint.flags
@@ -488,7 +488,7 @@ def test_without_a_trail_width_every_new_metric_is_empty_and_nothing_is_flagged(
     }
     assert all(entry.value is None and entry.passed is None for entry in by_name.values())
     assert flags == []
-    assert median_fwhm_px(wavelengths, None, BLUE_WINDOW_ANGSTROM) is None
+    assert median_fwhm_px(wavelengths, None, BLUE_WINDOW_ANGSTROM.default) is None
 
 
 def test_the_pipeline_stores_the_measured_profile_on_the_result() -> None:

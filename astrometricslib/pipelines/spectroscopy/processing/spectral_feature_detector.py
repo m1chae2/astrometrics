@@ -37,6 +37,16 @@ import numpy as np
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     ResolutionProfile,
@@ -104,14 +114,39 @@ VERDICT_NOT_COVERED = "not_covered"
 # about 3 nm (Vega's Balmer dips fit with 0.3 nm RMS after tuning, so 30 A
 # leaves generous room for the untuned case). The best dip inside this
 # window is used, and the control test searches the same size of window.
-CENTER_SEARCH_TOLERANCE_ANGSTROM = 30.0
+# It stands for about two thirds of a resolution element (30 on the reference
+# setup, 0.69 × the spectral resolution), so it follows the spectral
+# resolution the run measures.
+CENTER_SEARCH_TOLERANCE_ANGSTROM = TunedParameter(
+    name="spectroscopy.center_search_tolerance_angstrom",
+    default=factor_for(30.0, RunBasis.SPECTRAL_RESOLUTION_ANGSTROM),
+    unit="× spectral resolution",
+    description="How far from its rest wavelength a feature's dip may be centered and still count.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D42",
+    basis=RunBasis.SPECTRAL_RESOLUTION_ANGSTROM,
+    reference_value=30.0,
+)
 
 # Degree of the polynomial fitted as the continuum. 2 (a gentle curve)
 # rather than 1 (a straight line): the instrument's own response bends the
 # continuum, and on the Vega, Alcor and Alnath master stacks a straight
 # line left that bend behind as "noise" and made obvious Balmer dips look
 # marginal.
-CONTINUUM_POLYNOMIAL_DEGREE = 2
+CONTINUUM_POLYNOMIAL_DEGREE = TunedParameter(
+    name="spectroscopy.spectral_feature_detector.continuum_polynomial_degree",
+    default=2,
+    unit="degree",
+    description="Degree of the polynomial fitted as the continuum of a feature.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D41",
+    allowed_range=(1, 4),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
+)
 
 # The continuum is a curve fitted to two bands on either side of the core.
 # Each band starts this many resolution elements from the center, or one
@@ -126,32 +161,103 @@ CONTINUUM_POLYNOMIAL_DEGREE = 2
 # template gives 0.129 at 49 A resolution; a second Vega spectrum, 0.087 +/-
 # 0.017 before, gave 0.134 +/- 0.008 too). Measured on those two spectra
 # only, 2026-09-25.
-SHOULDER_INNER_RESOLUTION_ELEMENTS = 1.5
+SHOULDER_INNER_RESOLUTION_ELEMENTS = TunedParameter(
+    name="spectroscopy.shoulder_inner_resolution_elements",
+    default=1.5,
+    unit="× resolution",
+    description="How far from the core, in resolution elements, the inner edge of the continuum bands lies.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D41",
+    allowed_range=(0.5, 3.0),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
+)
 
 # Each band is this many half-windows wide. It was 3 (from one half-window
 # out to four), wide enough to fit a curve and narrow enough that a
 # quadratic can follow the continuum; the width is unchanged.
-SHOULDER_BAND_HALF_WINDOWS = 3.0
+SHOULDER_BAND_HALF_WINDOWS = TunedParameter(
+    name="spectroscopy.shoulder_band_half_windows",
+    default=3.0,
+    unit="× half-window",
+    description="Each continuum band is this many half-windows wide.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D41",
+    allowed_range=(1.0, 8.0),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
+)
 
 # Fewest samples allowed in a continuum band (both bands together must
 # also give the continuum fit at least this many points) and in a core; below
 # this the numbers are too noisy to trust.
-_MINIMUM_SHOULDER_POINTS = 8
-_MINIMUM_CORE_POINTS = 2
+_MINIMUM_SHOULDER_POINTS = TunedParameter(
+    name="spectroscopy.minimum_shoulder_points",
+    default=8,
+    unit="count",
+    description="The fewest samples allowed in a continuum band.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D41",
+    allowed_range=(4, 40),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
+)
+_MINIMUM_CORE_POINTS = TunedParameter(
+    name="spectroscopy.minimum_core_points",
+    default=2,
+    unit="count",
+    description="The fewest samples allowed in a feature core.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D41",
+    allowed_range=(1, 10),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
+)
 
 # A dip shallower than this fraction of the continuum is never reported,
 # however statistically clean. A 1% dip is below what the standard-star
 # checks in validate_spectral_and_period_analysis.py can tell from small
 # calibration and response errors.
-MINIMUM_REPORTED_DEPTH = 0.01
+MINIMUM_REPORTED_DEPTH = TunedParameter(
+    name="spectroscopy.minimum_reported_depth",
+    default=0.01,
+    unit="fraction",
+    description="A dip shallower than this fraction of the continuum is never reported.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D43",
+)
 
 # p-value cutoffs for the verdicts. 0.01 means noise like this spectrum's
 # gives a dip this significant about 1 time in 100. Eight features are
 # tested per spectrum, so a pure-noise spectrum still gives roughly a 1 in
 # 12 chance of one false "detected". The synthetic pure-noise check in
 # validate_spectral_and_period_analysis.py measures the real rate.
-DETECTED_P_VALUE = 0.01
-POSSIBLE_P_VALUE = 0.05
+DETECTED_P_VALUE = TunedParameter(
+    name="spectroscopy.detected_p_value",
+    default=0.01,
+    unit="p-value",
+    description="A feature with a p-value below this is called detected.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-24",
+)
+POSSIBLE_P_VALUE = TunedParameter(
+    name="spectroscopy.possible_p_value",
+    default=0.05,
+    unit="p-value",
+    description="A feature with a p-value below this is called possible.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-24",
+)
 
 # A feature that is neither detected nor possible is still called
 # "inconclusive" (rather than "not detected") when its dip is at least
@@ -184,8 +290,26 @@ POSSIBLE_P_VALUE = 0.05
 # On the 131 stored spectra, 17% of the 1,025 tested features are, and 95
 # of the stars have at least one. (Measured before the resolution changed
 # from 30 A to 45 A; not re-run since.)
-INCONCLUSIVE_P_VALUE = 0.25
-INCONCLUSIVE_MINIMUM_DEPTH = 0.065
+INCONCLUSIVE_P_VALUE = TunedParameter(
+    name="spectroscopy.inconclusive_p_value",
+    default=0.25,
+    unit="p-value",
+    description="A feature with a p-value below this and a deep enough dip is called inconclusive.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-24",
+)
+INCONCLUSIVE_MINIMUM_DEPTH = TunedParameter(
+    name="spectroscopy.inconclusive_minimum_depth",
+    default=0.065,
+    unit="fraction",
+    description="The least dip depth for an inconclusive verdict.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-24",
+)
 
 # A feature measured with a depth uncertainty above this can be called no
 # better than "inconclusive", however small its p-value. The uncertainty is
@@ -198,19 +322,46 @@ INCONCLUSIVE_MINIMUM_DEPTH = 0.065
 # uncertainty were both (2 of 2) for lines the catalog type does not expect,
 # against 10-33% below it. 0.11 is twice the median depth. A small sample:
 # not tested on a larger set.
-MAXIMUM_UNCERTAINTY_FOR_A_VERDICT = 0.11
+MAXIMUM_UNCERTAINTY_FOR_A_VERDICT = TunedParameter(
+    name="spectroscopy.maximum_uncertainty_for_a_verdict",
+    default=0.11,
+    unit="fraction",
+    description="A feature with a depth uncertainty above this is called no better than inconclusive.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D43",
+)
 
 # Number of control positions needed before the noise width is measured
 # from them. With fewer, the width cannot be measured reliably, so the
 # depth's own uncertainty is trusted as it is and the p-value is labeled
 # as "gaussian" instead of "control_calibrated".
-MINIMUM_CONTROL_POSITIONS = 20
+MINIMUM_CONTROL_POSITIONS = TunedParameter(
+    name="spectroscopy.minimum_control_positions",
+    default=20,
+    unit="count",
+    description="The number of control positions needed before the noise width is measured from them.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-24",
+)
 
 # Spacing of the control positions, in multiples of the search tolerance.
 # Half the tolerance gives about 250 controls across a 3800-8000 A
 # spectrum. Neighboring controls overlap, so they are not independent
 # measurements; they are only used to measure the spread of the noise.
-_CONTROL_SPACING_TOLERANCES = 0.5
+_CONTROL_SPACING_TOLERANCES = TunedParameter(
+    name="spectroscopy.control_spacing_tolerances",
+    default=0.5,
+    unit="× tolerance",
+    description="Spacing of the control positions, in multiples of the search tolerance.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D42",
+)
 
 # The fitted noise width is never allowed to be narrower than the depth's
 # own uncertainty (a width of 1.0), so a spectrum that looks unusually
@@ -221,23 +372,70 @@ _MINIMUM_NOISE_WIDTH = 1.0
 # are) is never allowed below this fraction of one significance unit, so a
 # spectrum whose controls happen to look identical cannot produce an
 # infinitely confident p-value.
-_GUMBEL_WIDTH_FLOOR_FRACTION = 0.25
+_GUMBEL_WIDTH_FLOOR_FRACTION = TunedParameter(
+    name="spectroscopy.gumbel_width_floor_fraction",
+    default=0.25,
+    unit="× significance unit",
+    description="The fitted Gumbel width is never allowed below this fraction of one significance unit.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D42",
+)
 
 # How uncertain the reference spectrum's expected depth is, as a fraction
 # of that depth. A star's real line strength differs from its spectral
 # type's template (luminosity class, metallicity, catalog type rounded to
 # the nearest bundled rung), and 50% is a deliberately wide guess.
-_EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY = 0.5
+_EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY = TunedParameter(
+    name="spectroscopy.expected_depth_fractional_uncertainty",
+    default=0.5,
+    unit="fraction",
+    description="How uncertain the reference spectrum's expected depth is, as a fraction of that depth.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D43",
+)
 
 # Prior chance a line is present. 0.5 when the expected type predicts a
 # clear dip, 0.1 when it predicts essentially none. These are not
 # calibrated; they only stop the probability from being driven purely by
 # the data when the type says the line should be absent.
-_PRIOR_PRESENT_WHEN_EXPECTED = 0.5
-_PRIOR_PRESENT_WHEN_NOT_EXPECTED = 0.1
+_PRIOR_PRESENT_WHEN_EXPECTED = TunedParameter(
+    name="spectroscopy.prior_present_when_expected",
+    default=0.5,
+    unit="probability",
+    description="Prior chance a line is present when the reference expects it.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D43",
+)
+_PRIOR_PRESENT_WHEN_NOT_EXPECTED = TunedParameter(
+    name="spectroscopy.prior_present_when_not_expected",
+    default=0.1,
+    unit="probability",
+    description="Prior chance a line is present when the reference does not expect it.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D43",
+)
 
 # Fewest valid points needed to attempt any feature.
-_MINIMUM_SPECTRUM_POINTS = 30
+_MINIMUM_SPECTRUM_POINTS = TunedParameter(
+    name="spectroscopy.spectral_feature_detector.minimum_spectrum_points",
+    default=30,
+    unit="count",
+    description="The fewest valid points needed to attempt any feature.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D41",
+    allowed_range=(10, 300),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
+)
 
 
 @dataclass(frozen=True)
@@ -279,8 +477,8 @@ def _shoulder_edges(half_window: float, resolution_element_angstrom: float) -> t
         The distances, in Angstroms, where each continuum band starts and
         ends (see `SHOULDER_INNER_RESOLUTION_ELEMENTS`).
     """
-    inner = max(half_window, SHOULDER_INNER_RESOLUTION_ELEMENTS * resolution_element_angstrom)
-    return inner, inner + SHOULDER_BAND_HALF_WINDOWS * half_window
+    inner = max(half_window, resolve(SHOULDER_INNER_RESOLUTION_ELEMENTS).value * resolution_element_angstrom)
+    return inner, inner + resolve(SHOULDER_BAND_HALF_WINDOWS).value * half_window
 
 
 def _fit_continuum(offsets: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -307,7 +505,7 @@ def _fit_continuum(offsets: np.ndarray, values: np.ndarray) -> np.ndarray:
         The polynomial coefficients, highest power first, as `numpy.polyfit`
         returns them.
     """
-    matrix = np.vander(offsets, CONTINUUM_POLYNOMIAL_DEGREE + 1)
+    matrix = np.vander(offsets, resolve(CONTINUUM_POLYNOMIAL_DEGREE).value + 1)
     scale = np.sqrt((matrix * matrix).sum(axis=0))
     solution = np.linalg.lstsq(matrix / scale, values, rcond=len(offsets) * np.finfo(offsets.dtype).eps)[0]
     return (solution.T / scale).T
@@ -374,7 +572,10 @@ def _measure_dip(
     in_core = distance <= half_window
     in_shoulder = (distance > inner) & (distance <= outer)
 
-    if in_core.sum() < _MINIMUM_CORE_POINTS or in_shoulder.sum() < _MINIMUM_SHOULDER_POINTS:
+    if (
+        in_core.sum() < resolve(_MINIMUM_CORE_POINTS).value
+        or in_shoulder.sum() < resolve(_MINIMUM_SHOULDER_POINTS).value
+    ):
         return None
     # Both sides must contribute, or the curve would just extrapolate.
     shoulder_wavelength = wavelength_angstrom[in_shoulder]
@@ -393,7 +594,7 @@ def _measure_dip(
 
     # The fit used (degree + 1) numbers, so the scatter is divided by
     # (count - that many), the usual correction for a fitted curve.
-    fitted_numbers = CONTINUUM_POLYNOMIAL_DEGREE + 1
+    fitted_numbers = resolve(CONTINUUM_POLYNOMIAL_DEGREE).value + 1
     scatter = float(np.sqrt(np.sum(residuals**2) / max(1, residuals.size - fitted_numbers)))
     relative_scatter = scatter / mean_continuum
 
@@ -504,7 +705,7 @@ def _feature_equivalent_width(
         line_spread,
         inner,
         outer - inner,
-        CONTINUUM_POLYNOMIAL_DEGREE,
+        resolve(CONTINUUM_POLYNOMIAL_DEGREE).value,
     )
 
 
@@ -556,7 +757,7 @@ def _control_centers(
     wavelength_angstrom: np.ndarray,
     half_window: float,
     tolerance_angstrom: float,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
 ) -> np.ndarray:
     """Choose wavelengths for the control measurements.
 
@@ -582,12 +783,14 @@ def _control_centers(
     centers : `np.ndarray`
         Control center wavelengths, in Angstroms.
     """
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     reach = tolerance_angstrom + _shoulder_edges(half_window, resolution_element_angstrom)[1]
     first = wavelength_angstrom[0] + reach
     last = wavelength_angstrom[-1] - reach
     if last <= first:
         return np.array([])
-    centers = np.arange(first, last + 1e-9, _CONTROL_SPACING_TOLERANCES * tolerance_angstrom)
+    centers = np.arange(first, last + 1e-9, resolve(_CONTROL_SPACING_TOLERANCES).value * tolerance_angstrom)
     # A control's search window and core must not reach a named feature's core.
     # Its continuum bands may reach a feature's wings: that makes the noise
     # distribution a little heavier where real lines are, which only makes
@@ -606,7 +809,7 @@ def _control_centers(
 def expected_feature_depth(
     reference_spectral_type: str,
     feature_name: str,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
 ) -> float | None:
     """Measure how deep a feature should be for a star of a given type.
@@ -636,6 +839,8 @@ def expected_feature_depth(
         The fractional depth the template shows, or `None` if the type
         has no template or the template does not cover the feature.
     """
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import _get_reference_templates
 
     templates = _get_reference_templates()
@@ -802,16 +1007,16 @@ def _one_sided_p_value(
     likelihood_absent : `float`
         The density of the noise distribution at the observed significance.
     """
-    if len(control_significances) >= MINIMUM_CONTROL_POSITIONS:
+    if len(control_significances) >= resolve(MINIMUM_CONTROL_POSITIONS).value:
         location, width = stats.gumbel_r.fit(np.array(control_significances))
-        width = max(float(width), _MINIMUM_NOISE_WIDTH * _GUMBEL_WIDTH_FLOOR_FRACTION)
+        width = max(float(width), _MINIMUM_NOISE_WIDTH * resolve(_GUMBEL_WIDTH_FLOOR_FRACTION).value)
         return (
             float(stats.gumbel_r.sf(observed_significance, loc=location, scale=width)),
             "control_calibrated",
             float(stats.gumbel_r.pdf(observed_significance, loc=location, scale=width)),
         )
     independent_candidates = max(
-        1, round(2.0 * CENTER_SEARCH_TOLERANCE_ANGSTROM / resolution_element_angstrom) + 1
+        1, round(2.0 * resolve(CENTER_SEARCH_TOLERANCE_ANGSTROM).value / resolution_element_angstrom) + 1
     )
     single_chance = float(stats.norm.sf(max(observed_significance, 0.0)))
     return (
@@ -839,11 +1044,14 @@ def _verdict_for(magnitude: float, p_value: float) -> str:
         `VERDICT_DETECTED`, `VERDICT_POSSIBLE`, `VERDICT_INCONCLUSIVE` or
         `VERDICT_NOT_DETECTED`.
     """
-    if magnitude >= MINIMUM_REPORTED_DEPTH and p_value <= DETECTED_P_VALUE:
+    if magnitude >= resolve(MINIMUM_REPORTED_DEPTH).value and p_value <= resolve(DETECTED_P_VALUE).value:
         return VERDICT_DETECTED
-    if magnitude >= MINIMUM_REPORTED_DEPTH and p_value <= POSSIBLE_P_VALUE:
+    if magnitude >= resolve(MINIMUM_REPORTED_DEPTH).value and p_value <= resolve(POSSIBLE_P_VALUE).value:
         return VERDICT_POSSIBLE
-    if magnitude >= INCONCLUSIVE_MINIMUM_DEPTH and p_value <= INCONCLUSIVE_P_VALUE:
+    if (
+        magnitude >= resolve(INCONCLUSIVE_MINIMUM_DEPTH).value
+        and p_value <= resolve(INCONCLUSIVE_P_VALUE).value
+    ):
         return VERDICT_INCONCLUSIVE
     return VERDICT_NOT_DETECTED
 
@@ -873,10 +1081,14 @@ def _control_significances(
         For each control position that could be measured, the significance
         of its best dip and of its best bump (as a positive number).
     """
+    center_search_tolerance_angstrom = resolve(CENTER_SEARCH_TOLERANCE_ANGSTROM).value
     dip_significances: list[float] = []
     bump_significances: list[float] = []
     for control_center in _control_centers(
-        wavelength_angstrom, half_window, CENTER_SEARCH_TOLERANCE_ANGSTROM, resolution_element_angstrom
+        wavelength_angstrom,
+        half_window,
+        center_search_tolerance_angstrom,
+        resolution_element_angstrom,
     ):
         control_candidates = _candidate_dips(
             wavelength_angstrom,
@@ -884,7 +1096,7 @@ def _control_significances(
             float(control_center),
             half_window,
             resolution_element_angstrom,
-            CENTER_SEARCH_TOLERANCE_ANGSTROM,
+            center_search_tolerance_angstrom,
         )
         if control_candidates:
             dip_significances.append(max(candidate.significance for candidate in control_candidates))
@@ -896,7 +1108,7 @@ def detect_named_features(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
     reference_spectral_type: str | None = None,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
     errors: np.ndarray | None = None,
 ) -> list[dict[str, object]]:
@@ -969,6 +1181,14 @@ def detect_named_features(
         the 50% and prior settings above; it is not a calibrated
         probability.
     """
+    center_search_tolerance_angstrom = resolve(CENTER_SEARCH_TOLERANCE_ANGSTROM).value
+    expected_depth_fractional_uncertainty = resolve(_EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY).value
+    minimum_reported_depth = resolve(MINIMUM_REPORTED_DEPTH).value
+    prior_present_when_expected = resolve(_PRIOR_PRESENT_WHEN_EXPECTED).value
+    prior_present_when_not_expected = resolve(_PRIOR_PRESENT_WHEN_NOT_EXPECTED).value
+    maximum_uncertainty_for_a_verdict = resolve(MAXIMUM_UNCERTAINTY_FOR_A_VERDICT).value
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
     sample_errors = None if errors is None else np.asarray(errors, dtype=float)
@@ -977,7 +1197,7 @@ def detect_named_features(
     intensity = intensity[valid]
     if sample_errors is not None:
         sample_errors = sample_errors[valid]
-    if wavelength_angstrom.size < _MINIMUM_SPECTRUM_POINTS:
+    if wavelength_angstrom.size < resolve(_MINIMUM_SPECTRUM_POINTS).value:
         return []
 
     order = np.argsort(wavelength_angstrom)
@@ -1005,7 +1225,7 @@ def detect_named_features(
             rest_wavelength,
             half_window,
             resolution_element_angstrom,
-            CENTER_SEARCH_TOLERANCE_ANGSTROM,
+            center_search_tolerance_angstrom,
         )
         if not observed_candidates:
             entries.append(entry)
@@ -1069,16 +1289,16 @@ def detect_named_features(
             # reference spectra hold absorption only, so an emission feature
             # gets no probability.
             expected_significance = max(expected_depth, 0.0) / observed.depth_uncertainty
-            spread_present = math.hypot(1.0, _EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY * expected_significance)
+            spread_present = math.hypot(1.0, expected_depth_fractional_uncertainty * expected_significance)
             likelihood_present = float(
                 stats.norm.pdf(
                     observed.significance, loc=expected_significance, scale=max(spread_present, 1e-9)
                 )
             )
             prior = (
-                _PRIOR_PRESENT_WHEN_EXPECTED
-                if expected_depth >= MINIMUM_REPORTED_DEPTH
-                else _PRIOR_PRESENT_WHEN_NOT_EXPECTED
+                prior_present_when_expected
+                if expected_depth >= minimum_reported_depth
+                else prior_present_when_not_expected
             )
             denominator = prior * likelihood_present + (1.0 - prior) * likelihood_absent
             probability_present = float(prior * likelihood_present / denominator) if denominator > 0 else None
@@ -1099,7 +1319,7 @@ def detect_named_features(
             else None
         )
 
-        limited_by_noise = observed.depth_uncertainty > MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
+        limited_by_noise = observed.depth_uncertainty > maximum_uncertainty_for_a_verdict
         if limited_by_noise and verdict in (VERDICT_DETECTED, VERDICT_POSSIBLE):
             verdict = VERDICT_INCONCLUSIVE
 

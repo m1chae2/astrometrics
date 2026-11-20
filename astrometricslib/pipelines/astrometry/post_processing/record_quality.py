@@ -29,6 +29,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from astrometricslib.foundation.jobs.runner import get_current_job
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
@@ -40,6 +41,12 @@ from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_CATALOG_MATCH_SEPARATION_RMS_ARCSEC,
     ASTROMETRY_CATALOG_MATCHED_STAR_COUNT,
@@ -98,19 +105,48 @@ CATALOG_LOOKUP_GATE_NAME = "catalog_lookup"
 # plate-solver fit residuals. A fit residual is expected to be the smaller of
 # the two, so this limit is the more lenient one for it. It has not been
 # re-measured on fit residuals.
-MAXIMUM_RESIDUAL_FRACTION_OF_FWHM = 0.5
+MAXIMUM_RESIDUAL_FRACTION_OF_FWHM = TunedParameter(
+    name="astrometry.maximum_residual_fraction_of_fwhm",
+    default=0.5,
+    unit="× FWHM",
+    description=(
+        "Largest plate-solve residual, as a fraction of the stars' own width, before the fit is called wrong."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-04",
+)
 
 # The fewest catalog-matched stars for the residual to mean anything. The
 # residual is a root mean square over the matched stars; with a handful of
 # them it is not a reliable measure of the fit. A design estimate. On the 42
 # saved solves, 4 had fewer than 20 matches (4, 6, 11 and 19), and they are
 # among the five with the largest residuals (5.8, 5.9, 9.0 and 7.1 arcsec).
-MINIMUM_MATCHED_STARS = 20
+MINIMUM_MATCHED_STARS = TunedParameter(
+    name="astrometry.minimum_matched_stars",
+    default=20,
+    unit="stars",
+    description="Fewest catalog-matched stars for the plate-solve residual to mean anything.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-05",
+)
 
 # The share of catalog lookups that may fail before the star names cannot be
 # trusted. A design estimate: the first failures usually come from one slow
 # or unreachable service, and half failing means most stars went unnamed.
-MAXIMUM_FAILED_LOOKUP_FRACTION = 0.5
+MAXIMUM_FAILED_LOOKUP_FRACTION = TunedParameter(
+    name="astrometry.maximum_failed_lookup_fraction",
+    default=0.5,
+    unit="fraction",
+    description="Share of catalog lookups that may fail before the star names cannot be trusted.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D09",
+)
 
 
 def _residual_and_basis(metrics: AstrometryPipelineQualityMetrics) -> tuple[float | None, str]:
@@ -162,30 +198,33 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
         and ``catalog_lookup`` gates.
     """
     gates: list[GateResult] = []
+    minimum_matched_stars = resolve(MINIMUM_MATCHED_STARS).value
+    maximum_residual_fraction = resolve(MAXIMUM_RESIDUAL_FRACTION_OF_FWHM).value
+    maximum_failed_lookup_fraction = resolve(MAXIMUM_FAILED_LOOKUP_FRACTION).value
     matched = metrics.catalog_matched_star_count
-    matches_source = f"at least {MINIMUM_MATCHED_STARS} catalog-matched stars (design estimate)"
+    matches_source = f"at least {minimum_matched_stars} catalog-matched stars (design estimate)"
     if not metrics.plate_solve_succeeded:
         gates.append(
             unchecked_gate(
                 MATCHED_STARS_GATE_NAME, "the image was not solved, so no stars were matched", matches_source
             )
         )
-    elif matched < MINIMUM_MATCHED_STARS:
+    elif matched < minimum_matched_stars:
         gates.append(
             failed_gate(
                 MATCHED_STARS_GATE_NAME,
                 f"only {matched} star(s) were matched to a catalog, too few for the fit to be reliable",
                 float(matched),
-                float(MINIMUM_MATCHED_STARS),
+                float(minimum_matched_stars),
                 matches_source,
             )
         )
     else:
         gates.append(
-            passed_gate(MATCHED_STARS_GATE_NAME, float(matched), float(MINIMUM_MATCHED_STARS), matches_source)
+            passed_gate(MATCHED_STARS_GATE_NAME, float(matched), float(minimum_matched_stars), matches_source)
         )
 
-    residual_source = f"at most {MAXIMUM_RESIDUAL_FRACTION_OF_FWHM:g} of a star's width (design estimate)"
+    residual_source = f"at most {maximum_residual_fraction:g} of a star's width (design estimate)"
     residual, basis = _residual_and_basis(metrics)
     scale = metrics.plate_scale_arcsec_per_pixel
     fwhm = metrics.star_fwhm_px
@@ -200,14 +239,14 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
         )
     else:
         fraction = residual / (scale * fwhm)
-        if fraction > MAXIMUM_RESIDUAL_FRACTION_OF_FWHM:
+        if fraction > maximum_residual_fraction:
             gates.append(
                 failed_gate(
                     RESIDUAL_GATE_NAME,
                     f"the plate solution misses its stars by {residual:.1f} arcsec ({basis}), "
                     f"{fraction:.0%} of a star's width, so it may be wrong",
                     fraction,
-                    MAXIMUM_RESIDUAL_FRACTION_OF_FWHM,
+                    maximum_residual_fraction,
                     residual_source,
                 )
             )
@@ -216,7 +255,7 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
                 passed_gate(
                     RESIDUAL_GATE_NAME,
                     fraction,
-                    MAXIMUM_RESIDUAL_FRACTION_OF_FWHM,
+                    maximum_residual_fraction,
                     residual_source,
                     f"{residual:.2f} arcsec ({basis})",
                 )
@@ -235,7 +274,7 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
         gates.append(passed_gate(SOURCE_DETECTION_GATE_NAME, float(metrics.sources_detected), 1.0))
 
     lookup_source = (
-        f"under {MAXIMUM_FAILED_LOOKUP_FRACTION:.0%} of lookups failed and the circuit "
+        f"under {maximum_failed_lookup_fraction:.0%} of lookups failed and the circuit "
         "breaker did not trip (design estimate)"
     )
     attempted = metrics.remote_catalog_queries_attempted
@@ -264,13 +303,13 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
         gates.append(
             unchecked_gate(CATALOG_LOOKUP_GATE_NAME, "no catalog lookup was attempted", lookup_source)
         )
-    elif failed / attempted >= MAXIMUM_FAILED_LOOKUP_FRACTION:
+    elif failed / attempted >= maximum_failed_lookup_fraction:
         gates.append(
             failed_gate(
                 CATALOG_LOOKUP_GATE_NAME,
                 f"{failed} of {attempted} catalog lookup(s) failed; many stars may be unnamed",
                 failed / attempted,
-                MAXIMUM_FAILED_LOOKUP_FRACTION,
+                maximum_failed_lookup_fraction,
                 lookup_source,
             )
         )
@@ -279,7 +318,7 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
             passed_gate(
                 CATALOG_LOOKUP_GATE_NAME,
                 failed / attempted,
-                MAXIMUM_FAILED_LOOKUP_FRACTION,
+                maximum_failed_lookup_fraction,
                 lookup_source,
                 f"{failed} of {attempted} catalog lookup(s) failed",
             )

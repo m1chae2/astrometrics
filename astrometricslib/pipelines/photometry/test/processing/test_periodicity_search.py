@@ -202,7 +202,7 @@ def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search() -> Non
     assert raw_period_ratio > 100_000, "this scenario should reproduce the real incident's ratio"
 
     grid = build_search_grid(times)
-    assert grid.maximum_period_days / grid.minimum_period_days <= _MAXIMUM_PERIOD_RATIO * 1.0001
+    assert grid.maximum_period_days / grid.minimum_period_days <= _MAXIMUM_PERIOD_RATIO.default * 1.0001
 
     started_at = time_module.monotonic()
     lomb_scargle_search(times, flux)

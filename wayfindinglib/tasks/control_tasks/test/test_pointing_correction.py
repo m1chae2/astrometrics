@@ -16,7 +16,9 @@ from wayfindinglib.tasks.control_tasks.pointing_correction import compute_pointi
 def test_matching_solve_yields_zero_error_and_converges() -> None:
     """Verify a solve exactly at the commanded position yields zero error."""
     config = CorrectionConfig()
-    correction = compute_pointing_correction("frame-1", 180.0, 45.0, 180.0, 45.0, iteration=1, config=config)
+    correction = compute_pointing_correction(
+        "frame-1", 180.0, 45.0, 180.0, 45.0, iteration=1, config=config, latitude_deg=45.0
+    )
     assert correction.pointing_error_arcsec < 1e-6
     assert correction.converged is True
 
@@ -28,7 +30,7 @@ def test_known_ra_offset_yields_signed_correction() -> None:
     # needs a negative RA correction to move back to the commanded position.
     solved_ra_deg = 180.0 + (10.0 / 3600.0)
     correction = compute_pointing_correction(
-        "frame-2", 180.0, 0.0, solved_ra_deg, 0.0, iteration=1, config=config
+        "frame-2", 180.0, 0.0, solved_ra_deg, 0.0, iteration=1, config=config, latitude_deg=45.0
     )
     assert correction.pointing_error_arcsec == pytest.approx(10.0, rel=1e-3)
     assert correction.correction_ra_arcsec < 0.0
@@ -38,7 +40,9 @@ def test_known_ra_offset_yields_signed_correction() -> None:
 def test_large_offset_does_not_converge() -> None:
     """Verify an offset beyond the tolerance is not marked converged."""
     config = CorrectionConfig(alignment_convergence_tolerance_arcsec=5.0)
-    correction = compute_pointing_correction("frame-3", 180.0, 0.0, 180.1, 0.0, iteration=3, config=config)
+    correction = compute_pointing_correction(
+        "frame-3", 180.0, 0.0, 180.1, 0.0, iteration=3, config=config, latitude_deg=45.0
+    )
     assert correction.converged is False
     assert correction.iteration == 3
 
@@ -46,7 +50,9 @@ def test_large_offset_does_not_converge() -> None:
 def test_no_pointing_model_leaves_prediction_fields_none() -> None:
     """Verify omitting pointing_model leaves the prediction fields None."""
     config = CorrectionConfig()
-    correction = compute_pointing_correction("frame-4", 180.0, 0.0, 180.1, 0.0, iteration=1, config=config)
+    correction = compute_pointing_correction(
+        "frame-4", 180.0, 0.0, 180.1, 0.0, iteration=1, config=config, latitude_deg=45.0
+    )
     assert correction.model_predicted_error_arcsec is None
     assert correction.unexplained_residual_arcsec is None
 
@@ -59,7 +65,15 @@ def test_insufficient_data_model_is_treated_as_no_model() -> None:
     config = CorrectionConfig(alignment_convergence_tolerance_arcsec=5.0)
 
     correction = compute_pointing_correction(
-        "frame-5", 180.0, 0.0, 180.1, 0.0, iteration=1, config=config, pointing_model=unfit_model
+        "frame-5",
+        180.0,
+        0.0,
+        180.1,
+        0.0,
+        iteration=1,
+        config=config,
+        pointing_model=unfit_model,
+        latitude_deg=45.0,
     )
 
     assert correction.model_predicted_error_arcsec is None
@@ -97,6 +111,7 @@ def test_error_fully_explained_by_model_converges_despite_large_raw_error() -> N
         iteration=1,
         config=config,
         pointing_model=model,
+        latitude_deg=45.0,
     )
 
     assert correction.pointing_error_arcsec == pytest.approx(dec_index_error_arcsec, rel=1e-3)
@@ -116,7 +131,15 @@ def test_unmodeled_error_does_not_converge_even_with_a_model() -> None:
     config = CorrectionConfig(alignment_convergence_tolerance_arcsec=5.0)
 
     correction = compute_pointing_correction(
-        "frame-7", 180.0, 0.0, 180.1, 0.0, iteration=1, config=config, pointing_model=zero_model
+        "frame-7",
+        180.0,
+        0.0,
+        180.1,
+        0.0,
+        iteration=1,
+        config=config,
+        pointing_model=zero_model,
+        latitude_deg=45.0,
     )
 
     assert correction.model_predicted_error_arcsec == pytest.approx(0.0, abs=1e-6)

@@ -24,12 +24,29 @@ from typing import Any
 
 from astrometricslib import Astrometrics
 from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.reports import CaptureSetting, SubjectLevel
 from wayfindinglib.analytics.result_quality.forecast import NORMALIZED_NOISE_METRIC, PINNED_STACK_METRICS
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import ProposedAction
 
-DEFAULT_NOISE_GOAL = 1.9e-4
+DEFAULT_NOISE_GOAL = TunedParameter(
+    name="wayfinding.default_noise_goal",
+    default=0.00019,
+    unit="fraction",
+    description="The one noise goal for every target (no setting on screen).",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D83",
+    config_key=("Wayfinding.Planning", "default_noise_goal"),
+)
 """The one noise goal for every target (no setting on screen).
 
 The noise is the library stack's empty-aperture noise as a fraction of the
@@ -44,7 +61,16 @@ Design estimate, register row WAY-D83.
 NOISE_GOAL_ENTRY = "WAY-D83"
 """Register row behind the default noise goal."""
 
-RANKING_SUGGESTIONS_PER_USE = 3
+RANKING_SUGGESTIONS_PER_USE = TunedParameter(
+    name="wayfinding.ranking_suggestions_per_use",
+    default=3,
+    unit="suggestions",
+    description="How many targets of each use tonight's ranking turns into suggestions.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D85",
+)
 """How many targets of each use tonight's ranking turns into suggestions.
 
 Three is about the number of targets one night's session holds (a target

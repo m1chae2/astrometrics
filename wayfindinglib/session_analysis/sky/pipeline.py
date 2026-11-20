@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib.analytics.performance_envelope import BASELINE_SPREAD_MULTIPLIER
 from wayfindinglib.models.session.sky_quality import (
     SkyAnalysis,
@@ -131,8 +132,8 @@ class SkySessionPipeline(SessionAnalysisPipeline):
             equipment_fingerprint=request.equipment_fingerprint,
             resolved_parameters={
                 "blur_tolerance_fraction": request.blur_tolerance_fraction,
-                "minimum_z_score": BASELINE_SPREAD_MULTIPLIER,
-                "minimum_nights_per_bin": MINIMUM_NIGHTS_PER_BIN,
+                "minimum_z_score": resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value,
+                "minimum_nights_per_bin": resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value,
                 "metrics": list(METRIC_SPECS),
             },
             input_quality=input_quality,

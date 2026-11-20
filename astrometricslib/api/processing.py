@@ -28,6 +28,7 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.storage.data_versions import QUALITY_KIND, get_library_data_version
 from astrometricslib.foundation.versioned_cache import VersionedCache
 from astrometricslib.models.calibration_ingest import (
@@ -55,6 +56,12 @@ from astrometricslib.models.quality.subset_stacks import (
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
     StackKind,
@@ -126,7 +133,16 @@ _CURRENT_VERSIONS = {
 # Two dark exposures are the same set when they differ by less than this many
 # seconds. It is the tolerance the library uses to pick a dark for a light
 # (`select_dark_frames`).
-_EXPOSURE_MATCH_TOLERANCE_SECONDS = 0.05
+_EXPOSURE_MATCH_TOLERANCE_SECONDS = TunedParameter(
+    name="api.exposure_match_tolerance_seconds",
+    default=0.05,
+    unit="s",
+    description="Largest exposure time difference at which a calibration set still matches.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D07",
+)
 
 
 def _calibration_set_matches(
@@ -167,12 +183,13 @@ def _calibration_set_matches(
     ):
         return False
     if temperature_c is not None and calibration_set.temperature_c != temperature_slot_c(
-        temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+        temperature_c, resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     ):
         return False
     return exposure_seconds is None or (
         calibration_set.exposure_seconds is not None
-        and abs(calibration_set.exposure_seconds - exposure_seconds) < _EXPOSURE_MATCH_TOLERANCE_SECONDS
+        and abs(calibration_set.exposure_seconds - exposure_seconds)
+        < resolve(_EXPOSURE_MATCH_TOLERANCE_SECONDS).value
     )
 
 
@@ -259,7 +276,7 @@ def _calibration_row_matches(
         kind == "dark"
         and temperature_c is not None
         and row.get("temperature_c")
-        != temperature_slot_c(temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C)
+        != temperature_slot_c(temperature_c, resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value)
     )
 
 
@@ -421,7 +438,7 @@ class CalibrationCatalog:
                     kind=kind,
                     camera_totals=camera_totals,
                     matched_row_keys=matched,
-                    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                    dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
                 )
             rows = keyed
             if kind is not None:
@@ -430,7 +447,7 @@ class CalibrationCatalog:
                 detail=detail,
                 kind=kind,
                 camera_totals=camera_totals,
-                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
                 **rows,
             )
         if target is None:
@@ -442,14 +459,14 @@ class CalibrationCatalog:
                 detail=detail,
                 target_id=resolved.id,
                 lights=lights,
-                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
             )
         groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
         return CalibrationQueryResult(
             detail=detail,
             target_id=resolved.id,
             groups=groups,
-            dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
         )
 
     def add_frames(self, paths: Sequence[str], *, telescope: str) -> list[str]:
@@ -1188,6 +1205,7 @@ class ProcessingPipelines:
         plan_only: bool = False,
         kind: StackKind = "imaging",
         camera_id: str | None = None,
+        focal_length_mm: float | None = None,
         force: bool = False,
         denoise: bool | None = None,
         denoise_strength: float | None = None,
@@ -1207,7 +1225,8 @@ class ProcessingPipelines:
         it sets aside bad frames, stacks, trims the noisy edges, records the
         quality summary and the preview, and saves the target. Imaging and
         spectroscopy frames are never mixed, so ``kind`` picks one, and
-        frames from two cameras are never stacked together. An unchanged
+        frames from two cameras, or from two optics (focal lengths), are
+        never stacked together. An unchanged
         stack is kept unless ``force`` is set. A target, camera or frame
         choice that matches nothing raises `NotFoundError`; a stacking stage
         that finishes without making a stack raises `ProcessingError`.
@@ -1240,6 +1259,12 @@ class ProcessingPipelines:
             before any other frame check. A target with frames from more
             than one camera needs this; without it the answer is an error
             that names the cameras and how many frames each took.
+        focal_length_mm : `float`, optional
+            Only frames taken at this focal length, such as ``405``, rounded
+            to whole millimeters. Chosen with ``camera_id``, before any other
+            frame check. A target with frames from more than one optic needs
+            this; without it the answer is an error that names the focal
+            lengths and how many frames each has.
         force : `bool`, optional
             Rebuild even if nothing changed since the stack on disk.
         denoise : `bool`, optional
@@ -1282,11 +1307,12 @@ class ProcessingPipelines:
         InvalidArgumentError
             If ``kind`` or ``denoise_strength`` is out of range, a time
             cannot be read, ``frames`` is combined with a frame choice, or
-            the frames come from more than one camera.
+            the frames come from more than one camera or optic.
         """
         from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
         from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+        from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
         from astrometricslib.pipelines.stacking.stack_request import (
             SirilOptions,
             choose_frames_to_stack,
@@ -1298,21 +1324,22 @@ class ProcessingPipelines:
             raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
         resolved = self._resolve(target)
         if frames is not None:
-            choices = (filter_name, first_file, last_file, since, until, camera_id)
+            choices = (filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
             if any(value is not None for value in choices):
                 raise InvalidArgumentError(
-                    "Pass frames, or choose them with filter_name, first_file, last_file, since, until "
-                    "and camera_id, not both."
+                    "Pass frames, or choose them with filter_name, first_file, last_file, since, until, "
+                    "camera_id and focal_length_mm, not both."
                 )
             if not frames:
                 raise InvalidArgumentError("frames is empty: there is nothing to stack.")
             ensure_single_camera(frames, target_id=resolved.id)
+            ensure_single_optic(frames, target_id=resolved.id)
             chosen = list(frames)
         else:
             selection = make_frame_selection(
                 filter_name, first_file, last_file, since, until, kind == "spectral"
             )
-            chosen = choose_frames_to_stack(resolved, kind, selection, camera_id)
+            chosen = choose_frames_to_stack(resolved, kind, selection, camera_id, focal_length_mm)
         return run_stack(
             resolved,
             chosen,
@@ -1349,7 +1376,7 @@ class ProcessingPipelines:
         target: str | Target,
         kind: Literal["growth", "night_contributions", "odd_even_difference"] = "growth",
         *,
-        maximum_steps: int = 4,
+        maximum_steps: int | None = None,
         include: list[str] | None = None,
         keep_halves: bool = False,
         register_job: bool = True,
@@ -1445,7 +1472,7 @@ class ProcessingPipelines:
             reason, and the result says why.
         maximum_steps : `int`, optional
             Applies to ``"growth"`` only. The most subsets to stack. Defaults
-            to 4.
+            to the registered ``stacking.default_growth_steps`` (4).
         include : `list` [`str`], optional
             Applies to ``"growth"`` only. Sections to run in the same job,
             under the same lock, after the series: ``"night_contributions"``
@@ -1490,12 +1517,12 @@ class ProcessingPipelines:
             kind,
             _NOISE_ARGUMENTS,
             {
-                "maximum_steps": maximum_steps != 4,
+                "maximum_steps": maximum_steps is not None,
                 "include": bool(sections),
                 "keep_halves": keep_halves,
             },
         )
-        if maximum_steps < 1:
+        if maximum_steps is not None and maximum_steps < 1:
             raise InvalidArgumentError("maximum_steps must be at least 1.")
         if kind == "growth" and include is None:
             sections = frozenset(("odd_even_difference",))
@@ -1743,7 +1770,9 @@ class ProcessingPipelines:
         stages : `list` [`str`], optional
             For one target, which of ``"astrometry"``, ``"photometry"``,
             ``"spectroscopy"`` and ``"asteroids"`` to run. Defaults to the
-            first three. The asteroid search needs a stack.
+            first three. The asteroid search needs a stack. It is
+            experimental: its false-positive rate is not measured on real
+            data, so a person should check its results.
         astrometry : `dict`, optional
             Options for the astrometry stage: ``path`` (the image to plate
             solve; the stack by default).
@@ -1756,7 +1785,9 @@ class ProcessingPipelines:
             `None`, every usable identified star is processed. The user
             removed the top-10 default on 2026-11-01).
         asteroids : `dict`, optional
-            Options for the asteroid search: ``moving_object_config`` (a
+            Options for the asteroid search, which is experimental: its
+            false-positive rate is not measured on real data, so a person
+            should check its results. The option is ``moving_object_config`` (a
             dictionary of settings, such as
             ``{"detection_threshold_sigma": 4.0}``; a key left out keeps its
             default value, and a key that names no setting raises

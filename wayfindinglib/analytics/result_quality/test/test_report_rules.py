@@ -170,9 +170,9 @@ def test_sky_cost_without_a_split_uses_the_whole_sky_loss_and_says_so() -> None:
 
 def test_sky_cost_needs_the_minimum_captured_time() -> None:
     """One short frame cannot say the sky lost 100% of the time."""
-    tiny = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS - 1.0
+    tiny = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS.default - 1.0
     assert rr.sky_cost_statements([_summary(captured_seconds=tiny, account=_account(tiny, None))]) == []
-    enough = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS
+    enough = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS.default
     statements = rr.sky_cost_statements([_summary(captured_seconds=enough, account=_account(enough, None))])
     assert len(statements) == 1
 

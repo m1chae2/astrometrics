@@ -6,6 +6,7 @@ child with a grandchild that must stop together. The Windows versions have
 their own tests in `test_system_windows.py`, which run on Windows.
 """
 
+import contextlib
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- real child processes are the point
 import sys
 import time
@@ -107,3 +108,51 @@ def test_stopping_a_process_that_already_ended_does_nothing() -> None:
     finished.wait()
     system.stop_process_tree(finished, 0.2, 2.0)
     assert finished.returncode == 0
+
+
+# A parent that starts a long sleep through the library's own helper, prints
+# the sleep's process number and then waits to be killed.
+PARENT_WITH_REGISTERED_CHILD = (
+    "import sys, time;"
+    "from astrometricslib.foundation.run_abandonment import launch_registered;"
+    "import subprocess;"
+    "from astrometricslib.foundation.system import child_process_options;"
+    "p = launch_registered(lambda: subprocess.Popen("
+    "['sleep', '60'], **child_process_options()));"
+    "print(p.pid, flush=True);"
+    "time.sleep(60)"
+)
+
+
+def test_the_child_options_give_the_child_its_own_session() -> None:
+    """The options include a new session, so the group can be stopped."""
+    assert system.child_process_options()["start_new_session"] is True
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="PDEATHSIG exists on Linux only")
+def test_a_helper_ends_when_the_parent_is_killed() -> None:
+    """A helper is gone soon after its parent is killed with SIGKILL."""
+    parent = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
+        [sys.executable, "-c", PARENT_WITH_REGISTERED_CHILD], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert parent.stdout is not None
+        helper_id = int(parent.stdout.readline())
+        assert psutil.pid_exists(helper_id)
+        parent.kill()
+        parent.wait(timeout=5)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                if psutil.Process(helper_id).status() == psutil.STATUS_ZOMBIE:
+                    break
+            except psutil.NoSuchProcess:
+                break
+            time.sleep(0.1)
+        else:
+            pytest.fail("The helper outlived its parent.")
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        with contextlib.suppress(psutil.NoSuchProcess, ValueError):
+            psutil.Process(helper_id).kill()

@@ -17,6 +17,17 @@ from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import zoom
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+)
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import STAR_FINDER_THRESHOLD_SIGMA
 from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -26,7 +37,57 @@ logger = logging.getLogger(__name__)
 # filaments are not, so a source outside (-0.6, 0.6) is dropped. Tightened from
 # DAOStarFinder's (-1, 1) default on the Veil Nebula frame (AST-16). The frame
 # measurement passes no window, because it must keep trailed stars.
-SOURCE_DETECTOR_ROUNDNESS_RANGE = (-0.6, 0.6)
+SOURCE_DETECTOR_ROUNDNESS_RANGE = TunedParameter(
+    name="astrometry.source_detector_roundness_range",
+    default=(-0.6, 0.6),
+    unit="roundness",
+    description="The roundness window a detected source must lie inside to count as a star.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D01",
+)
+
+# The star finder's kernel width when nothing better is known, in pixels.
+# The astrometry stage sizes the kernel from the measured blob width of the
+# frame (`fwhm.measure_blob_width_from_data`), the spread of all the light
+# around the brightest stars. That reads about twice the star's FWHM and was
+# validated (AST-D01: on the Bubble Nebula stack, 335 catalog matches and a
+# 1.04 arcsec residual, against 181 and 5.0 arcsec with a FWHM-sized kernel).
+# On the M 31 ASI 533MM stack of 2026-11-15 it read 4.04 px. This fallback
+# (color frames, or when the blob width cannot be measured) keeps the old
+# 4 px on the reference setup and follows the star width elsewhere: 4 px is
+# 1.7 times the reference star width of 2.33 px.
+SOURCE_DETECTOR_KERNEL_FWHM_PX = TunedParameter(
+    name="astrometry.source_detector_kernel_fwhm_px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    unit="px (× star width)",
+    description="Star-finder kernel width used when the frame's blob width is not measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D01",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
+)
+
+# Detections closer than this many kernel widths are one star and are merged.
+# The star finder already keeps its detections at least 2.5 kernel widths
+# apart (photutils 3.0 and later), so on one image nothing merges: the step
+# only removes a detection reported twice. It used to be 15 px, which on the
+# M 31 stack of 2026-11-15 merged 2,038 of 11,134 detections, every one a
+# separate star (the nearest two detections were 9.6 px apart), and placed
+# the merged star at the average position, between two real stars.
+SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS = TunedParameter(
+    name="astrometry.source_detector_merge_kernel_widths",
+    default=1.0,
+    unit="kernel widths",
+    description="Detections closer than this many kernel widths are merged into one star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D02",
+)
 
 # Below this pixel count, background stats are computed on the full
 # array -- subsampling only pays off once the full-array cost is
@@ -38,7 +99,16 @@ _BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS = 512 * 512
 # within 0.05%, at ~20x lower cost. A *strided* subsample (data[::4,
 # ::4]) was tried first and rejected -- it aliased with real spatial
 # structure in the frame and came out 77% off on std.
-_BACKGROUND_STATS_SAMPLE_FRACTION = 1.0 / 16.0
+_BACKGROUND_STATS_SAMPLE_FRACTION = TunedParameter(
+    name="astrometry.background_stats_sample_fraction",
+    default=1.0 / 16.0,
+    unit="fraction of pixels",
+    description="The share of pixels sampled to estimate the global background of a large image.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-16",
+)
 # Seed for the random subsample above. The sample feeds the detection
 # threshold, so an unseeded sample would nudge the threshold a little on
 # every run, and a faint star near the cutoff could appear in one run and
@@ -56,13 +126,59 @@ BACKGROUND_SAMPLE_SEED = 20261010
 # into "background" instead of candidate source flux. 1/20 keeps the
 # box comfortably larger than a stellar FWHM while still tracking
 # nebula-scale gradients.
-_BACKGROUND_2D_BOX_FRACTION = 1.0 / 20.0
-_BACKGROUND_2D_BOX_MIN_PX = 20
-_BACKGROUND_2D_BOX_MAX_PX = 200
+_BACKGROUND_2D_BOX_FRACTION = TunedParameter(
+    name="astrometry.background_2d_box_fraction",
+    default=1.0 / 20.0,
+    unit="× shorter image axis",
+    description="Side of a background box, as a fraction of the image's shorter axis.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-16",
+)
+# Stands for the smallest background box, which must stay several star
+# widths across. It follows the star width: the value is a factor times the
+# star width the run measured (20 on the reference setup).
+_BACKGROUND_2D_BOX_MIN_PX = TunedParameter(
+    name="astrometry.background_2d_box_min_px",
+    default=factor_for(20, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Smallest side of a background box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=20,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+)
+# Stands for the largest background box, which sets how finely a gradient is
+# followed. It follows the image size: the value is a factor times the image
+# size the run measured (200 on the reference setup).
+_BACKGROUND_2D_BOX_MAX_PX = TunedParameter(
+    name="astrometry.background_2d_box_max_px",
+    default=factor_for(200, RunBasis.IMAGE_SHORT_SIDE_PX),
+    unit="× image size",
+    description="Largest side of a background box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.IMAGE_SHORT_SIDE_PX,
+    reference_value=200,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+)
 # Background2D needs several boxes per axis to interpolate a map at
 # all; below this, per-box statistics are too noisy to be meaningful
 # and we fall back to a single global background estimate.
-_BACKGROUND_2D_MIN_BOXES_PER_AXIS = 3
+_BACKGROUND_2D_MIN_BOXES_PER_AXIS = TunedParameter(
+    name="astrometry.background_2d_min_boxes_per_axis",
+    default=3,
+    unit="boxes",
+    description="Fewest background boxes along each axis for the 2D background map to be used.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-16",
+)
 
 # A star's radius is the distance from its centre at which it falls to this
 # fraction of its peak brightness above the background. 10% captures the
@@ -96,7 +212,7 @@ def background_sample_indices(pixel_count: int, seed: int = BACKGROUND_SAMPLE_SE
         Distinct positions in the flattened image, one per sampled pixel.
         The sample holds `_BACKGROUND_STATS_SAMPLE_FRACTION` of the pixels.
     """
-    sample_size = int(pixel_count * _BACKGROUND_STATS_SAMPLE_FRACTION)
+    sample_size = int(pixel_count * resolve(_BACKGROUND_STATS_SAMPLE_FRACTION).value)
     return np.random.default_rng(seed).choice(pixel_count, size=sample_size, replace=False)
 
 
@@ -213,21 +329,25 @@ def background_map_from_mesh(mesh: np.ndarray, box_size: int, shape: tuple[int, 
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
-    def __init__(self, fwhm: float = 4.0, threshold_sigma: float = 5.0) -> None:
+    def __init__(self, fwhm: float | None = None, threshold_sigma: float | None = None) -> None:
         """Set up the star finder.
 
         Parameters
         ----------
         fwhm : `float`, optional
             How wide a typical star is expected to be across the middle,
-            measured in pixels (default is 4.0).
+            measured in pixels. `SOURCE_DETECTOR_KERNEL_FWHM_PX` if omitted.
         threshold_sigma : `float`, optional
             How bright a dot needs to be before it is believed to be a star.
-            This is measured as a multiple of the background noise
-            (default is 5.0x the noise).
+            This is measured as a multiple of the background noise.
+            `STAR_FINDER_THRESHOLD_SIGMA` (5 times the noise) if omitted. The
+            declaration lives with the star-profile fit, which uses the same
+            finder setting.
         """
-        self.fwhm = fwhm
-        self.threshold_sigma = threshold_sigma
+        self.fwhm = float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value) if fwhm is None else fwhm
+        self.threshold_sigma = (
+            float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value) if threshold_sigma is None else threshold_sigma
+        )
         # The background noise (standard deviation of the sky pixels) of the
         # picture the last `detect` call searched, in the picture's units, or
         # `None` before any call. The expected position error of a star needs
@@ -270,13 +390,13 @@ class SourceDetector:
         # meaningful box grid (see _BACKGROUND_2D_MIN_BOXES_PER_AXIS).
         box_size = int(
             np.clip(
-                min(data.shape) * _BACKGROUND_2D_BOX_FRACTION,
-                _BACKGROUND_2D_BOX_MIN_PX,
-                _BACKGROUND_2D_BOX_MAX_PX,
+                min(data.shape) * resolve(_BACKGROUND_2D_BOX_FRACTION).value,
+                resolve(_BACKGROUND_2D_BOX_MIN_PX).value,
+                resolve(_BACKGROUND_2D_BOX_MAX_PX).value,
             )
         )
         background_map: np.ndarray | float
-        if min(data.shape) >= box_size * _BACKGROUND_2D_MIN_BOXES_PER_AXIS:
+        if min(data.shape) >= box_size * resolve(_BACKGROUND_2D_MIN_BOXES_PER_AXIS).value:
             try:
                 bkg = Background2D(
                     data,
@@ -324,7 +444,7 @@ class SourceDetector:
             noise=std,
             expected_fwhm_px=self.fwhm,
             threshold_sigma=self.threshold_sigma,
-            roundness_range=SOURCE_DETECTOR_ROUNDNESS_RANGE,
+            roundness_range=resolve(SOURCE_DETECTOR_ROUNDNESS_RANGE).value,
             mask=mask,
         )
         if not with_radius:
@@ -337,12 +457,16 @@ class SourceDetector:
             )
         return detected
 
-    def deduplicate(self, sources: list[dict[str, Any]], separation_px: float = 15.0) -> list[dict[str, Any]]:
+    def deduplicate(
+        self, sources: list[dict[str, Any]], separation_px: float | None = None
+    ) -> list[dict[str, Any]]:
         """Combine overlapping dots into a single star.
 
-        If the math accidentally splits a large star into two dots, this
-        combines them back together. The average position is taken and
-        their brightnesses are added together.
+        Two detections closer than the merge distance are one star reported
+        twice. The merged star keeps the position of its brightest detection,
+        and their brightnesses are added together. The finder already keeps
+        separate stars 2.5 kernel widths apart, so the default distance of
+        one kernel width merges no separate stars.
 
         Parameters
         ----------
@@ -350,7 +474,8 @@ class SourceDetector:
             The list of stars found in the previous step.
         separation_px : `float`, optional
             How close two dots need to be (in pixels) before they are assumed
-            to actually just be one star. Default is 15.0 pixels.
+            to actually just be one star. `SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS`
+            kernel widths if omitted.
 
         Returns
         -------
@@ -374,6 +499,8 @@ class SourceDetector:
             dtype=float,
         )
 
+        if separation_px is None:
+            separation_px = float(resolve(SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS).value) * self.fwhm
         tree = cKDTree(coords)
         visited = np.zeros(len(sources), dtype=bool)
         unique_stars = []
@@ -395,20 +522,15 @@ class SourceDetector:
             if len(group) == 1:
                 unique_stars.append(group[0])
             else:
-                leader = group[0]
-                merged = leader.copy()
-                all_x = [coords[i][0] for i in neighbor_indices]
-                all_y = [coords[i][1] for i in neighbor_indices]
+                # The merged star sits where its brightest detection is, not
+                # at the average: an average of two separate stars is a point
+                # between them where there is no star.
                 all_flux = [s.get("flux", 0.0) for s in group]
-
-                if "x_centroid" in merged:
-                    merged["x_centroid"] = float(np.mean(all_x))
-                    merged["y_centroid"] = float(np.mean(all_y))
-                else:
-                    merged["xcentroid"] = float(np.mean(all_x))
-                    merged["ycentroid"] = float(np.mean(all_y))
-
+                merged = group[int(np.argmax(all_flux))].copy()
                 merged["flux"] = float(np.sum(all_flux))
+                # Says how many reports became this star, for a caller that
+                # shows merged stars (the viewer's detection overlay).
+                merged["merged_detection_count"] = len(group)
                 unique_stars.append(merged)
 
         return unique_stars

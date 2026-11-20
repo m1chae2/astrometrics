@@ -174,8 +174,8 @@ def test_a_dip_the_noise_could_hide_is_inconclusive() -> None:
     entry = _entry(detect_named_features(wavelength, intensity), "H-alpha")
 
     assert entry["verdict"] == VERDICT_INCONCLUSIVE
-    assert POSSIBLE_P_VALUE < entry["p_value"] <= INCONCLUSIVE_P_VALUE
-    assert entry["depth"] >= INCONCLUSIVE_MINIMUM_DEPTH
+    assert POSSIBLE_P_VALUE.default < entry["p_value"] <= INCONCLUSIVE_P_VALUE.default
+    assert entry["depth"] >= INCONCLUSIVE_MINIMUM_DEPTH.default
 
 
 def test_a_quiet_spectrum_with_no_dip_has_no_inconclusive_features() -> None:
@@ -411,13 +411,15 @@ def test_controls_cover_the_blue_but_never_reach_a_feature_core() -> None:
     """
     wavelength = np.arange(3800.0, 8000.0, 10.9)
 
-    controls = _control_centers(wavelength, 25.0, CENTER_SEARCH_TOLERANCE_ANGSTROM, 45.0)
+    controls = _control_centers(wavelength, 25.0, CENTER_SEARCH_TOLERANCE_ANGSTROM.reference_value, 45.0)
 
     assert controls.min() < 4400.0
     for feature in NAMED_FEATURES:
         rest = float(feature["wavelength_angstrom"])
         window = float(feature["window_angstrom"])
-        assert np.all(np.abs(controls - rest) > CENTER_SEARCH_TOLERANCE_ANGSTROM + 25.0 + window)
+        assert np.all(
+            np.abs(controls - rest) > CENTER_SEARCH_TOLERANCE_ANGSTROM.reference_value + 25.0 + window
+        )
 
 
 def test_the_gaussian_fallback_p_value_matches_a_hand_computed_normal_tail() -> None:
@@ -434,7 +436,7 @@ def test_the_gaussian_fallback_p_value_matches_a_hand_computed_normal_tail() -> 
     # A lone 2-sigma try, paid for by the Sidak correction over the
     # independent centers a +/-25 A search at 40 A resolution allows.
     single_chance = 0.5 * math.erfc(2.0 / math.sqrt(2.0))
-    independent_candidates = round(2.0 * CENTER_SEARCH_TOLERANCE_ANGSTROM / 40.0) + 1
+    independent_candidates = round(2.0 * CENTER_SEARCH_TOLERANCE_ANGSTROM.reference_value / 40.0) + 1
     assert p_value == pytest.approx(1.0 - (1.0 - single_chance) ** independent_candidates)
     assert likelihood_absent == pytest.approx(math.exp(-2.0) / math.sqrt(2.0 * math.pi))
 
@@ -600,7 +602,9 @@ def test_fast_continuum_fit_matches_numpy_polyfit_and_polyval() -> None:
 
     coefficients = _fit_continuum(offsets, values)
 
-    np.testing.assert_array_equal(coefficients, np.polyfit(offsets, values, CONTINUUM_POLYNOMIAL_DEGREE))
+    np.testing.assert_array_equal(
+        coefficients, np.polyfit(offsets, values, CONTINUUM_POLYNOMIAL_DEGREE.default)
+    )
     np.testing.assert_array_equal(
         _evaluate_continuum(coefficients, offsets), np.polyval(coefficients, offsets)
     )

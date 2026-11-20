@@ -122,7 +122,7 @@ def test_estimate_is_none_when_there_is_nothing_to_measure_from() -> None:
     assert estimate_resolution_element_angstrom(wavelength_angstrom, widths[:-1]) is None
     assert estimate_resolution_element_angstrom(wavelength_angstrom, np.zeros(SAMPLE_COUNT)) is None
     too_few = np.zeros(SAMPLE_COUNT)
-    too_few[: MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES - 1] = 1.7
+    too_few[: MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES.default - 1] = 1.7
     assert estimate_resolution_element_angstrom(wavelength_angstrom, too_few) is None
 
 
@@ -151,7 +151,7 @@ def test_resolve_falls_back_and_says_so() -> None:
     fallback_value, fallback_measured = resolve_resolution_element_angstrom(wavelength_angstrom, None)
     measured_value, is_measured = resolve_resolution_element_angstrom(wavelength_angstrom, widths)
 
-    assert fallback_value == pytest.approx(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM)
+    assert fallback_value == pytest.approx(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default)
     assert fallback_measured is False
     assert measured_value == pytest.approx(FWHM_PER_SIGMA * 1.7 * ANGSTROM_PER_PIXEL)
     assert is_measured is True
@@ -163,7 +163,10 @@ def test_blur_sigma_in_samples_converts_a_fwhm_to_a_sigma_in_samples() -> None:
 
 
 def test_every_consumer_shares_the_one_default_resolution() -> None:
-    """No module may keep its own private copy of the resolution default."""
+    """No module may keep its own private copy of the resolution default.
+
+    Each consumer leaves the argument empty and reads the one declared value.
+    """
     for function in (
         classify_spectral_type,
         detect_named_features,
@@ -171,7 +174,7 @@ def test_every_consumer_shares_the_one_default_resolution() -> None:
         derive_instrument_response,
     ):
         default = inspect.signature(function).parameters["resolution_element_angstrom"].default
-        assert default == FALLBACK_RESOLUTION_ELEMENT_ANGSTROM, function.__name__
+        assert default is None, function.__name__
 
 
 def test_blurred_reference_cache_is_kept_per_resolution() -> None:
@@ -209,7 +212,7 @@ def test_analysis_measures_the_resolution_from_the_trail_width() -> None:
     assert measured.is_resolution_measured is True
     assert measured.resolution_element_angstrom == pytest.approx(FWHM_PER_SIGMA * 2.5 * ANGSTROM_PER_PIXEL)
     assert fallback.is_resolution_measured is False
-    assert fallback.resolution_element_angstrom == pytest.approx(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM)
+    assert fallback.resolution_element_angstrom == pytest.approx(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default)
 
 
 def test_analysis_expects_shallower_lines_for_a_blurrier_spectrum() -> None:

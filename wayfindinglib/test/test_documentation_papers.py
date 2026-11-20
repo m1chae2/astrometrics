@@ -9,7 +9,7 @@ architecture paper, it names no code and states no tuned values; hidden
 quality; it follows the same rules.
 The rules and their helpers are shared with
 ``astrometricslib/test/test_documentation_rules.py`` so both libraries follow
-``documentation/Documentation_Conventions.md`` in the same way.
+``.claude/skills/documentation-style/CONVENTIONS.md`` in the same way.
 """
 
 import re

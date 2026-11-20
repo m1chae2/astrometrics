@@ -43,6 +43,7 @@ from astrometricslib import (
 )
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib._internal.arguments import check_choice, check_include, reject_unused_arguments
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
@@ -2877,7 +2878,7 @@ class ObservationPlanning:
             target_id,
             reading,
             noise,
-            DEFAULT_NOISE_GOAL,
+            resolve_parameter(DEFAULT_NOISE_GOAL).value,
             held_keys(),
             depth_goal_met=depth_met,
         )
@@ -3027,9 +3028,10 @@ class ObservationPlanning:
                     f"No ranking for tonight ({error}). Ranking suggestions were left as they are."
                 )
         queued_targets = {entry.target_id for entry in tonight_session.queue} if tonight_session else set()
+        ranking_suggestions_per_use = resolve_parameter(RANKING_SUGGESTIONS_PER_USE).value
         retrying(
             lambda writer, packages: tasks.refresh_ranking_packages(
-                writer, packages, ranking, night_id, RANKING_SUGGESTIONS_PER_USE, held_keys(), queued_targets
+                writer, packages, ranking, night_id, ranking_suggestions_per_use, held_keys(), queued_targets
             ),
             "ranking",
         )

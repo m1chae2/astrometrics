@@ -16,6 +16,12 @@
  *               library's `stretchParameters` when the stretch is on (without
  *               them the view is linear; the stretch is never worked out here).
  *   - `release` forget the image filed under `imageId`.
+ *   - `pixel`   read the original value (every channel) at one pixel of the image filed under
+ *               `imageId`, for the viewer's pixel readout. Replies with `pixelComplete`.
+ *
+ * With the stretch off and no `displayRange`, the view is linear between the
+ * black and white points of the zscale algorithm (see zscale.ts), worked out
+ * once per image from the decoded pixels.
  *
  * Drawing prefers one long-lived OffscreenCanvas+WebGL2 context (see
  * mtfStretchGL.ts, the single canonical MTF-stretch implementation). The
@@ -32,6 +38,7 @@ import {
   MtfStretchParameters,
 } from './mtfStretchGL';
 import { decodeFitsPixels } from './fitsParse';
+import { computeZscaleRange } from './zscale';
 
 /** One decoded image held by the worker. */
 interface StoredImage {
@@ -42,12 +49,31 @@ interface StoredImage {
   rowOrder: string | undefined;
   min: number;
   max: number;
+  /** Black and white points of the Linear display, worked out the first time they are needed. */
+  zscaleRange?: { low: number; high: number };
+  /** True when the last draw put the file's first row at the top; the pixel readout needs it to find the row under the pointer. */
+  lastDrawnFirstRowAtTop?: boolean;
 }
 
 const storedImages = new Map<number, StoredImage>();
 
 let glCanvas: OffscreenCanvas | null = null;
 let glContext: WebGL2RenderingContext | null = null;
+
+/**
+ * Gives the black and white points of the Linear display, working them out on first use.
+ *
+ * @param image The image.
+ * @returns The value drawn black and the value drawn white. Falls back to the image's
+ *   darkest and brightest pixels when the image has no finite pixel to sample.
+ */
+function getZscaleRange(image: StoredImage): { low: number; high: number } {
+  if (!image.zscaleRange) {
+    image.zscaleRange = computeZscaleRange(image.pixels, image.width, image.height, image.channels)
+      ?? { low: image.min, high: image.max };
+  }
+  return image.zscaleRange;
+}
 
 function midtoneTransferFunction(mid: number, x: number): number {
   if (x === 0) return 0;
@@ -212,6 +238,34 @@ self.onmessage = async (ev: MessageEvent) => {
     return;
   }
 
+  if (cmd === 'pixel') {
+    const { column, rowFromTop } = ev.data;
+    const image = storedImages.get(imageId);
+    if (!image || !Number.isInteger(column) || !Number.isInteger(rowFromTop)) {
+      (self as any).postMessage({ cmd: 'pixelComplete', requestId, imageId, result: null });
+      return;
+    }
+    if (column < 0 || column >= image.width || rowFromTop < 0 || rowFromTop >= image.height) {
+      (self as any).postMessage({ cmd: 'pixelComplete', requestId, imageId, result: null });
+      return;
+    }
+    // The drawn picture has the file's first row at the top, or at the bottom (the FITS default).
+    const fileRow = image.lastDrawnFirstRowAtTop === false ? image.height - 1 - rowFromTop : rowFromTop;
+    const planeSize = image.width * image.height;
+    const values: number[] = [];
+    for (let channel = 0; channel < image.channels; channel++) {
+      values.push(image.pixels[channel * planeSize + fileRow * image.width + column]);
+    }
+    // FITS pixel numbers count from 1.
+    (self as any).postMessage({
+      cmd: 'pixelComplete',
+      requestId,
+      imageId,
+      result: { x: column + 1, y: fileRow + 1, values },
+    });
+    return;
+  }
+
   if (cmd === 'parse') {
     try {
       const { pw, ph, channels: requestedChannels, roworder, rawBuffer, bitpix, bzero, bscale, dataOffset } = ev.data;
@@ -255,24 +309,32 @@ self.onmessage = async (ev: MessageEvent) => {
       if (stretch && stretchParameters) {
         // The library worked out the stretch for this image; it is applied as sent.
         parameters = shaderParametersFromLibraryStretch(stretchParameters);
-      } else {
-        // No stretch asked for, or none sent with the image: a linear view.
+      } else if (displayRange) {
         // A caller that knows the file's scale (a stretched picture runs from
         // 0 to 1) passes it, so the picture is not rescaled to its own darkest
-        // and brightest pixels. Otherwise the file's own range is used.
-        const rangeMinimum = displayRange ? displayRange[0] : image.min;
-        const rangeMaximum = displayRange ? displayRange[1] : image.max;
-        parameters = computeLinearStretchParameters(rangeMinimum, rangeMaximum);
+        // and brightest pixels.
+        parameters = computeLinearStretchParameters(displayRange[0], displayRange[1]);
+      } else if (stretch) {
+        // A stretch was asked for but none was sent with the image: a linear view
+        // over the file's own range, as it always was.
+        parameters = computeLinearStretchParameters(image.min, image.max);
+      } else {
+        // The Linear display of raw data: a straight line between the sky-based
+        // black and white points, so a few saturated stars do not set the scale.
+        const { low, high } = getZscaleRange(image);
+        parameters = computeLinearStretchParameters(low, high);
       }
 
       // GPU path: draw at full source resolution via the shared shader, then
       // let createImageBitmap's own high-quality resize handle the downscale
       // to destination size.
       let bitmap: ImageBitmap;
-      // The auto-stretch honours the file's ROWORDER. The linear view never
-      // did (it always drew the first row at the top), and that is kept as is
-      // so images already shown unstretched do not suddenly turn over.
-      const isTopDownRowOrder = stretch ? image.rowOrder === 'TOP-DOWN' : true;
+      // The auto-stretch and the zscale Linear view honour the file's ROWORDER.
+      // A picture drawn over a fixed `displayRange` never did (it always drew the
+      // first row at the top), and that is kept as is so pictures already shown
+      // that way do not suddenly turn over.
+      const isTopDownRowOrder = stretch || !displayRange ? image.rowOrder === 'TOP-DOWN' : true;
+      image.lastDrawnFirstRowAtTop = isTopDownRowOrder;
       const fullResolutionBitmap = renderViaWebGL(imageId, image, parameters, isTopDownRowOrder);
       if (fullResolutionBitmap) {
         bitmap = await createImageBitmap(fullResolutionBitmap, {
@@ -282,6 +344,8 @@ self.onmessage = async (ev: MessageEvent) => {
         });
         fullResolutionBitmap.close();
       } else {
+        // The fallback draws the file's first row at the top whatever the row order.
+        image.lastDrawnFirstRowAtTop = true;
         bitmap = await renderViaScalarLoops(image, stretch, parameters, destinationWidth, destinationHeight);
       }
 

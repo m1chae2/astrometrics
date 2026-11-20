@@ -41,6 +41,14 @@ colour, not an exact one.
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 __all__ = [
     "CCM89_MAXIMUM_WAVELENGTH_ANGSTROM",
     "CCM89_MINIMUM_WAVELENGTH_ANGSTROM",
@@ -51,7 +59,16 @@ __all__ = [
     "redden_spectrum",
 ]
 
-STANDARD_R_V = 3.1
+STANDARD_R_V = TunedParameter(
+    name="spectroscopy.standard_r_v",
+    default=3.1,
+    unit="ratio",
+    description="The ratio A(V) over E(B-V) for average galactic dust (Cardelli, Clayton and Mathis 1989).",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="SPE-21",
+)
 """The ratio A(V) / E(B-V) for average galactic dust (Cardelli, Clayton and
 Mathis 1989). A(V) is the dimming in magnitudes in the V band."""
 
@@ -91,7 +108,7 @@ def _polynomial(coefficients: tuple[float, ...], y: np.ndarray) -> np.ndarray:
     return np.polynomial.polynomial.polyval(y, coefficients)
 
 
-def ccm89_extinction_ratio(wavelength_angstrom: np.ndarray, r_v: float = STANDARD_R_V) -> np.ndarray:
+def ccm89_extinction_ratio(wavelength_angstrom: np.ndarray, r_v: float | None = None) -> np.ndarray:
     """Give the dimming at each wavelength as a multiple of the V-band dimming.
 
     Parameters
@@ -114,6 +131,8 @@ def ccm89_extinction_ratio(wavelength_angstrom: np.ndarray, r_v: float = STANDAR
         If a wavelength lies outside the range the law covers, or `r_v` is
         not positive.
     """
+    if r_v is None:
+        r_v = resolve(STANDARD_R_V).value
     if r_v <= 0:
         raise ValueError(f"R_V must be positive, got {r_v}.")
     wavelengths = np.asarray(wavelength_angstrom, dtype=float)
@@ -157,7 +176,7 @@ def ccm89_extinction_ratio(wavelength_angstrom: np.ndarray, r_v: float = STANDAR
 
 
 def extinction_magnitudes(
-    wavelength_angstrom: np.ndarray, ebv: float, r_v: float = STANDARD_R_V
+    wavelength_angstrom: np.ndarray, ebv: float, r_v: float | None = None
 ) -> np.ndarray:
     """Give the dimming, in magnitudes, that dust of a given reddening causes.
 
@@ -176,11 +195,13 @@ def extinction_magnitudes(
         A(wavelength) in magnitudes, equal to `r_v` * `ebv` times the ratio
         from `ccm89_extinction_ratio`.
     """
+    if r_v is None:
+        r_v = resolve(STANDARD_R_V).value
     return r_v * ebv * ccm89_extinction_ratio(wavelength_angstrom, r_v)
 
 
 def redden_spectrum(
-    wavelength_angstrom: np.ndarray, flux: np.ndarray, ebv: float, r_v: float = STANDARD_R_V
+    wavelength_angstrom: np.ndarray, flux: np.ndarray, ebv: float, r_v: float | None = None
 ) -> np.ndarray:
     """Apply interstellar dimming to a spectrum.
 
@@ -200,12 +221,14 @@ def redden_spectrum(
     reddened_flux : `numpy.ndarray`
         `flux` times 10 to the power of -0.4 A(wavelength).
     """
+    if r_v is None:
+        r_v = resolve(STANDARD_R_V).value
     dimming = extinction_magnitudes(wavelength_angstrom, ebv, r_v)
     return np.asarray(flux, dtype=float) * 10.0 ** (-0.4 * dimming)
 
 
 def deredden_spectrum(
-    wavelength_angstrom: np.ndarray, flux: np.ndarray, ebv: float, r_v: float = STANDARD_R_V
+    wavelength_angstrom: np.ndarray, flux: np.ndarray, ebv: float, r_v: float | None = None
 ) -> np.ndarray:
     """Remove interstellar dimming from a spectrum.
 
@@ -226,5 +249,7 @@ def deredden_spectrum(
         `flux` times 10 to the power of +0.4 A(wavelength): the brightness
         the star would show without the dust.
     """
+    if r_v is None:
+        r_v = resolve(STANDARD_R_V).value
     dimming = extinction_magnitudes(wavelength_angstrom, ebv, r_v)
     return np.asarray(flux, dtype=float) * 10.0 ** (0.4 * dimming)

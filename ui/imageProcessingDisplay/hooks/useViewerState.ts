@@ -1,10 +1,18 @@
 /**
  * @file useViewerState.ts
  * @description State management hook for the image viewer panel.
- * Coordinates fetching of light frames, arbitrary files, stretch state, and auto-pan triggers.
+ * Coordinates fetching of light frames, arbitrary files, the display mode, and auto-pan triggers.
+ *
+ * In Auto Stretch the backend draws the picture (a stack shows its Siril-stretched JPEG when one
+ * exists) and the viewer shows it as sent. In Linear the viewer reads the FITS file itself, so the
+ * pixel values are in the viewer and it can set the black and white points from the sky.
  */
 import { useState, useEffect, useRef } from 'react';
-import { fetchLightFrame, fetchImageByPath } from '../../common/services/imaging/imageService';
+import {
+    fetchLightFrame, fetchImageByPath, fetchFitsFileByPath, fetchTargetFrameAsFits
+} from '../../common/services/imaging/imageService';
+import { DEFAULT_DISPLAY_MODE } from '../../common/fitsViewer/displayMode';
+import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { reportError } from '../../common/utils/reportError';
 import { on as onEvent } from '../../common/utils/eventBus';
 import { useOnValueChange } from './useOnValueChange';
@@ -20,7 +28,7 @@ export interface ImageFrameInfo {
 }
 
 /**
- * Hook to manage the state of the image viewer (loading, current URL, frame info, and stretch toggling).
+ * Hook to manage the state of the image viewer (loading, current picture or FITS file, frame info, and the display mode).
  *
  * @param selectedTarget The currently selected target identifier.
  * @param lightFrames Available light frame records.
@@ -33,14 +41,16 @@ export const useViewerState = (
     externalSelectedFilePath: string | null = null
 ) => {
     const [imageUrl, setImageUrl] = useState<string | null>(null);
-    const [imageBlob] = useState<Blob | null>(null); // Seems unused in original, but kept for compat
+    // The FITS file itself, read in Linear mode. Only one of imageUrl and imageBlob is set at a time.
+    const [imageBlob, setImageBlob] = useState<Blob | null>(null);
     const [imageFrameInfo, setImageFrameInfo] = useState<ImageFrameInfo | null>(null);
     const [autoPanTrigger, setAutoPanTrigger] = useState<number>(0);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedLightRow, setSelectedLightRow] = useState<number | null>(null);
     const [disableStretch, setDisableStretch] = useState(false);
-    const [stretch, setStretch] = useState(true);
+    const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_DISPLAY_MODE);
+    const stretch = displayMode === 'auto-stretch';
     const [prevTarget, setPrevTarget] = useState<string | null>(null);
     // Counts the pictures remade at a path the viewer already shows. The count is a dependency
     // of the file effect, so the file is read again and the old picture is not left on screen.
@@ -59,6 +69,7 @@ export const useViewerState = (
     useOnValueChange(selectedTarget, () => {
         setSelectedLightRow(null);
         setImageUrl(null);
+        setImageBlob(null);
         setImageFrameInfo(null);
         setError(null);
         setAutoPanTrigger((n) => n + 1);
@@ -84,12 +95,13 @@ export const useViewerState = (
             lightFrames.length > 0 &&
             selectedLightRow === null &&
             !imageUrl &&
+            !imageBlob &&
             !externalSelectedFilePath
         ) {
             setSelectedLightRow(0);
             setAutoPanTrigger((n) => n + 1);
         }
-    }, [lightFrames, selectedTarget, selectedLightRow, imageUrl, externalSelectedFilePath]);
+    }, [lightFrames, selectedTarget, selectedLightRow, imageUrl, imageBlob, externalSelectedFilePath]);
 
     // Fetch frame data
     useEffect(() => {
@@ -109,6 +121,21 @@ export const useViewerState = (
             setError(null);
             setDisableStretch(false); // Default lights always stretch
             try {
+                if (!stretch) {
+                    // Linear: read the FITS file itself so the viewer holds the pixel values.
+                    const frameFile = await fetchTargetFrameAsFits(selectedTarget, String(iso), String(exposure), 0);
+                    if (!aborted) {
+                        setImageUrl(null);
+                        setImageBlob(frameFile);
+                        setImageFrameInfo({
+                            objectId: selectedTarget,
+                            iso: String(iso),
+                            exposure: String(exposure),
+                            index: 0,
+                        });
+                    }
+                    return;
+                }
                 let frameData = await fetchLightFrame(
                     selectedTarget,
                     String(iso),
@@ -118,7 +145,7 @@ export const useViewerState = (
                     undefined, // center
                     undefined, // width
                     'gray', // cmap
-                    stretch // PASS STRETCH STATE
+                    true // Auto Stretch
                 );
 
                 // If 404 (returned as null by silenced service), retry once after 2s for initial selection
@@ -134,11 +161,12 @@ export const useViewerState = (
                         undefined,
                         undefined,
                         'gray',
-                        stretch
+                        true
                     );
                 }
 
                 if (!aborted && frameData) {
+                    setImageBlob(null);
                     setImageUrl(frameData.imageData);
                     setImageFrameInfo({
                         objectId: selectedTarget,
@@ -173,13 +201,29 @@ export const useViewerState = (
             if (isDifferentFile) {
                 prevFetchedFilePathRef.current = externalSelectedFilePath;
                 setImageUrl(null); // Clear old image only when switching to a different file
+                setImageBlob(null);
                 setAutoPanTrigger((n) => n + 1);
             }
             setLoading(true);
             setError(null);
             try {
-                const data = await fetchImageByPath(externalSelectedFilePath, stretch);
+                if (!stretch) {
+                    // Linear: read the FITS file itself so the viewer holds the pixel values.
+                    const file = await fetchFitsFileByPath(externalSelectedFilePath);
+                    if (!aborted) {
+                        setImageUrl(null);
+                        setImageBlob(file);
+                        setImageFrameInfo({
+                            objectId: selectedTarget || 'Unknown',
+                            iso: 'Unknown',
+                            exposure: 'Unknown',
+                        });
+                    }
+                    return;
+                }
+                const data = await fetchImageByPath(externalSelectedFilePath, true);
                 if (!aborted && data) {
+                    setImageBlob(null);
                     setImageUrl(data.imageData as string);
                     setImageFrameInfo({
                         objectId: selectedTarget || 'Unknown',
@@ -211,7 +255,7 @@ export const useViewerState = (
         error,
         selectedLightRow,
         setSelectedLightRow,
-        stretch,
-        toggleStretch: () => setStretch(!stretch)
+        displayMode,
+        setDisplayMode
     };
 };

@@ -55,8 +55,8 @@ def _candidates(best_rms: float, second_rms: float, second_type: str = "M0V") ->
 
 def test_is_classification_poor_match_flags_rms_above_the_gate_constant() -> None:
     """Verify `NO_GOOD_MATCH_RMS` separates poor from good matches."""
-    assert is_classification_poor_match(NO_GOOD_MATCH_RMS + 0.01) is True
-    assert is_classification_poor_match(NO_GOOD_MATCH_RMS - 0.01) is False
+    assert is_classification_poor_match(NO_GOOD_MATCH_RMS.default + 0.01) is True
+    assert is_classification_poor_match(NO_GOOD_MATCH_RMS.default - 0.01) is False
 
 
 def test_is_classification_poor_match_treats_unclassified_as_not_poor() -> None:
@@ -86,7 +86,7 @@ def test_build_spectral_classification_concerns_flags_poor_match_and_class_ambig
         spectroscopy=SpectroscopyResult(
             self_determined_spectral_type="K5V",
             self_determined_spectral_type_rms=0.05,
-            self_determined_spectral_type_candidates=_candidates(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 4),
+            self_determined_spectral_type_candidates=_candidates(0.05, 0.05 + AMBIGUOUS_RMS_GAP.default / 4),
         ),
     )
     subtype_only = StellarObject(
@@ -95,7 +95,7 @@ def test_build_spectral_classification_concerns_flags_poor_match_and_class_ambig
             self_determined_spectral_type="K5V",
             self_determined_spectral_type_rms=0.05,
             self_determined_spectral_type_candidates=_candidates(
-                0.05, 0.05 + AMBIGUOUS_RMS_GAP / 4, second_type="K7V"
+                0.05, 0.05 + AMBIGUOUS_RMS_GAP.default / 4, second_type="K7V"
             ),
         ),
     )
@@ -104,7 +104,7 @@ def test_build_spectral_classification_concerns_flags_poor_match_and_class_ambig
         spectroscopy=SpectroscopyResult(
             self_determined_spectral_type="M5V",
             self_determined_spectral_type_rms=0.05,
-            self_determined_spectral_type_candidates=_candidates(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP),
+            self_determined_spectral_type_candidates=_candidates(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP.default),
         ),
     )
 
@@ -120,19 +120,21 @@ def test_build_spectral_classification_concerns_flags_poor_match_and_class_ambig
     assert set(concerns_by_id) == {"PoorMatchStar", "AmbiguousStar"}
     assert concerns_by_id["PoorMatchStar"]["reason"] == "poor_match"
     assert concerns_by_id["AmbiguousStar"]["reason"] == "class_ambiguous"
-    assert concerns_by_id["AmbiguousStar"]["rms_gap_to_next_class"] == pytest.approx(AMBIGUOUS_RMS_GAP / 4)
+    assert concerns_by_id["AmbiguousStar"]["rms_gap_to_next_class"] == pytest.approx(
+        AMBIGUOUS_RMS_GAP.default / 4
+    )
 
 
 def test_a_neighbouring_subtype_is_not_class_ambiguous() -> None:
     """Verify a K5V/K7V tie is a subtype tie, not a class tie."""
-    neighbours = _candidates(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 4, second_type="K7V")
+    neighbours = _candidates(0.05, 0.05 + AMBIGUOUS_RMS_GAP.default / 4, second_type="K7V")
     assert is_classification_class_ambiguous(neighbours) is False
 
 
 def test_a_different_class_at_a_tiny_gap_is_class_ambiguous() -> None:
     """Verify K5V against M0V at a tiny gap is a class tie."""
-    assert is_classification_class_ambiguous(_candidates(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 4)) is True
-    assert is_classification_class_ambiguous(_candidates(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP)) is False
+    assert is_classification_class_ambiguous(_candidates(0.05, 0.05 + AMBIGUOUS_RMS_GAP.default / 4)) is True
+    assert is_classification_class_ambiguous(_candidates(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP.default)) is False
 
 
 def test_class_ambiguity_looks_past_same_class_neighbours() -> None:
@@ -194,8 +196,10 @@ def _checkpoint_outcomes(classification: dict[str, object]) -> dict[str, bool | 
 
 def test_checkpoint_three_reports_each_reachable_outcome_from_the_numbers() -> None:
     """Verify a tight gap fails only its check and a clean result passes."""
-    ambiguous = _checkpoint_outcomes(_classification(0.05, AMBIGUOUS_RMS_GAP / 4, 0.2))
-    clean = _checkpoint_outcomes(_classification(0.05, 2 * AMBIGUOUS_RMS_GAP, 2 * AMBIGUOUS_RMS_GAP))
+    ambiguous = _checkpoint_outcomes(_classification(0.05, AMBIGUOUS_RMS_GAP.default / 4, 0.2))
+    clean = _checkpoint_outcomes(
+        _classification(0.05, 2 * AMBIGUOUS_RMS_GAP.default, 2 * AMBIGUOUS_RMS_GAP.default)
+    )
     unclassified = output_quality_checkpoint(
         _classification(0.05, 0.1, 0.1),
         own_spectral_type="Unknown",
@@ -210,8 +214,8 @@ def test_checkpoint_three_reports_each_reachable_outcome_from_the_numbers() -> N
 
 def test_checkpoint_three_judges_the_colour_difference_by_its_size() -> None:
     """Verify a B-V difference beyond the limit, of either sign, fails."""
-    too_red = CatalogComparison(b_minus_v_difference_mag=COLOUR_DISAGREEMENT_MAGNITUDES + 0.1)
-    too_blue = CatalogComparison(b_minus_v_difference_mag=-COLOUR_DISAGREEMENT_MAGNITUDES - 0.1)
+    too_red = CatalogComparison(b_minus_v_difference_mag=COLOUR_DISAGREEMENT_MAGNITUDES.default + 0.1)
+    too_blue = CatalogComparison(b_minus_v_difference_mag=-COLOUR_DISAGREEMENT_MAGNITUDES.default - 0.1)
     close = CatalogComparison(b_minus_v_difference_mag=-0.1)
     outcomes = []
     for comparison in (too_red, too_blue, close, None):
@@ -229,7 +233,9 @@ def test_checkpoint_three_judges_the_colour_difference_by_its_size() -> None:
 def test_checkpoint_three_flags_name_the_failed_checks_and_no_trust_verdict() -> None:
     """Verify flags follow the failed checks, with no trust verdict."""
     checkpoint = output_quality_checkpoint(
-        _classification(NO_GOOD_MATCH_RMS + 0.05, AMBIGUOUS_RMS_GAP / 4, AMBIGUOUS_RMS_GAP / 4),
+        _classification(
+            NO_GOOD_MATCH_RMS.default + 0.05, AMBIGUOUS_RMS_GAP.default / 4, AMBIGUOUS_RMS_GAP.default / 4
+        ),
         own_spectral_type="K5V",
         catalog_spectral_type="B0V",
         catalog_comparison=CatalogComparison(b_minus_v_difference_mag=0.9),

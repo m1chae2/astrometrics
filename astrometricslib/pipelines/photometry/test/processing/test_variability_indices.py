@@ -142,7 +142,7 @@ def test_the_noise_model_follows_the_injected_scatter_and_ignores_variables() ->
     model = vi.fit_noise_model(magnitude, measured)
 
     assert model is not None
-    assert len(model.magnitudes) == vi.MAXIMUM_NOISE_BINS
+    assert len(model.magnitudes) == vi.MAXIMUM_NOISE_BINS.default
     assert sum(model.star_counts) == 600
     for centre, fitted in zip(model.magnitudes, model.rms_mag, strict=True):
         assert fitted == pytest.approx(float(injected_rms(np.array([centre]))[0]), rel=0.15)
@@ -237,7 +237,7 @@ def test_the_thresholds_follow_the_field_and_ignore_a_few_variables() -> None:
     assert 1.2 < base.reduced_chi_square < 2.2
     assert 0.2 < base.stetson_j < 0.6
     assert inflated.reduced_chi_square == pytest.approx(5.0 * base.reduced_chi_square)
-    assert base.excess_scatter == vi.EXCESS_SCATTER_THRESHOLD
+    assert base.excess_scatter == vi.EXCESS_SCATTER_THRESHOLD.default
 
 
 def build_field(variable_amplitude: float) -> list[StellarObject]:
@@ -280,7 +280,7 @@ def test_assess_variability_flags_the_injected_star_and_writes_the_indices() -> 
             assert getattr(photometry, name) is not None
     assert stars[0].photometry.variability_score > 1.0
     assert all(star.photometry.variability_score <= 1.0 for star in stars[1:])
-    assert stars[0].photometry.excess_scatter > vi.EXCESS_SCATTER_THRESHOLD
+    assert stars[0].photometry.excess_scatter > vi.EXCESS_SCATTER_THRESHOLD.default
 
 
 def test_assess_variability_flags_nothing_in_a_field_of_constants() -> None:

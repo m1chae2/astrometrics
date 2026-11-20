@@ -42,22 +42,22 @@ def test_jitter_is_judged_against_the_plate_scale() -> None:
     """Under 0.75 pixel is safe, to 1.25 pixels caution, beyond that high."""
     plate_scale = 1.91
     for rms in (0.82, 0.87, 0.93, 1.0, 1.2):
-        assert rms_risk_score(rms, plate_scale) < CAUTION_SCORE
-    assert CAUTION_SCORE <= rms_risk_score(1.8, plate_scale) < HIGH_SCORE
-    assert rms_risk_score(2.8, plate_scale) >= HIGH_SCORE
+        assert rms_risk_score(rms, plate_scale) < CAUTION_SCORE.default
+    assert CAUTION_SCORE.default <= rms_risk_score(1.8, plate_scale) < HIGH_SCORE.default
+    assert rms_risk_score(2.8, plate_scale) >= HIGH_SCORE.default
 
 
 def test_without_a_plate_scale_the_limits_are_1_2_and_2_arcseconds() -> None:
     """The fallback limits match a typical amateur mount."""
-    assert rms_risk_score(0.8) < CAUTION_SCORE
-    assert rms_risk_score(1.2) <= CAUTION_SCORE
-    assert CAUTION_SCORE <= rms_risk_score(1.6) < HIGH_SCORE
-    assert rms_risk_score(2.4) >= HIGH_SCORE
+    assert rms_risk_score(0.8) < CAUTION_SCORE.default
+    assert rms_risk_score(1.2) <= CAUTION_SCORE.default
+    assert CAUTION_SCORE.default <= rms_risk_score(1.6) < HIGH_SCORE.default
+    assert rms_risk_score(2.4) >= HIGH_SCORE.default
 
 
 def test_small_jitter_is_high_risk_on_a_long_focal_length() -> None:
     """0.8 arcseconds is two pixels at 0.4 arcseconds per pixel."""
-    assert rms_risk_score(0.8, 0.4) >= HIGH_SCORE
+    assert rms_risk_score(0.8, 0.4) >= HIGH_SCORE.default
 
 
 def test_the_prior_rises_west_of_the_meridian_near_the_pole_and_near_the_horizon() -> None:
@@ -93,7 +93,7 @@ def test_a_measured_target_pulls_nearby_scores_toward_its_jitter() -> None:
     bad = TrackedTarget(ha_deg=-30.0, dec_deg=40.0, rms_arcsec=5.0, solve_count=30)
     risk_map = build_tracking_risk_map(40.0, [bad], 1.0, 30)
 
-    assert _score_at(risk_map, -30.0, 40.0) >= HIGH_SCORE
+    assert _score_at(risk_map, -30.0, 40.0) >= HIGH_SCORE.default
     assert _score_at(risk_map, 150.0, -40.0) == _score_at(
         build_tracking_risk_map(40.0, [], 1.0, 0), 150.0, -40.0
     )

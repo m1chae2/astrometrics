@@ -12,6 +12,7 @@ one set of frame facts and returns one `StackWeightPrediction`.
 import math
 from collections.abc import Mapping, Sequence
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.processing_results import StackWeightPrediction
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     group_frame_weights,
@@ -47,7 +48,7 @@ def predict_stack_weights(
     star_width_px: Sequence[float | None] | None = None,
     rate_variance: Sequence[float | None] | None = None,
     group_frame_noise_adu: Mapping[float, float | None] | None = None,
-    minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
+    minimum_frames_per_group: int | None = None,
 ) -> StackWeightPrediction:
     """Predict the weighting mode, exposure groups and weights of a stack.
 
@@ -81,6 +82,8 @@ def predict_stack_weights(
         The mode, the group each frame lands in, and the weight of each
         frame, or the reasons the weights are unknown.
     """
+    if minimum_frames_per_group is None:
+        minimum_frames_per_group = resolve(MINIMUM_FRAMES_PER_EXPOSURE_GROUP).value
     folded = fold_exposure_lengths(list(exposure_seconds), minimum_frames_per_group)
     if len(set(folded)) > 1:
         mode = GROUP_MODE

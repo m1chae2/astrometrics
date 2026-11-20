@@ -76,8 +76,8 @@ def _row(
 
 def test_the_default_goal_and_the_ranking_count_are_the_registered_values() -> None:
     """The tuned values are those of register rows WAY-D83 and WAY-D85."""
-    assert DEFAULT_NOISE_GOAL == pytest.approx(1.9e-4)
-    assert RANKING_SUGGESTIONS_PER_USE == 3
+    assert DEFAULT_NOISE_GOAL.default == pytest.approx(1.9e-4)
+    assert RANKING_SUGGESTIONS_PER_USE.default == 3
 
 
 def test_the_fingerprint_ignores_row_ids_and_small_count_changes_but_not_real_ones() -> None:

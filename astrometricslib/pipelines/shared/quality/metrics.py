@@ -16,6 +16,7 @@ light frames because the meaning is the same: `FRAME_BACKGROUND_LEVEL` and
 
 import datetime
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
@@ -239,7 +240,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         limits=(
             QualityLimit(
-                value=float(SATURATED_BLOB_MINIMUM_PIXELS),
+                value=float(resolve(SATURATED_BLOB_MINIMUM_PIXELS).value),
                 unit="pixels",
                 tier=LimitTier.DESIGN_ESTIMATE,
                 derivation=(
@@ -251,7 +252,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
                 ),
             ),
             QualityLimit(
-                value=SATURATED_FRAME_FRACTION,
+                value=resolve(SATURATED_FRAME_FRACTION).value,
                 unit="fraction",
                 tier=LimitTier.DESIGN_ESTIMATE,
                 derivation=(

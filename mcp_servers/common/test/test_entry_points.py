@@ -38,7 +38,6 @@ def test_entry_point_builds_its_registry_and_lists_tools(
         """Record the server's arguments instead of reading stdin."""
         served.update(name=name, instructions=instructions, tools=tools, options=options)
 
-    monkeypatch.setenv("ASTROMETRICS_MCP_PROFILE", "investigator")
     monkeypatch.setattr(entry_module, "run_server", fake_run_server)
     monkeypatch.setattr(entry_module, "configure_logging", lambda *args, **kwargs: None)
 

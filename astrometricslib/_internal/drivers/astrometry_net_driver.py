@@ -42,9 +42,16 @@ from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.offline import OfflineModeError, require_online
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +96,16 @@ _ONLINE_SOLVE_ERRORS: tuple[type[Exception], ...] = (
 # 300s timeout with too few detected sources to ever succeed). Below
 # this, skip straight to the online path instead of spending minutes on
 # an attempt that was never going to work.
-MINIMUM_SOURCES_FOR_LOCAL_SOLVE = 10
+MINIMUM_SOURCES_FOR_LOCAL_SOLVE = TunedParameter(
+    name="internal.minimum_sources_for_local_solve",
+    default=10,
+    unit="stars",
+    description="Fewest detected stars worth handing to the local plate solver.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-13",
+)
 
 # If the hinted local solve already consumed this fraction of its time
 # budget without succeeding, it searched exhaustively and failed --
@@ -99,7 +115,21 @@ MINIMUM_SOURCES_FOR_LOCAL_SOLVE = 10
 # failure; a hinted attempt that instead fails quickly (a real
 # hint-mismatch, not an exhaustive search) still gets the blind retry,
 # since that is the case it exists to rescue.
-HINTED_SOLVE_NEAR_TIMEOUT_FRACTION = 0.9
+#
+# 0.9 stands for "it ran until its time limit": solve-field stops itself at
+# its CPU limit a little before the wall-clock timeout, so the exact limit is
+# never reached. It is a method choice, not tuned: only skipped retries log
+# their elapsed time, so there is nothing to tune from.
+HINTED_SOLVE_NEAR_TIMEOUT_FRACTION = TunedParameter(
+    name="internal.hinted_solve_near_timeout_fraction",
+    default=0.9,
+    unit="fraction",
+    description="Share of its time budget a hinted solve may use before the blind retry is skipped.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D06",
+)
 
 # The maximum number of times to retry if the internet connection fails.
 # Stop at 3 so the process doesn't get stuck forever if the site is down.
@@ -348,13 +378,15 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         # failure. Sources are only skipped when the count is known
         # (`sources` provided) and clearly too low; when the caller has
         # not pre-detected sources at all, local solving still runs.
-        source_count_too_low = sources is not None and len(sources) < MINIMUM_SOURCES_FOR_LOCAL_SOLVE
+        source_count_too_low = (
+            sources is not None and len(sources) < resolve(MINIMUM_SOURCES_FOR_LOCAL_SOLVE).value
+        )
         if source_count_too_low:
             logger.info(
                 "Only %s source(s) detected (fewer than %s); skipping the local solver and going "
                 "straight to the online path.",
                 len(sources),
-                MINIMUM_SOURCES_FOR_LOCAL_SOLVE,
+                resolve(MINIMUM_SOURCES_FOR_LOCAL_SOLVE).value,
             )
         elif image_path:
             header = self._solve_locally(image_path, **hints)
@@ -481,7 +513,9 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
                 # very unlikely to succeed in the same budget, so skip it
                 # rather than spend a second full timeout on a near-certain
                 # repeat failure.
-                hinted_exhausted_its_budget = hinted_elapsed >= timeout * HINTED_SOLVE_NEAR_TIMEOUT_FRACTION
+                hinted_exhausted_its_budget = (
+                    hinted_elapsed >= timeout * resolve(HINTED_SOLVE_NEAR_TIMEOUT_FRACTION).value
+                )
                 if applied_hints and hinted_exhausted_its_budget:
                     logger.info(
                         "Hinted local solve failed after using %.0fs of its %ss budget; skipping "

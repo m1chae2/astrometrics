@@ -28,6 +28,13 @@ from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     ResolutionProfile,
@@ -52,14 +59,38 @@ _LINES_TO_SKIP_ANGSTROM = (3970.0, 4102.0, 4340.0, 4861.0, 6563.0)
 # band is 126 A wide at H-delta and 444 A wide at H-alpha. A fixed 60 A half
 # width would leave most of the H-alpha and H-beta wings in the fit, and the
 # response would then divide Vega's line wings out of every target.
-_LINE_SKIP_HALF_WIDTH_PER_FWHM = 1.5
+_LINE_SKIP_HALF_WIDTH_PER_FWHM = TunedParameter(
+    name="spectroscopy.line_skip_half_width_per_fwhm",
+    default=1.5,
+    unit="× FWHM",
+    description="How far either side of each line the response fit skips, as a multiple of the line spread.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D55",
+    allowed_range=(0.5, 4.0),
+    # A sample is a stored star spectrum with a bundled reference.
+    minimum_sample=3,
+)
 
 # The least the fit skips either side of a line, in Angstroms, whatever the
 # line spread says. In the blue the line spread is only 42-45 A, but the
 # Balmer wings there reach about 100 A, so those lines keep a band of at least
 # 60 A each side. A wider band in the blue left the fit unconstrained below
 # 4300 A, and it swung to a wrong value at the blue end.
-_MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
+_MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = TunedParameter(
+    name="spectroscopy.minimum_line_skip_half_width_angstrom",
+    default=60.0,
+    unit="Å",
+    description="The least the response fit skips either side of a line, whatever the line spread says.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D55",
+    allowed_range=(20.0, 150.0),
+    # A sample is a stored star spectrum with a bundled reference.
+    minimum_sample=3,
+)
 
 # The default range the response is fitted over, and so the range spectra
 # are compared with the references (a response marks everything outside
@@ -104,14 +135,38 @@ _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
 # re-derives this response for a new grating should re-check this range
 # rather than assume 8000 A still applies; deriving it over the full
 # camera range is supported (see `derive_instrument_response`).
-DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM = (4200.0, 8000.0)
+DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM = TunedParameter(
+    name="spectroscopy.default_response_wavelength_range_angstrom",
+    default=(4200.0, 8000.0),
+    unit="Å",
+    description="The default range the instrument response is fitted over.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-13",
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
+)
 
 # Degree of the polynomial fitted to the logarithm of (observed /
 # reference). A degree of 4 follows the grating and sensor's broad
 # shape (it rises, peaks near 5300 A and falls) without bending to follow
 # the noise. A degree of 5 fitted the Vega master stack marginally
 # better but made the blue end swing, so it is not used.
-_RESPONSE_POLYNOMIAL_DEGREE = 4
+_RESPONSE_POLYNOMIAL_DEGREE = TunedParameter(
+    name="spectroscopy.response_polynomial_degree",
+    default=4,
+    unit="degree",
+    description="Degree of the polynomial fitted to the logarithm of observed over reference.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D55",
+    allowed_range=(2, 6),
+    # A sample is a stored star spectrum with a bundled reference.
+    minimum_sample=3,
+)
 
 # The polynomial is written in this scaled variable, (wavelength - 6000) /
 # 2000, so its coefficients stay of order one and the fit is stable.
@@ -323,7 +378,10 @@ def line_skip_half_widths_angstrom(
         if line_spread_profile is not None
         else np.full(lines.size, fallback_line_spread_angstrom)
     )
-    return np.maximum(_LINE_SKIP_HALF_WIDTH_PER_FWHM * line_spread, _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM)
+    return np.maximum(
+        resolve(_LINE_SKIP_HALF_WIDTH_PER_FWHM).value * line_spread,
+        resolve(_MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM).value,
+    )
 
 
 def derive_instrument_response(
@@ -332,8 +390,8 @@ def derive_instrument_response(
     reference_type: str,
     camera_name: str,
     source: str,
-    wavelength_range_angstrom: tuple[float, float] = DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    wavelength_range_angstrom: tuple[float, float] | None = None,
+    resolution_element_angstrom: float | None = None,
     line_spread_profile: ResolutionProfile | None = None,
     reference_airmass: float | None = None,
 ) -> InstrumentResponse:
@@ -407,6 +465,10 @@ def derive_instrument_response(
     ProcessingError
         If too few samples fall in the fitting range.
     """
+    if wavelength_range_angstrom is None:
+        wavelength_range_angstrom = resolve(DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM).value
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import _get_reference_templates
 
     templates = _get_reference_templates()
@@ -447,7 +509,7 @@ def derive_instrument_response(
 
     ratio = intensity[usable] / np.interp(wavelength_angstrom[usable], template_wavelength, smoothed_template)
     scaled = (wavelength_angstrom[usable] - _WAVELENGTH_CENTER_ANGSTROM) / _WAVELENGTH_SCALE_ANGSTROM
-    coefficients = np.polyfit(scaled, np.log(ratio), _RESPONSE_POLYNOMIAL_DEGREE)
+    coefficients = np.polyfit(scaled, np.log(ratio), resolve(_RESPONSE_POLYNOMIAL_DEGREE).value)
     return InstrumentResponse(
         camera_name=camera_name,
         coefficients=tuple(float(value) for value in coefficients),

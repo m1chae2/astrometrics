@@ -8,7 +8,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
@@ -321,18 +321,125 @@ class ImageProcessingService(BaseBackgroundService):
             logger.exception("Failed to launch Siril for %s", target_id)
             return False
 
-    def process_target(self, target_id: str, image_files: list) -> dict:
-        """Start a background processing job for a target using threads.
+    def process_target(
+        self,
+        target_id: str,
+        image_files: list | None = None,
+        kind: str | None = None,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
+        plan_only: bool = False,
+        force: bool = False,
+        denoise: bool | None = None,
+        denoise_strength: float | None = None,
+        star_toning: bool | None = None,
+    ) -> dict:
+        """Start a background stacking job for a target.
+
+        The app's Stack button sends the frames it shows as checked in
+        ``image_files``. A caller without a frame list (the AI's
+        ``processing_stack`` tool) leaves it out and chooses the frames the
+        way the library's ``processing.stack`` does, with ``kind``, a
+        filter, a file range, a time range, a camera and a focal length.
+        Both start the same ``stacking`` job, so it shows in the job list
+        with its progress and log, and the app's Cancel button reaches it.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target to stack.
+        image_files : `list`, optional
+            The frames to stack, as paths or frame dictionaries. Cannot be
+            combined with the frame choices below.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"`` frames, when the frames
+            are chosen here.
+        filter_name : `str`, optional
+            Only frames of this filter.
+        first_file : `str`, optional
+            Only frames from this file onward (``"013"`` means frame 013).
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, optional
+            Only frames taken at or after this ISO time.
+        until : `str`, optional
+            Only frames taken at or before this ISO time.
+        camera_id : `str`, optional
+            Only frames from this camera.
+        focal_length_mm : `float`, optional
+            Only frames taken at this focal length.
+        plan_only : `bool`, optional
+            Only say which frames would be stacked. No job starts.
+        force : `bool`, optional
+            Stack again even if nothing changed since the stack on disk.
+        denoise : `bool`, optional
+            Run or skip Cosmic Clarity for this run's preview.
+        denoise_strength : `float`, optional
+            Cosmic Clarity's strength for this run, from 0 to 1.
+        star_toning : `bool`, optional
+            Turn the preview's star toning on or off for this run.
 
         Returns
         -------
         result : `dict`
             Dict describing the job: `"status"` (`"started"` or
             `"already_running"`), `"jobId"`, `"expectedOutput"`, and
-            `"logFile"`.
+            `"logFile"`. With ``plan_only`` it is ``"status": "plan"`` and
+            ``"plan"``, the library's frame choice (count, first and last
+            file, camera), and no job starts.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``image_files`` is combined with a frame choice. The library's
+            plan raises its own errors for a choice that is out of range or
+            matches no frame.
         """
+        selection = {
+            name: value
+            for name, value in (
+                ("filter_name", filter_name),
+                ("first_file", first_file),
+                ("last_file", last_file),
+                ("since", since),
+                ("until", until),
+                ("camera_id", camera_id),
+                ("focal_length_mm", focal_length_mm),
+            )
+            if value is not None
+        }
+        stack_options = {
+            name: value
+            for name, value in (
+                ("denoise", denoise),
+                ("denoise_strength", denoise_strength),
+                ("star_toning", star_toning),
+            )
+            if value is not None
+        }
+        if force:
+            stack_options["force"] = True
+        choose_here = image_files is None
+        if choose_here:
+            # The library chooses the frames. A plan is quick and writes
+            # nothing, so a choice that matches no frame, or frames from two
+            # cameras, is refused here instead of as a failed job.
+            selection["kind"] = kind or "imaging"
+            plan = self._processing_api.stack(target_id, plan_only=True, register_job=False, **selection)
+            if plan_only:
+                return {"status": "plan", "plan": plan.model_dump(mode="json")}
+        elif selection or kind is not None or plan_only:
+            raise InvalidArgumentError(
+                "Pass image_files, or choose the frames with kind, filter_name, first_file, last_file, "
+                "since, until, camera_id and focal_length_mm, not both."
+            )
         # Rehydrate metadata if image_files is a flat list
-        if isinstance(image_files, list) and self._target_service:
+        if image_files and isinstance(image_files, list) and self._target_service:
             try:
                 target = self._target_service.get_targets(target_id)
                 if target and target.frames:
@@ -380,6 +487,8 @@ class ImageProcessingService(BaseBackgroundService):
             target_service=self._target_service,
             job_repository=self._job_repository,
             notification_service=self._notification_service,
+            selection=selection if choose_here else None,
+            stack_options=stack_options,
         )
 
         return {
@@ -438,6 +547,8 @@ def start_siril_processing_task(
     target_service: Any = None,
     job_repository: Any = None,
     notification_service: Any = None,
+    selection: dict[str, Any] | None = None,
+    stack_options: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> str | None:
     """Worker task that stacks a target's frames with the full stacking stage.
@@ -445,7 +556,11 @@ def start_siril_processing_task(
     This is the same stage the batch script runs, so a stack made from the
     viewer gets the same quality summary, provenance record and processed
     picture as one made in a batch. The ``job_repository`` is the database
-    that keeps the job log lines.
+    that keeps the job log lines. With ``selection`` (the frame choice of
+    ``processing.stack``, with its ``kind``) the library chooses the frames
+    and ``image_files`` is not used. ``stack_options`` (``force``,
+    ``denoise``, ``denoise_strength``, ``star_toning``) go to the stack
+    unchanged.
 
     Returns
     -------
@@ -479,8 +594,15 @@ def start_siril_processing_task(
         target = target_service.get_targets(target_id) if target_service else None
         if target is None:
             raise NotFoundError(f"Cannot stack '{target_id}': the target is not in the library.")
-        requested_paths = {frame if isinstance(frame, str) else frame.get("path") for frame in image_files}
-        frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
+        if selection is None:
+            requested_paths = {
+                frame if isinstance(frame, str) else frame.get("path") for frame in image_files
+            }
+            frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
+            frame_choice: dict[str, Any] = {"frames": frames_to_stack}
+        else:
+            frames_to_stack = []
+            frame_choice = {name: value for name, value in selection.items() if name != "kind"}
 
         # `ProcessingPipelines.stack` runs the whole stacking stage, the same
         # one the batch script runs: it holds a stacking slot (an OS-level
@@ -493,11 +615,14 @@ def start_siril_processing_task(
         from astrometricslib.exceptions import ProcessingError
         from astrometricslib.jobs import log_context, running_as_job
 
-        kind = (
-            "spectral"
-            if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
-            else "imaging"
-        )
+        if selection is not None:
+            kind = selection.get("kind", "imaging")
+        else:
+            kind = (
+                "spectral"
+                if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
+                else "imaging"
+            )
         try:
             # `running_as_job` makes this job row the current job, so the
             # stack's stage progress ("Stage 2 of 7") moves the job's bar.
@@ -513,7 +638,12 @@ def start_siril_processing_task(
                 ),
             ):
                 stack_result = target_service.astrometrics.processing.stack(
-                    target, frames=frames_to_stack, kind=kind, log_file=log_file_path, register_job=False
+                    target,
+                    kind=kind,
+                    log_file=log_file_path,
+                    register_job=False,
+                    **frame_choice,
+                    **(stack_options or {}),
                 )
             final_path = stack_result.stacked_path
         except ProcessingError:

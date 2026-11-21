@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, createEvent } from '@testing-library/react';
 import {
   STAR_LABEL_BUDGET,
+  labelCapForScale,
   StarScreenTransform,
   chooseLabeledStarIds,
   findStarNearPointer
@@ -82,7 +83,7 @@ describe('chooseLabeledStarIds', () => {
     };
     const labeled = chooseLabeledStarIds(stars, zoomed, estimateBadgeWidth);
     expect(labeled.size).toBeGreaterThan(0);
-    expect(labeled.size).toBeLessThanOrEqual(STAR_LABEL_BUDGET);
+    expect(labeled.size).toBeLessThanOrEqual(labelCapForScale(2));
     for (const star of stars.filter((item) => labeled.has(item.id))) {
       const screenX = -6000 + star.x * 2;
       const screenY = -8000 + star.y * 2;

@@ -31,6 +31,7 @@ import { StretchParameters } from '../types/backendTypes';
 import {
   StarScreenTransform,
   chooseLabeledStarIds,
+  MARKER_ALL_STARS_SCALE,
   findStarNearPointer,
   isInView,
   starScreenPosition
@@ -128,6 +129,9 @@ export function estimateBadgeWidth(star: AstrometryOverlayStar): number {
 
 /** Radius, in screen pixels, of the thin circle drawn on every star. */
 const MARKER_RADIUS_PX = 5;
+
+/** Radius, in screen pixels, of the smaller marks for unmatched and missed stars when zoomed out. */
+const SMALL_MARKER_RADIUS_PX = 3;
 
 /** How far from a click, in screen pixels, a measurement may look for the star's center. */
 export const STAR_SEARCH_SCREEN_PX = 6;
@@ -478,7 +482,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     () => overlayStars?.filter((star) => !star.matchKind || star.matchKind === 'matched'),
     [overlayStars]
   );
-  // A fixed label budget is spent on the stars in view, so zooming in shows more labels per area.
+  // The most important names in view are labeled, up to a cap that grows with the zoom.
   const labeledIds = React.useMemo(
     () => (overlayVisible && labelableStars
       ? chooseLabeledStarIds(
@@ -512,6 +516,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     context.lineWidth = 1;
     context.globalAlpha = 0.65;
     const transform = { scaleX, scaleY, panX, panY, viewWidth: width, viewHeight: height };
+    const overview = Math.min(scaleX, scaleY) < MARKER_ALL_STARS_SCALE;
     // Named stars and the target's catalog stars are circles; a detection with no catalog star is a
     // dashed circle; a catalog star with no detection is a cross. Each has its own theme color.
     const groups: Array<{ kind: 'named' | 'unmatched' | 'catalog_only'; color: string }> = [
@@ -526,23 +531,27 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       for (const star of overlayStars) {
         const kind = star.matchKind === 'unmatched' || star.matchKind === 'catalog_only' ? star.matchKind : 'named';
         if (kind !== group.kind) continue;
+        // Zoomed out, a named star shows a circle only when it has a name badge; the rest stay
+        // findable by hovering. Unmatched and missed stars stay as smaller marks.
+        if (overview && kind === 'named' && !labeledIds.has(star.id)) continue;
         const position = starScreenPosition(star, transform);
         if (!isInView(position, transform)) continue;
+        const radius = overview && kind !== 'named' ? SMALL_MARKER_RADIUS_PX : MARKER_RADIUS_PX;
         if (kind === 'catalog_only') {
-          const arm = MARKER_RADIUS_PX * 0.8;
+          const arm = radius * 0.8;
           context.moveTo(position.x - arm, position.y - arm);
           context.lineTo(position.x + arm, position.y + arm);
           context.moveTo(position.x - arm, position.y + arm);
           context.lineTo(position.x + arm, position.y - arm);
         } else {
-          context.moveTo(position.x + MARKER_RADIUS_PX, position.y);
-          context.arc(position.x, position.y, MARKER_RADIUS_PX, 0, Math.PI * 2);
+          context.moveTo(position.x + radius, position.y);
+          context.arc(position.x, position.y, radius, 0, Math.PI * 2);
         }
       }
       context.stroke();
     }
     context.setLineDash?.([]);
-  }, [overlayVisible, overlayStars, scaleX, scaleY, panX, panY, containerW, containerH]);
+  }, [overlayVisible, overlayStars, labeledIds, scaleX, scaleY, panX, panY, containerW, containerH]);
 
   /**
    * Finds the star circle under the pointer, labeled or not, for the tooltip.

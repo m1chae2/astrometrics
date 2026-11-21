@@ -57,6 +57,7 @@ astrometry.source_detector_kernel_fwhm_px,AST-D01,measurement,Design estimate
 astrometry.source_detector_merge_kernel_widths,AST-D02,measurement,Design estimate
 astrometry.source_detector_roundness_range,AST-D01,exclusion criteria,Design estimate
 astrometry.unresolved_companion_radius_arcsec,AST-10,measurement,Partly measured
+astrometry.viewing_separation_kernel_widths,AST-D23,measurement,Measured
 astrometry.wcs_refinement.minimum_matched_stars,AST-03,judgment,Partly measured
 foundation.full_scale_counts,STK-38,measurement,Partly measured
 foundation.mount_periodic_error_period_seconds,WAY-D135,measurement,Design estimate

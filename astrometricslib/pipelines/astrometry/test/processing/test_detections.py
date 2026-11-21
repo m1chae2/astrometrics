@@ -67,7 +67,9 @@ def test_same_list_as_the_run_function(tmp_path: Path) -> None:
     path = tmp_path / "pair.fits"
     image = _write_image(path, STAR_POSITIONS + CLOSE_PAIR)
     result = measure_detections_in_file(str(path))
-    _, unique = find_unique_stars(SourceDetector(), np.asarray(image, dtype=np.float32).astype(float))
+    _, unique = find_unique_stars(
+        SourceDetector(keep_close_pairs=True), np.asarray(image, dtype=np.float32).astype(float)
+    )
     assert len(unique) == result.detection_count
     for source, detection in zip(unique, result.detections, strict=True):
         assert detection.x == pytest.approx(float(source["x_centroid"]) + 1.0)
@@ -220,21 +222,19 @@ def test_stack_sidecar_is_used_and_raw_frames_get_none(
 ) -> None:
     """A stack gets a saved list that is read back; a frame gets none."""
     stack = tmp_path / "Stack.fits"
-    image = _write_image(stack, STAR_POSITIONS)
+    _write_image(stack, STAR_POSITIONS)
     with fits.open(stack, mode="update") as hdul:
         hdul[0].header["STACKCNT"] = 10
     frame = tmp_path / "Frame.fits"
     _write_image(frame, STAR_POSITIONS)
-    detector = SourceDetector()
-    _, unique = find_unique_stars(detector, np.asarray(image, dtype=np.float32).astype(float))
-    assert save_run_detections(str(stack), unique, float(detector.fwhm), False)
-    assert not save_run_detections(str(frame), unique, float(detector.fwhm), False)
+    assert save_run_detections(str(stack))
+    assert not save_run_detections(str(frame))
     assert (tmp_path / "Stack_detections.json").exists()
     assert not (tmp_path / "Frame_detections.json").exists()
     calls = _count_finder_calls(monkeypatch)
     loaded = measure_detections_in_file(str(stack))
     assert calls == []
-    assert loaded.detection_count == len(unique)
+    assert loaded.detection_count == len(detections_module._find_detections(str(stack)).detections)
     assert loaded.detections == detections_module._find_detections(str(stack)).detections
     calls.clear()
     # Replacing the stack makes the saved list stale.
@@ -242,3 +242,33 @@ def test_stack_sidecar_is_used_and_raw_frames_get_none(
     os.utime(stack, ns=(status.st_atime_ns, status.st_mtime_ns + 5_000_000_000))
     measure_detections_in_file(str(stack))
     assert len(calls) == 1
+
+
+def test_close_pair_is_two_stars_for_viewing_and_one_for_solving(tmp_path: Path) -> None:
+    """A close pair is two stars for viewing and one for solving."""
+    path = tmp_path / "pair.fits"
+    image = np.asarray(_write_image(path, [(100.0, 100.0), (106.0, 100.0)]), dtype=np.float32).astype(float)
+    # Make the companion fainter, like the real case.
+    rows, columns = np.mgrid[0:200, 0:200]
+    image -= 2000.0 * np.exp(-((columns - 106.0) ** 2 + (rows - 100.0) ** 2) / (2 * 1.7**2))
+    fits.PrimaryHDU(image.astype(np.float32)).writeto(path, overwrite=True)
+    data = np.asarray(image, dtype=np.float32).astype(float)
+    _, solving = find_unique_stars(SourceDetector(), data)
+    _, viewing = find_unique_stars(SourceDetector(keep_close_pairs=True), data)
+    assert len(solving) == 1
+    assert len(viewing) == 2
+
+
+def test_saved_list_is_stale_when_the_viewing_separation_changes(
+    tmp_path: Path, private_cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The viewing separation is part of the stamp, so old lists recompute."""
+    assert "viewing_separation_kernel_widths" in detections_module._finder_settings()
+    path = tmp_path / "stars.fits"
+    _write_image(path, STAR_POSITIONS)
+    calls = _count_finder_calls(monkeypatch)
+    measure_detections_in_file(str(path))
+    settings = dict(detections_module._finder_settings(), viewing_separation_kernel_widths=9.0)
+    monkeypatch.setattr(detections_module, "_finder_settings", lambda: settings)
+    measure_detections_in_file(str(path))
+    assert len(calls) == 2

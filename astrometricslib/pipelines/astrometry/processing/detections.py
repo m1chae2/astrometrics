@@ -43,6 +43,7 @@ from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwh
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import (
     SOURCE_DETECTOR_KERNEL_FWHM_PX,
     SOURCE_DETECTOR_ROUNDNESS_RANGE,
+    VIEWING_SEPARATION_KERNEL_WIDTHS,
     SourceDetector,
 )
 from astrometricslib.pipelines.astrometry.processing.star_identifier import (
@@ -66,7 +67,7 @@ DETECTIONS_SIDECAR_SUFFIX = "_detections.json"
 
 # Raise this when the layout of a saved list changes, so an old file is not
 # read as a new one.
-DETECTIONS_FILE_VERSION = 1
+DETECTIONS_FILE_VERSION = 2
 
 # The cache folder keeps at most this many lists; the oldest are deleted.
 DETECTIONS_CACHE_LIMIT = 200
@@ -89,7 +90,8 @@ def find_star_centers(data: np.ndarray) -> list[tuple[float, float]]:
     centers : `list` [`tuple` [`float`, `float`]]
         The 0-based ``(column, row)`` of each star, as the finder gives it.
     """
-    _, unique_sources = find_unique_stars(SourceDetector(), np.asarray(data, dtype=float))
+    detector = SourceDetector(keep_close_pairs=True)
+    _, unique_sources = find_unique_stars(detector, np.asarray(data, dtype=float))
     return [
         (
             float(source.get("x_centroid", source.get("xcentroid"))),
@@ -150,27 +152,21 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
     return measurement
 
 
-def save_run_detections(
-    path: str, unique_sources: list[dict[str, Any]], kernel_fwhm_px: float, binned_on_color: bool
-) -> bool:
-    """Save the list the astrometry run found on a stack, next to the stack.
+def save_run_detections(path: str) -> bool:
+    """Save the viewing list of a stack, next to the stack.
 
-    Call it after the run has finished changing the file (it writes the
-    solved coordinates into the header), so the saved size and modification
-    time are the ones the viewer will see. Only a stack gets a file: a single
-    frame belongs to the raw folders, where nothing is written.
+    The run itself finds the separated list that plate solving needs, which
+    drops the fainter star of a close pair. The viewer and the star naming
+    need the pairs, so this finds the viewing list (`_find_detections`) and
+    saves that. Call it after the run has finished changing the file (it
+    writes the solved coordinates into the header), so the saved size and
+    modification time are the ones the viewer will see. Only a stack gets a
+    file: a single frame belongs to the raw folders, where nothing is written.
 
     Parameters
     ----------
     path : `str`
         The stack's FITS file.
-    unique_sources : `list` [`dict`]
-        The stars the run's finder found, merged, as `find_unique_stars`
-        returns them.
-    kernel_fwhm_px : `float`
-        The kernel width the finder used.
-    binned_on_color : `bool`
-        Whether the finder searched a binned copy of a color image.
 
     Returns
     -------
@@ -181,11 +177,7 @@ def save_run_detections(
         image = AstrometricsImage(path)
         if int(image.header.get("STACKCNT", 0) or 0) <= 1:
             return False
-        raw = image.data
-        data = np.asarray(collapse_to_2d(raw) if np.asarray(raw).ndim == 3 else raw, dtype=float)
-        measurement = _build_measurement(
-            path, data, image.header, unique_sources, kernel_fwhm_px, binned_on_color
-        )
+        measurement = _find_detections(path)
         _write_saved(_sidecar_path(path), path, measurement)
     except (OSError, ValueError, TypeError, InvalidArgumentError) as error:
         logger.debug("Could not save the detection list of %s: %s", path, error)
@@ -225,7 +217,7 @@ def _find_detections(path: str) -> DetectionsMeasurement:
     # The finder is built exactly as the run builds it, so the markers are
     # the stars a run finds. The run reads each star's radius; the viewer
     # does not, so it is skipped here.
-    detector = SourceDetector()
+    detector = SourceDetector(keep_close_pairs=True)
     _, unique_sources = find_unique_stars(detector, data, is_color_frame=is_color_frame, with_radius=False)
     return _build_measurement(path, data, image.header, unique_sources, float(detector.fwhm), is_color_frame)
 
@@ -323,6 +315,7 @@ def _finder_settings() -> dict[str, Any]:
         "kernel_fwhm_px": float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value),
         "roundness_range": [float(value) for value in resolve(SOURCE_DETECTOR_ROUNDNESS_RANGE).value],
         "color_bin_factor": int(resolve(_COLOR_DETECTION_BIN_FACTOR).value),
+        "viewing_separation_kernel_widths": float(resolve(VIEWING_SEPARATION_KERNEL_WIDTHS).value),
     }
 
 

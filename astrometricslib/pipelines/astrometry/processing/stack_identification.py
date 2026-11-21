@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 IDENTIFICATION_SIDECAR_SUFFIX = "_identification.json"
 
 # Raise this when the layout of the saved file changes.
-IDENTIFICATION_FILE_VERSION = 1
+IDENTIFICATION_FILE_VERSION = 2
 
 # The most catalog stars with no detection listed, brightest first, so a
 # dense field does not send tens of thousands of markers to the viewer. A

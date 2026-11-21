@@ -272,30 +272,26 @@ def _measure_star_fwhm_px(image: Any, target: Any = None) -> float | None:
 
 
 def _save_stack_detections(path: str, star_identifier: Any) -> None:
-    """Save the stars the run found on a stack, for the viewer's overlay.
+    """Save the viewing star list of a stack, for the viewer's overlay.
 
     The list goes next to the stack (see `save_run_detections`), so the
-    Detections overlay opens at once. A failure is ignored: the viewer finds
-    the stars itself when there is no file.
+    Detections overlay opens at once. It keeps close pairs, unlike the run's
+    own list. A failure is ignored: the viewer finds the stars itself when
+    there is no file.
 
     Parameters
     ----------
     path : `str`
         The analyzed image.
     star_identifier : `StarIdentifier`
-        The identifier that did the run; it holds the stars it found.
+        The identifier that did the run; only used to check it found stars.
     """
     from astrometricslib.pipelines.astrometry.processing.detections import save_run_detections
 
     sources = getattr(star_identifier, "detected_unique_sources", None)
     if not path or not isinstance(sources, list) or not sources:
         return
-    save_run_detections(
-        path,
-        sources,
-        float(star_identifier.detector.fwhm),
-        bool(getattr(star_identifier, "_detected_on_binned_copy", False)),
-    )
+    save_run_detections(path)
 
 
 class AstrometryPipelineAdapter(AnalysisPipeline):

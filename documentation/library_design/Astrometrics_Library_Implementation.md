@@ -177,7 +177,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | Frame measurement: CPU time; fit grid cells | 60 s; 196 | Design estimate ([AST-17](validation/astrometry.md#ast-17)) | §3.4 |
 | Pixel blur factor $c$; field grid and region cells per side | 2 ln 2 / 3; 14 and 4 | Design estimate ([AST-18](validation/astrometry.md#ast-18)) | §3.4 |
 | Frame screening: session gap | 4 h | Design estimate ([table](validation/stacking.md#design-estimates)) | §3.4.1 |
-| Frame screening: fewest frames to judge; clouded frame star count; trailed frame elongation | 8; below 0.5 of session median; above 1.32 and 0.22 over median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
+| Frame screening: fewest frames to judge; clouded frame star count; trailed frame elongation | 8; below 0.5 of session median; above 1.32 and 0.12 over median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
 | Elongation rise, color camera | at least 0.22 over median | Measured ([STK-02](validation/stacking.md#stk-02)) | §3.4.1 |
 | Warning share of a session set aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
 | Dark temperature slot width | 3 °C | Partly measured ([STK-06](validation/stacking.md#stk-06)) | §3.2 |

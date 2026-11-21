@@ -61,6 +61,27 @@ ELONGATION_OUTLIER_SIGMAS = TunedParameter(
 )
 
 
+# How many robust standard deviations above its own session's median a frame of
+# a monochrome camera must be to count as trailed. It is smaller than the
+# outlier cut above because the contact sheets of 2026-11-20 (STK-01) show
+# trailing well inside five spreads in sessions whose median is already above
+# 1.2: M 27 of 2026-09-24 frames 057 and 059 (+0.14 and +0.13 above the
+# median of 1.28) and NGC 2903 frame 015 (+0.12, doubled stars) are trailed,
+# while frames up to +0.11 (NGC 2403 022, 028) look like the rest of their
+# session. 0.12 over the spread of 0.045 is 2.7 spreads. The fixed limit and
+# the colour camera's rise keep the five-spread cut.
+ELONGATION_RISE_SIGMAS = TunedParameter(
+    name="stacking.elongation_rise_sigmas",
+    default=2.7,
+    unit="× robust standard deviation",
+    description="Robust standard deviations above its session's median at which a mono frame is trailed.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-01",
+)
+
+
 def group_elongation_by_session(rows: Iterable[QualityMeasurement]) -> list[list[float]]:
     """Gather the stored elongation of frames into sessions.
 
@@ -201,7 +222,9 @@ def tune_trailed_limits(inputs: TuningInputs) -> TuningResult:
     sigmas = resolve(ELONGATION_OUTLIER_SIGMAS).value
     values: dict[str, float] = {TRAILED_ELONGATION_LIMIT.name: fixed_elongation_limit(sessions, sigmas)}
     if not _camera_is_colour(inputs, astrometrics):
-        values[ELONGATION_RISE_ABOVE_MEDIAN.name] = rise_above_session_median(sessions, sigmas)
+        values[ELONGATION_RISE_ABOVE_MEDIAN.name] = rise_above_session_median(
+            sessions, resolve(ELONGATION_RISE_SIGMAS).value
+        )
     frame_count = sum(len(session) for session in sessions)
     return TuningResult(
         values=values,
@@ -254,8 +277,8 @@ TRAILED_LIMITS_TUNER = Tuner(
     method=(
         "Reads the stored star elongation of every frame of the setup's camera, groups the frames into "
         "sessions (one target, night and capture setting, at least the quarantine's minimum batch), and "
-        "sets the rise above the session median a set number of robust standard deviations out. The fixed "
-        "limit is the library median plus that rise."
+        "sets the rise above the session median a set number of robust standard deviations out (fewer for "
+        "the rise than for the fixed limit). The fixed limit is the library median plus five spreads."
     ),
     tune=tune_trailed_limits,
 )

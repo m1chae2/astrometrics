@@ -203,10 +203,10 @@ def test_judge_batch_treats_a_measurement_without_the_colour_key_as_mono() -> No
 
 
 def test_judge_batch_scales_the_elongation_limit_to_the_session() -> None:
-    """In a session with a median of 1.20, only frames 0.22 higher move."""
-    measurements = [make_measurement(f"f{index}.fits", elongation=1.20) for index in range(12)]
+    """In a session with a median of 1.28, only frames 0.12 higher move."""
+    measurements = [make_measurement(f"f{index}.fits", elongation=1.28) for index in range(12)]
     measurements[0] = make_measurement("worst.fits", elongation=2.0)
-    measurements[1] = make_measurement("bad.fits", elongation=1.50)
+    measurements[1] = make_measurement("bad.fits", elongation=1.41)
     measurements[2] = make_measurement("mild.fits", elongation=1.38)
 
     moved = {decision.path for decision in judge_batch(measurements)}

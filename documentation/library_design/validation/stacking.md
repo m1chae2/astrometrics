@@ -16,7 +16,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Settings it supports:**
   - code constant `CLOUD_STAR_FRACTION` = 0.5 in `pipelines/stacking/pre_processing/frame_quarantine.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.CLOUD_STAR_FRACTION -->
   - code constant `TRAILED_ELONGATION_LIMIT` = 1.32 in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.TRAILED_ELONGATION_LIMIT -->
-  - code constant `ELONGATION_RISE_ABOVE_MEDIAN` = 0.22 in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.ELONGATION_RISE_ABOVE_MEDIAN -->
+  - code constant `ELONGATION_RISE_ABOVE_MEDIAN` = 0.12 in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.ELONGATION_RISE_ABOVE_MEDIAN -->
   - code constant `MINIMUM_FRAMES_TO_JUDGE` = 8 in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MINIMUM_FRAMES_TO_JUDGE -->
   - code constant `CLOUD_SKY_MULTIPLE` = 1.15 in the same file (it changes only the wording of the reason). Relation: sanity check only; it is a warning threshold and blocks nothing. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.CLOUD_SKY_MULTIPLE -->
   - on/off: config key `[Processing.Siril] quarantine_bad_frames_enabled` (default `true`). Relation: sanity check only; it is a warning threshold and blocks nothing.

@@ -205,7 +205,7 @@ stacker's pixel rejection removes it, so such a frame stays.
 
 ELONGATION_RISE_ABOVE_MEDIAN = TunedParameter(
     name="stacking.elongation_rise_above_median",
-    default=0.22,
+    default=0.12,
     unit="ratio",
     description="How far above the batch's median elongation a frame must be to count as trailed.",
     role=ParameterRole.EXCLUSION_CRITERIA,
@@ -221,11 +221,16 @@ ELONGATION_RISE_ABOVE_MEDIAN = TunedParameter(
 Some sessions are mildly elongated throughout. The M 27 session of
 2026-09-24 had a median elongation of 1.28 and 15 of its 33 frames above
 1.30. With the fixed limit alone most of them would move. With the rise of
-0.22 the cut-off there is 1.50. On a round session such as NGC 7331 (median
+0.12 the cut-off there is 1.40. On a round session such as NGC 7331 (median
 1.096) the cut-off is the fixed 1.32.
 
-The rise is five robust standard deviations of a frame's distance above its
-own session's median, over the same 675 frames as the fixed limit.
+The rise is `quarantine_tuning.ELONGATION_RISE_SIGMAS` (2.7) robust standard
+deviations of a frame's distance above its own session's median (0.045 over
+the same 675 frames as the fixed limit). It was 0.22 (five spreads) until
+the contact sheets of 2026-11-20 showed visibly elongated stars from about
++0.12 in sessions whose median is above 1.2 (M 27 of 2026-09-24 frames 057
+and 059, NGC 2903 frame 015), while frames up to +0.11 looked like the
+rest of their session (STK-01).
 """
 
 COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN = TunedParameter(
@@ -258,9 +263,10 @@ mono value. The two M 106 sessions (90 frames) scatter far more (medians 1.39
 and 1.36, spreads 0.31): by roundness only two of their frames were judged
 bad, so it is not known whether the scatter is trailing or measurement noise
 in a sparse field. Pooling all three sessions gives 0.17. Until more colour
-sessions are stored, the colour value equals the mono one (0.22), which is
-above all three measurements of the clean session and cannot be tuned lower
-without data (STK-02).
+sessions are stored, the colour value stays at 0.22. The contact sheets of
+2026-11-20 support it: NGC 6888 frame 113 (+0.20) has round stars, while
+M 106 frame 021 (+0.21) is trailed, so no lower value separates them
+(STK-02).
 """
 
 UNEVEN_SKY_SIGMAS = TunedParameter(

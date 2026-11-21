@@ -428,7 +428,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       targetDisplay: 'Astronomy Manager',
       targetElement: 'spectrumViewer',
       action: 'astronomySelectStar',
-      payload: recordId,
+      payload: { starId: recordId, targetId: selectedTarget },
       toast: {
         message: `Opening ${star.name || recordId} in Astronomy Manager`,
         type: 'info',
@@ -443,7 +443,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
         }
       }
     });
-  }, [persistView]);
+  }, [persistView, selectedTarget]);
 
   // Merge remote targets into the list if they don't exist locally
   const allItems = useMemo(() => {

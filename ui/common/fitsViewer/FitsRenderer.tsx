@@ -917,8 +917,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         )}
         {showDetections && detectionPaths && (
           <svg className={`fits-renderer__detections${detectionPaths.mode === 'dots' ? ' fits-renderer__detections--dots' : ''}`} data-mode={detectionPaths.mode} data-overlay-layer="true" data-testid="detections-layer" aria-hidden="true">
-            <path className="fits-renderer__detection" data-testid="detections-single" d={detectionPaths.circles} />
-            <path className="fits-renderer__detection fits-renderer__detection--merged" data-testid="detections-merged" d={detectionPaths.diamonds} />
+            <path className="fits-renderer__detection" data-testid="detections-single" d={detectionPaths.circles} style={detectionPaths.mode === 'dots' ? { fillOpacity: detectionPaths.dotOpacity } : undefined} />
+            <path className="fits-renderer__detection fits-renderer__detection--merged" data-testid="detections-merged" d={detectionPaths.diamonds} style={detectionPaths.mode === 'dots' ? { fillOpacity: detectionPaths.mergedDotOpacity } : undefined} />
           </svg>
         )}
         {profileMarker && (

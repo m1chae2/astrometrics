@@ -30,6 +30,36 @@ export const DOT_RADIUS_PX = 1.25;
 /** Radius, in screen pixels, of the dot drawn for a merged detection, a little larger than a single star's dot. */
 export const MERGED_DOT_RADIUS_PX = 2;
 
+/** Opacity of a single star's dot at normal density. Matches the stylesheet's old fixed value. */
+export const DOT_OPACITY = 0.6;
+
+/** Opacity of a merged star's dot at normal density, the same as a single star's. */
+export const MERGED_DOT_OPACITY = 0.6;
+
+/**
+ * Dots per 1,000 screen pixels squared (in view) up to which dots keep their normal look. A 900 by 600
+ * pixel view holding a 12,000-star image is about 22, so a normal view is unchanged.
+ */
+export const CROWDED_DOTS_START_PER_KILOPIXEL = 30;
+
+/**
+ * Dots per 1,000 screen pixels squared at which dots reach their smallest and faintest. A 180 by 180 pixel
+ * view holding 12,000 stars is about 370, which is past this, so such a view is at the floors.
+ */
+export const CROWDED_DOTS_FULL_PER_KILOPIXEL = 300;
+
+/** Smallest dot radius, in screen pixels, of a single star in a crowded view, so the star is still drawn. */
+export const CROWDED_DOT_RADIUS_PX = 0.6;
+
+/** Smallest dot radius of a merged star in a crowded view, kept larger so merged stars stay distinguishable. */
+export const CROWDED_MERGED_DOT_RADIUS_PX = 1;
+
+/** Faintest opacity of a single star's dot in a crowded view; many overlapping dots still add up to a visible cloud. */
+export const CROWDED_DOT_OPACITY = 0.2;
+
+/** Faintest opacity of a merged star's dot in a crowded view, stronger than a single star's. */
+export const CROWDED_MERGED_DOT_OPACITY = 0.4;
+
 /** How much wider a merged star's diamond is than a single star's circle, so the two shapes read apart. */
 const MERGED_TO_SINGLE_SIZE = MERGED_MARKER_RADIUS_PX / DETECTION_MARKER_RADIUS_PX;
 
@@ -73,6 +103,28 @@ export interface DetectionPaths {
   diamonds: string;
   /** How many markers are in view. */
   visibleCount: number;
+  /** Fill opacity of the single-star dots (dot mode; lower when the view is crowded). */
+  dotOpacity: number;
+  /** Fill opacity of the merged-star dots (dot mode; lower when the view is crowded). */
+  mergedDotOpacity: number;
+}
+
+/**
+ * Finds how crowded the dots are, from 0 (normal density) to 1 (as crowded as it gets). The scale is
+ * logarithmic because density spans orders of magnitude between a zoomed-in and a zoomed-out view.
+ *
+ * @param visibleCount How many detections are in view.
+ * @param viewWidth Width of the viewer, in screen pixels.
+ * @param viewHeight Height of the viewer, in screen pixels.
+ * @returns The crowding, between 0 and 1.
+ */
+export function dotCrowding(visibleCount: number, viewWidth: number, viewHeight: number): number {
+  const area = viewWidth * viewHeight / 1000;
+  if (area <= 0 || visibleCount <= 0) return 0;
+  const density = visibleCount / area;
+  if (density <= CROWDED_DOTS_START_PER_KILOPIXEL) return 0;
+  const span = Math.log(CROWDED_DOTS_FULL_PER_KILOPIXEL / CROWDED_DOTS_START_PER_KILOPIXEL);
+  return Math.min(1, Math.log(density / CROWDED_DOTS_START_PER_KILOPIXEL) / span);
 }
 
 /**
@@ -115,17 +167,27 @@ export function buildDetectionPaths(detections: StarDetection[], geometry: Detec
   const diamondX = rx * MERGED_TO_SINGLE_SIZE;
   const diamondY = ry * MERGED_TO_SINGLE_SIZE;
   const margin = dotMode ? MERGED_DOT_RADIUS_PX : Math.max(diamondX, diamondY);
+  // One pass finds what is in view; the dot size and opacity then follow how crowded the view is.
+  const inView: { x: number; y: number; merged: boolean }[] = [];
   for (const detection of detections) {
     const { x, y } = detectionScreenPosition(detection, geometry);
     if (x < -margin || y < -margin || x > geometry.viewWidth + margin || y > geometry.viewHeight + margin) continue;
+    inView.push({ x, y, merged: Boolean(detection.merged) });
+  }
+  const crowding = dotMode ? dotCrowding(inView.length, geometry.viewWidth, geometry.viewHeight) : 0;
+  const mix = (normal: number, floor: number): number => normal + (floor - normal) * crowding;
+  const singleDotRadius = mix(DOT_RADIUS_PX, CROWDED_DOT_RADIUS_PX);
+  const mergedDotRadius = mix(MERGED_DOT_RADIUS_PX, CROWDED_MERGED_DOT_RADIUS_PX);
+  for (const { x, y, merged } of inView) {
     const px = x.toFixed(1);
     const py = y.toFixed(1);
     if (dotMode) {
-      const radius = detection.merged ? MERGED_DOT_RADIUS_PX : DOT_RADIUS_PX;
-      const width = (2 * radius).toFixed(2);
-      const dot = `M${(x - radius).toFixed(1)} ${py}a${radius} ${radius} 0 1 0 ${width} 0a${radius} ${radius} 0 1 0 -${width} 0`;
-      (detection.merged ? diamonds : circles).push(dot);
-    } else if (detection.merged) {
+      const radius = merged ? mergedDotRadius : singleDotRadius;
+      const r = Number(radius.toFixed(2));
+      const width = (2 * r).toFixed(2);
+      const dot = `M${(x - r).toFixed(1)} ${py}a${r} ${r} 0 1 0 ${width} 0a${r} ${r} 0 1 0 -${width} 0`;
+      (merged ? diamonds : circles).push(dot);
+    } else if (merged) {
       diamonds.push(
         `M${px} ${(y - diamondY).toFixed(1)}L${(x + diamondX).toFixed(1)} ${py}`
         + `L${px} ${(y + diamondY).toFixed(1)}L${(x - diamondX).toFixed(1)} ${py}Z`,
@@ -137,5 +199,8 @@ export function buildDetectionPaths(detections: StarDetection[], geometry: Detec
       circles.push(`M${(x - rx).toFixed(1)} ${py}a${sx} ${sy} 0 1 0 ${width} 0a${sx} ${sy} 0 1 0 -${width} 0`);
     }
   }
-  return { mode: dotMode ? 'dots' : 'circles', circles: circles.join(''), diamonds: diamonds.join(''), visibleCount: circles.length + diamonds.length };
+  return {
+    mode: dotMode ? 'dots' : 'circles', circles: circles.join(''), diamonds: diamonds.join(''), visibleCount: circles.length + diamonds.length,
+    dotOpacity: mix(DOT_OPACITY, CROWDED_DOT_OPACITY), mergedDotOpacity: mix(MERGED_DOT_OPACITY, CROWDED_MERGED_DOT_OPACITY),
+  };
 }

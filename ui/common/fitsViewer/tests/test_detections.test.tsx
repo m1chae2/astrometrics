@@ -8,7 +8,10 @@ import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendError } from '../../services/backendError';
-import { buildDetectionPaths, detectionScreenPosition } from '../utils/detectionMarkers';
+import {
+  buildDetectionPaths, detectionScreenPosition, CROWDED_DOT_OPACITY, CROWDED_DOT_RADIUS_PX,
+  CROWDED_MERGED_DOT_OPACITY, CROWDED_MERGED_DOT_RADIUS_PX, DOT_OPACITY,
+} from '../utils/detectionMarkers';
 import type { DetectionGeometry } from '../utils/detectionMarkers';
 import type { DetectionsMeasurement } from '../../types/backendTypes';
 
@@ -123,6 +126,32 @@ describe('detection marker placement', () => {
     expect(paths.diamonds.match(/a2 2/g)).toHaveLength(2);
     expect(paths.diamonds).not.toContain('Z');
     expect(paths.visibleCount).toBe(3);
+  });
+
+  it('keeps the normal dot size and opacity at low density', () => {
+    const paths = buildDetectionPaths(
+      [{ x: 20, y: 20, flux: 1, merged: false }],
+      { ...geometry, stepX: 0.5, stepY: 0.5, apertureRadiusPx: 4 },
+    );
+    expect(paths.dotOpacity).toBe(DOT_OPACITY);
+  });
+
+  it('shrinks and fades dots in a crowded view, never below the floors, and keeps merged dots larger', () => {
+    const many = Array.from({ length: 12000 }, (_, index) => ({
+      x: 1 + (index % 200), y: 1 + Math.floor(index / 200) % 160, flux: 1, merged: index % 10 === 0,
+    }));
+    const paths = buildDetectionPaths(many, {
+      ...geometry, stepX: 0.1, stepY: 0.1, panX: 0, panY: 0, viewWidth: 180, viewHeight: 180, apertureRadiusPx: 4,
+    });
+    expect(paths.mode).toBe('dots');
+    expect(paths.dotOpacity).toBeGreaterThanOrEqual(CROWDED_DOT_OPACITY);
+    expect(paths.dotOpacity).toBeLessThan(DOT_OPACITY);
+    expect(paths.dotOpacity).toBeCloseTo(CROWDED_DOT_OPACITY, 5);
+    expect(paths.mergedDotOpacity).toBeCloseTo(CROWDED_MERGED_DOT_OPACITY, 5);
+    expect(paths.mergedDotOpacity).toBeGreaterThan(paths.dotOpacity);
+    expect(paths.visibleCount).toBe(12000);
+    expect(paths.circles).toContain(`a${CROWDED_DOT_RADIUS_PX} ${CROWDED_DOT_RADIUS_PX}`);
+    expect(paths.diamonds).toContain(`a${CROWDED_MERGED_DOT_RADIUS_PX} ${CROWDED_MERGED_DOT_RADIUS_PX}`);
   });
 
   it('draws circles and diamonds once the circle is at least 3 screen pixels', () => {

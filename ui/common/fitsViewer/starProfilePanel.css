@@ -214,10 +214,10 @@
   stroke-width: 1.75;
 }
 
-/* Zoomed out: each detection is a small filled dot, partly transparent so the image still shows. */
+/* Zoomed out: each detection is a small filled dot, partly transparent so the image still shows.
+   The opacity is set on each path by the renderer: it falls as the view gets crowded. */
 .fits-renderer__detections--dots .fits-renderer__detection {
   fill: var(--detection-marker-color);
-  fill-opacity: 0.6;
   stroke: none;
 }
 

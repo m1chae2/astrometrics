@@ -49,7 +49,7 @@ def make_frame(
     -------
     frame : `SimpleNamespace`
         A frame with ``path``, ``timestamp``, ``camera``, ``filter``,
-        ``exposure`` and ``role``.
+        ``exposure``, ``role``, ``iso`` (gain 100) and ``focal_length_mm``.
     """
     return SimpleNamespace(
         path=str(path),
@@ -58,6 +58,8 @@ def make_frame(
         filter=SimpleNamespace(value=filter_name),
         exposure=exposure,
         role=role,
+        iso="100",
+        focal_length_mm=405.0,
     )
 
 
@@ -86,7 +88,13 @@ def clean_batch(count: int = 12) -> list[dict[str, Any]]:
 
 
 def test_split_into_batches_separates_setups_and_sessions() -> None:
-    """Frames split by camera, filter, exposure and by gaps over 4 hours."""
+    """Frames split by capture setting (gain too) and by gaps over 4 hours."""
+    other_gain = make_frame("e1", 0.0)
+    other_gain.iso = "200"
+    same_gain_written_otherwise = make_frame("a4", 60.0)
+    same_gain_written_otherwise.iso = "100.0"
+    other_optic = make_frame("f1", 0.0)
+    other_optic.focal_length_mm = 300.0
     frames = [
         make_frame("a1", 0.0),
         make_frame("a2", 120.0),
@@ -94,9 +102,12 @@ def test_split_into_batches_separates_setups_and_sessions() -> None:
         make_frame("c1", 0.0, filter_name="Red"),
         make_frame("d1", 0.0, camera="Camera B"),
         make_frame("a3", 120.0 + frame_quarantine.SESSION_GAP_SECONDS.default + 1),
+        other_gain,
+        same_gain_written_otherwise,
+        other_optic,
     ]
     batches = split_into_batches(frames)
-    assert sorted(len(batch) for batch in batches) == [1, 1, 1, 1, 2]
+    assert sorted(len(batch) for batch in batches) == [1, 1, 1, 1, 1, 1, 3]
 
 
 def test_judge_batch_flags_cloud_and_trailing_and_keeps_the_rest() -> None:
@@ -515,9 +526,9 @@ def stars_at(rows: list[tuple[float, float]]) -> np.ndarray:
     Returns
     -------
     stars : `numpy.ndarray`
-        Rows of ``[y, x, sigma_x, sigma_y]``.
+        Rows of ``[y, x, sigma_x, sigma_y, flux]``.
     """
-    return np.array([[y, x, 2.0, 2.0] for y, x in rows])
+    return np.array([[y, x, 2.0, 2.0, 1000.0] for y, x in rows])
 
 
 def test_judge_batch_sets_aside_a_frame_pointing_off_the_main_field() -> None:

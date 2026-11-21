@@ -79,6 +79,7 @@ from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality impo
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.frame_identity import frame_subject_id
+from astrometricslib.utilities.iso_text import canonical_iso_text
 
 logger = logging.getLogger(__name__)
 
@@ -536,14 +537,19 @@ class QuarantineReport:
 def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
     """Group frames into batches that can be judged against each other.
 
-    Frames share a batch when they have the same camera, filter and
-    exposure and were taken less than `SESSION_GAP_SECONDS` apart.
+    Frames share a batch when they have the same capture setting (camera,
+    optic, filter, exposure and gain) and were taken less than
+    `SESSION_GAP_SECONDS` apart. Each gain setting is its own batch, because
+    a frame's star count and sky level depend on the gain, so a frame is
+    judged only against frames taken the same way.
 
     Parameters
     ----------
     frames : `Sequence`
         Frame records with ``camera``, ``filter``, ``exposure`` and
-        ``timestamp``. A frame with no timestamp is placed by file name.
+        ``timestamp``, and optionally ``iso`` (the gain) and
+        ``focal_length_mm`` (the optic). A frame with no timestamp is placed
+        by file name.
 
     Returns
     -------
@@ -551,9 +557,16 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
         The batches, each in time order.
     """
     session_gap_seconds = resolve(SESSION_GAP_SECONDS).value
-    by_setup: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    by_setup: dict[tuple[str, ...], list[Any]] = defaultdict(list)
     for frame in frames:
-        setup = (str(frame.camera), str(getattr(frame.filter, "value", frame.filter)), str(frame.exposure))
+        focal_length = getattr(frame, "focal_length_mm", None)
+        setup = (
+            str(frame.camera),
+            str(round(float(focal_length))) if focal_length else "",
+            str(getattr(frame.filter, "value", frame.filter)),
+            str(frame.exposure),
+            canonical_iso_text(getattr(frame, "iso", None)),
+        )
         by_setup[setup].append(frame)
 
     batches: list[list[Any]] = []
@@ -1503,15 +1516,17 @@ def quarantine_preview_report(
 ) -> QuarantinePreview:
     """Show which frames a stack would set aside, without moving any.
 
-    It answers as a real stack of all the target's non-spectral light frames
-    would. The stacker does not judge every light frame: it first leaves out
-    frames of a minority gain setting and frames an earlier run already set
-    aside, and it skips the check when the setting turns it off. The preview
-    runs the same steps (`find_dominant_gain_subset`,
-    `find_frames_already_set_aside` and `find_frames_to_quarantine`), so the
-    frames it names are the ones a real stack would move. It measures each
-    remaining frame (about a second each), so a large target takes a while.
-    It changes neither the target nor any file.
+    It judges every non-spectral light frame of the target, each capture
+    setting (camera, optic, filter, exposure and gain) in its own sessions
+    (`split_into_batches`). A target imaged with two cameras is stacked one
+    camera at a time, so every camera's frames are judged. Frames an earlier
+    run already set aside are left out, as a stack leaves them out
+    (`find_frames_already_set_aside`). The stacker also leaves out the
+    frames of a minority gain setting of a camera before its check
+    (`find_dominant_gain_subset`); the preview still judges them, in their
+    own sessions, and says how many there are. It measures each frame
+    (about a second each), so a large target takes a while. It changes
+    neither the target nor any file.
 
     Parameters
     ----------
@@ -1530,9 +1545,10 @@ def quarantine_preview_report(
     preview : `QuarantinePreview`
         The frames the check would move, with the measurements behind each,
         the batches it would leave alone, and any frame it could not read.
-        ``frames_checked`` counts the frames the check judges after the
-        earlier steps.
+        ``frames_checked`` counts the frames judged: every light frame that
+        is not already set aside.
     """
+    from astrometricslib.pipelines.shared.frame_grouping import frame_configuration_key
     from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import (
         find_dominant_gain_subset,
     )
@@ -1552,17 +1568,22 @@ def quarantine_preview_report(
         for frame in target.frames
         if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
     ]
-    same_gain, minority_gain = find_dominant_gain_subset(lights)
+    by_configuration: dict[str, list[Any]] = defaultdict(list)
+    for frame in lights:
+        by_configuration[frame_configuration_key(frame) or str(frame.camera)].append(frame)
+    minority_gain = [
+        frame for frames in by_configuration.values() for frame in find_dominant_gain_subset(frames)[1]
+    ]
     already_set_aside = {
-        frame.path for frame in find_frames_already_set_aside(target.id, same_gain, frames_path)
+        frame.path for frame in find_frames_already_set_aside(target.id, lights, frames_path)
     }
-    judged = [frame for frame in same_gain if frame.path not in already_set_aside]
+    judged = [frame for frame in lights if frame.path not in already_set_aside]
     found = find_frames_to_quarantine(judged, target_id=target.id)
     notes = [*found.notes, *found.warnings]
     if minority_gain:
         notes.append(
-            f"{len(minority_gain)} frame(s) with a minority gain setting are left out of a stack "
-            "before this check, so they are not judged."
+            f"{len(minority_gain)} frame(s) have a minority gain setting for their camera. They were "
+            "judged in their own sessions, but a stack of that camera leaves them out before this check."
         )
     if already_set_aside:
         notes.append(

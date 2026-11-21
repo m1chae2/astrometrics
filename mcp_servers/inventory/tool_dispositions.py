@@ -336,6 +336,19 @@ DECISIONS = {
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
     ),
+    "quality_choose_blink_pair": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Picks a typical frame of a frame's session and one reference star in both, "
+        "for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is "
+        "stored.",
+        tool_class="compute",
+    ),
+    "quality_match_frame_positions": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Says where positions of one frame lie in another frame of the same field, "
+        "allowing for drift and a meridian flip. Reads the files only; nothing is stored.",
+        tool_class="compute",
+    ),
     "quality_measure_tuned_parameters": ToolDecision(
         "withhold",
         "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "

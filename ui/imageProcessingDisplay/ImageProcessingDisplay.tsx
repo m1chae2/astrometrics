@@ -5,6 +5,7 @@ import { useTargetActions } from '../common/hooks/useTargetActions';
 import { ImageProcessingProvider, useImageProcessingContext } from './context/ImageProcessingContext';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useViewerState } from './hooks/useViewerState';
+import { useBlinkPair, useBlinkPreload } from './hooks/useBlinkPair';
 import { usePersistentFlag } from './hooks/usePersistentFlag';
 import { ImageProcessingLayout } from './ImageProcessingLayout';
 import { RadioListManager } from '../common/radioList/RadioListManager';
@@ -98,11 +99,16 @@ const ImageProcessingDisplayInner: React.FC = () => {
     starShapeReview, frameStatuses, frameReport, setAsideFiles, putBackFrame
   } = files;
 
+  // Blink: a flagged or set-aside frame can be compared with a typical frame of its session. The viewer
+  // shows the picked frame, or the typical frame while Blink is on.
+  const blink = useBlinkPair(selectedTarget, selectedFile, selectedFile ? frameStatuses.get(selectedFile) : undefined);
   const {
     imageUrl, imageBlob, imageFrameInfo, autoPanTrigger, disableStretch,
     loading, error, displayMode, setDisplayMode,
-    setSelectedLightRow, selectedLightRow
-  } = useViewerState(selectedTarget, lightFrames, selectedFile);
+    setSelectedLightRow, selectedLightRow, loadedPath
+  } = useViewerState(selectedTarget, lightFrames, blink.shownPath);
+  useBlinkPreload(blink.framePaths, displayMode === 'auto-stretch');
+
 
   // "Ready" for the app-boot splash screen means the viewer has actually
   // settled on its initial image, not merely that `loading` happens to be
@@ -494,6 +500,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
       onStarClick={handleStarClick}
       selectedStarId={selectedStarId}
       stackOrientation={stackOrientation}
+      blink={blink}
+      shownFile={blink.shownPath}
+      focusStar={blink.focusFor(loadedPath)}
       allFiles={allFiles}
       filteredFiles={filteredFiles}
       fileFilterText={fileFilterText}

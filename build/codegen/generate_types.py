@@ -36,6 +36,7 @@ from astrometricslib.models.moving_object import (
 )
 from astrometricslib.models.processing_results import PreviewRemakeResult
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.blink_pair import BlinkPair
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
@@ -724,6 +725,7 @@ def render_types() -> str:
                 StackSummary,
                 PreviewRemakeResult,
                 SetAsideFrameRecord,
+                BlinkPair,
                 StackReviewStart,
                 StackQualityReport,
             ],

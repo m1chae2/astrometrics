@@ -142,6 +142,22 @@ const NOT_A_STAR_MARKER_RADIUS_PX = 4;
 /** Most the pointer may move, in screen pixels, between press and release for the gesture to count as a click and not a pan. */
 export const STAR_CLICK_MOVE_THRESHOLD_PX = 4;
 
+/** A star to put at the center of the view, for example the reference star of the Blink comparison. */
+export interface FocusStar {
+  /** The star's column in the file, counted from 1 (FITS pixels). */
+  x: number;
+  /** The star's row in the file, counted from 1 (FITS pixels). */
+  y: number;
+  /** The file's width in pixels. */
+  width: number;
+  /** The file's height in pixels. */
+  height: number;
+  /** Names the focus. The view is moved once for each picture drawn while the key stays the same. */
+  key: string;
+  /** Screen pixels per file pixel to zoom to when the view moves, or undefined to keep the zoom. */
+  scale?: number;
+}
+
 export interface FitsRendererProps {
   imageUrl: string | null;
   imageBlob: Blob | null;
@@ -182,6 +198,12 @@ export interface FitsRendererProps {
    * Leave it out to show every frame as it is stored.
    */
   stackOrientation?: StackOrientation | null;
+  /**
+   * A star to put at the center of the view each time a picture is drawn. The place is a position of the
+   * file, so the viewer finds it on the turned or redrawn picture. The caller gives the star of the
+   * file that is on screen.
+   */
+  focusStar?: FocusStar | null;
 }
 
 export interface FitsRendererHandle {
@@ -217,7 +239,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     resolveMeasurePath,
     noPixelDataMessage = SET_DISPLAY_TO_LINEAR_MESSAGE,
     starProfilePictureNote,
-    stackOrientation = null
+    stackOrientation = null,
+    focusStar = null
   } = props;
 
   // Local State
@@ -344,6 +367,40 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   useEffect(() => {
     keepViewOnResizeRef.current = false;
   }, [currentKey]);
+
+  // Put the focus star at the center of the view, once for each picture drawn under the same focus key.
+  const focusAppliedRef = useRef<{ key: string; object: unknown } | null>(null);
+  useEffect(() => {
+    if (!focusStar || !mainDrawn || !drawnObject || drawnSize.w <= 0 || drawnSize.h <= 0) return undefined;
+    const applied = focusAppliedRef.current;
+    if (applied && applied.key === focusStar.key && applied.object === drawnObject) return undefined;
+    let cancelled = false;
+    const worker = workerRef.current;
+    if (parsedData && worker) {
+      // The file's own row order decides which end of the picture the first row is at.
+      const probeCell = rowOrderProbeCell(parsedData.w, parsedData.h, turn);
+      void askWorkerForPixel(worker, parsedData.imageId, probeCell).then((reading) => {
+        const firstRowAtTop = reading?.y === 1;
+        const turned = fitsPixelToTurnedPicture(focusStar.x, focusStar.y, parsedData.w, parsedData.h, turn, firstRowAtTop);
+        const shown = turnedSize(parsedData.w, parsedData.h, turn);
+        if (cancelled) return;
+        const scale = focusStar.scale === undefined ? undefined : (focusStar.scale * shown.w) / drawnSize.w;
+        focusAppliedRef.current = { key: focusStar.key, object: drawnObject };
+        placeCenter({ x: turned.x / shown.w, y: turned.y / shown.h }, { force: true, scale });
+      });
+    } else if (!parsedData) {
+      // A picture the backend drew shows the file with its first row at the bottom, scaled to fit.
+      // Turning a point given as fractions of a square gives the fractions of the turned picture.
+      const place = baseToTurned(
+        { x: (focusStar.x - 0.5) / focusStar.width, y: 1 - (focusStar.y - 0.5) / focusStar.height }, 1, 1, turn
+      );
+      const fileShown = turnedSize(focusStar.width, focusStar.height, turn);
+      const scale = focusStar.scale === undefined ? undefined : (focusStar.scale * fileShown.w) / drawnSize.w;
+      focusAppliedRef.current = { key: focusStar.key, object: drawnObject };
+      placeCenter({ x: place.x, y: place.y }, { force: true, scale });
+    }
+    return () => { cancelled = true; };
+  }, [focusStar, mainDrawn, drawnObject, drawnSize.w, drawnSize.h, parsedData, turn, placeCenter, workerRef]);
 
   // Disable automatic stretching for stacked images.
   const isStacked = disableStretch ?? (

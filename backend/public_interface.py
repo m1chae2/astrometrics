@@ -195,6 +195,9 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:remake_preview",
     # The frames the stacker set aside for a target, with the reason (a read).
     "quality:set_aside_frames",
+    # A typical frame and a reference star for the viewer's Blink button
+    # (a read).
+    "quality:choose_blink_pair",
     # Measures a stack and the one before it the same way and compares them
     # (a background job; it records a job and writes no quality rows).
     "quality:measure_stack",

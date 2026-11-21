@@ -6,8 +6,9 @@ import type { FitsRendererHandle } from './FitsRenderer';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { StretchParameters } from '../types/backendTypes';
 import type { StackOrientation } from './displayTurn';
+import type { FocusStar } from './FitsRenderer';
 
-export type { FitsRendererHandle };
+export type { FitsRendererHandle, FocusStar };
 
 /** Props for the FitsViewerManager component. */
 interface Props {
@@ -62,6 +63,8 @@ interface Props {
   starProfilePictureNote?: string;
   /** The target's stack orientation; raw frames are shown turned to match it. See `FitsRenderer`. */
   stackOrientation?: StackOrientation | null;
+  /** A star to put at the center of the view whenever a picture is drawn; see `FitsRenderer`. */
+  focusStar?: FocusStar | null;
 }
 
 /**
@@ -90,7 +93,8 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   resolveMeasurePath,
   noPixelDataMessage,
   starProfilePictureNote,
-  stackOrientation
+  stackOrientation,
+  focusStar
 }, ref) => {
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
   if (imageUrl || imageBlob || previewBlob) {
@@ -119,6 +123,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         noPixelDataMessage={noPixelDataMessage}
         starProfilePictureNote={starProfilePictureNote}
         stackOrientation={stackOrientation}
+        focusStar={focusStar}
       />
     );
   }

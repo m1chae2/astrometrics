@@ -13,6 +13,8 @@ import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
 import type { StackOrientation } from '../../common/fitsViewer/displayTurn';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
+import type { BlinkState } from '../hooks/useBlinkPair';
+import type { BlinkFocus } from '../utils/blinkView';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */
 
@@ -40,6 +42,12 @@ interface ViewerPanelContainerProps {
   selectedStarId?: string | null;
   /** The target's stack orientation; raw frames are shown turned to match it. */
   stackOrientation?: StackOrientation | null;
+  /** The Blink comparison of the picked frame with a typical frame of its session. */
+  blink?: BlinkState;
+  /** The file the viewer is showing, when it is not the picked file (the typical frame while blinking). */
+  shownFile?: string | null;
+  /** The star to center in the picture on screen, from Blink. */
+  focusStar?: BlinkFocus | null;
 
   // File Browser Props
   allFiles: any[];
@@ -76,7 +84,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, displayMode, onDisplayModeChange,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
-  selectedStarId, stackOrientation,
+  selectedStarId, stackOrientation, blink, shownFile, focusStar,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame, onOpenImageControls
@@ -88,14 +96,14 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
 
   /** Finds the FITS file on screen: the file picked in the browser, else the light frame being shown. */
   const resolveMeasurePath = useCallback(async (): Promise<string | null> => {
-    if (selectedFile) return selectedFile;
+    if (shownFile ?? selectedFile) return shownFile ?? selectedFile;
     if (imageFrameInfo && imageFrameInfo.iso !== 'Unknown' && imageFrameInfo.objectId) {
       return resolveTargetFramePath(
         imageFrameInfo.objectId, imageFrameInfo.iso, imageFrameInfo.exposure, imageFrameInfo.index ?? 0
       );
     }
     return null;
-  }, [selectedFile, imageFrameInfo]);
+  }, [shownFile, selectedFile, imageFrameInfo]);
 
   return (
     <div className="image-processing-display__center">
@@ -127,6 +135,26 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
                 {overlayReason}
               </span>
             )}
+            {blink?.applies && (
+              <>
+                <Button
+                  size="small"
+                  active={blink.blinkOn}
+                  disabled={!blink.ready}
+                  onClick={blink.toggle}
+                  title={
+                    blink.ready
+                      ? 'Switch between this frame and a typical frame of its session, at the same star (B)'
+                      : (blink.loading ? 'Choosing a typical frame' : blink.unavailableReason)
+                  }
+                >
+                  Blink
+                </Button>
+                {blink.note && (
+                  <span className="fits-header-controls__note" data-testid="blink-note">{blink.note}</span>
+                )}
+              </>
+            )}
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</Button>
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
@@ -153,6 +181,8 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           showDetections={detectionsEnabled}
           stackOrientation={stackOrientation}
           resolveMeasurePath={resolveMeasurePath}
+          acceptPrefetch={Boolean(blink?.ready)}
+          focusStar={focusStar}
         />
       </SectionPanel>
       {browserCollapsed ? null : (

@@ -32,10 +32,11 @@ from pydantic import ValidationError
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.foundation.tuning import TuningReport
 from astrometricslib.models.quality.aperture_record import OddEvenApertureRecord
+from astrometricslib.models.quality.blink_pair import BlinkPair, FramePositionMatch
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.detections import DetectionsMeasurement
@@ -200,7 +201,6 @@ class QualityRecords:
         """
         import datetime
 
-        from astrometricslib.foundation.errors import NotFoundError
         from astrometricslib.foundation.tuning import collect_tuners, run_tuning
 
         tuners = collect_tuners(("astrometricslib",))
@@ -1171,6 +1171,98 @@ class QualityRecords:
         from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
 
         return measure_detections_in_file(path)
+
+    def match_frame_positions(
+        self, path_a: str, path_b: str, points: list[tuple[float, float]]
+    ) -> FramePositionMatch:
+        """Say where positions of one frame lie in another frame.
+
+        Nothing is stored. The bright stars of the two frames are matched the
+        way the quarantine's pointing check matches them, trying the second
+        frame as it is and turned half a revolution (a meridian flip). A
+        missing file raises `NotFoundError`.
+
+        Parameters
+        ----------
+        path_a, path_b : `str`
+            Two FITS frames of the same size.
+        points : `list` [`tuple` [`float`, `float`]]
+            ``(x, y)`` positions in ``path_a``, in 1-based pixels (as in FITS
+            and DS9).
+
+        Returns
+        -------
+        match : `FramePositionMatch`
+            Fields: ``matched``, ``turned``, ``votes``, ``reason`` and
+            ``points``, each with ``x``, ``y``, ``mapped_x``, ``mapped_y``
+            (1-based pixels in ``path_b``) and ``inside``.
+
+        Raises
+        ------
+        NotFoundError
+            If a frame file does not exist.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.blink_pair import (
+            match_frame_positions as match_positions,
+        )
+
+        for path in (path_a, path_b):
+            if not os.path.isfile(path):
+                raise NotFoundError(f"No frame at {path}.")
+        return match_positions(path_a, path_b, [(float(x), float(y)) for x, y in points])
+
+    def choose_blink_pair(self, target: str | Target, path: str) -> BlinkPair:
+        """Pick a typical frame and a reference star to blink a frame against.
+
+        Nothing is stored. The typical frame is the frame of the same session
+        (the batch the quarantine step judges the frame in) whose stored
+        ``frame.star_elongation`` and ``frame.sky_unevenness`` lie closest to
+        the session medians. The reference star is a bright, isolated,
+        unsaturated star near the frame center, chosen with the rules of the
+        star-shape measurement. Its position in the typical frame is found
+        with `match_frame_positions`. The frame may be one in the stack or
+        one the stacker set aside.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, or its id or name.
+        path : `str`
+            The frame to examine.
+
+        Returns
+        -------
+        pair : `BlinkPair`
+            Fields: ``found``, ``reason``, ``path``, ``typical_path``,
+            ``star_x`` and ``star_y`` (the star in ``path``),
+            ``typical_star_x`` and ``typical_star_y`` (the same star in the
+            typical frame), all in 1-based pixels, then ``turned``,
+            ``votes``, ``session_frame_count`` and the frame size ``width`` and
+            ``height``. When nothing could be
+            found, ``found`` is `False` and ``reason`` says why.
+
+        Raises
+        ------
+        NotFoundError
+            If the target or the frame file does not exist.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.blink_pair import (
+            choose_blink_pair as choose_pair,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.blink_pair import frame_record_for_set_aside
+
+        resolved = resolve_target(self._targets, target)
+        if not os.path.isfile(path):
+            raise NotFoundError(f"No frame at {path}.")
+        lights = [frame for frame in resolved.frames if frame.role == "LIGHT"]
+        clicked = None
+        if not any(frame.path == path for frame in lights):
+            record = next((item for item in self.set_aside_frames(resolved) if item.path == path), None)
+            if record is not None:
+                clicked = frame_record_for_set_aside(
+                    lights, path, record.camera, record.filter, record.exposure_seconds, record.date
+                )
+        return choose_pair(resolved.id, path, lights, clicked)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack(

@@ -156,12 +156,12 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
-    "quality_put_back_set_aside_frames": {
-      "tool_class": "change-data",
+    "quality_choose_blink_pair": {
+      "tool_class": "compute",
       "category": "image-processing",
-      "disposition": "withhold",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Moves chosen set-aside frames out of a target's _excluded folder back into the target and rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File Browser. The AI lists them with quality_set_aside_frames."
+      "note": "Built 2026-11-20. Picks a typical frame of a frame's session and one reference star in both, for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is stored."
     },
     "quality_forget": {
       "tool_class": "change-data",
@@ -176,6 +176,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
+    },
+    "quality_match_frame_positions": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-20. Says where positions of one frame lie in another frame of the same field, allowing for drift and a meridian flip. Reads the files only; nothing is stored."
     },
     "quality_measure_detections": {
       "tool_class": "compute",
@@ -225,6 +232,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-21. Lists the declared quality metrics (or one, given its name, or those of one checkpoint). The default detail is a short summary (unit, checkpoint, levels, purpose); detail=full adds the meaning, which way is better and how it is estimated. Fixed text, nothing is read from disk."
+    },
+    "quality_put_back_set_aside_frames": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves chosen set-aside frames out of a target's _excluded folder back into the target and rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File Browser. The AI lists them with quality_set_aside_frames."
     },
     "quality_query": {
       "tool_class": "observe",

@@ -769,7 +769,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     : mainDrawn && !parsedData ? noPixelDataMessage
     : detections.status === 'loading' ? 'Finding stars…'
       : detections.status === 'error' ? detections.message
-        : detections.status === 'ready' ? `${detections.measurement.detection_count.toLocaleString('en-US')} detections`
+        : detections.status === 'ready' ? `${detections.measurement.detection_count.toLocaleString('en-US')} detections${detectionPaths?.mode === 'dots' ? '. Zoom in to see the photometry circles' : ''}`
           : null;
 
   const hoveredStar = hoveredStarId && overlayStars ? overlayStars.find((star) => star.id === hoveredStarId) : undefined;
@@ -916,7 +916,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
           </svg>
         )}
         {showDetections && detectionPaths && (
-          <svg className="fits-renderer__detections" data-overlay-layer="true" data-testid="detections-layer" aria-hidden="true">
+          <svg className={`fits-renderer__detections${detectionPaths.mode === 'dots' ? ' fits-renderer__detections--dots' : ''}`} data-mode={detectionPaths.mode} data-overlay-layer="true" data-testid="detections-layer" aria-hidden="true">
             <path className="fits-renderer__detection" data-testid="detections-single" d={detectionPaths.circles} />
             <path className="fits-renderer__detection fits-renderer__detection--merged" data-testid="detections-merged" d={detectionPaths.diamonds} />
           </svg>
@@ -975,10 +975,10 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
           className={`fits-renderer__detections-note${detections.status === 'error' ? ' fits-renderer__detections-note--error' : ''}`}
           role="status"
           data-testid="detections-note"
-          title="Circles are single stars; diamonds are stars reported twice and merged."
+          title="Circles or small dots are single stars; diamonds or larger dots are stars reported twice and merged."
         >
           {detectionsNote}
-          {detections.status === 'ready' && detections.measurement.merged_count > 0 && ` (${detections.measurement.merged_count} merged, shown as diamonds)`}
+          {detections.status === 'ready' && detections.measurement.merged_count > 0 && ` (${detections.measurement.merged_count} merged, shown as ${detectionPaths?.mode === 'dots' ? 'larger dots' : 'diamonds'})`}
         </div>
       )}
 

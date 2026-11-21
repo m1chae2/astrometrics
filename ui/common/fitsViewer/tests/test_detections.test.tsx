@@ -113,12 +113,26 @@ describe('detection marker placement', () => {
     expect(paths.circles).toContain('a8.0 8.0');
   });
 
-  it('keeps the photometry circle visible when zoomed far out', () => {
+  it('draws a dot for every star, single or merged, when the circle would be under 3 screen pixels', () => {
     const paths = buildDetectionPaths(
-      [{ x: 20, y: 20, flux: 1, merged: false }],
-      { ...geometry, stepX: 0.1, stepY: 0.1, apertureRadiusPx: 4 },
+      [{ x: 20, y: 20, flux: 1, merged: false }, { x: 40, y: 30, flux: 2, merged: true }, { x: 60, y: 30, flux: 2, merged: false }],
+      { ...geometry, stepX: 0.5, stepY: 0.5, apertureRadiusPx: 4 },
     );
+    expect(paths.mode).toBe('dots');
+    expect(paths.circles.match(/a1.25 1.25/g)).toHaveLength(4);
+    expect(paths.diamonds.match(/a2 2/g)).toHaveLength(2);
+    expect(paths.diamonds).not.toContain('Z');
+    expect(paths.visibleCount).toBe(3);
+  });
+
+  it('draws circles and diamonds once the circle is at least 3 screen pixels', () => {
+    const paths = buildDetectionPaths(
+      [{ x: 20, y: 20, flux: 1, merged: false }, { x: 40, y: 30, flux: 2, merged: true }],
+      { ...geometry, stepX: 0.75, stepY: 0.75, apertureRadiusPx: 4 },
+    );
+    expect(paths.mode).toBe('circles');
     expect(paths.circles).toContain('a3.0 3.0');
+    expect(paths.diamonds).toContain('Z');
   });
 });
 
@@ -176,6 +190,17 @@ describe('Detections overlay', () => {
     await waitFor(() => expect(screen.getByTestId('detections-note').textContent).toContain('2 detections'));
     expect(callBackendMock).toHaveBeenCalledWith('images:measure_detections', { path: '/stacks/M31.fits' }, expect.anything());
     expect(screen.getByTestId('detections-single').getAttribute('d')).not.toBe('');
+    expect(screen.getByTestId('detections-merged').getAttribute('d')).not.toBe('');
+  });
+
+  it('draws dots and says to zoom in when the photometry circles are too small to see', async () => {
+    callBackendMock.mockResolvedValue({
+      ...makeDetections([{ x: 30, y: 40, flux: 5, merged: false }, { x: 60, y: 80, flux: 9, merged: true }]),
+      aperture_radius_px: 0.5,
+    });
+    renderViewer(true);
+    await waitFor(() => expect(screen.getByTestId('detections-note').textContent).toContain('Zoom in to see the photometry circles'));
+    expect(screen.getByTestId('detections-layer').getAttribute('data-mode')).toBe('dots');
     expect(screen.getByTestId('detections-merged').getAttribute('d')).not.toBe('');
   });
 

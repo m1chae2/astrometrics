@@ -350,14 +350,17 @@ graxpert_executable = ""
 # writes the "input" and "output" folders next to itself, so keep those
 # folders free of other files. The stack file is never changed either way.
 denoise_executable = ""
-# How strongly to remove noise, from 0 (none) to 1 (full). On the M 101, M 57,
-# NGC 4438 and M 81 stacks, 0.9 cut the sky grain by 14-39% compared with
-# 0.75, raised the ratio of structure to grain by 17-63%, and left the peak
-# brightness of 300 mid-bright stars unchanged. On the M 13 stack, 0.5 left
-# visible grain. Judged by eye on M 13 and by measurement on the four others,
-# with the denoise run after the stretch. Not tested above 0.9 on more than
-# one target.
-denoise_strength = "0.9"
+# Whether previews are denoised when the program above is set. "true" is the
+# default; "false" skips the step.
+denoise_enabled = "true"
+# How strongly to remove noise, from 0 (none) to 1 (full). The default, 0.5,
+# halved the sky noise on the NGC 7331 and M 31 stacks (14.5 to 7.4 and 8.4
+# to 4.3 display units) and did not widen the stars. 0.7 cut the noise more
+# but flattened a faint diffuse galaxy (NGC 7320, in Stephan's Quintet) by
+# about half; 0.9 smeared the Quintet on 2026-10-04. Measured on a copy of the
+# library, with the denoise run after the stretch (see STK-30 in the
+# validation register).
+denoise_strength = "0.5"
 
 ["Processing.Siril"]
 # Match this to whichever --siril-source you passed to

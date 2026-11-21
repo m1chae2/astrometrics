@@ -1093,31 +1093,40 @@ Every Python example assumes the library is installed and configured with your o
 
 **Denoising after the stretch, and its strength**
 
-- **Claim:** Cosmic Clarity's denoise removes far more visible grain when it runs after the stretch than before it, and a strength of 0.9 removes more grain than 0.75 without changing star brightness.
+- **Claim:** Cosmic Clarity's denoise removes far more visible grain when it runs after the stretch than before it. At strength 0.5 it halves the sky noise without widening stars, and costs little sharpness; higher strengths smear faint diffuse structure.
 - **Settings it supports:**
-  - config key `[Processing.CosmicClarity] denoise_strength` (default 0.9). Relation: confirmed by this entry. <!-- impl: astrometricslib.foundation.config.AppConfiguration.get_cosmic_clarity_denoise_strength -->
+  - config key `[Processing.CosmicClarity] denoise_strength` (default 0.5). Relation: confirmed by this entry. <!-- impl: astrometricslib.foundation.config.AppConfiguration.get_cosmic_clarity_denoise_strength -->
+  - config key `[Processing.CosmicClarity] denoise_enabled` (default `true`). Relation: derived from this entry. <!-- impl: astrometricslib.foundation.config.AppConfiguration.get_cosmic_clarity_denoise_enabled -->
   - the order of the preview steps in `write_stack_preview`. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview -->
-- **Status:** Partly measured. One stack for the order, four for the strength.
-- **Data you need:** Stacks of faint targets with visible sky grain, and Cosmic Clarity configured.
-- **Procedure:** Remake the preview at two strengths and compare the grain of the sky.
+- **Status:** Measured. Strength 0.5 against none, 0.7 and a GraXpert denoise on two stacks (NGC 7331 and M 31, 2026-11-21); the order on one stack (M 13).
+- **Data you need:** Stacks of faint targets with visible sky grain, a copy of the library and config (so no real preview is rewritten), and Cosmic Clarity configured.
+- **Procedure:** On the copy, call `write_stack_preview` for the same stack once per version, with a `PreviewSettings` that sets `denoise` and `denoise_strength` for that run only, and move each version's picture files to its own folder. Then measure each version's processed FITS (display units 0 to 255) at the same places, chosen once on the baseline: five star-free sky boxes (noise from `measure_sky_background`, and coarse grain after binning 4 by 4), ten isolated stars (fitted FWHM), and a faint diffuse neighbor (center minus surrounding ring).
 
   ```python
-  from astrometricslib import Astrometrics
+  from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
+      PreviewSettings,
+      write_stack_preview,
+  )
 
-  astro = Astrometrics()
-  for strength in (0.75, 0.9):
-      result = astro.processing.remake_preview("M 101", denoise_strength=strength)
-      print(strength, result.preview_path, result.steps_run)
+  # stack_path and steps come from the copy of the library; run on the copy only.
+  for strength in (None, 0.5, 0.7):
+      settings = (
+          PreviewSettings(denoise=False)
+          if strength is None
+          else PreviewSettings(denoise=True, denoise_strength=strength)
+      )
+      write_stack_preview(stack_path, settings, steps)
   ```
 
-- **Acceptance criterion:** Not recorded (set after the result).
-- **What to look at:** The sky grain: the standard deviation of a starless sky patch in the stretched picture, relative to a picture without denoise (a 73% fall means 73% less grain). Star peak values should not change.
-- **Our result:** On the M 13 stack, visible grain fell by 22% with the denoise before the stretch and by 73% after it. On M 101, M 57, NGC 4438 and M 81, strength 0.9 cut the sky grain by 14% to 39% compared with 0.75 and left star peaks unchanged. On M 13, 0.5 left visible grain. Dates not recorded.
-- **Verdict:** Not judged.
-- **Limits:** The grain measurement method is not recorded.
-- **To tune for your setup:** Lower the strength if smooth areas look plastic; raise it if grain remains.
-- **Regenerate with:** No script; measured by hand.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_preview.py`.
+  `write_stack_preview` and `PreviewSettings` are internal, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview -->
+- **Acceptance criterion:** Sky noise at least halved, median star width not more than 10% wider than without denoise, and the faint neighbor's sharpness not lower by more than 30%.
+- **What to look at:** Sky noise (clipped spread of pixel differences 4 px apart, in display units), star FWHM, and the sharpness of a diffuse neighbor galaxy. A stronger denoise lowers noise more but flattens diffuse structure.
+- **Our result:** On NGC 7331 (2026-11-21), strength 0.5 cut sky noise from 14.5 to 7.4 and the star FWHM went from 3.76 to 3.30 px; Stephan's Quintet member NGC 7320 fell in sharpness from 36.3 to 26.8 (to 18.8 at 0.7); the four compact members held. On M 31, sky noise fell from 8.4 to 4.3 and star FWHM from 2.29 to 2.13 px; M 32 was unchanged (3.97 to 4.03). Earlier, on the M 13 stack, visible grain fell by 22% with the denoise before the stretch and by 73% after it, and strength 0.9 had smeared the Quintet on 2026-10-04. The old default of 0.9 came from four stacks (M 101, M 57, NGC 4438, M 81), where it cut grain 14% to 39% more than 0.75.
+- **Verdict:** Pass. The default is 0.5 (chosen by the user on 2026-11-21).
+- **Limits:** Two targets measured; one camera (ZWO ASI 533MM Pro); the 0.7 result on M 31 was not compared by eye. GraXpert denoise (after the stretch, or before it on linear data) was also tried and gave less noise reduction at about three times the run time.
+- **To tune for your setup:** Lower the strength if smooth areas look plastic or a faint galaxy looks smeared; raise it if grain remains.
+- **Regenerate with:** The library calls above on a copy; the measurement scripts were scratch and are not kept.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_preview.py` and `astrometricslib/foundation/test/test_config_loader.py`.
 - **Raw record:** None kept.
 
 ### STK-31

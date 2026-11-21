@@ -174,9 +174,9 @@ def test_cosmic_clarity_is_off_unless_a_program_is_configured(config_in_tmp_path
 def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(
     config_in_tmp_path: AppConfiguration,
 ) -> None:
-    """A fresh install uses 0.9; out-of-range values are clipped."""
+    """A fresh install uses 0.5; out-of-range values are clipped."""
     config = config_in_tmp_path
-    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.5)
 
     config.update_config({"Processing.CosmicClarity": {"denoise_strength": "0.4"}})
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.4)
@@ -185,7 +185,7 @@ def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(1.0)
 
     config.update_config({"Processing.CosmicClarity": {"denoise_strength": "not a number"}})
-    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.5)
 
 
 def test_get_stacks_path_defaults_to_the_frames_path(config_in_tmp_path: AppConfiguration) -> None:

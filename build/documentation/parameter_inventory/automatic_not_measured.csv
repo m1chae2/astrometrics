@@ -465,7 +465,7 @@ stacking.clipping_floor_sigmas,STK-D12,measurement,Design estimate
 stacking.contamination_magnitude_margin,STK-D34,judgment,Design estimate
 stacking.core_ring_offset_pixels,STK-D60,measurement,Design estimate
 stacking.core_ring_width_pixels,STK-D60,measurement,Design estimate
-stacking.cosmic_clarity_denoise_strength,STK-30,measurement,Partly measured
+stacking.cosmic_clarity_denoise_strength,STK-30,measurement,Measured
 stacking.coverage_grid_step,STK-23,measurement,Design estimate
 stacking.cross_axis_end,STK-D58,measurement,Design estimate
 stacking.cross_axis_start,STK-D58,measurement,Design estimate

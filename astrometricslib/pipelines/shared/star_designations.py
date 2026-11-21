@@ -84,10 +84,11 @@ def most_familiar_designation(identifiers: Iterable[str]) -> str | None:
     -------
     name : `str` or `None`
         The most familiar one, made readable, or `None` for an empty list.
-        Among names of the same kind the first one given wins.
+        Among names of the same kind the first in alphabetical order wins,
+        so the answer does not depend on the order SIMBAD listed them in.
     """
     cleaned = [identifier.strip() for identifier in identifiers if identifier and identifier.strip()]
     if not cleaned:
         return None
-    best = min(enumerate(cleaned), key=lambda item: (designation_rank(item[1]), item[0]))[1]
+    best = min(enumerate(cleaned), key=lambda item: (designation_rank(item[1]), item[1]))[1]
     return readable_designation(best)

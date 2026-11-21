@@ -39,6 +39,9 @@ class IdentifiedStar(BaseModel):
         The Gaia DR3 source ID, when a Gaia star is matched.
     name_source : `str`
         ``simbad``, ``gaia`` or ``none``: where the name came from.
+    aliases : `list` [`str`]
+        The other names SIMBAD lists for the star (Gaia numbers are left
+        out), most familiar first.
     """
 
     id: str
@@ -51,6 +54,7 @@ class IdentifiedStar(BaseModel):
     g_mag: float | None = None
     gaia_source_id: str | None = None
     name_source: str = "none"
+    aliases: list[str] = []
 
 
 class StackIdentification(BaseModel):
@@ -89,6 +93,9 @@ class StackIdentification(BaseModel):
         a star on that copy.
     viewer_width, viewer_height : `int`
         The size of that copy, in pixels.
+    alias_records_updated : `int`
+        How many records of the star catalog gained SIMBAD names as aliases
+        in this run.
     """
 
     path: str
@@ -108,3 +115,4 @@ class StackIdentification(BaseModel):
     viewer_offset_y: int = 0
     viewer_width: int = 0
     viewer_height: int = 0
+    alias_records_updated: int = 0

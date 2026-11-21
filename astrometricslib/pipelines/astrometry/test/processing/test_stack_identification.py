@@ -87,7 +87,9 @@ def _sky(x: float, y: float) -> tuple[float, float]:
 
 
 def _setup(
-    monkeypatch: pytest.MonkeyPatch, path: str, simbad: tuple[Any, list[str], list[Any], str] | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    simbad: tuple[Any, list[str], list[Any], str, list[list[str]]] | None = None,
 ) -> None:
     """Stand in for the detections, the Gaia tiles and SIMBAD.
 
@@ -144,8 +146,9 @@ def _setup(
     monkeypatch.setattr(
         module,
         "_simbad_names",
-        lambda *_a: simbad or (None, [], [], "Offline: the names come from Gaia only."),
+        lambda *_a: simbad or (None, [], [], "Offline: the names come from Gaia only.", []),
     )
+    monkeypatch.setattr(module, "_record_simbad_aliases", lambda *_a: 0)
 
 
 def test_offline_every_detection_gets_a_gaia_name_or_none(
@@ -171,12 +174,17 @@ def test_a_simbad_name_wins_over_the_gaia_number(tmp_path: Path, monkeypatch: py
     """SIMBAD's familiar name replaces the Gaia number of the same star."""
     path = _stack(tmp_path)
     ra, dec = _sky(50, 50)
-    _setup(monkeypatch, path, (SkyCoord([ra] * u.deg, [dec] * u.deg), ["Vega"], ["11"], ""))
+    _setup(
+        monkeypatch,
+        path,
+        (SkyCoord([ra] * u.deg, [dec] * u.deg), ["Vega"], ["11"], "", [["alf Lyr", "HD 172167"]]),
+    )
 
     result = module.identify_stack_stars(path, config=None)
 
     assert result.stars[0].name == "Vega"
     assert result.stars[0].name_source == "simbad"
+    assert result.stars[0].aliases == ["alf Lyr", "HD 172167"]
     assert result.simbad_used
     assert result.notes == []
 
@@ -211,3 +219,161 @@ def test_a_stop_request_stops_the_work(tmp_path: Path, monkeypatch: pytest.Monke
     with pytest.raises(module.StackIdentificationStoppedError):
         module.identify_stack_stars(path, config=None, should_stop=lambda: True)
     assert module.read_stack_identification(path) is None
+
+
+class _FakeSimbadIdentifier:
+    """Stand in for the star identifier, answering a SIMBAD table."""
+
+    def __init__(self, rows: list[tuple[str, float]]) -> None:
+        """Remember the rows.
+
+        Parameters
+        ----------
+        rows : `list` [`tuple` [`str`, `float`]]
+            The ``|``-separated identifiers and the declination of each row.
+        """
+        self.rows = rows
+
+    def _query_simbad_region(self, *_args: Any, **_kwargs: Any) -> tuple[Table, SkyCoord]:
+        """Give the table and the positions of the rows.
+
+        Returns
+        -------
+        table, coords : `Table`, `SkyCoord`
+            The rows, all at one right ascension.
+        """
+        table = Table({"ids": [ids for ids, _ in self.rows]})
+        return table, SkyCoord(ra=[10.0] * len(self.rows) * u.deg, dec=[dec for _, dec in self.rows] * u.deg)
+
+
+def _simbad_answer(rows: list[tuple[str, float]]) -> tuple[Any, ...]:
+    """Run the SIMBAD step on made-up rows.
+
+    Parameters
+    ----------
+    rows : `list` [`tuple` [`str`, `float`]]
+        The identifiers and declination of each row.
+
+    Returns
+    -------
+    answer : `tuple`
+        What `_simbad_names` returns.
+    """
+    return module._simbad_names(_FakeSimbadIdentifier(rows), _wcs(), SIZE, SIZE)
+
+
+def test_one_name_per_star_whatever_the_order_of_simbad_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two rows of one Gaia star give one star, in either row order."""
+    monkeypatch.setattr(module, "network_is_offline", lambda: False)
+    rows = [
+        ("TYC 2743-1974-1|Gaia DR3 1903910765541999872", 34.4100),
+        ("HD 214181|HIP 111500|Gaia DR2 1903910765541999872|Gaia DR3 1903910765541999872", 34.4101),
+    ]
+    first = _simbad_answer(rows)
+    second = _simbad_answer(rows[::-1])
+
+    assert first[1] == second[1] == ["HD 214181"]
+    assert first[2] == ["1903910765541999872"]
+    assert first[4] == second[4] == [["HIP 111500", "TYC 2743-1974-1"]]
+
+
+def test_equal_names_of_one_kind_are_picked_alphabetically(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Of two Henry Draper numbers, the same one is chosen always."""
+    monkeypatch.setattr(module, "network_is_offline", lambda: False)
+    one = _simbad_answer([("HD 2|HD 1|Gaia DR3 5", 34.0)])
+    other = _simbad_answer([("HD 1|HD 2|Gaia DR3 5", 34.0)])
+
+    assert one[1] == other[1] == ["HD 1"]
+
+
+class _FakeCatalogAccess:
+    """A star catalog in memory that follows the real merge rule."""
+
+    def __init__(self, records: list[Any]) -> None:
+        """Hold the records.
+
+        Parameters
+        ----------
+        records : `list` [`StellarObject`]
+            The saved stars.
+        """
+        self.records = {record.id: record for record in records}
+
+    def get_by_ids(self, _dataset: str, ids: list[str]) -> list[Any]:
+        """Give the saved records among the ids.
+
+        Parameters
+        ----------
+        _dataset : `str`
+            Ignored.
+        ids : `list` [`str`]
+            The wanted ids.
+
+        Returns
+        -------
+        records : `list` [`StellarObject`]
+            The ones that exist.
+        """
+        return [self.records[star_id].model_copy(deep=True) for star_id in ids if star_id in self.records]
+
+    def merge_and_record(self, _dataset: str, objects: list[Any], merge: Any) -> None:
+        """Save each object through the merge rule.
+
+        Parameters
+        ----------
+        _dataset : `str`
+            Ignored.
+        objects : `list` [`StellarObject`]
+            The records to merge in.
+        merge : `Callable`
+            The merge rule.
+        """
+        for record in objects:
+            self.records[record.id] = merge(self.records.get(record.id), record)
+
+
+def test_simbad_names_are_added_to_saved_records_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing aliases are added to a saved record and nothing else."""
+    from astrometricslib._internal.drivers import catalog_access as catalog_module
+    from astrometricslib.models.stack_identification import IdentifiedStar
+    from astrometricslib.models.stellar_source import StellarObject
+
+    saved = StellarObject(id="Gaia DR3 11", name="Gaia DR3 11", aliases=["HIP 5"], magnitude=7.5)
+    fake = _FakeCatalogAccess([saved])
+    monkeypatch.setattr(catalog_module, "CatalogAccess", lambda _config: fake)
+
+    def star(gaia: str, name: str, aliases: list[str]) -> IdentifiedStar:
+        """Make a matched star.
+
+        Parameters
+        ----------
+        gaia : `str`
+            Its Gaia number.
+        name, aliases : `str`, `list` [`str`]
+            Its SIMBAD name and aliases.
+
+        Returns
+        -------
+        star : `IdentifiedStar`
+            The star.
+        """
+        return IdentifiedStar(
+            id=f"detection-{gaia}", name=name, kind="matched", x=0.0, y=0.0, ra_deg=0.0, dec_deg=0.0,
+            gaia_source_id=gaia, name_source="simbad", aliases=aliases,
+        )  # fmt: skip
+
+    stars = [
+        star("11", "HD 214181", ["HIP 5", "TYC 2743-1974-1"]),
+        star("22", "HD 9", ["TYC 1-1-1"]),  # no saved record: stays uncreated
+        star("33", "HD 7", ["TYC 7-7-7"]),  # Gaia number SIMBAD does not list: not trusted
+    ]
+    updated = module._record_simbad_aliases(None, stars, ["11", "22"])
+
+    assert updated == 1
+    record = fake.records["Gaia DR3 11"]
+    assert record.aliases == ["HIP 5", "HD 214181", "TYC 2743-1974-1"]
+    assert (record.id, record.name, record.magnitude) == ("Gaia DR3 11", "Gaia DR3 11", 7.5)
+    assert set(fake.records) == {"Gaia DR3 11"}
+    # A second run finds nothing to add.
+    assert module._record_simbad_aliases(None, stars, ["11", "22"]) == 0
+    assert fake.records["Gaia DR3 11"].aliases == ["HIP 5", "HD 214181", "TYC 2743-1974-1"]

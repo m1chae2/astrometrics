@@ -35,7 +35,7 @@ def _identification() -> SimpleNamespace:
     return SimpleNamespace(
         width=10, height=10, stars=[star], matched_count=1, unmatched_count=0, catalog_only_count=0,
         solution_reused=True, gaia_depth=20.0, catalog_only_limit=19.0, gaia_tiles_missing=0,
-        simbad_used=True, notes=[],
+        simbad_used=True, notes=[], alias_records_updated=2,
     )  # fmt: skip
 
 

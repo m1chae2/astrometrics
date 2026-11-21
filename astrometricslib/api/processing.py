@@ -2106,9 +2106,12 @@ class ProcessingPipelines:
         are matched to the Gaia stars of the cache tiles under it (filled to
         the depth the equipment predicts) and, when online, to SIMBAD, whose
         most familiar designation wins (proper name, Bayer, Flamsteed, HD,
-        HIP, TYC, then ``Gaia DR3 <id>``). Nothing is added to the target's
-        star catalog. The result is saved next to the stack; see
-        `get_stack_identification`. Raw frames are refused.
+        HIP, TYC, then ``Gaia DR3 <id>``; among equals, alphabetical). The
+        other SIMBAD names of each star are its ``aliases``. A star the
+        library already has a record of (``Gaia DR3 <id>``) gains the names
+        it lacks as aliases; no record is created or otherwise changed. The
+        result is saved next to the stack; see `get_stack_identification`.
+        Raw frames are refused.
 
         Parameters
         ----------
@@ -2126,10 +2129,10 @@ class ProcessingPipelines:
             Fields: ``path``, ``width``, ``height``, ``solution_reused``,
             ``stars`` (each with ``id``, ``name``, ``kind`` -- ``matched``,
             ``unmatched`` or ``catalog_only`` --, ``x`` and ``y`` in 0-based
-            pixels, ``ra_deg``, ``dec_deg``, ``g_mag``, ``gaia_source_id`` and
-            ``name_source``), the three counts, ``gaia_depth``,
-            ``catalog_only_limit``, ``gaia_tiles_missing``, ``simbad_used``
-            and ``notes``.
+            pixels, ``ra_deg``, ``dec_deg``, ``g_mag``, ``gaia_source_id``,
+            ``name_source`` and ``aliases``), the three counts, ``gaia_depth``,
+            ``catalog_only_limit``, ``gaia_tiles_missing``, ``simbad_used``,
+            ``notes`` and ``alias_records_updated``.
         """
         from astrometricslib.pipelines.astrometry.processing.stack_identification import identify_stack_stars
 

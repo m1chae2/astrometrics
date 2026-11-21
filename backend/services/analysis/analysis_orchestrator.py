@@ -470,6 +470,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                     "matched": identification.matched_count,
                     "unmatched": identification.unmatched_count,
                     "catalogOnly": identification.catalog_only_count,
+                    "aliasRecordsUpdated": identification.alias_records_updated,
                     "notes": list(identification.notes),
                 }
                 self._store_job_result(job_id, result)

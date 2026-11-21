@@ -667,44 +667,59 @@ def test_the_manifest_carries_the_warning_when_many_frames_are_set_aside(tmp_pat
     assert report.warnings == ["3 of 10 frames set aside: 3 trailed"]
 
 
-def test_a_fogged_session_is_held_to_its_clearest_quarter() -> None:
-    """Most frames fogged: the clearest quarter sets the star limit."""
-    measurements = [
-        make_measurement(f"f{index}.fits", stars=stars)
-        for index, stars in enumerate([0, 0, 0, 0, 1, 1, 15, 105, 299, 658, 706])
-    ]
+def frames_on_fields(
+    field_sizes: list[int], shape: tuple[int, int] = (3000, 3000), shift: float = 700.0
+) -> list[dict[str, Any]]:
+    """Build frame measurements shot at several pointings of one star field.
 
-    moved = {decision.path for decision in judge_batch(measurements)}
+    Parameters
+    ----------
+    field_sizes : `list` [`int`]
+        Frames at each pointing. The first pointing is the main field; each
+        later one is shifted a further ``shift`` pixels in x.
+    shape : `tuple` [`int`, `int`]
+        Frame height and width in pixels.
+    shift : `float`
+        Pointing step in pixels.
 
-    assert moved == {f"f{index}.fits" for index in range(7)}
+    Returns
+    -------
+    measurements : `list` [`dict`]
+        One entry per frame: the frames of each pointing in a row.
+    """
+    generator = np.random.default_rng(3)
+    sky_rows = [(float(y), float(x)) for y, x in generator.uniform(100, 2900, size=(80, 2))]
+    measurements = []
+    for field_index, size in enumerate(field_sizes):
+        for frame_index in range(size):
+            measurement = make_measurement(f"field{field_index}_{frame_index:02d}.fits")
+            rows = [(y, x + shift * field_index) for y, x in sky_rows]
+            measurement.update(_stars=stars_at(rows), width_px=shape[1], height_px=shape[0])
+            measurements.append(measurement)
+    return measurements
 
 
-def test_a_session_is_held_to_its_sister_sessions(tmp_path: Path) -> None:
-    """A wholly fogged night is judged against the clear nights."""
-    gap = frame_quarantine.SESSION_GAP_SECONDS.default + 1
-    clear = [make_frame(tmp_path / f"clear{index}.fits", float(index)) for index in range(10)]
-    foggy = [make_frame(tmp_path / f"fog{index}.fits", gap + 100 + index) for index in range(10)]
-    stars = {frame.path: 3000 for frame in clear} | {frame.path: 1000 for frame in foggy}
+def test_a_second_field_is_set_aside_as_another_field() -> None:
+    """A second pointing held by enough frames is an "Other field"."""
+    measurements = frames_on_fields([14, 4])
 
-    report = find_frames_to_quarantine(
-        clear + foggy, measure=lambda path: make_measurement(path, stars=stars[path])
-    )
+    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
 
-    assert {decision.path for decision in report.moved} == {frame.path for frame in foggy}
-    assert "other session" in report.moved[0].reason
+    assert [decision.path for decision in decisions] == [f"field1_{index:02d}.fits" for index in range(4)]
+    assert all(decision.kind == "off_field" for decision in decisions)
+    assert decisions[0].reason == "Other field (4 frames): not in this stack"
 
 
-def test_pointing_fields_keep_each_held_pointing_and_drop_strays() -> None:
-    """Held pointings are fields; a lone frame or a small run is a stray."""
-    several = (
-        [(0.0, 0.0)] * 3
-        + [(1000.0, 0.0)] * 3
-        + [(0.0, 1000.0)] * 3
-        + [(1000.0, 1000.0)] * 2
-        + [(3000.0, 3000.0)]
-    )
-    fields = frame_quarantine.find_pointing_fields(several, 300.0)
-    assert len(fields) == 4
+def test_a_short_run_at_another_pointing_is_a_stray_not_a_field() -> None:
+    """A small run or a lone frame at another pointing is a stray."""
+    measurements = frames_on_fields([20, 2])
 
-    stray_run = [(0.0, 0.0)] * 111 + [(720.0, 0.0)] * 12
-    assert frame_quarantine.find_pointing_fields(stray_run, 300.0) == [(0.0, 0.0)]
+    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+
+    assert [decision.path for decision in decisions] == ["field1_00.fits", "field1_01.fits"]
+    assert all(decision.reason.startswith("Pointing off the main field: ") for decision in decisions)
+
+    lone = frames_on_fields([11, 1])
+    lone_decisions, _ = frame_quarantine.judge_batch_with_notes(lone)
+    assert [decision.path for decision in lone_decisions] == ["field1_00.fits"]
+    assert lone_decisions[0].reason.startswith("Pointing off the main field: ")

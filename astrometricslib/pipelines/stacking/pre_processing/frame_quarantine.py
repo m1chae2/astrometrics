@@ -326,7 +326,8 @@ OFF_FIELD_POINTING_FRACTION = TunedParameter(
 The offset is found by matching the brightest stars of each frame with those
 of one reference frame of the session, trying the frame as it is and turned
 half a revolution (a meridian flip turns the camera, and a flipped frame of
-the same field is not offset). The main field is the median of the offsets.
+the same field is not offset). The main field is the median centre
+of the matched frames.
 On NGC 7331 the frames of the same field sit within 0.020 of the width (a
 slow drift of up to 75 pixels), the 12 frames after the flip that missed
 the field sit at 0.243, and the 0.10 limit lies between them. A frame this
@@ -373,13 +374,15 @@ POINTING_FIELD_MINIMUM_FRAMES = TunedParameter(
     kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D73",
 )
-"""A pointing held for this many frames is a field, not a stray.
+"""A pointing held for this many frames is a second field, not a stray.
 
 A session may be shot at several pointings on purpose (the M 45 session of
 the ASI camera: 12 frames at five pointings). A pointing chosen on purpose
 is held for more than one exposure; a single frame away from every other is
-a stray (a failed centring or a bump). See `POINTING_FIELD_MINIMUM_SHARE`
-for the second condition (STK-D73).
+a stray (a failed centring or a bump). Both are set aside, but the reason
+differs: "Other field" for a second field, "Pointing off the main field" for
+a stray. See `POINTING_FIELD_MINIMUM_SHARE` for the second condition
+(STK-D73).
 """
 
 POINTING_FIELD_MINIMUM_SHARE = TunedParameter(
@@ -741,33 +744,43 @@ def measure_sky_unevenness(measurements: Sequence[dict[str, Any]]) -> list[float
     ]
 
 
-def find_pointing_fields(
-    centres: Sequence[tuple[float, float]], link_distance: float
-) -> list[tuple[float, float]]:
-    """Group frame centres into the fields a session was shot at.
+def find_other_field_sizes(
+    centres: Sequence[tuple[float, float] | None], offsets: Sequence[float | None], link_distance: float
+) -> list[int]:
+    """Find the frames that sit on a deliberate second field.
 
-    Two centres closer than ``link_distance`` belong to one group, and so
-    does a chain of them, so a slow drift stays one group. A group is a
-    field when it holds at least `POINTING_FIELD_MINIMUM_FRAMES` frames and
-    `POINTING_FIELD_MINIMUM_SHARE` of the centres. When no group qualifies,
-    the largest group is the field.
+    The frames off the main pointing (offset above the limit) are grouped:
+    two centres closer than ``link_distance`` belong to one group, and so
+    does a chain of them. A group is a second field when it holds at least
+    `POINTING_FIELD_MINIMUM_FRAMES` frames and `POINTING_FIELD_MINIMUM_SHARE`
+    of the matched frames. Smaller groups are strays.
 
     Parameters
     ----------
-    centres : `Sequence` [`tuple` [`float`, `float`]]
-        The matched frame centres, in pixels.
+    centres : `Sequence` [`tuple` [`float`, `float`] or `None`]
+        Each frame's matched centre in pixels, `None` when not matched.
+    offsets : `Sequence` [`float` or `None`]
+        Each frame's distance from the main pointing, as a share of the
+        frame width, or `None`.
     link_distance : `float`
         The largest step, in pixels, between two centres of one group.
 
     Returns
     -------
-    fields : `list` [`tuple` [`float`, `float`]]
-        The median centre of each field.
+    sizes : `list` [`int`]
+        For each frame, the size of the second field it belongs to, or 0
+        when it is on the main field or is a stray.
     """
-    group_of = list(range(len(centres)))
+    limit = resolve(OFF_FIELD_POINTING_FRACTION).value
+    away = [
+        index
+        for index, (centre, offset) in enumerate(zip(centres, offsets, strict=True))
+        if centre is not None and offset is not None and offset > limit
+    ]
+    group_of = {index: index for index in away}
 
     def root(index: int) -> int:
-        """Find the group a centre belongs to.
+        """Find the group a frame belongs to.
 
         Returns
         -------
@@ -779,37 +792,38 @@ def find_pointing_fields(
             index = group_of[index]
         return index
 
-    for first in range(len(centres)):
-        for second in range(first + 1, len(centres)):
-            if math.dist(centres[first], centres[second]) < link_distance:
+    for position, first in enumerate(away):
+        for second in away[position + 1 :]:
+            if math.dist(centres[first], centres[second]) < link_distance:  # type: ignore[arg-type]
                 group_of[root(first)] = root(second)
-    groups: dict[int, list[tuple[float, float]]] = defaultdict(list)
-    for index, centre in enumerate(centres):
-        groups[root(index)].append(centre)
+    members: dict[int, list[int]] = defaultdict(list)
+    for index in away:
+        members[root(index)].append(index)
+    matched = sum(1 for centre in centres if centre is not None)
     minimum_frames = resolve(POINTING_FIELD_MINIMUM_FRAMES).value
     minimum_share = resolve(POINTING_FIELD_MINIMUM_SHARE).value
-    members = [
-        group
-        for group in groups.values()
-        if len(group) >= minimum_frames and len(group) >= minimum_share * len(centres)
-    ] or [max(groups.values(), key=len)]
-    return [
-        (statistics.median(c[0] for c in group), statistics.median(c[1] for c in group)) for group in members
-    ]
+    sizes = [0] * len(centres)
+    for group in members.values():
+        if len(group) >= minimum_frames and len(group) >= minimum_share * matched:
+            for index in group:
+                sizes[index] = len(group)
+    return sizes
 
 
-def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[list[float | None], str]:
+def measure_pointing_offsets(
+    measurements: Sequence[dict[str, Any]],
+) -> tuple[list[float | None], list[int], str]:
     """Measure how far each frame's centre lies from the session's main field.
 
     The brightest stars of the frame in the middle of the batch are the
     reference. Every frame is matched to it
     (`raw_frame_check.measure_field_offset`), which tries the frame as it
     is and turned half a revolution, so a meridian flip does not count as a
-    move. The matched centres are grouped into fields
-    (`find_pointing_fields`), so a session shot at several pointings keeps
-    each of them. A frame's offset is its distance from the nearest field's
-    median centre divided by the frame width; only a stray, away from every
-    field, has a large offset.
+    move. The main pointing is the median centre of all the matched frames,
+    and a frame's offset is its distance from it divided by the frame
+    width. Frames beyond the limit are grouped
+    (`find_other_field_sizes`) to tell a deliberate second field from a
+    stray.
 
     The star positions come from the frames themselves, not from the header
     pointing or from a stored stack's shifts. On NGC 7331 the header
@@ -826,13 +840,18 @@ def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[li
     -------
     offsets : `list` [`float` or `None`]
         One value per frame, `None` for a frame that could not be matched.
+    other_field_sizes : `list` [`int`]
+        For each frame, the number of frames on the second field it belongs
+        to, or 0 (main field or stray).
     note : `str`
         A sentence about frames left unjudged, or an empty string.
     """
     measured = [m for m in measurements if m.get("_stars") is not None and len(m["_stars"])]
     if len(measured) < len(measurements) / 2 or not measured:
-        return [None] * len(measurements), (
-            "Pointing was not judged: too few frames had stars to match." if measurements else ""
+        return (
+            [None] * len(measurements),
+            [0] * len(measurements),
+            ("Pointing was not judged: too few frames had stars to match." if measurements else ""),
         )
     reference = measurements[len(measurements) // 2]
     if reference.get("_stars") is None or not len(reference["_stars"]):
@@ -851,19 +870,26 @@ def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[li
             centres.append(None if found is None else (found[0], found[1]))
     matched = [centre for centre in centres if centre is not None]
     if len(matched) < len(measurements) / 2:
-        return [None] * len(measurements), (
-            f"Pointing was not judged: only {len(matched)} of {len(measurements)} frames could be "
-            "matched to the reference frame's stars."
+        return (
+            [None] * len(measurements),
+            [0] * len(measurements),
+            (
+                f"Pointing was not judged: only {len(matched)} of {len(measurements)} frames could be "
+                "matched to the reference frame's stars."
+            ),
         )
-    width = statistics.median(m["width_px"] for m in measurements)
-    fields = find_pointing_fields(matched, resolve(OFF_FIELD_POINTING_FRACTION).value * width)
+    main_row = statistics.median(centre[0] for centre in matched)
+    main_column = statistics.median(centre[1] for centre in matched)
     offsets = [
         None
         if centre is None
-        else min(math.hypot(centre[0] - row, centre[1] - column) for row, column in fields)
-        / measurement["width_px"]
+        else math.hypot(centre[0] - main_row, centre[1] - main_column) / measurement["width_px"]
         for centre, measurement in zip(centres, measurements, strict=True)
     ]
+    width = statistics.median(m["width_px"] for m in measurements)
+    other_field_sizes = find_other_field_sizes(
+        centres, offsets, resolve(OFF_FIELD_POINTING_FRACTION).value * width
+    )
     unmatched = len(measurements) - len(matched)
     note = (
         f"Pointing could not be matched for {unmatched} of {len(measurements)} frames; "
@@ -871,31 +897,7 @@ def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[li
         if unmatched
         else ""
     )
-    return offsets, note
-
-
-@dataclass(frozen=True)
-class SessionReference:
-    """The clear-sky star count and bright-star flux a session is held to.
-
-    Attributes
-    ----------
-    star_count : `float` or `None`
-        The typical star count of clear frames taken the same way.
-    bright_star_flux_adu : `float` or `None`
-        Their typical bright-star flux.
-    source : `str`
-        Where the numbers come from, in plain words.
-    unevenness_limit : `float` or `None`
-        The median sky-unevenness limit of those sessions, or `None`. A
-        session's own limit is lowered to it, so a long stretch of glow or
-        fog cannot widen its own limit.
-    """
-
-    star_count: float | None
-    bright_star_flux_adu: float | None
-    source: str
-    unevenness_limit: float | None = None
+    return offsets, other_field_sizes, note
 
 
 def session_unevenness_limit(unevenness: Sequence[float | None]) -> float | None:
@@ -934,40 +936,8 @@ def _median_or_none(values: Sequence[float | None]) -> float | None:
     return float(statistics.median(known)) if known else None
 
 
-def _upper_quartile_or_none(values: Sequence[float | None]) -> float | None:
-    """Return the upper quartile of the known values.
-
-    Returns
-    -------
-    quartile : `float` or `None`
-        `None` when no value is known.
-    """
-    known = [value for value in values if value is not None]
-    return float(np.percentile(known, 75)) if known else None
-
-
-def own_session_reference(measurements: Sequence[dict[str, Any]]) -> SessionReference:
-    """Build the reference of a session that has no earlier session to lean on.
-
-    The upper quartile of the session is used, so a session that is fogged
-    for most of its frames is still held to its clear quarter, not to its
-    own fogged median.
-
-    Returns
-    -------
-    reference : `SessionReference`
-        The upper quartiles of the star count and the bright-star flux.
-    """
-    return SessionReference(
-        star_count=_upper_quartile_or_none([m.get("star_count") for m in measurements]),
-        bright_star_flux_adu=_upper_quartile_or_none([m.get("bright_star_flux_adu") for m in measurements]),
-        source="the clearest quarter of this session",
-    )
-
-
 def judge_batch_with_notes(
     measurements: Sequence[dict[str, Any]],
-    reference: SessionReference | None = None,
 ) -> tuple[list[QuarantineDecision], list[str]]:
     """Pick the frames of one batch that are clouded, trailed or off the field.
 
@@ -980,13 +950,12 @@ def judge_batch_with_notes(
     notes : `list` [`str`]
         One sentence for each check that could not be made on some frames.
     """
-    decisions, _, notes = judge_batch_in_full(measurements, reference)
+    decisions, _, notes = judge_batch_in_full(measurements)
     return decisions, notes
 
 
 def judge_batch_in_full(
     measurements: Sequence[dict[str, Any]],
-    reference: SessionReference | None = None,
 ) -> tuple[list[QuarantineDecision], list[QuarantineDecision], list[str]]:
     """Pick the frames of one batch that are clouded, trailed or off the field.
 
@@ -996,13 +965,7 @@ def judge_batch_in_full(
     - Trailed stars: the frame's stored star elongation is above both
       `TRAILED_ELONGATION_LIMIT` and the batch median plus the rise
       (`ELONGATION_RISE_ABOVE_MEDIAN`, or the colour camera's).
-    - Few stars: fewer than `CLOUD_STAR_FRACTION` of the typical star
-      count, or a bright-star flux below that share of the typical flux.
-      The typical value is the larger of the batch median and the
-      reference: the median of earlier sessions taken the same way, or,
-      without them, the clearest quarter of this session
-      (`own_session_reference`). A session fogged for most of its frames
-      therefore cannot lower its own limit.
+    - Few stars: fewer than `CLOUD_STAR_FRACTION` of the batch median.
     - Uneven sky: the sky pattern differs from the session's by more than
       `UNEVEN_SKY_SIGMAS` robust spreads above the typical difference, and
       by at least `UNEVEN_SKY_MINIMUM` (see `measure_sky_unevenness`). It is
@@ -1011,8 +974,12 @@ def judge_batch_in_full(
       Otherwise the frame is kept and flagged "uneven sky (gradient or
       obstruction)".
     - Off the field: the frame's centre is more than
-      `OFF_FIELD_POINTING_FRACTION` of the frame width from every field the
-      session was shot at (see `measure_pointing_offsets`).
+      `OFF_FIELD_POINTING_FRACTION` of the frame width from the session's
+      main pointing (see `measure_pointing_offsets`). When a second
+      pointing holds at least `POINTING_FIELD_MINIMUM_FRAMES` frames and
+      `POINTING_FIELD_MINIMUM_SHARE` of the session, the frame is on a
+      deliberate second field. It is set aside too, with the reason "Other
+      field (n frames): not in this stack", so the person can put it back.
 
     The measurements are updated in place with ``sky_unevenness`` and
     ``pointing_offset_fraction``, so the caller can store them for kept
@@ -1026,9 +993,6 @@ def judge_batch_in_full(
         ``_stars``, ``width_px``, ``height_px``, and optionally
         ``bright_star_flux_adu`` and ``colour_camera`` (a colour camera gets
         the wider `COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN`).
-    reference : `SessionReference`, optional
-        The clear-sky values of earlier sessions taken the same way. Without
-        it, `own_session_reference` is used.
 
     Returns
     -------
@@ -1043,17 +1007,9 @@ def judge_batch_in_full(
     notes: list[str] = []
     if len(measurements) < resolve(MINIMUM_FRAMES_TO_JUDGE).value:
         return [], [], notes
-    if reference is None:
-        reference = own_session_reference(measurements)
     cloud_sky_multiple = resolve(CLOUD_SKY_MULTIPLE).value
-    median_stars = statistics.median(m["star_count"] for m in measurements)
-    typical_stars = max(median_stars, reference.star_count or 0.0)
+    typical_stars = statistics.median(m["star_count"] for m in measurements)
     median_flux = _median_or_none([m.get("bright_star_flux_adu") for m in measurements])
-    typical_flux = None if median_flux is None else max(median_flux, reference.bright_star_flux_adu or 0.0)
-    held_to_reference = typical_stars > median_stars or (
-        typical_flux is not None and median_flux is not None and typical_flux > median_flux
-    )
-    reference_words = f" ({reference.source})" if held_to_reference else ""
     typical_sky = statistics.median(m["sky_median_adu"] for m in measurements)
 
     elongations = [m.get("star_elongation") for m in measurements]
@@ -1079,12 +1035,8 @@ def judge_batch_in_full(
     unevenness_limit = session_unevenness_limit(unevenness)
     if unevenness_limit is None:
         notes.append("The sky was not checked for unevenness: too few frames had a sky grid.")
-    elif reference.unevenness_limit is not None and reference.unevenness_limit < unevenness_limit:
-        # A session that degrades for a long stretch widens its own spread;
-        # its sister sessions say how even the sky is when it is clear.
-        unevenness_limit = reference.unevenness_limit
 
-    pointing_offsets, pointing_note = measure_pointing_offsets(measurements)
+    pointing_offsets, other_field_sizes, pointing_note = measure_pointing_offsets(measurements)
     if pointing_note:
         notes.append(pointing_note)
     pointing_limit = resolve(OFF_FIELD_POINTING_FRACTION).value
@@ -1092,14 +1044,13 @@ def judge_batch_in_full(
     transparency_limit = resolve(UNEVEN_SKY_TRANSPARENCY_FRACTION).value
     decisions: list[QuarantineDecision] = []
     flagged: list[QuarantineDecision] = []
-    for measurement, elongation, uneven, offset in zip(
-        measurements, elongations, unevenness, pointing_offsets, strict=True
+    for measurement, elongation, uneven, offset, other_field_size in zip(
+        measurements, elongations, unevenness, pointing_offsets, other_field_sizes, strict=True
     ):
         measurement["sky_unevenness"] = uneven
         measurement["pointing_offset_fraction"] = offset
         star_count = measurement["star_count"]
         flux = measurement.get("bright_star_flux_adu")
-        flux_share = None if flux is None or not typical_flux else flux / typical_flux
         sky = measurement["sky_median_adu"]
         findings: list[RuleFinding] = []
         if elongation is not None and elongation_limit is not None and elongation > elongation_limit:
@@ -1120,23 +1071,14 @@ def judge_batch_in_full(
                 RuleFinding(
                     "few_stars",
                     "clouded" if cloudy_sky else "trailed",
-                    f"Few stars: {star_count} against a typical {typical_stars:.0f}{reference_words}"
+                    f"Few stars: {star_count} against a typical {typical_stars:.0f}"
                     + (f", sky {sky / typical_sky:.1f} times normal" if cloudy_sky else ", sky level normal"),
-                )
-            )
-        elif flux_share is not None and flux_share < CLOUD_STAR_FRACTION:
-            findings.append(
-                RuleFinding(
-                    "few_stars",
-                    "clouded",
-                    f"Dim stars: bright-star flux {flux_share:.2f} of the typical{reference_words}",
                 )
             )
         uneven_finding = None
         if uneven is not None and unevenness_limit is not None and uneven > unevenness_limit:
-            # Against the session's own median, as the limit was derived; the
-            # floor rules above already hold the session to its reference.
-            star_share = star_count / median_stars if median_stars else 1.0
+            # Against the session's own median, as the limit was derived.
+            star_share = star_count / typical_stars if typical_stars else 1.0
             session_flux_share = None if flux is None or not median_flux else flux / median_flux
             transparency = (
                 math.sqrt(star_share * session_flux_share) if session_flux_share is not None else star_share
@@ -1163,14 +1105,13 @@ def judge_batch_in_full(
                     f"{star_words}, so not cloud",
                 )
         if offset is not None and offset > pointing_limit:
-            findings.append(
-                RuleFinding(
-                    "off_field",
-                    "off_field",
-                    f"Pointing off the main field: {offset:.2f} of the field width, "
-                    f"limit {pointing_limit:.2f}",
-                )
+            reason = (
+                f"Other field ({other_field_size} frames): not in this stack"
+                if other_field_size
+                else f"Pointing off the main field: {offset:.2f} of the field width, "
+                f"limit {pointing_limit:.2f}"
             )
+            findings.append(RuleFinding("off_field", "off_field", reason))
         if findings:
             decisions.append(_decision_from_findings(measurement, findings, typical_stars))
         elif uneven_finding is not None:
@@ -1454,53 +1395,6 @@ def _measure_frames(
     return [result for result in results if result is not None], unreadable
 
 
-def references_from_other_sessions(
-    judged_batches: Sequence[tuple[Sequence[Any], Sequence[dict[str, Any]]]],
-) -> list[SessionReference | None]:
-    """Find, for each session, the clear-sky values of its sister sessions.
-
-    The reference of a session is the median, over the target's other
-    sessions with the same capture setting (`capture_setting_key`), of each
-    session's median star count and bright-star flux. A median of sessions
-    is used so one fogged session cannot lower it. The sessions' sky
-    unevenness limits are kept too (`session_unevenness_limit`).
-
-    Parameters
-    ----------
-    judged_batches : `Sequence`
-        Each session's frames and their measurements.
-
-    Returns
-    -------
-    references : `list` [`SessionReference` or `None`]
-        One per session, `None` when no other session was taken the same
-        way (the session is then held to its own clearest quarter).
-    """
-    summaries = []
-    for batch, measurements in judged_batches:
-        summaries.append((
-            capture_setting_key(batch[0]),
-            _median_or_none([m.get("star_count") for m in measurements]),
-            _median_or_none([m.get("bright_star_flux_adu") for m in measurements]),
-            session_unevenness_limit(measure_sky_unevenness(measurements)),
-        ))
-    references: list[SessionReference | None] = []
-    for index, (key, *_) in enumerate(summaries):
-        others = [summary for other, summary in enumerate(summaries) if other != index and summary[0] == key]
-        if not others:
-            references.append(None)
-            continue
-        references.append(
-            SessionReference(
-                star_count=_median_or_none([summary[1] for summary in others]),
-                bright_star_flux_adu=_median_or_none([summary[2] for summary in others]),
-                source=f"median of {len(others)} other session(s) taken the same way",
-                unevenness_limit=_median_or_none([summary[3] for summary in others]),
-            )
-        )
-    return references
-
-
 def find_frames_to_quarantine(
     frames: Sequence[Any],
     measure: Callable[[str], dict[str, Any]] | None = None,
@@ -1536,7 +1430,6 @@ def find_frames_to_quarantine(
         "Checked",
         sum(len(batch) for batch in batches if len(batch) >= minimum_frames_to_judge),
     )
-    judged_batches: list[tuple[list[Any], list[dict[str, Any]]]] = []
     for batch in batches:
         if len(batch) < minimum_frames_to_judge:
             report.batches_too_small += 1
@@ -1555,10 +1448,7 @@ def find_frames_to_quarantine(
                 f"(at least {minimum_frames_to_judge} needed to judge); none moved."
             )
             continue
-        judged_batches.append((batch, measurements))
-    references = references_from_other_sessions(judged_batches)
-    for (_, measurements), reference in zip(judged_batches, references, strict=True):
-        decisions, flagged, judging_notes = judge_batch_in_full(measurements, reference)
+        decisions, flagged, judging_notes = judge_batch_in_full(measurements)
         report.notes.extend(judging_notes)
         report.flagged.extend(flagged)
         if flagged:

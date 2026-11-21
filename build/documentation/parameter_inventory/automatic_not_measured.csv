@@ -487,6 +487,7 @@ stacking.detected_star_count,STK-D23,measurement,Design estimate
 stacking.detection_sigma,STK-D17,measurement,Design estimate
 stacking.elongation_outlier_sigmas,STK-01,exclusion criteria,Partly measured
 stacking.elongation_rise_above_median,STK-01,exclusion criteria,Partly measured
+stacking.elongation_rise_sigmas,STK-01,exclusion criteria,Partly measured
 stacking.exposure_group_gain_tolerance,STK-20,exclusion criteria,Partly measured
 stacking.exposure_relative_tolerance,STK-35,exclusion criteria,Partly measured
 stacking.extended_light_brightness,STK-29,measurement,Partly measured
@@ -566,6 +567,8 @@ stacking.pattern_refit_passes,STK-D14,measurement,Design estimate
 stacking.pattern_star_count,STK-D14,measurement,Design estimate
 stacking.plausible_gain_range,STK-21,judgment,Partly measured
 stacking.point_source_sigma,STK-D34,judgment,Design estimate
+stacking.pointing_field_minimum_frames,STK-D73,exclusion criteria,Design estimate
+stacking.pointing_field_minimum_share,STK-D73,exclusion criteria,Design estimate
 stacking.poor_alignment_rms_px,STK-D30,judgment,Design estimate
 stacking.position_misfit_radius_factor,STK-D34,judgment,Design estimate
 stacking.processed_minimum_coverage_fraction,STK-23,measurement,Partly measured
@@ -626,6 +629,7 @@ stacking.thin_set_frame_count,STK-D36,judgment,Design estimate
 stacking.trailed_elongation_limit,STK-01,exclusion criteria,Partly measured
 stacking.uneven_sky_minimum,STK-D72,exclusion criteria,Design estimate
 stacking.uneven_sky_sigmas,STK-D72,exclusion criteria,Design estimate
+stacking.uneven_sky_transparency_fraction,STK-D72,exclusion criteria,Design estimate
 stacking.value_step_allowance,STK-48,judgment,Partly measured
 stacking.wcs_check_minimum_matches,STK-D52,judgment,Design estimate
 stacking.wcs_check_star_count,STK-D52,judgment,Design estimate

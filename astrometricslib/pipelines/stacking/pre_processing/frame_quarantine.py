@@ -363,6 +363,44 @@ alone does not separate the cases: NGC 6888 frames 068 to 079 (a steady
 tilt) have 0.94 to 1.22 of the star count but 0.80 to 1.04 of the flux.
 """
 
+POINTING_FIELD_MINIMUM_FRAMES = TunedParameter(
+    name="stacking.pointing_field_minimum_frames",
+    default=2,
+    unit="frames",
+    description="Fewest frames at one pointing for that pointing to count as a field of its own.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D73",
+)
+"""A pointing held for this many frames is a field, not a stray.
+
+A session may be shot at several pointings on purpose (the M 45 session of
+the ASI camera: 12 frames at five pointings). A pointing chosen on purpose
+is held for more than one exposure; a single frame away from every other is
+a stray (a failed centring or a bump). See `POINTING_FIELD_MINIMUM_SHARE`
+for the second condition (STK-D73).
+"""
+
+POINTING_FIELD_MINIMUM_SHARE = TunedParameter(
+    name="stacking.pointing_field_minimum_share",
+    default=0.15,
+    unit="× matched frames",
+    description="Least share of a session's matched frames at one pointing for it to count as a field.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D73",
+)
+"""A pointing must also hold this share of the session to be a field.
+
+A run of frames that missed the field is not a field of its own when the
+rest of the session points elsewhere: on NGC 7331 the 12 frames after the
+flip that missed the field are 0.098 of the 123, and they cost the stack 42%
+of its area. The smallest pointing of the M 45 session holds 2 of 12 frames
+(0.17). The value lies between them (STK-D73).
+"""
+
 SESSION_GAP_SECONDS = TunedParameter(
     name="stacking.session_gap_seconds",
     default=4 * 3600,
@@ -703,6 +741,63 @@ def measure_sky_unevenness(measurements: Sequence[dict[str, Any]]) -> list[float
     ]
 
 
+def find_pointing_fields(
+    centres: Sequence[tuple[float, float]], link_distance: float
+) -> list[tuple[float, float]]:
+    """Group frame centres into the fields a session was shot at.
+
+    Two centres closer than ``link_distance`` belong to one group, and so
+    does a chain of them, so a slow drift stays one group. A group is a
+    field when it holds at least `POINTING_FIELD_MINIMUM_FRAMES` frames and
+    `POINTING_FIELD_MINIMUM_SHARE` of the centres. When no group qualifies,
+    the largest group is the field.
+
+    Parameters
+    ----------
+    centres : `Sequence` [`tuple` [`float`, `float`]]
+        The matched frame centres, in pixels.
+    link_distance : `float`
+        The largest step, in pixels, between two centres of one group.
+
+    Returns
+    -------
+    fields : `list` [`tuple` [`float`, `float`]]
+        The median centre of each field.
+    """
+    group_of = list(range(len(centres)))
+
+    def root(index: int) -> int:
+        """Find the group a centre belongs to.
+
+        Returns
+        -------
+        group : `int`
+            The index that names the group.
+        """
+        while group_of[index] != index:
+            group_of[index] = group_of[group_of[index]]
+            index = group_of[index]
+        return index
+
+    for first in range(len(centres)):
+        for second in range(first + 1, len(centres)):
+            if math.dist(centres[first], centres[second]) < link_distance:
+                group_of[root(first)] = root(second)
+    groups: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for index, centre in enumerate(centres):
+        groups[root(index)].append(centre)
+    minimum_frames = resolve(POINTING_FIELD_MINIMUM_FRAMES).value
+    minimum_share = resolve(POINTING_FIELD_MINIMUM_SHARE).value
+    members = [
+        group
+        for group in groups.values()
+        if len(group) >= minimum_frames and len(group) >= minimum_share * len(centres)
+    ] or [max(groups.values(), key=len)]
+    return [
+        (statistics.median(c[0] for c in group), statistics.median(c[1] for c in group)) for group in members
+    ]
+
+
 def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[list[float | None], str]:
     """Measure how far each frame's centre lies from the session's main field.
 
@@ -710,8 +805,11 @@ def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[li
     reference. Every frame is matched to it
     (`raw_frame_check.measure_field_offset`), which tries the frame as it
     is and turned half a revolution, so a meridian flip does not count as a
-    move. The main field is the median centre of all the matched frames,
-    and a frame's offset is its distance from it divided by the frame width.
+    move. The matched centres are grouped into fields
+    (`find_pointing_fields`), so a session shot at several pointings keeps
+    each of them. A frame's offset is its distance from the nearest field's
+    median centre divided by the frame width; only a stray, away from every
+    field, has a large offset.
 
     The star positions come from the frames themselves, not from the header
     pointing or from a stored stack's shifts. On NGC 7331 the header
@@ -757,12 +855,13 @@ def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[li
             f"Pointing was not judged: only {len(matched)} of {len(measurements)} frames could be "
             "matched to the reference frame's stars."
         )
-    main_row = statistics.median(centre[0] for centre in matched)
-    main_column = statistics.median(centre[1] for centre in matched)
+    width = statistics.median(m["width_px"] for m in measurements)
+    fields = find_pointing_fields(matched, resolve(OFF_FIELD_POINTING_FRACTION).value * width)
     offsets = [
         None
         if centre is None
-        else math.hypot(centre[0] - main_row, centre[1] - main_column) / measurement["width_px"]
+        else min(math.hypot(centre[0] - row, centre[1] - column) for row, column in fields)
+        / measurement["width_px"]
         for centre, measurement in zip(centres, measurements, strict=True)
     ]
     unmatched = len(measurements) - len(matched)
@@ -912,8 +1011,8 @@ def judge_batch_in_full(
       Otherwise the frame is kept and flagged "uneven sky (gradient or
       obstruction)".
     - Off the field: the frame's centre is more than
-      `OFF_FIELD_POINTING_FRACTION` of the frame width from the session's
-      main field (see `measure_pointing_offsets`).
+      `OFF_FIELD_POINTING_FRACTION` of the frame width from every field the
+      session was shot at (see `measure_pointing_offsets`).
 
     The measurements are updated in place with ``sky_unevenness`` and
     ``pointing_offset_fraction``, so the caller can store them for kept

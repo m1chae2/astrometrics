@@ -692,3 +692,19 @@ def test_a_session_is_held_to_its_sister_sessions(tmp_path: Path) -> None:
 
     assert {decision.path for decision in report.moved} == {frame.path for frame in foggy}
     assert "other session" in report.moved[0].reason
+
+
+def test_pointing_fields_keep_each_held_pointing_and_drop_strays() -> None:
+    """Held pointings are fields; a lone frame or a small run is a stray."""
+    several = (
+        [(0.0, 0.0)] * 3
+        + [(1000.0, 0.0)] * 3
+        + [(0.0, 1000.0)] * 3
+        + [(1000.0, 1000.0)] * 2
+        + [(3000.0, 3000.0)]
+    )
+    fields = frame_quarantine.find_pointing_fields(several, 300.0)
+    assert len(fields) == 4
+
+    stray_run = [(0.0, 0.0)] * 111 + [(720.0, 0.0)] * 12
+    assert frame_quarantine.find_pointing_fields(stray_run, 300.0) == [(0.0, 0.0)]

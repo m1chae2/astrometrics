@@ -12,7 +12,7 @@ Terms are defined in the [glossary](../../../documentation/Glossary.md). This do
 - *Pixel rejection* means throwing out a pixel's value in one frame when it disagrees strongly with the same pixel's values in the other frames, before averaging.
 - *Siril* is the external image-processing program that this pipeline uses to calibrate, register and combine frames. *FITS* is the standard astronomy image file format. *CMOS* is the type of image sensor in the cameras used here.
 - The *gain setting* is the camera's amplifier setting, a unitless number stored in the FITS `GAIN` card. (Elsewhere, "gain" in e-/ADU means the number of electrons that make one raw count; this README does not use that meaning.) *Offset* is a constant the camera adds to every pixel so that noise below zero is still recorded. *Binning* combines blocks of neighboring pixels (for example 2 by 2) into one larger pixel.
-- A *session* is the set of frames of one camera, filter and exposure length taken less than 4 h apart. The quarantine step judges each session on its own.
+- A *session* is the set of frames of one camera, optic, filter, exposure length and gain taken less than 4 h apart. The quarantine step judges each session on its own.
 - A *spectral frame* is a frame taken through a grating, which spreads each star into a spectrum trail of colors. The trail is the spectrum, so the pipeline treats these frames differently from imaging frames.
 - The *zero-order star* is the plain, undispersed image of the star that a slitless spectrum frame records beside its spectrum.
 - A pixel is *saturated* when it has reached the highest value the camera can record, so its true brightness is lost.
@@ -45,12 +45,14 @@ A frame that disagrees with the others is excluded rather than stacked. The pipe
 
 **What it does.** It compares each frame with the other frames of its own session. It moves a frame when:
 
-- it has fewer stars than half the session's median star count (cloud, or heavy trailing); or
-- its stars are more elongated than the session's. Elongation is a star's long width divided by its short width, 1.0 for a circle, taken from the stored `frame.star_elongation`. The step moves the frame when elongation is above 1.32 and at least 0.22 above the session median (also 0.22 for a color camera);
-- its sky is uneven across the frame (thin cloud): the sky in a 4 by 4 grid differs from the session's usual pattern by 5 robust spreads and at least 0.01; or
-- its center lies more than 0.10 of the frame width from the session's main field. A frame turned half a revolution by a meridian flip that points at the same field is not off the field.
+- it has fewer stars, or dimmer bright stars, than half the typical value (cloud, fog or heavy trailing). The typical value is the larger of the session median and a reference: the median of the target's other sessions taken the same way, or, when there are none, the session's clearest quarter. A session fogged for most of its frames therefore cannot lower its own limit;
+- its stars are more elongated than the session's. Elongation is a star's long width divided by its short width, 1.0 for a circle, taken from the stored `frame.star_elongation`. The step moves the frame when elongation is above 1.32 and at least 0.12 above the session median (0.22 for a color camera);
+- its sky is uneven across the frame and its stars suffer too (cloud): the sky in a 4 by 4 grid differs from the session's usual pattern by 5 robust spreads and at least 0.01, and the star transparency (the geometric mean of the star count and the bright-star flux, each as a share of the session median) is below 0.83. The session's unevenness limit is lowered to its sister sessions' limit, so a long stretch of glow cannot widen it. An uneven sky with normal stars (a gradient, a glow or a tree in a corner) is kept and flagged "uneven sky (gradient or obstruction)"; or
+- its center lies more than 0.10 of the frame width from every field of the session. The matched frame centers are grouped; a group of at least 2 frames and 15% of the session is a field, so a session shot at several pointings keeps each of them, and only strays are set aside. A frame turned half a revolution by a meridian flip that points at the same field is not off the field.
 
-Each moved frame gets a plain reason in `excluded_frames.json`: the rule, the frame's value and the limit.
+A session is the frames of one capture setting (camera, optic, filter, exposure and gain), so every gain is judged against its own frames.
+
+Each moved frame gets a plain reason in `excluded_frames.json`: the rule, the frame's value and the limit. A flagged frame's stored quality rows carry its reason as their action taken, and the quarantine preview lists it under `flagged`.
 
 These limits are partly measured (see [STK-01](../../../documentation/library_design/validation/stacking.md#stk-01) and, for color cameras, [STK-02](../../../documentation/library_design/validation/stacking.md#stk-02)). The session gap of 4 h is a design estimate (see [stacking design estimates](../../../documentation/library_design/validation/stacking.md#design-estimates)).
 

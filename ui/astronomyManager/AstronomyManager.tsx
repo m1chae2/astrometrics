@@ -163,11 +163,13 @@ export const AstronomyManager: React.FC = () => {
     handedOffStarRef.current = null;
     const targetIds: string[] = Array.isArray(astronomyData.targetIds) ? astronomyData.targetIds : [];
     const chosen = chooseTargetForStar(targetIds, selectedTarget, handedOff.targetId);
+    // The new target would otherwise pick its own default star over the one that was asked for.
+    if (chosen) starsByTarget.rememberPickedStar(chosen, handedOff.starId);
     if (chosen && chosen !== selectedTarget) {
       setNavigationMode('target');
       setSelectedTarget(chosen);
     }
-  }, [astronomyData, selectedTarget]);
+  }, [astronomyData, selectedTarget, starsByTarget]);
 
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);

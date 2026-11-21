@@ -1351,6 +1351,58 @@
   font-size: var(--section-label-size);
 }
 
+/* Calibration block (Data tab): missing frames first, all groups on request. */
+.calibration-report__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.calibration-report__note,
+.calibration-report__subheading {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.calibration-report__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calibration-report__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.calibration-report__settings {
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
+}
+
+.calibration-report__table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.calibration-report__table th,
+.calibration-report__table td {
+  padding: 2px var(--space-2);
+  border-top: 1px solid var(--grey-medium, var(--text-darkest));
+  font-weight: normal;
+  vertical-align: middle;
+}
+
+.calibration-report__table thead th {
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
+}
+
 /* The "Make the picture again" disclosure in the Stack Summary block. */
 .preview-remake {
   display: flex;

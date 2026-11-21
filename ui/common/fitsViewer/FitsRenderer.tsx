@@ -512,10 +512,16 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     zoomToScale: (v: number) => zoomToScale(v)
   }));
 
-  // React to autoPanTrigger
+  // Fit again only when the trigger itself changes. The reset function changes whenever the drawn
+  // size does (a new display stretch draws the picture at another size), and that must not refit.
+  const resetViewRef = useRef(resetView);
+  resetViewRef.current = resetView;
+  const lastAutoPanTriggerRef = useRef(autoPanTrigger);
   useEffect(() => {
-    if (autoPanTrigger) resetView();
-  }, [autoPanTrigger, resetView]);
+    if (lastAutoPanTriggerRef.current === autoPanTrigger) return;
+    lastAutoPanTriggerRef.current = autoPanTrigger;
+    if (autoPanTrigger) resetViewRef.current();
+  }, [autoPanTrigger]);
 
   // The astrometry stars are placed on the picture as the backend drew it; a turned picture turns them with it.
   const overlayStars = React.useMemo(() => {

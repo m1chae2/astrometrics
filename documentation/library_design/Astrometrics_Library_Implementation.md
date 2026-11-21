@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers, model classes, pipeline modules, and the scripts and tests that check them. It lists each pipeline's tuned values with status labels.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the code and the tests that check it. It lists each pipeline's tuned values with status labels.
 
 The [glossary](../Glossary.md) defines the terms; this document defines each at first use.
 
@@ -140,7 +140,8 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frames and targets.** `frame_grouping.py`, `frame_scanning.py`, `target_records.py`, `target_sessions.py`.
 - **Images, stars and state.** `image_conversions.py`, `star_recording.py`, `catalog_star_identity.py`, `session_identification.py`, `analysis_context.py`.
 - **Recording.** `provenance_recording.py`, `applied_camera_profile.py`, `quality/notices.py` ([STK-58](validation/stacking.md#stk-58)). <!-- impl: astrometricslib.pipelines.shared.quality.notices.notice_measurement -->
-- **Quality primitives.** `quality/` (`saturation.py`, `raw_frame_check.py`, `frame_measurement.py`; the shared README lists the rest).
+- **Quality primitives.** `quality/` (`saturation.py`, `raw_frame_check.py`, `frame_measurement.py`).
+- **Star card shape.** `measure_single_star_shape` is the frame fit for one star; round is at most `TRAILED_ELONGATION_LIMIT` ([AST-17](validation/astrometry.md#ast-17)). <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.measure_single_star_shape -->
 
 ### 4.7 Drivers and pixel-level primitives
 
@@ -150,7 +151,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Siril.** `siril_stacking_driver.py`, `siril_interface/`.
 - **Catalogs and services.** `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`.
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `catalog_access.py`.
-- **Images.** `fits_access.py`, `image.py`. The drivers README lists the rest.
+- **Images.** `fits_access.py`, `image.py`.
 
 `catalog_access.py` uses the Butler (Section 4.8) [9], not SQL.
 

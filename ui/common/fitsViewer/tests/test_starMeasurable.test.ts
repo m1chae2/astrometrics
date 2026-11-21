@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { StarProfileMeasurement } from '../../types/backendTypes';
-import { buildMeasurableRows } from '../utils/starMeasurable';
+import { buildMeasurableRows, describeRoundness } from '../utils/starMeasurable';
 
 /**
  * Builds a measurement of a good, round, isolated star in the middle of a frame.
@@ -28,6 +28,10 @@ function goodStar(overrides: Partial<StarProfileMeasurement> = {}): StarProfileM
     sky_outer_px: 12,
     circle_neighbor_count: 0,
     sky_ring_neighbor_count: 0,
+    star_elongation: 1.08,
+    star_elongation_angle_deg: 20,
+    star_shape_judgeable: true,
+    trailing_elongation_limit: 1.32,
     ...overrides,
   } as StarProfileMeasurement;
 }
@@ -42,9 +46,9 @@ function goodStar(overrides: Partial<StarProfileMeasurement> = {}): StarProfileM
 const rowOf = (rows: ReturnType<typeof buildMeasurableRows>, id: string) => rows.find((row) => row.id === id);
 
 describe('buildMeasurableRows', () => {
-  it('says yes to every check for a good star and leaves out the edge and shape rows', () => {
+  it('says yes to every check for a good star and leaves out the edge row', () => {
     const rows = buildMeasurableRows(goodStar(), 3.0);
-    expect(rows.map((row) => row.id)).toEqual(['width', 'saturation', 'signal', 'neighbors']);
+    expect(rows.map((row) => row.id)).toEqual(['width', 'saturation', 'signal', 'neighbors', 'shape']);
     expect(rows.every((row) => row.ok)).toBe(true);
   });
 
@@ -66,11 +70,26 @@ describe('buildMeasurableRows', () => {
     expect(rowOf(rows, 'edge')?.value).toContain('5 px from the edge');
   });
 
-  it('adds a shape row only for a noticeably oval star or something that is not a single star', () => {
-    const oval = { order: 2, amplitude: 0.2, amplitude_error: 0.01, amplitude_debiased: 0.19, significance: 19, significant: true, direction_degrees: 10 };
-    expect(rowOf(buildMeasurableRows(goodStar({ ring_harmonics: [oval] }), 3.0), 'shape')?.value).toBe('oval by 19%');
-    const faint = { ...oval, amplitude_debiased: 0.02 };
-    expect(rowOf(buildMeasurableRows(goodStar({ ring_harmonics: [faint] }), 3.0), 'shape')).toBeUndefined();
+  it('judges roundness by the core elongation against the trailing limit, not by the ring', () => {
+    const oval = { order: 2, amplitude: 1.8, amplitude_error: 0.01, amplitude_debiased: 1.8, significance: 19, significant: true, direction_degrees: 10 };
+    const round = rowOf(buildMeasurableRows(goodStar({ ring_harmonics: [oval] }), 3.0), 'shape');
+    expect(round?.ok).toBe(true);
+    expect(round?.value).toBe('elongation 1.08');
+    const stretched = rowOf(buildMeasurableRows(goodStar({ star_elongation: 1.5, star_elongation_angle_deg: 35 }), 3.0), 'shape');
+    expect(stretched?.ok).toBe(false);
+    expect(stretched?.value).toBe('elongation 1.50, long axis at 35° from x toward y');
+  });
+
+  it('gives no verdict when the shape cannot be judged, and says so for something that is not a single star', () => {
+    const faint = rowOf(buildMeasurableRows(goodStar({ star_elongation: null, star_shape_judgeable: false }), 3.0), 'shape');
+    expect(faint?.unknown).toBe(true);
+    expect(faint?.value).toBe('too faint to judge shape');
     expect(rowOf(buildMeasurableRows(goodStar({ star_found: false, not_a_star_reason: 'Too flat.' }), 3.0), 'shape')?.detail).toBe('Too flat.');
+  });
+
+  it('writes the stat strip text from the elongation only when it is judgeable', () => {
+    expect(describeRoundness(goodStar())).toBe('Elong 1.08');
+    expect(describeRoundness(goodStar({ star_shape_judgeable: false, star_elongation: null }))).toBeNull();
+    expect(describeRoundness(goodStar({ star_found: false }))).toBeNull();
   });
 });

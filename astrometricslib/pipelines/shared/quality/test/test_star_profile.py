@@ -310,3 +310,72 @@ def test_surroundings_count_neighbors_in_circle_and_sky_ring(tmp_path: Path) -> 
     assert result.sky_ring_neighbor_count == 1
     alone = measure_star_profile_in_file(path, 51.0, 51.0)
     assert alone.circle_neighbor_count == 0
+
+
+def _write_stretched_star(
+    tmp_path: Path, peak: float, sigma_long: float, sigma_short: float, angle_deg: float
+) -> str:
+    """Write one stretched Gaussian star on a noisy sky.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder for the file.
+    peak : `float`
+        The peak above the sky.
+    sigma_long, sigma_short : `float`
+        The widths along and across the long axis, in pixels.
+    angle_deg : `float`
+        The long axis, from the x axis toward the y axis.
+
+    Returns
+    -------
+    path : `str`
+        The file.
+    """
+    rng = np.random.default_rng(5)
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    cosine, sine = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+    along = (columns - 50.3) * cosine + (rows - 49.8) * sine
+    across = -(columns - 50.3) * sine + (rows - 49.8) * cosine
+    image = SKY + rng.normal(0.0, 2.0, (SIZE, SIZE))
+    image += peak * np.exp(-(along**2 / (2 * sigma_long**2) + across**2 / (2 * sigma_short**2)))
+    path = tmp_path / "stretched.fits"
+    fits.PrimaryHDU(image.astype(np.float32)).writeto(path)
+    return str(path)
+
+
+def test_round_star_core_shape_is_round(tmp_path: Path) -> None:
+    """A round star reads an elongation near 1 and is judgeable."""
+    path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.star_shape_judgeable
+    assert result.star_shape_note is None
+    assert result.star_elongation == pytest.approx(1.0, abs=0.03)
+
+
+def test_stretched_star_gives_its_ratio_and_angle(tmp_path: Path) -> None:
+    """A star stretched 4:3 at 30 degrees reads about 1.33 along 30 degrees."""
+    path = _write_stretched_star(tmp_path, 3000.0, 2.4, 1.8, 30.0)
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.star_shape_judgeable
+    assert result.star_elongation == pytest.approx(2.4 / 1.8, abs=0.06)
+    assert result.star_elongation_angle_deg == pytest.approx(30.0, abs=4.0)
+
+
+def test_faint_star_shape_is_not_judgeable(tmp_path: Path) -> None:
+    """A star barely above the noise gives no elongation and says why."""
+    path = _write(tmp_path, [(50.0, 50.0, 8.0, 1.8)])
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert not result.star_shape_judgeable
+    assert result.star_elongation is None
+    assert result.star_elongation_angle_deg is None
+    assert result.star_shape_note is not None
+
+
+def test_star_at_the_edge_is_not_judgeable(tmp_path: Path) -> None:
+    """A star whose fit box leaves the image is not judged."""
+    path = _write(tmp_path, [(6.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 7.0, 51.0)
+    assert not result.star_shape_judgeable
+    assert "edge" in (result.star_shape_note or "")

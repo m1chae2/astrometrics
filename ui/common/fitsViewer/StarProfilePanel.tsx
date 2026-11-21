@@ -450,7 +450,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
             data-testid="star-profile-plots"
           >
             <div className="star-profile__plot-heading">
-              <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Ring brightness by direction'}</span>
+              <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Light around the star by direction'}</span>
               <span className="star-profile__plot-tools">
                 <Button size="small" pressed={logScale} variant={logScale ? 'default' : 'secondary'} title={LOG_SCALE_TOOLTIP} onClick={() => setLogScale(!logScale)}>
                   Log scale
@@ -459,7 +459,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
                   size="small"
                   variant="secondary"
                   aria-expanded={opticsOpen}
-                  title="The ring of light around the star, for checking tracking and focus."
+                  title="The light around the star by direction, for spikes, close pairs and halos. Roundness is in the list above."
                   onClick={() => setOpticsOpen(!opticsOpen)}
                   data-testid="star-profile-optics-toggle"
                 >

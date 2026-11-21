@@ -41,6 +41,11 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
+    MOFFAT_FIT_BOX_HALF_WIDTH_PX,
+    STAR_FINDER_THRESHOLD_SIGMA,
+    measure_single_star_shape,
+)
 from astrometricslib.pipelines.shared.quality.star_ring import (
     STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE,
     STAR_RING_TARGET_MATCH_RADIUS_PX,
@@ -503,6 +508,74 @@ def _judge_star(peak: float, sky_noise: float, moffat: ProfileFit) -> tuple[bool
     return True, None
 
 
+def _judge_core_shape(
+    data: np.ndarray,
+    center_column: float,
+    center_row: float,
+    signal_to_noise: float,
+    clipped: bool,
+    star_found: bool,
+    circle_neighbor_count: int,
+) -> tuple[float | None, float | None, bool, str | None]:
+    """Measure the star's core shape the way the frame measurement does.
+
+    The shape comes from `measure_single_star_shape`, the one-star form of
+    the estimator behind `frame.star_elongation`. It is judgeable only when
+    the frame measurement would accept the star: peak at least the star
+    finder's detection floor (`STAR_FINDER_THRESHOLD_SIGMA`) above the sky
+    noise, no clipped core, no bright neighbor in the star circle, a fit box
+    that lies inside the image, and a Moffat fit that the frame measurement's
+    own limits accept.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The image.
+    center_column, center_row : `float`
+        The star's center, 0-based.
+    signal_to_noise : `float`
+        The peak above the sky divided by the sky noise.
+    clipped : `bool`
+        Whether the peak looks clipped.
+    star_found : `bool`
+        Whether the profile looks like a star.
+    circle_neighbor_count : `int`
+        How many bright neighbors crowd the star circle.
+
+    Returns
+    -------
+    elongation : `float` or `None`
+        Long axis divided by short axis, or `None` when not judgeable.
+    angle_deg : `float` or `None`
+        Direction of the long axis, from +x (columns) toward +y (rows), 0 up
+        to 180 degrees, or `None` when not judgeable.
+    judgeable : `bool`
+        Whether the shape can be trusted.
+    note : `str` or `None`
+        The reason when it cannot, else `None`.
+    """
+    if not star_found:
+        return None, None, False, "this does not look like a single star"
+    if signal_to_noise < float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value):  # type: ignore[arg-type]
+        return None, None, False, "too faint to judge the shape"
+    if clipped:
+        return None, None, False, "the core is clipped"
+    if circle_neighbor_count > 0:
+        return None, None, False, "a bright neighbor is too close"
+    half = int(resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value)  # type: ignore[arg-type]
+    column, row = round(center_column), round(center_row)
+    height, width = data.shape
+    if column - half < 0 or row - half < 0 or column + half >= width or row + half >= height:
+        return None, None, False, "too close to the image edge to judge the shape"
+    box = data[row - half : row + half + 1, column - half : column + half + 1]
+    if not np.isfinite(box).all():
+        return None, None, False, "the image has gaps around the star"
+    shape = measure_single_star_shape(box)
+    if shape is None:
+        return None, None, False, "too faint or crowded to judge the shape"
+    return shape.elongation, shape.angle_deg, True, None
+
+
 def _survey_surroundings(
     data: np.ndarray,
     center: tuple[float, float],
@@ -789,6 +862,16 @@ def measure_star_profile_in_file(
         data, (center_column, center_row), float(sky_noise), peak, find_neighbors, photometry_geometry
     )
 
+    elongation, elongation_angle, shape_judgeable, shape_note = _judge_core_shape(
+        data,
+        center_column,
+        center_row,
+        float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
+        bool(clipped),
+        star_found,
+        int(surroundings["circle_neighbor_count"]),
+    )
+
     return StarProfileMeasurement(
         path=path,
         color_note=color_note,
@@ -837,5 +920,9 @@ def measure_star_profile_in_file(
         ring_masked_fraction=ring.masked_fraction,
         ring_note=ring.note,
         signal_to_noise=float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
+        star_elongation=elongation,
+        star_elongation_angle_deg=elongation_angle,
+        star_shape_judgeable=shape_judgeable,
+        star_shape_note=shape_note,
         **surroundings,  # type: ignore[arg-type]
     )

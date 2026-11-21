@@ -15,15 +15,14 @@ export const WIDTH_TYPICAL_RANGE = { low: 0.7, high: 1.5 } as const;
 /** The share of the sky ring that must lie on the image before the edge is not a concern. */
 export const GOOD_COVERAGE_FRACTION = 0.95;
 
-/** An oval term of the ring is worth showing when it is at least this share of the ring's mean brightness. */
-export const NOTICEABLE_OVAL_AMPLITUDE = 0.05;
-
 /** One line of the list. */
 export interface MeasurableRow {
   /** A stable name, used for test ids. */
   id: 'width' | 'saturation' | 'signal' | 'neighbors' | 'edge' | 'shape';
   /** True when the star is fine for this check. */
   ok: boolean;
+  /** True when the check cannot be made (shown as a neutral chip, with no Yes or No). */
+  unknown?: boolean;
   /** The question, for example "Width". */
   label: string;
   /** The value, for example "3.1 px, typical 3.0 px". */
@@ -58,12 +57,49 @@ function neighborWords(count: number): string {
  * Says how round the star is, for the stat strip.
  *
  * @param measurement The backend's answer.
- * @returns "Round", "Oval 29%", or null when the star was not found.
+ * @returns For example "Elong 1.08", or null when the star was not found or its shape cannot be judged.
  */
 export function describeRoundness(measurement: StarProfileMeasurement): string | null {
-  if (!measurement.star_found) return null;
-  const oval = measurement.ring_harmonics.find((term) => term.order === 2 && term.significant && term.amplitude_debiased >= NOTICEABLE_OVAL_AMPLITUDE);
-  return oval ? `Oval ${(oval.amplitude_debiased * 100).toFixed(0)}%` : 'Round';
+  const elongation = measurement.star_elongation;
+  if (!measurement.star_found || !measurement.star_shape_judgeable || elongation === null || elongation === undefined) return null;
+  return `Elong ${elongation.toFixed(2)}`;
+}
+
+/**
+ * Builds the "Round" row from the star's core elongation.
+ *
+ * @param measurement The backend's answer, for a star that was found.
+ * @returns The row. It has no Yes or No when the shape cannot be judged.
+ */
+function buildRoundRow(measurement: StarProfileMeasurement): MeasurableRow {
+  const elongation = measurement.star_elongation;
+  if (!measurement.star_shape_judgeable || elongation === null || elongation === undefined) {
+    return {
+      id: 'shape',
+      ok: true,
+      unknown: true,
+      label: 'Round',
+      value: 'too faint to judge shape',
+      detail: measurement.star_shape_note
+        ? `The shape was not judged: ${measurement.star_shape_note}.`
+        : 'The star is too faint for its shape to be judged.',
+    };
+  }
+  const limit = measurement.trailing_elongation_limit;
+  const hasLimit = limit !== null && limit !== undefined;
+  const round = !hasLimit || elongation <= limit;
+  const angle = measurement.star_elongation_angle_deg;
+  const direction = !round && angle !== null && angle !== undefined ? `, long axis at ${angle.toFixed(0)}° from x toward y` : '';
+  return {
+    id: 'shape',
+    ok: round,
+    unknown: !hasLimit,
+    label: 'Round',
+    value: `elongation ${elongation.toFixed(2)}${direction}`,
+    detail: hasLimit
+      ? `Elongation is the long width of the star divided by its short width, 1 for a circle. Stacking sets a frame aside as trailed above ${limit.toFixed(2)}.`
+      : 'Elongation is the long width of the star divided by its short width, 1 for a circle.',
+  };
 }
 
 /**
@@ -71,7 +107,7 @@ export function describeRoundness(measurement: StarProfileMeasurement): string |
  *
  * @param measurement The backend's answer for the star.
  * @param frameWidthPx The typical star width of the frame, in pixels, or null when it is not known.
- * @returns The rows, in reading order. The edge and shape rows appear only when they apply.
+ * @returns The rows, in reading order. The edge row appears only when it applies.
  */
 export function buildMeasurableRows(measurement: StarProfileMeasurement, frameWidthPx: number | null): MeasurableRow[] {
   const rows: MeasurableRow[] = [];
@@ -145,16 +181,7 @@ export function buildMeasurableRows(measurement: StarProfileMeasurement, frameWi
   if (!measurement.star_found) {
     rows.push({ id: 'shape', ok: false, label: 'Single star', value: 'no', detail: measurement.not_a_star_reason ?? 'This does not look like a single star.' });
   } else {
-    const oval = measurement.ring_harmonics.find((term) => term.order === 2 && term.significant && term.amplitude_debiased >= NOTICEABLE_OVAL_AMPLITUDE);
-    if (oval) {
-      rows.push({
-        id: 'shape',
-        ok: false,
-        label: 'Round',
-        value: `oval by ${(oval.amplitude_debiased * 100).toFixed(0)}%`,
-        detail: 'The light around the star is stretched along one direction, for example by tracking drift or a close pair.',
-      });
-    }
+    rows.push(buildRoundRow(measurement));
   }
   return rows;
 }

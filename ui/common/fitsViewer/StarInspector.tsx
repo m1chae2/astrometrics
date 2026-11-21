@@ -112,14 +112,14 @@ export const StarInspector: React.FC<StarInspectorProps> = ({
         {measurement.star_found && signalToNoise !== undefined && signalToNoise !== null && (
           <span className="star-profile__stat" title="Peak brightness divided by the sky noise">{`S/N ${signalToNoise.toFixed(0)}`}</span>
         )}
-        {roundness && <span className="star-profile__stat" title="How round the light around the star is">{roundness}</span>}
+        {roundness && <span className="star-profile__stat" title="Elongation of the star core: its long width divided by its short width, 1 for a circle">{roundness}</span>}
       </div>
       <div className="star-profile__measurable" data-testid="star-profile-measurable">
         <span className="star-profile__caption">Measurable here?</span>
         <ul className="star-profile__rows">
           {rows.map((row) => (
             <li key={row.id} className="star-profile__row" title={row.detail} data-testid={`star-profile-row-${row.id}`}>
-              <StatusChip compact status={row.ok ? 'ok' : 'warning'} label={row.ok ? 'Yes' : 'No'} />
+              <StatusChip compact status={row.unknown ? 'neutral' : row.ok ? 'ok' : 'warning'} label={row.unknown ? 'Not known' : row.ok ? 'Yes' : 'No'} />
               <span className="star-profile__row-label">{row.label}</span>
               <span className="star-profile__row-value">{row.value}</span>
             </li>

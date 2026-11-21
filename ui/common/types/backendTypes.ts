@@ -3175,6 +3175,25 @@ export interface DetectionsMeasurement {
  * How many bright neighbors crowd the photometry circle.
  * sky_ring_neighbor_count : `int`
  * How many neighbors lie in the photometry sky ring.
+ * star_elongation : `float` or `None`
+ * The star's core elongation, long axis divided by short axis (1 is
+ * round), from the second moments of its light. It is the one-star form
+ * of the estimator that makes the frame's `frame.star_elongation`. `None`
+ * when ``star_shape_judgeable`` is `False`.
+ * star_elongation_angle_deg : `float` or `None`
+ * The direction of the long axis, from 0 up to but not including 180
+ * degrees, measured from the image x axis (increasing column) toward the
+ * image y axis (increasing row). It is set by noise for a round star.
+ * `None` when the shape is not judgeable.
+ * star_shape_judgeable : `bool`
+ * `True` when the frame measurement would accept this star: bright
+ * enough, not clipped, no close neighbor, inside the image, and a
+ * Moffat fit within its limits.
+ * star_shape_note : `str` or `None`
+ * The reason the shape is not judgeable, or `None`.
+ * trailing_elongation_limit : `float` or `None`
+ * The elongation above which stacking sets a frame aside as trailed.
+ * The library fills it in; `None` when it is not known.
  */
 export interface StarProfileMeasurement {
   path: string;
@@ -3231,6 +3250,11 @@ export interface StarProfileMeasurement {
   sky_outer_px?: number;
   circle_neighbor_count?: number;
   sky_ring_neighbor_count?: number;
+  star_elongation?: number | null;
+  star_elongation_angle_deg?: number | null;
+  star_shape_judgeable?: boolean;
+  star_shape_note?: string | null;
+  trailing_elongation_limit?: number | null;
 }
 
 /**

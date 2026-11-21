@@ -211,6 +211,11 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
     sky_outer_px: 12,
     circle_neighbor_count: 0,
     sky_ring_neighbor_count: 0,
+    star_elongation: 1.08,
+    star_elongation_angle_deg: 20,
+    star_shape_judgeable: true,
+    star_shape_note: null,
+    trailing_elongation_limit: 1.32,
     ...overrides,
   };
 }
@@ -1096,9 +1101,35 @@ describe('the star inspector card', () => {
     expect(screen.getByTestId('star-profile-row-width').textContent).toContain('Yes');
     expect(screen.getByTestId('star-profile-row-signal').textContent).toContain('No');
     expect(screen.getByTestId('star-profile-row-neighbors').textContent).toContain('1 neighbor in the star circle');
-    // No edge row and no shape row for a round star in the middle of the frame.
+    // No edge row for a star in the middle of the frame, and a Round row from the star's elongation.
     expect(screen.queryByTestId('star-profile-row-edge')).toBeNull();
-    expect(screen.queryByTestId('star-profile-row-shape')).toBeNull();
+    expect(screen.getByTestId('star-profile-row-shape').textContent).toContain('Round');
+    expect(screen.getByTestId('star-profile-row-shape').textContent).toContain('elongation 1.08');
+    expect(screen.getByTestId('star-profile-row-shape').textContent).toContain('Yes');
+    expect(screen.getByTestId('star-profile-stats').textContent).toContain('Elong 1.08');
+  });
+
+  it('says Round: No with the long-axis direction for a stretched star, and gives no verdict for a faint one', () => {
+    const { unmount } = render(
+      <StarProfilePanel
+        state={{ status: 'ready', anchor, measurement: makeMeasurement({ star_elongation: 1.5, star_elongation_angle_deg: 35 }) }}
+        cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
+      />
+    );
+    const stretched = screen.getByTestId('star-profile-row-shape').textContent ?? '';
+    expect(stretched).toContain('No');
+    expect(stretched).toContain('elongation 1.50, long axis at 35°');
+    unmount();
+    render(
+      <StarProfilePanel
+        state={{ status: 'ready', anchor, measurement: makeMeasurement({ star_elongation: null, star_elongation_angle_deg: null, star_shape_judgeable: false, star_shape_note: 'too faint to judge the shape' }) }}
+        cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
+      />
+    );
+    const faint = screen.getByTestId('star-profile-row-shape').textContent ?? '';
+    expect(faint).toContain('too faint to judge shape');
+    expect(faint).not.toContain('Yes');
+    expect(screen.getByTestId('star-profile-stats').textContent).not.toContain('Elong');
   });
 
   it('opens the ring view behind the Optics detail link and closes it again', () => {

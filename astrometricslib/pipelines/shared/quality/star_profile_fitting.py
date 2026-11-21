@@ -784,6 +784,59 @@ def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float,
     return elongation, (variance_x - variance_y) / trace, 2.0 * covariance / trace
 
 
+@dataclass(frozen=True)
+class SingleStarShape:
+    """The elongation and stretch direction of one star.
+
+    Attributes
+    ----------
+    elongation : `float`
+        Long axis divided by short axis of the star's second moments, at least
+        1 (1 is round). The same number the frame's median elongation
+        (`frame.star_elongation`) is made from.
+    angle_deg : `float`
+        The direction of the long axis, from 0 up to but not including 180
+        degrees, measured from the x axis (increasing column) toward the y axis
+        (increasing row) of the array. A round star's angle is set by noise.
+    """
+
+    elongation: float
+    angle_deg: float
+
+
+def measure_single_star_shape(cutout: np.ndarray) -> SingleStarShape | None:
+    """Measure the shape of one star with the frame measurement's estimator.
+
+    The star is fitted with the pixel-integrated elliptical Moffat profile
+    (`_fit_moffat`, free power index, the same acceptance limits as for a
+    frame's stars), and `_measure_second_moments` takes the shape from the
+    light inside the fitted ellipse. A frame's elongation is the median of
+    this value over its stars, so this is the same measurement for one star.
+
+    Parameters
+    ----------
+    cutout : `numpy.ndarray`
+        A square box of raw pixels (sky not subtracted) with the star near its
+        center. Its side is odd. The usual side is
+        ``2 * MOFFAT_FIT_BOX_HALF_WIDTH_PX + 1``.
+
+    Returns
+    -------
+    shape : `SingleStarShape` or `None`
+        The shape, or `None` when the fit was refused (too faint, too wide,
+        a neighbor in the box, the center moved too far) or the moments could
+        not be taken.
+    """
+    fit = _fit_moffat(cutout, _subpixel_grid(cutout.shape[0]), fixed_beta=None)
+    if fit is None:
+        return None
+    moments = _measure_second_moments(cutout, fit)
+    if moments is None:
+        return None
+    angle_deg, _ = _mean_ellipticity_angle(np.array([moments[1]]), np.array([moments[2]]))
+    return SingleStarShape(elongation=float(moments[0]), angle_deg=float(angle_deg))
+
+
 def _mean_ellipticity_angle(
     first_components: np.ndarray, second_components: np.ndarray
 ) -> tuple[float, float]:

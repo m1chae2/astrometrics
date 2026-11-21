@@ -1128,6 +1128,13 @@ class QualityRecords:
             ``edge_distance_px``, ``coverage_fraction``, the photometry
             circle and sky ring radii, ``circle_neighbor_count`` and
             ``sky_ring_neighbor_count`` say whether the star is measurable.
+            The core shape is ``star_elongation`` (long axis divided by
+            short axis, from the same second-moment estimator as the frame's
+            ``frame.star_elongation``), ``star_elongation_angle_deg``
+            (the long axis, from +x toward +y, 0 up to 180),
+            ``star_shape_judgeable`` with ``star_shape_note`` when it
+            is not, and ``trailing_elongation_limit`` (the stacking
+            limit for a trailed frame).
 
         """
         from astrometricslib.foundation.parameters import resolve
@@ -1143,6 +1150,9 @@ class QualityRecords:
             PhotometryGeometry,
             measure_star_profile_in_file,
         )
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            TRAILED_ELONGATION_LIMIT,
+        )
 
         geometry = PhotometryGeometry(
             aperture_radius_px=float(resolve(APERTURE_RADIUS_PX).value),  # type: ignore[arg-type]
@@ -1151,7 +1161,7 @@ class QualityRecords:
             crowding_margin_px=float(resolve(CROWDING_MARGIN_PX).value),  # type: ignore[arg-type]
             crowding_neighbor_peak_fraction=float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value),  # type: ignore[arg-type]
         )
-        return measure_star_profile_in_file(
+        measurement = measure_star_profile_in_file(
             path,
             x,
             y,
@@ -1162,6 +1172,8 @@ class QualityRecords:
             find_neighbors=find_star_centers,
             photometry_geometry=geometry,
         )
+        measurement.trailing_elongation_limit = float(resolve(TRAILED_ELONGATION_LIMIT).value)
+        return measurement
 
     def measure_detections(self, path: str) -> DetectionsMeasurement:
         """List the stars the astrometry run's star finder detects in an image.

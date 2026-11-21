@@ -75,6 +75,9 @@ class QuarantinePreview(BaseModel):
     notes: list[str] = Field(default_factory=list)
     # Frames that could not be measured. They would stay where they are.
     unreadable: list[str] = Field(default_factory=list)
+    # Frames the check would keep but flag, such as an uneven sky with normal
+    # stars (a gradient or an obstruction); ``kind`` is "kept".
+    flagged: list[SetAsideFrame] = Field(default_factory=list)
 
 
 class RestoreReport(BaseModel):

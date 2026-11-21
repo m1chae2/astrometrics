@@ -793,8 +793,10 @@ def detect_stars(
     Returns
     -------
     stars : `numpy.ndarray`
-        Rows of ``[y, x, sigma_x, sigma_y]`` for the brightest stars with a
-        measurable shape, centroids in pixels.
+        Rows of ``[y, x, sigma_x, sigma_y, flux]`` for the brightest stars
+        with a measurable shape: centroids and widths in pixels, and the
+        flux, the sum of the background-subtracted pixels in the star's box
+        (ADU).
     blob_count : `int`
         Number of connected bright regions found (a count of stars that
         collapses when stars trail).
@@ -839,9 +841,9 @@ def detect_stars(
         centre_y, centre_x = (patch * yy).sum() / total, (patch * xx).sum() / total
         sigma_y = np.sqrt((patch * (yy - centre_y) ** 2).sum() / total)
         sigma_x = np.sqrt((patch * (xx - centre_x) ** 2).sum() / total)
-        rows.append([y + centre_y, x + centre_x, sigma_x, sigma_y])
+        rows.append([y + centre_y, x + centre_x, sigma_x, sigma_y, total])
     trail = _detect_straight_trail(residual, smooth, noise, trail_min_diagonal_fraction)
-    return np.array(rows).reshape(-1, 4), int(blob_count), longest_blob, trail
+    return np.array(rows).reshape(-1, 5), int(blob_count), longest_blob, trail
 
 
 def _match_shift(previous_stars: np.ndarray, stars: np.ndarray) -> tuple[tuple[float, float] | None, int]:
@@ -953,7 +955,10 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
         from), ``camera`` (the header's ``INSTRUME`` text, or `None`),
         ``colour_camera`` (`True` if the header has a ``BAYERPAT`` pattern,
         the test `fits_access.frame_uses_color_filter_array` makes),
-        ``width_px`` and ``height_px``, ``sky_grid_adu`` (the sky level in
+        ``width_px`` and ``height_px``, ``bright_star_flux_adu`` (the
+        median flux of the brightest stars, up to `MAXIMUM_STARS_MEASURED` of
+        them, `None` if none could be measured; thin cloud dims it even when
+        the stars are still found), ``sky_grid_adu`` (the sky level in
         each box of a grid, see `measure_sky_grid`, as nested lists), and the
         private ``_stars`` array used for matching.
     """
@@ -967,8 +972,10 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
     stars, blob_count, longest_blob, straight_trail = detect_stars(image, trail_min_diagonal_fraction)
     threshold_adu, threshold_source = resolve_saturation_threshold(camera)
     fwhm = None
+    bright_star_flux = None
     if len(stars):
         fwhm = float(2.355 * np.median(np.sqrt(stars[:, 2] * stars[:, 3])))
+        bright_star_flux = float(np.median(stars[:, 4]))
     return {
         "path": path,
         "camera": camera,
@@ -984,6 +991,7 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
         "saturation_threshold_source": threshold_source,
         "width_px": int(image.shape[1]),
         "height_px": int(image.shape[0]),
+        "bright_star_flux_adu": bright_star_flux,
         "sky_grid_adu": measure_sky_grid(image).tolist(),
         "_stars": stars,
     }

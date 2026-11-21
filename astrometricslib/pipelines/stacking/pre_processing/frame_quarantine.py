@@ -93,6 +93,7 @@ __all__ = [
     "find_frames_to_quarantine",
     "find_quarantine_folders",
     "judge_batch",
+    "judge_batch_in_full",
     "list_set_aside_frames",
     "quarantine_bad_frames",
     "quarantine_preview_report",
@@ -334,6 +335,34 @@ far off cuts the stack's overlap, so the stack is trimmed to its common area
 sets nothing aside (STK-D73).
 """
 
+UNEVEN_SKY_TRANSPARENCY_FRACTION = TunedParameter(
+    name="stacking.uneven_sky_transparency_fraction",
+    default=0.83,
+    unit="× typical",
+    description="Star transparency, as a share of the typical, below which an uneven frame is called cloud.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D72",
+)
+"""An uneven frame is set aside as cloud only when its stars suffer too.
+
+Cloud hides faint stars and dims bright ones; a steady gradient, a glow at
+the edge or a tree in a corner does neither much. The frame's star
+transparency is the geometric mean of its star count and its bright-star
+flux (``bright_star_flux_adu`` of `raw_frame_check.measure_raw_frame`), each
+as a share of the session median. An uneven frame below this share is set
+aside as cloud; above it, the frame is kept and flagged "uneven sky
+(gradient or obstruction)".
+
+On the read-only run of 2026-11-20 (37 targets, 102 sessions), the 3,557
+frames with an even sky and a normal star count have a median transparency
+of 1.001 and a robust spread of 0.035. The value is five spreads below,
+0.83, the repository's usual cut for an outlier (STK-D72). Either number
+alone does not separate the cases: NGC 6888 frames 068 to 079 (a steady
+tilt) have 0.94 to 1.22 of the star count but 0.80 to 1.04 of the flux.
+"""
+
 SESSION_GAP_SECONDS = TunedParameter(
     name="stacking.session_gap_seconds",
     default=4 * 3600,
@@ -410,9 +439,11 @@ class RuleFinding:
     Attributes
     ----------
     rule : `str`
-        ``"trailed"``, ``"few_stars"``, ``"uneven_sky"`` or ``"off_field"``.
+        ``"trailed"``, ``"few_stars"``, ``"uneven_sky"``, ``"off_field"``,
+        or ``"uneven_sky_kept"`` for a frame kept with a warning.
     kind : `str`
-        The stored kind: ``"clouded"``, ``"trailed"`` or ``"off_field"``.
+        The stored kind: ``"clouded"``, ``"trailed"`` or ``"off_field"``, or
+        ``"kept"`` for a frame kept with a warning.
     reason : `str`
         One sentence with the rule, the frame's value and the limit.
     """
@@ -496,6 +527,9 @@ class QuarantineReport:
         the step could read, whether the frame was moved or kept. A batch
         too small to judge is not measured, so it adds none. The stacking
         stage stores these as quality measurements.
+    flagged : `list` [`QuarantineDecision`]
+        Frames kept with a warning: an uneven sky with normal stars (a
+        gradient or an obstruction such as a tree), not cloud.
     """
 
     moved: list[QuarantineDecision] = field(default_factory=list)
@@ -510,6 +544,7 @@ class QuarantineReport:
     warnings: list[str] = field(default_factory=list)
     warning_by_path: dict[str, str] = field(default_factory=dict)
     measurements: list[dict[str, Any]] = field(default_factory=list)
+    flagged: list[QuarantineDecision] = field(default_factory=list)
 
     def actions_by_path(self) -> dict[str, str]:
         """Return the action text of each moved frame, for its stored rows.
@@ -519,11 +554,14 @@ class QuarantineReport:
         actions : `dict` [`str`, `str`]
             Original frame path mapped to the sentence stored as the
             ``action_taken`` of the frame's quarantine measurements. See
-            `set_aside_action_text`.
+            `set_aside_action_text`. A flagged frame, kept with a warning,
+            gets "frame kept, flagged: " and its reason.
         """
-        return {
+        actions = {decision.path: f"frame kept, flagged: {decision.reason}" for decision in self.flagged}
+        actions.update({
             decision.path: set_aside_action_text(decision.kind, decision.reason) for decision in self.moved
-        }
+        })
+        return actions
 
     def reasons_by_path(self) -> dict[str, str]:
         """Return the recorded reason for each moved frame.
@@ -538,6 +576,31 @@ class QuarantineReport:
             decision.path: f"{QUARANTINE_EXCLUSION_REASON_PREFIX}: {decision.kind} ({decision.reason})"
             for decision in self.moved
         }
+
+
+def capture_setting_key(frame: Any) -> tuple[str, ...]:
+    """Name the way a frame was taken: camera, optic, filter, exposure, gain.
+
+    Parameters
+    ----------
+    frame : `Any`
+        A frame record with ``camera``, ``filter`` and ``exposure``, and
+        optionally ``focal_length_mm`` and ``iso``.
+
+    Returns
+    -------
+    key : `tuple` [`str`, ...]
+        Equal for two frames taken the same way. Gains are compared as
+        numbers, so "800" and "800.0" match.
+    """
+    focal_length = getattr(frame, "focal_length_mm", None)
+    return (
+        str(frame.camera),
+        str(round(float(focal_length))) if focal_length else "",
+        str(getattr(frame.filter, "value", frame.filter)),
+        str(frame.exposure),
+        canonical_iso_text(getattr(frame, "iso", None)),
+    )
 
 
 def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
@@ -565,15 +628,7 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
     session_gap_seconds = resolve(SESSION_GAP_SECONDS).value
     by_setup: dict[tuple[str, ...], list[Any]] = defaultdict(list)
     for frame in frames:
-        focal_length = getattr(frame, "focal_length_mm", None)
-        setup = (
-            str(frame.camera),
-            str(round(float(focal_length))) if focal_length else "",
-            str(getattr(frame.filter, "value", frame.filter)),
-            str(frame.exposure),
-            canonical_iso_text(getattr(frame, "iso", None)),
-        )
-        by_setup[setup].append(frame)
+        by_setup[capture_setting_key(frame)].append(frame)
 
     batches: list[list[Any]] = []
     for setup_frames in by_setup.values():
@@ -720,9 +775,120 @@ def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[li
     return offsets, note
 
 
+@dataclass(frozen=True)
+class SessionReference:
+    """The clear-sky star count and bright-star flux a session is held to.
+
+    Attributes
+    ----------
+    star_count : `float` or `None`
+        The typical star count of clear frames taken the same way.
+    bright_star_flux_adu : `float` or `None`
+        Their typical bright-star flux.
+    source : `str`
+        Where the numbers come from, in plain words.
+    unevenness_limit : `float` or `None`
+        The median sky-unevenness limit of those sessions, or `None`. A
+        session's own limit is lowered to it, so a long stretch of glow or
+        fog cannot widen its own limit.
+    """
+
+    star_count: float | None
+    bright_star_flux_adu: float | None
+    source: str
+    unevenness_limit: float | None = None
+
+
+def session_unevenness_limit(unevenness: Sequence[float | None]) -> float | None:
+    """Find the sky unevenness above which a frame of a session is uneven.
+
+    Parameters
+    ----------
+    unevenness : `Sequence` [`float` or `None`]
+        Each frame's value from `measure_sky_unevenness`.
+
+    Returns
+    -------
+    limit : `float` or `None`
+        `UNEVEN_SKY_SIGMAS` robust spreads above the median, and at least
+        `UNEVEN_SKY_MINIMUM`. `None` when fewer than
+        `MINIMUM_FRAMES_TO_JUDGE` frames have a value.
+    """
+    known = [value for value in unevenness if value is not None]
+    if len(known) < resolve(MINIMUM_FRAMES_TO_JUDGE).value:
+        return None
+    return max(
+        resolve(UNEVEN_SKY_MINIMUM).value,
+        statistics.median(known) + resolve(UNEVEN_SKY_SIGMAS).value * _robust_spread(known),
+    )
+
+
+def _median_or_none(values: Sequence[float | None]) -> float | None:
+    """Return the median of the known values.
+
+    Returns
+    -------
+    median : `float` or `None`
+        `None` when no value is known.
+    """
+    known = [value for value in values if value is not None]
+    return float(statistics.median(known)) if known else None
+
+
+def _upper_quartile_or_none(values: Sequence[float | None]) -> float | None:
+    """Return the upper quartile of the known values.
+
+    Returns
+    -------
+    quartile : `float` or `None`
+        `None` when no value is known.
+    """
+    known = [value for value in values if value is not None]
+    return float(np.percentile(known, 75)) if known else None
+
+
+def own_session_reference(measurements: Sequence[dict[str, Any]]) -> SessionReference:
+    """Build the reference of a session that has no earlier session to lean on.
+
+    The upper quartile of the session is used, so a session that is fogged
+    for most of its frames is still held to its clear quarter, not to its
+    own fogged median.
+
+    Returns
+    -------
+    reference : `SessionReference`
+        The upper quartiles of the star count and the bright-star flux.
+    """
+    return SessionReference(
+        star_count=_upper_quartile_or_none([m.get("star_count") for m in measurements]),
+        bright_star_flux_adu=_upper_quartile_or_none([m.get("bright_star_flux_adu") for m in measurements]),
+        source="the clearest quarter of this session",
+    )
+
+
 def judge_batch_with_notes(
     measurements: Sequence[dict[str, Any]],
+    reference: SessionReference | None = None,
 ) -> tuple[list[QuarantineDecision], list[str]]:
+    """Pick the frames of one batch that are clouded, trailed or off the field.
+
+    See `judge_batch_in_full`; the frames kept with a warning are left out.
+
+    Returns
+    -------
+    decisions : `list` [`QuarantineDecision`]
+        The frames to move.
+    notes : `list` [`str`]
+        One sentence for each check that could not be made on some frames.
+    """
+    decisions, _, notes = judge_batch_in_full(measurements, reference)
+    return decisions, notes
+
+
+def judge_batch_in_full(
+    measurements: Sequence[dict[str, Any]],
+    reference: SessionReference | None = None,
+) -> tuple[list[QuarantineDecision], list[QuarantineDecision], list[str]]:
     """Pick the frames of one batch that are clouded, trailed or off the field.
 
     Four rules are tried on every frame, and a frame that breaks several is
@@ -731,10 +897,20 @@ def judge_batch_with_notes(
     - Trailed stars: the frame's stored star elongation is above both
       `TRAILED_ELONGATION_LIMIT` and the batch median plus the rise
       (`ELONGATION_RISE_ABOVE_MEDIAN`, or the colour camera's).
-    - Few stars: fewer than `CLOUD_STAR_FRACTION` of the batch median.
+    - Few stars: fewer than `CLOUD_STAR_FRACTION` of the typical star
+      count, or a bright-star flux below that share of the typical flux.
+      The typical value is the larger of the batch median and the
+      reference: the median of earlier sessions taken the same way, or,
+      without them, the clearest quarter of this session
+      (`own_session_reference`). A session fogged for most of its frames
+      therefore cannot lower its own limit.
     - Uneven sky: the sky pattern differs from the session's by more than
       `UNEVEN_SKY_SIGMAS` robust spreads above the typical difference, and
-      by at least `UNEVEN_SKY_MINIMUM` (see `measure_sky_unevenness`).
+      by at least `UNEVEN_SKY_MINIMUM` (see `measure_sky_unevenness`). It is
+      called cloud, and the frame set aside, only when the stars suffer
+      too: a star transparency below `UNEVEN_SKY_TRANSPARENCY_FRACTION`.
+      Otherwise the frame is kept and flagged "uneven sky (gradient or
+      obstruction)".
     - Off the field: the frame's centre is more than
       `OFF_FIELD_POINTING_FRACTION` of the frame width from the session's
       main field (see `measure_pointing_offsets`).
@@ -749,22 +925,36 @@ def judge_batch_with_notes(
         One entry per frame, in time order: ``path``, ``star_count``,
         ``star_elongation`` (or `None`), ``sky_median_adu``, ``sky_grid_adu``,
         ``_stars``, ``width_px``, ``height_px``, and optionally
-        ``colour_camera`` (a colour camera gets the wider
-        `COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN`).
+        ``bright_star_flux_adu`` and ``colour_camera`` (a colour camera gets
+        the wider `COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN`).
+    reference : `SessionReference`, optional
+        The clear-sky values of earlier sessions taken the same way. Without
+        it, `own_session_reference` is used.
 
     Returns
     -------
     decisions : `list` [`QuarantineDecision`]
         The frames to move, in the order given. Empty when the batch is
         too small to judge.
+    flagged : `list` [`QuarantineDecision`]
+        The frames kept with a warning (uneven sky with normal stars).
     notes : `list` [`str`]
         One sentence for each check that could not be made on some frames.
     """
     notes: list[str] = []
     if len(measurements) < resolve(MINIMUM_FRAMES_TO_JUDGE).value:
-        return [], notes
+        return [], [], notes
+    if reference is None:
+        reference = own_session_reference(measurements)
     cloud_sky_multiple = resolve(CLOUD_SKY_MULTIPLE).value
-    typical_stars = statistics.median(m["star_count"] for m in measurements)
+    median_stars = statistics.median(m["star_count"] for m in measurements)
+    typical_stars = max(median_stars, reference.star_count or 0.0)
+    median_flux = _median_or_none([m.get("bright_star_flux_adu") for m in measurements])
+    typical_flux = None if median_flux is None else max(median_flux, reference.bright_star_flux_adu or 0.0)
+    held_to_reference = typical_stars > median_stars or (
+        typical_flux is not None and median_flux is not None and typical_flux > median_flux
+    )
+    reference_words = f" ({reference.source})" if held_to_reference else ""
     typical_sky = statistics.median(m["sky_median_adu"] for m in measurements)
 
     elongations = [m.get("star_elongation") for m in measurements]
@@ -787,29 +977,30 @@ def judge_batch_with_notes(
         )
 
     unevenness = measure_sky_unevenness(measurements)
-    known_unevenness = [value for value in unevenness if value is not None]
-    unevenness_limit = None
-    if len(known_unevenness) >= resolve(MINIMUM_FRAMES_TO_JUDGE).value:
-        unevenness_limit = max(
-            resolve(UNEVEN_SKY_MINIMUM).value,
-            statistics.median(known_unevenness)
-            + resolve(UNEVEN_SKY_SIGMAS).value * _robust_spread(known_unevenness),
-        )
-    else:
+    unevenness_limit = session_unevenness_limit(unevenness)
+    if unevenness_limit is None:
         notes.append("The sky was not checked for unevenness: too few frames had a sky grid.")
+    elif reference.unevenness_limit is not None and reference.unevenness_limit < unevenness_limit:
+        # A session that degrades for a long stretch widens its own spread;
+        # its sister sessions say how even the sky is when it is clear.
+        unevenness_limit = reference.unevenness_limit
 
     pointing_offsets, pointing_note = measure_pointing_offsets(measurements)
     if pointing_note:
         notes.append(pointing_note)
     pointing_limit = resolve(OFF_FIELD_POINTING_FRACTION).value
 
+    transparency_limit = resolve(UNEVEN_SKY_TRANSPARENCY_FRACTION).value
     decisions: list[QuarantineDecision] = []
+    flagged: list[QuarantineDecision] = []
     for measurement, elongation, uneven, offset in zip(
         measurements, elongations, unevenness, pointing_offsets, strict=True
     ):
         measurement["sky_unevenness"] = uneven
         measurement["pointing_offset_fraction"] = offset
         star_count = measurement["star_count"]
+        flux = measurement.get("bright_star_flux_adu")
+        flux_share = None if flux is None or not typical_flux else flux / typical_flux
         sky = measurement["sky_median_adu"]
         findings: list[RuleFinding] = []
         if elongation is not None and elongation_limit is not None and elongation > elongation_limit:
@@ -830,18 +1021,48 @@ def judge_batch_with_notes(
                 RuleFinding(
                     "few_stars",
                     "clouded" if cloudy_sky else "trailed",
-                    f"Few stars: {star_count} against a typical {typical_stars:.0f}"
+                    f"Few stars: {star_count} against a typical {typical_stars:.0f}{reference_words}"
                     + (f", sky {sky / typical_sky:.1f} times normal" if cloudy_sky else ", sky level normal"),
                 )
             )
-        if uneven is not None and unevenness_limit is not None and uneven > unevenness_limit:
+        elif flux_share is not None and flux_share < CLOUD_STAR_FRACTION:
             findings.append(
                 RuleFinding(
-                    "uneven_sky",
+                    "few_stars",
                     "clouded",
-                    f"Uneven sky, likely cloud: {uneven:.3f}, limit {unevenness_limit:.3f}",
+                    f"Dim stars: bright-star flux {flux_share:.2f} of the typical{reference_words}",
                 )
             )
+        uneven_finding = None
+        if uneven is not None and unevenness_limit is not None and uneven > unevenness_limit:
+            # Against the session's own median, as the limit was derived; the
+            # floor rules above already hold the session to its reference.
+            star_share = star_count / median_stars if median_stars else 1.0
+            session_flux_share = None if flux is None or not median_flux else flux / median_flux
+            transparency = (
+                math.sqrt(star_share * session_flux_share) if session_flux_share is not None else star_share
+            )
+            stars_suffer = transparency < transparency_limit
+            star_words = (
+                f"star transparency {transparency:.2f} of the typical (limit {transparency_limit:.2f}; "
+                f"stars {star_share:.2f}"
+                + (f", star flux {session_flux_share:.2f})" if session_flux_share is not None else ")")
+            )
+            if stars_suffer:
+                findings.append(
+                    RuleFinding(
+                        "uneven_sky",
+                        "clouded",
+                        f"Uneven sky, likely cloud: {uneven:.3f}, limit {unevenness_limit:.3f}; {star_words}",
+                    )
+                )
+            else:
+                uneven_finding = RuleFinding(
+                    "uneven_sky_kept",
+                    "kept",
+                    f"Uneven sky (gradient or obstruction): {uneven:.3f}, limit {unevenness_limit:.3f}; "
+                    f"{star_words}, so not cloud",
+                )
         if offset is not None and offset > pointing_limit:
             findings.append(
                 RuleFinding(
@@ -853,7 +1074,9 @@ def judge_batch_with_notes(
             )
         if findings:
             decisions.append(_decision_from_findings(measurement, findings, typical_stars))
-    return decisions, notes
+        elif uneven_finding is not None:
+            flagged.append(_decision_from_findings(measurement, [uneven_finding], typical_stars))
+    return decisions, flagged, notes
 
 
 def _decision_from_findings(
@@ -1114,6 +1337,53 @@ def _measure_frames(
     return [result for result in results if result is not None], unreadable
 
 
+def references_from_other_sessions(
+    judged_batches: Sequence[tuple[Sequence[Any], Sequence[dict[str, Any]]]],
+) -> list[SessionReference | None]:
+    """Find, for each session, the clear-sky values of its sister sessions.
+
+    The reference of a session is the median, over the target's other
+    sessions with the same capture setting (`capture_setting_key`), of each
+    session's median star count and bright-star flux. A median of sessions
+    is used so one fogged session cannot lower it. The sessions' sky
+    unevenness limits are kept too (`session_unevenness_limit`).
+
+    Parameters
+    ----------
+    judged_batches : `Sequence`
+        Each session's frames and their measurements.
+
+    Returns
+    -------
+    references : `list` [`SessionReference` or `None`]
+        One per session, `None` when no other session was taken the same
+        way (the session is then held to its own clearest quarter).
+    """
+    summaries = []
+    for batch, measurements in judged_batches:
+        summaries.append((
+            capture_setting_key(batch[0]),
+            _median_or_none([m.get("star_count") for m in measurements]),
+            _median_or_none([m.get("bright_star_flux_adu") for m in measurements]),
+            session_unevenness_limit(measure_sky_unevenness(measurements)),
+        ))
+    references: list[SessionReference | None] = []
+    for index, (key, *_) in enumerate(summaries):
+        others = [summary for other, summary in enumerate(summaries) if other != index and summary[0] == key]
+        if not others:
+            references.append(None)
+            continue
+        references.append(
+            SessionReference(
+                star_count=_median_or_none([summary[1] for summary in others]),
+                bright_star_flux_adu=_median_or_none([summary[2] for summary in others]),
+                source=f"median of {len(others)} other session(s) taken the same way",
+                unevenness_limit=_median_or_none([summary[3] for summary in others]),
+            )
+        )
+    return references
+
+
 def find_frames_to_quarantine(
     frames: Sequence[Any],
     measure: Callable[[str], dict[str, Any]] | None = None,
@@ -1149,6 +1419,7 @@ def find_frames_to_quarantine(
         "Checked",
         sum(len(batch) for batch in batches if len(batch) >= minimum_frames_to_judge),
     )
+    judged_batches: list[tuple[list[Any], list[dict[str, Any]]]] = []
     for batch in batches:
         if len(batch) < minimum_frames_to_judge:
             report.batches_too_small += 1
@@ -1167,8 +1438,17 @@ def find_frames_to_quarantine(
                 f"(at least {minimum_frames_to_judge} needed to judge); none moved."
             )
             continue
-        decisions, judging_notes = judge_batch_with_notes(measurements)
+        judged_batches.append((batch, measurements))
+    references = references_from_other_sessions(judged_batches)
+    for (_, measurements), reference in zip(judged_batches, references, strict=True):
+        decisions, flagged, judging_notes = judge_batch_in_full(measurements, reference)
         report.notes.extend(judging_notes)
+        report.flagged.extend(flagged)
+        if flagged:
+            report.notes.append(
+                f"{len(flagged)} of {len(measurements)} frames of one session have an uneven sky but "
+                "normal stars (a gradient or an obstruction); they are kept and flagged."
+            )
         for measurement in measurements:
             # The star positions were needed only to match the pointing.
             measurement.pop("_stars", None)
@@ -1604,6 +1884,7 @@ def quarantine_preview_report(
         would_move=would_move[:limit],
         notes=notes,
         unreadable=found.unreadable,
+        flagged=[decision_to_set_aside_frame(decision) for decision in found.flagged][:limit],
     )
 
 

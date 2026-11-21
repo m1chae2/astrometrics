@@ -502,12 +502,36 @@ def sky_grid(pattern_shift: float = 0.0) -> list[list[float]]:
     ]
 
 
-def test_judge_batch_sets_aside_a_frame_with_an_uneven_sky_and_says_why() -> None:
-    """A frame lit unevenly, with its stars intact, is called cloud."""
+def uneven_batch() -> list[dict[str, Any]]:
+    """Build a clean batch whose frame 4 has an uneven sky.
+
+    Returns
+    -------
+    measurements : `list` [`dict`]
+        Twelve frames with a bright-star flux of 1000; frame 4 lit unevenly.
+    """
     measurements = clean_batch()
     for index, measurement in enumerate(measurements):
         measurement["sky_grid_adu"] = sky_grid(0.0005 * (index % 3))
+        measurement["bright_star_flux_adu"] = 1000.0
     measurements[4]["sky_grid_adu"] = sky_grid(0.06)
+    return measurements
+
+
+def test_judge_batch_keeps_and_flags_an_uneven_frame_whose_stars_are_normal() -> None:
+    """A gradient or a tree with normal stars is flagged, not set aside."""
+    decisions, flagged, _ = frame_quarantine.judge_batch_in_full(uneven_batch())
+
+    assert decisions == []
+    assert [frame.path for frame in flagged] == ["frame_004.fits"]
+    assert flagged[0].findings[0].rule == "uneven_sky_kept"
+    assert flagged[0].reason.startswith("Uneven sky (gradient or obstruction): ")
+
+
+def test_judge_batch_sets_aside_a_frame_with_an_uneven_sky_and_says_why() -> None:
+    """An uneven frame whose bright stars are dimmed is called cloud."""
+    measurements = uneven_batch()
+    measurements[4]["bright_star_flux_adu"] = 600.0
 
     decisions, notes = frame_quarantine.judge_batch_with_notes(measurements)
 
@@ -641,3 +665,30 @@ def test_the_manifest_carries_the_warning_when_many_frames_are_set_aside(tmp_pat
     assert len(kept) == 7
     assert {entry["warning"] for entry in manifest} == {"3 of 10 frames set aside: 3 trailed"}
     assert report.warnings == ["3 of 10 frames set aside: 3 trailed"]
+
+
+def test_a_fogged_session_is_held_to_its_clearest_quarter() -> None:
+    """Most frames fogged: the clearest quarter sets the star limit."""
+    measurements = [
+        make_measurement(f"f{index}.fits", stars=stars)
+        for index, stars in enumerate([0, 0, 0, 0, 1, 1, 15, 105, 299, 658, 706])
+    ]
+
+    moved = {decision.path for decision in judge_batch(measurements)}
+
+    assert moved == {f"f{index}.fits" for index in range(7)}
+
+
+def test_a_session_is_held_to_its_sister_sessions(tmp_path: Path) -> None:
+    """A wholly fogged night is judged against the clear nights."""
+    gap = frame_quarantine.SESSION_GAP_SECONDS.default + 1
+    clear = [make_frame(tmp_path / f"clear{index}.fits", float(index)) for index in range(10)]
+    foggy = [make_frame(tmp_path / f"fog{index}.fits", gap + 100 + index) for index in range(10)]
+    stars = {frame.path: 3000 for frame in clear} | {frame.path: 1000 for frame in foggy}
+
+    report = find_frames_to_quarantine(
+        clear + foggy, measure=lambda path: make_measurement(path, stars=stars[path])
+    )
+
+    assert {decision.path for decision in report.moved} == {frame.path for frame in foggy}
+    assert "other session" in report.moved[0].reason

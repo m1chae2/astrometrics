@@ -24,6 +24,7 @@ import { navigateToElement } from '../common/utils/displayCoordinator';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { Button } from '../common/components/Button';
 import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
+import { useStackIdentification } from './hooks/useStackIdentification';
 
 /**
  * Main component for the image processing view.
@@ -222,21 +223,44 @@ const ImageProcessingDisplayInner: React.FC = () => {
     }
   }, [selectedTarget, selectedFile]);
 
+  // On the imaging stack, the Astrometry button shows the stack's own star names: every detection,
+  // named from Gaia and SIMBAD, and the catalog stars it missed (made by a job on first use). On a
+  // raw frame it shows the target's catalog stars, placed only when the frame has a real solution.
+  const isStackShown = Boolean(selectedFile && stackedImage && selectedFile === stackedImage);
+  const stackIdentification = useStackIdentification(
+    selectedTarget, isStackShown ? selectedFile : null, showAstrometryOverlay && isStackShown
+  );
+
   // The overlay stars are only read while the Astrometry switch is on, because
   // nothing shows them otherwise. The key holds the target and the file, so two
   // asks for the same image share one request, and a new file asks again.
   const overlayQuery = useQuery({
     queryKey: ['astrometryOverlayStars', selectedTarget, selectedFile ?? null],
     queryFn: () => fetchAstrometryOverlayStars(selectedTarget as string, 0, selectedFile),
-    enabled: Boolean(selectedTarget) && showAstrometryOverlay,
+    enabled: Boolean(selectedTarget) && showAstrometryOverlay && !isStackShown,
     staleTime: 30_000,
   });
   const overlayStars: AstrometryOverlayStar[] = useMemo(
-    () => (showAstrometryOverlay && selectedTarget ? overlayQuery.data?.stars ?? [] : []),
-    [showAstrometryOverlay, selectedTarget, overlayQuery.data]
+    () => {
+      if (!showAstrometryOverlay || !selectedTarget) return [];
+      if (isStackShown) return stackIdentification.stars;
+      return overlayQuery.data?.stars ?? [];
+    },
+    [showAstrometryOverlay, selectedTarget, isStackShown, stackIdentification.stars, overlayQuery.data]
   );
-  const overlayReason: string | null = overlayQuery.data?.reason ?? null;
-  const isLoadingOverlay = overlayQuery.isFetching && showAstrometryOverlay;
+  const overlayReason: string | null = isStackShown
+    ? stackIdentification.statusText
+    : overlayQuery.data?.reason ?? null;
+  const isLoadingOverlay = !isStackShown && overlayQuery.isFetching && showAstrometryOverlay;
+
+  // The first click on a stack without saved names starts the job that makes them.
+  const wantStackNamesRef = useRef(false);
+  const { isLoaded: stackNamesLoaded, hasResult: stackHasNames, running: stackNaming, start: startStackNames } = stackIdentification;
+  useEffect(() => {
+    if (!wantStackNamesRef.current || !isStackShown || !showAstrometryOverlay || !stackNamesLoaded) return;
+    wantStackNamesRef.current = false;
+    if (!stackHasNames && !stackNaming) void startStackNames();
+  }, [isStackShown, showAstrometryOverlay, stackNamesLoaded, stackHasNames, stackNaming, startStackNames]);
 
   // Report a failed read, once per failure.
   useEffect(() => {
@@ -272,9 +296,13 @@ const ImageProcessingDisplayInner: React.FC = () => {
       emitToast('No target selected.', 'warning', 'Astrometry');
       return;
     }
-    askedForOverlayRef.current = true;
+    if (isStackShown) {
+      wantStackNamesRef.current = true;
+    } else {
+      askedForOverlayRef.current = true;
+    }
     setShowAstrometryOverlay(true);
-  }, [showAstrometryOverlay, selectedTarget, setShowAstrometryOverlay]);
+  }, [showAstrometryOverlay, selectedTarget, isStackShown, setShowAstrometryOverlay]);
 
   /**
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
@@ -491,7 +519,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       onToggleAstrometryOverlay={handleToggleAstrometryOverlay}
       isLoadingOverlay={isLoadingOverlay}
       overlayReason={overlayReason}
-      onStarClick={handleStarClick}
+      onStarClick={isStackShown ? undefined : handleStarClick}
       selectedStarId={selectedStarId}
       stackOrientation={stackOrientation}
       allFiles={allFiles}

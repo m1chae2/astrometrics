@@ -694,6 +694,35 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     """
     if run.has_spectral or not stacked_path:
         return
+    ensure_stack_plate_solution(stacked_path, run.drivers)
+
+
+def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple[Any, str, bool]:
+    """Give an imaging stack's plate solution, solving and saving it if needed.
+
+    A stack whose header carries a plate solution (``PLTSOLVD``) keeps it.
+    Otherwise the stack is solved with the no-network solve the noise step
+    uses (`_plate_solve_stack_wcs`), and the solution is written into the
+    stack with `write_wcs_to_fits_header`. Either way, the viewer's copy
+    (`processed_fits_path_for`) gets the solution when it has none yet: as it
+    is on the same pixel grid, or moved by the crop offset its header gives.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The imaging stack.
+    drivers : `Drivers`, optional
+        The outside services; the plate solver is used.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution on the stack's own grid, or `None`.
+    reason : `str`
+        Why there is none; empty when there is one.
+    solved_now : `bool`
+        True when the stack was solved by this call.
+    """
     from astropy.wcs import WCS
 
     from astrometricslib._internal.drivers.fits_access import read_header
@@ -716,37 +745,39 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
         stack_header = read_header(stacked_path)
     except (OSError, *DATA_ERRORS) as error:
         logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
-        return
+        return None, f"the header could not be read: {error}", False
+    solved_now = False
     if header_is_plate_solved(stack_header):
         wcs = WCS(stack_header).celestial
     else:
-        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, run.drivers)
+        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
         if wcs is None:
             logger.warning(
                 "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
             )
-            return
+            return None, reason, False
         write_wcs_to_fits_header(stacked_path, wcs)
+        solved_now = True
         logger.info("Saved the stack's plate solution in its header (%s).", source)
 
     processed_path = processed_fits_path_for(stacked_path)
     if not os.path.exists(processed_path):
-        return
+        return wcs, "", solved_now
     try:
         processed_header = read_header(processed_path)
     except (OSError, *DATA_ERRORS) as error:
         logger.warning("Could not read %s to add the plate solution: %s", processed_path, error)
-        return
+        return wcs, "", solved_now
     same_grid = (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")) == (
         stack_header.get("NAXIS1"),
         stack_header.get("NAXIS2"),
     )
     if header_is_plate_solved(processed_header):
-        return
+        return wcs, "", solved_now
     if same_grid:
         write_wcs_to_fits_header(processed_path, wcs)
         logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
-        return
+        return wcs, "", solved_now
     # A cropped picture: its header says where it sits on the stack, so the
     # stack's solution is moved by that offset.
     crop = [
@@ -754,11 +785,12 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
         for key in (CROP_X0_KEYWORD, CROP_Y0_KEYWORD, CROP_WIDTH_KEYWORD, CROP_HEIGHT_KEYWORD)
     ]
     if None in crop or (crop[2], crop[3]) != (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")):
-        return
-    shifted_header = stack_header.copy()
+        return wcs, "", solved_now
+    shifted_header = read_header(stacked_path) if solved_now else stack_header.copy()
     shift_header_for_crop(shifted_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
     write_wcs_to_fits_header(processed_path, WCS(shifted_header).celestial)
     logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
+    return wcs, "", solved_now
 
 
 def _turn_stack_north_up(run: StackRun, stacked_path: str | None) -> bool:

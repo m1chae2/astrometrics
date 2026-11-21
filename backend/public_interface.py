@@ -215,6 +215,8 @@ RPC_METHODS: tuple[str, ...] = (
     "analysis:analyze_image",
     "analysis:get_results",
     "analysis:cancel",
+    "analysis:identify_stack",
+    "analysis:get_stack_identification",
     # Target library
     "target:list",
     "target:get",

@@ -382,6 +382,9 @@ export interface ActionRegistry {
     "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
+    // Names the detected stars of a stack (a job of the analysis type), and reads the saved names.
+    "analysis:identify_stack": { payload: { target_id: string; stack_path: string }; response: { status: string; jobId: string } };
+    "analysis:get_stack_identification": { payload: { target_id: string; stack_path: string }; response: import('./astronomyService').StackIdentificationState };
 
     // Imaging
     // Matches ImagingService.capture_sequence. An earlier declaration listed

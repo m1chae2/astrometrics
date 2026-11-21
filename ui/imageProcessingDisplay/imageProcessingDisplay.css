@@ -1401,6 +1401,9 @@
   pointer-events: none;
   /* Read by FitsRenderer when it draws the star markers. */
   --star-marker-color: var(--accent-sky);
+  /* A stack's detection with no catalog star, and a catalog star with no detection. */
+  --star-marker-unmatched-color: var(--warning-orange);
+  --star-marker-catalog-color: var(--accent-purple);
 }
 
 /* The pixel readout floats over the bottom-left corner of the image, so the image keeps its full height.

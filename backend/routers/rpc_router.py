@@ -191,6 +191,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
     "analysis:cancel": ("analysis_orchestrator", "cancel_analysis"),
+    "analysis:identify_stack": ("analysis_orchestrator", "identify_stack"),
+    "analysis:get_stack_identification": ("analysis_orchestrator", "get_stack_identification"),
     # Target library
     "target:list": ("target_service", "get_all_targets_list"),
     "target:get": ("target_service", "get_targets"),

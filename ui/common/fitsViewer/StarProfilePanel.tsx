@@ -144,6 +144,11 @@ export interface StarProfilePanelProps {
   followNote?: { method: string; note: string } | null;
   /** Called when what the image should draw changes (the tab, the cut length, the ring). */
   onViewChange?: (view: StarProfileView) => void;
+  /**
+   * The measured star's name, shown at the top: its most familiar designation, or "Unnamed star" with its
+   * right ascension and declination. Null when the image has no names and no plate solution.
+   */
+  starName?: string | null;
 }
 
 /**
@@ -375,7 +380,7 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
  * @returns The panel, or null when it is closed.
  */
 export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
-  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null,
+  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null, starName = null,
 }) => {
   // Kept while the panel is open, and for the next star.
   const [logScale, setLogScale] = useState(false);
@@ -427,6 +432,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
           </svg>
         </Button>
       </div>
+      {measurement && starName && <p className="star-profile__name" data-testid="star-profile-name">{starName}</p>}
       {followNote && <p className="star-profile__note" title={followNote.note} data-testid="star-profile-follow">{describeFollow(followNote.method)}</p>}
       {message}
       {measurement && (

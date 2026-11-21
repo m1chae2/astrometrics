@@ -150,6 +150,13 @@ astrometricslib/pipelines/astrometry/processing/gaia_depth.py,predict_gaia_query
 astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_CHILDREN_PER_TILE,A HEALPix tile always has four children one level finer; structure
 astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
 astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_LIMIT,"Most missed catalog stars sent to the viewer; display limit, changes no name"
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_MARGIN_MAG,"Which missed catalog stars the viewer shows; display choice, changes no name or measurement"
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,IDENTIFICATION_FILE_VERSION,Version number of a saved file layout; plumbing
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_DETECTED,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SIMBAD_DONE,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SOLVED,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_TILES_DONE,Share of a progress bar; display only
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_CONSECUTIVE_FAILURE_LIMIT,Network retry limit; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling

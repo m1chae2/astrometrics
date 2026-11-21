@@ -239,6 +239,22 @@ describe('FitsRenderer star overlay', () => {
   });
 
   /**
+   * Pointer capture makes the release land on the container, not the star group that was pressed.
+   * The star pressed still opens, even when a neighbor with no library record is nearer the pointer.
+   */
+  it('opens the pressed star when the release lands on the container', async () => {
+    const onStarClick = vi.fn();
+    const stars = makeGridStars().map((star, index) => (index === 0 ? star : { ...star, libraryId: null }));
+    const { container } = await renderOverlay(stars, onStarClick);
+    const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
+    const group = container.querySelector(`[data-star-id="${stars[0].id}"]`) as HTMLElement;
+    fireEvent.pointerDown(group, { clientX: 400, clientY: 400 });
+    fireEvent.pointerUp(viewer, { clientX: 400, clientY: 400 });
+    expect(onStarClick).toHaveBeenCalledTimes(1);
+    expect(onStarClick.mock.calls[0][0]).toMatchObject({ id: stars[0].id });
+  });
+
+  /**
    * Enter and Space on a focused star open it, and Space does not scroll the page.
    */
   it('opens a star with Enter or Space', async () => {

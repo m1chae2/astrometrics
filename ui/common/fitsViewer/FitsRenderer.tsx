@@ -275,7 +275,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const [hoveredStarId, setHoveredStarId] = useState<string | null>(null);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   // Where the pointer went down, to tell a click from a pan drag.
-  const pressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pressStartRef = useRef<{ x: number; y: number; starId: string | null } | null>(null);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -719,11 +719,13 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     if (!start) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-    const badgeStarId = (event.target as Element).closest?.('[data-star-id]')?.getAttribute('data-star-id');
+    const badgeStarId = start.starId
+      ?? (event.target as Element).closest?.('[data-star-id]')?.getAttribute('data-star-id');
     let star = badgeStarId && overlayStars ? overlayStars.find((item) => item.id === badgeStarId) : undefined;
     if (!star && overlayVisible && overlayStars) {
+      // Only a star the Astronomy Manager can open matters here, so look among those first.
       star = findStarNearPointer(
-        overlayStars, screenTransform, event.clientX - rect.left, event.clientY - rect.top
+        overlayStars.filter(canOpenInAstronomyManager), screenTransform, event.clientX - rect.left, event.clientY - rect.top
       ) ?? undefined;
     }
     // A named star the Astronomy Manager can open still opens there; any other press measures a star.
@@ -863,7 +865,12 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       <div
         ref={containerRef}
         className={`fits-renderer__canvas-container${restoreHidesPicture ? ' fits-renderer__canvas-container--restoring' : ''}`}
-        onPointerDown={(event) => { pressStartRef.current = { x: event.clientX, y: event.clientY }; onPointerDown(event); }}
+        onPointerDown={(event) => {
+          // The star group under the press is read now: pointer capture makes the release target the container.
+          const pressedStarId = (event.target as Element).closest?.('[data-star-id]')?.getAttribute('data-star-id') ?? null;
+          pressStartRef.current = { x: event.clientX, y: event.clientY, starId: pressedStarId };
+          onPointerDown(event);
+        }}
         onPointerMove={(event) => { onPointerMove(event); handleHoverMove(event); }}
         onPointerUp={(event) => { onPointerUp(event); handleStarRelease(event); }}
         onPointerLeave={(event) => { pressStartRef.current = null; onPointerUp(event); setHoveredStarId(null); setHoverPoint(null); }}

@@ -98,7 +98,10 @@ def file_size(path: Path) -> int | None:
 
 
 def count_gaia_cache_stars(catalog_db: Path | None) -> int | None:
-    """Count the cached Gaia stars, in the current table or the old one.
+    """Count the cached Gaia stars of the tile table.
+
+    A cache file from before tiles has only the old table, which the app
+    treats as empty, so it counts as no stars.
 
     Parameters
     ----------
@@ -112,10 +115,7 @@ def count_gaia_cache_stars(catalog_db: Path | None) -> int | None:
     """
     if catalog_db is None:
         return None
-    count = count_rows(catalog_db, "SELECT count(*) FROM gaia_stars")
-    if count is None:
-        count = count_rows(catalog_db, "SELECT count(*) FROM gaia_sources")
-    return count
+    return count_rows(catalog_db, "SELECT count(*) FROM gaia_stars")
 
 
 def collect(library_dir: Path, wayfinding_db: Path, frames_root: Path, catalog_db: Path | None) -> dict:

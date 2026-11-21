@@ -16,7 +16,6 @@ astrometricslib/_internal/drivers/catalog_access.py,AbstractCatalogAccess.query_
 astrometricslib/_internal/drivers/catalog_access.py,CatalogAccess.query_star_summary_page.offset,Pagination start; 0 means from the first row
 astrometricslib/_internal/drivers/catalog_access.py,_BOX_MARGIN_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/catalog_access.py,_FULL_CIRCLE_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
-astrometricslib/_internal/drivers/catalog_store.py,_COVERAGE_TOLERANCE_DEG,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/catalog_store.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
 astrometricslib/_internal/drivers/catalog_store.py,_SCHEMA_VERSION,Version number of the cache file layout; plumbing
 astrometricslib/_internal/drivers/catalog_store.py,_SQL_CHUNK,Rows per database query; plumbing
@@ -148,7 +147,17 @@ astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_CACHE_L
 astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_FILE_VERSION,Version number of the saved detection-list layout; plumbing
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,_BAND_SAMPLES,Sampling resolution of the passband integral; structure
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,predict_gaia_query_depth.central_obstruction_fraction,Argument default of 0 for an optic with no central obstruction; the caller passes the real value
+astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_CHILDREN_PER_TILE,A HEALPix tile always has four children one level finer; structure
+astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
 astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_LIMIT,"Most missed catalog stars sent to the viewer; display limit, changes no name"
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_MARGIN_MAG,"Which missed catalog stars the viewer shows; display choice, changes no name or measurement"
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,IDENTIFICATION_FILE_VERSION,Version number of a saved file layout; plumbing
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_DETECTED,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SIMBAD_DONE,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SOLVED,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_TILES_DONE,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_CONSECUTIVE_FAILURE_LIMIT,Network retry limit; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ROW_LIMIT,Plumbing: query size
@@ -156,7 +165,6 @@ astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_VIZIER_T
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE_SOLVE_SOURCES,Decided not tuning in the #175 review (AST-D05): speed cap; the brightest stars are enough to solve
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._seed_gaia_cache_for_field.radius_deg,Search radius that callers always pass
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service

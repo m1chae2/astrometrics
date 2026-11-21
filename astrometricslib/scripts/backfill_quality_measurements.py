@@ -1424,6 +1424,8 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
 # not hold.
 _ASTROMETRY_NOT_HELD: tuple[str, ...] = (
     "astrometry.notice_camera_without_profile",
+    # Summaries stored before the Gaia tile cache hold no tile counts.
+    "astrometry.notice_gaia_tiles_missing",
     "astrometry.frame_target_clipped_fraction",
     "astrometry.frame_target_nonlinear_fraction",
     # The expected residual needs the star finder's peaks and noise of the run

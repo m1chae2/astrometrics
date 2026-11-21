@@ -36,6 +36,7 @@ from erfa import ErfaWarning
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.gaia_cone_driver import TileFetch
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
@@ -59,6 +60,17 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.astrometry.processing.gaia_depth import (
+    GaiaDepthPrediction,
+    depth_exceeded,
+    predict_gaia_depth_from_header,
+)
+from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
+    FieldGaiaStars,
+    TileFetcher,
+    load_field_gaia_stars,
+    tiles_under_image,
+)
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
     WcsRefinement,
     record_plate_scale,
@@ -72,7 +84,7 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
 )
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
 from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
-from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
+from astrometricslib.utilities.exceptions import DATA_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
 logger = logging.getLogger(__name__)
@@ -254,61 +266,29 @@ UNRESOLVED_COMPANION_RADIUS_ARCSEC = TunedParameter(
 
 # --- Gaia Search Depth and Epoch --------------------------------------------
 #
-# The Gaia cone search asks for stars brighter than a magnitude limit and
-# returns at most `GAIA_ROW_LIMIT` of them, brightest first. Without a limit
-# the search ranked stars by distance from the field centre and stopped at
-# 10,000 rows, so a dense field lost its edge stars and those stars went
-# unmatched.
-#
-# The limit comes from the frame when it can: the faintest detected star's
-# estimated G magnitude plus `GAIA_MAGNITUDE_LIMIT_MARGIN`. The estimate fits
-# a zero point to the detected stars that SIMBAD matched (their catalog V
-# magnitude against their measured flux). V and G differ by a few tenths of a
-# magnitude for most stars and by more than one for the reddest, so the
-# margin and the clamps below are design estimates, not measurements.
-# Without enough SIMBAD-matched stars to fit, the limit is
-# `GAIA_DEFAULT_MAGNITUDE_LIMIT`, which is also the depth the bulk cache
-# seed uses.
+# The Gaia stars of an image are read from the tile cache down to a depth,
+# the query depth. The depth is predicted from the equipment and the
+# exposure (see `gaia_depth.predict_gaia_depth_from_header`). When the
+# header does not give what the prediction needs, the depth is
+# `GAIA_DEFAULT_MAGNITUDE_LIMIT`. After the matching, the faintest detected
+# star's magnitude is estimated from the catalog-matched stars and compared
+# with the depth; a fainter star records `FLAG_GAIA_DEPTH_EXCEEDED`.
 GAIA_DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
     name="astrometry.gaia_default_magnitude_limit",
     default=18.0,
     unit="magnitude",
-    description="Gaia G magnitude limit used when the frame gives no depth estimate.",
+    description="Gaia G magnitude limit used when the frame gives no depth prediction.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D11",
 )
-GAIA_MAGNITUDE_LIMIT_MARGIN = TunedParameter(
-    name="astrometry.gaia_magnitude_limit_margin",
-    default=1.0,
-    unit="magnitudes",
-    description="Margin added to the faintest detected star's magnitude to set the Gaia search depth.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
-    register_entry="AST-D11",
-)
-GAIA_MINIMUM_MAGNITUDE_LIMIT = TunedParameter(
-    name="astrometry.gaia_minimum_magnitude_limit",
-    default=14.0,
-    unit="magnitude",
-    description="Brightest Gaia search depth the frame estimate may give.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
-    register_entry="AST-D11",
-)
-GAIA_MAXIMUM_MAGNITUDE_LIMIT = TunedParameter(
-    name="astrometry.gaia_maximum_magnitude_limit",
-    default=20.0,
-    unit="magnitude",
-    description="Faintest Gaia search depth the frame estimate may give.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
-    register_entry="AST-D11",
-)
+# The faint end of a frame's detections, as a percentile of their fluxes. On
+# the NGC 7331 stack (2026-11-20) the single faintest detection read G 20.2
+# and flagged the depth as exceeded, while 99 percent of the Gaia-matched
+# stars were brighter than G 19.6. Structure of the check, not a tuned value.
+FAINT_END_PERCENTILE = 1.0
+
 MINIMUM_STARS_FOR_DEPTH_ESTIMATE = TunedParameter(
     name="astrometry.minimum_stars_for_depth_estimate",
     default=5,
@@ -320,10 +300,9 @@ MINIMUM_STARS_FOR_DEPTH_ESTIMATE = TunedParameter(
     register_entry="AST-D11",
 )
 
-# The most rows one Gaia cone search may return. The old limit was 10,000.
-# A one-degree-radius field at G < 18 near the galactic plane holds tens of
-# thousands of stars, so the limit is raised to 50,000. A result with exactly
-# this many rows is treated as cut short and recorded in a flag.
+# The most rows one Gaia tile download may return. A result with this many
+# rows is treated as cut short, and the tile is fetched again as its four
+# children (see `gaia_field_stars`).
 GAIA_ROW_LIMIT = 50_000
 
 # Gaia DR3 positions are for this epoch (the year 2016.0, in Julian years).
@@ -333,11 +312,11 @@ GAIA_DR3_REFERENCE_EPOCH = "J2016.0"
 
 # Flags recorded on the quality summary (`astrometry_flags` of the
 # astrometry metrics). Each is a stable key; tests and readers match on it.
-FLAG_GAIA_ROW_LIMIT_REACHED = "gaia_row_limit_reached"
+FLAG_GAIA_TILES_MISSING = "gaia_tiles_missing"
+FLAG_GAIA_DEPTH_EXCEEDED = "gaia_depth_exceeded"
 FLAG_GAIA_PROPER_MOTION_UNKNOWN = "gaia_proper_motion_unknown"
 FLAG_GAIA_EPOCH_UNKNOWN = "gaia_epoch_unknown"
 FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
-FLAG_GAIA_DEPTH_REDUCED = "gaia_depth_reduced"
 FLAG_WCS_REFINED = "wcs_refined_against_gaia"
 FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
 
@@ -506,7 +485,7 @@ def _mark_gaia_service_unreachable(service: str) -> None:
     Parameters
     ----------
     service : `str`
-        The service's name, as used in `_fetch_gaia_cone`.
+        The service's name, as `make_gaia_tile_fetcher` names it.
     """
     state = _gaia_state()
     with state.lock:
@@ -519,7 +498,7 @@ def _is_gaia_service_unreachable(service: str) -> bool:
     Parameters
     ----------
     service : `str`
-        The service's name, as used in `_fetch_gaia_cone`.
+        The service's name, as `make_gaia_tile_fetcher` names it.
 
     Returns
     -------
@@ -532,126 +511,95 @@ def _is_gaia_service_unreachable(service: str) -> bool:
         return service in state.unreachable_services
 
 
-def _fetch_gaia_cone(
-    ra_center: float,
-    dec_center: float,
-    radius_deg: float,
-    max_magnitude: float,
-    row_limit: int,
-    purpose: str,
-) -> Any | None:
-    """Download Gaia DR3 stars in a circle, trying each service in turn.
+def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
+    """Build the function that downloads one Gaia sky tile for this run.
 
-    The order is VizieR, then the ESA Gaia archive, both at `max_magnitude`;
-    then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits. The
-    first answer wins. A service that cannot be reached (a connection
-    failure) is skipped for the rest of the run (see
-    `_GaiaRunState.unreachable_services`), so its later, brighter attempts
-    are not made. A service that was reached but was slow keeps its brighter
-    attempts. The whole attempt counts as one success or one failure for
-    the circuit breaker.
-
-    Parameters
-    ----------
-    ra_center, dec_center, radius_deg : `float`
-        The search circle, in degrees.
-    max_magnitude : `float`
-        The faintest G magnitude asked for.
-    row_limit : `int`
-        The most rows to return, brightest first.
-    purpose : `str`
-        What the stars are for, used in log messages.
+    Each tile tries VizieR, then the ESA Gaia archive, both at the depth
+    wanted; then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits
+    (see `gaia_cone_driver.fetch_gaia_tile`). A service that cannot be reached
+    (a connection failure) is skipped for the rest of the run (see
+    `_GaiaRunState.unreachable_services`). Each tile counts as one success or
+    one failure for the circuit breaker. Once the breaker is open, every
+    later tile is refused at once.
 
     Returns
     -------
-    table : `astropy.table.Table` or `None`
-        The stars (see `drivers.gaia_cone_driver.GAIA_CONE_COLUMNS`), or
-        `None` when every attempt failed. ``meta["magnitude_limit"]`` is the
-        depth actually fetched, ``meta["depth_reduced"]`` is True when that is
-        brighter than `max_magnitude`, ``meta["gaia_service"]`` names the
-        service that answered, and ``meta["row_limit_reached"]`` is True when
-        the table holds `row_limit` rows.
+    fetch : `TileFetcher` or `None`
+        The fetcher, or `None` when this run may not go online.
+    reason : `str`
+        Why there is no fetcher; empty when there is one.
     """
-    from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+    from astrometricslib._internal.drivers import gaia_cone_driver
 
     if network_is_offline():
-        logger.debug("Skipping Gaia %s: this launch sends nothing off the computer.", purpose)
-        return None
+        return None, "this launch sends nothing off the computer"
+    if _gaia_remote_queries_disabled():
+        logger.warning(
+            "Gaia downloads are skipped: they failed %s times in a row earlier in this run.",
+            GAIA_CONSECUTIVE_FAILURE_LIMIT,
+        )
+        return None, "Gaia downloads stopped after repeated failures earlier in this run"
 
-    attempts: list[tuple[str, float, Callable[[], Any], int]] = []
-    depth_step_magnitudes = resolve(GAIA_DEPTH_STEP_MAGNITUDES).value
-    for step in range(resolve(GAIA_DEPTH_STEPS_DOWN).value + 1):
-        magnitude = max_magnitude - step * depth_step_magnitudes
+    def on_error(service: str, error: BaseException) -> None:
+        """Log one failed attempt; stop asking a service that is unreachable.
 
-        def vizier(magnitude: float = magnitude) -> Any:
-            """Ask VizieR at this depth.
+        Parameters
+        ----------
+        service : `str`
+            The service that failed.
+        error : `BaseException`
+            What went wrong.
+        """
+        if _is_connection_failure(error):
+            _mark_gaia_service_unreachable(service)
+        logger.info("A Gaia tile download from %s failed: %s", service, error)
 
-            Returns
-            -------
-            table : `astropy.table.Table`
-                The stars VizieR returned.
-            """
-            return query_gaia_cone_vizier(
-                ra_center, dec_center, radius_deg, magnitude, row_limit, GAIA_VIZIER_TIMEOUT_SECONDS
-            )
+    def fetch(level: int, tile: int, have_magnitude: float, want_magnitude: float) -> TileFetch:
+        """Download the missing depth of one tile.
 
-        attempts.append(("VizieR", magnitude, vizier, GAIA_VIZIER_TIMEOUT_SECONDS + 5))
-        if step == 0:
+        Parameters
+        ----------
+        level, tile : `int`
+            The tile.
+        have_magnitude, want_magnitude : `float`
+            The depth already cached and the depth wanted.
 
-            def esa(magnitude: float = magnitude) -> Any:
-                """Ask the ESA Gaia archive at this depth.
+        Returns
+        -------
+        answer : `TileFetch`
+            The tile's stars and how deep they are complete.
 
-                Returns
-                -------
-                table : `astropy.table.Table`
-                    The stars the archive returned.
-                """
-                return query_gaia_cone_esa(ra_center, dec_center, radius_deg, magnitude, row_limit)
-
-            attempts.append(("ESA Gaia archive", magnitude, esa, GAIA_ESA_TIMEOUT_SECONDS))
-
-    for service, magnitude, query, deadline in attempts:
-        if _is_gaia_service_unreachable(service):
-            logger.debug(
-                "Skipping Gaia %s from %s (G < %.1f): it failed earlier in this run.",
-                purpose,
-                service,
-                magnitude,
-            )
-            continue
+        Raises
+        ------
+        ExternalServiceError
+            When every service failed, or the circuit breaker is open.
+        """
+        if _gaia_remote_queries_disabled():
+            raise ExternalServiceError("not tried: Gaia downloads stopped after repeated failures")
         try:
-            table = _run_with_daemon_thread_timeout(query, timeout_seconds=deadline)
+            answer = gaia_cone_driver.fetch_gaia_tile(
+                level,
+                tile,
+                have_magnitude,
+                want_magnitude,
+                GAIA_ROW_LIMIT,
+                vizier_timeout_seconds=GAIA_VIZIER_TIMEOUT_SECONDS,
+                esa_timeout_seconds=GAIA_ESA_TIMEOUT_SECONDS,
+                depth_step_magnitudes=float(resolve(GAIA_DEPTH_STEP_MAGNITUDES).value),
+                depth_steps_down=int(resolve(GAIA_DEPTH_STEPS_DOWN).value),
+                run_with_deadline=_run_with_daemon_thread_timeout,
+                skip_service=_is_gaia_service_unreachable,
+                on_error=on_error,
+                vizier_query=gaia_cone_driver.query_gaia_tile_vizier,
+                esa_query=gaia_cone_driver.query_gaia_tile_esa,
+            )
         except ExternalServiceError:
-            logger.warning(
-                "Gaia %s from %s timed out after %ss (G < %.1f, field %.4f, %.4f).",
-                purpose,
-                service,
-                deadline,
-                magnitude,
-                ra_center,
-                dec_center,
-            )
-            continue
-        except ONLINE_QUERY_ERRORS as error:
-            if _is_connection_failure(error):
-                _mark_gaia_service_unreachable(service)
-            logger.warning("Gaia %s from %s failed (G < %.1f): %s", purpose, service, magnitude, error)
-            continue
+            _record_gaia_failure(f"Gaia tile {tile}")
+            raise
         _record_gaia_success()
-        table.meta["magnitude_limit"] = magnitude
-        table.meta["depth_reduced"] = magnitude < max_magnitude
-        table.meta["gaia_service"] = service
-        table.meta["row_limit_reached"] = len(table) >= row_limit
-        if magnitude < max_magnitude:
-            logger.warning(
-                "Gaia %s reached only G < %.1f of the G < %.1f asked for; fainter stars stay unnamed.",
-                purpose,
-                magnitude,
-                max_magnitude,
-            )
-        return table
-    _record_gaia_failure(f"{purpose} failed on every service")
-    return None
+        return answer
+
+    return fetch, ""
 
 
 def get_gaia_query_statistics() -> dict[str, int | bool]:
@@ -945,45 +893,26 @@ def _is_unresolved_match(star_coord: SkyCoord, simbad_coords: SkyCoord) -> bool:
     return int(np.count_nonzero(separations <= resolve(UNRESOLVED_COMPANION_RADIUS_ARCSEC).value)) >= 2
 
 
-def _catalog_ra_ranges(ra_center: float, dec_center: float, radius_deg: float) -> list[tuple[float, float]]:
-    """Build the Right Ascension (RA) ranges of a catalog search box.
-
-    RA is an angle that wraps from 360 deg back to 0 deg. A box centred
-    near that line has edges below 0 or above 360, and the catalog stores
-    RA only inside [0, 360], so a single range would miss the rows on the
-    far side of the line. This function splits such a box into two
-    ranges, one on each side. The box is wider in RA than in declination
-    by ``1 / cos(dec)``, with the cosine held at 0.1 or more so the box
-    stays finite near a pole.
+def _table_has_proper_motion(result_table: Any) -> bool:
+    """Check whether any star of a Gaia table has a proper motion.
 
     Parameters
     ----------
-    ra_center : `float`
-        RA of the search centre, in degrees.
-    dec_center : `float`
-        Declination of the search centre, in degrees.
-    radius_deg : `float`
-        Search radius on the sky, in degrees.
+    result_table : `astropy.table.Table`
+        A Gaia table.
 
     Returns
     -------
-    ranges : `list` [`tuple` [`float`, `float`]]
-        One or two ``(low, high)`` RA ranges in degrees, each inside
-        [0, 360]. Two ranges are returned when the box crosses the wrap
-        line, and they do not overlap. A single range ``(0, 360)`` is
-        returned when the box is at least half the circle wide.
+    known : `bool`
+        True if the table has ``pmra`` and ``pmdec`` columns and at least one
+        row has a finite value in both. Some Gaia stars have none (their
+        solution has no motion), so a few missing values are normal.
     """
-    half_width_deg = float(radius_deg / max(0.1, np.cos(np.radians(dec_center))))
-    if half_width_deg >= 180.0:
-        return [(0.0, 360.0)]
-    centre_deg = float(ra_center) % 360.0
-    low_deg = centre_deg - half_width_deg
-    high_deg = centre_deg + half_width_deg
-    if low_deg < 0.0:
-        return [(0.0, high_deg), (low_deg + 360.0, 360.0)]
-    if high_deg > 360.0:
-        return [(low_deg, 360.0), (0.0, high_deg - 360.0)]
-    return [(low_deg, high_deg)]
+    if "pmra" not in result_table.colnames or "pmdec" not in result_table.colnames:
+        return False
+    pm_ra = np.ma.filled(np.ma.asarray(result_table["pmra"], dtype=float), np.nan)
+    pm_dec = np.ma.filled(np.ma.asarray(result_table["pmdec"], dtype=float), np.nan)
+    return bool(np.any(np.isfinite(pm_ra) & np.isfinite(pm_dec)))
 
 
 def propagate_gaia_positions(
@@ -1062,28 +991,29 @@ def read_observation_time(header: Any) -> Time | None:
         return None
 
 
-def estimate_gaia_magnitude_limit(stellar_objects: list[StellarObject]) -> float | None:
-    """Work out how faint a Gaia search needs to go for one frame.
+def estimate_faintest_detected_magnitude(stellar_objects: list[StellarObject]) -> float | None:
+    """Estimate the catalog magnitude of the faintest detected star of a frame.
 
-    The detected stars that SIMBAD identified have both a measured flux and a
-    catalog V magnitude. Magnitude is ``zero_point - 2.5 * log10(flux)``, so
-    each such star gives a zero point, and the median is the frame's. The
-    faintest detected star's magnitude follows from its flux. The limit is
-    that magnitude plus `GAIA_MAGNITUDE_LIMIT_MARGIN`, kept between
-    `GAIA_MINIMUM_MAGNITUDE_LIMIT` and `GAIA_MAXIMUM_MAGNITUDE_LIMIT`.
+    The detected stars that a catalog identified have both a measured flux
+    and a catalog magnitude. Magnitude is ``zero_point - 2.5 * log10(flux)``,
+    so each such star gives a zero point, and the median is the frame's. The
+    faint end is the flux that 99 percent of the detections exceed
+    (`FAINT_END_PERCENTILE`), not the single faintest one, because the very
+    faintest detections are mostly noise peaks. It is only a check of the
+    predicted query depth (see `gaia_depth.depth_exceeded`); it does not set
+    the depth.
 
     Parameters
     ----------
     stellar_objects : `list` [`StellarObject`]
-        Every detected star of the frame, after the SIMBAD pass.
+        Every detected star of the frame, after the catalog matching.
 
     Returns
     -------
-    magnitude_limit : `float` or `None`
-        The limit, or `None` when fewer than
+    magnitude : `float` or `None`
+        The estimate, or `None` when fewer than
         `MINIMUM_STARS_FOR_DEPTH_ESTIMATE` stars have both a positive flux
-        and a catalog magnitude. The caller then uses
-        `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
+        and a catalog magnitude.
     """
     fluxes: list[float] = []
     zero_points: list[float] = []
@@ -1097,14 +1027,8 @@ def estimate_gaia_magnitude_limit(stellar_objects: list[StellarObject]) -> float
             zero_points.append(magnitude + 2.5 * math.log10(flux))
     if len(zero_points) < resolve(MINIMUM_STARS_FOR_DEPTH_ESTIMATE).value:
         return None
-    faintest_magnitude = float(np.median(zero_points)) - 2.5 * math.log10(min(fluxes))
-    limit = faintest_magnitude + resolve(GAIA_MAGNITUDE_LIMIT_MARGIN).value
-    return float(
-        min(
-            max(limit, resolve(GAIA_MINIMUM_MAGNITUDE_LIMIT).value),
-            resolve(GAIA_MAXIMUM_MAGNITUDE_LIMIT).value,
-        )
-    )
+    faint_flux = float(np.percentile(fluxes, FAINT_END_PERCENTILE, method="lower"))
+    return float(np.median(zero_points)) - 2.5 * math.log10(faint_flux)
 
 
 def find_unique_stars(
@@ -1230,6 +1154,29 @@ class StarIdentifier:
         self.gaia_fit_peak_over_noise: tuple[float, ...] = ()
         self.gaia_fit_signal_reason: str = "no Gaia fit was made"
         self._detected_on_binned_copy = False
+        # The predicted Gaia query depth of the last image (from its header),
+        # or `None` when no image header was read. A caller that names stars
+        # of another image may set it before `identify_stars_with_wcs`.
+        self.gaia_depth_prediction: GaiaDepthPrediction | None = None
+        # The Gaia stars of the last image's tiles, and the tiles behind them
+        # (see `_prepare_field_gaia_stars`). `None` before the first field.
+        self.field_gaia_stars: FieldGaiaStars | None = None
+
+    def use_image_header(self, header: Any) -> None:
+        """Set the Gaia query depth from the header of the image to be named.
+
+        `process_image` does this itself. A caller that names the stars of
+        another image with `identify_stars_with_wcs` calls it first.
+
+        Parameters
+        ----------
+        header : `Any`
+            The image's FITS header, or `None` for the default depth.
+        """
+        self.gaia_depth_prediction = (
+            None if header is None else predict_gaia_depth_from_header(header, self.config)
+        )
+        self.field_gaia_stars = None
 
     def _add_flag(self, flag: str) -> None:
         """Record a limiting condition once for the current image.
@@ -1524,6 +1471,7 @@ class StarIdentifier:
             data = image_data_or_path
             path = None
         self.observation_time = read_observation_time(header)
+        self.use_image_header(header)
 
         is_color_frame = data is not None and data.ndim == 3
         if is_color_frame:
@@ -1658,9 +1606,11 @@ class StarIdentifier:
 
         The solver fits only the few stars of its own index files, and can sit
         more than a pixel from the truth with no check noticing (see
-        `wcs_refinement`). This downloads (or reads from the cache) the Gaia
-        DR3 stars of the field to `GAIA_DEFAULT_MAGNITUDE_LIMIT`, moves them
-        to the date of the image, and refits. The outcome is kept in
+        `wcs_refinement`). This fills the Gaia tiles under the image (see
+        `_prepare_field_gaia_stars`), reads the stars of the complete tiles
+        to `GAIA_DEFAULT_MAGNITUDE_LIMIT` (or the query depth, if shallower),
+        moves them to the date of the image, and refits. Stars of a tile that
+        is not complete are not used. The outcome is kept in
         `wcs_refinement`, and one flag says whether the new solution was used.
         A failed download leaves the solver's solution as it was.
 
@@ -1673,8 +1623,8 @@ class StarIdentifier:
         height, width : `int`
             The image's size in pixels.
         cache_only : `bool`, optional
-            If True, use only a complete cached download and never ask a
-            remote service. Without one, the solver's solution is kept.
+            If True, use only tiles already complete in the cache and never
+            ask a remote service. With none, the solver's solution is kept.
 
         Returns
         -------
@@ -1690,29 +1640,24 @@ class StarIdentifier:
                 centroids.append((float(x), float(y)))
                 centroid_source_indices.append(source_index)
         try:
-            centre = wcs.pixel_to_world(width / 2.0, height / 2.0)
-            scales = proj_plane_pixel_scales(wcs)
-            radius_deg = min(1.0, float(np.hypot(scales[0] * width, scales[1] * height)) / 2.0 * 1.05)
+            if cache_only:
+                tiles = tiles_under_image(wcs, width, height)
+            else:
+                tiles = self._prepare_field_gaia_stars(wcs, width, height).tiles
         except DATA_ERRORS:
             logger.exception("Could not place the solved image on the sky; the Gaia refit is skipped.")
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
             return wcs
-        default_magnitude_limit = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
-        if cache_only:
-            from astrometricslib.foundation.config import get_configuration
-
-            cached = self._query_gaia_region_from_cache(
-                get_configuration(),
-                float(centre.ra.deg),
-                float(centre.dec.deg),
-                radius_deg,
-                default_magnitude_limit,
-            )
-            gaia_table, gaia_coords = cached if cached is not None else (None, None)
-        else:
-            gaia_table, gaia_coords = self._query_gaia_region(
-                float(centre.ra.deg), float(centre.dec.deg), radius_deg, default_magnitude_limit
-            )
+        # The refit keeps its own depth: bright stars place the field well,
+        # and the faintest stars of a crowded field add wrong pairs.
+        refit_depth = min(float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value), self._gaia_query_depth())
+        try:
+            refit_stars = load_field_gaia_stars(self.config, tiles, refit_depth, None)
+        except sqlite3.Error, OSError:
+            logger.exception("The Gaia cache could not be read for the refit.")
+            refit_stars = None
+        gaia_table = None if refit_stars is None else refit_stars.table
+        gaia_coords = None if refit_stars is None else refit_stars.coords
         if gaia_table is None or gaia_coords is None:
             logger.warning("No Gaia stars for the refit of the solution; the solver's solution is kept.")
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
@@ -1808,7 +1753,6 @@ class StarIdentifier:
                 fov_x = pixel_scales[0] * width
                 fov_y = pixel_scales[1] * height
                 radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
-                radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
             except DATA_ERRORS as e:
                 logger.warning("Failed to calculate FOV from WCS: %s", e)
 
@@ -1886,496 +1830,6 @@ class StarIdentifier:
 
         return result_table, simbad_coords
 
-    @staticmethod
-    def _seed_gaia_cache_for_field(
-        ra_center: float,
-        dec_center: float,
-        radius_deg: float = 0.5,
-        max_magnitude: float | None = None,
-    ) -> int:
-        """Download and save Gaia DR3 stars for a specific area of the sky.
-
-        This checks if the local database already holds a complete download
-        that covers this area to this depth (see
-        `catalog_store.is_gaia_region_complete`). If not, it downloads stars
-        brighter than the `max_magnitude` limit, saves them, and records
-        the region's centre, radius and magnitude limit so a later search can
-        reuse them. The record holds the depth actually fetched and whether
-        the download reached `GAIA_ROW_LIMIT` rows.
-
-        Parameters
-        ----------
-        ra_center, dec_center : `float`
-            The center of the image area in degrees.
-        radius_deg : `float`, optional
-            How wide of an area to search.
-        max_magnitude : `float`, optional
-            How faint of a star to care about. Defaults to
-            `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
-
-        Returns
-        -------
-        count : `int`
-            How many stars we downloaded or found in the cache.
-        """
-        if max_magnitude is None:
-            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
-        from astropy.table import Table
-
-        from astrometricslib._internal.drivers import catalog_store
-        from astrometricslib.foundation.config import get_configuration
-
-        radius_deg = min(max(0.1, radius_deg), 1.0)
-        if math.isclose(ra_center, 0.0, abs_tol=1e-9) and math.isclose(dec_center, 0.0, abs_tol=1e-9):
-            return 0
-
-        config = get_configuration()
-        region_key = f"{ra_center:.3f}_{dec_center:.3f}_{radius_deg:.2f}"
-
-        try:
-            if catalog_store.is_gaia_region_complete(
-                config, ra_center, dec_center, radius_deg, max_magnitude
-            ):
-                logger.debug("Gaia region '%s' already cached.", region_key)
-                return 0
-        except (sqlite3.Error, OSError) as e:
-            logger.warning("Error checking gaia_cache_regions: %s", e)
-
-        # Use the same safety switch as the main search. We still check the
-        # local database above, we just skip the internet download part if the
-        # connection has failed too many times.
-        if _gaia_remote_queries_disabled():
-            logger.debug(
-                "Skipping Gaia cache seed for field (%.4f, %.4f): circuit breaker open.",
-                ra_center,
-                dec_center,
-            )
-            return 0
-
-        logger.info(
-            "Seeding Gaia DR3 cache for field (%.4f, %.4f), radius=%.3f°...",
-            ra_center,
-            dec_center,
-            radius_deg,
-        )
-        result_table: Table | None = _fetch_gaia_cone(
-            ra_center, dec_center, radius_deg, max_magnitude, GAIA_ROW_LIMIT, "cache seed"
-        )
-        if result_table is None or len(result_table) == 0:
-            return 0
-
-        try:
-            to_insert = [
-                (
-                    str(row["source_id"]),
-                    float(row["ra"]),
-                    float(row["dec"]),
-                    float(row["phot_g_mean_mag"]) if row["phot_g_mean_mag"] is not None else 0.0,
-                    str(row["designation"]) if row["designation"] else f"Gaia DR3 {row['source_id']}",
-                    _optional_float(row["pmra"]) if "pmra" in result_table.colnames else None,
-                    _optional_float(row["pmdec"]) if "pmdec" in result_table.colnames else None,
-                )
-                for row in result_table
-            ]
-            catalog_store.insert_gaia_sources(config, to_insert)
-            catalog_store.mark_region_cached(config, region_key, ra_center, dec_center, radius_deg)
-            # The depth actually fetched, which is brighter than asked when
-            # every service failed at the full depth.
-            catalog_store.record_gaia_region(
-                config,
-                ra_center,
-                dec_center,
-                radius_deg,
-                result_table.meta["magnitude_limit"],
-                row_limit_hit=bool(result_table.meta["row_limit_reached"]),
-            )
-            logger.info(
-                "Successfully cached %s Gaia DR3 sources for field (%.4f, %.4f).",
-                len(to_insert),
-                ra_center,
-                dec_center,
-            )
-            return len(to_insert)
-        except (*DATA_ERRORS, sqlite3.Error, OSError) as e:
-            logger.warning("Failed to record Gaia DR3 sources to cache: %s", e)
-            return 0
-
-    @staticmethod
-    def _query_gaia_region(
-        ra_center: float,
-        dec_center: float,
-        radius_deg: float,
-        max_magnitude: float | None = None,
-    ) -> tuple[Any, SkyCoord] | tuple[None, None]:
-        """Search the Gaia DR3 database for stars in a circular area.
-
-        We check our local cache first. The cache is used only when a recorded
-        download covers this area, is at least as deep as `max_magnitude` and
-        was not cut short by the row limit. Otherwise we download from the
-        internet and save it, with a record of how it was fetched, for next
-        time. If every remote service fails, the search returns nothing. A
-        cache that holds only some of the stars is never used: a missing star
-        could let a neighbor take its identity for good.
-
-        Parameters
-        ----------
-        ra_center, dec_center : `float`
-            The center of the image area in degrees.
-        radius_deg : `float`
-            How wide of an area to search.
-        max_magnitude : `float`, optional
-            Only stars brighter than this Gaia G magnitude are returned,
-            whether they come from the cache or the download. Defaults to
-            `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
-
-        Returns
-        -------
-        result_table, gaia_coords : `astropy.table.Table`, `SkyCoord`
-            The list of stars and their coordinates, or None if the search
-            failed. The table's ``meta`` dictionary can hold two keys:
-            ``row_limit_reached`` (the download returned `GAIA_ROW_LIMIT`
-            rows, so it may be cut short) and ``proper_motion_known``
-            (whether any row has a proper motion).
-        """
-        if max_magnitude is None:
-            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
-        from astrometricslib.foundation.config import get_configuration
-
-        radius_deg = min(radius_deg, 1.0)
-        config = get_configuration()
-
-        cached = StarIdentifier._query_gaia_region_from_cache(
-            config, ra_center, dec_center, radius_deg, max_magnitude
-        )
-        if cached is not None:
-            logger.info(
-                "Gaia stars for (%.4f, %.4f) came from the local cache; no remote query.",
-                ra_center,
-                dec_center,
-            )
-            return cached
-
-        # We didn't find the stars in our local database. Like before, we
-        # only skip this next part (the internet download) if the connection
-        # safety switch has been tripped.
-        if _gaia_remote_queries_disabled():
-            logger.debug(
-                "Skipping remote Gaia query at %.4f, %.4f: circuit breaker open for this process.",
-                ra_center,
-                dec_center,
-            )
-            return None, None
-
-        result_table = StarIdentifier._download_gaia_region(ra_center, dec_center, radius_deg, max_magnitude)
-
-        if result_table is None or len(result_table) == 0:
-            logger.info("No Gaia results for this region.")
-            return None, None
-
-        logger.info("  Found %s Gaia sources in field.", len(result_table))
-        result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(result_table)
-
-        StarIdentifier._cache_gaia_results(
-            config,
-            result_table,
-            region=(
-                ra_center,
-                dec_center,
-                radius_deg,
-                result_table.meta.get("magnitude_limit", max_magnitude),
-            ),
-        )
-
-        gaia_coords = StarIdentifier._gaia_coords_from_table(result_table)
-        if gaia_coords is None:
-            return None, None
-
-        return result_table, gaia_coords
-
-    @staticmethod
-    def _table_has_proper_motion(result_table: Any) -> bool:
-        """Check whether any star of a Gaia table has a proper motion.
-
-        Parameters
-        ----------
-        result_table : `astropy.table.Table`
-            A Gaia result or cache table.
-
-        Returns
-        -------
-        known : `bool`
-            True if the table has ``pmra`` and ``pmdec`` columns and at least
-            one row has a finite value in both. Some Gaia stars have none
-            (their solution has no motion), so a few missing values are normal.
-            A table where every value is missing came from a cache written
-            before proper motions were stored.
-        """
-        if "pmra" not in result_table.colnames or "pmdec" not in result_table.colnames:
-            return False
-        pm_ra = np.ma.filled(np.ma.asarray(result_table["pmra"], dtype=float), np.nan)
-        pm_dec = np.ma.filled(np.ma.asarray(result_table["pmdec"], dtype=float), np.nan)
-        return bool(np.any(np.isfinite(pm_ra) & np.isfinite(pm_dec)))
-
-    @staticmethod
-    def _query_gaia_region_from_cache(
-        config: Any,
-        ra_center: float,
-        dec_center: float,
-        radius_deg: float,
-        max_magnitude: float | None = None,
-    ) -> tuple[Any, SkyCoord] | None:
-        """Look for cached Gaia DR3 sources covering this region.
-
-        Parameters
-        ----------
-        config : `AppConfiguration`
-            The application settings.
-        ra_center, dec_center, radius_deg : `float`
-            The search centre and radius in degrees.
-        max_magnitude : `float`, optional
-            Cached stars fainter than this Gaia G magnitude are left out. A
-            star stored without a magnitude (stored as 0) is kept. The cache
-            is also used only if a recorded download is at least this deep.
-            Defaults to `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
-
-        Returns
-        -------
-        result : `tuple` or `None`
-            `(result_table, gaia_coords)` if a recorded download covers the
-            search circle, reaches `max_magnitude` and was not cut short, and
-            the cache holds at least one star in the search bounding box.
-            Otherwise `None`, and the caller downloads. A cache file with no
-            region records (one written before they existed) always gives
-            `None`, so its regions are downloaded again once. The table has
-            ``pmra`` and ``pmdec`` columns (NaN where the cache has no
-            proper motion for the star) and its ``meta["proper_motion_known"]``
-            says whether any star has one.
-        """
-        if max_magnitude is None:
-            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
-        from astropy.table import Table
-
-        from astrometricslib._internal.drivers import catalog_store
-
-        cache_db_path = catalog_store.get_catalog_cache_path(config)
-        try:
-            # A star count says nothing about completeness: a region cut off
-            # by the old 10,000-row limit, or downloaded to a brighter limit,
-            # holds plenty of rows. Only a recorded download counts.
-            if not catalog_store.is_gaia_region_complete(
-                config, ra_center, dec_center, radius_deg, max_magnitude
-            ):
-                logger.debug(
-                    "No complete cached Gaia download covers (%.4f, %.4f) r=%.3f G<%.1f.",
-                    ra_center,
-                    dec_center,
-                    radius_deg,
-                    max_magnitude,
-                )
-                return None
-
-            # Query existing cached sources within bounding box + radius.
-            # A box that crosses RA = 0 deg splits in two, one query per side.
-            min_dec = dec_center - radius_deg
-            max_dec = dec_center + radius_deg
-
-            cached_rows = []
-            for min_ra, max_ra in _catalog_ra_ranges(ra_center, dec_center, radius_deg):
-                cached_rows.extend(
-                    catalog_store.query_gaia_sources_in_bounds(
-                        config, min_ra, max_ra, min_dec, max_dec, include_proper_motion=True
-                    )
-                )
-            # The recorded download may be deeper than this request, so the
-            # same magnitude limit applies here as to a download.
-            cached_rows = [row for row in cached_rows if not row[3] or row[3] < max_magnitude]
-
-            if cached_rows:
-                logger.info(
-                    "Loaded %s Gaia DR3 sources from local SQLite cache (%s).",
-                    len(cached_rows),
-                    cache_db_path,
-                )
-                source_ids = [r[0] for r in cached_rows]
-                ras = [r[1] for r in cached_rows]
-                decs = [r[2] for r in cached_rows]
-                mags = [r[3] for r in cached_rows]
-                desigs = [r[4] for r in cached_rows]
-                pm_ras = [np.nan if r[5] is None else r[5] for r in cached_rows]
-                pm_decs = [np.nan if r[6] is None else r[6] for r in cached_rows]
-
-                result_table = Table(
-                    [source_ids, ras, decs, mags, desigs, pm_ras, pm_decs],
-                    names=["source_id", "ra", "dec", "phot_g_mean_mag", "DESIGNATION", "pmra", "pmdec"],
-                )
-                result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(
-                    result_table
-                )
-                gaia_coords = SkyCoord(ra=np.array(ras) * u.deg, dec=np.array(decs) * u.deg)
-                return result_table, gaia_coords
-        except (*DATA_ERRORS, sqlite3.Error, OSError) as e:
-            logger.warning("Failed checking local Gaia SQLite cache: %s", e)
-
-        return None
-
-    @staticmethod
-    def _download_gaia_region(
-        ra_center: float,
-        dec_center: float,
-        radius_deg: float,
-        max_magnitude: float | None = None,
-        row_limit: int = GAIA_ROW_LIMIT,
-    ) -> Any | None:
-        """Download Gaia DR3 sources for a region from VizieR or ESA.
-
-        The query asks for stars brighter than `max_magnitude` inside the
-        circle and returns the brightest first, so if the result is cut at
-        `row_limit` rows, the faintest stars are the ones lost. Each row has
-        the position (epoch 2016.0), the G magnitude, the designation and the
-        proper motion. See `_fetch_gaia_cone` for the order of services and
-        the brighter limits tried when every service fails.
-
-        Parameters
-        ----------
-        ra_center, dec_center, radius_deg : `float`
-            The search circle in degrees.
-        max_magnitude : `float`, optional
-            Only stars brighter than this Gaia G magnitude are returned.
-            Defaults to `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
-        row_limit : `int`, optional
-            The most rows to return.
-
-        Returns
-        -------
-        result_table : `astropy.table.Table` or `None`
-            The downloaded sources, or `None` if every attempt timed out
-            or failed. ``meta`` holds the keys `_fetch_gaia_cone` sets,
-            including ``row_limit_reached`` and the depth actually fetched.
-        """
-        if max_magnitude is None:
-            max_magnitude = resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value
-        logger.info(
-            "Querying Gaia DR3 region at %.4f, %.4f with %.3f degree radius (G < %.1f)...",
-            ra_center,
-            dec_center,
-            radius_deg,
-            max_magnitude,
-        )
-        result_table = _fetch_gaia_cone(
-            ra_center, dec_center, radius_deg, max_magnitude, row_limit, "cone search"
-        )
-        if result_table is not None and result_table.meta["row_limit_reached"]:
-            logger.warning(
-                "The Gaia search returned its limit of %s rows (G < %.1f), so faint stars in the "
-                "field may be missing.",
-                row_limit,
-                result_table.meta["magnitude_limit"],
-            )
-        return result_table
-
-    @staticmethod
-    def _cache_gaia_results(
-        config: Any,
-        result_table: Any,
-        *,
-        region: tuple[float, float, float, float] | None = None,
-    ) -> None:
-        """Save downloaded Gaia DR3 sources to the local SQLite cache.
-
-        Parameters
-        ----------
-        config : `AppConfiguration`
-            The application settings.
-        result_table : `astropy.table.Table`
-            The downloaded sources.
-        region : `tuple` of `float`, optional
-            ``(ra_center, dec_center, radius_deg, magnitude_limit)`` of the
-            download, in degrees and Gaia G magnitude. When given, the region
-            is recorded after the stars are saved, together with whether
-            ``result_table.meta["row_limit_reached"]`` says the download was
-            cut short. Without it the stars are saved but no region is
-            recorded, so they are never reused as a complete download.
-        """
-        from astrometricslib._internal.drivers import catalog_store
-
-        cache_db_path = catalog_store.get_catalog_cache_path(config)
-        try:
-            ra_col = next((c for c in ["ra", "RA", "ra_epoch2000"] if c in result_table.colnames), None)
-            dec_col = next((c for c in ["dec", "DEC", "dec_epoch2000"] if c in result_table.colnames), None)
-            id_col = next((c for c in ["source_id", "SOURCE_ID"] if c in result_table.colnames), None)
-            mag_col = next((c for c in ["phot_g_mean_mag", "g_mag"] if c in result_table.colnames), None)
-            pm_ra_col = "pmra" if "pmra" in result_table.colnames else None
-            pm_dec_col = "pmdec" if "pmdec" in result_table.colnames else None
-            desig_col = next((c for c in ["DESIGNATION", "designation"] if c in result_table.colnames), None)
-
-            if ra_col and dec_col:
-                to_insert = []
-                for row in result_table:
-                    sid = str(row[id_col]) if id_col and row[id_col] is not None else ""
-                    r_val = float(row[ra_col]) if row[ra_col] is not None else 0.0
-                    d_val = float(row[dec_col]) if row[dec_col] is not None else 0.0
-                    m_val = float(row[mag_col]) if mag_col and row[mag_col] is not None else 0.0
-                    des = (
-                        str(row[desig_col]) if desig_col and row[desig_col] is not None else f"Gaia DR3 {sid}"
-                    )
-                    to_insert.append((
-                        sid,
-                        r_val,
-                        d_val,
-                        m_val,
-                        des,
-                        _optional_float(row[pm_ra_col]) if pm_ra_col else None,
-                        _optional_float(row[pm_dec_col]) if pm_dec_col else None,
-                    ))
-
-                catalog_store.insert_gaia_sources(config, to_insert)
-                if region is not None:
-                    region_ra, region_dec, region_radius, region_magnitude_limit = region
-                    catalog_store.record_gaia_region(
-                        config,
-                        region_ra,
-                        region_dec,
-                        region_radius,
-                        region_magnitude_limit,
-                        row_limit_hit=bool(result_table.meta.get("row_limit_reached")),
-                    )
-                logger.info("Cached %s Gaia DR3 sources locally in %s.", len(to_insert), cache_db_path)
-        except (*DATA_ERRORS, sqlite3.Error, OSError) as cache_err:
-            logger.warning("Failed to cache Gaia sources locally: %s", cache_err)
-
-    @staticmethod
-    def _gaia_coords_from_table(result_table: Any) -> SkyCoord | None:
-        """Build a `SkyCoord` from a Gaia result table's RA/Dec columns.
-
-        Returns
-        -------
-        gaia_coords : `SkyCoord` or `None`
-            `None` if the table has no recognisable RA/Dec columns, or
-            coordinate construction failed.
-        """
-        try:
-            ra_col = next(
-                (c for c in ["ra", "RA", "ra_epoch2000"] if c in result_table.colnames),
-                None,
-            )
-            dec_col = next(
-                (c for c in ["dec", "DEC", "dec_epoch2000"] if c in result_table.colnames),
-                None,
-            )
-            if ra_col is None or dec_col is None:
-                logger.warning("Gaia result table missing ra/dec columns.")
-                return None
-
-            ra_vals = result_table[ra_col]
-            dec_vals = result_table[dec_col]
-            return SkyCoord(
-                ra=ra_vals * u.deg,
-                dec=dec_vals * u.deg,
-            )
-        except DATA_ERRORS:
-            logger.exception("Gaia SkyCoord creation failed")
-            return None
-
     def identify_stars_with_wcs(
         self,
         stellar_objects: list[StellarObject],
@@ -2435,16 +1889,9 @@ class StarIdentifier:
             return stellar_objects
 
         still_unmatched = self._match_stars_against_gaia(
-            unmatched_after_simbad,
-            sky_positions,
-            ra_center,
-            dec_center,
-            wcs,
-            width,
-            height,
-            query_radius_deg,
-            magnitude_limit=estimate_gaia_magnitude_limit(stellar_objects),
+            unmatched_after_simbad, sky_positions, wcs, width, height
         )
+        self._check_query_depth(stellar_objects)
 
         self._assign_field_ids(still_unmatched, sky_positions)
 
@@ -2508,11 +1955,9 @@ class StarIdentifier:
             )
             # +15 arcsec buffer keeps the search radius comfortably above
             # the 10 arcsec nearest-neighbour match tolerance used below.
-            # Capped at 1 degree to match the pre-existing FOV-derived cap:
-            # when detected stars are spread across the whole frame this
-            # bounding radius can exceed that cap, and should never be
-            # worse than the old field-of-view-based approach was.
-            query_radius_deg = min(float(bbox_center.separation(star_coords).max().deg) + (15 / 3600), 1.0)
+            # The radius reaches every detected star, also in the corners of
+            # a field wider than 2 degrees across.
+            query_radius_deg = float(bbox_center.separation(star_coords).max().deg) + (15 / 3600)
             ra_center, dec_center = bbox_center.ra.deg, bbox_center.dec.deg
 
         return sky_positions, ra_center, dec_center, query_radius_deg
@@ -2601,18 +2046,17 @@ class StarIdentifier:
         self,
         unmatched_after_simbad: list[StellarObject],
         sky_positions: dict[int, tuple[float, float]],
-        ra_center: float,
-        dec_center: float,
         wcs: WCS,
         width: int,
         height: int,
-        query_radius_deg: float | None,
-        magnitude_limit: float | None = None,
     ) -> list[StellarObject]:
-        """Match stars SIMBAD couldn't identify against a bulk Gaia query.
+        """Match stars SIMBAD couldn't identify against the field's Gaia tiles.
 
-        Gaia positions are moved from epoch 2016.0 to the time of the image
-        before matching (see `_move_gaia_coords_to_observation_epoch`).
+        The Gaia stars come from the complete tiles under the image (see
+        `_prepare_field_gaia_stars`). Their positions are moved from epoch
+        2016.0 to the time of the image before matching (see
+        `_move_gaia_coords_to_observation_epoch`). A detection in a tile that
+        is not complete is not matched and keeps a position-only name.
 
         Parameters
         ----------
@@ -2620,51 +2064,23 @@ class StarIdentifier:
             The stars SIMBAD could not identify.
         sky_positions : `dict`
             Maps `id(stellar_object)` to its `(ra, dec)` in degrees.
-        ra_center, dec_center : `float`
-            The search centre in degrees.
         wcs : `astropy.wcs.WCS`
-            The solved sky map, used to size the search when no radius
-            is given.
+            The solved sky map.
         width, height : `int`
             The image size in pixels.
-        query_radius_deg : `float` or `None`
-            The search radius in degrees, or `None` to derive it from the WCS.
-        magnitude_limit : `float`, optional
-            Only Gaia stars brighter than this G magnitude are searched.
-            `GAIA_DEFAULT_MAGNITUDE_LIMIT` when left out.
 
         Returns
         -------
         still_unmatched : `list` [`StellarObject`]
             The stars neither catalog could identify.
         """
-        # Reuse the same star-position-bounded radius Step 1 used, so this
-        # query covers only the actual detected field, not the full FOV.
-        # Falls back to a field-of-view-derived radius on the rare path
-        # where no star had a projectable sky position (query_radius_deg
-        # is None) -- same as the pre-existing behavior in that case.
-        radius_deg = query_radius_deg
-        if radius_deg is None:
-            radius_deg = 0.2
-            try:
-                pixel_scales = proj_plane_pixel_scales(wcs)
-                fov_x = pixel_scales[0] * width
-                fov_y = pixel_scales[1] * height
-                radius_deg = min(max(fov_x, fov_y) / 2.0 * 1.1, 1.0)
-            except DATA_ERRORS as exc:
-                logger.debug("Could not derive search radius from WCS pixel scale: %s", exc)
-
-        gaia_table, gaia_coords = self._query_gaia_region(
-            ra_center,
-            dec_center,
-            radius_deg,
-            resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value if magnitude_limit is None else magnitude_limit,
-        )
+        try:
+            field = self._prepare_field_gaia_stars(wcs, width, height)
+        except DATA_ERRORS:
+            logger.exception("Could not list the Gaia tiles under the image; Gaia naming is skipped.")
+            return unmatched_after_simbad
+        gaia_table, gaia_coords = field.table, field.coords
         if gaia_table is not None and gaia_coords is not None:
-            if gaia_table.meta.get("row_limit_reached"):
-                self._add_flag(FLAG_GAIA_ROW_LIMIT_REACHED)
-            if gaia_table.meta.get("depth_reduced"):
-                self._add_flag(FLAG_GAIA_DEPTH_REDUCED)
             gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 
         still_unmatched: list[StellarObject] = []
@@ -2712,6 +2128,94 @@ class StarIdentifier:
 
         return still_unmatched
 
+    def _gaia_query_depth(self) -> float:
+        """Give the Gaia G magnitude the current image's tiles are filled to.
+
+        Returns
+        -------
+        depth : `float`
+            The predicted query depth, or `GAIA_DEFAULT_MAGNITUDE_LIMIT` when
+            there is no prediction.
+        """
+        if self.gaia_depth_prediction is not None:
+            return float(self.gaia_depth_prediction.query_depth)
+        return float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value)
+
+    def _prepare_field_gaia_stars(self, wcs: WCS, width: int, height: int) -> FieldGaiaStars:
+        """Fill the Gaia tiles under an image and read the complete ones.
+
+        The tiles are every tile under the image's four corners plus the
+        catalog match radius. The missing ones are downloaded to the query
+        depth (see `make_gaia_tile_fetcher`), unless this run may not go
+        online. The answer is kept, so the refit and the naming of one image
+        share one fill. When tiles stay missing, one warning names how many
+        and why, and `FLAG_GAIA_TILES_MISSING` is recorded.
+
+        Parameters
+        ----------
+        wcs : `astropy.wcs.WCS`
+            The solved sky map.
+        width, height : `int`
+            The image size in pixels.
+
+        Returns
+        -------
+        field : `FieldGaiaStars`
+            The stars of the complete tiles and the tile lists.
+        """
+        tiles = tiles_under_image(wcs, width, height)
+        depth = self._gaia_query_depth()
+        kept = self.field_gaia_stars
+        if kept is not None and kept.tiles == tiles and kept.depth == depth:
+            return kept
+        fetch, reason = make_gaia_tile_fetcher()
+        try:
+            field = load_field_gaia_stars(self.config, tiles, depth, fetch, skipped_reason=reason)
+        except (sqlite3.Error, OSError) as cache_error:
+            logger.warning("The Gaia cache could not be read or written: %s", cache_error)
+            field = FieldGaiaStars(table=None, coords=None, depth=depth, tiles=tiles, missing_tiles=tiles)
+        self.field_gaia_stars = field
+        if field.missing_tiles:
+            why = field.skipped_reason or (
+                f"{len(field.failed_tiles)} failed to download" if field.failed_tiles else "not downloaded"
+            )
+            logger.warning(
+                "%s of %s Gaia tiles under this image are not in the cache to G < %.1f (%s); detections in "
+                "them get position-only names until a later run fills them.",
+                len(field.missing_tiles),
+                len(field.tiles),
+                depth,
+                why,
+            )
+            self._add_flag(FLAG_GAIA_TILES_MISSING)
+        return field
+
+    def _check_query_depth(self, stellar_objects: list[StellarObject]) -> None:
+        """Warn when the image shows stars fainter than the Gaia query depth.
+
+        Parameters
+        ----------
+        stellar_objects : `list` [`StellarObject`]
+            Every detected star of the image, after the catalog matching.
+        """
+        faintest = estimate_faintest_detected_magnitude(stellar_objects)
+        prediction = self.gaia_depth_prediction
+        if prediction is None:
+            prediction = GaiaDepthPrediction(
+                query_depth=self._gaia_query_depth(),
+                limiting_magnitude=None,
+                is_fallback=True,
+                reason="no image header",
+            )
+        if depth_exceeded(prediction, faintest):
+            logger.warning(
+                "The faintest detected star is about G %.1f, fainter than the Gaia query depth G %.1f, so "
+                "the faintest stars cannot be named from Gaia.",
+                faintest,
+                prediction.query_depth,
+            )
+            self._add_flag(FLAG_GAIA_DEPTH_EXCEEDED)
+
     def _move_gaia_coords_to_observation_epoch(self, gaia_table: Any, gaia_coords: SkyCoord) -> SkyCoord:
         """Move Gaia star positions from epoch 2016.0 to the image's time.
 
@@ -2735,7 +2239,7 @@ class StarIdentifier:
             The positions at the observation time, or `gaia_coords`
             unchanged when they cannot be moved.
         """
-        if not self._table_has_proper_motion(gaia_table):
+        if not _table_has_proper_motion(gaia_table):
             logger.warning(
                 "The Gaia stars carry no proper motion (an older cache?), so their positions stay at "
                 "epoch 2016.0."

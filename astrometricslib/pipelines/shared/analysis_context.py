@@ -60,3 +60,8 @@ class AnalysisContext:
     gaia_fit_peak_over_noise: tuple[float, ...] = ()
     gaia_fit_signal_reason: str = "no Gaia fit was made"
     astrometry_flags: list[str] = field(default_factory=list)
+    # How many Gaia cache tiles lie under the image, and how many of them
+    # were not complete to the query depth, so their detections got no Gaia
+    # name. Both 0 when no field was solved.
+    gaia_tiles_count: int = 0
+    gaia_tiles_missing_count: int = 0

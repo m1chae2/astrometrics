@@ -2040,6 +2040,8 @@ export interface AstrometryPipelineQualityMetrics {
   gaiaFitStarCount?: number | null;
   wcsRefinementShiftArcsec?: number | null;
   astrometryFlags?: string[];
+  gaiaTilesCount?: number;
+  gaiaTilesMissingCount?: number;
   plateScaleArcsecPerPixel?: number | null;
   starFwhmPx?: number | null;
   remoteCatalogQueriesAttempted?: number;
@@ -6420,6 +6422,8 @@ export const RPC_METHODS = [
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",
+  "analysis:identify_stack",
+  "analysis:get_stack_identification",
   "target:list",
   "target:get",
   "target:get_targets",

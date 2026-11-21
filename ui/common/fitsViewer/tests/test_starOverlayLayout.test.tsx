@@ -136,7 +136,7 @@ describe('FitsRenderer star overlay', () => {
     Element.prototype.releasePointerCapture = vi.fn();
     const strokeCounts = { arcs: 0 };
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
-      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), stroke: vi.fn(),
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), setLineDash: vi.fn(), stroke: vi.fn(),
       arc: vi.fn(() => { strokeCounts.arcs += 1; })
     })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     const result = render(
@@ -164,7 +164,7 @@ describe('FitsRenderer star overlay', () => {
    */
   it('shows a tooltip when hovering a star that has no label', async () => {
     const stars = makeGridStars();
-    const { container } = await renderOverlay(stars);
+    const { container } = await renderOverlay(stars, () => {});
     const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
     // Star S49_39 sits at the bottom right of the fitted image (zoom 0.95, pan 20 and 25), away from the labels.
     expect(container.querySelector('.fits-renderer__star-tooltip')).toBeNull();
@@ -173,6 +173,30 @@ describe('FitsRenderer star overlay', () => {
     expect(tooltip?.textContent).toContain('Star 49-39');
     expect(tooltip?.textContent).toBe('Open Star 49-39 in the Astronomy Manager');
     expect(tooltip?.textContent).not.toContain('G2V');
+  });
+
+  /**
+   * A stack's detections with no catalog star and its missed catalog stars get markers but no labels.
+   */
+  it('labels only the stars with a catalog name', async () => {
+    const stars = makeGridStars().map((star, index) => ({
+      ...star,
+      matchKind: index === 0 ? 'matched' as const : index % 2 ? 'unmatched' as const : 'catalog_only' as const,
+    }));
+    const { container } = await renderOverlay(stars);
+    const labeled = Array.from(container.querySelectorAll('.fits-renderer__star-group'))
+      .map((group) => group.getAttribute('data-star-id'));
+    expect(labeled).toEqual(['S0_0']);
+  });
+
+  /**
+   * With nothing to open (a stack's own star names), the tooltip gives only the name.
+   */
+  it('names the hovered star without an open hint when stars cannot be opened', async () => {
+    const { container } = await renderOverlay(makeGridStars());
+    const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
+    fireEvent.pointerMove(viewer, { clientX: 770.5, clientY: 965.5 });
+    expect(container.querySelector('.fits-renderer__star-tooltip')?.textContent).toBe('Star 49-39');
   });
 
   /**

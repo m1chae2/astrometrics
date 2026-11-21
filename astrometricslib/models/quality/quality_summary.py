@@ -500,14 +500,20 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     gaia_fit_star_count: int | None = Field(default=None, alias="gaiaFitStarCount")
     wcs_refinement_shift_arcsec: float | None = Field(default=None, alias="wcsRefinementShiftArcsec")
     # Short stable keys for conditions that limit how far the results can be
-    # trusted: ``gaia_row_limit_reached`` (the Gaia search returned as many
-    # rows as it may, so faint stars may be missing),
-    # ``gaia_proper_motion_unknown`` (cached Gaia rows had no proper motion,
-    # so positions stay at epoch 2016.0), ``gaia_epoch_unknown`` (the frame has
-    # no observation date, so positions stay at epoch 2016.0) and
+    # trusted: ``gaia_tiles_missing`` (some Gaia cache tiles under the image
+    # were not complete to the query depth, so stars there have no Gaia
+    # name), ``gaia_depth_exceeded`` (the image shows stars fainter than the
+    # Gaia query depth), ``gaia_proper_motion_unknown`` (cached Gaia rows had
+    # no proper motion, so positions stay at epoch 2016.0),
+    # ``gaia_epoch_unknown`` (the frame has no observation date, so positions
+    # stay at epoch 2016.0) and
     # ``scale_hint_binning_mismatch`` (the header's X and Y pixel sizes, or X
     # and Y binning, differ). They do not flag the run.
     astrometry_flags: list[str] = Field(default_factory=list, alias="astrometryFlags")
+    # How many Gaia cache tiles lie under the image, and how many were not
+    # complete to the query depth (their detections got no Gaia name).
+    gaia_tiles_count: int = Field(default=0, alias="gaiaTilesCount")
+    gaia_tiles_missing_count: int = Field(default=0, alias="gaiaTilesMissingCount")
 
     # The size of one pixel on the sky, in arcseconds, from the solved
     # coordinates, and the width (FWHM) of the stars in the image, in pixels.

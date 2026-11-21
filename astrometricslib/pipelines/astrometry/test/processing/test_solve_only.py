@@ -59,17 +59,15 @@ def _forbid_catalog_work(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "_refine_wcs_against_gaia",
         "_identify_stars_with_simbad",
-        "_query_gaia_region",
+        "_prepare_field_gaia_stars",
         "_query_simbad_region",
-        "_fetch_gaia_cone",
-        "_seed_gaia_cache_for_field",
     ):
-        if hasattr(StarIdentifier, name):
-            monkeypatch.setattr(StarIdentifier, name, _fail_if_called)
-    monkeypatch.setattr(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier._fetch_gaia_cone", _fail_if_called
-    )
-    for name in ("_seed_gaia_cache_from_wcs", "_build_extended_source_hint", "check_extended_source"):
+        monkeypatch.setattr(StarIdentifier, name, _fail_if_called)
+    for name in ("make_gaia_tile_fetcher", "load_field_gaia_stars"):
+        monkeypatch.setattr(
+            f"astrometricslib.pipelines.astrometry.processing.star_identifier.{name}", _fail_if_called
+        )
+    for name in ("_build_extended_source_hint", "check_extended_source"):
         monkeypatch.setattr(AstrometryPipeline, name, _fail_if_called)
 
 
@@ -130,7 +128,7 @@ def test_solve_only_with_an_unsolved_field_still_raises(monkeypatch: pytest.Monk
         identifier.process_image(np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True)
 
 
-def test_the_pipeline_solve_wcs_skips_refit_naming_and_seeding(
+def test_the_pipeline_solve_wcs_skips_refit_and_naming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`AstrometryPipeline.solve_wcs` reads a file and returns only the WCS."""
@@ -173,29 +171,34 @@ def _allow_only_the_cached_refit(
     from astrometricslib.pipelines.astrometry.processing import star_identifier
 
     calls: list[str] = []
+    table, coords = cached if cached is not None else (None, None)
 
-    def cache_lookup(*arguments: Any, **keywords: Any) -> tuple[Any, Any] | None:
-        """Record the lookup and give the prepared answer.
+    def cache_lookup(
+        config: Any, tiles: Any, depth: float, fetch: Any, **keywords: Any
+    ) -> star_identifier.FieldGaiaStars:
+        """Record a cache-only lookup and give the prepared answer.
 
         Parameters
         ----------
-        *arguments
+        config, tiles, depth : `Any`
             Ignored.
+        fetch : `Any`
+            Must be `None`: a cache-only read.
         **keywords
             Ignored.
 
         Returns
         -------
-        cached : `tuple` or `None`
+        field : `FieldGaiaStars`
             The prepared answer.
         """
+        assert fetch is None
         calls.append("cache")
-        return cached
+        return star_identifier.FieldGaiaStars(table=table, coords=coords, depth=depth, tiles=[1])
 
     monkeypatch.setattr(StarIdentifier, "_refine_wcs_against_gaia", _REAL_REFINE)
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region_from_cache", staticmethod(cache_lookup))
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(_fail_if_called))
-    monkeypatch.setattr(star_identifier, "_fetch_gaia_cone", _fail_if_called)
+    monkeypatch.setattr(star_identifier, "load_field_gaia_stars", cache_lookup)
+    monkeypatch.setattr(star_identifier, "tiles_under_image", lambda *arguments, **keywords: [1])
     return calls
 
 

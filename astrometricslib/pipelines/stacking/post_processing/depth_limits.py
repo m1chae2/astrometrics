@@ -289,12 +289,17 @@ def cached_gaia_lookup(config: object) -> GaiaLookup:
         Gives the cached Gaia stars inside a small circle; `None` when the
         cache cannot be read. It never downloads anything.
     """
-    from astrometricslib._internal.drivers.catalog_store import query_gaia_sources_in_bounds
+    from astrometricslib._internal.drivers.catalog_store import GAIA_TILE_LEVEL, missing_tiles, stars_in_tiles
+    from astrometricslib._internal.drivers.sky_tiles import tiles_for_cone
+    from astrometricslib.foundation.parameters import resolve
 
     def lookup(
         right_ascension: float, declination: float, radius_deg: float
     ) -> list[tuple[float, float, float]] | None:
         """Give the cached Gaia stars inside a circle around a position.
+
+        Only tiles that a download has completed to some depth are read; a
+        tile never downloaded gives no stars.
 
         Parameters
         ----------
@@ -306,22 +311,29 @@ def cached_gaia_lookup(config: object) -> GaiaLookup:
         Returns
         -------
         rows : `list` or `None`
-            ``(right ascension, declination, G)`` of each star, or `None` if
-            the cache could not be read.
+            ``(right ascension, declination, G)`` of each star inside the
+            circle, or `None` if the cache could not be read.
         """
-        half_width = radius_deg / max(math.cos(math.radians(declination)), 0.05)
+        level = int(resolve(GAIA_TILE_LEVEL).value)
         try:
-            found = query_gaia_sources_in_bounds(
-                config,
-                right_ascension - half_width,
-                right_ascension + half_width,
-                declination - radius_deg,
-                declination + radius_deg,
-            )
+            tiles = tiles_for_cone(right_ascension, declination, radius_deg, level)
+            # Any recorded depth counts here: the zero point needs only the
+            # bright reference stars, which every completed download holds.
+            never_downloaded = set(missing_tiles(config, tiles, 0.0))
+            known = [tile for tile in tiles if tile not in never_downloaded]
+            found = stars_in_tiles(config, known, 99.0)
         except Exception:  # an unreadable cache only means no zero point
             logger.exception("The Gaia cache could not be read for the stack's zero point")
             return None
-        return [(row[1], row[2], row[3]) for row in found if row[3] is not None]
+        cos_dec = math.cos(math.radians(declination))
+        rows = []
+        for row in found:
+            if row[3] is None:
+                continue
+            delta_ra = ((row[1] - right_ascension + 180.0) % 360.0 - 180.0) * cos_dec
+            if math.hypot(delta_ra, row[2] - declination) <= radius_deg:
+                rows.append((row[1], row[2], row[3]))
+        return rows
 
     return lookup
 

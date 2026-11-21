@@ -430,6 +430,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,
                 **_refinement_metrics(result.context.wcs_refinement),
                 astrometry_flags=list(result.context.astrometry_flags),
+                gaia_tiles_count=result.context.gaia_tiles_count,
+                gaia_tiles_missing_count=result.context.gaia_tiles_missing_count,
                 plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
                 star_fwhm_px=_measure_star_fwhm_px(result.context.image, request.target),
                 plate_solve_succeeded=result.context.wcs is not None,

@@ -66,7 +66,7 @@ def test_stars_are_stored_with_the_tile_of_their_source_id(tmp_path: Path) -> No
     """The tile column is ``source_id >> 45``; lookups by tile find it."""
     config = _Config(tmp_path)
     star = _star(1234, 7, 12.0)
-    catalog_store.insert_gaia_sources(config, [star])
+    catalog_store.record_tile_fetch(config, 1234, 18.0, [star], "test")
 
     connection = sqlite3.connect(catalog_store.get_catalog_cache_path(config))
     try:
@@ -164,18 +164,3 @@ def test_an_old_format_file_opens_without_conversion(tmp_path: Path) -> None:
     assert {"gaia_stars", "gaia_tiles"} <= tables
     assert version == 2
     assert old_rows == 1
-
-
-def test_the_circle_functions_work_on_top_of_tiles(tmp_path: Path) -> None:
-    """A circle record marks inner tiles; tiles alone can also answer."""
-    config = _Config(tmp_path)
-    catalog_store.record_gaia_region(config, 100.0, 20.0, 1.0, 18.0, row_limit_hit=False)
-    inner = [
-        t for t, d in catalog_store.tile_status(config, tiles_for_cone(100.0, 20.0, 1.0, LEVEL)).items() if d
-    ]
-    assert inner
-
-    tiles = tiles_for_cone(100.0, 20.0, 0.2, LEVEL)
-    for tile in tiles:
-        catalog_store.record_tile_fetch(config, tile, 19.0, [], "VizieR")
-    assert catalog_store.is_gaia_region_complete(config, 100.0, 20.0, 0.2, 19.0)

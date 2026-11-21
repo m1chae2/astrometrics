@@ -247,6 +247,12 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
 
     notice_rows = [camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+    if pipeline == "astrometry":
+        from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
+            gaia_tiles_missing_notice_measurement,
+        )
+
+        notice_rows.append(gaia_tiles_missing_notice_measurement(2, 25, context, context.run_subject()))
     if pipeline == "asteroid_detection":
         from astrometricslib.pipelines.asteroid_detection.record_quality import (
             ephemeris_query_cap_notice_measurement,

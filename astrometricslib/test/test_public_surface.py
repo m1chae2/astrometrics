@@ -288,6 +288,8 @@ SUB_API_MEMBERS = {
     "processing": {
         "acquire_job_slot",
         "calibration",
+        "get_stack_identification",
+        "identify_stack",
         "process_target",
         "remake_preview",
         "run_spectroscopy_by_session",

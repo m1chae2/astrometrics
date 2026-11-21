@@ -165,7 +165,7 @@ The FITS Viewer header has these controls.
 | --- | --- |
 | FWHM and Rejected badge | Appears after analysis. FWHM is the width of a star's image at half its peak brightness, in pixels. The badge also shows how many frames were rejected |
 | Stretch or Linear | Switches between the auto-stretched view and the linear view. The label shows the view in use. A stretch brightens faint detail |
-| Astrometry | Shows or hides star labels drawn over the image. The labels exist only after a plate solve. If none exist, a message tells you to run plate solving first |
+| Astrometry | Shows or hides star names drawn over the image. On the stack, the first click names every star the star finder detected, as a job: Analyze Target shows it as running, and its Cancel button stops it. The stack is plate solved first if it has no solution. A circle marks a named star (its most familiar name, from SIMBAD when online and from Gaia otherwise), a dashed circle a detection with no catalog star, and a cross a catalog star the finder missed. The line beside the button gives the counts and any note. On a raw frame, it shows the target's catalog stars, and only when the frame has a plate solution; otherwise the line says why. Clicking a star then opens the star profile, with the star's name at the top |
 | + and - | Zoom in and zoom out |
 | Fit and 1:1 | Fit the image to the panel, or show actual size |
 | Image Viewer button | Opens the same target in the Image Viewer |

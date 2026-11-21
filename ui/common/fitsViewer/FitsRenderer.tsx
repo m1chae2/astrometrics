@@ -22,6 +22,8 @@ import { Badge } from '../components/Badge';
 import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
 import type { SkyPosition } from './wcs';
+import { createPixelToSky } from './wcs';
+import { nameStarAt } from './utils/starNames';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -470,15 +472,21 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   // Star positions are FITS pixel positions, so the overlay waits for the full image and is not drawn on the preview.
   const overlayVisible = Boolean(showOverlay && mainDrawn && overlayStars && overlayStars.length > 0 && drawnSize.w > 0 && drawnSize.h > 0);
 
+  // Only stars with a catalog name get a label; a stack's unmatched detections and missed catalog
+  // stars are drawn as markers only.
+  const labelableStars = React.useMemo(
+    () => overlayStars?.filter((star) => !star.matchKind || star.matchKind === 'matched'),
+    [overlayStars]
+  );
   // A fixed label budget is spent on the stars in view, so zooming in shows more labels per area.
   const labeledIds = React.useMemo(
-    () => (overlayVisible && overlayStars
+    () => (overlayVisible && labelableStars
       ? chooseLabeledStarIds(
-        overlayStars, { scaleX, scaleY, panX, panY, viewWidth: containerW, viewHeight: containerH },
+        labelableStars, { scaleX, scaleY, panX, panY, viewWidth: containerW, viewHeight: containerH },
         estimateBadgeWidth, undefined, (star) => isStarSelected(star, selectedStarId)
       )
       : new Set<string>()),
-    [overlayVisible, overlayStars, scaleX, scaleY, panX, panY, containerW, containerH, selectedStarId]
+    [overlayVisible, labelableStars, scaleX, scaleY, panX, panY, containerW, containerH, selectedStarId]
   );
 
   // Draw one thin circle for every star on a canvas, which stays smooth with thousands of stars.
@@ -501,18 +509,39 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const layerStyle = getComputedStyle(canvas);
     const markerColor = layerStyle.getPropertyValue('--star-marker-color').trim()
       || layerStyle.getPropertyValue('--accent-sky').trim();
-    if (markerColor) context.strokeStyle = markerColor;
     context.lineWidth = 1;
     context.globalAlpha = 0.65;
-    context.beginPath();
     const transform = { scaleX, scaleY, panX, panY, viewWidth: width, viewHeight: height };
-    for (const star of overlayStars) {
-      const position = starScreenPosition(star, transform);
-      if (!isInView(position, transform)) continue;
-      context.moveTo(position.x + MARKER_RADIUS_PX, position.y);
-      context.arc(position.x, position.y, MARKER_RADIUS_PX, 0, Math.PI * 2);
+    // Named stars and the target's catalog stars are circles; a detection with no catalog star is a
+    // dashed circle; a catalog star with no detection is a cross. Each has its own theme color.
+    const groups: Array<{ kind: 'named' | 'unmatched' | 'catalog_only'; color: string }> = [
+      { kind: 'named', color: markerColor },
+      { kind: 'unmatched', color: layerStyle.getPropertyValue('--star-marker-unmatched-color').trim() || markerColor },
+      { kind: 'catalog_only', color: layerStyle.getPropertyValue('--star-marker-catalog-color').trim() || markerColor },
+    ];
+    for (const group of groups) {
+      if (group.color) context.strokeStyle = group.color;
+      context.setLineDash?.(group.kind === 'unmatched' ? [2, 2] : []);
+      context.beginPath();
+      for (const star of overlayStars) {
+        const kind = star.matchKind === 'unmatched' || star.matchKind === 'catalog_only' ? star.matchKind : 'named';
+        if (kind !== group.kind) continue;
+        const position = starScreenPosition(star, transform);
+        if (!isInView(position, transform)) continue;
+        if (kind === 'catalog_only') {
+          const arm = MARKER_RADIUS_PX * 0.8;
+          context.moveTo(position.x - arm, position.y - arm);
+          context.lineTo(position.x + arm, position.y + arm);
+          context.moveTo(position.x - arm, position.y + arm);
+          context.lineTo(position.x + arm, position.y - arm);
+        } else {
+          context.moveTo(position.x + MARKER_RADIUS_PX, position.y);
+          context.arc(position.x, position.y, MARKER_RADIUS_PX, 0, Math.PI * 2);
+        }
+      }
+      context.stroke();
     }
-    context.stroke();
+    context.setLineDash?.([]);
   }, [overlayVisible, overlayStars, scaleX, scaleY, panX, panY, containerW, containerH]);
 
   /**
@@ -681,6 +710,19 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     }
     return { screenX, screenY, radius, cut, band, neighbors, starFound };
   })();
+
+  // The name of the measured star for the top of the profile panel: the overlay star at its center, or
+  // "Unnamed star" with its sky position when the image is plate-solved.
+  const profileStarName = React.useMemo(() => {
+    const profileState = starProfile.state;
+    if (profileState.status !== 'ready') return null;
+    return nameStarAt(
+      profileState.measurement.center_x,
+      profileState.measurement.center_y,
+      showOverlay ? overlayStarsAsSent : undefined,
+      parsedData?.header ? createPixelToSky(parsedData.header) : null,
+    );
+  }, [starProfile.state, showOverlay, overlayStarsAsSent, parsedData]);
 
   // The Detections overlay: fetched while it is on, drawn with the same placement as the star profile marker.
   const detections = useDetections(showDetections && mainDrawn && parsedData !== null, currentKey, resolveMeasurePath);
@@ -914,7 +956,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
             role="tooltip"
             style={{ left: hoverPoint.x + 12, top: hoverPoint.y + 12 }}
           >
-            {`Open ${hoveredStar.name} in the Astronomy Manager`}
+            {onStarClick ? `Open ${hoveredStar.name} in the Astronomy Manager` : hoveredStar.name}
           </div>
         )}
       </div>
@@ -964,6 +1006,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         followNote={starProfile.followNote}
         onClose={starProfile.close}
         pictureNote={starProfilePictureNote}
+        starName={profileStarName}
       />
 
       {effectiveLoading && (

@@ -473,6 +473,8 @@ _NOT_MEASUREMENT_FIELDS = {
     "plate_solve_succeeded": "a yes/no verdict; the plate-solve gate holds it as a 0 or 1",
     "astrometry_flags": "a list of flag sentences; the gates carry them",
     "remote_catalog_circuit_breaker_tripped": "a yes/no verdict; the catalog-lookup gate holds it",
+    "gaia_tiles_count": "the tile count; the missing-tiles notice states it",
+    "gaia_tiles_missing_count": "the missing-tile count; the missing-tiles notice holds it",
 }
 
 
@@ -501,3 +503,25 @@ def test_the_gate_limit_table_covers_every_gate_and_uses_registered_metrics() ->
     }
     assert all(source.tier is not LimitTier.VALIDATED_DATASET for source in rg.GATE_LIMIT_SOURCES.values())
     assert rg.GATE_LIMIT_SOURCES[rg.CATALOG_LOOKUP_GATE_NAME].tier is LimitTier.DESIGN_ESTIMATE
+
+
+def test_missing_gaia_tiles_store_a_notice_the_job_can_list() -> None:
+    """A run with missing Gaia tiles stores one failed notice row."""
+    metrics = make_metrics().model_copy(update={"gaia_tiles_count": 25, "gaia_tiles_missing_count": 3})
+
+    rows = rg.astrometry_run_measurements(metrics, _all_gates(metrics), _context("job-9"), "M99_Stacked.fits")
+    notices = [row for row in rows if row.metric == "astrometry.notice_gaia_tiles_missing"]
+
+    assert len(notices) == 1
+    assert notices[0].value == pytest.approx(3.0)
+    assert notices[0].check_outcome.value == "failed"
+    assert "3 of 25" in notices[0].reason
+
+
+def test_no_notice_when_every_gaia_tile_is_complete() -> None:
+    """A run whose tiles were all complete stores no notice."""
+    metrics = make_metrics()
+
+    rows = rg.astrometry_run_measurements(metrics, _all_gates(metrics), _context("job-9"), "M99_Stacked.fits")
+
+    assert not [row for row in rows if row.metric == "astrometry.notice_gaia_tiles_missing"]

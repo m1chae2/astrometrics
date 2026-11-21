@@ -75,19 +75,20 @@ The next job plate solves your frames and then measures the brightness of every 
 
 Now check the plate solve.
 
-1. Click the Astrometry button above the viewer.
+1. Click the Astrometry button above the viewer, with the stack shown.
 
-**What you should see.** Small labels appear on the image. Each label sits on a star and carries the star's catalog name. The labels exist because the plate solve worked. If a message says no stars were identified, the solve did not work. Check your plate solver in Settings > Processing and run Analyze Target again.
+**What you should see.** The first time, a line beside the button shows the progress while the stars are named, and Analyze Target shows the job as running. Then small labels appear on the image. Each label sits on a star and carries its most familiar name. A dashed circle marks a star with no catalog name, and a cross marks a catalog star that was not detected. If the line says the stack could not be plate solved, check your plate solver in Settings > Processing.
 
 ## Step 5: Read a light curve
 
-1. In the viewer, click the label of a bright star.
-2. A message says that the star is opening in the Astronomy Manager. The view changes to the Astronomy Manager.
-3. Look at the star list on the left. Rows with a P badge have photometry. Photometry means brightness measurements. If you see the note No photometry has been recorded for this star, click another star with a P badge.
-4. Look at the Photometry panel in the middle.
-5. Look at the Stellar Analysis panel on the right. Under Light Curve, read Measurements and Time span.
-6. Drag the two Timeline sliders to look at part of the time range.
-7. If a Run period analysis button shows under Period Search, click it. The search looks for brightness that rises and falls on a regular schedule.
+1. In the File Browser, click one of your frames, then click Astrometry. The labels now show the target's own catalog stars.
+2. In the viewer, click the label of a bright star.
+3. A message says that the star is opening in the Astronomy Manager. The view changes to the Astronomy Manager.
+4. Look at the star list on the left. Rows with a P badge have photometry. Photometry means brightness measurements. If you see the note No photometry has been recorded for this star, click another star with a P badge.
+5. Look at the Photometry panel in the middle.
+6. Look at the Stellar Analysis panel on the right. Under Light Curve, read Measurements and Time span.
+7. Drag the two Timeline sliders to look at part of the time range.
+8. If a Run period analysis button shows under Period Search, click it. The search looks for brightness that rises and falls on a regular schedule.
 
 **What you should see.** The Photometry panel plots brightness against time, with one point for each frame. For most stars the points scatter around a flat line. That is normal, because most stars do not change. After a period search, a Repeating Patterns section appears. It gives Detected period or Possible period, and Chance of noise. A low Chance of noise is more convincing.
 

@@ -164,13 +164,11 @@ def test_seeding_visits_every_field_without_network(tmp_path: Path, monkeypatch:
     second = _Target("M 42", [_Frame(_write_frame(tmp_path / "b.fits", CRVAL1=83.8, CRVAL2=-5.4))])
     requested = []
 
-    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0) -> int:  # ruff: ignore[missing-type-function-argument]
+    def _fake_seed(ra: float, dec: float, radius_deg: float, depth: float | None) -> int:
         requested.append((ra, dec))
         return 100
 
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-
-    monkeypatch.setattr(StarIdentifier, "_seed_gaia_cache_for_field", staticmethod(_fake_seed))
+    monkeypatch.setattr(catalog_seeding, "seed_field_tiles", _fake_seed)
 
     report = seed_local_gaia_catalog([first, second], request_delay_seconds=0)
 
@@ -185,14 +183,12 @@ def test_a_failing_field_does_not_stop_the_others(tmp_path: Path, monkeypatch: p
     first = _Target("M 101", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0))])
     second = _Target("M 42", [_Frame(_write_frame(tmp_path / "b.fits", CRVAL1=83.8, CRVAL2=-5.4))])
 
-    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0) -> int:  # ruff: ignore[missing-type-function-argument]
+    def _fake_seed(ra: float, dec: float, radius_deg: float, depth: float | None) -> int:
         if ra > 200:
             raise ConnectionError("TAP service unavailable")
         return 50
 
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-
-    monkeypatch.setattr(StarIdentifier, "_seed_gaia_cache_for_field", staticmethod(_fake_seed))
+    monkeypatch.setattr(catalog_seeding, "seed_field_tiles", _fake_seed)
 
     report = seed_local_gaia_catalog([first, second], request_delay_seconds=0, max_attempts=1)
 
@@ -206,15 +202,13 @@ def test_a_transient_failure_is_retried(tmp_path: Path, monkeypatch: pytest.Monk
     target = _Target("M 101", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0))])
     attempts = {"count": 0}
 
-    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0) -> int:  # ruff: ignore[missing-type-function-argument]
+    def _fake_seed(ra: float, dec: float, radius_deg: float, depth: float | None) -> int:
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise TimeoutError("cone search timed out")
         return 75
 
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-
-    monkeypatch.setattr(StarIdentifier, "_seed_gaia_cache_for_field", staticmethod(_fake_seed))
+    monkeypatch.setattr(catalog_seeding, "seed_field_tiles", _fake_seed)
     monkeypatch.setattr(catalog_seeding.time, "sleep", lambda _seconds: None)
 
     report = seed_local_gaia_catalog([target], request_delay_seconds=0)

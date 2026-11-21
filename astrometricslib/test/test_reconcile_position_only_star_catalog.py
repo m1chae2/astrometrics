@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib._internal.drivers.catalog_access import CatalogAccess
-from astrometricslib._internal.drivers.catalog_store import GAIA_TILE_LEVEL, insert_gaia_sources
+from astrometricslib._internal.drivers.catalog_store import GAIA_TILE_LEVEL, record_tile_fetch
 from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points, pixel_source_id_range
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.parameters import resolve
@@ -141,13 +141,15 @@ def catalog(tmp_path: Path) -> tuple[AppConfiguration, Path, dict[str, int]]:
         "A": _gaia_source_id(star_a_ra, _DECLINATION, 11),
         "B": _gaia_source_id(star_b_ra, _DECLINATION, 12),
     }
-    insert_gaia_sources(
-        config,
-        [
-            (str(gaia["A"]), star_a_ra, _DECLINATION, 9.0, f"Gaia DR3 {gaia['A']}", 0.0, 0.0),
-            (str(gaia["B"]), star_b_ra, _DECLINATION, 12.0, f"Gaia DR3 {gaia['B']}", 0.0, 0.0),
-        ],
-    )
+    level = int(resolve(GAIA_TILE_LEVEL).value)
+    for source_id, star_ra, g_magnitude in ((gaia["A"], star_a_ra, 9.0), (gaia["B"], star_b_ra, 12.0)):
+        record_tile_fetch(
+            config,
+            int(healpix_pixels_of_points(level, star_ra, _DECLINATION)),
+            21.0,
+            [(str(source_id), star_ra, _DECLINATION, g_magnitude, f"Gaia DR3 {source_id}", 0.0, 0.0)],
+            "test",
+        )
     spectrum = SpectroscopyResult(wavelengthsAngstrom=[4000.0, 4010.0], intensities=[1.0, 2.0])
     duplicate_ra, alone_ra, vega_ra = 339.2, 339.3, 339.4
     stars = [

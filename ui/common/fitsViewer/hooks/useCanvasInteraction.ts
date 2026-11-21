@@ -465,13 +465,22 @@ export const useCanvasInteraction = (
 
     /**
      * Moves the view, keeping the zoom, so a point of the picture is at the center. Does nothing
-     * while the view is still the automatic fit, because a fit is centered already.
+     * while the view is still the automatic fit, because a fit is centered already, unless the
+     * move is forced.
      *
      * @param fraction The point, as fractions of the drawn width and height from the top-left corner.
+     * @param options `force` moves the view even while it is the automatic fit (and then counts as set
+     *   by hand, so a resize does not fit it again). `scale` sets the zoom first.
      */
-    const placeCenter = useCallback((fraction: { x: number; y: number }) => {
+    const placeCenter = useCallback((fraction: { x: number; y: number }, options?: { force?: boolean; scale?: number }) => {
         const container = containerRef.current;
-        if (!container || !userAdjustedViewRef.current || drawnSize.w <= 0 || drawnSize.h <= 0) return;
+        if (!container || drawnSize.w <= 0 || drawnSize.h <= 0) return;
+        if (options?.force) userAdjustedViewRef.current = true;
+        if (!userAdjustedViewRef.current) return;
+        if (options?.scale !== undefined && options.scale > 0) {
+            zoomRef.current = options.scale;
+            setZoom(options.scale);
+        }
         panRef.current.x = container.clientWidth / 2 - fraction.x * drawnSize.w * zoomRef.current;
         panRef.current.y = container.clientHeight / 2 - fraction.y * drawnSize.h * zoomRef.current;
         clampPan();

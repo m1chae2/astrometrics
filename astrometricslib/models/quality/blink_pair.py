@@ -91,6 +91,10 @@ class BlinkPair(BaseModel):
         How many star pairs agreed when the two frames were lined up.
     session_frame_count : `int`
         How many frames of the session could be a typical frame.
+    width, height : `int`
+        The size of the frames in pixels (both frames share one size), so a
+        picture drawn at another size can place the star. 0 when nothing was
+        found.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -106,3 +110,5 @@ class BlinkPair(BaseModel):
     turned: bool = False
     votes: int = 0
     session_frame_count: int = Field(default=0, alias="sessionFrameCount")
+    width: int = 0
+    height: int = 0

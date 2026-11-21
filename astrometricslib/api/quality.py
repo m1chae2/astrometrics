@@ -1237,7 +1237,8 @@ class QualityRecords:
             ``star_x`` and ``star_y`` (the star in ``path``),
             ``typical_star_x`` and ``typical_star_y`` (the same star in the
             typical frame), all in 1-based pixels, then ``turned``,
-            ``votes`` and ``session_frame_count``. When nothing could be
+            ``votes``, ``session_frame_count`` and the frame size ``width`` and
+            ``height``. When nothing could be
             found, ``found`` is `False` and ``reason`` says why.
 
         Raises

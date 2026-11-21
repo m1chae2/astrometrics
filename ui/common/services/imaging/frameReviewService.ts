@@ -7,7 +7,7 @@
  */
 
 import { callBackend } from '../backendApi';
-import type { FrameStatusReport } from '../../types/backendTypes';
+import type { BlinkPair, FrameStatusReport } from '../../types/backendTypes';
 
 /**
  * Reads the status of every frame of a target, including the frames set aside.
@@ -31,4 +31,19 @@ export async function fetchFrameStatuses(targetId: string): Promise<FrameStatusR
 export async function putBackFrames(targetId: string, paths: string[]): Promise<string[]> {
     const result = await callBackend('target:put_back_frames', { target_id: targetId, paths });
     return result?.restored ?? [];
+}
+
+/**
+ * Asks for the Blink comparison of a frame: a typical frame of its session and one star in both frames.
+ * The read is quiet, because a frame with nothing to compare against is a status, not an error.
+ * @param targetId The target.
+ * @param path The frame, as the status report lists it.
+ * @return The pair (whose `found` is false, with a reason, when none could be made), or `null` when the backend could not answer.
+ */
+export async function fetchBlinkPair(targetId: string, path: string): Promise<BlinkPair | null> {
+    try {
+        return (await callBackend('quality:choose_blink_pair', { target: targetId, path }, { silent: true })) ?? null;
+    } catch {
+        return null;
+    }
 }

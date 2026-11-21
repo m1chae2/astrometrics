@@ -4457,6 +4457,10 @@ export interface SetAsideFrameRecord {
  * How many star pairs agreed when the two frames were lined up.
  * session_frame_count : `int`
  * How many frames of the session could be a typical frame.
+ * width, height : `int`
+ * The size of the frames in pixels (both frames share one size), so a
+ * picture drawn at another size can place the star. 0 when nothing was
+ * found.
  */
 export interface BlinkPair {
   found: boolean;
@@ -4470,6 +4474,8 @@ export interface BlinkPair {
   turned?: boolean;
   votes?: number;
   sessionFrameCount?: number;
+  width?: number;
+  height?: number;
 }
 
 /**

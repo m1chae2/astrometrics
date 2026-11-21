@@ -233,6 +233,7 @@ def test_the_pair_uses_the_session_of_the_frame_and_the_star_in_both_frames(
     assert pair.found, pair.reason
     assert pair.typical_path == usual
     assert pair.turned
+    assert (pair.width, pair.height) == (WIDTH, HEIGHT)
     assert pair.session_frame_count == 3
     assert pair.star_x is not None and pair.typical_star_x is not None and pair.typical_star_y is not None
     assert pair.star_y is not None

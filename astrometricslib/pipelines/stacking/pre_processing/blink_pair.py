@@ -415,6 +415,8 @@ def choose_blink_pair(
                 turned=match.turned,
                 votes=match.votes,
                 session_frame_count=len(others),
+                width=int(width),
+                height=int(height),
             )
     return BlinkPair(
         found=False,

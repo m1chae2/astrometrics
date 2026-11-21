@@ -17,6 +17,7 @@ import { reportError } from '../../common/utils/reportError';
 import { on as onEvent } from '../../common/utils/eventBus';
 import { useOnValueChange } from './useOnValueChange';
 import { STACK_PICTURE_REMADE_EVENT } from '../../common/services/imaging/stackReviewService';
+import { preloadedFrame } from '../utils/frameLoadCache';
 
 export interface ImageFrameInfo {
     objectId: string;
@@ -48,6 +49,8 @@ export const useViewerState = (
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedLightRow, setSelectedLightRow] = useState<number | null>(null);
+    // The file whose pixels are in imageBlob or imageUrl now. It lags behind the file asked for while that one loads.
+    const [loadedPath, setLoadedPath] = useState<string | null>(null);
     const [disableStretch, setDisableStretch] = useState(false);
     const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_DISPLAY_MODE);
     const stretch = displayMode === 'auto-stretch';
@@ -70,6 +73,7 @@ export const useViewerState = (
         setSelectedLightRow(null);
         setImageUrl(null);
         setImageBlob(null);
+        setLoadedPath(null);
         setImageFrameInfo(null);
         setError(null);
         setAutoPanTrigger((n) => n + 1);
@@ -125,6 +129,7 @@ export const useViewerState = (
                     if (!aborted) {
                         setImageUrl(null);
                         setImageBlob(frameFile);
+                        setLoadedPath(null);
                         setImageFrameInfo({
                             objectId: selectedTarget,
                             iso: String(iso),
@@ -166,6 +171,7 @@ export const useViewerState = (
                 if (!aborted && frameData) {
                     setImageBlob(null);
                     setImageUrl(frameData.imageData);
+                    setLoadedPath(null);
                     setImageFrameInfo({
                         objectId: selectedTarget,
                         iso: String(iso),
@@ -203,10 +209,13 @@ export const useViewerState = (
             try {
                 if (!stretch) {
                     // Linear: read the FITS file itself so the viewer holds the pixel values.
-                    const file = await fetchFitsFileByPath(externalSelectedFilePath);
+                    // A frame kept ready for the Blink comparison is already read (and decoded).
+                    const kept = await preloadedFrame(externalSelectedFilePath, false)?.catch(() => null);
+                    const file = kept?.kind === 'fits' ? kept.blob : await fetchFitsFileByPath(externalSelectedFilePath);
                     if (!aborted) {
                         setImageUrl(null);
                         setImageBlob(file);
+                        setLoadedPath(externalSelectedFilePath);
                         setImageFrameInfo({
                             objectId: selectedTarget || 'Unknown',
                             iso: 'Unknown',
@@ -215,10 +224,12 @@ export const useViewerState = (
                     }
                     return;
                 }
-                const data = await fetchImageByPath(externalSelectedFilePath, true);
+                const kept = await preloadedFrame(externalSelectedFilePath, true)?.catch(() => null);
+                const data = kept?.kind === 'picture' && kept.image ? kept.image : await fetchImageByPath(externalSelectedFilePath, true);
                 if (!aborted && data) {
                     setImageBlob(null);
                     setImageUrl(data.imageData as string);
+                    setLoadedPath(externalSelectedFilePath);
                     setImageFrameInfo({
                         objectId: selectedTarget || 'Unknown',
                         iso: 'Unknown',
@@ -252,6 +263,7 @@ export const useViewerState = (
         error,
         selectedLightRow,
         setSelectedLightRow,
+        loadedPath,
         displayMode,
         setDisplayMode
     };

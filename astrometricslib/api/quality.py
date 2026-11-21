@@ -1124,7 +1124,10 @@ class QualityRecords:
             ``direction_degrees``), the neighbor stars left out
             (``ring_neighbors``, ``ring_masked_neighbor_count``,
             ``ring_masked_fraction``) and ``ring_note``. Angles run from +y
-            toward +x, like the cut.
+            toward +x, like the cut. ``signal_to_noise``,
+            ``edge_distance_px``, ``coverage_fraction``, the photometry
+            circle and sky ring radii, ``circle_neighbor_count`` and
+            ``sky_ring_neighbor_count`` say whether the star is measurable.
 
         """
         from astrometricslib.pipelines.astrometry.processing.detections import find_star_centers

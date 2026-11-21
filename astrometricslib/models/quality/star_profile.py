@@ -234,6 +234,19 @@ class StarProfileMeasurement(BaseModel):
         The fraction of the ring's pixels that the neighbor masks removed.
     ring_note : `str` or `None`
         A sentence that says why the ring could not be analyzed, or `None`.
+    signal_to_noise : `float`
+        The peak above the sky divided by the sky noise.
+    edge_distance_px : `float`
+        How far the star's center is from the nearest image edge, in pixels.
+    coverage_fraction : `float`
+        The share of the sky ring's area (the outer radius of the photometry
+        sky ring) that lies inside the image and holds a real value.
+    aperture_radius_px, sky_inner_px, sky_outer_px : `float`
+        The photometry circle and the radii of its sky ring, in pixels.
+    circle_neighbor_count : `int`
+        How many bright neighbors crowd the photometry circle.
+    sky_ring_neighbor_count : `int`
+        How many neighbors lie in the photometry sky ring.
     """
 
     path: str
@@ -282,3 +295,11 @@ class StarProfileMeasurement(BaseModel):
     ring_masked_neighbor_count: int
     ring_masked_fraction: float
     ring_note: str | None = None
+    signal_to_noise: float = 0.0
+    edge_distance_px: float = 0.0
+    coverage_fraction: float = 1.0
+    aperture_radius_px: float = 0.0
+    sky_inner_px: float = 0.0
+    sky_outer_px: float = 0.0
+    circle_neighbor_count: int = 0
+    sky_ring_neighbor_count: int = 0

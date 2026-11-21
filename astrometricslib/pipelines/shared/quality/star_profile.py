@@ -40,7 +40,11 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.quality.star_ring import analyze_star_ring
+from astrometricslib.pipelines.shared.quality.star_ring import (
+    STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE,
+    STAR_RING_TARGET_MATCH_RADIUS_PX,
+    analyze_star_ring,
+)
 
 __all__ = ["measure_star_profile_in_file"]
 
@@ -471,6 +475,107 @@ def _judge_star(peak: float, sky_noise: float, moffat: ProfileFit) -> tuple[bool
     return True, None
 
 
+def _survey_surroundings(
+    data: np.ndarray,
+    center: tuple[float, float],
+    sky_noise: float,
+    peak: float,
+    find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None,
+) -> dict[str, float | int]:
+    """Describe what lies around a star the way photometry would see it.
+
+    The photometry circle and its sky ring come from the photometry
+    parameters. The result says how far the star is from the image edge, how
+    much of the sky ring lies on real pixels, and how many neighbors crowd the
+    circle or sit in the sky ring.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The whole image.
+    center : `tuple` [`float`, `float`]
+        The star's center as 0-based column and row.
+    sky_noise : `float`
+        The sky scatter, in image units.
+    peak : `float`
+        The star's peak above the sky.
+    find_neighbors : callable or `None`
+        The star finder for a piece of the image, as in
+        `measure_star_profile_in_file`. `None` finds no neighbors.
+
+    Returns
+    -------
+    surroundings : `dict`
+        Keys ``edge_distance_px``, ``coverage_fraction``,
+        ``aperture_radius_px``, ``sky_inner_px``, ``sky_outer_px``,
+        ``circle_neighbor_count`` and ``sky_ring_neighbor_count``.
+    """
+    from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+        APERTURE_RADIUS_PX,
+        CROWDING_MARGIN_PX,
+        CROWDING_NEIGHBOR_PEAK_FRACTION,
+        SKY_ANNULUS_INNER_RADIUS_PX,
+        SKY_ANNULUS_OUTER_RADIUS_PX,
+    )
+
+    column, row = center
+    height, width = data.shape
+    aperture = float(resolve(APERTURE_RADIUS_PX).value)  # type: ignore[arg-type]
+    sky_inner = float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value)  # type: ignore[arg-type]
+    sky_outer = float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value)  # type: ignore[arg-type]
+    margin = float(resolve(CROWDING_MARGIN_PX).value)  # type: ignore[arg-type]
+    peak_fraction = float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value)  # type: ignore[arg-type]
+    edge_distance = float(min(column, row, width - 1 - column, height - 1 - row))
+
+    # Coverage: the share of the pixels within the sky ring that hold a value.
+    x_low, x_high = max(int(column - sky_outer) - 1, 0), min(int(column + sky_outer) + 2, width)
+    y_low, y_high = max(int(row - sky_outer) - 1, 0), min(int(row + sky_outer) + 2, height)
+    window_rows, window_columns = np.mgrid[y_low:y_high, x_low:x_high]
+    disc = np.hypot(window_columns - column, window_rows - row) <= sky_outer
+    window = data[y_low:y_high, x_low:x_high]
+    expected = math.pi * sky_outer**2
+    coverage = min(1.0, float(np.sum(disc & np.isfinite(window))) / expected) if expected > 0 else 1.0
+
+    circle_count = 0
+    ring_count = 0
+    if find_neighbors is not None:
+        reach = sky_outer + 2.0
+        box_x0, box_x1 = max(int(column - reach), 0), min(int(column + reach) + 2, width)
+        box_y0, box_y1 = max(int(row - reach), 0), min(int(row + reach) + 2, height)
+        box = data[box_y0:box_y1, box_x0:box_x1]
+        sky_guess = float(np.nanmedian(box)) if np.isfinite(box).any() else 0.0
+        found = find_neighbors(np.nan_to_num(box, nan=sky_guess))
+        own = float(resolve(STAR_RING_TARGET_MATCH_RADIUS_PX).value)  # type: ignore[arg-type]
+        minimum_height = float(resolve(STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE).value) * sky_noise  # type: ignore[arg-type]
+        for found_column, found_row in found:
+            neighbor_column, neighbor_row = box_x0 + found_column, box_y0 + found_row
+            offset = math.hypot(neighbor_column - column, neighbor_row - row)
+            if offset <= own or offset > sky_outer:
+                continue
+            near = data[
+                max(round(neighbor_row) - 1, 0) : min(round(neighbor_row) + 2, height),
+                max(round(neighbor_column) - 1, 0) : min(round(neighbor_column) + 2, width),
+            ]
+            if not np.isfinite(near).any():
+                continue
+            height_above_sky = float(np.nanmax(near)) - sky_guess
+            if height_above_sky < minimum_height:
+                continue
+            if offset <= aperture + margin and height_above_sky >= peak_fraction * peak:
+                circle_count += 1
+            elif offset >= sky_inner:
+                ring_count += 1
+    return {
+        "edge_distance_px": edge_distance,
+        "coverage_fraction": coverage,
+        "aperture_radius_px": aperture,
+        "sky_inner_px": sky_inner,
+        "sky_outer_px": sky_outer,
+        "circle_neighbor_count": circle_count,
+        "sky_ring_neighbor_count": ring_count,
+    }
+
+
 def measure_star_profile_in_file(
     path: str,
     x: float,
@@ -651,6 +756,10 @@ def measure_star_profile_in_file(
         find_neighbors,
     )
 
+    surroundings = _survey_surroundings(
+        data, (center_column, center_row), float(sky_noise), peak, find_neighbors
+    )
+
     return StarProfileMeasurement(
         path=path,
         color_note=color_note,
@@ -698,4 +807,6 @@ def measure_star_profile_in_file(
         ring_masked_neighbor_count=len(ring.neighbors),
         ring_masked_fraction=ring.masked_fraction,
         ring_note=ring.note,
+        signal_to_noise=float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
+        **surroundings,  # type: ignore[arg-type]
     )

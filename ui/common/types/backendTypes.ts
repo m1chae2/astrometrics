@@ -3162,6 +3162,19 @@ export interface DetectionsMeasurement {
  * The fraction of the ring's pixels that the neighbor masks removed.
  * ring_note : `str` or `None`
  * A sentence that says why the ring could not be analyzed, or `None`.
+ * signal_to_noise : `float`
+ * The peak above the sky divided by the sky noise.
+ * edge_distance_px : `float`
+ * How far the star's center is from the nearest image edge, in pixels.
+ * coverage_fraction : `float`
+ * The share of the sky ring's area (the outer radius of the photometry
+ * sky ring) that lies inside the image and holds a real value.
+ * aperture_radius_px, sky_inner_px, sky_outer_px : `float`
+ * The photometry circle and the radii of its sky ring, in pixels.
+ * circle_neighbor_count : `int`
+ * How many bright neighbors crowd the photometry circle.
+ * sky_ring_neighbor_count : `int`
+ * How many neighbors lie in the photometry sky ring.
  */
 export interface StarProfileMeasurement {
   path: string;
@@ -3210,6 +3223,14 @@ export interface StarProfileMeasurement {
   ring_masked_neighbor_count: number;
   ring_masked_fraction: number;
   ring_note?: string | null;
+  signal_to_noise?: number;
+  edge_distance_px?: number;
+  coverage_fraction?: number;
+  aperture_radius_px?: number;
+  sky_inner_px?: number;
+  sky_outer_px?: number;
+  circle_neighbor_count?: number;
+  sky_ring_neighbor_count?: number;
 }
 
 /**

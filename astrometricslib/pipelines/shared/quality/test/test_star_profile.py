@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from astropy.io import fits
+from scipy.ndimage import maximum_filter
 
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
@@ -248,3 +249,35 @@ def test_cutout_pads_outside_the_image_and_is_limited(tmp_path: Path) -> None:
         measure_star_profile_in_file(path, 6.0, 6.0, radius_px=500.0)
     with pytest.raises(InvalidArgumentError):
         measure_star_profile_in_file(path, 6.0, 6.0, cut_half_length_px=500.0)
+
+
+def test_surroundings_report_edge_and_signal(tmp_path: Path) -> None:
+    """A star near the edge reports its edge distance and a high S/N."""
+    path = _write(tmp_path, [(6.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 7.0, 51.0)
+    assert result.edge_distance_px == pytest.approx(6.0, abs=0.5)
+    assert result.coverage_fraction < 0.9
+    assert result.signal_to_noise > 100
+
+
+def test_surroundings_count_neighbors_in_circle_and_sky_ring(tmp_path: Path) -> None:
+    """A bright star in the circle and one in the sky ring count apart."""
+    path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8), (56.0, 50.0, 1000.0, 1.8), (50.0, 59.0, 2000.0, 1.8)])
+
+    def finder(box: np.ndarray) -> list[tuple[float, float]]:
+        """Find the local brightness peaks in a piece of the image.
+
+        Returns
+        -------
+        stars : `list` [`tuple` [`float`, `float`]]
+            The 0-based column and row of each peak.
+        """
+        peaks = (box == maximum_filter(box, size=5)) & (box > SKY + 100.0)
+        rows, columns = np.nonzero(peaks)
+        return [(float(column), float(row)) for column, row in zip(columns, rows, strict=True)]
+
+    result = measure_star_profile_in_file(path, 51.0, 51.0, find_neighbors=finder)
+    assert result.circle_neighbor_count == 1
+    assert result.sky_ring_neighbor_count == 1
+    alone = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert alone.circle_neighbor_count == 0

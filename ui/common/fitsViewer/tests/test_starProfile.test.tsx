@@ -105,8 +105,14 @@ vi.mock('../../components/plotting/BasePlot', () => ({
 }));
 
 const callBackendMock = vi.fn();
+/** What the stand-in backend answers to the inspector's own reads, which the tests below do not count. */
+const detectionsAnswer = { path: '', width: 200, height: 200, detections: [], detection_count: 0, merged_count: 0, kernel_fwhm_px: 3, star_width_px: 3.2, aperture_radius_px: 4 };
 vi.mock('../../services/backendApi', () => ({
-  callBackend: (...args: unknown[]) => callBackendMock(...args),
+  callBackend: (...args: unknown[]) => {
+    if (args[0] === 'images:measure_detections') return Promise.resolve(detectionsAnswer);
+    if (args[0] === 'astronomy:get') return Promise.resolve(null);
+    return callBackendMock(...args);
+  },
 }));
 
 import { FitsRenderer } from '../FitsRenderer';
@@ -197,6 +203,14 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
     ring_masked_neighbor_count: 0,
     ring_masked_fraction: 0,
     ring_note: null,
+    signal_to_noise: 300,
+    edge_distance_px: 100,
+    coverage_fraction: 1,
+    aperture_radius_px: 4,
+    sky_inner_px: 7,
+    sky_outer_px: 12,
+    circle_neighbor_count: 0,
+    sky_ring_neighbor_count: 0,
     ...overrides,
   };
 }
@@ -547,7 +561,7 @@ describe('pinned star followed to another image', () => {
     click(container.querySelector('.fits-renderer__canvas-container') as HTMLElement, 10, 10);
     await screen.findByTestId('star-profile-width');
     // Settings the user made: the tab, the cut angle, and the log scale.
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     fireEvent.click(screen.getByRole('button', { name: 'Log scale' }));
     fireEvent.change(screen.getByLabelText('Cut angle in degrees'), { target: { value: '30' } });
     expect(measureCalls()).toHaveLength(1);
@@ -558,7 +572,7 @@ describe('pinned star followed to another image', () => {
     expect(mapCalls()[0][1]).toEqual({ from_path: '/stacks/A.fits', x: 50.6, y: 119.8, to_path: '/stacks/B.fits' });
     expect(measureCalls()[1][1]).toMatchObject({ path: '/stacks/B.fits', x: 80, y: 90, cut_angle_degrees: 30 });
     expect((await screen.findByTestId('star-profile-follow')).textContent).toBe('Followed by sky position');
-    expect(screen.getByRole('tab', { name: 'Around the star' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Hide optics detail' }).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: 'Log scale' }).getAttribute('aria-pressed')).toBe('true');
     expect((screen.getByLabelText('Cut angle in degrees') as HTMLInputElement).value).toBe('30');
   });
@@ -625,7 +639,7 @@ describe('around the star view', () => {
     render(
       <StarProfilePanel state={{ status: 'ready', anchor: anchorTop, measurement: makeMeasurement() }} cutAngleDegrees={30} onCutAngleChange={noop} onClose={noop} />
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     expect(screen.getByTestId('star-profile-ring-plot')).toBeTruthy();
     expect(screen.queryByTestId('star-profile-plot')).toBeNull();
     const layout = ringLayout();
@@ -639,7 +653,7 @@ describe('around the star view', () => {
     render(
       <StarProfilePanel state={{ status: 'ready', anchor: { ...anchorTop, firstRowAtTop: false }, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     expect(ringLayout().xaxis.ticktext.slice(0, 4)).toEqual(['Up<br>0°', 'Right<br>90°', 'Down<br>180°', 'Left<br>270°']);
   });
 
@@ -660,7 +674,7 @@ describe('around the star view', () => {
     const marker = screen.getByTestId('star-profile-marker');
     expect(marker.querySelector('line')).not.toBeNull();
     expect(marker.querySelector('[data-testid="star-profile-band-inner"]')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     const inner = screen.getByTestId('star-profile-band-inner');
     const outer = screen.getByTestId('star-profile-band-outer');
     expect(marker.querySelector('line')).toBeNull();
@@ -687,7 +701,7 @@ describe('the ring is always automatic', () => {
     const result = render(
       <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     return result;
   }
 
@@ -733,7 +747,7 @@ describe('the ring analysis from the library', () => {
     render(
       <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor, firstRowAtTop }, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
   }
 
   it('plots the library bins and a smooth curve of the constant plus the significant terms', () => {
@@ -830,7 +844,7 @@ describe('the ring analysis from the library', () => {
     await screen.findByTestId('star-profile-width');
     const marker = screen.getByTestId('star-profile-marker');
     expect(screen.queryByTestId('star-profile-neighbor')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     const circle = await screen.findByTestId('star-profile-neighbor');
     expect(marker.contains(circle)).toBe(true);
     expect(circle.getAttribute('class')).toContain('fits-renderer__profile-neighbor');
@@ -877,8 +891,10 @@ describe('StarProfilePanel', () => {
       <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByTestId('star-profile-width').textContent).toBe('FWHM 3.20 px (2.40″)');
-    // Two views, and no tab for the removed values.
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Along the line', 'Around the star']);
+    // The line plot is the main view; the ring view is behind a collapsed "Optics detail" link.
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Optics detail' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('star-profile-ring-plot')).toBeNull();
     for (const removed of [/beta/, /r²/, /sky \d/, /peak \d/, /Gaussian/, /Moffat/, /center/]) {
       expect(container.textContent).not.toMatch(removed);
     }
@@ -1036,6 +1052,63 @@ describe('StarProfilePanel', () => {
     );
     expect(screen.getByTestId('star-profile-width').textContent).toBe('Too few pixels above the noise.');
     expect(plotData['star-profile-plot'].map((trace) => trace.name)).toEqual(['pixels along the cut']);
+  });
+});
+
+describe('the star inspector card', () => {
+  const anchor = { x: 51, y: 120, firstRowAtTop: false, searchRadiusPx: 6 };
+  const noop = () => undefined;
+  /** A named star's record, with a catalog magnitude and a catalog type. */
+  const identity = { id: 'Vega', name: 'Vega', magnitude: 0.03, hasCatalogMagnitude: true, spectralType: 'A0V' };
+
+  it('shows one identity line: name, magnitude, type chip and a link that opens the star', () => {
+    const open = vi.fn();
+    render(
+      <StarProfilePanel
+        state={{ status: 'ready', anchor, measurement: makeMeasurement() }}
+        cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
+        starName="Vega" identity={identity} onOpenInManager={open}
+      />
+    );
+    const line = screen.getByTestId('star-profile-identity');
+    expect(line.textContent).toContain('Vega');
+    expect(line.textContent).toContain('mag 0.03');
+    expect(line.textContent).toContain('Catalog: A0V');
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Astronomy Manager' }));
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no link when the star is not in the catalog', () => {
+    render(
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} starName="Unnamed star" />
+    );
+    expect(screen.queryByRole('button', { name: 'Open in Astronomy Manager' })).toBeNull();
+  });
+
+  it('lists Measurable here rows with yes or no, comparing the width with the frame typical', () => {
+    const measurement = makeMeasurement({ circle_neighbor_count: 1, signal_to_noise: 4 });
+    render(
+      <StarProfilePanel
+        state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} frameWidthPx={3.0}
+      />
+    );
+    expect(screen.getByTestId('star-profile-row-width').textContent).toContain('frame typical 3.0 px');
+    expect(screen.getByTestId('star-profile-row-width').textContent).toContain('Yes');
+    expect(screen.getByTestId('star-profile-row-signal').textContent).toContain('No');
+    expect(screen.getByTestId('star-profile-row-neighbors').textContent).toContain('1 neighbor in the star circle');
+    // No edge row and no shape row for a round star in the middle of the frame.
+    expect(screen.queryByTestId('star-profile-row-edge')).toBeNull();
+    expect(screen.queryByTestId('star-profile-row-shape')).toBeNull();
+  });
+
+  it('opens the ring view behind the Optics detail link and closes it again', () => {
+    render(
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
+    expect(screen.getByTestId('star-profile-ring-plot')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide optics detail' }));
+    expect(screen.queryByTestId('star-profile-ring-plot')).toBeNull();
   });
 });
 

@@ -14,6 +14,7 @@ import { StarProfilePanel, SET_DISPLAY_TO_LINEAR_MESSAGE } from './StarProfilePa
 import type { StarProfileView } from './StarProfilePanel';
 import { useStarProfile } from './hooks/useStarProfile';
 import { useDetections } from './hooks/useDetections';
+import { useStarIdentity } from './hooks/useStarIdentity';
 import { buildDetectionPaths } from './utils/detectionMarkers';
 import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
 import { baseToTurned, describeTurn, fitsPixelToTurnedPicture, rowOrderProbeCell, turnedSize, turnStep, turnToMatchStack } from './displayTurn';
@@ -23,7 +24,7 @@ import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
 import type { SkyPosition } from './wcs';
 import { createPixelToSky } from './wcs';
-import { nameStarAt } from './utils/starNames';
+import { findStarAt, nameStarAt, UNNAMED_STAR } from './utils/starNames';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -733,8 +734,24 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     );
   }, [starProfile.state, showOverlay, overlayStarsAsSent, parsedData]);
 
+  // The overlay star at the measured center, when the catalog names it: its record fills the identity line.
+  const profileCatalogStar = React.useMemo(() => {
+    const profileState = starProfile.state;
+    if (profileState.status !== 'ready' || !showOverlay) return null;
+    const star = findStarAt(profileState.measurement.center_x, profileState.measurement.center_y, overlayStarsAsSent);
+    return star && star.matchKind !== 'unmatched' && star.name && star.name !== UNNAMED_STAR && (star.id || star.name) ? star : null;
+  }, [starProfile.state, showOverlay, overlayStarsAsSent]);
+  const profileStarIdentity = useStarIdentity(profileCatalogStar ? (profileCatalogStar.id || profileCatalogStar.name) : null);
+  const openProfileStarInManager = React.useMemo(
+    () => (profileCatalogStar && onStarClick ? () => onStarClick(profileCatalogStar) : undefined),
+    [profileCatalogStar, onStarClick],
+  );
+
   // The Detections overlay: fetched while it is on, drawn with the same placement as the star profile marker.
-  const detections = useDetections(showDetections && mainDrawn && parsedData !== null, currentKey, resolveMeasurePath);
+  // The profile panel reads the frame's typical star width from the same answer, so it asks for it while the panel is open.
+  const profilePanelOpen = starProfile.state.status === 'ready';
+  const detections = useDetections((showDetections || profilePanelOpen) && mainDrawn && parsedData !== null, currentKey, resolveMeasurePath);
+  const frameStarWidthPx = detections.status === 'ready' ? detections.measurement.star_width_px ?? null : null;
   const [detectionsFirstRowAtTop, setDetectionsFirstRowAtTop] = useState<boolean | null>(null);
   useEffect(() => {
     const worker = workerRef.current;
@@ -747,7 +764,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   }, [showDetections, mainDrawn, parsedData, workerRef, turn]);
   // Rebuilt only when the view or the detections change, not on every other re-render (hover, panel changes).
   const detectionPaths = React.useMemo(() => {
-    if (detections.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
+    if (!showDetections || detections.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
     if (drawnSize.w <= 0 || drawnSize.h <= 0) return null;
     return buildDetectionPaths(detections.measurement.detections, {
       imageWidth: parsedData.w,
@@ -1016,6 +1033,9 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         onClose={starProfile.close}
         pictureNote={starProfilePictureNote}
         starName={profileStarName}
+        identity={profileStarIdentity}
+        frameWidthPx={frameStarWidthPx}
+        onOpenInManager={openProfileStarInManager}
       />
 
       {effectiveLoading && (

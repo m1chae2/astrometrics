@@ -19,6 +19,27 @@ export const UNNAMED_STAR = 'Unnamed star';
 type NamedStar = Pick<OverlayStar, 'x' | 'y' | 'name'> & { matchKind?: string };
 
 /**
+ * Finds the overlay star at a measured center.
+ *
+ * @param centerX Column of the center, 1-based (as the star profile gives it).
+ * @param centerY Row of the center, 1-based.
+ * @param stars The overlay stars, at 0-based pixels of the same image, or undefined.
+ * @returns The nearest star within {@link SAME_STAR_DISTANCE_PX}, or null.
+ */
+export function findStarAt<T extends Pick<OverlayStar, 'x' | 'y'>>(centerX: number, centerY: number, stars: T[] | undefined): T | null {
+  let nearest: T | null = null;
+  let nearestDistance = SAME_STAR_DISTANCE_PX;
+  for (const star of stars ?? []) {
+    const distance = Math.hypot(star.x - (centerX - 1), star.y - (centerY - 1));
+    if (distance <= nearestDistance) {
+      nearest = star;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+/**
  * Names the star at a measured center.
  *
  * @param centerX Column of the center, 1-based (as the star profile gives it).
@@ -33,15 +54,7 @@ export function nameStarAt(
   stars: NamedStar[] | undefined,
   pixelToSky: PixelToSky | null,
 ): string | null {
-  let nearest: NamedStar | null = null;
-  let nearestDistance = SAME_STAR_DISTANCE_PX;
-  for (const star of stars ?? []) {
-    const distance = Math.hypot(star.x - (centerX - 1), star.y - (centerY - 1));
-    if (distance <= nearestDistance) {
-      nearest = star;
-      nearestDistance = distance;
-    }
-  }
+  const nearest = findStarAt(centerX, centerY, stars);
   if (nearest && nearest.matchKind !== 'unmatched' && nearest.name && nearest.name !== UNNAMED_STAR) {
     return nearest.name;
   }

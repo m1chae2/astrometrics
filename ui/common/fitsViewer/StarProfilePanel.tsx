@@ -1,10 +1,10 @@
 /**
  * @file StarProfilePanel.tsx
- * @description The star profile panel of the FITS viewer. It shows what the backend measured for the
- * star the user clicked: the width (FWHM) from the fit, a Clipped chip when the star is clipped, and one
- * plot shaped like a bell curve. The points are the real pixels along a straight cut through the star
+ * @description The star profile panel of the FITS viewer, a star inspector card. It shows what the backend
+ * measured for the star the user clicked: the width (FWHM) from the fit, a Clipped chip when the star is clipped,
+ * the star's identity and a "Measurable here?" list (see StarInspector), and one plot shaped like a bell curve. The points are the real pixels along a straight cut through the star
  * (the angle is set with a slider). The curve is the fitted star shape, mirrored to both sides, with a
- * dashed line at half its height to show the width. The "Around the star" tab plots the library's ring (the
+ * dashed line at half its height to show the width. The "Optics detail" link opens a view that plots the library's ring (the
  * brightness by direction with the neighbor stars left out), the smooth curve of its significant Fourier terms,
  * and a small bar chart of the size of each term, with a one-line summary.
  */
@@ -13,11 +13,11 @@ import { Button } from '../components/Button';
 import { InfoButton } from '../components/InfoButton';
 import { Slider } from '../components/Slider';
 import { StatusChip } from '../components/StatusChip';
-import { Tabs, tabElementId, tabPanelElementId } from '../components/Tabs';
 import { BasePlot } from '../components/plotting/BasePlot';
 import { buildLayout, getVar, getVarAsNum } from '../utils/plotTools';
 import type { PlotlyTrace } from '../utils/plotTools';
-import type { ProfileFit, RingHarmonic, StarProfileMeasurement } from '../types/backendTypes';
+import type { ProfileFit, RingHarmonic, Spectrum, StarProfileMeasurement } from '../types/backendTypes';
+import { StarInspector } from './StarInspector';
 import type { StarProfileState } from './hooks/useStarProfile';
 import { rebuildCut } from './utils/starCut';
 import { describeRing, harmonicCurve, hasFewPixels, screenDirection } from './utils/starRing';
@@ -149,6 +149,12 @@ export interface StarProfilePanelProps {
    * right ascension and declination. Null when the image has no names and no plate solution.
    */
   starName?: string | null;
+  /** The star's record (magnitude, type and pattern chips), or null when it has none. */
+  identity?: Spectrum | null;
+  /** The typical star width of the frame, in pixels, or null when it is not known. */
+  frameWidthPx?: number | null;
+  /** Opens the star in the Astronomy Manager; leave out when the star has no catalog match. */
+  onOpenInManager?: () => void;
 }
 
 /**
@@ -381,10 +387,13 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
  */
 export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
   state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null, starName = null,
+  identity = null, frameWidthPx = null, onOpenInManager,
 }) => {
   // Kept while the panel is open, and for the next star.
   const [logScale, setLogScale] = useState(false);
-  const [tabId, setTabId] = useState<'line' | 'ring'>('line');
+  // The ring analysis stays behind the "Optics detail" link until the person opens it.
+  const [opticsOpen, setOpticsOpen] = useState(false);
+  const tabId: 'line' | 'ring' = opticsOpen ? 'ring' : 'line';
   const measurement = state.status === 'ready' ? state.measurement : state.status === 'measuring' ? state.previous : null;
   const anchor = state.status === 'ready' || state.status === 'measuring' ? state.anchor : null;
   // The cutout reaches only as far as the length the star was measured with; a longer cut waits for a new measurement.
@@ -432,25 +441,28 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
           </svg>
         </Button>
       </div>
-      {measurement && starName && <p className="star-profile__name" data-testid="star-profile-name">{starName}</p>}
+      {measurement && (
+        <StarInspector measurement={measurement} starName={starName} identity={identity} frameWidthPx={frameWidthPx} onOpenInManager={onOpenInManager} />
+      )}
       {followNote && <p className="star-profile__note" title={followNote.note} data-testid="star-profile-follow">{describeFollow(followNote.method)}</p>}
       {message}
       {measurement && (
         <div className={`star-profile__body${state.status === 'measuring' ? ' star-profile__body--updating' : ''}`}>
           {notes && <p className="star-profile__note" data-testid="star-profile-note">{notes}</p>}
-          <Tabs
-            idPrefix="star-profile"
-            ariaLabel="Star profile views"
-            size="compact"
-            selectedId={tabId}
-            onChange={(id) => setTabId(id === 'ring' ? 'ring' : 'line')}
-            tabs={[{ id: 'line', label: 'Along the line' }, { id: 'ring', label: 'Around the star' }]}
-          />
+          <Button
+            size="small"
+            variant="ghost"
+            className="star-profile__optics-toggle"
+            aria-expanded={opticsOpen}
+            title="The ring of light around the star, for checking tracking and focus."
+            onClick={() => setOpticsOpen(!opticsOpen)}
+            data-testid="star-profile-optics-toggle"
+          >
+            {opticsOpen ? 'Hide optics detail' : 'Optics detail'}
+          </Button>
           <div
             className="star-profile__tabpanel"
-            role="tabpanel"
-            id={tabPanelElementId('star-profile', tabId)}
-            aria-labelledby={tabElementId('star-profile', tabId)}
+            data-testid="star-profile-plots"
           >
             <div className="star-profile__plot-heading">
               <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Mean brightness in the ring, by direction'}</span>

@@ -250,3 +250,56 @@
   z-index: 2;
   pointer-events: none;
 }
+
+/* The identity line: the name, the magnitude, the type chips and the link to the Astronomy Manager. */
+.star-profile__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.star-profile__identity .star-profile__name {
+  flex: 1 1 auto;
+}
+
+.star-profile__magnitude {
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+}
+
+.star-profile__measurable {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.star-profile__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.star-profile__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--small-font-size);
+}
+
+.star-profile__row-label {
+  font-weight: 600;
+}
+
+.star-profile__row-value {
+  min-width: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.star-profile__optics-toggle {
+  align-self: flex-start;
+}

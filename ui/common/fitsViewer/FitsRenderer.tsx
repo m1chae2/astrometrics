@@ -25,7 +25,7 @@ import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
 import type { SkyPosition } from './wcs';
 import { createPixelToSky } from './wcs';
-import { findStarAt, nameStarAt, UNNAMED_STAR } from './utils/starNames';
+import { canOpenInAstronomyManager, findStarAt, nameStarAt } from './utils/starNames';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -719,31 +719,25 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const handleStarRelease = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = pressStartRef.current;
     pressStartRef.current = null;
-    if (start && !(event.target as Element).closest?.('[data-star-id]')) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      // A named star's circle (with the astrometry overlay on) still opens the star in the Astronomy Manager.
-      const onNamedCircle = Boolean(onStarClick && overlayVisible && overlayStars
-        && findStarNearPointer(overlayStars, screenTransform, event.clientX - rect.left, event.clientY - rect.top));
-      if (!onNamedCircle) {
-        // A press that did not move is a click and measures a star; a drag only panned.
-        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < STAR_CLICK_MOVE_THRESHOLD_PX) {
-          void measureStarAt(event.clientX - rect.left, event.clientY - rect.top);
-        }
-        return;
-      }
-    }
-    if (!start || !onStarClick || !overlayVisible || !overlayStars) return;
+    if (!start) return;
+    const rect = event.currentTarget.getBoundingClientRect();
     const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-    if (moved >= STAR_CLICK_MOVE_THRESHOLD_PX) return;
     const badgeStarId = (event.target as Element).closest?.('[data-star-id]')?.getAttribute('data-star-id');
-    let star = badgeStarId ? overlayStars.find((item) => item.id === badgeStarId) : undefined;
-    if (!star) {
-      const rect = event.currentTarget.getBoundingClientRect();
+    let star = badgeStarId && overlayStars ? overlayStars.find((item) => item.id === badgeStarId) : undefined;
+    if (!star && overlayVisible && overlayStars) {
       star = findStarNearPointer(
         overlayStars, screenTransform, event.clientX - rect.left, event.clientY - rect.top
       ) ?? undefined;
     }
-    if (star) onStarClick(star);
+    // A named star the Astronomy Manager can open still opens there; any other press measures a star.
+    if (star && onStarClick && overlayVisible && canOpenInAstronomyManager(star)) {
+      if (moved < STAR_CLICK_MOVE_THRESHOLD_PX) onStarClick(star);
+      return;
+    }
+    // A press that did not move is a click and measures a star; a drag only panned.
+    if (moved < STAR_CLICK_MOVE_THRESHOLD_PX) {
+      void measureStarAt(event.clientX - rect.left, event.clientY - rect.top);
+    }
   };
 
   // The marker of the measured star: a ring at the refined center and the line of the cut.
@@ -810,7 +804,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const profileState = starProfile.state;
     if (profileState.status !== 'ready' || !showOverlay) return null;
     const star = findStarAt(profileState.measurement.center_x, profileState.measurement.center_y, overlayStarsAsSent);
-    return star && star.matchKind !== 'unmatched' && star.name && star.name !== UNNAMED_STAR && (star.id || star.name) ? star : null;
+    return star && canOpenInAstronomyManager(star) ? star : null;
   }, [starProfile.state, showOverlay, overlayStarsAsSent]);
   const profileStarIdentity = useStarIdentity(profileCatalogStar ? (profileCatalogStar.id || profileCatalogStar.name) : null);
   const openProfileStarInManager = React.useMemo(
@@ -945,13 +939,13 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                       if (event.key === 'Enter' || event.key === ' ') {
                         // Space must not scroll the page while it opens the star.
                         event.preventDefault();
-                        onStarClick?.(star);
+                        if (canOpenInAstronomyManager(star)) onStarClick?.(star);
                       }
                     }}
                     role="button"
                     tabIndex={0}
                   >
-                    <title>{`Open ${star.name} in the Astronomy Manager`}</title>
+                    <title>{onStarClick && canOpenInAstronomyManager(star) ? `Open ${star.name} in the Astronomy Manager` : star.name}</title>
 
                     {/* Precision Reticle: Ring */}
                     <circle
@@ -1053,7 +1047,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
             role="tooltip"
             style={{ left: hoverPoint.x + 12, top: hoverPoint.y + 12 }}
           >
-            {onStarClick ? `Open ${hoveredStar.name} in the Astronomy Manager` : hoveredStar.name}
+            {onStarClick && canOpenInAstronomyManager(hoveredStar) ? `Open ${hoveredStar.name} in the Astronomy Manager` : hoveredStar.name}
           </div>
         )}
       </div>

@@ -262,4 +262,23 @@ describe('FitsRenderer star overlay', () => {
     fireEvent.pointerUp(viewer, { clientX: 770.5, clientY: 965.5 });
     expect(onStarClick).not.toHaveBeenCalled();
   });
+
+  /**
+   * A star named only by a Gaia source number has no Astronomy Manager record: no hint, no open.
+   */
+  it('does not open or promise to open a star named only by a Gaia number', async () => {
+    const onStarClick = vi.fn();
+    const stars = makeGridStars().map((star) => ({ ...star, name: 'Gaia DR3 123456', matchKind: 'matched' as const }));
+    const { container } = await renderOverlay(stars, onStarClick);
+    const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
+    fireEvent.pointerMove(viewer, { clientX: 770.5, clientY: 965.5 });
+    expect(container.querySelector('.fits-renderer__star-tooltip')?.textContent).toBe('Gaia DR3 123456');
+    fireEvent.pointerDown(viewer, { clientX: 770.5, clientY: 965.5 });
+    fireEvent.pointerUp(viewer, { clientX: 771, clientY: 966 });
+    expect(onStarClick).not.toHaveBeenCalled();
+    const badge = container.querySelector('.fits-renderer__star-group') as HTMLElement;
+    expect(badge.querySelector('title')?.textContent).toBe(badge.querySelector('title')?.textContent?.replace(/^Open | in the Astronomy Manager$/g, ''));
+    fireEvent.keyDown(badge, { key: 'Enter' });
+    expect(onStarClick).not.toHaveBeenCalled();
+  });
 });

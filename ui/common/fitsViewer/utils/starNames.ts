@@ -18,6 +18,25 @@ export const UNNAMED_STAR = 'Unnamed star';
 /** An overlay star, with the kind of match a stack's own star names carry. */
 type NamedStar = Pick<OverlayStar, 'x' | 'y' | 'name'> & { matchKind?: string };
 
+/** The start of a name that is only a Gaia source number, which the Astronomy Manager has no record for. */
+const GAIA_ONLY_NAME_PREFIX = 'Gaia DR3 ';
+
+/**
+ * Says whether the Astronomy Manager can open an overlay star.
+ *
+ * A star can be opened when a catalog matched it and its name is a real catalog name. A star with no
+ * match, no name, or only a Gaia source number (such as "Gaia DR3 123") has no record there.
+ *
+ * @param star The overlay star.
+ * @returns True when opening the star in the Astronomy Manager can show it.
+ */
+export function canOpenInAstronomyManager(star: Pick<OverlayStar, 'name'> & { id?: string; matchKind?: string }): boolean {
+  if (star.matchKind === 'unmatched') return false;
+  const name = star.name;
+  if (!name || name === UNNAMED_STAR || name.startsWith(GAIA_ONLY_NAME_PREFIX)) return false;
+  return Boolean(star.id || name);
+}
+
 /**
  * Finds the overlay star at a measured center.
  *

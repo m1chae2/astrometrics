@@ -27,6 +27,7 @@ from astrometricslib.foundation.storage.data_versions import STARS_KIND, TARGETS
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "POSITION_ONLY_STAR_ID_PREFIX",
+    "STAR_RECORD_COLUMNS",
     "UNRESOLVED_DETECTION_ID",
     "AbstractCatalogAccess",
     "CatalogAccess",
@@ -34,6 +35,8 @@ __all__ = [
     "StarGroupCount",
     "StarPosition",
     "StarSummary",
+    "stellar_object_from_row",
+    "stellar_storage_payload",
 ]
 
 logger = logging.getLogger(__name__)
@@ -585,6 +588,21 @@ class AbstractCatalogAccess(ABC):
         """
         return [summary.id for summary in self.list_star_summaries()]
 
+    def read_star_radii(self, ids: list[str]) -> dict[str, float | None]:
+        """Read the saved star radius (``radius_px``) of some stars.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        radii : `dict` [`str`, `float` or `None`]
+            The radius in pixels of each star found, `None` when it has none.
+        """
+        return {record.id: record.radius_px for record in self.get_by_ids("stellar_catalog", ids)}
+
     def existing_star_ids(self, ids: list[str]) -> set[str]:
         """Say which of the given star ids are in the catalog.
 
@@ -677,6 +695,110 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
         "has_photometry": int(stellar_object.has_photometry),
         "spectral_type": stellar_object.spectral_type or "",
     }
+
+
+# The star's own columns that also stand for a field of its stored record,
+# as (record key, column name). The record leaves out a field its column
+# can give back exactly, and reading the row puts it back from the column.
+_STAR_FIELDS_HELD_IN_COLUMNS = (("name", "name"), ("ra", "ra"), ("dec", "dec"), ("magnitude", "magnitude"))
+
+STAR_RECORD_COLUMNS = ("id", "name", "ra", "dec", "magnitude", "target_id")
+"""The columns of the star table that `stellar_object_from_row` reads
+together with the stored record."""
+
+
+def _column_gives_back(value: Any, column_value: Any) -> bool:
+    """Tell whether a column holds a field's value exactly.
+
+    Parameters
+    ----------
+    value : `Any`
+        The field's value on the star.
+    column_value : `Any`
+        What the star's row keeps in the matching column.
+
+    Returns
+    -------
+    gives_back : `bool`
+        `True` when reading the column gives `value` back unchanged: the
+        same text, or the same finite number of the same type. A number
+        stored as text, or a value that is not a number (the database keeps
+        it as empty), stays in the record.
+    """
+    if isinstance(value, str):
+        return value == column_value
+    if type(value) is float and math.isfinite(value):
+        return column_value == value
+    return False
+
+
+def stellar_storage_payload(stellar_object: Any) -> dict[str, Any]:
+    """Build the record saved in a star's ``data_json``.
+
+    The record keeps only what reading the row back needs. A field still at
+    its default value is left out, because reading fills it in again. The
+    values worked out from other fields (``hasSpectra``, ``plotData`` and
+    the rest) are left out, because they are worked out again on reading.
+    The id, name, position, brightness and targets are left out when the
+    row's own columns give them back exactly (`stellar_object_from_row`
+    puts them back). A star with no measurements then keeps only its
+    detection record (``starData``) and its catalog facts.
+
+    This is the stored form only. `StellarObject.serialize` still gives
+    the full form, with the worked-out values, for the app.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The star to save.
+
+    Returns
+    -------
+    payload : `dict`
+        The record, keyed by the field aliases.
+    """
+    payload = stellar_object.model_dump(
+        mode="python", by_alias=True, exclude_defaults=True, exclude_computed_fields=True
+    )
+    payload.pop("id", None)
+    columns = _stellar_extra_columns(stellar_object)
+    for key, column in _STAR_FIELDS_HELD_IN_COLUMNS:
+        if key in payload and _column_gives_back(payload[key], columns[column]):
+            del payload[key]
+    target_ids = payload.get("targetIds")
+    if target_ids is not None and _split_target_ids(columns["target_id"]) == target_ids:
+        del payload["targetIds"]
+    return payload
+
+
+def stellar_object_from_row(payload: dict[str, Any], columns: dict[str, Any]) -> Any:
+    """Build a star from its stored record and its row's columns.
+
+    Works for both stored forms: a full record (saved before records left
+    out what the columns hold) is read as it is, and a short record gets the
+    missing fields from the columns.
+
+    Parameters
+    ----------
+    payload : `dict`
+        The parsed ``data_json``. It is changed in place.
+    columns : `dict`
+        The row's values for `STAR_RECORD_COLUMNS`.
+
+    Returns
+    -------
+    stellar_object : `StellarObject`
+        The star, equal to the one that was saved.
+    """
+    from astrometricslib.models.stellar_source import StellarObject
+
+    payload.setdefault("id", columns["id"])
+    for key, column in _STAR_FIELDS_HELD_IN_COLUMNS:
+        if key not in payload and columns.get(column) is not None:
+            payload[key] = columns[column]
+    if "targetIds" not in payload:
+        payload["targetIds"] = _split_target_ids(columns.get("target_id"))
+    return StellarObject.model_validate(payload)
 
 
 class CatalogAccess(AbstractCatalogAccess):
@@ -782,6 +904,9 @@ class CatalogAccess(AbstractCatalogAccess):
                         "spectral_type": "TEXT",
                     },
                     extra_columns=_stellar_extra_columns,
+                    serializer=stellar_storage_payload,
+                    read_columns=STAR_RECORD_COLUMNS,
+                    deserializer=stellar_object_from_row,
                     # Rows saved before this column existed still hold the
                     # value inside their stored JSON. The database copies it
                     # out once, when the column is first added.
@@ -984,6 +1109,25 @@ class CatalogAccess(AbstractCatalogAccess):
             One id per star.
         """
         return [row["id"] for row in self._generic.list_projected("stellar_catalog", ["id"])]
+
+    def read_star_radii(self, ids: list[str]) -> dict[str, float | None]:
+        """Read the saved star radius (``radius_px``) of some stars.
+
+        Only that one value is read out of each stored record, so a star
+        with a long light curve or spectrum costs no more than any other.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        radii : `dict` [`str`, `float` or `None`]
+            The radius in pixels of each star found, `None` when it has none.
+        """
+        values = self._generic.read_record_field("stellar_catalog", ids, "radiusPx")
+        return {star_id: (float(value) if value is not None else None) for star_id, value in values.items()}
 
     def existing_star_ids(self, ids: list[str]) -> set[str]:
         """Say which of the given star ids are in the catalog.

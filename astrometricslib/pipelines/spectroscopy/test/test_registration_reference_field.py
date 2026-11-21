@@ -243,3 +243,38 @@ def test_a_solved_position_is_preferred_over_the_header(tmp_path: Path) -> None:
     assert _field_center_for_registration(str(stack), 1.5, 2.5) == (1.5, 2.5)
     assert _field_center_for_registration(str(stack), None, None) == (10.0, 20.0)
     assert _field_center_for_registration(str(tmp_path / "missing.fits"), None, None) is None
+
+
+class _CountingCatalog(_Catalog):
+    """A stand-in that remembers every id whose full record was read."""
+
+    def __init__(self, stars: list[StellarObject]) -> None:
+        """Keep the stars and start with no ids read."""
+        super().__init__(stars)
+        self.read_ids: list[str] = []
+
+    def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[StellarObject]:
+        """Note the ids asked for, then return those stars.
+
+        Returns
+        -------
+        stars : `list` [`StellarObject`]
+            The stars found.
+        """
+        self.read_ids.extend(ids)
+        return super().get_by_ids(dataset_type, ids)
+
+
+def test_position_only_rows_are_never_read_in_full() -> None:
+    """A FIELD_J row can never be a reference, so its record is not loaded."""
+    named = _star("Gaia DR3 1", 292.7, 28.0, ["Albireo"])
+    position_only = StellarObject(id="FIELD_J292.7000+28.0000", name="FIELD_J292.7000+28.0000")
+    position_only.right_ascension = 292.7
+    position_only.declination = 28.0
+    position_only.target_ids = ["Albireo"]
+
+    for field_center in (FIELD_CENTER, None):
+        catalog = _CountingCatalog([named, position_only])
+        candidates = _registration_reference_candidates(SimpleNamespace(id="Albireo"), catalog, field_center)
+        assert [star.id for star in candidates] == ["Gaia DR3 1"]
+        assert position_only.id not in catalog.read_ids

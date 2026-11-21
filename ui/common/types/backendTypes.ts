@@ -3190,7 +3190,10 @@ export interface DetectionsMeasurement {
  * enough, not clipped, no close neighbor, inside the image, and a
  * Moffat fit within its limits.
  * star_shape_note : `str` or `None`
- * The reason the shape is not judgeable, or `None`.
+ * The short reason the shape is not judgeable (for example "a neighbor
+ * is too close"), or `None`.
+ * star_shape_detail : `str` or `None`
+ * The same reason as a full sentence, or `None`.
  * trailing_elongation_limit : `float` or `None`
  * The elongation above which stacking sets a frame aside as trailed.
  * The library fills it in; `None` when it is not known.
@@ -3254,6 +3257,7 @@ export interface StarProfileMeasurement {
   star_elongation_angle_deg?: number | null;
   star_shape_judgeable?: boolean;
   star_shape_note?: string | null;
+  star_shape_detail?: string | null;
   trailing_elongation_limit?: number | null;
 }
 

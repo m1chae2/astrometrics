@@ -215,6 +215,7 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
     star_elongation_angle_deg: 20,
     star_shape_judgeable: true,
     star_shape_note: null,
+    star_shape_detail: null,
     trailing_elongation_limit: 1.32,
     ...overrides,
   };
@@ -1122,12 +1123,12 @@ describe('the star inspector card', () => {
     unmount();
     render(
       <StarProfilePanel
-        state={{ status: 'ready', anchor, measurement: makeMeasurement({ star_elongation: null, star_elongation_angle_deg: null, star_shape_judgeable: false, star_shape_note: 'too faint to judge the shape' }) }}
+        state={{ status: 'ready', anchor, measurement: makeMeasurement({ star_elongation: null, star_elongation_angle_deg: null, star_shape_judgeable: false, star_shape_note: 'too faint', star_shape_detail: 'The star is too faint.' }) }}
         cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
       />
     );
     const faint = screen.getByTestId('star-profile-row-shape').textContent ?? '';
-    expect(faint).toContain('too faint to judge shape');
+    expect(faint).toContain('not judged: too faint');
     expect(faint).not.toContain('Yes');
     expect(screen.getByTestId('star-profile-stats').textContent).not.toContain('Elong');
   });

@@ -81,9 +81,15 @@ describe('buildMeasurableRows', () => {
   });
 
   it('gives no verdict when the shape cannot be judged, and says so for something that is not a single star', () => {
-    const faint = rowOf(buildMeasurableRows(goodStar({ star_elongation: null, star_shape_judgeable: false }), 3.0), 'shape');
-    expect(faint?.unknown).toBe(true);
-    expect(faint?.value).toBe('too faint to judge shape');
+    const crowded = rowOf(
+      buildMeasurableRows(goodStar({ star_elongation: null, star_shape_judgeable: false, star_shape_note: 'a neighbor is too close', star_shape_detail: 'A bright neighbor lies inside the star circle.' }), 3.0),
+      'shape'
+    );
+    expect(crowded?.unknown).toBe(true);
+    expect(crowded?.value).toBe('not judged: a neighbor is too close');
+    expect(crowded?.detail).toBe('A bright neighbor lies inside the star circle.');
+    const noReason = rowOf(buildMeasurableRows(goodStar({ star_elongation: null, star_shape_judgeable: false, star_shape_note: null, star_shape_detail: null }), 3.0), 'shape');
+    expect(noReason?.value).toBe('not judged');
     expect(rowOf(buildMeasurableRows(goodStar({ star_found: false, not_a_star_reason: 'Too flat.' }), 3.0), 'shape')?.detail).toBe('Too flat.');
   });
 

@@ -44,7 +44,7 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
     MOFFAT_FIT_BOX_HALF_WIDTH_PX,
     STAR_FINDER_THRESHOLD_SIGMA,
-    measure_single_star_shape,
+    explain_single_star_shape,
 )
 from astrometricslib.pipelines.shared.quality.star_ring import (
     STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE,
@@ -516,16 +516,16 @@ def _judge_core_shape(
     clipped: bool,
     star_found: bool,
     circle_neighbor_count: int,
-) -> tuple[float | None, float | None, bool, str | None]:
+) -> tuple[float | None, float | None, bool, str | None, str | None]:
     """Measure the star's core shape the way the frame measurement does.
 
-    The shape comes from `measure_single_star_shape`, the one-star form of
+    The shape comes from `explain_single_star_shape`, the one-star form of
     the estimator behind `frame.star_elongation`. It is judgeable only when
     the frame measurement would accept the star: peak at least the star
     finder's detection floor (`STAR_FINDER_THRESHOLD_SIGMA`) above the sky
     noise, no clipped core, no bright neighbor in the star circle, a fit box
     that lies inside the image, and a Moffat fit that the frame measurement's
-    own limits accept.
+    own limits accept. The first check that fails names the reason.
 
     Parameters
     ----------
@@ -552,28 +552,70 @@ def _judge_core_shape(
     judgeable : `bool`
         Whether the shape can be trusted.
     note : `str` or `None`
-        The reason when it cannot, else `None`.
+        A short reason when it cannot (for example "a neighbor is too close"),
+        else `None`.
+    detail : `str` or `None`
+        A full sentence for the same reason, else `None`.
     """
     if not star_found:
-        return None, None, False, "this does not look like a single star"
-    if signal_to_noise < float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value):  # type: ignore[arg-type]
-        return None, None, False, "too faint to judge the shape"
+        return None, None, False, "not a single star", "This does not look like a single star."
+    floor = float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value)  # type: ignore[arg-type]
+    if signal_to_noise < floor:
+        return (
+            None,
+            None,
+            False,
+            "too faint",
+            f"The star's peak is {signal_to_noise:.1f} times the sky noise, "
+            f"below the {floor:g} needed to judge its shape.",
+        )
     if clipped:
-        return None, None, False, "the core is clipped"
+        return (
+            None,
+            None,
+            False,
+            "the core is clipped",
+            "The star's core is at the top of the camera's range, so its true shape is lost.",
+        )
     if circle_neighbor_count > 0:
-        return None, None, False, "a bright neighbor is too close"
+        return (
+            None,
+            None,
+            False,
+            "a neighbor is too close",
+            "A bright neighbor lies inside the star circle and would pull the shape toward itself.",
+        )
     half = int(resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value)  # type: ignore[arg-type]
     column, row = round(center_column), round(center_row)
     height, width = data.shape
     if column - half < 0 or row - half < 0 or column + half >= width or row + half >= height:
-        return None, None, False, "too close to the image edge to judge the shape"
+        return (
+            None,
+            None,
+            False,
+            "too near the edge",
+            "The star is too near the edge of the image for the shape fit to fit on it.",
+        )
     box = data[row - half : row + half + 1, column - half : column + half + 1]
     if not np.isfinite(box).all():
-        return None, None, False, "the image has gaps around the star"
-    shape = measure_single_star_shape(box)
+        return (
+            None,
+            None,
+            False,
+            "gaps in the image",
+            "The image has gaps around the star, so the shape fit cannot be made.",
+        )
+    shape, reason = explain_single_star_shape(box)
     if shape is None:
-        return None, None, False, "too faint or crowded to judge the shape"
-    return shape.elongation, shape.angle_deg, True, None
+        return (
+            None,
+            None,
+            False,
+            "the fit did not hold",
+            f"The shape fit was refused: {reason or 'the fit did not hold'}. "
+            "The frame measurement would skip this star too.",
+        )
+    return shape.elongation, shape.angle_deg, True, None, None
 
 
 def _survey_surroundings(
@@ -862,7 +904,7 @@ def measure_star_profile_in_file(
         data, (center_column, center_row), float(sky_noise), peak, find_neighbors, photometry_geometry
     )
 
-    elongation, elongation_angle, shape_judgeable, shape_note = _judge_core_shape(
+    elongation, elongation_angle, shape_judgeable, shape_note, shape_detail = _judge_core_shape(
         data,
         center_column,
         center_row,
@@ -924,5 +966,6 @@ def measure_star_profile_in_file(
         star_elongation_angle_deg=elongation_angle,
         star_shape_judgeable=shape_judgeable,
         star_shape_note=shape_note,
+        star_shape_detail=shape_detail,
         **surroundings,  # type: ignore[arg-type]
     )

@@ -654,8 +654,32 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     Returns
     -------
     fit : `_FitResult` or `None`
+        The accepted fit, or `None` when the fit failed or was refused.
+    """
+    return _fit_moffat_with_reason(cutout, grid, fixed_beta)[0]
+
+
+def _fit_moffat_with_reason(
+    cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | None
+) -> tuple[_FitResult | None, str | None]:
+    """Fit one star with a pixel-integrated elliptical Moffat profile.
+
+    Parameters
+    ----------
+    cutout : `numpy.ndarray`
+        The square box of pixels, with the star near its center.
+    grid : `_SubpixelGrid`
+        The sub-pixel sample positions for that box size.
+    fixed_beta : `float` or `None`
+        Hold the power index at this value, or fit it when `None`.
+
+    Returns
+    -------
+    fit : `_FitResult` or `None`
         The accepted fit, or `None` when the fit failed or was refused (see the
         ``MOFFAT_*`` limits above).
+    reason : `str` or `None`
+        Which check refused the fit, in plain words, or `None` when it held.
     """
     beta_minimum = resolve(MOFFAT_BETA_MINIMUM).value
     beta_maximum = resolve(MOFFAT_BETA_MAXIMUM).value
@@ -668,7 +692,7 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     background_start = float(np.median(cutout))
     peak = float(cutout[half - 2 : half + 3, half - 2 : half + 3].max()) - background_start
     if not math.isfinite(peak) or peak <= 0.0:
-        return None
+        return None, "the star has no peak above its background"
     alpha_start = 2.5
     start = [peak, half, half, alpha_start, alpha_start, 0.0]
     lower = [0.0, half - 3.0, half - 3.0, 0.3, 0.3, -math.pi]
@@ -694,26 +718,26 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     try:
         result = optimize.least_squares(residuals, np.array(start), bounds=(lower, upper), max_nfev=200)
     except ValueError, FloatingPointError:
-        return None
+        return None, "the fit did not hold"
     if not result.success:
-        return None
+        return None, "the fit did not hold"
     total_variance = float(np.sum((cutout - cutout.mean()) ** 2))
     if total_variance <= 0.0:
-        return None
+        return None, "the star has no peak above its background"
     r_squared = 1.0 - float(np.sum(result.fun**2)) / total_variance
     if r_squared < minimum_r_squared:
-        return None
+        return None, "the star does not follow a smooth star profile"
     parameters = result.x
     beta = parameters[6] if fixed_beta is None else fixed_beta
     background = parameters[-1]
     center_shift = math.hypot(parameters[1] - half, parameters[2] - half)
     if center_shift > maximum_center_shift_px:
-        return None
+        return None, "the fit moved off the star"
     fwhm_a = _moffat_fwhm_px(parameters[3], beta)
     fwhm_b = _moffat_fwhm_px(parameters[4], beta)
     fwhm_major, fwhm_minor = max(fwhm_a, fwhm_b), min(fwhm_a, fwhm_b)
     if not (minimum_fwhm_px <= fwhm_minor and fwhm_major <= maximum_fwhm_px):
-        return None
+        return None, "the fitted width is outside the allowed range"
     angle = parameters[5] if fwhm_a >= fwhm_b else parameters[5] + math.pi / 2.0
     return _FitResult(
         center_x=float(parameters[1]),
@@ -724,7 +748,7 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
         beta=float(beta),
         background=float(background),
         r_squared=float(r_squared),
-    )
+    ), None
 
 
 def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float, float, float] | None:
@@ -827,14 +851,35 @@ def measure_single_star_shape(cutout: np.ndarray) -> SingleStarShape | None:
         a neighbor in the box, the center moved too far) or the moments could
         not be taken.
     """
-    fit = _fit_moffat(cutout, _subpixel_grid(cutout.shape[0]), fixed_beta=None)
+    return explain_single_star_shape(cutout)[0]
+
+
+def explain_single_star_shape(cutout: np.ndarray) -> tuple[SingleStarShape | None, str | None]:
+    """Measure one star's shape and say which check refused it, if any.
+
+    Same measurement as `measure_single_star_shape`.
+
+    Parameters
+    ----------
+    cutout : `numpy.ndarray`
+        A square box of raw pixels, as for `measure_single_star_shape`.
+
+    Returns
+    -------
+    shape : `SingleStarShape` or `None`
+        The shape, or `None` when it was refused.
+    reason : `str` or `None`
+        Plain words for the refusing check (for example "the fit moved off
+        the star"), or `None` when the shape was measured.
+    """
+    fit, reason = _fit_moffat_with_reason(cutout, _subpixel_grid(cutout.shape[0]), fixed_beta=None)
     if fit is None:
-        return None
+        return None, reason
     moments = _measure_second_moments(cutout, fit)
     if moments is None:
-        return None
+        return None, "the light inside the fit could not be measured"
     angle_deg, _ = _mean_ellipticity_angle(np.array([moments[1]]), np.array([moments[2]]))
-    return SingleStarShape(elongation=float(moments[0]), angle_deg=float(angle_deg))
+    return SingleStarShape(elongation=float(moments[0]), angle_deg=float(angle_deg)), None
 
 
 def _mean_ellipticity_angle(

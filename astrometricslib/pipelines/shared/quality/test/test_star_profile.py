@@ -23,7 +23,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     SKY_ANNULUS_INNER_RADIUS_PX,
     SKY_ANNULUS_OUTER_RADIUS_PX,
 )
-from astrometricslib.pipelines.shared.quality.star_profile import PhotometryGeometry
+from astrometricslib.pipelines.shared.quality.star_profile import PhotometryGeometry, _judge_core_shape
 from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file as _measure
 
 SIZE = 101
@@ -379,3 +379,69 @@ def test_star_at_the_edge_is_not_judgeable(tmp_path: Path) -> None:
     result = measure_star_profile_in_file(path, 7.0, 51.0)
     assert not result.star_shape_judgeable
     assert "edge" in (result.star_shape_note or "")
+
+
+def _star_image(peak: float = 3000.0) -> np.ndarray:
+    """Draw one round, clean star at the middle of a noisy sky.
+
+    Parameters
+    ----------
+    peak : `float`, optional
+        The star's peak above the sky.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        The image, with the star at column 50 and row 50.
+    """
+    rng = np.random.default_rng(3)
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    image = SKY + rng.normal(0.0, 2.0, (SIZE, SIZE))
+    return image + peak * np.exp(-((columns - 50.0) ** 2 + (rows - 50.0) ** 2) / (2 * 1.8**2))
+
+
+def test_shape_note_for_a_clean_star_is_empty() -> None:
+    """A clean, bright star is judged and has no note or detail."""
+    image = _star_image()
+    elongation, _, judgeable, note, detail = _judge_core_shape(image, 50.0, 50.0, 500.0, False, True, 0)
+    assert judgeable and elongation is not None
+    assert note is None and detail is None
+
+
+@pytest.mark.parametrize(
+    ("case", "note"),
+    [
+        ("not_star", "not a single star"),
+        ("faint", "too faint"),
+        ("clipped", "the core is clipped"),
+        ("neighbor", "a neighbor is too close"),
+        ("edge", "too near the edge"),
+        ("gaps", "gaps in the image"),
+        ("fit", "the fit did not hold"),
+    ],
+)
+def test_shape_note_names_the_failing_check(case: str, note: str) -> None:
+    """Each refusing check gives its own short reason and a sentence."""
+    image = _star_image()
+    column = row = 50.0
+    signal_to_noise, clipped, found, neighbors = 500.0, False, True, 0
+    if case == "not_star":
+        found = False
+    elif case == "faint":
+        signal_to_noise = 2.0
+    elif case == "clipped":
+        clipped = True
+    elif case == "neighbor":
+        neighbors = 1
+    elif case == "edge":
+        column = 4.0
+    elif case == "gaps":
+        image[48, 52] = np.nan
+    elif case == "fit":
+        image = SKY + np.random.default_rng(9).normal(0.0, 2.0, (SIZE, SIZE))
+    elongation, _, judgeable, found_note, detail = _judge_core_shape(
+        image, column, row, signal_to_noise, clipped, found, neighbors
+    )
+    assert not judgeable and elongation is None
+    assert found_note == note
+    assert detail and detail.endswith(".")

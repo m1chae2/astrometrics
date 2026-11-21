@@ -79,10 +79,10 @@ function buildRoundRow(measurement: StarProfileMeasurement): MeasurableRow {
       ok: true,
       unknown: true,
       label: 'Round',
-      value: 'too faint to judge shape',
-      detail: measurement.star_shape_note
+      value: measurement.star_shape_note ? `not judged: ${measurement.star_shape_note}` : 'not judged',
+      detail: measurement.star_shape_detail ?? (measurement.star_shape_note
         ? `The shape was not judged: ${measurement.star_shape_note}.`
-        : 'The star is too faint for its shape to be judged.',
+        : 'The shape was not judged.'),
     };
   }
   const limit = measurement.trailing_elongation_limit;

@@ -28,7 +28,7 @@ from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from photutils.aperture import CircularAnnulus, CircularAperture
 
-from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header
 from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
@@ -322,12 +322,22 @@ def read_stack_plane(stack_path: str, dtype: type[np.floating] = np.float64) -> 
     -------
     plane : `numpy.ndarray` or `None`
         The image (color channels averaged), or `None` when the file holds no
-        pixels.
+        pixels. A stack saved turned by a quarter turn (see
+        `quarter_turn.apply_quarter_turn`) is given back as Siril registered
+        it, so the trim offset, the saved apertures and the registration
+        reference frame still line up with it.
     """
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import (
+        read_quarter_turn,
+        undo_quarter_turn,
+    )
+
     data = read_data(stack_path)
     if data is None:
         return None
-    return collapse_to_2d(np.asarray(data, dtype=dtype))
+    plane = collapse_to_2d(np.asarray(data, dtype=dtype))
+    turned_by = read_quarter_turn(read_header(stack_path)) or 0
+    return undo_quarter_turn(plane, turned_by) if turned_by else plane
 
 
 def sky_level_of_plane(plane: np.ndarray) -> float | None:

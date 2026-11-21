@@ -3,10 +3,11 @@
 Description: The backend server must not offer an AI client the code runner
 or the generic RPC call. These tests check that the committed manifest covers
 every tool the server registers, and that the profile offers
-only the four reviewed backend tools.
+only the reviewed backend tools and the job tools that start work in the app.
 """
 
 from mcp_servers.backend.definition import MANIFEST_PATH, build_registry
+from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
 from mcp_servers.common.profile import load_manifest
 
 
@@ -28,6 +29,7 @@ def test_profile_gets_only_the_reviewed_backend_tools() -> None:
         "docs_get",
         "terminal_add_script",
         "terminal_get_recent_runs",
+        *APP_JOB_TOOLS,
     }
     assert "electron_run_python" in registry.withheld
     assert "backend_call_rpc" in registry.withheld

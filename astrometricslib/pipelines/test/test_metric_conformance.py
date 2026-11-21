@@ -207,7 +207,10 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     )
     from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
     from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
-    from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+        stack_turned_measurement,
+        stacking_notice_measurements,
+    )
 
     context = PipelineRunContext(
         "M 99", pipeline, "1.0.0", "job-1", "job-1", datetime(2026, 11, 1, tzinfo=UTC)
@@ -230,21 +233,52 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
             framesAccepted=1,
             framesQuarantined=2,
             flatCalibrationIssues=["not smoothed: a test note"],
+            stackCropReason="cropped 120 px on the left: fewer than half the frames covered it",
+            stackCropAreaFraction=0.04,
         ),
     )
     summary.quality_processing_applied = False
     record_camera_profile(summary, "Acme Imager 9000")
     if pipeline == "stacking":
-        return [*rows, *stacking_notice_measurements(summary, context, "M99_Stacked.fits")]
+        turned_row = stack_turned_measurement(
+            context, "M99_Stacked.fits", 180, "Turned 180 degrees so north is near the top."
+        )
+        return [*rows, *stacking_notice_measurements(summary, context, "M99_Stacked.fits"), turned_row]
     from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
 
     notice_rows = [camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+    if pipeline == "astrometry":
+        from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
+            gaia_tiles_missing_notice_measurement,
+        )
+
+        notice_rows.append(gaia_tiles_missing_notice_measurement(2, 25, context, context.run_subject()))
     if pipeline == "asteroid_detection":
         from astrometricslib.pipelines.asteroid_detection.record_quality import (
             ephemeris_query_cap_notice_measurement,
         )
 
         notice_rows.append(ephemeris_query_cap_notice_measurement(2, context, context.run_subject()))
+    if pipeline == "photometry":
+        from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+            logged_warnings_notice_measurement,
+            session_without_comparison_stars_notice_measurement,
+        )
+        from astrometricslib.pipelines.photometry.run_warnings import (
+            LoggedWarning,
+            SessionWithoutComparisonStars,
+        )
+
+        notice_rows.append(
+            session_without_comparison_stars_notice_measurement(
+                [SessionWithoutComparisonStars("night-1", "fewer than two usable stars", True, 2)], context
+            )
+        )
+        notice_rows.append(
+            logged_warnings_notice_measurement(
+                [LoggedWarning("astrometricslib.catalog", "server silent", 3)], context
+            )
+        )
     if pipeline == "spectroscopy":
         from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
             below_feature_limit_notice_measurement,
@@ -257,6 +291,10 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         notice_rows.append(reddening_lookup_failed_notice_measurement(2, context, context.run_subject()))
     return [*rows, *notice_rows]
 
+
+# Metrics that stay declared so stored rows and reports citing them can be
+# read, although no step measures them any more.
+RETIRED_METRICS = frozenset({"frame.quarantine_roundness"})
 
 # Phase 3: a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record
@@ -583,7 +621,7 @@ def test_a_phase_3_pipeline_emits_every_metric_it_declares(pipeline: str) -> Non
     """The record step emits each declared metric and nothing undeclared."""
     from astrometricslib.pipelines.shared.quality.metric_registry import load_pipeline_metrics
 
-    declared = {spec.name for spec in load_pipeline_metrics(pipeline)}
+    declared = {spec.name for spec in load_pipeline_metrics(pipeline)} - RETIRED_METRICS
     emitted = {
         measurement.metric for measurement in _with_notice_rows(pipeline, PHASE_3_RECORD_STEPS[pipeline]())
     }

@@ -37,7 +37,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.image_scaling import (
-    measure_sky,
+    measure_sky_background,
     midtones_balance_for,
     white_fraction_after_autostretch,
 )
@@ -177,10 +177,11 @@ def choose_bright_object_stretch(data: np.ndarray) -> BrightObjectStretch | None
         arr = arr.mean(axis=0 if arr.shape[0] in (1, 3, 4) else 2)
     if arr.ndim != 2:
         return None
-    sky = measure_sky(arr)
+    sky = measure_sky_background(arr)
     if sky is None:
         return None
-    median, _, peak = sky
+    median = sky[0]
+    peak = float(np.nanmax(arr))
     white_fraction = white_fraction_after_autostretch(arr, choose_sky_level(arr).sky_level)
     if white_fraction is None or white_fraction < resolve(SATURATED_FRACTION_LIMIT).value:
         return None

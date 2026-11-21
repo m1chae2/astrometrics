@@ -10,10 +10,13 @@ stack (level ``stack``). A value about one exposure group is about that group's
 own stack file (see `exposure_group_subject` in `record_quality.py`). The
 per-frame weights are about one frame each.
 
-Two of them are frame metrics (`frame.quarantine_roundness` and
-`frame.quarantine_sky_median_adu`). The frame quarantine step measures them
-for every light frame it checks, so the stacking stage records them for kept
-frames as well as for the frames it moves aside.
+Three of them are frame metrics (`frame.quarantine_sky_median_adu`,
+`frame.sky_unevenness` and `frame.pointing_offset_fraction`). The frame
+quarantine step measures them for every light frame it checks, so the stacking
+stage records them for kept frames as well as for the frames it moves aside.
+A fourth, `frame.quarantine_roundness`, is retired: the step no longer
+measures it (trailing is judged on the stored `frame.star_elongation`), and
+its old rows stay readable.
 """
 
 import datetime
@@ -27,14 +30,25 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.metrics import (
+    FRAME_METRICS,
+    FRAME_STAR_ELONGATION,
+    FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_WIDTH_REGION_PX,
+)
 from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     CHECKED_ESTIMATE_ERROR_FRACTION,
 )
 
 STACKING_REJECTED_PIXEL_FRACTION = "stacking.rejected_pixel_fraction"
+STACKING_STAR_ELONGATION = "stacking.star_elongation"
+STACKING_STAR_ELONGATION_ANGLE_DEG = "stacking.star_elongation_angle_deg"
+STACKING_STAR_WIDTH_CENTER_PX = "stacking.star_width_center_px"
 FRAME_QUARANTINE_ROUNDNESS = "frame.quarantine_roundness"
 FRAME_QUARANTINE_SKY_MEDIAN = "frame.quarantine_sky_median_adu"
+FRAME_SKY_UNEVENNESS = "frame.sky_unevenness"
+FRAME_POINTING_OFFSET_FRACTION = "frame.pointing_offset_fraction"
 
 _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
     MetricSpec(
@@ -74,20 +88,20 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
         levels=(SubjectLevel.FRAME,),
         better=Direction.HIGHER,
         meaning=(
-            "How round the brightest stars of one raw frame are, as the frame quarantine step "
-            "measures it (1 is round, smaller is more stretched). It is the step's own number, "
-            "kept so a frame that was kept can be compared with the frames that were moved."
+            "RETIRED. How round the brightest stars of one raw frame were, as the frame quarantine "
+            "step once measured it (1 is round, smaller is more stretched). The step no longer "
+            "measures it and judges trailing on `frame.star_elongation`. Rows written before the "
+            "change stay in the store."
         ),
-        decisions=("frame quarantine",),
         # `frame.star_elongation` is a different estimator (Moffat fits and
         # second moments of up to 196 stars). The two must never share a name.
         estimator=(
-            "Median over the brightest detected stars (at most `MAXIMUM_STARS_MEASURED`) of the "
+            "Median over the brightest detected stars (at most 150) of the "
             "smaller flux-weighted second-moment width divided by the larger one, measured in a "
-            "small box on the background-subtracted frame by `detect_stars`. The widths are taken "
+            "small box on the background-subtracted frame. The widths are taken "
             "along the image x and y axes, not along the star's own axes, so a trail at 45 degrees "
-            "to the axes reads round (a roundness near 1); the metric catches trails along the axes "
-            "and is blind to diagonal ones. `frame.star_elongation` has no such blind spot."
+            "to the axes read round (a roundness near 1): the metric caught trails along the axes "
+            "and was blind to diagonal ones. `frame.star_elongation` has no such blind spot."
         ),
         sample_definition=(
             "The brightest stars with a measurable shape, away from the frame edge. A frame with "
@@ -98,10 +112,10 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         register_entry="STK-01",
-        purpose=MetricPurpose.DECISION,
+        purpose=MetricPurpose.CONTEXT,
         purpose_reason=(
-            "A frame whose stars are much less round than the rest of its session has trailed, and "
-            "the quarantine step moves it out of the stack."
+            "It once decided trailing; it now decides nothing. It stays declared so that stored rows "
+            "and reports that cite them can still be read."
         ),
     ),
     MetricSpec(
@@ -129,6 +143,77 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
         purpose_reason=(
             "A frame much brighter than its session, together with few stars, is clouded, and the "
             "quarantine step moves it out of the stack."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_SKY_UNEVENNESS,
+        definition_version=1,
+        unit="",
+        checkpoint=Checkpoint.FRAME,
+        levels=(SubjectLevel.FRAME,),
+        better=Direction.LOWER,
+        meaning=(
+            "How much the sky pattern across one raw frame differs from the typical pattern of its "
+            "session (0 is the same). Thin cloud lights part of the frame and raises it."
+        ),
+        decisions=("frame quarantine",),
+        estimator=(
+            "The sky is measured in a 4 x 4 grid of boxes (the median of the 32-pixel block medians "
+            "of each box, after dropping blocks more than 3 robust standard deviations above the "
+            "box median, so stars are left out). The boxes are divided by the frame's own sky level "
+            "(the median of its boxes). The session's typical pattern is the median of those "
+            "fractions, box by box. The value is the root-mean-square difference between the "
+            "frame's fractions and that pattern."
+        ),
+        sample_definition=(
+            "The frames of one session (same camera, filter and exposure, less than four hours "
+            "apart), at least eight. The value is relative to the other frames of the session, so "
+            "it is not comparable between sessions. The sky level includes the bias."
+        ),
+        band="The frame's own filter; a color image is read as stored, with its color pixels mixed.",
+        computed_by="pipelines.stacking.pre_processing.frame_quarantine.measure_sky_unevenness",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported.",
+        register_entry="STK-01",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A frame whose sky differs from its session's pattern by far more than the clear frames "
+            "do was shot through cloud, and the quarantine step moves it out of the stack."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_POINTING_OFFSET_FRACTION,
+        definition_version=1,
+        unit="fraction",
+        checkpoint=Checkpoint.FRAME,
+        levels=(SubjectLevel.FRAME,),
+        better=Direction.LOWER,
+        meaning=(
+            "How far the centre of one raw frame lies from the main field of its session, as a "
+            "share of the frame width. A frame turned half a revolution by a meridian flip that "
+            "points at the same field is not offset."
+        ),
+        decisions=("frame quarantine",),
+        estimator=(
+            "The brightest stars (at most 150) of the frame are matched with those of the batch's "
+            "middle frame by voting on the offsets of all star pairs, as the frame is and with the "
+            "reference turned half a revolution; the version with more agreeing pairs (at least 15) "
+            "wins. The main field is the median centre of all matched frames. The value is the "
+            "distance of the frame's centre from it divided by the frame width."
+        ),
+        sample_definition=(
+            "The frames of one session, at least eight, more than half of them matched. A frame "
+            "with fewer than 15 agreeing pairs gets no value."
+        ),
+        band="The frame's own filter; a color image is read as stored, with its color pixels mixed.",
+        computed_by="pipelines.stacking.pre_processing.frame_quarantine.measure_pointing_offsets",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported.",
+        register_entry="STK-01",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A frame centred far from the rest of the session forces the stack to be cut down to "
+            "the area every frame shares, so the quarantine step moves it out of the stack."
         ),
     ),
 )
@@ -160,6 +245,8 @@ STACKING_DURATION_S = "stacking.duration_s"
 STACKING_ABANDONED_AFTER_S = "stacking.abandoned_after_s"
 STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED = "stacking.notice_frames_moved_to_excluded"
 STACKING_NOTICE_SINGLE_FRAME_STACK = "stacking.notice_single_frame_stack"
+STACKING_NOTICE_STACK_CROPPED = "stacking.notice_stack_cropped"
+STACKING_NOTICE_STACK_TURNED = "stacking.notice_stack_turned"
 STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT = "stacking.notice_exposure_group_left_out"
 STACKING_NOTICE_FLAT_CALIBRATION_NOTE = "stacking.notice_flat_calibration_note"
 STACKING_NOTICE_PREVIEW_STEP_SKIPPED = "stacking.notice_preview_step_skipped"
@@ -659,22 +746,32 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         STACKING_MEDIAN_INPUT_FWHM_PX,
         "px",
-        "The median star width of a sample of the input frames.",
-        "The median of `measure_image_fwhm` over at most 15 frames spaced evenly over the set.",
-        "At most 15 input frames.",
+        "The median star width of the frames in the stack.",
+        (
+            "The median of `measure_image_fwhm` over every frame in the stack, unweighted. A width "
+            "the frame quality step stored (`frame.star_width_gaussian_brightest_px`, the same "
+            "estimator) is reused instead of measuring the frame again."
+        ),
+        "Every frame in the stack (the member frames of `determine_stack_members`).",
         f"{_STACKING}.fwhm_sampling.measure_fwhm_degradation",
         better=Direction.LOWER,
         register_entry="STK-25",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EXPECTED_STACK_FWHM_PX,
         "px",
         "The star width the stack should have, given the widths of its input frames.",
-        "The root mean square of the sampled input widths (`expected_stack_fwhm`).",
-        "The same sample of at most 15 input frames.",
+        (
+            "The weighted root mean square of the member frames' widths (`expected_stack_fwhm`), each "
+            "frame weighted as the stack weighted it (`normalized_weights`; Siril's `-weight=wfwhm` "
+            "weights rebuilt by `wfwhm_weights`). Equal weights when the weights are unknown."
+        ),
+        "Every frame in the stack, the same frames as `stacking.median_input_fwhm_px`.",
         "pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm",
         better=Direction.LOWER,
         register_entry="STK-25",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_DURATION_S,
@@ -1440,12 +1537,12 @@ _GATE_METRICS: tuple[MetricSpec, ...] = (
     _gate_metric(
         STACKING_GATE_FRAME_QUARANTINE,
         "fraction",
-        "Whether the quarantine step could judge each session and stay within its cap.",
-        "No number: the check reports its outcome and the cap (the largest share of a session it may move).",
+        "Whether the quarantine step judged each session, and whether it set aside over a quarter of one.",
+        "No number: the check reports its outcome and the share of a session above which it warns.",
         "pipelines.stacking.pre_processing.frame_quarantine.quarantine_gate",
         (
-            "A session with too many apparent bad frames is probably a bad night, so none are moved "
-            "and the stack is flagged."
+            "A session with many apparent bad frames is probably a bad night, or a limit that does not "
+            "suit the equipment. The frames are moved all the same and the stack is flagged."
         ),
         register_entry="STK-03",
     ),
@@ -3017,6 +3114,27 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
         "A stack of one frame has no pixel rejection or alignment, so its quality numbers differ.",
     ),
     notice_spec(
+        STACKING_NOTICE_STACK_CROPPED,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "fraction",
+        "Whether the stack's edges, covered by too few frames, were cropped away.",
+        "The share of the image area the crop removed, from 0 to 1.",
+        _NOTICE_COMPUTED_BY,
+        "A cropped stack is smaller than its frames, so a person should know which edges went and why.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_STACK_TURNED,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "deg",
+        "Whether the saved stack was turned by a quarter turn so that north is near the top.",
+        "The degrees the stack was turned: 90, 180 or 270.",
+        f"{_STACKING}.post_processing.record_quality.stack_turned_measurement",
+        "A turned stack no longer has the pixel grid of Siril's registration reference frame, so a person "
+        "comparing it with a frame should know it was turned.",
+    ),
+    notice_spec(
         STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT,
         Checkpoint.STACKING,
         SubjectLevel.STACK,
@@ -3049,8 +3167,82 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
     camera_without_profile_spec("stacking"),
 )
 
+# ---------------------------------------------------------------------------
+# The star shape of the stack image: the frame star-shape metrics, measured on
+# the stacked pixels by the same code.
+# ---------------------------------------------------------------------------
+
+# The note added to the sample definition of each stack star-shape metric.
+_STACK_STAR_SHAPE_NOTE = (
+    " For a stack the same measurement runs on the stacked image: the stars are those of the stack, "
+    "the stack's own plateau (not a camera limit) decides which stars are near saturation, and a "
+    "stack made of color planes is measured plane by plane. A spectral stack is not measured."
+)
+
+
+def _stack_star_shape_spec(frame_name: str, stack_name: str) -> MetricSpec:
+    """Declare the stack form of a frame star-shape metric.
+
+    The stack metric repeats the frame metric's unit, direction, estimator,
+    purpose and register entry, so one definition holds at both levels. Only
+    the name, the checkpoint, the subject level and the texts that name the
+    subject change.
+
+    Parameters
+    ----------
+    frame_name : `str`
+        The name of the frame metric to repeat.
+    stack_name : `str`
+        The name of the stack metric.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        The declaration of the stack metric.
+    """
+    frame_spec = next(spec for spec in FRAME_METRICS if spec.name == frame_name)
+    fields = frame_spec.model_dump()
+    fields.update(
+        name=stack_name,
+        definition_version=1,
+        checkpoint=Checkpoint.STACKING,
+        levels=(SubjectLevel.STACK,),
+        meaning=f"In the stacked image: {frame_spec.meaning[0].lower()}{frame_spec.meaning[1:]}",
+        sample_definition=frame_spec.sample_definition + _STACK_STAR_SHAPE_NOTE,
+        band="The stack's filter or channel; a stack stored as color planes is measured plane by plane.",
+        estimator=frame_spec.estimator.replace(frame_name, stack_name),
+    )
+    if frame_spec.purpose_reason:
+        fields["purpose_reason"] = (
+            frame_spec.purpose_reason.replace(frame_name, stack_name)
+            + " In a stack the stars are the sum of many frames, so a round stack from stretched "
+            "frames means the stretch changed from frame to frame."
+        )
+    return MetricSpec.model_validate(fields)
+
+
+_STACK_STAR_SHAPE_METRICS: tuple[MetricSpec, ...] = (
+    _stack_star_shape_spec(FRAME_STAR_ELONGATION, STACKING_STAR_ELONGATION),
+    _stack_star_shape_spec(FRAME_STAR_ELONGATION_ANGLE_DEG, STACKING_STAR_ELONGATION_ANGLE_DEG),
+    *(
+        _stack_star_shape_spec(frame_name, frame_name.replace("frame.", "stacking.", 1))
+        for frame_name in FRAME_STAR_WIDTH_REGION_PX.values()
+    ),
+)
+
+# The stack metric that repeats each frame star-shape metric, by frame name.
+STACK_STAR_SHAPE_METRIC_BY_FRAME_METRIC: dict[str, str] = {
+    FRAME_STAR_ELONGATION: STACKING_STAR_ELONGATION,
+    FRAME_STAR_ELONGATION_ANGLE_DEG: STACKING_STAR_ELONGATION_ANGLE_DEG,
+    **{
+        frame_name: frame_name.replace("frame.", "stacking.", 1)
+        for frame_name in FRAME_STAR_WIDTH_REGION_PX.values()
+    },
+}
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
+    *_STACK_STAR_SHAPE_METRICS,
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
     *_NIGHT_METRICS,

@@ -6,8 +6,9 @@ air clarity, airmass. It must not contain anything that only some stars do, or
 that starts or stops partway through the session. This module builds that
 signal in four steps.
 
-1. **Candidates.** A star is a candidate when it is measured, unsaturated, and
-   positive in every usable frame, and no catalog lists it as variable. The
+1. **Candidates.** A star is a candidate when it is measured, unsaturated, not
+   crowded by a bright neighbor, and positive in every usable frame, and no
+   catalog lists it as variable. The
    candidates are ranked by their median flux. The brightest 2 percent are
    skipped (they come closest to saturation and to the camera's non-linear
    range). The band reaches down to the brightest 30 percent. At most 100
@@ -258,6 +259,11 @@ class FluxTable:
         One `bool` per star: a catalog lists it as variable.
     unusable_timestamps : `tuple` [`datetime.datetime`]
         Frames left out of the table because too few stars were measured.
+    crowded : `numpy.ndarray` or `None`
+        One `bool` per star: a bright neighbor lies within its aperture's
+        reach (see `CROWDING_MARGIN_PX`), so its flux may carry the
+        neighbor's light. `None` when no star recorded crowding. A crowded
+        star is never chosen as a comparison star.
     """
 
     star_ids: tuple[str, ...]
@@ -268,6 +274,7 @@ class FluxTable:
     saturation_trusted: np.ndarray
     listed_variable: np.ndarray
     unusable_timestamps: tuple[datetime, ...]
+    crowded: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -413,6 +420,7 @@ def build_flux_table(stars: list[StellarObject]) -> FluxTable | None:
     ever_saturated = np.zeros(row_count, dtype=bool)
     saturation_trusted = np.ones(row_count, dtype=bool)
     listed_variable = np.zeros(row_count, dtype=bool)
+    crowded = np.zeros(row_count, dtype=bool)
     for row, star in enumerate(tracked):
         light_curve = star.photometry
         count = min(len(light_curve.timestamps), len(light_curve.fluxes))
@@ -434,6 +442,7 @@ def build_flux_table(stars: list[StellarObject]) -> FluxTable | None:
                 if math.isfinite(error) and error > 0:
                     errors[row, column[light_curve.timestamps[index]]] = error
         listed_variable[row] = is_listed_as_variable(star)
+        crowded[row] = bool(light_curve.crowded)
 
     measured_per_frame = np.sum(np.isfinite(fluxes), axis=0)
     typical = float(np.median(measured_per_frame))
@@ -449,6 +458,7 @@ def build_flux_table(stars: list[StellarObject]) -> FluxTable | None:
         saturation_trusted=saturation_trusted,
         listed_variable=listed_variable,
         unusable_timestamps=tuple(stamp for stamp, keep in zip(stamps, usable, strict=True) if not keep),
+        crowded=crowded if any(star.photometry.crowded is not None for star in tracked) else None,
     )
 
 
@@ -586,7 +596,8 @@ def select_comparison_set(table: FluxTable, maximum: int | None = None) -> Compa
     """Choose the comparison stars for a session.
 
     A candidate is measured with a positive flux in every usable frame, never
-    saturated, and not listed as variable by a catalog. The candidates are
+    saturated, not crowded by a bright neighbor, and not listed as variable
+    by a catalog. The candidates are
     ranked by median flux. The brightest `BRIGHTEST_SKIPPED_FRACTION` are
     skipped and the band ends at the brightest `FAINTEST_BAND_FRACTION`. The
     band is widened to `MINIMUM_VETTING_CANDIDATES` stars when it is
@@ -614,6 +625,8 @@ def select_comparison_set(table: FluxTable, maximum: int | None = None) -> Compa
         maximum = resolve(DEFAULT_MAXIMUM_COMPARISON_STARS).value
     maximum = max(maximum, minimum_comparison_stars)
     eligible = np.all(np.isfinite(table.fluxes), axis=1) & ~table.ever_saturated & table.saturation_trusted
+    if table.crowded is not None:
+        eligible &= ~table.crowded
     listed_rows = np.flatnonzero(eligible & table.listed_variable)
     pool = np.flatnonzero(eligible & ~table.listed_variable)
     if pool.size == 0:
@@ -636,6 +649,56 @@ def select_comparison_set(table: FluxTable, maximum: int | None = None) -> Compa
         candidate_count=int(band.size),
         uses_errors=uses_errors,
     )
+
+
+def describe_missing_comparison_stars(table: FluxTable, selection: ComparisonSelection) -> str:
+    """Say in one sentence why a session has too few comparison stars.
+
+    The sentence counts the stars left after each rule of
+    `select_comparison_set`, in the order the rules are applied. When no
+    star has a flux in every usable frame, it also names the frame with the
+    most missing stars, because a frame lost to cloud is the usual cause.
+
+    Parameters
+    ----------
+    table : `FluxTable`
+        The session's fluxes.
+    selection : `ComparisonSelection`
+        What `select_comparison_set` chose from the table.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence, without a final period.
+    """
+    measured_everywhere = np.all(np.isfinite(table.fluxes), axis=1)
+    unsaturated = measured_everywhere & ~table.ever_saturated & table.saturation_trusted
+    uncrowded = unsaturated & ~table.crowded if table.crowded is not None else unsaturated
+    unlisted = uncrowded & ~table.listed_variable
+    parts = [
+        f"{int(measured_everywhere.sum())} of {len(table.star_ids)} stars have a positive flux in all "
+        f"{len(table.timestamps)} usable frames",
+        f"{int(unsaturated.sum())} of those are never saturated",
+    ]
+    if table.crowded is not None:
+        parts.append(f"{int(uncrowded.sum())} are not crowded")
+    parts.append(f"{int(unlisted.sum())} are not listed as variable")
+    if selection.candidate_count:
+        parts.append(
+            f"{len(selection.member_rows)} of {selection.candidate_count} candidates passed the "
+            "constancy check"
+        )
+    reason = "; ".join(parts)
+    if table.timestamps and not measured_everywhere.any():
+        missing_per_frame = np.sum(~np.isfinite(table.fluxes), axis=0)
+        worst = int(np.argmax(missing_per_frame))
+        frames_missing_many = int(np.sum(missing_per_frame > 0.1 * len(table.star_ids)))
+        reason += (
+            f". {frames_missing_many} frame(s) lack a flux for more than a tenth of the stars; the worst, "
+            f"{table.timestamps[worst].isoformat()}, lacks {int(missing_per_frame[worst])} (cloud or a lost "
+            "field is the usual cause)"
+        )
+    return reason
 
 
 def build_ensemble_signal(

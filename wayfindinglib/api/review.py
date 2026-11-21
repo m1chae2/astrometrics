@@ -43,6 +43,7 @@ from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
 from wayfindinglib.models.session.review_query import ReviewQueryResult
 from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
+from wayfindinglib.models.session.star_shape_review import StarShapeReview
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionsResult,
@@ -811,6 +812,45 @@ class ObservationReview(ControlChild):
         return sky_rate_tasks.get_sky_rate_prediction(
             self._context, epoch_seconds, ra_deg, dec_deg, filter_name, exclude_nights
         )
+
+    def get_star_shape_review(
+        self,
+        target: str | Target,
+        night: str | None = None,
+        frame_paths: list[str] | None = None,
+    ) -> StarShapeReview:
+        """Say in plain words how round a target's stars are and why.
+
+        Reads the star-shape measurements already stored for the target's
+        light frames (and its stack, when the stack has its own). Nothing is
+        measured or stored. The verdicts are suggestions: whether the stars
+        are round against this equipment's own history (WAY-42), whether the
+        stretch points one way (tracking, guiding, wind or flexing) or many
+        ways (seeing or focus), and which frames stand out as candidates to
+        set aside. The corner widths are reported but are not validated
+        (AST-18), so no tilt verdict is made.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        night : `str`, optional
+            Judge only this observing night, such as ``"2026-09-24"``.
+        frame_paths : `list` [`str`], optional
+            Judge only these frames.
+
+        Returns
+        -------
+        review : `StarShapeReview`
+            The verdicts, each with a plain sentence and its numbers, the
+            standout frames, and the per-frame series for a chart. A target
+            with no stored star shapes gets "not measured yet" verdicts, not
+            an error.
+        """
+        from wayfindinglib.tasks.control_tasks import star_shape_tasks
+
+        target_id = target if isinstance(target, str) else target.id
+        return star_shape_tasks.get_star_shape_review(self._context, target_id, night, frame_paths)
 
     def get_advisory(
         self,

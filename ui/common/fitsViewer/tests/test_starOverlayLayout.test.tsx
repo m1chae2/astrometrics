@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, createEvent } from '@testing-library/react';
 import {
   STAR_LABEL_BUDGET,
+  labelCapForScale,
   StarScreenTransform,
   chooseLabeledStarIds,
   findStarNearPointer
@@ -51,7 +52,8 @@ function makeGridStars() {
     for (let column = 0; column < 40; column++) {
       stars.push({
         id: `S${row}_${column}`, name: `Star ${row}-${column}`, x: column * 100 + 50, y: row * 100 + 50,
-        spectralType: 'G2V', isCatalogIdentified: true, referenceWidth: 4000, referenceHeight: 5000
+        spectralType: 'G2V', isCatalogIdentified: true, referenceWidth: 4000, referenceHeight: 5000,
+        libraryId: `S${row}_${column}` as string | null
       });
     }
   }
@@ -82,7 +84,7 @@ describe('chooseLabeledStarIds', () => {
     };
     const labeled = chooseLabeledStarIds(stars, zoomed, estimateBadgeWidth);
     expect(labeled.size).toBeGreaterThan(0);
-    expect(labeled.size).toBeLessThanOrEqual(STAR_LABEL_BUDGET);
+    expect(labeled.size).toBeLessThanOrEqual(labelCapForScale(2));
     for (const star of stars.filter((item) => labeled.has(item.id))) {
       const screenX = -6000 + star.x * 2;
       const screenY = -8000 + star.y * 2;
@@ -136,7 +138,7 @@ describe('FitsRenderer star overlay', () => {
     Element.prototype.releasePointerCapture = vi.fn();
     const strokeCounts = { arcs: 0 };
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
-      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), stroke: vi.fn(),
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), setLineDash: vi.fn(), stroke: vi.fn(),
       arc: vi.fn(() => { strokeCounts.arcs += 1; })
     })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     const result = render(
@@ -164,7 +166,7 @@ describe('FitsRenderer star overlay', () => {
    */
   it('shows a tooltip when hovering a star that has no label', async () => {
     const stars = makeGridStars();
-    const { container } = await renderOverlay(stars);
+    const { container } = await renderOverlay(stars, () => {});
     const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
     // Star S49_39 sits at the bottom right of the fitted image (zoom 0.95, pan 20 and 25), away from the labels.
     expect(container.querySelector('.fits-renderer__star-tooltip')).toBeNull();
@@ -173,6 +175,30 @@ describe('FitsRenderer star overlay', () => {
     expect(tooltip?.textContent).toContain('Star 49-39');
     expect(tooltip?.textContent).toBe('Open Star 49-39 in the Astronomy Manager');
     expect(tooltip?.textContent).not.toContain('G2V');
+  });
+
+  /**
+   * A stack's detections with no catalog star and its missed catalog stars get markers but no labels.
+   */
+  it('labels only the stars with a catalog name', async () => {
+    const stars = makeGridStars().map((star, index) => ({
+      ...star,
+      matchKind: index === 0 ? 'matched' as const : index % 2 ? 'unmatched' as const : 'catalog_only' as const,
+    }));
+    const { container } = await renderOverlay(stars);
+    const labeled = Array.from(container.querySelectorAll('.fits-renderer__star-group'))
+      .map((group) => group.getAttribute('data-star-id'));
+    expect(labeled).toEqual(['S0_0']);
+  });
+
+  /**
+   * With nothing to open (a stack's own star names), the tooltip gives only the name.
+   */
+  it('names the hovered star without an open hint when stars cannot be opened', async () => {
+    const { container } = await renderOverlay(makeGridStars());
+    const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
+    fireEvent.pointerMove(viewer, { clientX: 770.5, clientY: 965.5 });
+    expect(container.querySelector('.fits-renderer__star-tooltip')?.textContent).toBe('Star 49-39');
   });
 
   /**
@@ -213,6 +239,22 @@ describe('FitsRenderer star overlay', () => {
   });
 
   /**
+   * Pointer capture makes the release land on the container, not the star group that was pressed.
+   * The star pressed still opens, even when a neighbor with no library record is nearer the pointer.
+   */
+  it('opens the pressed star when the release lands on the container', async () => {
+    const onStarClick = vi.fn();
+    const stars = makeGridStars().map((star, index) => (index === 0 ? star : { ...star, libraryId: null }));
+    const { container } = await renderOverlay(stars, onStarClick);
+    const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
+    const group = container.querySelector(`[data-star-id="${stars[0].id}"]`) as HTMLElement;
+    fireEvent.pointerDown(group, { clientX: 400, clientY: 400 });
+    fireEvent.pointerUp(viewer, { clientX: 400, clientY: 400 });
+    expect(onStarClick).toHaveBeenCalledTimes(1);
+    expect(onStarClick.mock.calls[0][0]).toMatchObject({ id: stars[0].id });
+  });
+
+  /**
    * Enter and Space on a focused star open it, and Space does not scroll the page.
    */
   it('opens a star with Enter or Space', async () => {
@@ -235,6 +277,25 @@ describe('FitsRenderer star overlay', () => {
     const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
     fireEvent.pointerDown(viewer, { clientX: 700, clientY: 900 });
     fireEvent.pointerUp(viewer, { clientX: 770.5, clientY: 965.5 });
+    expect(onStarClick).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A star the library has no record of gets no hint and does not open, whatever its name.
+   */
+  it('does not open or promise to open a star with no library record', async () => {
+    const onStarClick = vi.fn();
+    const stars = makeGridStars().map((star) => ({ ...star, name: 'Gaia DR3 123456', libraryId: null, matchKind: 'matched' as const }));
+    const { container } = await renderOverlay(stars, onStarClick);
+    const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
+    fireEvent.pointerMove(viewer, { clientX: 770.5, clientY: 965.5 });
+    expect(container.querySelector('.fits-renderer__star-tooltip')?.textContent).toBe('Gaia DR3 123456');
+    fireEvent.pointerDown(viewer, { clientX: 770.5, clientY: 965.5 });
+    fireEvent.pointerUp(viewer, { clientX: 771, clientY: 966 });
+    expect(onStarClick).not.toHaveBeenCalled();
+    const badge = container.querySelector('.fits-renderer__star-group') as HTMLElement;
+    expect(badge.querySelector('title')?.textContent).toBe(badge.querySelector('title')?.textContent?.replace(/^Open | in the Astronomy Manager$/g, ''));
+    fireEvent.keyDown(badge, { key: 'Enter' });
     expect(onStarClick).not.toHaveBeenCalled();
   });
 });

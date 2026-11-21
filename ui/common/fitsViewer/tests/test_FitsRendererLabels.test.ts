@@ -107,6 +107,27 @@ describe('isStarSelected', () => {
   });
 
   /**
+   * A selected detection id must not select other detections whose ids only start with it.
+   */
+  it('matches ids exactly, never as a substring', () => {
+    const star = { id: 'detection-5', name: 'HD 214181', x: 1, y: 1 };
+    expect(isStarSelected(star, 'detection-5')).toBe(true);
+    expect(isStarSelected({ ...star, id: 'detection-50', name: 'HD 1' }, 'detection-5')).toBe(false);
+    expect(isStarSelected({ ...star, id: 'detection-512', name: 'HD 2' }, 'detection-5')).toBe(false);
+    expect(isStarSelected({ ...star, id: 'detection-5' }, 'detection-50')).toBe(false);
+  });
+
+  /**
+   * A star is selected by its catalog keys: its Gaia DR3 id or its name.
+   */
+  it('matches the Gaia DR3 id and the name of a stack star', () => {
+    const star = { id: 'detection-5', name: 'HD 214181', gaiaSourceId: '1234', x: 1, y: 1 };
+    expect(isStarSelected(star, 'Gaia DR3 1234')).toBe(true);
+    expect(isStarSelected(star, 'hd 214181')).toBe(true);
+    expect(isStarSelected(star, 'Gaia DR3 123')).toBe(false);
+  });
+
+  /**
    * Tests non-matching star identifiers return false.
    */
   it('returns false for mismatched star identifiers', () => {

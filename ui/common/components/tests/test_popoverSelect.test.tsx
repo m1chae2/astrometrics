@@ -69,3 +69,28 @@ describe('PopoverSelect options for tight places', () => {
         expect(outer.classList.contains('popover-select--above')).toBe(true);
     });
 });
+
+describe('PopoverSelect menu placement', () => {
+    /** The menu is drawn in document.body, not inside the picker, and is placed from the button's rectangle. */
+    it('renders the menu in a portal on document.body, fixed under the button', async () => {
+        const user = userEvent.setup();
+        const { container } = render(<PopoverSelect label="Camera" options={cameras} selectedId="asi533" onSelect={() => undefined} />);
+        const button = screen.getByRole('button', { name: 'Camera: ASI533MM' });
+        button.getBoundingClientRect = () => ({ left: 40, right: 240, top: 100, bottom: 138, width: 200, height: 38, x: 40, y: 100, toJSON: () => ({}) });
+        await user.click(button);
+        const menu = screen.getByRole('group', { name: 'Camera' });
+        expect(container.contains(menu)).toBe(false);
+        expect(menu.parentElement).toBe(document.body);
+        expect(menu.style.left).toBe('40px');
+        expect(menu.style.top).toBe('146px');
+    });
+
+    /** A press outside the button and menu closes the menu. */
+    it('closes on a press outside', async () => {
+        const user = userEvent.setup();
+        render(<PopoverSelect label="Camera" options={cameras} selectedId="asi533" onSelect={() => undefined} />);
+        await user.click(screen.getByRole('button', { name: 'Camera: ASI533MM' }));
+        await user.click(document.body);
+        expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
+    });
+});

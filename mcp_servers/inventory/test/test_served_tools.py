@@ -7,7 +7,8 @@ offered and, if not, why. These tests check three things:
 * every reflected library method has a row in the table, so a new public
   method fails a test until someone decides whether an AI may use it;
 * the tools a server offers are exactly the reflected methods whose row
-  says ``keep``, less the ones under an interim block;
+  says ``keep``, less the ones under an interim block and the job tools
+  that the astrometrics-backend server serves instead (``APP_JOB_TOOLS``);
 * the committed ``tool_manifest.json`` files match a fresh run of the
   inventory, so a changed decision cannot be forgotten.
 """
@@ -19,6 +20,7 @@ import pytest
 
 from astrometricslib import Astrometrics
 from mcp_servers.astrometrics_core import definition as astrometrics_definition
+from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
 from mcp_servers.common.profile import find_withheld_tools, load_manifest
 from mcp_servers.common.reflection import register_reflected_tools
 from mcp_servers.common.tool_registry import ToolRegistry
@@ -90,7 +92,7 @@ def test_served_tools_are_the_public_api_minus_the_decisions_table(server: str) 
     withheld = find_withheld_tools(sorted(reflected), manifest)
     served = reflected - withheld.keys()
     not_served_by_decision = {name for name in reflected if DECISIONS[name].disposition != "keep"}
-    assert served == reflected - not_served_by_decision - INTERIM_BLOCKS.keys()
+    assert served == reflected - not_served_by_decision - INTERIM_BLOCKS.keys() - APP_JOB_TOOLS.keys()
 
 
 @pytest.mark.parametrize("server", sorted(RUNTIME_MANIFEST_PATHS))

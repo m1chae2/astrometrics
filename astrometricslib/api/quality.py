@@ -13,6 +13,8 @@
   through it.
 * Detections: `measure_detections` lists the stars the astrometry run's star
   finder detects in one image, so a viewer can draw them.
+* Put back: `put_back_set_aside_frames` moves chosen set-aside frames back into
+  their target.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
 
@@ -30,10 +32,11 @@ from pydantic import ValidationError
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.foundation.tuning import TuningReport
 from astrometricslib.models.quality.aperture_record import OddEvenApertureRecord
+from astrometricslib.models.quality.blink_pair import BlinkPair, FramePositionMatch
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.detections import DetectionsMeasurement
@@ -198,7 +201,6 @@ class QualityRecords:
         """
         import datetime
 
-        from astrometricslib.foundation.errors import NotFoundError
         from astrometricslib.foundation.tuning import collect_tuners, run_tuning
 
         tuners = collect_tuners(("astrometricslib",))
@@ -999,6 +1001,60 @@ class QualityRecords:
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
 
+    def put_back_set_aside_frames(self, target: str | Target, paths: list[str]) -> list[str]:
+        """Move chosen set-aside frames back into their target.
+
+        This is the one-frame form of putting frames back. Each path must be
+        a frame that `set_aside_frames` lists. A frame whose original place is
+        taken, or that has no `excluded_frames.json` entry saying where it
+        came from, stays where it is. The target is re-scanned afterwards, so
+        it lists the moved frames again, and the next stack may set them
+        aside again.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, or its id or name.
+        paths : `list` [`str`]
+            The set-aside frames to move back, as listed in the ``path`` of
+            `set_aside_frames`.
+
+        Returns
+        -------
+        restored : `list` [`str`]
+            The original paths of the frames that were moved back.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a path is not in one of the target's `_excluded` folders.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            restore_quarantined_frames,
+            target_folder_names,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import find_excluded_folders
+
+        resolved = resolve_target(self._targets, target)
+        folders = {
+            os.path.realpath(folder): folder
+            for folder in find_excluded_folders(
+                str(self._config.get_frames_path()), target_folder_names(resolved.id)
+            )
+        }
+        files_by_folder: dict[str, set[str]] = {}
+        for path in paths:
+            folder = os.path.realpath(os.path.dirname(path))
+            if folder not in folders:
+                raise InvalidArgumentError(f"'{path}' is not in an _excluded folder of {resolved.id}.")
+            files_by_folder.setdefault(folders[folder], set()).add(os.path.basename(path))
+        restored: list[str] = []
+        for folder, file_names in files_by_folder.items():
+            restored.extend(restore_quarantined_frames(folder, file_names))
+        if restored:
+            self._targets.reindex_frames(resolved)
+        return restored
+
     def measure_star_profile(
         self,
         path: str,
@@ -1068,13 +1124,44 @@ class QualityRecords:
             ``direction_degrees``), the neighbor stars left out
             (``ring_neighbors``, ``ring_masked_neighbor_count``,
             ``ring_masked_fraction``) and ``ring_note``. Angles run from +y
-            toward +x, like the cut.
+            toward +x, like the cut. ``signal_to_noise``,
+            ``edge_distance_px``, ``coverage_fraction``, the photometry
+            circle and sky ring radii, ``circle_neighbor_count`` and
+            ``sky_ring_neighbor_count`` say whether the star is measurable.
+            The core shape is ``star_elongation`` (long axis divided by
+            short axis, from the same second-moment estimator as the frame's
+            ``frame.star_elongation``), ``star_elongation_angle_deg``
+            (the long axis, from +x toward +y, 0 up to 180),
+            ``star_shape_judgeable`` with ``star_shape_note`` when it
+            is not, and ``trailing_elongation_limit`` (the stacking
+            limit for a trailed frame).
 
         """
+        from astrometricslib.foundation.parameters import resolve
         from astrometricslib.pipelines.astrometry.processing.detections import find_star_centers
-        from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
+        from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+            APERTURE_RADIUS_PX,
+            CROWDING_MARGIN_PX,
+            CROWDING_NEIGHBOR_PEAK_FRACTION,
+            SKY_ANNULUS_INNER_RADIUS_PX,
+            SKY_ANNULUS_OUTER_RADIUS_PX,
+        )
+        from astrometricslib.pipelines.shared.quality.star_profile import (
+            PhotometryGeometry,
+            measure_star_profile_in_file,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            TRAILED_ELONGATION_LIMIT,
+        )
 
-        return measure_star_profile_in_file(
+        geometry = PhotometryGeometry(
+            aperture_radius_px=float(resolve(APERTURE_RADIUS_PX).value),  # type: ignore[arg-type]
+            sky_inner_px=float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value),  # type: ignore[arg-type]
+            sky_outer_px=float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value),  # type: ignore[arg-type]
+            crowding_margin_px=float(resolve(CROWDING_MARGIN_PX).value),  # type: ignore[arg-type]
+            crowding_neighbor_peak_fraction=float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value),  # type: ignore[arg-type]
+        )
+        measurement = measure_star_profile_in_file(
             path,
             x,
             y,
@@ -1083,7 +1170,10 @@ class QualityRecords:
             cut_half_length_px,
             search_radius_px,
             find_neighbors=find_star_centers,
+            photometry_geometry=geometry,
         )
+        measurement.trailing_elongation_limit = float(resolve(TRAILED_ELONGATION_LIMIT).value)
+        return measurement
 
     def measure_detections(self, path: str) -> DetectionsMeasurement:
         """List the stars the astrometry run's star finder detects in an image.
@@ -1107,11 +1197,106 @@ class QualityRecords:
             with ``x`` and ``y`` in 1-based pixels as in
             `measure_star_profile`, ``flux`` and ``merged``, `True` when two
             reports of one star were merged), ``detection_count``,
-            ``merged_count``, ``kernel_fwhm_px`` and ``binned_on_color``.
+            ``merged_count``, ``kernel_fwhm_px``, ``binned_on_color``,
+            ``star_width_px`` (this image's star width, which sizes the
+            circle) and ``aperture_radius_px``, the radius of
+            the circle photometry measures each star in.
         """
         from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
 
         return measure_detections_in_file(path)
+
+    def match_frame_positions(
+        self, path_a: str, path_b: str, points: list[tuple[float, float]]
+    ) -> FramePositionMatch:
+        """Say where positions of one frame lie in another frame.
+
+        Nothing is stored. The bright stars of the two frames are matched the
+        way the quarantine's pointing check matches them, trying the second
+        frame as it is and turned half a revolution (a meridian flip). A
+        missing file raises `NotFoundError`.
+
+        Parameters
+        ----------
+        path_a, path_b : `str`
+            Two FITS frames of the same size.
+        points : `list` [`tuple` [`float`, `float`]]
+            ``(x, y)`` positions in ``path_a``, in 1-based pixels (as in FITS
+            and DS9).
+
+        Returns
+        -------
+        match : `FramePositionMatch`
+            Fields: ``matched``, ``turned``, ``votes``, ``reason`` and
+            ``points``, each with ``x``, ``y``, ``mapped_x``, ``mapped_y``
+            (1-based pixels in ``path_b``) and ``inside``.
+
+        Raises
+        ------
+        NotFoundError
+            If a frame file does not exist.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.blink_pair import (
+            match_frame_positions as match_positions,
+        )
+
+        for path in (path_a, path_b):
+            if not os.path.isfile(path):
+                raise NotFoundError(f"No frame at {path}.")
+        return match_positions(path_a, path_b, [(float(x), float(y)) for x, y in points])
+
+    def choose_blink_pair(self, target: str | Target, path: str) -> BlinkPair:
+        """Pick a typical frame and a reference star to blink a frame against.
+
+        Nothing is stored. The typical frame is the frame of the same session
+        (the batch the quarantine step judges the frame in) whose stored
+        ``frame.star_elongation`` and ``frame.sky_unevenness`` lie closest to
+        the session medians. The reference star is a bright, isolated,
+        unsaturated star near the frame center, chosen with the rules of the
+        star-shape measurement. Its position in the typical frame is found
+        with `match_frame_positions`. The frame may be one in the stack or
+        one the stacker set aside.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, or its id or name.
+        path : `str`
+            The frame to examine.
+
+        Returns
+        -------
+        pair : `BlinkPair`
+            Fields: ``found``, ``reason``, ``path``, ``typical_path``,
+            ``star_x`` and ``star_y`` (the star in ``path``),
+            ``typical_star_x`` and ``typical_star_y`` (the same star in the
+            typical frame), all in 1-based pixels, then ``turned``,
+            ``votes``, ``session_frame_count`` and the frame size ``width`` and
+            ``height``. When nothing could be
+            found, ``found`` is `False` and ``reason`` says why.
+
+        Raises
+        ------
+        NotFoundError
+            If the target or the frame file does not exist.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.blink_pair import (
+            choose_blink_pair as choose_pair,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.blink_pair import frame_record_for_set_aside
+
+        resolved = resolve_target(self._targets, target)
+        if not os.path.isfile(path):
+            raise NotFoundError(f"No frame at {path}.")
+        lights = [frame for frame in resolved.frames if frame.role == "LIGHT"]
+        clicked = None
+        if not any(frame.path == path for frame in lights):
+            record = next((item for item in self.set_aside_frames(resolved) if item.path == path), None)
+            if record is not None:
+                clicked = frame_record_for_set_aside(
+                    lights, path, record.camera, record.filter, record.exposure_seconds, record.date
+                )
+        return choose_pair(resolved.id, path, lights, clicked)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack(

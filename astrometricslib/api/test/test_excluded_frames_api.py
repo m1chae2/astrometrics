@@ -128,7 +128,7 @@ def with_measurement(star_counts: dict[str, int]) -> object:
     """
     real_finder = frame_quarantine.find_frames_to_quarantine
 
-    def finder(frames: list[FrameRecord]) -> object:
+    def finder(frames: list[FrameRecord], target_id: str | None = None) -> object:
         """Find the frames to move, using the made-up measurements.
 
         Returns
@@ -136,7 +136,7 @@ def with_measurement(star_counts: dict[str, int]) -> object:
         report : `QuarantineReport`
             What the real finder decided.
         """
-        return real_finder(frames, fake_measurement(star_counts))
+        return real_finder(frames, fake_measurement(star_counts), target_id=target_id)
 
     return finder
 
@@ -297,11 +297,12 @@ def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:
 
 
 def test_preview_names_what_a_real_stack_would_move(tmp_path: Path) -> None:
-    """The preview judges the frames a stack judges, not every light frame.
+    """The preview judges every gain setting, each in its own session.
 
     Eleven frames share one gain. Frame 11 has another gain and few stars.
-    Before, the preview judged it with the rest and listed it as clouded. A
-    stack leaves it out for its gain first, so it is never moved.
+    The preview judges it in its own session, not against the eleven, so it
+    is not listed as clouded (one frame is too few to judge). A stack leaves
+    it out for its gain first, and the preview says so.
     """
     from astrometricslib.api.quality import QualityRecords
     from astrometricslib.pipelines.stacking import frame_screening
@@ -316,7 +317,7 @@ def test_preview_names_what_a_real_stack_would_move(tmp_path: Path) -> None:
     )
     real_finder = frame_quarantine.find_frames_to_quarantine
 
-    def finder(frames: list[FrameRecord], measure: object = None) -> object:
+    def finder(frames: list[FrameRecord], measure: object = None, target_id: str | None = None) -> object:
         """Run the real finder with the made-up measurements.
 
         Returns
@@ -324,7 +325,7 @@ def test_preview_names_what_a_real_stack_would_move(tmp_path: Path) -> None:
         report : `QuarantineReport`
             What the real finder decided.
         """
-        return real_finder(frames, fake_measurement(cloudy))
+        return real_finder(frames, fake_measurement(cloudy), target_id=target_id)
 
     with patch(FINDER, side_effect=finder):
         preview = QualityRecords(configuration, None, targets=MagicMock()).measure_frames(
@@ -340,8 +341,9 @@ def test_preview_names_what_a_real_stack_would_move(tmp_path: Path) -> None:
     stack_kept = {Path(frame.path).name for frame in screening.frames}
     stack_moved = {f"frame_{index:03d}.fits" for index in range(12)} - stack_kept - {"frame_011.fits"}
     assert moved_by_stack == stack_moved == {"frame_005.fits"}
-    assert preview.frames_checked == 11
+    assert preview.frames_checked == 12
     assert any("minority gain" in note for note in preview.notes)
+    assert any("too few to judge" in note for note in preview.notes)
 
 
 def test_preview_says_nothing_would_move_when_quarantine_is_off(tmp_path: Path) -> None:
@@ -364,3 +366,35 @@ def test_preview_says_nothing_would_move_when_quarantine_is_off(tmp_path: Path) 
     assert preview.would_move_total == 0
     assert preview.frames_checked == 0
     assert "turned off" in preview.notes[0]
+
+
+def test_put_back_moves_only_the_chosen_frame_and_rescans(quality: QualityRecords, tmp_path: Path) -> None:
+    """Only the chosen frame returns, and the target is rescanned."""
+    folder = camera_folder(tmp_path)
+    quarantine = write_manifest(
+        folder, [manifest_entry(folder, "frame_003.fits"), manifest_entry(folder, "frame_004.fits")]
+    )
+    target = Target(id="M 1")
+
+    restored = quality.put_back_set_aside_frames(target, [str(quarantine / "frame_003.fits")])
+
+    assert restored == [str(folder / "frame_003.fits")]
+    assert (folder / "frame_003.fits").exists()
+    assert (quarantine / "frame_004.fits").exists()
+    assert [
+        entry["file"]
+        for entry in frame_quarantine.read_quarantine_manifest(str(quarantine / MANIFEST_FILE_NAME))
+    ] == ["frame_004.fits"]
+    quality._targets.reindex_frames.assert_called_once_with(target)
+
+
+def test_put_back_refuses_a_path_outside_the_excluded_folders(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """A frame that is not set aside cannot be moved by this call."""
+    folder = camera_folder(tmp_path)
+    (folder / "frame_001.fits").write_bytes(b"x")
+
+    with pytest.raises(InvalidArgumentError):
+        quality.put_back_set_aside_frames(Target(id="M 1"), [str(folder / "frame_001.fits")])
+    quality._targets.reindex_frames.assert_not_called()

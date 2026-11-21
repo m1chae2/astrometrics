@@ -48,6 +48,8 @@ export interface ProfileAnchor {
   searchRadiusPx: number;
   /** True when the picture shows the file's first row at the top; the marker needs it to turn rows into screen positions. */
   firstRowAtTop: boolean;
+  /** How far the picture was shown turned, clockwise in degrees (default 0); the marker and the direction names need it. */
+  turn?: number;
 }
 
 /** What the panel shows. */
@@ -85,7 +87,7 @@ export interface StarProfileController {
    * Finds the pinned star on the image now shown and measures it there. The pin is left as it was, and a failure
    * is shown in the panel.
    */
-  follow: (options: { firstRowAtTop: boolean; searchRadiusPx: number }) => Promise<void>;
+  follow: (options: { firstRowAtTop: boolean; searchRadiusPx: number; turn?: number }) => Promise<void>;
   /** Closes the panel and forgets the star. */
   close: () => void;
 }
@@ -184,12 +186,12 @@ export function useStarProfile(resolvePath: (() => Promise<string | null>) | und
     void run(anchor, cutAngleDegreesRef.current, cutLengthPxRef.current, true);
   }, [run]);
 
-  const follow = useCallback(async ({ firstRowAtTop, searchRadiusPx }: { firstRowAtTop: boolean; searchRadiusPx: number }) => {
+  const follow = useCallback(async ({ firstRowAtTop, searchRadiusPx, turn = 0 }: { firstRowAtTop: boolean; searchRadiusPx: number; turn?: number }) => {
     const pinned = pinRef.current;
     if (!pinned) return;
     const requestId = ++latestRequestRef.current;
     lastMeasurementRef.current = null;
-    const waiting: ProfileAnchor = { x: pinned.x, y: pinned.y, searchRadiusPx, firstRowAtTop };
+    const waiting: ProfileAnchor = { x: pinned.x, y: pinned.y, searchRadiusPx, firstRowAtTop, turn };
     setState({ status: 'measuring', anchor: waiting, previous: null });
     try {
       const path = await resolvePathRef.current?.();
@@ -217,7 +219,7 @@ export function useStarProfile(resolvePath: (() => Promise<string | null>) | und
       setFollowNote({ method: mapped.method, note: mapped.note });
       // A guess needs a wider look, since the star may be some pixels away from the same pixel.
       const radius = mapped.method === 'same pixel' ? Math.max(searchRadiusPx, GUESS_SEARCH_RADIUS_PX) : searchRadiusPx;
-      void run({ x: mapped.x, y: mapped.y, searchRadiusPx: radius, firstRowAtTop }, cutAngleDegreesRef.current, cutLengthPxRef.current);
+      void run({ x: mapped.x, y: mapped.y, searchRadiusPx: radius, firstRowAtTop, turn }, cutAngleDegreesRef.current, cutLengthPxRef.current);
     } catch (failure) {
       if (requestId !== latestRequestRef.current) return;
       setState({ status: 'unavailable', message: `The star could not be followed to this image: ${describeFailure(failure)}` });

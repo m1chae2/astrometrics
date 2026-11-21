@@ -37,6 +37,7 @@ const STACK_WARNING_TITLES: Record<string, string> = {
     'stacking.abandoned_after_s': 'Stacking ran out of time',
     'stacking.notice_frames_moved_to_excluded': 'Frames moved to the excluded folder',
     'stacking.notice_single_frame_stack': 'Stack of a single frame',
+    'stacking.notice_stack_cropped': 'Stack cropped at the edges',
     'stacking.notice_exposure_group_left_out': 'Exposure group left out',
     'stacking.notice_flat_calibration_note': 'Flat frame problem',
 };

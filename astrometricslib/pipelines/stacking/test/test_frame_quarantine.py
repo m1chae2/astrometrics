@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
@@ -48,7 +49,7 @@ def make_frame(
     -------
     frame : `SimpleNamespace`
         A frame with ``path``, ``timestamp``, ``camera``, ``filter``,
-        ``exposure`` and ``role``.
+        ``exposure``, ``role``, ``iso`` (gain 100) and ``focal_length_mm``.
     """
     return SimpleNamespace(
         path=str(path),
@@ -57,20 +58,22 @@ def make_frame(
         filter=SimpleNamespace(value=filter_name),
         exposure=exposure,
         role=role,
+        iso="100",
+        focal_length_mm=405.0,
     )
 
 
 def make_measurement(
-    path: Path | str, stars: int = 3400, roundness: float | None = 0.97, sky: float = 1400.0
+    path: Path | str, stars: int = 3400, elongation: float | None = 1.05, sky: float = 1400.0
 ) -> dict[str, Any]:
-    """Build the measurement dictionary `raw_frame_check` returns for a frame.
+    """Build the measurement dictionary of one frame.
 
     Returns
     -------
     measurement : `dict`
-        ``path``, ``star_count``, ``roundness`` and ``sky_median_adu``.
+        ``path``, ``star_count``, ``star_elongation`` and ``sky_median_adu``.
     """
-    return {"path": str(path), "star_count": stars, "roundness": roundness, "sky_median_adu": sky}
+    return {"path": str(path), "star_count": stars, "star_elongation": elongation, "sky_median_adu": sky}
 
 
 def clean_batch(count: int = 12) -> list[dict[str, Any]]:
@@ -85,7 +88,13 @@ def clean_batch(count: int = 12) -> list[dict[str, Any]]:
 
 
 def test_split_into_batches_separates_setups_and_sessions() -> None:
-    """Frames split by camera, filter, exposure and by gaps over 4 hours."""
+    """Frames split by capture setting (gain too) and by gaps over 4 hours."""
+    other_gain = make_frame("e1", 0.0)
+    other_gain.iso = "200"
+    same_gain_written_otherwise = make_frame("a4", 60.0)
+    same_gain_written_otherwise.iso = "100.0"
+    other_optic = make_frame("f1", 0.0)
+    other_optic.focal_length_mm = 300.0
     frames = [
         make_frame("a1", 0.0),
         make_frame("a2", 120.0),
@@ -93,17 +102,20 @@ def test_split_into_batches_separates_setups_and_sessions() -> None:
         make_frame("c1", 0.0, filter_name="Red"),
         make_frame("d1", 0.0, camera="Camera B"),
         make_frame("a3", 120.0 + frame_quarantine.SESSION_GAP_SECONDS.default + 1),
+        other_gain,
+        same_gain_written_otherwise,
+        other_optic,
     ]
     batches = split_into_batches(frames)
-    assert sorted(len(batch) for batch in batches) == [1, 1, 1, 1, 2]
+    assert sorted(len(batch) for batch in batches) == [1, 1, 1, 1, 1, 1, 3]
 
 
 def test_judge_batch_flags_cloud_and_trailing_and_keeps_the_rest() -> None:
-    """Thin stars under bright sky read as cloud; low roundness as trailing."""
+    """Few stars under bright sky read as cloud; long stars as trailing."""
     measurements = clean_batch()
     measurements[3] = make_measurement("cloud.fits", stars=900, sky=3500.0)
-    measurements[5] = make_measurement("trail.fits", roundness=0.55)
-    measurements[7] = make_measurement("mild.fits", roundness=0.86)
+    measurements[5] = make_measurement("trail.fits", elongation=1.9)
+    measurements[7] = make_measurement("mild.fits", elongation=1.25)
     measurements[9] = make_measurement("thin.fits", stars=2900, sky=1650.0)
 
     decisions = {decision.path: decision for decision in judge_batch(measurements)}
@@ -137,13 +149,13 @@ def test_judge_batch_needs_enough_frames() -> None:
     assert judge_batch(measurements) == []
 
 
-def colour_session(roundness_values: list[float], colour_camera: bool) -> list[dict[str, Any]]:
-    """Build a batch of twelve frames with the given roundness values.
+def colour_session(elongation_values: list[float], colour_camera: bool) -> list[dict[str, Any]]:
+    """Build a batch of twelve frames with the given elongation values.
 
     Parameters
     ----------
-    roundness_values : `list` [`float`]
-        Roundness of the frames at the end of the batch; the rest are 0.90.
+    elongation_values : `list` [`float`]
+        Elongation of the frames at the end of the batch; the rest are 1.10.
     colour_camera : `bool`
         Whether the measurements say a colour camera took them.
 
@@ -154,63 +166,82 @@ def colour_session(roundness_values: list[float], colour_camera: bool) -> list[d
     """
     measurements = clean_batch()
     for measurement in measurements:
-        measurement["roundness"] = 0.90
+        measurement["star_elongation"] = 1.10
         measurement["colour_camera"] = colour_camera
-    for offset, roundness in enumerate(roundness_values):
-        measurements[-1 - offset]["roundness"] = roundness
+    for offset, elongation in enumerate(elongation_values):
+        measurements[-1 - offset]["star_elongation"] = elongation
     return measurements
 
 
-def test_judge_batch_gives_a_colour_camera_a_wider_roundness_allowance() -> None:
-    """A frame 0.18 under the median moves for mono, not for colour."""
-    mono = judge_batch(colour_session([0.72], colour_camera=False))
-    colour = judge_batch(colour_session([0.72], colour_camera=True))
+def test_judge_batch_reads_the_colour_cameras_own_elongation_rise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A colour camera is judged with its own rise, mono with the mono one."""
+    wider = frame_quarantine.COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN.model_copy(update={"default": 0.40})
+    monkeypatch.setattr(frame_quarantine, "COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN", wider)
+
+    mono = judge_batch(colour_session([1.36], colour_camera=False))
+    colour = judge_batch(colour_session([1.36], colour_camera=True))
 
     assert [d.kind for d in mono] == ["trailed"]
     assert colour == []
 
 
 def test_judge_batch_still_catches_clearly_trailed_colour_frames() -> None:
-    """Frames 0.35 under the median move for a colour camera too."""
-    decisions = judge_batch(colour_session([0.55, 0.50], colour_camera=True))
+    """Frames 0.7 over the median move for a colour camera too."""
+    decisions = judge_batch(colour_session([1.9, 1.8], colour_camera=True))
 
     assert len(decisions) == 2
     assert {d.kind for d in decisions} == {"trailed"}
 
 
 def test_judge_batch_treats_a_measurement_without_the_colour_key_as_mono() -> None:
-    """Older measurements, with no ``colour_camera`` key, use the 0.15 drop."""
-    measurements = colour_session([0.72], colour_camera=True)
+    """Older measurements, with no ``colour_camera`` key, use the mono rise."""
+    measurements = colour_session([1.36], colour_camera=True)
     for measurement in measurements:
         del measurement["colour_camera"]
 
     assert [d.kind for d in judge_batch(measurements)] == ["trailed"]
 
 
-def test_judge_batch_scales_the_roundness_limit_to_the_session() -> None:
-    """In a session of 0.90-round stars, only frames 0.15 lower move."""
-    measurements = [make_measurement(f"f{index}.fits", roundness=0.90) for index in range(12)]
-    measurements[0] = make_measurement("worst.fits", roundness=0.50)
-    measurements[1] = make_measurement("bad.fits", roundness=0.72)
-    measurements[2] = make_measurement("mild.fits", roundness=0.78)
+def test_judge_batch_scales_the_elongation_limit_to_the_session() -> None:
+    """In a session with a median of 1.28, only frames 0.12 higher move."""
+    measurements = [make_measurement(f"f{index}.fits", elongation=1.28) for index in range(12)]
+    measurements[0] = make_measurement("worst.fits", elongation=2.0)
+    measurements[1] = make_measurement("bad.fits", elongation=1.41)
+    measurements[2] = make_measurement("mild.fits", elongation=1.38)
 
     moved = {decision.path for decision in judge_batch(measurements)}
 
     assert moved == {"worst.fits", "bad.fits"}
 
 
-def test_find_frames_refuses_a_batch_where_too_many_look_bad(tmp_path: Path) -> None:
-    """More than a quarter flagged means the batch is poor; nothing moves."""
-    frames = [make_frame(tmp_path / f"f{index}.fits", float(index)) for index in range(12)]
+def test_find_frames_moves_every_bad_frame_and_warns_when_many_look_bad(tmp_path: Path) -> None:
+    """With 30% of a batch bad, all of them move and the report warns."""
+    frames = [make_frame(tmp_path / f"f{index}.fits", float(index)) for index in range(10)]
     measurements = {
-        frame.path: make_measurement(frame.path, roundness=0.4 if index < 5 else 0.97)
+        frame.path: make_measurement(frame.path, elongation=2.5 if index < 3 else 1.05)
         for index, frame in enumerate(frames)
     }
 
     report = find_frames_to_quarantine(frames, measure=lambda path: dict(measurements[path]))
 
-    assert report.moved == []
-    assert any("none moved" in note for note in report.notes)
+    assert len(report.moved) == 3
+    assert report.batches_with_many_set_aside == 1
+    assert report.warnings == ["3 of 10 frames set aside: 3 trailed"]
+    assert set(report.warning_by_path) == {decision.path for decision in report.moved}
+
+
+def test_find_frames_does_not_warn_at_a_quarter_or_less(tmp_path: Path) -> None:
+    """Two bad frames of 10 are moved without a warning."""
+    frames = [make_frame(tmp_path / f"f{index}.fits", float(index)) for index in range(10)]
+    measurements = {
+        frame.path: make_measurement(frame.path, elongation=2.5 if index < 2 else 1.05)
+        for index, frame in enumerate(frames)
+    }
+
+    report = find_frames_to_quarantine(frames, measure=lambda path: dict(measurements[path]))
+
+    assert len(report.moved) == 2
+    assert report.warnings == []
 
 
 def test_find_frames_notes_small_batches_and_reports_unreadable_frames(tmp_path: Path) -> None:
@@ -247,7 +278,7 @@ def test_quarantine_moves_files_records_them_and_updates_the_target(tmp_path: Pa
     bad_path = frames[4].path
 
     def measure(path: str) -> dict[str, Any]:
-        return make_measurement(path, roundness=0.4 if path == bad_path else 0.97)
+        return make_measurement(path, elongation=2.5 if path == bad_path else 1.05)
 
     kept, report = quarantine_bad_frames(target, frames, measure=measure)
 
@@ -279,7 +310,7 @@ def test_frames_set_aside_earlier_are_dropped_even_if_the_target_still_lists_the
     quarantine_bad_frames(
         first_run_target,
         frames,
-        measure=lambda path: make_measurement(path, roundness=0.4 if path == bad_path else 0.97),
+        measure=lambda path: make_measurement(path, elongation=2.5 if path == bad_path else 1.05),
     )
     # The first run's save of the target did not last: it still lists all ten.
     recalculations: list[int] = []
@@ -310,7 +341,7 @@ def test_a_restored_frame_is_not_dropped(tmp_path: Path) -> None:
     quarantine_bad_frames(
         target,
         frames,
-        measure=lambda path: make_measurement(path, roundness=0.4 if path == bad_path else 0.97),
+        measure=lambda path: make_measurement(path, elongation=2.5 if path == bad_path else 1.05),
     )
     # Put the moved file back without clearing the manifest.
     Path(bad_path).write_bytes(b"frame")
@@ -351,7 +382,7 @@ def test_restore_moves_frames_back_and_cleans_up(tmp_path: Path) -> None:
     target = SimpleNamespace(id="T", frames=list(frames), recalculate_total_exposure=lambda: None)
 
     def measure(path: str) -> dict[str, Any]:
-        return make_measurement(path, roundness=0.3 if path.endswith("f2.fits") else 0.97)
+        return make_measurement(path, elongation=2.5 if path.endswith("f2.fits") else 1.05)
 
     quarantine_bad_frames(target, frames, measure=measure)
     assert not (directory / "f2.fits").exists()
@@ -386,7 +417,7 @@ def test_a_second_move_with_the_same_name_does_not_overwrite(tmp_path: Path) -> 
     for content in (b"first", b"second"):
         path = directory / "f.fits"
         path.write_bytes(content)
-        decision = frame_quarantine.QuarantineDecision(str(path), "trailed", "test", 100, 3000.0, 0.4, 1400.0)
+        decision = frame_quarantine.QuarantineDecision(str(path), "trailed", "test", 100, 3000.0, 2.5, 1400.0)
         frame_quarantine._move_to_quarantine(decision)
 
     names = sorted(os.listdir(directory / QUARANTINE_FOLDER_NAME))
@@ -435,7 +466,7 @@ def test_the_report_keeps_the_measurements_of_kept_frames_as_well_as_moved_ones(
     def measure(path: str) -> dict[str, Any]:
         if path.endswith("k7.fits"):
             raise OSError("truncated file")
-        return make_measurement(path, roundness=0.4 if path == bad_path else 0.97)
+        return make_measurement(path, elongation=2.5 if path == bad_path else 1.05)
 
     report = find_frames_to_quarantine(frames, measure=measure)
 
@@ -444,5 +475,251 @@ def test_the_report_keeps_the_measurements_of_kept_frames_as_well_as_moved_ones(
     assert {entry["path"] for entry in report.measurements} == {
         frame.path for frame in frames if not frame.path.endswith("k7.fits")
     }
-    roundness_by_path = {entry["path"]: entry["roundness"] for entry in report.measurements}
-    assert roundness_by_path[bad_path] == pytest.approx(0.4)
+    elongation_by_path = {entry["path"]: entry["star_elongation"] for entry in report.measurements}
+    assert elongation_by_path[bad_path] == pytest.approx(2.5)
+
+
+def sky_grid(pattern_shift: float = 0.0) -> list[list[float]]:
+    """Build a 4 x 4 sky grid of a level near 1200 ADU with a gentle gradient.
+
+    Parameters
+    ----------
+    pattern_shift : `float`
+        Fraction of the sky level taken from the left half and added to the
+        right half, as a stand-in for thin cloud over one side.
+
+    Returns
+    -------
+    grid : `list` [`list` [`float`]]
+        Four rows of four sky levels.
+    """
+    return [
+        [
+            1200.0 * (1.0 + 0.002 * column + (pattern_shift if column >= 2 else -pattern_shift))
+            for column in range(4)
+        ]
+        for _ in range(4)
+    ]
+
+
+def uneven_batch() -> list[dict[str, Any]]:
+    """Build a clean batch whose frame 4 has an uneven sky.
+
+    Returns
+    -------
+    measurements : `list` [`dict`]
+        Twelve frames with a bright-star flux of 1000; frame 4 lit unevenly.
+    """
+    measurements = clean_batch()
+    for index, measurement in enumerate(measurements):
+        measurement["sky_grid_adu"] = sky_grid(0.0005 * (index % 3))
+        measurement["bright_star_flux_adu"] = 1000.0
+    measurements[4]["sky_grid_adu"] = sky_grid(0.06)
+    return measurements
+
+
+def test_judge_batch_keeps_and_flags_an_uneven_frame_whose_stars_are_normal() -> None:
+    """A gradient or a tree with normal stars is flagged, not set aside."""
+    decisions, flagged, _ = frame_quarantine.judge_batch_in_full(uneven_batch())
+
+    assert decisions == []
+    assert [frame.path for frame in flagged] == ["frame_004.fits"]
+    assert flagged[0].findings[0].rule == "uneven_sky_kept"
+    assert flagged[0].reason.startswith("Uneven sky (gradient or obstruction): ")
+
+
+def test_judge_batch_sets_aside_a_frame_with_an_uneven_sky_and_says_why() -> None:
+    """An uneven frame whose bright stars are dimmed is called cloud."""
+    measurements = uneven_batch()
+    measurements[4]["bright_star_flux_adu"] = 600.0
+
+    decisions, notes = frame_quarantine.judge_batch_with_notes(measurements)
+
+    assert [decision.path for decision in decisions] == ["frame_004.fits"]
+    assert decisions[0].kind == "clouded"
+    assert decisions[0].reason.startswith("Uneven sky, likely cloud: ")
+    assert ", limit " in decisions[0].reason
+    assert decisions[0].sky_unevenness > 0.05
+    assert all(m["sky_unevenness"] is not None for m in measurements)
+    assert not any("sky was not checked" in note for note in notes)
+
+
+def stars_at(rows: list[tuple[float, float]]) -> np.ndarray:
+    """Build the star array `detect_stars` returns from ``(y, x)`` pairs.
+
+    Returns
+    -------
+    stars : `numpy.ndarray`
+        Rows of ``[y, x, sigma_x, sigma_y, flux]``.
+    """
+    return np.array([[y, x, 2.0, 2.0, 1000.0] for y, x in rows])
+
+
+def test_judge_batch_sets_aside_a_frame_pointing_off_the_main_field() -> None:
+    """A frame 700 pixels off the field is set aside; a flipped one is not."""
+    generator = np.random.default_rng(3)
+    sky_rows = [(float(y), float(x)) for y, x in generator.uniform(100, 2900, size=(80, 2))]
+    shape = (3000, 3000)
+
+    def frame_with(rows: list[tuple[float, float]], name: str) -> dict[str, Any]:
+        measurement = make_measurement(name)
+        measurement.update(_stars=stars_at(rows), width_px=shape[1], height_px=shape[0])
+        return measurement
+
+    measurements = [frame_with(sky_rows, f"f{index:02d}.fits") for index in range(12)]
+    measurements[2] = frame_with([(y, x + 700.0) for y, x in sky_rows], "off.fits")
+    # Turned half a revolution, as after a meridian flip, same field.
+    measurements[6] = frame_with([(shape[0] - 1 - y, shape[1] - 1 - x) for y, x in sky_rows], "flipped.fits")
+
+    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+
+    assert [decision.path for decision in decisions] == ["off.fits"]
+    assert decisions[0].kind == "off_field"
+    assert decisions[0].pointing_offset_fraction == pytest.approx(700 / 3000, abs=0.01)
+    assert decisions[0].reason.startswith("Pointing off the main field: 0.23 of the field width, limit 0.10")
+    flipped = next(m for m in measurements if m["path"] == "flipped.fits")
+    assert flipped["pointing_offset_fraction"] < 0.01
+
+
+def test_a_frame_that_breaks_two_rules_lists_both_reasons() -> None:
+    """The reason names every rule broken, with its value and limit."""
+    measurements = clean_batch()
+    measurements[5] = make_measurement("both.fits", stars=900, sky=3500.0, elongation=1.9)
+
+    decisions = judge_batch(measurements)
+
+    assert [decision.path for decision in decisions] == ["both.fits"]
+    assert [finding.rule for finding in decisions[0].findings] == ["trailed", "few_stars"]
+    assert decisions[0].reason.startswith("Stars trailed: elongation 1.90, limit 1.32; Few stars: 900")
+
+
+def test_the_warning_counts_each_rule_in_words() -> None:
+    """The warning says how many frames each rule caught."""
+    measurements = clean_batch()
+    for index in range(5):
+        measurements[index] = make_measurement(f"trail_{index}.fits", elongation=2.5)
+    measurements[8] = make_measurement("cloud.fits", stars=900, sky=3500.0)
+    decisions = judge_batch(measurements)
+
+    warning = frame_quarantine.describe_many_set_aside(decisions, len(measurements))
+
+    assert len(decisions) == 6
+    assert warning == "6 of 12 frames set aside: 5 trailed, 1 few stars"
+
+
+def test_frames_with_no_elongation_are_noted_not_judged_for_trailing() -> None:
+    """A missing elongation is said out loud, and never counts as trailed."""
+    measurements = clean_batch()
+    measurements[1]["star_elongation"] = None
+
+    decisions, notes = frame_quarantine.judge_batch_with_notes(measurements)
+
+    assert decisions == []
+    assert any("1 of 12 frames have no star elongation" in note for note in notes)
+
+
+def test_the_manifest_records_the_rule_value_and_limit(tmp_path: Path) -> None:
+    """The manifest lists the plain reason and the measured values."""
+    directory = tmp_path / "Camera"
+    directory.mkdir()
+    frames = []
+    for index in range(10):
+        path = directory / f"f{index}.fits"
+        path.write_bytes(b"x")
+        frames.append(make_frame(path, float(index)))
+    target = SimpleNamespace(id="T", frames=list(frames), recalculate_total_exposure=lambda: None)
+
+    quarantine_bad_frames(
+        target,
+        frames,
+        measure=lambda path: make_measurement(path, elongation=1.64 if path.endswith("f2.fits") else 1.05),
+    )
+
+    manifest = json.loads((directory / QUARANTINE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
+    assert manifest[0]["reason"] == "Stars trailed: elongation 1.64, limit 1.32"
+    assert manifest[0]["star_elongation"] == pytest.approx(1.64)
+    assert manifest[0]["rules"] == ["trailed"]
+
+
+def test_the_manifest_carries_the_warning_when_many_frames_are_set_aside(tmp_path: Path) -> None:
+    """With 30% bad, every moved frame is listed with the warning."""
+    directory = tmp_path / "Camera"
+    directory.mkdir()
+    frames = []
+    for index in range(10):
+        path = directory / f"f{index}.fits"
+        path.write_bytes(b"x")
+        frames.append(make_frame(path, float(index)))
+    target = SimpleNamespace(id="T", frames=list(frames), recalculate_total_exposure=lambda: None)
+
+    kept, report = quarantine_bad_frames(
+        target,
+        frames,
+        measure=lambda path: make_measurement(
+            path, elongation=1.64 if "f0" in path or "f1" in path or "f2" in path else 1.05
+        ),
+    )
+
+    manifest = json.loads((directory / QUARANTINE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
+    assert len(manifest) == 3
+    assert len(kept) == 7
+    assert {entry["warning"] for entry in manifest} == {"3 of 10 frames set aside: 3 trailed"}
+    assert report.warnings == ["3 of 10 frames set aside: 3 trailed"]
+
+
+def frames_on_fields(
+    field_sizes: list[int], shape: tuple[int, int] = (3000, 3000), shift: float = 700.0
+) -> list[dict[str, Any]]:
+    """Build frame measurements shot at several pointings of one star field.
+
+    Parameters
+    ----------
+    field_sizes : `list` [`int`]
+        Frames at each pointing. The first pointing is the main field; each
+        later one is shifted a further ``shift`` pixels in x.
+    shape : `tuple` [`int`, `int`]
+        Frame height and width in pixels.
+    shift : `float`
+        Pointing step in pixels.
+
+    Returns
+    -------
+    measurements : `list` [`dict`]
+        One entry per frame: the frames of each pointing in a row.
+    """
+    generator = np.random.default_rng(3)
+    sky_rows = [(float(y), float(x)) for y, x in generator.uniform(100, 2900, size=(80, 2))]
+    measurements = []
+    for field_index, size in enumerate(field_sizes):
+        for frame_index in range(size):
+            measurement = make_measurement(f"field{field_index}_{frame_index:02d}.fits")
+            rows = [(y, x + shift * field_index) for y, x in sky_rows]
+            measurement.update(_stars=stars_at(rows), width_px=shape[1], height_px=shape[0])
+            measurements.append(measurement)
+    return measurements
+
+
+def test_a_second_field_is_set_aside_as_another_field() -> None:
+    """A second pointing held by enough frames is an "Other field"."""
+    measurements = frames_on_fields([14, 4])
+
+    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+
+    assert [decision.path for decision in decisions] == [f"field1_{index:02d}.fits" for index in range(4)]
+    assert all(decision.kind == "off_field" for decision in decisions)
+    assert decisions[0].reason == "Other field (4 frames): not in this stack"
+
+
+def test_a_short_run_at_another_pointing_is_a_stray_not_a_field() -> None:
+    """A small run or a lone frame at another pointing is a stray."""
+    measurements = frames_on_fields([20, 2])
+
+    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+
+    assert [decision.path for decision in decisions] == ["field1_00.fits", "field1_01.fits"]
+    assert all(decision.reason.startswith("Pointing off the main field: ") for decision in decisions)
+
+    lone = frames_on_fields([11, 1])
+    lone_decisions, _ = frame_quarantine.judge_batch_with_notes(lone)
+    assert [decision.path for decision in lone_decisions] == ["field1_00.fits"]
+    assert lone_decisions[0].reason.startswith("Pointing off the main field: ")

@@ -1,9 +1,9 @@
 """Tests that the quarantine step's gate record tells its outcomes apart.
 
-The gate must go red when bad frames are left in the stack, must stay green
-only when a session was really judged, and must say "not checked" when
-nothing could be judged. A session too small to judge must never read as
-a clean pass.
+The gate must go red when more than a quarter of a session is set
+aside, must stay green only when a session was really judged, and must
+say "not checked" when nothing could be judged. A session too small to
+judge must never read as a clean pass.
 """
 
 from pathlib import Path
@@ -33,11 +33,11 @@ def _batch(tmp_path: Path, count: int, prefix: str = "f", exposure: str = "120.0
     ]
 
 
-def test_gate_fails_when_too_many_bad_frames_are_left_in_the_stack(tmp_path: Path) -> None:
-    """Five bad frames of 12 exceed the cap, so the gate is red."""
+def test_gate_fails_and_says_how_many_when_a_quarter_of_a_session_is_set_aside(tmp_path: Path) -> None:
+    """Five bad frames of 12 are all moved; the red gate gives the counts."""
     frames = _batch(tmp_path, 12)
     measurements = {
-        frame.path: make_measurement(frame.path, roundness=0.4 if index < 5 else 0.97)
+        frame.path: make_measurement(frame.path, elongation=2.5 if index < 5 else 1.05)
         for index, frame in enumerate(frames)
     }
 
@@ -45,7 +45,7 @@ def test_gate_fails_when_too_many_bad_frames_are_left_in_the_stack(tmp_path: Pat
 
     assert gate.name == GATE_NAME
     assert gate.status is GateStatus.FAILED
-    assert "still in the stack" in gate.detail
+    assert gate.detail == "5 of 12 frames set aside: 5 trailed"
 
 
 def test_gate_passes_when_a_session_was_judged_and_is_clean(tmp_path: Path) -> None:

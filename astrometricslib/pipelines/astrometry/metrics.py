@@ -45,7 +45,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
-from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 
 ASTROMETRY_SOURCES_DETECTED = "astrometry.sources_detected_count"
 ASTROMETRY_SIMBAD_MATCHED_COUNT = "astrometry.simbad_matched_count"
@@ -86,6 +86,10 @@ ASTROMETRY_GATE_SOURCE_DETECTION = "astrometry.gate_source_detection"
 ASTROMETRY_GATE_CATALOG_MATCHES = "astrometry.gate_catalog_matches"
 ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL = "astrometry.gate_astrometric_residual"
 ASTROMETRY_GATE_CATALOG_LOOKUP = "astrometry.gate_catalog_lookup"
+
+# The notice that some Gaia tiles under the image were not in the cache to the
+# query depth, so their detections got no Gaia name.
+ASTROMETRY_NOTICE_GAIA_TILES_MISSING = "astrometry.notice_gaia_tiles_missing"
 
 # A value read from the one stacked image (its stars, its solution, its pixel
 # scale) belongs to that stack. A count of what the run did (solver uploads,
@@ -749,4 +753,18 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The catalog lookups made during the run.",
     ),
     camera_without_profile_spec("astrometry"),
+    notice_spec(
+        ASTROMETRY_NOTICE_GAIA_TILES_MISSING,
+        Checkpoint.ASTROMETRY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some Gaia sky tiles under the image were missing, so stars there have no Gaia name.",
+        "The number of Gaia cache tiles under the image that were not complete to the query depth: the "
+        "download failed or was cut short, or the run could not go online.",
+        "pipelines.astrometry.post_processing.record_quality.gaia_tiles_missing_notice_measurement",
+        (
+            "A star in a missing tile keeps a position-only name. Without this notice a run with a failed "
+            "download would look like a field with few Gaia stars."
+        ),
+    ),
 )

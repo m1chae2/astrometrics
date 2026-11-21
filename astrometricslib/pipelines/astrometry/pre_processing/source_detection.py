@@ -89,6 +89,26 @@ SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS = TunedParameter(
     register_entry="AST-D02",
 )
 
+# The closest two stars may lie when the list is for looking at or naming
+# stars, not for plate solving, in kernel widths (about one star width). The
+# solving list keeps the finder's 2.5 kernel widths, which drops the fainter
+# star of a close pair; that is right for a plate solve (a pair is a poor
+# anchor, AST-D01) but the viewer and the star naming must show both stars.
+# One star width is also what the photometry neighbor list uses. Two stars
+# nearer than about one width are not resolved by the finder's template.
+# Validation: NGC 7331 stack, close companions next to brighter stars that
+# Gaia confirms (AST-D23).
+VIEWING_SEPARATION_KERNEL_WIDTHS = TunedParameter(
+    name="astrometry.viewing_separation_kernel_widths",
+    default=1.0,
+    unit="kernel widths",
+    description="Closest two detected stars may lie in the viewing and naming list; close pairs are kept.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D23",
+)
+
 # Below this pixel count, background stats are computed on the full
 # array -- subsampling only pays off once the full-array cost is
 # large enough to matter, and small arrays don't have enough pixels
@@ -329,7 +349,12 @@ def background_map_from_mesh(mesh: np.ndarray, box_size: int, shape: tuple[int, 
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
-    def __init__(self, fwhm: float | None = None, threshold_sigma: float | None = None) -> None:
+    def __init__(
+        self,
+        fwhm: float | None = None,
+        threshold_sigma: float | None = None,
+        keep_close_pairs: bool = False,
+    ) -> None:
         """Set up the star finder.
 
         Parameters
@@ -343,7 +368,14 @@ class SourceDetector:
             `STAR_FINDER_THRESHOLD_SIGMA` (5 times the noise) if omitted. The
             declaration lives with the star-profile fit, which uses the same
             finder setting.
+        keep_close_pairs : `bool`, optional
+            If True, the finder keeps stars as close as
+            `VIEWING_SEPARATION_KERNEL_WIDTHS` kernel widths, and merging
+            duplicates uses half that distance, so a faint companion of a
+            bright star stays. For the viewer and star naming. The default
+            (False) is the plate-solving list.
         """
+        self.keep_close_pairs = keep_close_pairs
         self.fwhm = float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value) if fwhm is None else fwhm
         self.threshold_sigma = (
             float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value) if threshold_sigma is None else threshold_sigma
@@ -446,6 +478,11 @@ class SourceDetector:
             threshold_sigma=self.threshold_sigma,
             roundness_range=resolve(SOURCE_DETECTOR_ROUNDNESS_RANGE).value,
             mask=mask,
+            min_separation=(
+                float(resolve(VIEWING_SEPARATION_KERNEL_WIDTHS).value) * self.fwhm
+                if self.keep_close_pairs
+                else None
+            ),
         )
         if not with_radius:
             return detected
@@ -501,6 +538,12 @@ class SourceDetector:
 
         if separation_px is None:
             separation_px = float(resolve(SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS).value) * self.fwhm
+            if self.keep_close_pairs:
+                # Half the finder's closest allowed spacing, so no kept pair
+                # merges; only a star reported twice does.
+                separation_px = min(
+                    separation_px, 0.5 * float(resolve(VIEWING_SEPARATION_KERNEL_WIDTHS).value) * self.fwhm
+                )
         tree = cKDTree(coords)
         visited = np.zeros(len(sources), dtype=bool)
         unique_stars = []

@@ -17,6 +17,7 @@ import { reportError } from '../../common/utils/reportError';
 import { on as onEvent } from '../../common/utils/eventBus';
 import { useOnValueChange } from './useOnValueChange';
 import { STACK_PICTURE_REMADE_EVENT } from '../../common/services/imaging/stackReviewService';
+import { preloadedFrame } from '../utils/frameLoadCache';
 
 export interface ImageFrameInfo {
     objectId: string;
@@ -48,6 +49,8 @@ export const useViewerState = (
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedLightRow, setSelectedLightRow] = useState<number | null>(null);
+    // The file whose pixels are in imageBlob or imageUrl now. It lags behind the file asked for while that one loads.
+    const [loadedPath, setLoadedPath] = useState<string | null>(null);
     const [disableStretch, setDisableStretch] = useState(false);
     const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_DISPLAY_MODE);
     const stretch = displayMode === 'auto-stretch';
@@ -70,6 +73,7 @@ export const useViewerState = (
         setSelectedLightRow(null);
         setImageUrl(null);
         setImageBlob(null);
+        setLoadedPath(null);
         setImageFrameInfo(null);
         setError(null);
         setAutoPanTrigger((n) => n + 1);
@@ -112,11 +116,9 @@ export const useViewerState = (
             if (!row) return;
             const [iso, exposure] = row;
 
-            if (prevSelectedLightRowRef.current !== selectedLightRow) {
-                prevSelectedLightRowRef.current = selectedLightRow;
-                setAutoPanTrigger((n) => n + 1);
-            }
-
+            // Another image of the same target keeps the viewer's zoom and position, so the trigger
+            // is not bumped here; the viewer fits again on its own when the target changes.
+            prevSelectedLightRowRef.current = selectedLightRow;
             setLoading(true);
             setError(null);
             setDisableStretch(false); // Default lights always stretch
@@ -127,6 +129,7 @@ export const useViewerState = (
                     if (!aborted) {
                         setImageUrl(null);
                         setImageBlob(frameFile);
+                        setLoadedPath(null);
                         setImageFrameInfo({
                             objectId: selectedTarget,
                             iso: String(iso),
@@ -168,6 +171,7 @@ export const useViewerState = (
                 if (!aborted && frameData) {
                     setImageBlob(null);
                     setImageUrl(frameData.imageData);
+                    setLoadedPath(null);
                     setImageFrameInfo({
                         objectId: selectedTarget,
                         iso: String(iso),
@@ -197,22 +201,21 @@ export const useViewerState = (
         let aborted = false;
         const doFetch = async () => {
             if (!externalSelectedFilePath) return;
-            const isDifferentFile = prevFetchedFilePathRef.current !== externalSelectedFilePath;
-            if (isDifferentFile) {
-                prevFetchedFilePathRef.current = externalSelectedFilePath;
-                setImageUrl(null); // Clear old image only when switching to a different file
-                setImageBlob(null);
-                setAutoPanTrigger((n) => n + 1);
-            }
+            // The old image stays on screen until the new file arrives, so the viewer is not
+            // taken apart and keeps its zoom and position for another image of the same target.
+            prevFetchedFilePathRef.current = externalSelectedFilePath;
             setLoading(true);
             setError(null);
             try {
                 if (!stretch) {
                     // Linear: read the FITS file itself so the viewer holds the pixel values.
-                    const file = await fetchFitsFileByPath(externalSelectedFilePath);
+                    // A frame kept ready for the Blink comparison is already read (and decoded).
+                    const kept = await preloadedFrame(externalSelectedFilePath, false)?.catch(() => null);
+                    const file = kept?.kind === 'fits' ? kept.blob : await fetchFitsFileByPath(externalSelectedFilePath);
                     if (!aborted) {
                         setImageUrl(null);
                         setImageBlob(file);
+                        setLoadedPath(externalSelectedFilePath);
                         setImageFrameInfo({
                             objectId: selectedTarget || 'Unknown',
                             iso: 'Unknown',
@@ -221,10 +224,12 @@ export const useViewerState = (
                     }
                     return;
                 }
-                const data = await fetchImageByPath(externalSelectedFilePath, true);
+                const kept = await preloadedFrame(externalSelectedFilePath, true)?.catch(() => null);
+                const data = kept?.kind === 'picture' && kept.image ? kept.image : await fetchImageByPath(externalSelectedFilePath, true);
                 if (!aborted && data) {
                     setImageBlob(null);
                     setImageUrl(data.imageData as string);
+                    setLoadedPath(externalSelectedFilePath);
                     setImageFrameInfo({
                         objectId: selectedTarget || 'Unknown',
                         iso: 'Unknown',
@@ -232,6 +237,9 @@ export const useViewerState = (
                         min: data.min as number,
                         max: data.max as number
                     });
+                } else if (!aborted) {
+                    // The picture could not be made (the file is gone or unreadable).
+                    setError(`Could not open ${externalSelectedFilePath}`);
                 }
             } catch (err) {
                 if (!aborted) setError(String(err));
@@ -255,6 +263,7 @@ export const useViewerState = (
         error,
         selectedLightRow,
         setSelectedLightRow,
+        loadedPath,
         displayMode,
         setDisplayMode
     };

@@ -3,7 +3,7 @@
 Description: A stack of several exposure lengths can leave a whole group out
 (it failed in Siril, could not be lined up, or was nonlinear). These tests
 check that the frame count, the session breakdown and the sharpness
-sample use only the groups that went into the final stack, that a
+check's frames come only from the groups that went into the final stack, that a
 left-out group reports no stacked frames, and that the
 `exposure_groups_combined` gate names what was lost. A stack with no
 group information must behave as before.
@@ -124,9 +124,9 @@ def test_frames_stacked_is_unchanged_without_group_information() -> None:
     assert stage._frames_in_combined_groups(frames, {}) is frames
 
 
-def test_the_sharpness_sample_uses_only_combined_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_sharpness_check_uses_only_combined_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     """Frames of a left-out group are not measured for the expected width."""
-    monkeypatch.setattr(fwhm_sampling, "_fwhm_worker_count", lambda sample_size: 1)
+    monkeypatch.setattr(fwhm_sampling, "_fwhm_worker_count", lambda frame_count: 1)
     frames = [*make_frames("kept", 30), *make_frames("dropped", 30)]
     combined = stage._frames_in_combined_groups(
         frames, {"combined_frame_paths": [frame.path for frame in frames[:30]]}

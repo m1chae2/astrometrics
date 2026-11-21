@@ -91,7 +91,7 @@ class SocketClient extends EventEmitter {
             };
 
             this.socket.onclose = () => {
-                console.log("[Socket] Disconnected");
+                console.debug("[Socket] Disconnected");
                 // Closing without ever opening means the handshake was refused,
                 // most likely because the backend restarted and now holds a
                 // different session token. Drop the cached one so the next
@@ -102,12 +102,15 @@ class SocketClient extends EventEmitter {
                 this.scheduleReconnect();
             };
 
-            this.socket.onerror = (err) => {
-                console.error("[Socket] Error:", err);
+            this.socket.onerror = () => {
+                // A failed attempt is normal while the backend restarts. The
+                // close event that follows reports it and schedules a retry.
+                console.debug("[Socket] Connection attempt failed; will retry");
             };
 
         } catch (e) {
-            console.error("[Socket] Connection failed:", e);
+            // Not an error: the backend is simply not reachable yet.
+            console.debug("[Socket] Connection failed; will retry:", e);
             this.announceDisconnected();
             this.scheduleReconnect();
         }

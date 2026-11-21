@@ -1316,10 +1316,22 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # it would claim a count the summary never held. The comparison script reports
 # such a flag reason as old data until a new run stores the row (validation
 # register STK-58).
+# The star-shape rows of a stack (`stacking.star_*`) are measured from the
+# stack image itself, which a stored summary does not hold, and the crop
+# notice (see above) is a notice row.
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.abandoned_after_s",
     "stacking.notice_frames_moved_to_excluded",
     "stacking.notice_single_frame_stack",
+    "stacking.notice_stack_cropped",
+    "stacking.notice_stack_turned",
+    "stacking.star_elongation",
+    "stacking.star_elongation_angle_deg",
+    "stacking.star_width_center_px",
+    "stacking.star_width_corner_xlow_ylow_px",
+    "stacking.star_width_corner_xhigh_ylow_px",
+    "stacking.star_width_corner_xlow_yhigh_px",
+    "stacking.star_width_corner_xhigh_yhigh_px",
     "stacking.notice_exposure_group_left_out",
     "stacking.notice_flat_calibration_note",
     "stacking.notice_preview_step_skipped",
@@ -1412,6 +1424,8 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
 # not hold.
 _ASTROMETRY_NOT_HELD: tuple[str, ...] = (
     "astrometry.notice_camera_without_profile",
+    # Summaries stored before the Gaia tile cache hold no tile counts.
+    "astrometry.notice_gaia_tiles_missing",
     "astrometry.frame_target_clipped_fraction",
     "astrometry.frame_target_nonlinear_fraction",
     # The expected residual needs the star finder's peaks and noise of the run
@@ -1512,6 +1526,8 @@ _PHOTOMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(PHOTOMET
 # the summary does not keep.
 _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     "photometry.notice_camera_without_profile",
+    "photometry.notice_session_without_comparison_stars",
+    "photometry.notice_logged_warnings",
     "photometry.stars_with_light_curve_scatter_count",
     "photometry.noise_model_star_count",
     "photometry.comparison_scatter_over_predicted_worst",

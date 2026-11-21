@@ -2,20 +2,20 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { TabView } from '../../common/components/TabView';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { Tabs } from '../../common/components/Tabs';
-import { PopoverSelect } from '../../common/components/PopoverSelect';
 
-import { useCalibrationStats } from '../../common/hooks/useCalibrationStats';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { ProcessingStatus } from './ProcessingStatus';
 import { AnalysisResults } from '../analysisResults/AnalysisResults';
 import { StackedImagePanel } from './StackedImagePanel';
-import { UnifiedFrameAnalysis } from './FrameCountTable';
+import { CalibrationLine } from './CalibrationLine';
 import { ImageDetailsManager } from '../imageDetailsManager/ImageDetailsManager';
 import { JobHistoryList } from './JobHistoryList';
+import { StarShapesSummary } from './StarShapesSummary';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
-import { GroupedFrameStat } from '../../common/types/backendTypes';
+import { FrameStatusReport, GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
 import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
 
@@ -34,6 +34,18 @@ interface FrameAnalysisPanelProps {
   setIsAddModalOpen: (open: boolean) => void;
   selectedFile: string | null;
   onShowHeader?: (path: string) => void;
+  /** The stored star-shape verdicts of the target, or `null` when not available. */
+  starShapeReview?: StarShapeReview | null;
+  /** The backend's per-frame statuses, including set-aside frames, or `null` until read. */
+  frameReport?: FrameStatusReport | null;
+  /** The File Browser's status of each frame by path. */
+  frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
+
+  // Fold state, held by the screen because the Image Controls tab can sit in the viewer's bottom bar.
+  analysisCollapsed: boolean;
+  setAnalysisCollapsed: (collapsed: boolean) => void;
+  controlsCollapsed: boolean;
+  setControlsCollapsed: (collapsed: boolean) => void;
 }
 
 /**
@@ -44,7 +56,8 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
   handleSelectFile,
   handleAddImages, setIsAddModalOpen,
-  selectedFile, onShowHeader
+  selectedFile, onShowHeader, starShapeReview = null, frameReport = null, frameStatuses,
+  analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
 }) => {
   const {
     selectedTarget, commonName, catalogId,
@@ -59,23 +72,12 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       openSiril, requestJobHistory
     } = useImageProcessingContext();
 
-  const { stats: calStats, loading: calLoading } = useCalibrationStats(reloadKey);
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('data');
   // The job history only shows on the Analysis tab, so it is read when that tab is first opened.
   useEffect(() => {
     if (activeAnalysisTab === 'analysis') requestJobHistory?.();
   }, [activeAnalysisTab, requestJobHistory]);
-  const [dataTabCamera, setDataTabCamera] = useState('All');
   const [lightStats, setLightStats] = useState<GroupedFrameStat[]>([]);
-
-  // Compute unique cameras for the Data tab dropdown
-  const uniqueCameras = useMemo(() => {
-    const cams = new Set<string>();
-    if (allFiles) {
-      allFiles.forEach(f => cams.add(f.camera));
-    }
-    return Array.from(cams).sort();
-  }, [allFiles]);
 
   // Fetch grouped stats from backend
   useEffect(() => {
@@ -83,29 +85,10 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       setLightStats([]);
       return;
     }
-    fetchFrameStatsGrouped(selectedTarget, dataTabCamera === 'All' ? undefined : dataTabCamera)
+    fetchFrameStatsGrouped(selectedTarget)
       .then(setLightStats)
       .catch(err => console.error("Failed to fetch grouped stats", err));
-  }, [selectedTarget, dataTabCamera, reloadKey]);
-
-  // Filter darks/biases/flats based on selected camera
-  const filteredDarks = useMemo(() => {
-    if (!calStats?.darks) return [];
-    if (dataTabCamera === 'All') return calStats.darks;
-    return calStats.darks.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
-
-  const filteredBiases = useMemo(() => {
-    if (!calStats?.biases) return [];
-    if (dataTabCamera === 'All') return calStats.biases;
-    return calStats.biases.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
-
-  const filteredFlats = useMemo(() => {
-    if (!calStats?.flats) return [];
-    if (dataTabCamera === 'All') return calStats.flats;
-    return calStats.flats.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
+  }, [selectedTarget, reloadKey]);
 
   const multiCameraStatus = useMemo(() => {
     const filesToConsider = checkedFiles.size > 0
@@ -151,10 +134,33 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   const analysisSelection = chooseAnalysisSelection(selectionInput);
   const temporalVariationSelection = chooseTemporalVariationSelection(selectionInput);
 
+  // Frame Analysis folded: a thin rail on the right edge.
+  const analysisRail = (
+    <SectionPanel
+      title="Frame Analysis"
+      collapsed="right"
+      onTitleClick={() => setAnalysisCollapsed(false)}
+      titleButtonLabel="Expand Frame Analysis"
+    >
+      {null}
+    </SectionPanel>
+  );
+
+  // Both folded: the column is just the rail. The Image Controls row sits under the viewer
+  // (see ViewerPanelContainer).
+  if (analysisCollapsed && controlsCollapsed) {
+    return <div className="image-processing-display__right image-processing-display__right--collapsed">{analysisRail}</div>;
+  }
+
   return (
-    <div className="image-processing-display__right panel-group">
+    <div
+      className={`image-processing-display__right ${analysisCollapsed ? 'image-processing-display__right--split' : 'panel-group'}`}
+    >
+      {!analysisCollapsed && (
       <SectionPanel
         title="Frame Analysis"
+        onTitleClick={() => setAnalysisCollapsed(true)}
+        titleButtonLabel="Collapse to the right"
         className="image-processing-display__analysis-section frame-analysis-panel flex-fill"
         headerContent={
           <Tabs
@@ -213,33 +219,37 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     depthGoalRefreshKey={`${reloadKey}-${isProcessing ? 'busy' : 'idle'}`}
                   />
                   <AnalysisResults results={analysisResults} />
-                  <UnifiedFrameAnalysis
-                    lightFrames={lightStats}
-                    darkFrames={filteredDarks}
-                    biasFrames={filteredBiases}
-                    flatFrames={filteredFlats}
-                    isLoading={calLoading}
-                    selectedCamera={dataTabCamera}
-                    cameraSelector={
-                      <div className="data-tab-filter" style={{ margin: 0 }}>
-                        <PopoverSelect
-                          label="Camera"
-                          options={uniqueCameras.map((camera: string) => ({ id: camera, label: camera }))}
-                          selectedId={dataTabCamera === 'All' ? null : dataTabCamera}
-                          onSelect={(id) => setDataTabCamera(id ?? 'All')}
-                          emptyLabel="All Cameras"
-                          size="compact"
-                        />
-                      </div>
-                    }
+                  <StarShapesSummary
+                    review={starShapeReview}
+                    frameReport={frameReport}
+                    frameStatuses={frameStatuses}
+                    selectedPath={selectedFile}
+                    onSelectFrame={handleSelectFile}
                   />
+                  <CalibrationLine lightFrames={lightStats} />
                 </>
               )
             }
           ]}
         />
       </SectionPanel>
-      <SectionPanel title="Image Controls" className="flex-auto">
+      )}
+      {controlsCollapsed ? (
+        <SectionPanel
+          title="Image Controls"
+          collapsed="down"
+          onTitleClick={() => setControlsCollapsed(false)}
+          titleButtonLabel="Expand Image Controls"
+        >
+          {null}
+        </SectionPanel>
+      ) : (
+      <SectionPanel
+        title="Image Controls"
+        className="flex-auto"
+        onTitleClick={() => setControlsCollapsed(true)}
+        titleButtonLabel="Collapse down"
+      >
         <ImageDetailsManager
           selectedTarget={selectedTarget}
           commonName={commonName}
@@ -287,6 +297,8 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           }}
         />
       </SectionPanel>
+      )}
+      {analysisCollapsed && analysisRail}
     </div>
   );
 };

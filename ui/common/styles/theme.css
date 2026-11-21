@@ -196,6 +196,8 @@
   --heading-font-size: 22px;   /* dialog and page headings */
   --title-font-size: 24px;     /* view titles */
   --display-font-size: 28px;   /* the largest numbers and titles */
+  --star-card-label-width: 84px;   /* the label column of the star card's slider rows */
+  --star-card-plot-height: 150px;  /* the preferred height of the star card's plot */
 
   /* Named translucent surfaces (white or black over the panel color). */
   --surface-subtle: rgba(255, 255, 255, 0.04);    /* card header at rest */
@@ -207,6 +209,7 @@
   --surface-overlay: rgba(0, 0, 0, 0.4);          /* image area, dimming layer */
   --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);    /* panel and card shadow */
   --shadow-card-lifted: 0 8px 16px rgba(0, 0, 0, 0.5); /* a card being dragged */
+  --z-popover: 3000; /* menus drawn in a portal on document.body: above every panel and dialog */
   --surface-floating: rgba(10, 14, 22, 0.95);     /* panel floating over the sky map (not for menus) */
   --surface-menu: var(--grey-medium);             /* dropdown, popover and context menu: neutral grey, a step above the panels */
   --surface-control: rgba(255, 255, 255, 0.08);   /* button on a floating panel */
@@ -220,6 +223,7 @@
   --skeleton-pulse-duration: 1.8s;                 /* one fade from the resting to the lighter shade */
   --skeleton-row-height: 16px;                     /* one table row or text line */
   --skeleton-chart-height: 180px;                  /* plot area */
+  --star-shape-chart-height: 170px;                /* the star stretch by frame chart in Frame Analysis */
   --updating-bar-height: 2px;                      /* thin bar at a panel's top edge */
   --updating-bar-opacity: 0.55;                    /* understated accent segment of the bar */
   --updating-bar-duration: 2.4s;                   /* one slow slide of the segment */

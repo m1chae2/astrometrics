@@ -292,7 +292,7 @@ def test_sharpness_warns_above_the_ratio_limit_and_not_at_it() -> None:
     """Stars 1.3 times the predicted width warn; exactly 1.2 times does not."""
     wide = [
         _row("stacking.stacked_fwhm_px", 3.9, level="stack"),
-        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack", version=2),
     ]
     statement = _of_rule(_judge(wide), "stack_sharpness_poor")[0]
     assert statement.kind == StatementKind.WARNING
@@ -301,7 +301,7 @@ def test_sharpness_warns_above_the_ratio_limit_and_not_at_it() -> None:
     assert len(statement.evidence) == 2
     at_limit = [
         _row("stacking.stacked_fwhm_px", 3.6, level="stack"),
-        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack", version=2),
     ]
     assert _of_rule(_judge(at_limit), "stack_sharpness_poor") == []
 
@@ -310,9 +310,19 @@ def test_sharpness_makes_no_ratio_from_a_zero_predicted_width() -> None:
     """A predicted width of zero gives no ratio, so no warning and no error."""
     rows = [
         _row("stacking.stacked_fwhm_px", 3.0, level="stack"),
-        _row("stacking.expected_stack_fwhm_px", 0.0, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 0.0, level="stack", version=2),
     ]
     assert _of_rule(_judge(rows), "stack_sharpness_poor") == []
+
+
+def test_sharpness_ignores_a_prediction_of_the_old_definition() -> None:
+    """A version-1 prediction asks for a restack, not a warning."""
+    rows = [
+        _row("stacking.stacked_fwhm_px", 3.9, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack", version=1),
+    ]
+    statements = _of_rule(_judge(rows), "stack_sharpness_poor")
+    assert [statement.kind for statement in statements] == [StatementKind.INSUFFICIENT_DATA]
 
 
 def test_the_copied_stack_limits_agree_with_the_stacking_pipeline() -> None:

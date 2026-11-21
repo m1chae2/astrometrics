@@ -9,6 +9,7 @@ import logging
 import os
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -327,24 +328,57 @@ class ImageService:
         if not any(is_path_inside(root, resolved) for root in self._allowed_image_roots()):
             raise InvalidArgumentError("The image must be inside the library folders.")
         resolved = _detection_source(resolved)
+        return self._measure_with_cache(
+            resolved,
+            self._detection_cache,
+            self._detection_cache_lock,
+            lambda: self._astrometrics.quality.measure_detections(resolved).model_dump(),
+        )
+
+    @staticmethod
+    def _measure_with_cache(
+        resolved: str,
+        cache: OrderedDict[str, tuple[float, int, dict[str, Any]]],
+        lock: threading.Lock,
+        measure: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Return a file's measurement, reusing the last while it is unchanged.
+
+        Parameters
+        ----------
+        resolved : `str`
+            The real path of the file.
+        cache : `collections.OrderedDict`
+            The kept answers by path, each with the file's modified time and
+            size, newest last.
+        lock : `threading.Lock`
+            Guards ``cache``.
+        measure : `Callable`
+            Measures the file when there is no kept answer.
+
+        Returns
+        -------
+        result : `dict`
+            The measurement as plain data.
+        """
         try:
             status = os.stat(resolved)
             stamp = (status.st_mtime, status.st_size)
         except OSError:
             stamp = None
         if stamp is not None:
-            with self._detection_cache_lock:
-                cached = self._detection_cache.get(resolved)
+            with lock:
+                cached = cache.get(resolved)
                 if cached is not None and cached[:2] == stamp:
-                    self._detection_cache.move_to_end(resolved)
+                    cache.move_to_end(resolved)
                     return cached[2]
-        result = self._astrometrics.quality.measure_detections(resolved).model_dump()
+        result = measure()
         if stamp is not None:
-            with self._detection_cache_lock:
-                self._detection_cache[resolved] = (stamp[0], stamp[1], result)
-                self._detection_cache.move_to_end(resolved)
-                while len(self._detection_cache) > DETECTION_CACHE_SIZE:
-                    self._detection_cache.popitem(last=False)
+            with lock:
+                cache[resolved] = (stamp[0], stamp[1], result)
+                cache.move_to_end(resolved)
+                while len(cache) > DETECTION_CACHE_SIZE:
+                    cache.popitem(last=False)
         return result
 
     def delete_images(self, paths: list[str], target_id: str | None = None) -> dict[str, Any]:

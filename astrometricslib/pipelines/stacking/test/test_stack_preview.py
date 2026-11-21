@@ -254,6 +254,62 @@ def test_without_graxpert_the_stack_copy_is_stretched(
     assert list(scratch_root.iterdir()) == []
 
 
+def test_the_picture_is_cropped_before_graxpert_runs(
+    tmp_path: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify GraXpert gets the cropped copy and the stack is left whole."""
+    from astrometricslib.pipelines.shared.registration_record import (
+        RegistrationRecord,
+        write_registration_record,
+    )
+
+    stack_path = tmp_path / "M_13_L_Stacked.fits"
+    header = fits.Header()
+    header["CRPIX1"] = 50.0
+    header["CRPIX2"] = 40.0
+    fits.writeto(stack_path, np.zeros((80, 100), dtype=np.float32), header)
+    write_registration_record(
+        str(stack_path),
+        RegistrationRecord(
+            ("a.fits",),
+            ((1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0),),
+            (True,),
+            (0, 0),
+            None,
+            False,
+            0,
+            (10, 90, 8, 72),
+        ),
+    )
+    _configure(monkeypatch, "siril-cli", "graxpert-cli")
+    programs = _Programs()
+    seen: list[tuple[tuple[int, ...], dict[str, float]]] = []
+    original_flatten = programs.flatten
+
+    def watching_flatten(executable: str, input_path: str, output_stem: str) -> bool:
+        """Note the shape and header of the copy GraXpert is given.
+
+        Returns
+        -------
+        succeeded : `bool`
+            What the stand-in answers.
+        """
+        with fits.open(input_path, memmap=False) as hdul:
+            keys = ("CRPIX1", "CRPIX2", "CROPX0", "CROPY0", "CROPW", "CROPH")
+            seen.append((hdul[0].data.shape, {key: hdul[0].header[key] for key in keys}))
+        return original_flatten(executable, input_path, output_stem)
+
+    programs.flatten = watching_flatten  # type: ignore[method-assign]
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack_path))
+
+    assert seen[0][0] == (64, 80)
+    assert seen[0][1] == {"CRPIX1": 40.0, "CRPIX2": 32.0, "CROPX0": 10, "CROPY0": 8, "CROPW": 80, "CROPH": 64}
+    with fits.open(stack_path, memmap=False) as hdul:
+        assert hdul[0].data.shape == (80, 100)
+
+
 def test_graxpert_flattens_a_copy_before_the_stretch(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -349,7 +405,7 @@ def test_the_denoise_runs_on_the_stretched_copy_after_graxpert(
     assert Path(programs.flatten_calls[0][1]).name == "stack.fits"
     stretch_script, picture_script = programs.siril_calls[0][1], programs.siril_calls[1][1]
     assert 'load "flat.fits"' in stretch_script
-    assert any(command.startswith("autostretch") for command in stretch_script)
+    assert any(command.startswith(("autostretch", "mtf")) for command in stretch_script)
     executable, denoise_input, denoise_output, strength = programs.denoise_calls[0]
     assert executable == "/opt/cc/denoise"
     assert Path(denoise_input).name == "stretched.fits"
@@ -386,7 +442,7 @@ def test_without_cosmic_clarity_one_siril_script_stretches_and_saves(
 
     assert write_stack_preview(str(stack)) is not None
     assert len(programs.siril_calls) == 1
-    assert any(command.startswith("autostretch") for command in programs.siril_calls[0][1])
+    assert any(command.startswith(("autostretch", "mtf")) for command in programs.siril_calls[0][1])
     assert programs.denoise_calls == []
 
 

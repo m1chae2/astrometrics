@@ -97,6 +97,8 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOTICE_FLAT_CALIBRATION_NOTE,
     STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED,
     STACKING_NOTICE_SINGLE_FRAME_STACK,
+    STACKING_NOTICE_STACK_CROPPED,
+    STACKING_NOTICE_STACK_TURNED,
     STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG,
     STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
     STACKING_REJECTED_PIXEL_FRACTION,
@@ -110,6 +112,8 @@ from astrometricslib.pipelines.stacking.notice_reasons import (
     flat_calibration_issue_reason,
     frames_moved_to_excluded_reason,
     single_frame_stack_reason,
+    stack_cropped_reason,
+    stack_turned_reason,
     uncovered_flat_calibration_issues,
 )
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import ApertureSizeNoiseOutcome
@@ -177,6 +181,7 @@ __all__ = [
     "record_stacking_quality",
     "size_exponent_measurements",
     "stack_depth_of",
+    "stack_turned_measurement",
     "stacking_measurements",
     "stacking_notice_measurements",
 ]
@@ -197,7 +202,7 @@ _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in STACKING_MET
 _GATE_TIERS: dict[str, tuple[LimitTier, str | None]] = {
     # No limit at all: setting a minority gain aside corrects the stack.
     "gain_homogeneity": (LimitTier.GEOMETRY, None),
-    # STK-03: the 25% cap is a sanity check (13% is the largest normal share).
+    # STK-03: the 25% warning threshold (13% is the largest normal share).
     "frame_quarantine": (LimitTier.DESIGN_ESTIMATE, "STK-03"),
     # STK-04: the gap ratio of 4 rests on unit tests with made-up sky levels.
     "background_homogeneity": (LimitTier.DESIGN_ESTIMATE, "STK-04"),
@@ -451,6 +456,41 @@ def abandoned_stack_measurements(
     ]
 
 
+def stack_turned_measurement(
+    context: PipelineRunContext, stack_file_name: str, degrees: int, turn_reason: str
+) -> QualityMeasurement:
+    """Build the row that says a stack was saved turned by a quarter turn.
+
+    The row is stored apart from the stack's other rows, because the turn is
+    made after them (see `quarter_turn.apply_quarter_turn`), and it is also
+    made for an up-to-date stack that is turned later.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_file_name : `str`
+        The stack's file name.
+    degrees : `int`
+        The turn applied: 90, 180 or 270.
+    turn_reason : `str`
+        The turn's own sentence.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A notice row whose value is the degrees turned.
+    """
+    return notice_measurement(
+        _SPEC_BY_NAME[STACKING_NOTICE_STACK_TURNED],
+        float(degrees),
+        context,
+        context.stack_subject(stack_file_name),
+        stack_turned_reason(turn_reason),
+        action_taken=f"stack turned {degrees} degrees so north is near the top",
+    )
+
+
 def stacking_notice_measurements(
     summary: StackQualitySummary, context: PipelineRunContext, stack_file_name: str
 ) -> list[QualityMeasurement]:
@@ -474,11 +514,11 @@ def stacking_notice_measurements(
     -------
     measurements : `list` of `QualityMeasurement`
         A row for frames moved to the excluded folder, one for a stack of
-        one frame, one for each exposure group left out for a reason other
-        than nonlinearity (a nonlinear group is reported by the
-        ``exposure_group_linearity`` gate), one for the flat issues that no
-        flat gate reports (its reason joins their sentences), and one for a
-        camera with no profile.
+        one frame, one for a stack whose edges were cropped, one for each
+        exposure group left out for a reason other than nonlinearity (a
+        nonlinear group is reported by the ``exposure_group_linearity``
+        gate), one for the flat issues that no flat gate reports (its reason
+        joins their sentences), and one for a camera with no profile.
     """
     stack_subject = context.stack_subject(stack_file_name)
     rows: list[QualityMeasurement] = []
@@ -502,6 +542,18 @@ def stacking_notice_measurements(
                 context,
                 stack_subject,
                 single_frame_stack_reason(),
+            )
+        )
+    crop_reason = summary.stacking_metrics.stack_crop_reason
+    if crop_reason:
+        rows.append(
+            notice_measurement(
+                _SPEC_BY_NAME[STACKING_NOTICE_STACK_CROPPED],
+                float(summary.stacking_metrics.stack_crop_area_fraction or 0.0),
+                context,
+                stack_subject,
+                stack_cropped_reason(crop_reason),
+                action_taken="stack cropped to the area most frames cover",
             )
         )
     for index, group in enumerate(summary.stacking_metrics.exposure_groups):

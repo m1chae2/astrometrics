@@ -1,8 +1,8 @@
 """Tests for how the stack's star width is compared with its input frames.
 
-The check samples frames spread over the whole set, so a stack of several
-nights is judged against all of them, and it compares the stack with the
-width its inputs predict.
+The check uses every frame in the stack, reuses the widths the frame quality
+step stored, weights each frame as the stacking program weighted it, and
+compares the stack with the width its inputs predict.
 """
 
 from pathlib import Path
@@ -22,7 +22,7 @@ MEASURE = "astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_imag
 @pytest.fixture(autouse=True)
 def measure_in_this_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """Measure serially so in-process fakes can record their calls."""
-    monkeypatch.setattr(fwhm_sampling, "_fwhm_worker_count", lambda sample_size: 1)
+    monkeypatch.setattr(fwhm_sampling, "_fwhm_worker_count", lambda frame_count: 1)
 
 
 def make_summary() -> SimpleNamespace:
@@ -40,8 +40,8 @@ def make_summary() -> SimpleNamespace:
     )
 
 
-def test_the_sample_is_spread_over_all_frames_not_taken_from_the_start() -> None:
-    """With 60 frames, every fourth one is measured, up to 15 of them."""
+def test_every_frame_is_measured_not_a_sample() -> None:
+    """With 60 frames, all 60 are measured, not a sample of 15."""
     frames = [SimpleNamespace(path=str(index)) for index in range(60)]
     measured: list[str] = []
 
@@ -59,8 +59,180 @@ def test_the_sample_is_spread_over_all_frames_not_taken_from_the_start() -> None
     with patch(MEASURE, side_effect=fake_measure):
         fwhm_sampling.measure_fwhm_degradation(make_summary(), "stack.fits", frames)
 
-    frame_paths = [int(path) for path in measured if path != "stack.fits"]
-    assert frame_paths == list(range(0, 60, 4))
+    frame_paths = sorted(int(path) for path in measured if path != "stack.fits")
+    assert frame_paths == list(range(60))
+
+
+def test_stored_widths_are_reused_and_only_the_missing_frames_are_measured() -> None:
+    """A frame with a stored width is not measured again; the rest are."""
+    frames = [SimpleNamespace(path=str(index)) for index in range(4)]
+    measured: list[str] = []
+
+    def fake_measure(path: str) -> float:
+        """Record the path and give a fixed width.
+
+        Returns
+        -------
+        width : `float`
+            A width of 4 pixels.
+        """
+        measured.append(path)
+        return 4.0
+
+    summary = make_summary()
+    with patch(MEASURE, side_effect=fake_measure):
+        fwhm_sampling.measure_fwhm_degradation(
+            summary, "stack.fits", frames, stacked_fwhm=3.0, stored_widths={"0": 2.0, "1": 2.0}
+        )
+
+    assert sorted(measured) == ["2", "3"]
+    assert summary.stacking_metrics.expected_stack_fwhm_px == pytest.approx(10.0**0.5)
+    assert summary.stacking_metrics.median_input_fwhm_px == pytest.approx(3.0)
+
+
+def test_one_frame_more_or_less_changes_the_prediction() -> None:
+    """Dropping the last of 121 frames changes the numbers.
+
+    The old 15-frame sample (every 8th frame) picked the same frames from 121
+    and from 120 frames, so a restack without the last frame stored the same
+    widths to every digit.
+    """
+    widths = {str(index): 2.0 + index / 100 for index in range(121)}
+    results = []
+    for count in (121, 120):
+        summary = make_summary()
+        frames = [SimpleNamespace(path=str(index)) for index in range(count)]
+        fwhm_sampling.measure_fwhm_degradation(
+            summary, "stack.fits", frames, stacked_fwhm=2.5, stored_widths=widths
+        )
+        results.append(summary.stacking_metrics.expected_stack_fwhm_px)
+    assert results[0] != results[1]
+
+
+def wfwhm_diagnostics(paths: list[str], weighted_widths: list[float], included: list[bool]) -> dict:
+    """Build what a single-group ``-weight=wfwhm`` stacking run reports.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        The frames in the order given to Siril.
+    weighted_widths : `list` [`float`]
+        Siril's weighted FWHM of each frame, from its sequence file.
+    included : `list` [`bool`]
+        Whether Siril kept each frame while registering.
+
+    Returns
+    -------
+    diagnostics : `dict`
+        The keys `determine_stack_members` reads.
+    """
+    return {
+        "symlinked_light_paths": paths,
+        "registration_frames": [
+            {"weighted_fwhm_px": width, "dx": 0.0, "dy": 0.0} for width in weighted_widths
+        ],
+        "registration_included": included,
+    }
+
+
+def test_the_prediction_uses_siril_star_width_weights_and_only_stacked_frames() -> None:
+    """Sharp frames count more, and a frame Siril dropped is left out."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import wfwhm_weights
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import expected_stack_fwhm
+
+    paths = ["a", "b", "c", "d"]
+    frames = [SimpleNamespace(path=path, exposure=60.0) for path in paths]
+    widths = {"a": 2.0, "b": 3.0, "c": 4.0, "d": 9.0}
+    diagnostics = wfwhm_diagnostics(paths, [2.0, 3.0, 4.0, 9.0], [True, True, True, False])
+    summary = make_summary()
+
+    fwhm_sampling.measure_fwhm_degradation(
+        summary,
+        "stack.fits",
+        frames,
+        stacked_fwhm=3.0,
+        diagnostics=diagnostics,
+        stack_weight="wfwhm",
+        stored_widths=widths,
+    )
+
+    metrics = summary.stacking_metrics
+    weights = wfwhm_weights([2.0, 3.0, 4.0])
+    assert metrics.expected_stack_fwhm_px == pytest.approx(expected_stack_fwhm([2.0, 3.0, 4.0], weights))
+    assert metrics.expected_stack_fwhm_px < expected_stack_fwhm([2.0, 3.0, 4.0])
+    assert metrics.median_input_fwhm_px == pytest.approx(3.0)
+
+
+def test_an_equally_weighted_stack_predicts_the_plain_rms_of_its_members() -> None:
+    """Without a weight mode every member counts the same."""
+    paths = ["a", "b"]
+    frames = [SimpleNamespace(path=path, exposure=60.0) for path in paths]
+    summary = make_summary()
+
+    fwhm_sampling.measure_fwhm_degradation(
+        summary,
+        "stack.fits",
+        frames,
+        stacked_fwhm=3.0,
+        diagnostics=wfwhm_diagnostics(paths, [2.0, 4.0], [True, True]),
+        stack_weight=None,
+        stored_widths={"a": 2.0, "b": 4.0},
+    )
+
+    assert summary.stacking_metrics.expected_stack_fwhm_px == pytest.approx(10.0**0.5)
+
+
+def test_stored_frame_widths_reads_current_measured_rows_only(tmp_path: Path) -> None:
+    """Only measured whole-frame rows of the current definition are used."""
+    from datetime import UTC, datetime
+
+    from astrometricslib._internal.drivers.quality_store import QualityStore
+    from astrometricslib.models.quality.measurement import (
+        MeasurementOrigin,
+        MeasurementStatus,
+        QualityMeasurement,
+        QualitySubject,
+        SubjectLevel,
+    )
+    from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX
+
+    root = "/library/lights/M 31/Scope/Camera"
+    frames = [SimpleNamespace(path=f"{root}/{name}.fits") for name in ("a", "b", "c", "d")]
+
+    def row(name: str, **overrides: object) -> QualityMeasurement:
+        """Build a stored width row of one frame.
+
+        Returns
+        -------
+        row : `QualityMeasurement`
+            A frame-level width measurement.
+        """
+        fields: dict = {
+            "metric": FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
+            "definition_version": 1,
+            "subject": QualitySubject(
+                level=SubjectLevel.FRAME, subject_id=f"M 31/Scope/Camera/{name}.fits", target_id="M 31"
+            ),
+            "status": MeasurementStatus.MEASURED,
+            "value": 2.5,
+            "origin": MeasurementOrigin.MEASURED,
+            "run_id": f"run-{name}",
+            "measured_at": datetime(2026, 11, 1, tzinfo=UTC),
+            "unit": "px",
+        }
+        fields.update(overrides)
+        return QualityMeasurement(**fields)
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    store.write_measurements([
+        row("a"),
+        row("b", status=MeasurementStatus.NOT_MEASURED, value=None, reason="no star could be fitted"),
+        row("c", definition_version=0),
+    ])
+    with patch.object(QualityStore, "from_configuration", return_value=store):
+        widths = fwhm_sampling.stored_frame_widths("M 31", frames)
+
+    assert widths == {f"{root}/a.fits": 2.5}
 
 
 def test_the_stack_is_compared_with_the_rms_of_its_inputs() -> None:
@@ -165,8 +337,8 @@ def test_parallel_measurement_keeps_order_and_skips_failures(tmp_path: Path) -> 
         write_star_frame(tmp_path / f"frame_{index}.fits", 1.5 + index / 2, index) for index in range(3)
     ]
     paths = [good_paths[0], str(tmp_path / "missing.fits"), good_paths[1], good_paths[2]]
-    serial = fwhm_sampling._measure_sample_fwhms(paths, 1)
-    parallel = fwhm_sampling._measure_sample_fwhms(paths, 3)
+    serial = fwhm_sampling._measure_frame_fwhms(paths, 1)
+    parallel = fwhm_sampling._measure_frame_fwhms(paths, 3)
     assert serial[1] is None
     assert serial[0] < serial[2] < serial[3]
     assert parallel == serial
@@ -188,7 +360,7 @@ def test_parallel_widths_give_the_same_summary_as_serial(tmp_path: Path) -> None
     assert results[0] == results[1]
 
 
-def test_a_sample_of_one_frame_needs_no_pool(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A sample of one frame is measured in this process."""
+def test_one_frame_needs_no_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One frame is measured in this process."""
     monkeypatch.undo()
     assert fwhm_sampling._fwhm_worker_count(1) == 1

@@ -26,6 +26,10 @@ Default star
 - A star the user picked in a target is remembered for the session and chosen again when the
   user returns to that target. A star already open on first mount (a hand-off from another
   view) is kept.
+- A star opened from another view also moves the Targets list to the star's own target
+  (`chooseTargetForStar`, in `utils/handedOffStar.ts`). The target the user came from wins
+  when the star belongs to it; otherwise the selected target stays if it holds the star, else
+  the first target in the star's record. The Image Viewer sends the target it was showing.
 - A target with no stars selects nothing, so the list shows its "No stars found" message.
 - The Planetarium's "Stars in <target>" list uses the same hook, so it gets the same default.
 

@@ -36,7 +36,18 @@ uniform float uRange;
 uniform float uMidtones;
 uniform bool uIsColor;
 uniform bool uFlipVertical;
+// Quarter turns clockwise (0 to 3) the picture is shown turned by; display only, the texture is never changed.
+uniform int uTurnQuarters;
 out vec4 fragColor;
+
+// Finds where a point of the turned picture is in the base picture (the file drawn with its row
+// order but not turned). Both are fractions of the picture from the top-left corner.
+vec2 turnedToBase(vec2 turned) {
+  if (uTurnQuarters == 1) return vec2(turned.y, 1.0 - turned.x);
+  if (uTurnQuarters == 2) return vec2(1.0 - turned.x, 1.0 - turned.y);
+  if (uTurnQuarters == 3) return vec2(1.0 - turned.y, turned.x);
+  return turned;
+}
 
 float applyMidtoneTransferFunction(float midtones, float x) {
   if (x <= 0.0) return 0.0;
@@ -56,7 +67,9 @@ float stretchChannel(float rawValue) {
 void main() {
   // The texture is always uploaded in file order (row 0 at v = 0, the bottom of the canvas).
   // Flipping here instead of during upload lets one upload serve either row order.
-  vec2 sourceCoord = vec2(vTexCoord.x, uFlipVertical ? 1.0 - vTexCoord.y : vTexCoord.y);
+  // vTexCoord.y counts up from the bottom of the canvas, so the turned picture's row from the top is 1 - y.
+  vec2 baseCoord = turnedToBase(vec2(vTexCoord.x, 1.0 - vTexCoord.y));
+  vec2 sourceCoord = vec2(baseCoord.x, uFlipVertical ? baseCoord.y : 1.0 - baseCoord.y);
   vec4 texel = texture(uSourceTexture, sourceCoord);
   if (uIsColor) {
     fragColor = vec4(stretchChannel(texel.r), stretchChannel(texel.g), stretchChannel(texel.b), 1.0);
@@ -81,6 +94,7 @@ interface CachedGLResources {
     midtones: WebGLUniformLocation | null;
     isColor: WebGLUniformLocation | null;
     flipVertical: WebGLUniformLocation | null;
+    turnQuarters: WebGLUniformLocation | null;
     sourceTexture: WebGLUniformLocation | null;
   };
   /** Caller-chosen key of the image currently held in `sourceTexture`, or `undefined` if none/unknown. */
@@ -128,6 +142,7 @@ function getOrCreateResources(gl: WebGL2RenderingContext): CachedGLResources {
       midtones: gl.getUniformLocation(program, 'uMidtones'),
       isColor: gl.getUniformLocation(program, 'uIsColor'),
       flipVertical: gl.getUniformLocation(program, 'uFlipVertical'),
+      turnQuarters: gl.getUniformLocation(program, 'uTurnQuarters'),
       sourceTexture: gl.getUniformLocation(program, 'uSourceTexture'),
     },
     uploadedTextureKey: undefined,
@@ -184,6 +199,11 @@ export interface MtfStretchRenderInput {
    * row 0 is the bottom row and must be flipped to display correctly.
    */
   isTopDownRowOrder: boolean;
+  /**
+   * How far the picture is shown turned, clockwise, in degrees (0, 90, 180 or 270; default 0). The
+   * destination size must be the turned picture's size (width and height swapped for 90 and 270).
+   */
+  turnDegrees?: number;
   /** Destination canvas size in pixels; the source texture is resampled (nearest-neighbor) to fit. */
   destinationWidth: number;
   destinationHeight: number;
@@ -265,6 +285,7 @@ export function renderMtfStretch(gl: WebGL2RenderingContext, input: MtfStretchRe
   gl.uniform1f(resources.uniformLocations.midtones, parameters.midtones);
   gl.uniform1i(resources.uniformLocations.isColor, channels === 3 ? 1 : 0);
   gl.uniform1i(resources.uniformLocations.flipVertical, isTopDownRowOrder ? 1 : 0);
+  gl.uniform1i(resources.uniformLocations.turnQuarters, Math.round((input.turnDegrees ?? 0) / 90) % 4);
   gl.uniform1i(resources.uniformLocations.sourceTexture, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, resources.sourceTexture);

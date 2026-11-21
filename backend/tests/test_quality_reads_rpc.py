@@ -51,6 +51,7 @@ NEW_READS = {
     "advisory:target_report": "get_target_report",
     "advisory:tonight": "get_tonight_ranking",
     "advisory:result": "get_result_statements",
+    "advisory:star_shapes": "get_star_shape_review",
     "advisory:depth_goal": "get_depth_goal",
     "advisory:set_depth_goal": "set_depth_goal",
     "history:nights": "list_nights",
@@ -78,6 +79,15 @@ def test_target_report_asks_for_the_quality_kind() -> None:
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_target_report("M 81")
     wayfinder.review.get_advisory.assert_called_once_with(kind="quality", target="M 81")
+
+
+def test_star_shapes_pass_the_target_the_night_and_the_frames() -> None:
+    """The star-shape read passes its three arguments to the review."""
+    wayfinder = _wayfinder()
+    AdvisoryService(wayfinder).get_star_shape_review("M 81", night="2026-10-24", frame_paths=["a.fits"])
+    wayfinder.review.get_star_shape_review.assert_called_once_with(
+        "M 81", night="2026-10-24", frame_paths=["a.fits"]
+    )
 
 
 def test_tonight_ranking_passes_the_planning_time() -> None:

@@ -175,6 +175,8 @@ export interface ActionRegistry {
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
     "target:get_files": { payload: { target_id: string }; response: TargetFilesResponse };
+    "target:get_frame_statuses": { payload: { target_id: string }; response: import('../types/backendTypes').FrameStatusReport };
+    "target:put_back_frames": { payload: { target_id: string; paths: string[] }; response: { restored: string[] } };
     "target:get_camera_index": { payload: Record<string, never>; response: TargetCameraIndex };
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
@@ -189,6 +191,7 @@ export interface ActionRegistry {
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
     "astronomy:get": { payload: { star_id: string }; response: Spectrum | null };
+    "astronomy:existing_ids": { payload: { star_ids: string[] }; response: string[] };
     "astronomy:analyze_periodicity": { payload: { star_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
@@ -366,6 +369,8 @@ export interface ActionRegistry {
     "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
     // The frames the stacker set aside for a target, each with the reason it has on record.
     "quality:set_aside_frames": { payload: { target: string }; response: import('../types/backendTypes').SetAsideFrameRecord[] };
+    // A typical frame of a frame's session and one reference star in both, for the Blink button (a read; nothing is stored).
+    "quality:choose_blink_pair": { payload: { target: string; path: string }; response: import('../types/backendTypes').BlinkPair };
 
     // Quality measurements: the stored ones, and what each metric means.
     // Parameter names are snake_case (target_id, not targetId); the router
@@ -380,6 +385,9 @@ export interface ActionRegistry {
     "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
+    // Names the detected stars of a stack (a job of the analysis type), and reads the saved names.
+    "analysis:identify_stack": { payload: { target_id: string; stack_path: string }; response: { status: string; jobId: string } };
+    "analysis:get_stack_identification": { payload: { target_id: string; stack_path: string }; response: import('./astronomyService').StackIdentificationState };
 
     // Imaging
     // Matches ImagingService.capture_sequence. An earlier declaration listed
@@ -444,6 +452,7 @@ export interface ActionRegistry {
     "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
     "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
     "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "advisory:star_shapes": { payload: { target: string; night?: string; frame_paths?: string[] }; response: import('../types/backendTypes').StarShapeReview };
     "advisory:depth_goal": { payload: { target: string }; response: import('../types/backendTypes').DepthGoalStatus };
     "advisory:set_depth_goal": { payload: { target: string; level: 'quick_look' | 'good' | 'deep' }; response: import('../types/backendTypes').DepthGoalStatus };
     "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
@@ -619,9 +628,12 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',
+    'advisory:star_shapes',
+    'target:get_frame_statuses',
     'advisory:depth_goal',
     'processing:stack_summary',
     'quality:set_aside_frames',
+    'quality:choose_blink_pair',
     'history:nights',
     'history:night_quality',
     'history:target_changes',
@@ -644,6 +656,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:list',
     'astronomy:count',
     'astronomy:get',
+    'astronomy:existing_ids',
     'astronomy:get_status',
     'astronomy:visible',
     'astronomy:target_data_availability',

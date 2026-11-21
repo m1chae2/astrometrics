@@ -12,7 +12,7 @@ import pytest
 
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.foundation.errors import StorageError
+from astrometricslib.foundation.errors import ProcessingError, StorageError
 from astrometricslib.models.quality.gate_result import GateStatus, failed_gate
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.models.target import FrameRecord, Target
@@ -116,6 +116,19 @@ def test_stage_stacks_only_the_frames_the_quarantine_step_keeps() -> None:
     assert excluded[0].reason.startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
 
 
+def test_stage_says_why_nothing_is_stacked_when_every_frame_is_set_aside() -> None:
+    """If every frame fails a check, the job stops with a plain reason."""
+    target = make_target()
+    report = QuarantineReport(batches_judged=1, warnings=["10 of 10 frames set aside: 10 trailed"])
+
+    with patch(QUARANTINE_STEP, side_effect=lambda target_argument, frames: ([], report)):
+        with pytest.raises(ProcessingError) as raised:
+            run_stage(target)
+
+    assert "Nothing was stacked" in str(raised.value)
+    assert "10 of 10 frames set aside: 10 trailed" in str(raised.value)
+
+
 def test_stage_skips_the_quarantine_step_when_the_setting_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """With the setting off, the stage never calls the step."""
     from astrometricslib.foundation.config import get_configuration
@@ -162,11 +175,11 @@ def test_a_failed_quarantine_gate_reaches_the_summary() -> None:
         diagnostics={},
         background_split=None,
         stacked_path=None,
-        gate_results=[failed_gate("frame_quarantine", "too many bad frames; still in the stack")],
+        gate_results=[failed_gate("frame_quarantine", "5 of 12 frames set aside: 5 trailed")],
     )
 
     assert summary.gate("frame_quarantine").status is GateStatus.FAILED
-    assert summary.gate("frame_quarantine").detail == "too many bad frames; still in the stack"
+    assert summary.gate("frame_quarantine").detail == "5 of 12 frames set aside: 5 trailed"
 
 
 MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)

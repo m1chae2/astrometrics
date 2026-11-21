@@ -271,6 +271,29 @@ def _measure_star_fwhm_px(image: Any, target: Any = None) -> float | None:
         return None
 
 
+def _save_stack_detections(path: str, star_identifier: Any) -> None:
+    """Save the viewing star list of a stack, for the viewer's overlay.
+
+    The list goes next to the stack (see `save_run_detections`), so the
+    Detections overlay opens at once. It keeps close pairs, unlike the run's
+    own list. A failure is ignored: the viewer finds the stars itself when
+    there is no file.
+
+    Parameters
+    ----------
+    path : `str`
+        The analyzed image.
+    star_identifier : `StarIdentifier`
+        The identifier that did the run; only used to check it found stars.
+    """
+    from astrometricslib.pipelines.astrometry.processing.detections import save_run_detections
+
+    sources = getattr(star_identifier, "detected_unique_sources", None)
+    if not path or not isinstance(sources, list) or not sources:
+        return
+    save_run_detections(path)
+
+
 class AstrometryPipelineAdapter(AnalysisPipeline):
     """Adapts `AstrometryPipeline` to the shared `AnalysisPipeline`."""
 
@@ -354,6 +377,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
         _fill_target_position(target, context, request.options.get("drivers"))
         _write_solved_wcs_to_fits_header(path, context)
+        # After the header write, so the saved file's stamp is the final one.
+        _save_stack_detections(path, getattr(pipeline, "star_identifier", None))
 
         context.stellar_objects, _ = record_pipeline_stars(
             context.stellar_objects,
@@ -401,6 +426,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,
                 **_refinement_metrics(result.context.wcs_refinement),
                 astrometry_flags=list(result.context.astrometry_flags),
+                gaia_tiles_count=result.context.gaia_tiles_count,
+                gaia_tiles_missing_count=result.context.gaia_tiles_missing_count,
                 plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
                 star_fwhm_px=_measure_star_fwhm_px(result.context.image, request.target),
                 plate_solve_succeeded=result.context.wcs is not None,

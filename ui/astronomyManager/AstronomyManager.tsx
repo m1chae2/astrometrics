@@ -15,6 +15,7 @@ import { TimelineRangeSelector } from './components/TimelineRangeSelector';
 import { analyzeStarPeriodicity } from '../common/services/astronomyService';
 import { selectLightCurveSeries } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { chooseTargetForStar, readHandedOffStar as readHandoffPayload, HandedOffStar } from './utils/handedOffStar';
 import './styles/astronomyManager.css';
 import { Tabs } from '../common/components/Tabs';
 import { Button } from '../common/components/Button';
@@ -66,6 +67,10 @@ export const AstronomyManager: React.FC = () => {
   const [pendingId, setPendingId] = useState<string>(() => {
     return readHandedOffStar();
   });
+  // The star another screen asked for, until its record has loaded and its target has been chosen.
+  const handedOffStarRef = React.useRef<{ starId: string; targetId?: string } | null>(
+    readHandedOffStar() ? { starId: readHandedOffStar() } : null
+  );
   const [selectedTimestamps, setSelectedTimestamps] = useState<Set<string>>(new Set());
 
   // The hand-off applies to this visit only; clear it so a later launch
@@ -131,8 +136,12 @@ export const AstronomyManager: React.FC = () => {
   // action. The request waits in the hand-off store, so it also arrives when
   // this display was hidden or paused at the moment it was sent. (The
   // `?star=`/localStorage read above only runs once, on first mount.)
-  useHandoffConsumer<string>('Astronomy Manager', 'astronomySelectStar', (starId) => {
-    if (starId) setPendingId(starId);
+  useHandoffConsumer<HandedOffStar>('Astronomy Manager', 'astronomySelectStar', (payload) => {
+    const { starId, targetId } = readHandoffPayload(payload);
+    if (!starId) return;
+    // The Targets list follows the star once its record has loaded (see below).
+    handedOffStarRef.current = { starId, targetId };
+    setPendingId(starId);
   });
 
   /** Callback triggered when a new spectrum is successfully loaded into the viewer. */
@@ -145,6 +154,22 @@ export const AstronomyManager: React.FC = () => {
     pendingId,
     handleLoaded
   );
+
+  // When a star was opened from another screen, show it under its own target rather than under
+  // the first target of the list. Waits for the star's record, which holds its targets.
+  useEffect(() => {
+    const handedOff = handedOffStarRef.current;
+    if (!handedOff || !astronomyData || astronomyData.id !== handedOff.starId) return;
+    handedOffStarRef.current = null;
+    const targetIds: string[] = Array.isArray(astronomyData.targetIds) ? astronomyData.targetIds : [];
+    const chosen = chooseTargetForStar(targetIds, selectedTarget, handedOff.targetId);
+    // The new target would otherwise pick its own default star over the one that was asked for.
+    if (chosen) starsByTarget.rememberPickedStar(chosen, handedOff.starId);
+    if (chosen && chosen !== selectedTarget) {
+      setNavigationMode('target');
+      setSelectedTarget(chosen);
+    }
+  }, [astronomyData, selectedTarget, starsByTarget]);
 
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);

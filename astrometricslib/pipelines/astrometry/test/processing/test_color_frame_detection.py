@@ -209,7 +209,7 @@ def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm() -> None:
         identifier.detect_stars(data, is_color_frame=False)
 
     assert identifier.detector.fwhm == 6.75  # ruff: ignore[float-equality-comparison]
-    identifier.detector.detect.assert_called_once_with(data)
+    identifier.detector.detect.assert_called_once_with(data, with_radius=True)
 
 
 def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails() -> None:

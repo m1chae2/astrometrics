@@ -271,6 +271,11 @@ class StackingPipelineQualityMetrics(BaseModel):
     # Frames with clouds or trailed stars that the stage moved into the
     # `_excluded` folder before stacking.
     frames_quarantined: int = Field(default=0, alias="framesQuarantined")
+    # Why the stage cropped the stack's edges, in one sentence with the rule's
+    # numbers, and the share of the image area the crop removed (0 to 1).
+    # Both are `None` when the stack was not cropped.
+    stack_crop_reason: str | None = Field(default=None, alias="stackCropReason")
+    stack_crop_area_fraction: float | None = Field(default=None, alias="stackCropAreaFraction")
 
     rejected_pixel_fraction: float | None = Field(default=None, alias="rejectedPixelFraction")
 
@@ -315,8 +320,9 @@ class StackingPipelineQualityMetrics(BaseModel):
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
     # The star width the stack should have given its input frames: the root
-    # mean square of a sample of their widths. The sharpness gate compares
-    # the stack with this, not with the median.
+    # mean square of the widths of every frame in the stack, each weighted as
+    # the stack weighted it. The sharpness gate compares the stack with this,
+    # not with the median.
     expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
 
     # Spectral-only.
@@ -495,14 +501,20 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     gaia_fit_star_count: int | None = Field(default=None, alias="gaiaFitStarCount")
     wcs_refinement_shift_arcsec: float | None = Field(default=None, alias="wcsRefinementShiftArcsec")
     # Short stable keys for conditions that limit how far the results can be
-    # trusted: ``gaia_row_limit_reached`` (the Gaia search returned as many
-    # rows as it may, so faint stars may be missing),
-    # ``gaia_proper_motion_unknown`` (cached Gaia rows had no proper motion,
-    # so positions stay at epoch 2016.0), ``gaia_epoch_unknown`` (the frame has
-    # no observation date, so positions stay at epoch 2016.0) and
+    # trusted: ``gaia_tiles_missing`` (some Gaia cache tiles under the image
+    # were not complete to the query depth, so stars there have no Gaia
+    # name), ``gaia_depth_exceeded`` (the image shows stars fainter than the
+    # Gaia query depth), ``gaia_proper_motion_unknown`` (cached Gaia rows had
+    # no proper motion, so positions stay at epoch 2016.0),
+    # ``gaia_epoch_unknown`` (the frame has no observation date, so positions
+    # stay at epoch 2016.0) and
     # ``scale_hint_binning_mismatch`` (the header's X and Y pixel sizes, or X
     # and Y binning, differ). They do not flag the run.
     astrometry_flags: list[str] = Field(default_factory=list, alias="astrometryFlags")
+    # How many Gaia cache tiles lie under the image, and how many were not
+    # complete to the query depth (their detections got no Gaia name).
+    gaia_tiles_count: int = Field(default=0, alias="gaiaTilesCount")
+    gaia_tiles_missing_count: int = Field(default=0, alias="gaiaTilesMissingCount")
 
     # The size of one pixel on the sky, in arcseconds, from the solved
     # coordinates, and the width (FWHM) of the stars in the image, in pixels.

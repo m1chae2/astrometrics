@@ -7,11 +7,13 @@ judge how good a frame is before we even try to stack it.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality import frame_statistics
 from astrometricslib.pipelines.shared.quality.quality_metrics import measure_frame_input_quality
@@ -227,37 +229,98 @@ def test_each_frames_saturation_uses_its_own_cameras_threshold(
     assert target.frames[1].measurements.saturated_pixel_fraction == pytest.approx(0.0)
 
 
-def test_grouped_stats_ask_the_library_for_matching_darks() -> None:
-    """Each exposure group asks the library for darks of its settings."""
-    requests: list[tuple[str, float]] = []
+def _library(tmp_path: Path) -> CalibrationLibrary:
+    """Build an empty calibration library that saves inside `tmp_path`.
 
-    class _Library:
-        """A library that has darks only for 30 second exposures."""
+    Returns
+    -------
+    library : `CalibrationLibrary`
+        A library with no frames.
+    """
+    app_config = SimpleNamespace(get_library_file_path=lambda name: str(tmp_path / name))
+    return CalibrationLibrary(app_config=app_config)
 
-        def get_dark_frames(self, camera: str, exposure: float) -> list[str]:
-            """Record the request and return a dark for 30 second exposures.
 
-            Returns
-            -------
-            darks : `list` [`str`]
-                One dark path for a 30 second exposure, otherwise none.
-            """
-            requests.append((camera, exposure))
-            return ["dark.fits"] if abs(exposure - 30.0) < 1e-9 else []
+def _calibration_frame(
+    path: Path, exposure: float, offset: float = 30.0, flat_filter: str | None = None
+) -> str:
+    """Write a small calibration FITS frame at gain 100.
 
-    target = Target(
+    Returns
+    -------
+    path : `str`
+        The path written.
+    """
+    hdu = fits.PrimaryHDU(np.full((8, 8), 100.0, dtype=np.float32))
+    hdu.header["INSTRUME"] = "Cam"
+    hdu.header["EXPTIME"] = exposure
+    hdu.header["GAIN"] = 100
+    hdu.header["OFFSET"] = offset
+    hdu.header["XBINNING"] = 1
+    hdu.header["YBINNING"] = 1
+    if flat_filter is not None:
+        hdu.header["FILTER"] = flat_filter
+    hdu.writeto(path)
+    return str(path)
+
+
+def _light_target(offset: str = "30") -> Target:
+    """Make a target with two 30 s and one 10 s Luminance lights at gain 100.
+
+    Returns
+    -------
+    target : `Target`
+        The target.
+    """
+    kwargs = {"filter": "Luminance", "role": "LIGHT", "camera": "Cam", "iso": "100", "offset": offset}
+    return Target(
         id="Grouped",
         frames=[
-            FrameRecord(path="a.fits", filter="Luminance", role="LIGHT", camera="Cam", exposure="30.0"),
-            FrameRecord(path="b.fits", filter="Luminance", role="LIGHT", camera="Cam", exposure="30.0"),
-            FrameRecord(path="c.fits", filter="Luminance", role="LIGHT", camera="Cam", exposure="10.0"),
+            FrameRecord(path="a.fits", exposure="30.0", **kwargs),
+            FrameRecord(path="b.fits", exposure="30.0", **kwargs),
+            FrameRecord(path="c.fits", exposure="10.0", **kwargs),
         ],
     )
 
-    groups = frame_statistics.get_frame_stats_grouped(target, _Library())
+
+def test_grouped_stats_report_what_the_stacker_would_select(tmp_path: Path) -> None:
+    """Each group's match equals the selection the stacker runs."""
+    library = _library(tmp_path)
+    library.add_dark_frame(_calibration_frame(tmp_path / "dark.fits", 30.0))
+    library.add_bias_frame(_calibration_frame(tmp_path / "bias.fits", 0.0))
+    library.add_flat_frame(_calibration_frame(tmp_path / "flat.fits", 1.0, flat_filter="Luminance"))
+    target = _light_target()
+
+    groups = frame_statistics.get_frame_stats_grouped(target, library)
 
     by_exposure = {group["exposure"]: group for group in groups}
     assert by_exposure["30"]["count"] == 2
     assert by_exposure["30"]["darks"] == "1"
     assert by_exposure["10"]["darks"] == "Missing"
-    assert sorted(requests) == [("Cam", 10.0), ("Cam", 30.0)]
+    assert by_exposure["10"]["darkMatch"]["problem"]
+    direct_bias = library.select_bias_frames(camera="Cam", iso="100", offset="30", binning="1x1")
+    direct_flat = library.select_flat_frames(
+        telescope="Unknown",
+        camera="Cam",
+        filter_type=target.frames[0].filter,
+        iso="100",
+        offset="30",
+        binning="1x1",
+    )
+    assert by_exposure["30"]["biasMatch"]["count"] == len(direct_bias.frames) == 1
+    assert by_exposure["30"]["flatMatch"]["count"] == len(direct_flat.frames) == 1
+    assert by_exposure["30"]["biasMatch"]["problem"] == ""
+    assert by_exposure["30"]["biasMatch"]["fallbacks"] == []
+
+
+def test_a_bias_at_the_wrong_offset_is_a_fallback_with_the_reason(tmp_path: Path) -> None:
+    """A bias at another offset is a fallback, with a note saying so."""
+    library = _library(tmp_path)
+    library.add_bias_frame(_calibration_frame(tmp_path / "bias.fits", 0.0, offset=10.0))
+    groups = frame_statistics.get_frame_stats_grouped(_light_target(offset="30"), library)
+
+    bias = groups[0]["biasMatch"]
+    assert bias["count"] == 1
+    assert bias["fallbacks"]
+    assert groups[0]["flatMatch"]["count"] == 0
+    assert "no flat frames" in groups[0]["flatMatch"]["problem"]

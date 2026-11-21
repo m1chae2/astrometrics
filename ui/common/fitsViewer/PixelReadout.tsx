@@ -77,6 +77,8 @@ export interface PixelReadoutProps {
   panX: number;
   /** Vertical offset of the image's top edge from the container's top edge, in screen pixels. */
   panY: number;
+  /** How far the picture is shown turned, clockwise in degrees (default 0). The readout still names the file's own pixel. */
+  turn?: number;
 }
 
 /**
@@ -86,7 +88,7 @@ export interface PixelReadoutProps {
  * @returns The readout line, an empty hidden element while the pointer is off the image, or null when there is no decoded image and no note to show.
  */
 export const PixelReadout: React.FC<PixelReadoutProps> = ({
-  containerRef, workerRef, parsedData, drawnSize, zoom, panX, panY,
+  containerRef, workerRef, parsedData, drawnSize, zoom, panX, panY, turn = 0,
 }) => {
   const [state, setState] = useState<ReadoutState | null>(null);
   const pixelToSky = useMemo(
@@ -95,9 +97,9 @@ export const PixelReadout: React.FC<PixelReadoutProps> = ({
   );
 
   // What the animation-frame callback needs, kept in refs so it always sees the latest values.
-  const latestRef = useRef({ parsedData, drawnSize, zoom, panX, panY, pixelToSky });
+  const latestRef = useRef({ parsedData, drawnSize, zoom, panX, panY, pixelToSky, turn });
   useEffect(() => {
-    latestRef.current = { parsedData, drawnSize, zoom, panX, panY, pixelToSky };
+    latestRef.current = { parsedData, drawnSize, zoom, panX, panY, pixelToSky, turn };
   });
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -115,9 +117,9 @@ export const PixelReadout: React.FC<PixelReadoutProps> = ({
     frameRef.current = null;
     const pointer = pointerRef.current;
     const worker = workerRef.current;
-    const { parsedData: image, drawnSize: size, zoom: currentZoom, panX: currentPanX, panY: currentPanY } = latestRef.current;
+    const { parsedData: image, drawnSize: size, zoom: currentZoom, panX: currentPanX, panY: currentPanY, turn: currentTurn } = latestRef.current;
     if (!pointer || !worker || !image) return;
-    const cell = pointerToFileCell(pointer.x, pointer.y, image, size, currentZoom, currentPanX, currentPanY);
+    const cell = pointerToFileCell(pointer.x, pointer.y, image, size, currentZoom, currentPanX, currentPanY, currentTurn);
     if (!cell) {
       lastRequestIdRef.current = 0;
       setState(null);

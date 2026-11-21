@@ -21,7 +21,6 @@ import numpy as np
 from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
 from scipy import optimize
-from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
@@ -34,6 +33,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.neighbor_masking import nearest_neighbors
 from astrometricslib.pipelines.shared.quality.frame_statistics import (
     BOOTSTRAP_RESAMPLE_COUNT,
     BOOTSTRAP_SEED,
@@ -422,11 +422,21 @@ class StarWidthSample:
     width_px : `float`
         The star's Moffat FWHM (the geometric mean of the two axes) in original
         pixels, as it enters the frame's median.
+    elongation_ratio : `float`
+        The star's long axis divided by its short axis, from second moments
+        (at least 1). 1 when not recorded.
+    ellipticity_first, ellipticity_second : `float`
+        The star's ellipticity components ``(Ixx - Iyy) / (Ixx + Iyy)`` and
+        ``2 Ixy / (Ixx + Iyy)`` (see `_measure_second_moments`). Half the angle
+        of this vector is the long axis direction. Both 0 when not recorded.
     """
 
     x_px: float
     y_px: float
     width_px: float
+    elongation_ratio: float = 1.0
+    ellipticity_first: float = 0.0
+    ellipticity_second: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -644,8 +654,32 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     Returns
     -------
     fit : `_FitResult` or `None`
+        The accepted fit, or `None` when the fit failed or was refused.
+    """
+    return _fit_moffat_with_reason(cutout, grid, fixed_beta)[0]
+
+
+def _fit_moffat_with_reason(
+    cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | None
+) -> tuple[_FitResult | None, str | None]:
+    """Fit one star with a pixel-integrated elliptical Moffat profile.
+
+    Parameters
+    ----------
+    cutout : `numpy.ndarray`
+        The square box of pixels, with the star near its center.
+    grid : `_SubpixelGrid`
+        The sub-pixel sample positions for that box size.
+    fixed_beta : `float` or `None`
+        Hold the power index at this value, or fit it when `None`.
+
+    Returns
+    -------
+    fit : `_FitResult` or `None`
         The accepted fit, or `None` when the fit failed or was refused (see the
         ``MOFFAT_*`` limits above).
+    reason : `str` or `None`
+        Which check refused the fit, in plain words, or `None` when it held.
     """
     beta_minimum = resolve(MOFFAT_BETA_MINIMUM).value
     beta_maximum = resolve(MOFFAT_BETA_MAXIMUM).value
@@ -658,7 +692,7 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     background_start = float(np.median(cutout))
     peak = float(cutout[half - 2 : half + 3, half - 2 : half + 3].max()) - background_start
     if not math.isfinite(peak) or peak <= 0.0:
-        return None
+        return None, "the star has no peak above its background"
     alpha_start = 2.5
     start = [peak, half, half, alpha_start, alpha_start, 0.0]
     lower = [0.0, half - 3.0, half - 3.0, 0.3, 0.3, -math.pi]
@@ -684,26 +718,26 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     try:
         result = optimize.least_squares(residuals, np.array(start), bounds=(lower, upper), max_nfev=200)
     except ValueError, FloatingPointError:
-        return None
+        return None, "the fit did not hold"
     if not result.success:
-        return None
+        return None, "the fit did not hold"
     total_variance = float(np.sum((cutout - cutout.mean()) ** 2))
     if total_variance <= 0.0:
-        return None
+        return None, "the star has no peak above its background"
     r_squared = 1.0 - float(np.sum(result.fun**2)) / total_variance
     if r_squared < minimum_r_squared:
-        return None
+        return None, "the star does not follow a smooth star profile"
     parameters = result.x
     beta = parameters[6] if fixed_beta is None else fixed_beta
     background = parameters[-1]
     center_shift = math.hypot(parameters[1] - half, parameters[2] - half)
     if center_shift > maximum_center_shift_px:
-        return None
+        return None, "the fit moved off the star"
     fwhm_a = _moffat_fwhm_px(parameters[3], beta)
     fwhm_b = _moffat_fwhm_px(parameters[4], beta)
     fwhm_major, fwhm_minor = max(fwhm_a, fwhm_b), min(fwhm_a, fwhm_b)
     if not (minimum_fwhm_px <= fwhm_minor and fwhm_major <= maximum_fwhm_px):
-        return None
+        return None, "the fitted width is outside the allowed range"
     angle = parameters[5] if fwhm_a >= fwhm_b else parameters[5] + math.pi / 2.0
     return _FitResult(
         center_x=float(parameters[1]),
@@ -714,7 +748,7 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
         beta=float(beta),
         background=float(background),
         r_squared=float(r_squared),
-    )
+    ), None
 
 
 def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float, float, float] | None:
@@ -772,6 +806,80 @@ def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float,
     elongation = math.sqrt(largest / smallest)
     trace = variance_x + variance_y
     return elongation, (variance_x - variance_y) / trace, 2.0 * covariance / trace
+
+
+@dataclass(frozen=True)
+class SingleStarShape:
+    """The elongation and stretch direction of one star.
+
+    Attributes
+    ----------
+    elongation : `float`
+        Long axis divided by short axis of the star's second moments, at least
+        1 (1 is round). The same number the frame's median elongation
+        (`frame.star_elongation`) is made from.
+    angle_deg : `float`
+        The direction of the long axis, from 0 up to but not including 180
+        degrees, measured from the x axis (increasing column) toward the y axis
+        (increasing row) of the array. A round star's angle is set by noise.
+    """
+
+    elongation: float
+    angle_deg: float
+
+
+def measure_single_star_shape(cutout: np.ndarray) -> SingleStarShape | None:
+    """Measure the shape of one star with the frame measurement's estimator.
+
+    The star is fitted with the pixel-integrated elliptical Moffat profile
+    (`_fit_moffat`, free power index, the same acceptance limits as for a
+    frame's stars), and `_measure_second_moments` takes the shape from the
+    light inside the fitted ellipse. A frame's elongation is the median of
+    this value over its stars, so this is the same measurement for one star.
+
+    Parameters
+    ----------
+    cutout : `numpy.ndarray`
+        A square box of raw pixels (sky not subtracted) with the star near its
+        center. Its side is odd. The usual side is
+        ``2 * MOFFAT_FIT_BOX_HALF_WIDTH_PX + 1``.
+
+    Returns
+    -------
+    shape : `SingleStarShape` or `None`
+        The shape, or `None` when the fit was refused (too faint, too wide,
+        a neighbor in the box, the center moved too far) or the moments could
+        not be taken.
+    """
+    return explain_single_star_shape(cutout)[0]
+
+
+def explain_single_star_shape(cutout: np.ndarray) -> tuple[SingleStarShape | None, str | None]:
+    """Measure one star's shape and say which check refused it, if any.
+
+    Same measurement as `measure_single_star_shape`.
+
+    Parameters
+    ----------
+    cutout : `numpy.ndarray`
+        A square box of raw pixels, as for `measure_single_star_shape`.
+
+    Returns
+    -------
+    shape : `SingleStarShape` or `None`
+        The shape, or `None` when it was refused.
+    reason : `str` or `None`
+        Plain words for the refusing check (for example "the fit moved off
+        the star"), or `None` when the shape was measured.
+    """
+    fit, reason = _fit_moffat_with_reason(cutout, _subpixel_grid(cutout.shape[0]), fixed_beta=None)
+    if fit is None:
+        return None, reason
+    moments = _measure_second_moments(cutout, fit)
+    if moments is None:
+        return None, "the light inside the fit could not be measured"
+    angle_deg, _ = _mean_ellipticity_angle(np.array([moments[1]]), np.array([moments[2]]))
+    return SingleStarShape(elongation=float(moments[0]), angle_deg=float(angle_deg)), None
 
 
 def _mean_ellipticity_angle(
@@ -935,7 +1043,9 @@ STAR_FINDER_MINIMUM_BOXES_PER_AXIS = TunedParameter(
 )
 
 
-def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | None = None) -> list[dict]:
+def detect_stars_without_shape_cut(
+    plane: np.ndarray, expected_fwhm_px: float | None = None, min_separation: float | None = None
+) -> list[dict]:
     """Find the stars of a plane without refusing the stretched ones.
 
     `SourceDetector` keeps only sources whose DAOStarFinder roundness lies in
@@ -958,6 +1068,9 @@ def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | 
         How wide a star is expected to be, in the plane's own pixels. Defaults
         to `STAR_FINDER_EXPECTED_FWHM_PX`. A plane of 2 x 2 super-pixels needs
         half that.
+    min_separation : `float`, optional
+        The closest two sources may lie, in pixels. `None` keeps the finder's
+        own value (2.5 star widths), as the astrometry stage does.
 
     Returns
     -------
@@ -997,6 +1110,7 @@ def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | 
         expected_fwhm_px=expected_fwhm_px,
         threshold_sigma=resolve(STAR_FINDER_THRESHOLD_SIGMA).value,
         roundness_range=None,
+        min_separation=min_separation,
     )
 
 
@@ -1043,7 +1157,7 @@ def _grid_candidates(
     cells_x = max(round(columns / cell_side), 1)
     cells_y = max(round(rows / cell_side), 1)
     positions = np.array([[source["x_centroid"], source["y_centroid"]] for source in sources], dtype=float)
-    tree = cKDTree(positions)
+    neighbor_counts = nearest_neighbors(positions, None, isolation_radius_px).count
     half = resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value
     cell_lists: dict[tuple[int, int], list[tuple[float, float]]] = {}
     near_edge = near_neighbor = near_saturation = 0
@@ -1052,8 +1166,7 @@ def _grid_candidates(
         if center_x < half or center_y < half or center_x + half >= columns or center_y + half >= rows:
             near_edge += 1
             continue
-        neighbors = tree.query_ball_point(positions[index], isolation_radius_px)
-        if len(neighbors) > 1:
+        if neighbor_counts[index] > 0:
             near_neighbor += 1
             continue
         if top_level_adu is not None:
@@ -1231,7 +1344,16 @@ def measure_star_profiles(
         # A super-pixel's center is at its first pixel plus (factor - 1) / 2
         # original pixels, so (x + 0.5) * factor - 0.5 puts the star back on
         # the original pixel grid (it is x itself when the factor is 1).
-        samples.append(StarWidthSample((x + 0.5) * factor - 0.5, (y + 0.5) * factor - 0.5, widths[-1]))
+        samples.append(
+            StarWidthSample(
+                (x + 0.5) * factor - 0.5,
+                (y + 0.5) * factor - 0.5,
+                widths[-1],
+                shape[0],
+                shape[1],
+                shape[2],
+            )
+        )
         elongations.append(shape[0])
         first_components.append(shape[1])
         second_components.append(shape[2])
@@ -1339,6 +1461,31 @@ def _field_region_of(column_cell: int, row_cell: int) -> str | None:
     return corner_by_bands.get((column_band, row_band))
 
 
+def field_region_of_sample(result: StarProfileResult, sample: StarWidthSample) -> str | None:
+    """Name the field region a fitted star lies in.
+
+    Parameters
+    ----------
+    result : `StarProfileResult`
+        The frame's star profile result (its field shape sets the grid).
+    sample : `StarWidthSample`
+        One of the result's stars.
+
+    Returns
+    -------
+    region : `str` or `None`
+        One of `FIELD_REGION_NAMES`, or `None` when the star lies between the
+        regions or the result has no field shape.
+    """
+    if result.field_shape_px is None:
+        return None
+    rows, columns = result.field_shape_px
+    side = resolve(FIELD_GRID_CELLS_PER_SIDE).value
+    column_cell = min(side - 1, max(0, int(sample.x_px / columns * side)))
+    row_cell = min(side - 1, max(0, int(sample.y_px / rows * side)))
+    return _field_region_of(column_cell, row_cell)
+
+
 def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
     """Give the median star width of the center and of each corner.
 
@@ -1359,15 +1506,10 @@ def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
         `MOFFAT_MINIMUM_STAR_COUNT` stars; the count is always given.
     """
     members: dict[str, list[float]] = {name: [] for name in FIELD_REGION_NAMES}
-    if result.field_shape_px is not None:
-        rows, columns = result.field_shape_px
-        side = resolve(FIELD_GRID_CELLS_PER_SIDE).value
-        for sample in result.samples:
-            column_cell = min(side - 1, max(0, int(sample.x_px / columns * side)))
-            row_cell = min(side - 1, max(0, int(sample.y_px / rows * side)))
-            region = _field_region_of(column_cell, row_cell)
-            if region is not None:
-                members[region].append(sample.width_px)
+    for sample in result.samples:
+        region = field_region_of_sample(result, sample)
+        if region is not None:
+            members[region].append(sample.width_px)
     regions = []
     minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value
     for name in FIELD_REGION_NAMES:

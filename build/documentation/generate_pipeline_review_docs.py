@@ -218,6 +218,11 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "Cannot fail. Reports the median per-point error. Not checked when the errors assumed "
         "a gain of 1 e-/ADU (electrons per camera count), because the camera's gain was unknown."
     ),
+    "target_crowding": (
+        "Fails when a neighbor with at least `CROWDING_NEIGHBOR_PEAK_FRACTION` of the target "
+        "star's peak lies within the aperture radius plus `CROWDING_MARGIN_PX`, so the target's "
+        "light curve may carry the neighbor's light. Not checked without a single target star."
+    ),
     # Photometry period checks
     "holdout_nights": (
         "Period check. Leaves each night out in turn and asks whether the period found from the "
@@ -297,8 +302,8 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
     "frame_quarantine": (
-        "Fails when a batch had more bad frames (too few stars, or stars not round) than "
-        "`MAXIMUM_QUARANTINED_FRACTION`, so none were moved."
+        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
+        "aside. The frames are moved all the same; the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -685,8 +690,8 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
     "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",
     "stacked_fwhm_px": "Measured FWHM of the stacked image.",
-    "median_input_fwhm_px": "Median FWHM of all light frames that were kept.",
-    "expected_fwhm_px": "Predicted stack FWHM: the RMS of a sample of input-frame FWHMs.",
+    "median_input_fwhm_px": "Median FWHM of all frames in the stack.",
+    "expected_fwhm_px": "Predicted stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "fwhm_degradation_ratio": "Measured stack FWHM over the expected FWHM; 1 means no extra blur.",
     "fwhm_degradation_flagged": "True if the final image is clearly blurrier than its inputs.",
     "stacking_engine": "Program that did the pixel processing (for example Siril).",
@@ -710,7 +715,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "gaia_fit_star_count": "Stars used in the Gaia refit.",
     "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
-    "expected_stack_fwhm_px": "Expected stack FWHM: the RMS of a sample of input-frame FWHMs.",
+    "expected_stack_fwhm_px": "Expected stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
     ),
@@ -3144,7 +3149,7 @@ def build_stacking_doc() -> str:
         ),
         "quarantine": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine",
-            "MAXIMUM_QUARANTINED_FRACTION",
+            "WARN_QUARANTINED_FRACTION",
         ),
         "penalty": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
@@ -3267,12 +3272,12 @@ def build_stacking_doc() -> str:
             "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
-            "`MAXIMUM_QUARANTINED_FRACTION`",
+            "`WARN_QUARANTINED_FRACTION`",
             f"`{values['quarantine']}`",
             status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
-            "Largest share of a batch the quarantine (setting bad frames aside) may move. About "
-            "twice the share it picks from a normal batch: room for a bad stretch, without "
-            "gutting a session whose limits do not suit the equipment.",
+            "Share of a batch above which setting frames aside draws a warning. It blocks nothing: "
+            "every frame that fails a check is moved. About twice the share the step picks from a "
+            "normal batch, so a larger share is unusual.",
         ],
         [
             "`MINIMUM_PENALTY_TO_WEIGHT`",
@@ -3469,11 +3474,15 @@ A binning mismatch never falls back.
 FWHM (full width at half maximum) is the width of a star's light profile at half its peak
 height; a smaller FWHM means a sharper image. Averaging aligned frames adds no blur of its own,
 so the stack's FWHM follows from the input FWHMs. The pipeline predicts that FWHM and checks the
-stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are
-$\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
-inputs:
+stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ stacked frames
+are $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
+inputs, each weighted by the weight $a_j$ the frame had in the stack (Siril's star-width weights
+for `-weight=wfwhm`, all equal otherwise):
 
-$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^2} \tag{2}$$
+$$\text{FWHM}_\text{expected} = \sqrt{\frac{\sum_{j=1}^{N} a_j\,\text{FWHM}_j^2}{\sum_j a_j}} \tag{2}$$
+
+Every frame in the stack counts. A frame width the frame quality step already stored is reused,
+because it comes from the same estimator.
 
 The ratio $\rho_\text{FWHM}$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means
 the alignment or the combination blurred the stars. The stack passes when
@@ -3571,10 +3580,11 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
-5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames never line up exactly,
-   so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim
-   measures the noise and cuts each side back to where it matches the interior; a stack with
-   clean edges is left alone. The quality summary and its gates are built (<<gate_count>>).
+5. **After the stack.** Thinly covered edges are trimmed (`stack_crop.py`). Frames never line up exactly,
+   so the edges of a stack are covered by fewer frames than the middle and are noisier. The linear
+   stack is cut only where fewer than half the frames cover it; the processed picture is cropped
+   further, to the area at least 85% of the frames cover, before GraXpert and Cosmic Clarity run.
+   A stack with full coverage is left alone. The quality summary and its gates are built (<<gate_count>>).
    The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame
    count and time, and one weight per member frame as quality measurements
    (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty

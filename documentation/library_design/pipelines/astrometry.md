@@ -252,6 +252,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `gaia_fit_star_count` | `int \| None` | Stars used in the Gaia refit. |
 | `wcs_refinement_shift_arcsec` | `float \| None` | Largest move of the field made by the Gaia refit. |
 | `astrometry_flags` | `list[str]` | Warnings about conditions that limit the accuracy of the sky positions. |
+| `gaia_tiles_count` | `int` | Quality metric attribute. |
+| `gaia_tiles_missing_count` | `int` | Quality metric attribute. |
 | `plate_scale_arcsec_per_pixel` | `float \| None` | Pixel scale: the sky angle one pixel covers, in arcsec/pixel. |
 | `star_fwhm_px` | `float \| None` | Median FWHM across the image, in pixels. |
 | `remote_catalog_queries_attempted` | `int` | Number of online catalog requests started. |

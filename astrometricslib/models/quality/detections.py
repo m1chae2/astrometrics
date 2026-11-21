@@ -1,10 +1,11 @@
 """What `QualityRecords.measure_detections` returns: the detected stars.
 
 The result lists every star that the astrometry run's star finder detects in
-one image, with its position and brightness. The viewer draws a marker at each
-one, so a person can see a detection that sits on no star, a marker between two
-close stars, or a star the finder missed. Every number is a plain Python float,
-int, bool or list, so it can be sent to the app as it is.
+one image, with its position and brightness, and the radius of the circle
+photometry measures each star in. The viewer draws that circle at each one,
+so a person can see a detection that sits on no star, a marker between two
+close stars, or a star the finder missed. Every number is a plain Python
+float, int, bool or list, so it can be sent to the app as it is.
 """
 
 from pydantic import BaseModel
@@ -59,6 +60,16 @@ class DetectionsMeasurement(BaseModel):
         `True` when the image has color channels and the finder searched an
         averaged, smaller copy, as the run does. Positions are given back
         in full image pixels.
+    star_width_px : `float` or `None`
+        The star width measured on this image, in pixels, on the library's
+        one star-width scale. It sizes the photometry circle. `None` when no
+        star could be measured; the active setup's typical width was used
+        instead.
+    aperture_radius_px : `float` or `None`
+        The radius, in image pixels, of the circle that photometry measures
+        every star in, sized from ``star_width_px``. It is the same for every
+        star, because all stars in one image share one shape. `None` when it
+        was not set.
     """
 
     path: str
@@ -69,3 +80,5 @@ class DetectionsMeasurement(BaseModel):
     merged_count: int
     kernel_fwhm_px: float
     binned_on_color: bool = False
+    star_width_px: float | None = None
+    aperture_radius_px: float | None = None

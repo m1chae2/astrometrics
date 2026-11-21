@@ -16,10 +16,14 @@ astrometricslib/_internal/drivers/catalog_access.py,AbstractCatalogAccess.query_
 astrometricslib/_internal/drivers/catalog_access.py,CatalogAccess.query_star_summary_page.offset,Pagination start; 0 means from the first row
 astrometricslib/_internal/drivers/catalog_access.py,_BOX_MARGIN_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/catalog_access.py,_FULL_CIRCLE_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
-astrometricslib/_internal/drivers/catalog_store.py,_COVERAGE_TOLERANCE_DEG,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/catalog_store.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
+astrometricslib/_internal/drivers/catalog_store.py,_SCHEMA_VERSION,Version number of the cache file layout; plumbing
+astrometricslib/_internal/drivers/catalog_store.py,_SQL_CHUNK,Rows per database query; plumbing
 astrometricslib/_internal/drivers/frame_prefetch.py,DEFAULT_CHUNK_BYTES,software plumbing
 astrometricslib/_internal/drivers/frame_prefetch.py,PROGRESS_FRACTION,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/frame_prefetch.py,PROGRESS_MINIMUM_FILES,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/gaia_cone_driver.py,_OUTLINE_OFFSETS,Sample points around a tile; structure
+astrometricslib/_internal/drivers/gaia_cone_driver.py,_TILE_CIRCLE_PADDING,Geometry margin so the cone circle covers the whole tile; only widens the download
 astrometricslib/_internal/drivers/gaia_xp_driver.py,ANGSTROM_PER_NANOMETRE,unit or physical constant
 astrometricslib/_internal/drivers/gaia_xp_driver.py,DOWNLOAD_TIMEOUT_SECONDS,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/gaia_xp_driver.py,RETRY_AFTER_FAILURE_SECONDS,"Plumbing: backups, geometry margin, progress, timeouts"
@@ -39,6 +43,11 @@ astrometricslib/_internal/drivers/siril_interface/_pipes_windows.py,PIPE_RETRY_S
 astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril_interface/staging.py,WORK_DIRECTORY_RETENTION_DAYS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/sky_tiles.py,_FOOTPRINT_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for the footprint outline; structure
+astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID format constant
+astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
+astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
+astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
 astrometricslib/_internal/drivers/tuning_support.py,MAD_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
 astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
@@ -52,7 +61,7 @@ astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
 astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
 astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,"A direction chosen by the caller; 0 means along a column"
+astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/stars.py,StellarCatalog.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
@@ -84,7 +93,7 @@ astrometricslib/foundation/jobs/store.py,JobStore._connect.timeout,Timeout or wa
 astrometricslib/foundation/jobs/store.py,JobStore.get_jobs_by_target.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_jobs.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_log_entries_for_job.limit,Row or item cap that callers pass; plumbing
-astrometricslib/foundation/jobs/store.py,JobStore.interrupt_orphaned_jobs.stale_after_minutes,"Housekeeping for old jobs that have no owner"
+astrometricslib/foundation/jobs/store.py,JobStore.interrupt_orphaned_jobs.stale_after_minutes,Housekeeping for old jobs that have no owner
 astrometricslib/foundation/jobs/store.py,JobStore.query_jobs.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.query_jobs.offset,Pagination start; 0 means from the first row
 astrometricslib/foundation/logging.py,_LOG_FILES_KEPT,software plumbing
@@ -134,7 +143,21 @@ astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,BACKGROU
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS,Speed switch for subsampling; no result choice
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_STAR_RADIUS_PEAK_FRACTION,Decided not tuning in the #175 review (AST-D18): radius drawn on the star overlay only
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_STAR_RADIUS_WINDOW_HALF_WIDTH_PX,Decided not tuning in the #175 review (AST-D18): radius drawn on the star overlay only
+astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_CACHE_LIMIT,Number of detection lists the cache folder keeps; plumbing
+astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_FILE_VERSION,Version number of the saved detection-list layout; plumbing
+astrometricslib/pipelines/astrometry/processing/gaia_depth.py,_BAND_SAMPLES,Sampling resolution of the passband integral; structure
+astrometricslib/pipelines/astrometry/processing/gaia_depth.py,predict_gaia_query_depth.central_obstruction_fraction,Argument default of 0 for an optic with no central obstruction; the caller passes the real value
+astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_CHILDREN_PER_TILE,A HEALPix tile always has four children one level finer; structure
+astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
 astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_LIMIT,"Most missed catalog stars sent to the viewer; display limit, changes no name"
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_MARGIN_MAG,"Which missed catalog stars the viewer shows; display choice, changes no name or measurement"
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,IDENTIFICATION_FILE_VERSION,Version number of a saved file layout; plumbing
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_DETECTED,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SIMBAD_DONE,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SOLVED,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_TILES_DONE,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_CONSECUTIVE_FAILURE_LIMIT,Network retry limit; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ROW_LIMIT,Plumbing: query size
@@ -142,7 +165,8 @@ astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_VIZIER_T
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE_SOLVE_SOURCES,Decided not tuning in the #175 review (AST-D05): speed cap; the brightest stars are enough to solve
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._seed_gaia_cache_for_field.radius_deg,Search radius that callers always pass
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
@@ -150,9 +174,14 @@ astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,derive_field_c
 astrometricslib/pipelines/photometry/post_processing/known_variability_labels.py,split_scores_by_catalog_status.chunk_size,Query batch size; plumbing
 astrometricslib/pipelines/photometry/post_processing/record_noise_budget.py,[Observatory.Location] elevation,Site setting; the default of zero stands for sea level
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_TIMESTAMP_REASONS_SHOWN,Display cap on quoted reasons
+astrometricslib/pipelines/photometry/post_processing/record_quality.py,_LOGGED_WARNING_TEXT_LENGTH,Display cap on the text kept for one logged warning
+astrometricslib/pipelines/photometry/post_processing/record_quality.py,logged_warnings_notice_measurement.dropped_count,Count the caller passes; zero means none were dropped
 astrometricslib/pipelines/photometry/post_processing/variability_skill.py,_MAGNITUDES_PER_FRACTION,unit or physical constant
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,CENTROID_SEARCH_HALF_WIDTH_PX,Default search half width of the centroid locator; the drift limit is half of it (PHO-D16); method choice
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_MAXIMUM_UTC_OFFSET_HOURS,"Time zone range, not a choice"
+astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_CLIP_MAXIMUM_PASSES,Round cap of an iterative clip that settles in fewer rounds
+astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_CLIP_SIGMA,Repeats the clip level of the star-ring analysis (shared.sky_clip_sigma) for the photometry sky ring
+astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_MINIMUM_PIXELS,Fewest ring pixels that can describe the sky; a data-sufficiency floor
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,aperture_flux_error_adu.dark_current_e_per_pixel,0 means none; the caller passes the camera value
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,measure_aperture_photometry.dark_current_e_per_pixel,0 means none; the caller passes the camera value
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,summarize_centroid_shifts.anchor_count,0 means no anchors; the caller passes the count
@@ -175,6 +204,7 @@ astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MAXIMUM
 astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/photometry/processing/variability_indices.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/photometry/processing/variability_indices.py,false_alarm_probability.scale,Unit scale; 1 means unchanged
+astrometricslib/pipelines/photometry/run_warnings.py,_MAXIMUM_KEPT_WARNINGS,Row or item cap on distinct warnings kept; later ones are counted; plumbing
 astrometricslib/pipelines/shared/image_conversions.py,ImageConverter.convert_fits_to_png_with_stats.max_dimensions,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of the frame or layer; 0 means the first
 astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
@@ -183,23 +213,28 @@ astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,
 astrometricslib/pipelines/shared/image_scaling.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/shared/image_scaling.py,_PERCENTILE_SAMPLE_COUNT,"Sample size for display percentiles, seeded"
 astrometricslib/pipelines/shared/image_scaling.py,_SCALING_BLOCK_PIXELS,Memory block size
+astrometricslib/pipelines/shared/image_scaling.py,_SKY_MAXIMUM_CLIP_ROUNDS,Round cap of an iterative clip that settles in fewer rounds
+astrometricslib/pipelines/shared/image_scaling.py,_SKY_MINIMUM_SAMPLE_PIXELS,Fewest sampled pixels that can describe the sky; a data-sufficiency floor
 astrometricslib/pipelines/shared/image_scaling.py,_WHITE_COUNT_STRIDE,Speed stride for counting
+astrometricslib/pipelines/shared/neighbor_masking.py,NeighborField.around.exclude_radius,Argument default of 0 meaning no star is excluded
+astrometricslib/pipelines/shared/neighbor_masking.py,_MAD_TO_SIGMA,Statistical constant: scales a median absolute deviation to a standard deviation
 astrometricslib/pipelines/shared/quality/calibration_frame_measurement.py,NEIGHBOR_NOISE_COLUMN_STEP,Pixel step set by color sensor pattern
 astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_RESAMPLE_COUNT,Bootstrap resample count
 astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_SEED,software plumbing
 astrometricslib/pipelines/shared/quality/raw_frame_check.py,NOISE_SAMPLE_STEP,Subsampling for speed
+astrometricslib/pipelines/shared/quality/raw_frame_check.py,SKY_GRID_CLIP_PASSES,Round cap of an iterative clip that settles in fewer rounds
 astrometricslib/pipelines/shared/quality/raw_frame_check.py,TRAIL_ANGLE_STEP_DEGREES,Search resolution of line angles
 astrometricslib/pipelines/shared/quality/raw_frame_check.py,TRAIL_CANDIDATE_LINES,Search structure: lines checked in full
 astrometricslib/pipelines/shared/quality/record_measurements.py,UNKNOWN_DEFINITION_VERSION,software plumbing
 astrometricslib/pipelines/shared/quality/saturation.py,NORMALISED_STACK_MAXIMUM,Format fact: Siril stacks top out at 1.0
-astrometricslib/pipelines/shared/quality/star_profile.py,MINIMUM_RADIUS_PX,"Fewest pixels the four-number Moffat fit needs; refuses a smaller request"
-astrometricslib/pipelines/shared/quality/star_profile.py,_BETA_LIMITS,"Bounds that keep the Moffat fit from running off to a flat or a spiked curve"
-astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,"Number of points drawn for the fitted curve; does not change a measured value"
-astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,"A direction chosen by the caller; 0 means along a column"
+astrometricslib/pipelines/shared/quality/star_profile.py,MINIMUM_RADIUS_PX,Fewest pixels the four-number Moffat fit needs; refuses a smaller request
+astrometricslib/pipelines/shared/quality/star_profile.py,_BETA_LIMITS,Bounds that keep the Moffat fit from running off to a flat or a spiked curve
+astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,Number of points drawn for the fitted curve; does not change a measured value
+astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_ITERATIONS,"Rounds of sigma clipping for the ring sky plane; the same 5 rounds as the profile sky, and the fit settles in fewer"
-astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,"Clipping limit of the ring sky plane; the same 3 sigma as the profile sky"
+astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,Clipping limit of the ring sky plane; the same 3 sigma as the profile sky
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_MINIMUM_PIXELS,"Fewest pixels the sky annulus needs, as for the profile's sky; below it the profile sky is used"
 astrometricslib/pipelines/shared/quality/time_budget.py,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,Plumbing: time budget
 astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries
@@ -336,6 +371,7 @@ astrometricslib/pipelines/stacking/post_processing/half_pattern.py,BOOTSTRAP_SEE
 astrometricslib/pipelines/stacking/post_processing/half_pattern.py,SHIFTED_MASK_LEVEL,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/normalization_scale.py,EXPOSURE_MATCH_FRACTION,exposure equality check; the code says it is not tuned
 astrometricslib/pipelines/stacking/post_processing/odd_even_apertures.py,APERTURE_RECORD_VERSION,software plumbing
+astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMUM_SLOPE_PAIRS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MINIMUM_HOMOGRAPHY_SCALE,"Sampling, numerics, plumbing or math constant."
@@ -351,8 +387,12 @@ astrometricslib/pipelines/stacking/post_processing/stack_preview.py,GRAXPERT_TIM
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,_STALE_SCRATCH_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_MINIMUM_ROOM,Divide-by-zero guard.
+astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,EDGE_MARGIN_PX,Display margin so the zoomed view has pixels around the star
+astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_MINIMUM_FLUX_FRACTION,"Display choice of a reference star, picked by eye; does not act on data"
+astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_STAR_COUNT,Number of candidate stars offered to the caller for a display; not a detection limit
 astrometricslib/pipelines/stacking/pre_processing/calibration_assessment.py,MAXIMUM_FRAMES_OF_CONCERN,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,MEASUREMENT_THREADS,software plumbing
+astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,WARN_QUARANTINED_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
 astrometricslib/pipelines/stacking/pre_processing/sensor_noise.py,MAD_TO_STANDARD_DEVIATION,unit or physical constant
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing
@@ -461,10 +501,7 @@ wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_REQUEST_DELAY
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,MEASURED_BYTES_PER_STAR,software plumbing
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_ANONYMOUS_ASYNC_ROW_LIMIT,Archive row limit documented by astroquery
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_CONSECUTIVE_FAILURE_LIMIT,Stops download after repeated failures; plumbing
-wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_GAIA_HEALPIX_LEVEL,Gaia ID format constant
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_RETRY_BACKOFF_BASE_SECONDS,Network retry backoff
-wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
-wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,estimate_catalog_size.sample_count,Number of chunks sampled to estimate catalog size; estimate only
 wayfindinglib/drivers/catalog/deep_star_catalog_driver.py,_MAXIMUM_STARS_PER_QUERY,Plumbing: query size
 wayfindinglib/drivers/catalog/deep_star_catalog_driver.py,_NO_MAGNITUDE_LIMIT,Sentinel meaning no limit

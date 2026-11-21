@@ -2,12 +2,12 @@
 
 Description: During an observing session the raw frames sit on the
 telescope computer or in a staging folder, not yet in the library. This
-module measures each frame's stars (how many, how wide, how round, how
-long the longest streak is), the sky level, the saturated pixels, any long
-straight trail from a satellite or aircraft, and how far the star field
-moved since the previous frame. It then flags the frames that stand out
-from the rest of the batch: too few or too many stars, trailed, soft,
-crossed by a straight trail, or shifted a long way.
+module measures each frame's stars (how many, how wide, how long the
+longest streak is), the sky level (overall and in a grid of boxes), the
+saturated pixels, any long straight trail from a satellite or aircraft, and
+how far the star field moved since the previous frame. It then flags the
+frames that stand out from the rest of the batch: too few or too many
+stars, trailed, soft, crossed by a straight trail, or shifted a long way.
 
 Most limits compare a frame with the median of its own batch, so they adapt
 to the telescope, the camera and the night. The numeric limits below record
@@ -88,6 +88,38 @@ sliding median filter plus resampling, with the same flags on the
 2026-10-02 frames.
 """
 
+SKY_GRID_CELLS_PER_SIDE = TunedParameter(
+    name="shared.sky_grid_cells_per_side",
+    default=4,
+    unit="boxes",
+    description="Boxes along each side of the grid that measures how evenly the sky lies across a frame.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D72",
+)
+"""The sky is measured in this many boxes along each side of the frame."""
+
+SKY_GRID_CLIP_SIGMAS = TunedParameter(
+    name="shared.sky_grid_clip_sigmas",
+    default=3.0,
+    unit="× robust standard deviation",
+    description="Blocks this far above a grid box's median are left out of that box's sky level.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D72",
+)
+"""Blocks above the box's median by more than this are treated as stars.
+
+Three robust standard deviations is the usual cut for dropping a bright
+outlier from a median while keeping the ordinary scatter of sky blocks (99.9%
+of a normal spread lies below it on that side).
+"""
+
+SKY_GRID_CLIP_PASSES = 5
+"""Most clipping passes per grid box; a pass that drops nothing ends early."""
+
 NOISE_SAMPLE_STEP = 3
 """Every this-many pixels is used to estimate the noise, for speed."""
 
@@ -101,7 +133,7 @@ MAXIMUM_STARS_MEASURED = TunedParameter(
     kind=HardcodedKind.STATISTICS,
     register_entry="STK-D38",
 )
-"""Brightest stars used for width, roundness and frame-to-frame matching."""
+"""Brightest stars used for width and frame-to-frame matching."""
 
 # Stands for the half width of the box that holds a star for its centroid.
 # It follows the star width: the value is a factor times the star width the
@@ -209,21 +241,24 @@ The clearly soft frame (frame 092, 5.4 pixels against 3.75) was 1.43 times
 the median.
 """
 
-ROUND_STAR_RATIO = TunedParameter(
-    name="shared.round_star_ratio",
-    default=0.88,
-    unit="ratio",
-    description="Star roundness below which a frame's stars count as elongated.",
-    role=ParameterRole.RECOMMENDATION,
+POINTING_MINIMUM_VOTES = TunedParameter(
+    name="shared.pointing_minimum_votes",
+    default=15,
+    unit="star pairs",
+    description="Star pairs that must agree before a frame's pointing is compared with another frame's.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="STK-D39",
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D73",
 )
-"""A frame whose median star roundness falls below this is elongated.
+"""A pointing offset needs this many star pairs that agree on it.
 
-Roundness is the narrow width divided by the wide width, 1.0 for a circle.
-Clean frames measured 0.93 to 0.99. A frame guided badly through a dither
-measured 0.86.
+The match counts pairs of stars (150 per frame at most, so 22,500 pairs)
+whose offsets fall in one 12-pixel window. On a 3008 x 3008 frame chance
+alone puts about 0.4 pairs in such a window, and the raw-frame check's own
+limit for a lost match is 5. Frames of NGC 7331 that point at the same field
+gave 40 to 140 agreeing pairs; 15 keeps a wide margin over chance and below
+the genuine matches (see STK-D73).
 """
 
 SHIFT_FRACTION_OF_WIDTH = TunedParameter(
@@ -431,6 +466,27 @@ _SHIFT_BIN_PIXELS = TunedParameter(
 """Bin size of the offset histogram used to match star patterns."""
 
 
+def _block_medians(image: np.ndarray) -> np.ndarray:
+    """Take the median of each whole background block of an image.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        The 2-D pixel array.
+
+    Returns
+    -------
+    medians : `numpy.ndarray`
+        ``(rows, columns)`` array with the median of each whole block of
+        `BACKGROUND_BLOCK_PIXELS` pixels. Edge pixels beyond the last whole
+        block are left out.
+    """
+    block = resolve(BACKGROUND_BLOCK_PIXELS).value
+    rows, columns = image.shape[0] // block, image.shape[1] // block
+    blocks = image[: rows * block, : columns * block].reshape(rows, block, columns, block)
+    return np.median(blocks.swapaxes(1, 2).reshape(rows, columns, -1), axis=2)
+
+
 def _block_background(image: np.ndarray) -> np.ndarray:
     """Estimate the sky background as a map of block medians.
 
@@ -446,12 +502,56 @@ def _block_background(image: np.ndarray) -> np.ndarray:
         pixels beyond the last whole block take the nearest block's value.
     """
     block = resolve(BACKGROUND_BLOCK_PIXELS).value
-    rows, columns = image.shape[0] // block, image.shape[1] // block
-    blocks = image[: rows * block, : columns * block].reshape(rows, block, columns, block)
-    medians = np.median(blocks.swapaxes(1, 2).reshape(rows, columns, -1), axis=2)
+    medians = _block_medians(image)
     expanded = np.repeat(np.repeat(medians, block, axis=0), block, axis=1)
     pad_rows, pad_columns = image.shape[0] - expanded.shape[0], image.shape[1] - expanded.shape[1]
     return np.pad(expanded, ((0, pad_rows), (0, pad_columns)), mode="edge")
+
+
+def measure_sky_grid(image: np.ndarray, cells_per_side: int | None = None) -> np.ndarray:
+    """Measure the sky level in a grid of boxes across an image.
+
+    Stars are kept out of the answer in two steps. Each background block
+    (see `BACKGROUND_BLOCK_PIXELS`) is first reduced to its median, which a
+    star covering a tenth of the block does not move. The blocks of one grid
+    box are then clipped: those more than `SKY_GRID_CLIP_SIGMAS` robust
+    standard deviations above the box's median are dropped, so a bright star
+    or a galaxy core does not lift the box, and the median of the rest is
+    the box's sky.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        The 2-D pixel array.
+    cells_per_side : `int`, optional
+        Boxes along each side. Defaults to `SKY_GRID_CELLS_PER_SIDE`.
+
+    Returns
+    -------
+    grid : `numpy.ndarray`
+        ``(cells_per_side, cells_per_side)`` array of the sky level in ADU,
+        row 0 at the top of the array.
+    """
+    cells = int(resolve(SKY_GRID_CELLS_PER_SIDE).value if cells_per_side is None else cells_per_side)
+    clip_sigmas = resolve(SKY_GRID_CLIP_SIGMAS).value
+    medians = _block_medians(image.astype(np.float32, copy=False))
+    row_edges = np.linspace(0, medians.shape[0], cells + 1).astype(int)
+    column_edges = np.linspace(0, medians.shape[1], cells + 1).astype(int)
+    grid = np.empty((cells, cells))
+    for row in range(cells):
+        for column in range(cells):
+            values = medians[
+                row_edges[row] : row_edges[row + 1], column_edges[column] : column_edges[column + 1]
+            ].ravel()
+            for _ in range(SKY_GRID_CLIP_PASSES):
+                centre = np.median(values)
+                spread = 1.4826 * np.median(np.abs(values - centre))
+                kept = values[values <= centre + clip_sigmas * max(spread, 1e-6)]
+                if len(kept) == len(values):
+                    break
+                values = kept
+            grid[row, column] = np.median(values)
+    return grid
 
 
 def _bright_block_map(
@@ -693,8 +793,10 @@ def detect_stars(
     Returns
     -------
     stars : `numpy.ndarray`
-        Rows of ``[y, x, sigma_x, sigma_y]`` for the brightest stars with a
-        measurable shape, centroids in pixels.
+        Rows of ``[y, x, sigma_x, sigma_y, flux]`` for the brightest stars
+        with a measurable shape: centroids and widths in pixels, and the
+        flux, the sum of the background-subtracted pixels in the star's box
+        (ADU).
     blob_count : `int`
         Number of connected bright regions found (a count of stars that
         collapses when stars trail).
@@ -739,9 +841,9 @@ def detect_stars(
         centre_y, centre_x = (patch * yy).sum() / total, (patch * xx).sum() / total
         sigma_y = np.sqrt((patch * (yy - centre_y) ** 2).sum() / total)
         sigma_x = np.sqrt((patch * (xx - centre_x) ** 2).sum() / total)
-        rows.append([y + centre_y, x + centre_x, sigma_x, sigma_y])
+        rows.append([y + centre_y, x + centre_x, sigma_x, sigma_y, total])
     trail = _detect_straight_trail(residual, smooth, noise, trail_min_diagonal_fraction)
-    return np.array(rows).reshape(-1, 4), int(blob_count), longest_blob, trail
+    return np.array(rows).reshape(-1, 5), int(blob_count), longest_blob, trail
 
 
 def _match_shift(previous_stars: np.ndarray, stars: np.ndarray) -> tuple[tuple[float, float] | None, int]:
@@ -782,6 +884,87 @@ def _match_shift(previous_stars: np.ndarray, stars: np.ndarray) -> tuple[tuple[f
     return (float(offsets[agree, 0].mean()), float(offsets[agree, 1].mean())), votes
 
 
+def measure_field_shift(
+    reference_stars: np.ndarray, stars: np.ndarray, shape: tuple[int, int]
+) -> tuple[float, float, int, bool] | None:
+    """Measure how the stars of a frame sit against those of a reference frame.
+
+    The brightest stars of the two frames are matched by `_match_shift`. The
+    frame is tried as it is and with the reference turned half a revolution
+    about the frame centre, because a German equatorial mount turns the
+    camera half a revolution at a meridian flip. The try with more agreeing
+    star pairs wins.
+
+    Parameters
+    ----------
+    reference_stars, stars : `numpy.ndarray`
+        Star rows from `detect_stars` for the reference frame and the frame.
+    shape : `tuple` [`int`, `int`]
+        ``(height, width)`` of the frames in pixels.
+
+    Returns
+    -------
+    shift : `tuple` [`float`, `float`, `int`, `bool`] or `None`
+        ``(dy, dx, votes, turned)``. A star at ``p`` (row, column, counted
+        from 0) in the reference frame sits at ``p + (dy, dx)`` in the frame
+        when ``turned`` is `False`, and at ``(height - 1 - row, width - 1 -
+        column) + (dy, dx)`` when ``turned`` is `True`. ``votes`` is how many
+        star pairs agreed. `None` when fewer than `POINTING_MINIMUM_VOTES`
+        pairs agree.
+    """
+    height, width = shape
+    turned_reference = reference_stars.copy()
+    turned_reference[:, 0] = height - 1 - reference_stars[:, 0]
+    turned_reference[:, 1] = width - 1 - reference_stars[:, 1]
+    plain_shift, plain_votes = _match_shift(reference_stars, stars)
+    turned_shift, turned_votes = _match_shift(turned_reference, stars)
+    if max(plain_votes, turned_votes) < resolve(POINTING_MINIMUM_VOTES).value:
+        return None
+    if turned_votes > plain_votes and turned_shift is not None:
+        return turned_shift[0], turned_shift[1], turned_votes, True
+    if plain_shift is None:
+        return None
+    return plain_shift[0], plain_shift[1], plain_votes, False
+
+
+def measure_field_offset(
+    reference_stars: np.ndarray, stars: np.ndarray, shape: tuple[int, int]
+) -> tuple[float, float, int, bool] | None:
+    """Measure where a frame points, compared with a reference frame.
+
+    The stars are matched by `measure_field_shift`, which tries the frame as
+    it is and turned half a revolution. A frame that points at the same field
+    after a meridian flip is therefore not offset.
+
+    Parameters
+    ----------
+    reference_stars, stars : `numpy.ndarray`
+        Star rows from `detect_stars` for the reference frame and the frame.
+    shape : `tuple` [`int`, `int`]
+        ``(height, width)`` of the frames in pixels.
+
+    Returns
+    -------
+    offset : `tuple` [`float`, `float`, `int`, `bool`] or `None`
+        ``(dy, dx, votes, turned)``: where the frame's centre lies from the
+        reference frame's centre, in the reference frame's pixels (rows down,
+        columns right), how many star pairs agreed, and whether the frame is
+        turned half a revolution from the reference. `None` when fewer than
+        `POINTING_MINIMUM_VOTES` pairs agree.
+    """
+    found = measure_field_shift(reference_stars, stars, shape)
+    if found is None:
+        return None
+    shift_y, shift_x, votes, turned = found
+    if turned:
+        # A star at p in the reference sits at (size - 1 - p) + shift in the
+        # frame, so the frame centre falls at the reference centre + shift.
+        return float(shift_y), float(shift_x), votes, True
+    # A star at p in the reference sits at p + shift in the frame, so the
+    # frame centre falls at the reference centre - shift.
+    return -float(shift_y), -float(shift_x), votes, False
+
+
 def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = None) -> dict[str, Any]:
     """Measure one raw frame's stars, sky, saturation and straight trails.
 
@@ -796,9 +979,9 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
     Returns
     -------
     measurement : `dict`
-        ``star_count`` (connected bright regions), ``fwhm_px`` and
-        ``roundness`` (medians over the brightest stars, `None` if none
-        could be measured), ``longest_trail_px`` (the longest bright
+        ``star_count`` (connected bright regions), ``fwhm_px``
+        (the median over the brightest stars, `None` if none could be
+        measured), ``longest_trail_px`` (the longest bright
         region), ``line_trail_px`` and ``line_trail_angle_deg`` (the faint
         straight trail, 0 and `None` if there is none), ``sky_median_adu``,
         ``saturated_pixels``, ``saturation_threshold_adu`` and
@@ -806,7 +989,12 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
         from), ``camera`` (the header's ``INSTRUME`` text, or `None`),
         ``colour_camera`` (`True` if the header has a ``BAYERPAT`` pattern,
         the test `fits_access.frame_uses_color_filter_array` makes),
-        ``width_px``, and the private ``_stars`` array used for matching.
+        ``width_px`` and ``height_px``, ``bright_star_flux_adu`` (the
+        median flux of the brightest stars, up to `MAXIMUM_STARS_MEASURED` of
+        them, `None` if none could be measured; thin cloud dims it even when
+        the stars are still found), ``sky_grid_adu`` (the sky level in
+        each box of a grid, see `measure_sky_grid`, as nested lists), and the
+        private ``_stars`` array used for matching.
     """
     if trail_min_diagonal_fraction is None:
         trail_min_diagonal_fraction = resolve(TRAIL_MIN_DIAGONAL_FRACTION).value
@@ -817,19 +1005,17 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
     camera = str(camera) if camera else None
     stars, blob_count, longest_blob, straight_trail = detect_stars(image, trail_min_diagonal_fraction)
     threshold_adu, threshold_source = resolve_saturation_threshold(camera)
-    fwhm = roundness = None
+    fwhm = None
+    bright_star_flux = None
     if len(stars):
         fwhm = float(2.355 * np.median(np.sqrt(stars[:, 2] * stars[:, 3])))
-        narrow = np.minimum(stars[:, 2], stars[:, 3])
-        wide = np.maximum(stars[:, 2], stars[:, 3])
-        roundness = float(np.median(narrow / np.maximum(wide, 1e-6)))
+        bright_star_flux = float(np.median(stars[:, 4]))
     return {
         "path": path,
         "camera": camera,
         "colour_camera": bool(bayer_pattern is not None and str(bayer_pattern).strip()),
         "star_count": blob_count,
         "fwhm_px": fwhm,
-        "roundness": roundness,
         "longest_trail_px": longest_blob,
         "line_trail_px": straight_trail[0] if straight_trail else 0,
         "line_trail_angle_deg": straight_trail[1] if straight_trail else None,
@@ -838,6 +1024,9 @@ def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = Non
         "saturation_threshold_adu": float(threshold_adu),
         "saturation_threshold_source": threshold_source,
         "width_px": int(image.shape[1]),
+        "height_px": int(image.shape[0]),
+        "bright_star_flux_adu": bright_star_flux,
+        "sky_grid_adu": measure_sky_grid(image).tolist(),
         "_stars": stars,
     }
 
@@ -848,7 +1037,7 @@ def flag_frames(measurements: Sequence[dict[str, Any]]) -> None:
     A frame is flagged when it shows any of these: a star count under
     `LOW_STAR_FRACTION` or over `HIGH_STAR_MULTIPLE` times the batch median,
     a faint straight trail, a bright streak much longer than the batch's,
-    stars much wider or less round than the batch's, a lost match to the
+    stars much wider than the batch's, a lost match to the
     previous frame, or a large move since it.
 
     Parameters
@@ -865,7 +1054,6 @@ def flag_frames(measurements: Sequence[dict[str, Any]]) -> None:
     high_star_multiple = resolve(HIGH_STAR_MULTIPLE).value
     trail_limit = max(resolve(TRAIL_FLOOR_PIXELS).value, resolve(TRAIL_MULTIPLE).value * trail_median)
     soft_fwhm_multiple = resolve(SOFT_FWHM_MULTIPLE).value
-    round_star_ratio = resolve(ROUND_STAR_RATIO).value
     shift_fraction_of_width = resolve(SHIFT_FRACTION_OF_WIDTH).value
 
     for index, measurement in enumerate(measurements):
@@ -901,8 +1089,6 @@ def flag_frames(measurements: Sequence[dict[str, Any]]) -> None:
             flags.append(
                 f"Star width {measurement['fwhm_px']:.1f} px against a typical {fwhm_median:.1f}: soft."
             )
-        if measurement["roundness"] is not None and measurement["roundness"] < round_star_ratio:
-            flags.append(f"Stars are elongated (roundness {measurement['roundness']:.2f}).")
         shift = measurement.get("shift_from_previous_px")
         if (
             shift is not None

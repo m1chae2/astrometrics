@@ -596,10 +596,13 @@ def test_frames_lost_cites_the_quarantine_rows(isolated_butler: DiskButler) -> N
     lost = _of_rule(report, "frames_lost")
     assert len(lost) == 1
     assert lost[0].message == "2 of 32 frames were set aside (frame moved to _excluded/ 2)."
+    moved_ids = {frame_subject_id(library._path(index), "T") for index in (30, 31)}
     quarantine_ids = {
         row.row_id
         for row in library.rows
-        if row.metric.startswith("frame.quarantine") or row.metric == "frame.detected_region_count"
+        if row.metric.startswith("frame.quarantine")
+        or row.metric == "frame.detected_region_count"
+        or (row.metric == "frame.star_elongation" and row.subject.subject_id in moved_ids)
     }
     assert {reference.row_id for reference in lost[0].evidence} == quarantine_ids
 

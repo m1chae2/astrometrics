@@ -78,6 +78,9 @@ def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
             "denoise": True,
             "denoise_strength": 0.4,
             "star_toning": None,
+            "starnet": False,
+            "star_strength": None,
+            "star_stretch": None,
             "register_job": True,
         }
     ]

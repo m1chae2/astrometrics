@@ -51,7 +51,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 
 PHOTOMETRY_STARS_PROCESSED = "photometry.stars_processed_count"
 PHOTOMETRY_STARS_FOUND = "photometry.stars_found_count"
@@ -190,6 +190,9 @@ PHOTOMETRY_GATE_SCATTER_POPULATION = "photometry.gate_scatter_population"
 PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION = "photometry.gate_variability_discrimination"
 PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE = "photometry.gate_detectable_amplitude"
 PHOTOMETRY_GATE_FLUX_UNCERTAINTY = "photometry.gate_flux_uncertainty"
+PHOTOMETRY_GATE_TARGET_CROWDING = "photometry.gate_target_crowding"
+PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS = "photometry.notice_session_without_comparison_stars"
+PHOTOMETRY_NOTICE_LOGGED_WARNINGS = "photometry.notice_logged_warnings"
 
 _RUN_ONLY = (SubjectLevel.RUN,)
 _NO_UNCERTAINTY = "No uncertainty is reported. The value is an exact count."
@@ -1082,6 +1085,17 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         "Every point of every normalized light curve that carries an error.",
         register_entry="PHO-02",
     ),
+    _gate_metric(
+        PHOTOMETRY_GATE_TARGET_CROWDING,
+        "",
+        "Whether a bright neighbor lies close enough to the target star to add to its light.",
+        "The value is the peak of the target's nearest neighbor divided by the target's own peak. The "
+        "limit is 0.1. The check fails when a neighbor of at least that share of the target's peak "
+        "lies within the aperture radius plus 1.5 star widths. It is not checked when the run has no "
+        "single target star with a recorded crowding.",
+        "The target star of the run, measured on the reference frame.",
+        register_entry="PHO-02",
+    ),
     _zero_point_metric(
         PHOTOMETRY_CATALOG_ZERO_POINT_GAIA_G_MAG,
         "Gaia G",
@@ -1139,4 +1153,37 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
     *_WINDOW_METRICS,
     *_AMPLITUDE_METRICS,
     camera_without_profile_spec("photometry"),
+    notice_spec(
+        PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS,
+        Checkpoint.PHOTOMETRY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether a session's light curves could not be divided by comparison stars.",
+        "The number of sessions that had fewer than two usable comparison stars, so their light curves "
+        "kept raw flux. Their variable-star candidates are dropped, and when another session was "
+        "normalized their light curves are left out of the merged light curves. The reason names, for "
+        "each session, how many stars passed each rule of the comparison-star choice.",
+        "pipelines.photometry.post_processing.record_quality.session_without_comparison_stars_notice_measurement",
+        (
+            "Raw flux follows the sky's transparency and the airmass. Merged with another night's "
+            "normalized flux it makes every star look variable, so a person should know which nights "
+            "were left out and why."
+        ),
+    ),
+    notice_spec(
+        PHOTOMETRY_NOTICE_LOGGED_WARNINGS,
+        Checkpoint.PHOTOMETRY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether the run logged warnings that have no row of their own.",
+        "The number of different warnings the run logged (a warning repeated for every frame counts "
+        "once), such as a catalog server that did not answer, a camera profile with no gain for the "
+        "frames' settings, or a period search that failed. The reason lists them with how often each "
+        "was logged.",
+        "pipelines.photometry.post_processing.record_quality.logged_warnings_notice_measurement",
+        (
+            "A warning that is only in the log is easy to miss, so the job lists it with the run's "
+            "failed checks."
+        ),
+    ),
 )

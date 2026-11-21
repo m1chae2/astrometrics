@@ -165,6 +165,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
     "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    # A typical frame and a reference star for the viewer's Blink button
+    # (a read).
+    "quality:choose_blink_pair": ("astrometrics.quality", "choose_blink_pair"),
     # Compares a target's stack with the previous one. A failed plate solve can
     # take about ten minutes, so the service starts it as a background job.
     "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),
@@ -191,6 +194,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
     "analysis:cancel": ("analysis_orchestrator", "cancel_analysis"),
+    "analysis:identify_stack": ("analysis_orchestrator", "identify_stack"),
+    "analysis:get_stack_identification": ("analysis_orchestrator", "get_stack_identification"),
     # Target library
     "target:list": ("target_service", "get_all_targets_list"),
     "target:get": ("target_service", "get_targets"),
@@ -202,6 +207,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "target:send_to_phone": ("target_service", "send_to_phone"),
     "target:refresh": ("target_service", "refresh_target_images_by_id"),
     "target:get_files": ("target_service", "get_file_list"),
+    # Each frame's state (included, not stacked yet, set aside), with reasons.
+    "target:get_frame_statuses": ("target_service", "get_frame_statuses"),
+    # Moves chosen set-aside frames back into the target (a user action).
+    "target:put_back_frames": ("target_service", "put_back_frames"),
     "target:get_camera_index": ("target_service", "get_camera_index"),
     "target:get_frames": ("target_service", "get_frame_stats"),
     "target:get_frames_grouped": ("target_service", "get_frame_stats_grouped"),
@@ -213,6 +222,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "astronomy:spectral_class_summary": ("stellar_service", "get_spectral_class_summary"),
     "astronomy:stars_by_spectral_class": ("stellar_service", "get_stars_by_spectral_class"),
     "astronomy:get": ("stellar_service", "get_object_fuzzy_by_id"),
+    "astronomy:existing_ids": ("stellar_service", "get_existing_star_ids"),
     "astronomy:save": ("stellar_service", "save_objects"),
     "astronomy:delete": ("stellar_service", "delete_object"),
     "astronomy:analyze_periodicity": ("stellar_service", "analyze_periodicity"),
@@ -286,6 +296,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "advisory:target_report": ("advisory_service", "get_target_report"),
     "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
     "advisory:result": ("advisory_service", "get_result_statements"),
+    "advisory:star_shapes": ("advisory_service", "get_star_shape_review"),
     "advisory:depth_goal": ("advisory_service", "get_depth_goal"),
     "advisory:set_depth_goal": ("advisory_service", "set_depth_goal"),
     "history:nights": ("advisory_service", "list_nights"),
@@ -324,6 +335,7 @@ HEAVY_METHODS = frozenset({
     "advisory:target_report",
     "advisory:tonight",
     "advisory:depth_goal",
+    "advisory:star_shapes",
     "astronomy:list",
     "astronomy:visible",
     "target:get_targets",

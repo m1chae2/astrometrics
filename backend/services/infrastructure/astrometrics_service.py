@@ -93,6 +93,9 @@ class AstrometricsService:
     def update_processing_jobs(self, jobs: list[dict[str, Any]]) -> None:
         """Update the active background processing jobs and broadcast.
 
+        Nothing is sent when the list is the same as before, so the job list
+        can be read again every few seconds without flooding the app.
+
         Parameters
         ----------
         jobs : `list` of `dict`
@@ -100,6 +103,8 @@ class AstrometricsService:
             previously tracked list.
         """
         with self._lock:
+            if self._state["processing"] == jobs:
+                return
             self._state["processing"] = jobs
             state_to_send = dict(self._state)
 

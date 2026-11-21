@@ -13,6 +13,7 @@ from typing import Any
 from astrometricslib import FilterType, Target
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from backend.services.data.deletion_archive import archive_record_before_delete
+from backend.services.data.frame_status import build_frame_statuses
 from backend.services.data.image_service import ImageService
 from backend.services.infrastructure.phone_share import send_file_to_phone
 
@@ -369,10 +370,100 @@ class TargetService:
 
         return {
             "files": files,
-            "stackedImage": target.stacking.stacked_image or None,
-            "stackedSpectralTarget": target.spectral_stacking.stacked_image or None,
+            "stackedImage": self._existing_stack_path(target.stacking.stacked_image),
+            "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
             "totalExposure": target.exposure_sec,
         }
+
+    def get_frame_statuses(self, target_id: str) -> dict:
+        """Say what state each frame of a target is in, for the File Browser.
+
+        Each frame is ``included`` or ``not_stacked`` (taken after the latest
+        stack file was written, or the target has no stack). The frames the
+        stacker moved into an `_excluded` folder are listed too, as
+        ``set_aside``, each with the stacker's kind and reason, because the
+        target's own frame list no longer holds them.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target's id.
+
+        Returns
+        -------
+        report : `dict`
+            ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
+            ``reason``, ``date``, ``exposure``, ``originalPath``,
+            ``restorable`` and ``restoreNote``) and ``stackedAt``, the time
+            of the latest stack file in seconds since 1970, or `None`.
+            A target that is not found gives an empty list.
+        """
+        target = self.get_targets(target_id)
+        if not target:
+            return {"frames": [], "stackedAt": None}
+        stack_paths = {
+            self._existing_stack_path(target.stacking.stacked_image),
+            self._existing_stack_path(target.spectral_stacking.stacked_image),
+        }
+        stack_paths.update(
+            self._existing_stack_path(configuration.stacked_image)
+            for configuration in target.stacking.stacks_by_configuration.values()
+        )
+        stack_times = [os.path.getmtime(path) for path in stack_paths if path]
+        set_aside = self.astrometrics.quality.set_aside_frames(target.id)
+        report = build_frame_statuses(target.frames, set_aside, max(stack_times) if stack_times else None)
+        return report.model_dump(by_alias=True)
+
+    def put_back_frames(self, target_id: str, paths: list[str]) -> dict:
+        """Move set-aside frames back into a target.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target's id.
+        paths : `list` [`str`]
+            The set-aside frames to move back, as ``get_frame_statuses``
+            lists them.
+
+        Returns
+        -------
+        result : `dict`
+            ``restored``, the original paths of the frames that went back.
+            A frame that could not be moved is not in the list.
+
+        """
+        restored = self.astrometrics.quality.put_back_set_aside_frames(target_id, paths)
+        return {"restored": restored}
+
+    def _existing_stack_path(self, recorded_path: str | None) -> str | None:
+        """Return a recorded stack path only if the file is on disk.
+
+        A record made before the stacks moved to the stacks folder may
+        still name the old place under ``lights/``. The same file name is
+        looked for under ``lights/<target>/`` in the stacks folder. A
+        stack that exists nowhere is a status (there is no stack), not an
+        error, so the answer is `None`.
+
+        Parameters
+        ----------
+        recorded_path : `str` or `None`
+            The stack path saved in the target record.
+
+        Returns
+        -------
+        path : `str` or `None`
+            A path that exists, or `None` if there is no such stack.
+        """
+        if not recorded_path:
+            return None
+        if os.path.exists(recorded_path):
+            return recorded_path
+        get_stacks_path = getattr(getattr(self, "config", None), "get_stacks_path", None)
+        if not callable(get_stacks_path):
+            return None
+        target_folder = os.path.basename(os.path.dirname(recorded_path))
+        moved = os.path.join(str(get_stacks_path()), "lights", target_folder, os.path.basename(recorded_path))
+        return moved if os.path.exists(moved) else None
 
     def get_frame_stats_grouped(self, target_id: str, camera: str | None = None) -> list:
         """Calculate exposure specs grouped by filter, with calibration status.

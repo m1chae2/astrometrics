@@ -29,7 +29,9 @@ class _Remote:
         self.log_error: Exception | None = None
         self.samples = 42
 
-    def sync_frames(self, target: str, on_copied: Callable[[int], None] | None = None) -> SimpleNamespace:
+    def sync_frames(
+        self, target: str, on_copied: Callable[[int], None] | None = None, register_job: bool | None = None
+    ) -> SimpleNamespace:
         """Record the target, report 2 copied frames and wait to be released.
 
         Returns

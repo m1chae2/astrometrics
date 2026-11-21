@@ -16,12 +16,24 @@ checks for a mounted drive, the launch identity (`LaunchIdentity`,
 `require_local_host`, `is_loopback_host` and the ``ASTROMETRICS_OFFLINE``
 variable name `OFFLINE_VARIABLE`), the folders a settings file names
 (`library_folders`),
-and `stop_process_group`, which ends a program and the helpers it started.
+and `stop_process_group`, which ends a program and the helpers it started,
+and the HEALPix sky-tile helpers (`tile_of_source_id`, `tiles_for_cone`,
+`tiles_for_footprint`, `pixels_near_circles`, `healpix_pixels_of_points`,
+`pixel_source_id_range`, `build_pixel_query`).
 The private driver code (Siril, catalog
 access, camera profiles) lives in `astrometricslib._internal.drivers`.
 Each name here is imported from the module where its code lives today.
 """
 
+from astrometricslib._internal.drivers.sky_tiles import (
+    build_pixel_query,
+    healpix_pixels_of_points,
+    pixel_source_id_range,
+    pixels_near_circles,
+    tile_of_source_id,
+    tiles_for_cone,
+    tiles_for_footprint,
+)
 from astrometricslib.foundation.launch_identity import (
     LaunchIdentity,
     launch_identity_from_settings,
@@ -70,6 +82,7 @@ __all__ = [
     "LaunchIdentity",
     "LibraryFolders",
     "VersionedCache",
+    "build_pixel_query",
     "bump_data_version",
     "connect_db",
     "file_lock",
@@ -80,12 +93,15 @@ __all__ = [
     "get_target_camera_names",
     "get_target_data_version",
     "get_target_document_signs",
+    "healpix_pixels_of_points",
     "is_loopback_host",
     "is_path_inside",
     "launch_identity_from_settings",
     "library_folders",
     "locks_directory",
     "network_is_offline",
+    "pixel_source_id_range",
+    "pixels_near_circles",
     "read_data_versions",
     "read_launch_identity",
     "require_local_host",
@@ -94,4 +110,7 @@ __all__ = [
     "resolve_mounted_path",
     "scratch_directory",
     "stop_process_group",
+    "tile_of_source_id",
+    "tiles_for_cone",
+    "tiles_for_footprint",
 ]

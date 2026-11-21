@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.shared.image_scaling import measure_sky, sky_level_for_peak
+from astrometricslib.pipelines.shared.image_scaling import measure_sky_background, sky_level_for_peak
 from astrometricslib.pipelines.stacking.post_processing.sky_level import (
     DARKEST_SKY_LEVEL,
     EXTENDED_LIGHT_BRIGHTNESS,
@@ -85,8 +85,8 @@ def test_a_stronger_glow_never_lightens_the_sky() -> None:
 
 
 def test_a_middle_glow_gets_a_middle_sky() -> None:
-    """Verify a glow of several noise units lands between the two limits."""
-    level = choose_sky_level(_image(glow_sigma=8.0)).sky_level
+    """Verify a glow of ten noise units lands between the two limits."""
+    level = choose_sky_level(_image(glow_sigma=10.0)).sky_level
 
     assert DARKEST_SKY_LEVEL.default < level < LIGHTEST_SKY_LEVEL.default
 
@@ -146,13 +146,12 @@ def test_a_fits_file_is_read_and_a_bad_file_gets_the_fallback(tmp_path: Path) ->
 
 
 def test_the_sky_measurement_ignores_blank_images_and_finds_the_noise() -> None:
-    """Verify `measure_sky` skips blank images and finds the noise."""
-    assert measure_sky(np.zeros((32, 32))) is None
+    """Verify the sky measurement skips blank images and finds the noise."""
+    assert measure_sky_background(np.zeros((32, 32))) is None
 
-    median, sigma, peak = measure_sky(_image())
+    median, sigma = measure_sky_background(_image())
     assert median == pytest.approx(_SKY, abs=1e-4)
     assert sigma == pytest.approx(_NOISE, rel=0.1)
-    assert peak == pytest.approx(1.0)
 
 
 def test_a_brighter_feature_leaves_the_sky_darker() -> None:

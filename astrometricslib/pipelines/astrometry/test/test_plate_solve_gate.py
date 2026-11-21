@@ -51,6 +51,8 @@ def validate_with_options(
         plate_solve_matched_star_count=None,
         wcs_refinement=None,
         astrometry_flags=[],
+        gaia_tiles_count=0,
+        gaia_tiles_missing_count=0,
         wcs=wcs,
         wcs_is_header_fallback=False,
         image=SimpleNamespace(header={}),

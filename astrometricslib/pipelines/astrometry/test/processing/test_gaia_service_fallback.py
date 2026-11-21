@@ -2,17 +2,17 @@
 
 Description: On 2026-10-10 the ESA Gaia archive timed out on the pipeline's
 G < 18 query for M 13 while VizieR returned the same stars in 10 s, and every
-remote lookup of 22 of 23 targets had failed. The pipeline now asks VizieR
-first, the ESA archive second, and VizieR again at brighter limits. These
-tests check that order, that the depth actually fetched is the one recorded
-in the cache and flagged on the run, and that VizieR's columns are mapped to
-the archive's. They use fake services, so no network is needed.
+remote lookup of 22 of 23 targets had failed. Each Gaia sky tile is now asked
+of VizieR first, the ESA archive second, and VizieR again at brighter limits
+(`star_identifier.make_gaia_tile_fetcher`). These tests check that order,
+that the depth actually fetched is the one reported, how the circuit breaker
+counts, and that VizieR's columns are mapped to the archive's. They use fake
+services, so no network is needed.
 """
 
 import socket
 import sys
 from collections.abc import Iterator
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,17 +21,16 @@ import pytest
 import requests
 from astropy.table import Table
 
-from astrometricslib._internal.drivers import catalog_store, gaia_cone_driver
+from astrometricslib._internal.drivers import gaia_cone_driver
 from astrometricslib._internal.drivers.gaia_cone_driver import (
     query_gaia_cone_vizier as real_query_gaia_cone_vizier,
 )
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
-from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 CENTRE_RA_DEG = 250.445
 CENTRE_DEC_DEG = 36.157
-RADIUS_DEG = 0.3
+TILE = 12345
 
 
 def _stars(count: int = 5) -> Table:
@@ -106,13 +105,13 @@ def services(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
 
     monkeypatch.setattr(
         gaia_cone_driver,
-        "query_gaia_cone_vizier",
-        lambda ra, dec, radius, magnitude, row_limit, timeout: answer("vizier", magnitude),
+        "query_gaia_tile_vizier",
+        lambda level, tile, have, magnitude, row_limit, timeout: answer("vizier", magnitude),
     )
     monkeypatch.setattr(
         gaia_cone_driver,
-        "query_gaia_cone_esa",
-        lambda ra, dec, radius, magnitude, row_limit: answer("esa", magnitude),
+        "query_gaia_tile_esa",
+        lambda level, tile, have, magnitude, row_limit: answer("esa", magnitude),
     )
     star_identifier_module.reset_gaia_circuit_breaker()
     star_identifier_module.reset_gaia_query_statistics()
@@ -121,43 +120,22 @@ def services(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     star_identifier_module.reset_gaia_query_statistics()
 
 
-@pytest.fixture
-def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Give the test an empty Gaia cache in its own folder.
-
-    Parameters
-    ----------
-    tmp_path : `pathlib.Path`
-        The test's own folder, used as the library path.
-    monkeypatch : `pytest.MonkeyPatch`
-        Used to point the configuration at that folder.
+def _fetch() -> gaia_cone_driver.TileFetch | None:
+    """Ask for the test tile at G < 18, as the star identifier does.
 
     Returns
     -------
-    config : `AppConfiguration`
-        Settings whose library path is the test folder.
+    answer : `TileFetch` or `None`
+        The answer, or `None` when every service failed or no fetcher was
+        given.
     """
-    import astrometricslib.foundation.config as config_loader_module
-    from astrometricslib.foundation.config import AppConfiguration
-
-    app_config = AppConfiguration()
-    app_config.update_config({"Image Library": {"path": str(tmp_path)}})
-    monkeypatch.setattr(config_loader_module, "get_configuration", lambda: app_config)
-    (app_config.get_library_path() / "catalogs").mkdir(parents=True, exist_ok=True)
-    return app_config
-
-
-def _fetch() -> Table | None:
-    """Ask for the test field at G < 18 with a large row limit.
-
-    Returns
-    -------
-    table : `astropy.table.Table` or `None`
-        What `_fetch_gaia_cone` returned.
-    """
-    return star_identifier_module._fetch_gaia_cone(
-        CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0, 1000, "test"
-    )
+    fetch, _ = star_identifier_module.make_gaia_tile_fetcher()
+    if fetch is None:
+        return None
+    try:
+        return fetch(7, TILE, 0.0, 18.0)
+    except ExternalServiceError:
+        return None
 
 
 def test_vizier_answers_first_and_the_archive_is_not_asked(services: dict[str, Any]) -> None:
@@ -168,9 +146,8 @@ def test_vizier_answers_first_and_the_archive_is_not_asked(services: dict[str, A
 
     assert table is not None
     assert services["calls"] == [("vizier", 18.0)]
-    assert table.meta["gaia_service"] == "VizieR"
-    assert table.meta["magnitude_limit"] == pytest.approx(18.0)
-    assert table.meta["depth_reduced"] is False
+    assert table.service == "VizieR"
+    assert table.complete_to_g == pytest.approx(18.0)
 
 
 def test_the_archive_answers_when_vizier_fails(services: dict[str, Any]) -> None:
@@ -181,8 +158,8 @@ def test_the_archive_answers_when_vizier_fails(services: dict[str, Any]) -> None
 
     assert table is not None
     assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
-    assert table.meta["gaia_service"] == "ESA Gaia archive"
-    assert table.meta["depth_reduced"] is False
+    assert table.service == "ESA Gaia archive"
+    assert table.complete_to_g == pytest.approx(18.0)
 
 
 def test_a_connection_failure_rules_out_the_brighter_limits(services: dict[str, Any]) -> None:
@@ -234,8 +211,8 @@ def test_a_read_timeout_keeps_the_brighter_limits(
     assert table is not None
     assert services["calls"][0] == ("vizier", 18.0)
     assert ("vizier", 17.0) in services["calls"]
-    assert table.meta["depth_reduced"] is True
-    assert table.meta["gaia_service"] == "VizieR"
+    assert table.complete_to_g == pytest.approx(17.0)
+    assert table.service == "VizieR"
 
 
 def test_a_requests_read_timeout_is_not_a_connection_failure() -> None:
@@ -268,15 +245,15 @@ def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> N
 def test_later_fetches_in_the_same_run_skip_the_failed_services(
     services: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A second fetch makes no remote call, and each service warned once."""
-    with caplog.at_level("WARNING"):
+    """A second fetch makes no remote call, and each service is logged once."""
+    with caplog.at_level("INFO"):
         _fetch()
         services["calls"].clear()
         assert _fetch() is None
 
     assert services["calls"] == []
-    failure_warnings = [record for record in caplog.records if "Gaia test from" in record.getMessage()]
-    assert len(failure_warnings) == 2
+    failure_lines = [record for record in caplog.records if "Gaia tile download from" in record.getMessage()]
+    assert len(failure_lines) == 2
 
 
 def test_a_new_run_tries_the_services_again(services: dict[str, Any]) -> None:
@@ -305,78 +282,13 @@ def test_a_working_network_asks_the_same_questions_as_before(services: dict[str,
     assert services["calls"] == [("vizier", 18.0)]
 
 
-def _record_cached_download(config: Any, radius_deg: float, complete: bool) -> None:
-    """Put stars and a region record for the test field into the cache.
+def test_an_open_breaker_refuses_every_later_tile(services: dict[str, Any]) -> None:
+    """After the breaker opens, no fetcher is given and nothing is sent."""
+    for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+        star_identifier_module._record_gaia_failure("test")
 
-    Parameters
-    ----------
-    config : `AppConfiguration`
-        Settings pointing at the test's cache folder.
-    radius_deg : `float`
-        The recorded download's radius.
-    complete : `bool`
-        If `False`, no region record is written, as for stars left by a
-        download that was never recorded.
-    """
-    stars = _stars()
-    catalog_store.insert_gaia_sources(
-        config,
-        [
-            (
-                str(row["source_id"]),
-                float(row["ra"]),
-                float(row["dec"]),
-                float(row["phot_g_mean_mag"]),
-                "x",
-                0.0,
-                0.0,
-            )
-            for row in stars
-        ],
-    )
-    if complete:
-        catalog_store.record_gaia_region(
-            config, CENTRE_RA_DEG, CENTRE_DEC_DEG, radius_deg, 18.0, row_limit_hit=False
-        )
-
-
-def test_a_cached_field_covering_the_cone_makes_no_remote_call(services: dict[str, Any], config: Any) -> None:
-    """A recorded download holding the whole cone is used; nothing is sent."""
-    _record_cached_download(config, radius_deg=0.6, complete=True)
-
-    table, coordinates = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
-
-    assert table is not None and coordinates is not None
-    assert len(table) == 5
+    assert _fetch() is None
     assert services["calls"] == []
-
-
-def test_stars_in_an_unrecorded_cache_are_not_used_when_every_service_fails(
-    services: dict[str, Any], config: Any
-) -> None:
-    """A cache with no complete download never stands in for the network."""
-    _record_cached_download(config, radius_deg=0.6, complete=False)
-
-    table, coordinates = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
-
-    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
-    assert table is None and coordinates is None
-
-
-def test_the_cache_records_the_depth_fetched_not_the_depth_asked(
-    services: dict[str, Any], config: Any
-) -> None:
-    """A G < 17 answer to a G < 18 request is not reused as complete to 18."""
-    shallower = _stars()
-    shallower.meta["magnitude_limit"] = 17.0
-    shallower.meta["row_limit_reached"] = False
-
-    StarIdentifier._cache_gaia_results(
-        config, shallower, region=(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 17.0)
-    )
-
-    assert catalog_store.is_gaia_region_complete(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 17.0)
-    assert not catalog_store.is_gaia_region_complete(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
 
 
 def test_vizier_columns_are_mapped_to_the_archive_names(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -418,7 +330,7 @@ def test_vizier_columns_are_mapped_to_the_archive_names(monkeypatch: pytest.Monk
     monkeypatch.setitem(sys.modules, "astroquery.vizier", SimpleNamespace(Vizier=FakeVizier))
 
     # The real function, imported before the test suite's fixtures replace it.
-    table = real_query_gaia_cone_vizier(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0, 10, 30)
+    table = real_query_gaia_cone_vizier(CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.3, 18.0, 10, 30)
 
     assert list(table.colnames) == list(gaia_cone_driver.GAIA_CONE_COLUMNS)
     assert table["source_id"][0] == "1327870404636047872"

@@ -1,207 +1,22 @@
-"""Purpose: Tests for the depth and size limits of the Gaia cone search.
+"""Purpose: Tests for the depth of the Gaia stars an image is matched against.
 
-Description: The old search asked for every Gaia star in the circle, ranked
-them by distance from the centre and stopped at 10,000 rows. In a dense field
-the stars at the edge were cut, so detected stars there found no match. The
-search now asks only for stars brighter than a magnitude limit, returns the
-brightest first, allows more rows, and records a flag when it still hits the
-row limit. The limit comes from how deep the frame's own detections go. These
-tests use a fake Gaia client, so no network is needed.
+Description: The depth is predicted from the image header (see
+`gaia_depth.predict_gaia_depth_from_header`). The faintest detected star's
+magnitude is estimated from the catalog-matched stars only to check that
+prediction: a fainter star records the flag ``gaia_depth_exceeded``. These
+tests use stand-in Gaia stars, so no cache or network is needed.
 """
 
-import sys
-from collections.abc import Iterator
-from pathlib import Path
-from unittest.mock import MagicMock
-
-import numpy as np
 import pytest
-from astropy.table import Table
+from astropy.io import fits
 
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing.gaia_depth import GaiaDepthPrediction
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
-CENTRE_RA_DEG = 250.42
-CENTRE_DEC_DEG = 36.46
 ZERO_POINT = 24.0
-
-
-def fake_gaia(monkeypatch: pytest.MonkeyPatch, row_count: int) -> list[str]:
-    """Replace Gaia's job launcher with one that returns a made-up table.
-
-    Parameters
-    ----------
-    monkeypatch : `pytest.MonkeyPatch`
-        Used to replace `Gaia.launch_job_async`.
-    row_count : `int`
-        How many rows the fake query returns.
-
-    Returns
-    -------
-    queries : `list` [`str`]
-        Collects the ADQL text of each query sent.
-    """
-    gaia_module = MagicMock(name="astroquery.gaia")
-    monkeypatch.setitem(sys.modules, "astroquery.gaia", gaia_module)
-    queries: list[str] = []
-    table = Table({
-        "source_id": np.arange(row_count).astype(str),
-        "ra": CENTRE_RA_DEG + np.linspace(0.0, 0.05, row_count),
-        "dec": np.full(row_count, CENTRE_DEC_DEG),
-        "phot_g_mean_mag": np.linspace(8.0, 17.9, row_count),
-        "designation": [f"Gaia DR3 {index}" for index in range(row_count)],
-        "pmra": np.zeros(row_count),
-        "pmdec": np.zeros(row_count),
-    })
-
-    def launch_job_async(query: str, **_keywords: object) -> MagicMock:
-        """Record the query and return a finished job holding the table.
-
-        Parameters
-        ----------
-        query : `str`
-            The ADQL query text.
-        **_keywords
-            Ignored job options.
-
-        Returns
-        -------
-        job : `unittest.mock.MagicMock`
-            A job whose ``get_results()`` is the made-up table.
-        """
-        queries.append(query)
-        job = MagicMock()
-        job.get_results.return_value = table.copy()
-        return job
-
-    monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", launch_job_async)
-    return queries
-
-
-@pytest.fixture(autouse=True)
-def isolated_gaia_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Give each test an empty Gaia cache and a closed circuit breaker.
-
-    Parameters
-    ----------
-    tmp_path : `pathlib.Path`
-        The test's own folder, used as the library path.
-    monkeypatch : `pytest.MonkeyPatch`
-        Used to point the configuration at that folder.
-
-    Yields
-    ------
-    None
-        Runs the test between setup and clean-up.
-    """
-    import astrometricslib.foundation.config as config_loader_module
-    from astrometricslib.foundation.config import AppConfiguration
-
-    config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(tmp_path)}})
-    monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
-    star_identifier_module.reset_gaia_circuit_breaker()
-    yield
-    star_identifier_module.reset_gaia_circuit_breaker()
-
-
-def test_a_result_of_exactly_the_row_limit_is_marked_as_cut_short(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A query that returns exactly the limit sets ``row_limit_reached``."""
-    row_limit = star_identifier_module.GAIA_ROW_LIMIT
-    fake_gaia(monkeypatch, row_count=row_limit)
-
-    table, _ = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.5)
-
-    assert table is not None
-    assert len(table) == row_limit
-    assert table.meta["row_limit_reached"] is True
-
-
-def test_a_result_under_the_row_limit_is_not_marked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """One row fewer than the limit is a complete answer."""
-    fake_gaia(monkeypatch, row_count=star_identifier_module.GAIA_ROW_LIMIT - 1)
-
-    table, _ = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.5)
-
-    assert table is not None
-    assert not table.meta.get("row_limit_reached")
-
-
-def test_the_row_limit_is_raised_above_the_old_ten_thousand() -> None:
-    """The old limit of 10,000 rows truncated dense fields."""
-    assert star_identifier_module.GAIA_ROW_LIMIT > 10_000
-
-
-def test_the_query_has_a_magnitude_limit_and_returns_the_brightest_first(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The ADQL names the limit, the row cap and a brightness ordering."""
-    queries = fake_gaia(monkeypatch, row_count=20)
-
-    StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.5, max_magnitude=16.5)
-
-    assert len(queries) == 1
-    assert "phot_g_mean_mag < 16.5" in queries[0]
-    assert f"TOP {star_identifier_module.GAIA_ROW_LIMIT}" in queries[0]
-    assert "ORDER BY phot_g_mean_mag ASC" in queries[0]
-
-
-def test_a_truncated_result_puts_a_flag_on_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The matching step copies the truncation onto the identifier's flags."""
-    fake_gaia(monkeypatch, row_count=star_identifier_module.GAIA_ROW_LIMIT)
-    config = MagicMock()
-    config.get_value.return_value = None
-    identifier = StarIdentifier(config=config)
-    detection = StellarObject(id="Star_1", name="Star_1")
-    sky_positions = {id(detection): (CENTRE_RA_DEG, CENTRE_DEC_DEG)}
-
-    identifier._match_stars_against_gaia(
-        [detection], sky_positions, CENTRE_RA_DEG, CENTRE_DEC_DEG, None, 100, 100, 0.5
-    )
-
-    assert star_identifier_module.FLAG_GAIA_ROW_LIMIT_REACHED in identifier.astrometry_flags
-
-
-def test_the_frame_derived_limit_reaches_the_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A limit passed to the matching step is the one in the query."""
-    queries = fake_gaia(monkeypatch, row_count=20)
-    config = MagicMock()
-    config.get_value.return_value = None
-    identifier = StarIdentifier(config=config)
-    detection = StellarObject(id="Star_1", name="Star_1")
-    sky_positions = {id(detection): (CENTRE_RA_DEG, CENTRE_DEC_DEG)}
-
-    identifier._match_stars_against_gaia(
-        [detection], sky_positions, CENTRE_RA_DEG, CENTRE_DEC_DEG, None, 100, 100, 0.5, magnitude_limit=15.5
-    )
-
-    assert "phot_g_mean_mag < 15.5" in queries[0]
-
-
-def test_cached_stars_fainter_than_the_limit_are_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A cached download deeper than the request is trimmed to the request."""
-    from astrometricslib._internal.drivers import catalog_store
-    from astrometricslib.foundation.config import get_configuration
-
-    config = get_configuration()
-    (config.get_library_path() / "catalogs").mkdir(parents=True, exist_ok=True)
-    catalog_store.insert_gaia_sources(
-        config,
-        [
-            (f"{index}", CENTRE_RA_DEG + index * 1e-4, CENTRE_DEC_DEG, mag, f"Gaia DR3 {index}")
-            for index, mag in enumerate([10.0, 11.0, 12.0, 13.0, 14.0, 17.0, 19.5, 0.0])
-        ],
-    )
-    # The download went to G < 20, deeper than the request for G < 18.
-    catalog_store.record_gaia_region(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.6, 20.0, row_limit_hit=False)
-
-    cached = StarIdentifier._query_gaia_region_from_cache(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.5, 18.0)
-
-    assert cached is not None
-    magnitudes = sorted(float(value) for value in cached[0]["phot_g_mean_mag"])
-    # The 19.5 star is dropped. The star stored as magnitude 0 is kept.
-    assert magnitudes == [0.0, 10.0, 11.0, 12.0, 13.0, 14.0, 17.0]
 
 
 def make_star(flux: float, magnitude: float | None) -> StellarObject:
@@ -264,31 +79,21 @@ def stars_with_depth(faintest_magnitude: float, matched_count: int = 6) -> list[
     return [*matched, make_star(flux_of(faintest_magnitude), None)]
 
 
-@pytest.mark.parametrize(
-    ("faintest", "expected"),
-    [
-        (16.0, 17.0),
-        (18.5, 19.5),
-        (11.0, 14.0),
-        (22.0, 20.0),
-    ],
-)
-def test_the_limit_is_the_faintest_detection_plus_one_magnitude_within_clamps(
-    faintest: float, expected: float
-) -> None:
-    """Depth plus 1 mag, kept between the minimum and maximum limits."""
-    limit = star_identifier_module.estimate_gaia_magnitude_limit(stars_with_depth(faintest))
+@pytest.mark.parametrize("faintest", [11.0, 16.0, 18.5, 22.0])
+def test_the_estimate_is_the_faintest_detection_with_no_margin_or_clamp(faintest: float) -> None:
+    """The estimate is the faintest star's magnitude, with no margin."""
+    estimate = star_identifier_module.estimate_faintest_detected_magnitude(stars_with_depth(faintest))
 
-    assert limit == pytest.approx(expected, abs=1e-6)
+    assert estimate == pytest.approx(faintest, abs=1e-6)
 
 
 def test_too_few_matched_stars_gives_no_estimate() -> None:
-    """With fewer than five identified stars, the caller uses the default."""
+    """With fewer than five identified stars there is no estimate to check."""
     stars = stars_with_depth(
         16.0, matched_count=star_identifier_module.MINIMUM_STARS_FOR_DEPTH_ESTIMATE.default - 1
     )
 
-    assert star_identifier_module.estimate_gaia_magnitude_limit(stars) is None
+    assert star_identifier_module.estimate_faintest_detected_magnitude(stars) is None
     assert star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT.default == pytest.approx(18.0)
 
 
@@ -296,4 +101,81 @@ def test_a_star_without_a_flux_is_ignored_by_the_estimate() -> None:
     """A zero or missing flux cannot give a magnitude."""
     stars = [*stars_with_depth(16.0), make_star(0.0, None), StellarObject(id="x", name="x")]
 
-    assert star_identifier_module.estimate_gaia_magnitude_limit(stars) == pytest.approx(17.0, abs=1e-6)
+    assert star_identifier_module.estimate_faintest_detected_magnitude(stars) == pytest.approx(16.0, abs=1e-6)
+
+
+def _identifier_with_depth(query_depth: float) -> StarIdentifier:
+    """Build an identifier whose image predicted a given query depth.
+
+    Parameters
+    ----------
+    query_depth : `float`
+        The predicted depth.
+
+    Returns
+    -------
+    identifier : `StarIdentifier`
+        The identifier.
+    """
+    identifier = StarIdentifier.__new__(StarIdentifier)
+    identifier.astrometry_flags = []
+    identifier.gaia_depth_prediction = GaiaDepthPrediction(
+        query_depth=query_depth, limiting_magnitude=query_depth - 1.0, is_fallback=False, reason=""
+    )
+    return identifier
+
+
+def test_a_detection_fainter_than_the_query_depth_raises_the_flag() -> None:
+    """A star fainter than the query depth means it was too shallow."""
+    identifier = _identifier_with_depth(17.0)
+
+    identifier._check_query_depth(stars_with_depth(18.0))
+
+    assert star_identifier_module.FLAG_GAIA_DEPTH_EXCEEDED in identifier.astrometry_flags
+
+
+def test_a_detection_inside_the_query_depth_raises_no_flag() -> None:
+    """The flag stays off when every detection is brighter than the depth."""
+    identifier = _identifier_with_depth(19.0)
+
+    identifier._check_query_depth(stars_with_depth(18.0))
+
+    assert identifier.astrometry_flags == []
+
+
+def test_the_tiles_are_filled_to_the_predicted_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tiles are read to the depth predicted from the header."""
+    calls = use_field_stars(monkeypatch)
+    identifier = _identifier_with_depth(19.6)
+    identifier.field_gaia_stars = None
+    identifier.config = None
+
+    identifier._prepare_field_gaia_stars(None, 100, 100)
+
+    assert calls[0][0] == pytest.approx(19.6)
+
+
+def test_without_a_header_the_default_depth_is_used() -> None:
+    """With no prediction, the depth is `GAIA_DEFAULT_MAGNITUDE_LIMIT`."""
+    identifier = StarIdentifier.__new__(StarIdentifier)
+    identifier.gaia_depth_prediction = None
+
+    assert identifier._gaia_query_depth() == pytest.approx(18.0)
+
+
+def test_an_unknown_camera_gives_the_fallback_depth() -> None:
+    """A header whose camera has no profile gives the default depth."""
+    from astrometricslib.pipelines.astrometry.processing.gaia_depth import predict_gaia_depth_from_header
+
+    header = fits.Header()
+    header["INSTRUME"] = "No such camera"
+    header["APTDIA"] = 75.0
+    header["SCALE"] = 1.915
+    header["EXPTIME"] = 14760.0
+    header["STACKCNT"] = 123
+
+    prediction = predict_gaia_depth_from_header(header)
+
+    # An unknown camera has only the generic profile, which is not used.
+    assert prediction.is_fallback
+    assert prediction.reason == "no camera profile"

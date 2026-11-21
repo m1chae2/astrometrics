@@ -1,10 +1,29 @@
 /**
  * @file useCanvasInteraction.ts
  * @description Hook providing pan, zoom, wheel, and touch interactions for FITS and bitmap canvases.
- * Maintains transform coordinates and viewport scaling.
+ * Maintains transform coordinates and viewport scaling. While the user drags or zooms, the image
+ * and the overlay layers (marked `data-overlay-layer`) move together by CSS in the same frame, and
+ * React state is updated at most once per animation frame.
  */
-import { useState, useRef, useEffect, useCallback, RefObject } from 'react';
-import { clamp } from '../utils/transformUtils';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, RefObject } from 'react';
+import { clamp, overlayTransformBetween } from '../utils/transformUtils';
+
+/** The share of the window the fitted picture covers, which leaves a small margin. */
+export const FIT_MARGIN = 0.95;
+
+/**
+ * Gives the zoom that fits a whole picture in a window.
+ *
+ * @param containerWidth The window's width in screen pixels.
+ * @param containerHeight The window's height in screen pixels.
+ * @param drawnWidth The picture's width as drawn.
+ * @param drawnHeight The picture's height as drawn.
+ * @returns The zoom, or 0 while the window or the picture has no size.
+ */
+export function fitScaleFor(containerWidth: number, containerHeight: number, drawnWidth: number, drawnHeight: number): number {
+    if (containerWidth <= 0 || containerHeight <= 0 || drawnWidth <= 0 || drawnHeight <= 0) return 0;
+    return Math.min(containerWidth / drawnWidth, containerHeight / drawnHeight) * FIT_MARGIN;
+}
 
 interface InteractionState {
     zoom: number;
@@ -19,9 +38,12 @@ interface InteractionState {
  * @param containerRef Reference to the parent container element.
  * @param drawnSize Current dimensions of the drawn image on the canvas.
  * @param onLevelChange Optional callback for level adjustment gestures.
- * @param keepViewOnResizeRef While its value is true, a change of the drawn size that keeps the
- *   same shape (a small preview replaced by the full picture) keeps what the user sees: the
- *   zoom is rescaled so the picture covers the same area on screen. Read once per change, then set back to false.
+ * @param keepViewOnResizeRef While its value is true, a change of the drawn size keeps what the user
+ *   sees (a small preview replaced by the full picture, or another picture of the same target): the
+ *   zoom is rescaled so the picture covers the same width on screen, and the point at the center
+ *   of the view stays at the same fraction of the picture. A view still on the automatic fit is
+ *   kept only when the shape stays the same, and otherwise fitted again. Read once per change,
+ *   then set back to false.
  * @returns Object with zoom, pan positions, transform helpers, and pointer event handlers.
  */
 export const useCanvasInteraction = (
@@ -49,17 +71,81 @@ export const useCanvasInteraction = (
     // fitted to the container as the container changes size.
     const userAdjustedViewRef = useRef(false);
 
+    // The view the overlays were last drawn for (the last rendered React state).
+    const drawnViewRef = useRef({ panX: 0, panY: 0, zoom: 1 });
+    // Pending animation frame that will copy the live pan and zoom into React state.
+    const stateFrameRef = useRef<number | null>(null);
+
     /**
-     * Applies the current pan and zoom values to the canvas and overlay transform styles.
+     * Moves the overlay layers so they match the live view. Each overlay was drawn for the last
+     * rendered view, so it gets the transform from that view to the live one. Once React renders
+     * the live view the transform comes out as identity, so there is no jump.
+     */
+    const writeOverlayTransforms = useCallback(() => {
+        const layers = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('[data-overlay-layer]');
+        if (!layers || layers.length === 0) return;
+        const transform = overlayTransformBetween(
+            { panX: panRef.current.x, panY: panRef.current.y, zoom: zoomRef.current },
+            drawnViewRef.current
+        );
+        layers.forEach((layer) => {
+            layer.style.transformOrigin = '0 0';
+            layer.style.transform = transform;
+        });
+    }, [containerRef]);
+
+    /**
+     * Applies the current pan and zoom values to the image canvas and the overlay layers.
      */
     const scheduleTransformWrite = useCallback(() => {
         const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas:not([data-overlay-layer])');
-        if (!elements || elements.length === 0) return;
-        const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
-        elements.forEach((el) => {
-            el.style.transform = transform;
+        if (elements && elements.length > 0) {
+            const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
+            elements.forEach((el) => {
+                el.style.transform = transform;
+            });
+        }
+        writeOverlayTransforms();
+    }, [containerRef, writeOverlayTransforms]);
+
+    /**
+     * Copies the live pan and zoom into React state right away and cancels any waiting frame.
+     */
+    const flushState = useCallback(() => {
+        if (stateFrameRef.current !== null) {
+            cancelAnimationFrame(stateFrameRef.current);
+            stateFrameRef.current = null;
+        }
+        setZoom(zoomRef.current);
+        setPanX(panRef.current.x);
+        setPanY(panRef.current.y);
+    }, []);
+
+    /**
+     * Asks for the React state to catch up with the live view, at most once per animation frame.
+     * Drags and wheel turns can fire many times per frame; only the last position matters.
+     */
+    const scheduleStateSync = useCallback(() => {
+        if (stateFrameRef.current !== null) return;
+        stateFrameRef.current = requestAnimationFrame(() => {
+            stateFrameRef.current = null;
+            setZoom(zoomRef.current);
+            setPanX(panRef.current.x);
+            setPanY(panRef.current.y);
         });
-    }, [containerRef]);
+    }, []);
+
+    // After each render the overlays are drawn for the rendered state. Reset their transform before
+    // the browser paints (layout effect), so the redrawn layer replaces the moved one with no jump.
+    useLayoutEffect(() => {
+        drawnViewRef.current = { panX, panY, zoom };
+        writeOverlayTransforms();
+    });
+
+    // Drop a waiting frame when the viewer goes away.
+    useEffect(() => () => {
+        if (stateFrameRef.current !== null) cancelAnimationFrame(stateFrameRef.current);
+    }, []);
 
     const clampPan = useCallback(() => {
         const container = containerRef.current;
@@ -132,13 +218,10 @@ export const useCanvasInteraction = (
         clampPan();
         scheduleTransformWrite();
 
-        // Sync react state debounced or just for UI indicators?
-        // We'll sync it
-        setZoom(newZoom);
-        setPanX(panRef.current.x);
-        setPanY(panRef.current.y);
+        // The image and overlays already moved by CSS; React state catches up once per frame.
+        scheduleStateSync();
 
-    }, [containerRef, clampPan, scheduleTransformWrite]);
+    }, [containerRef, clampPan, scheduleTransformWrite, scheduleStateSync]);
 
 
     // Setup event listeners on container
@@ -176,11 +259,12 @@ export const useCanvasInteraction = (
 
         clampPan();
         scheduleTransformWrite();
-        setPanX(panRef.current.x);
-        setPanY(panRef.current.y);
+        scheduleStateSync();
     };
 
     const onPointerUp = (e: React.PointerEvent) => {
+        // Land the final position in React state now, so the overlays redraw exactly where the drag ended.
+        if (isDraggingRef.current) flushState();
         isDraggingRef.current = false;
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     };
@@ -268,9 +352,7 @@ export const useCanvasInteraction = (
         // view; the resize observer below fits again once there is a real size.
         if (cW === 0 || cH === 0) return;
 
-        const scaleX = cW / drawnSize.w;
-        const scaleY = cH / drawnSize.h;
-        const fitScale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave a small margin
+        const fitScale = fitScaleFor(cW, cH, drawnSize.w, drawnSize.h);
         userAdjustedViewRef.current = false;
 
         zoomRef.current = fitScale;
@@ -311,9 +393,29 @@ export const useCanvasInteraction = (
         if (keepViewOnResizeRef && hasDimensionChanged) keepViewOnResizeRef.current = false;
         const sameShape = hasDimensionChanged && drawnSize.w > 0 && drawnSize.h > 0 &&
             Math.abs((prev.w / prev.h) / (drawnSize.w / drawnSize.h) - 1) < 0.01;
+        const container = containerRef.current;
+        const viewCanBeKept = keepView && hasDimensionChanged && drawnSize.w > 0 && drawnSize.h > 0 &&
+            (userAdjustedViewRef.current || sameShape);
 
-        if (keepView && sameShape) {
-            // Same picture at a new pixel size: keep it covering the same screen area.
+        if (viewCanBeKept && container && container.clientWidth > 0 && container.clientHeight > 0) {
+            // Another picture of the same thing at a new size: it covers the same screen width, and
+            // the point at the center of the view stays at the same fraction of the picture.
+            const halfWidth = container.clientWidth / 2;
+            const halfHeight = container.clientHeight / 2;
+            const oldZoom = zoomRef.current;
+            const fractionX = ((halfWidth - panRef.current.x) / oldZoom) / prev.w;
+            const fractionY = ((halfHeight - panRef.current.y) / oldZoom) / prev.h;
+            const newZoom = oldZoom * (prev.w / drawnSize.w);
+            zoomRef.current = newZoom;
+            panRef.current.x = halfWidth - fractionX * drawnSize.w * newZoom;
+            panRef.current.y = halfHeight - fractionY * drawnSize.h * newZoom;
+            clampPan();
+            scheduleTransformWrite();
+            setZoom(newZoom);
+            setPanX(panRef.current.x);
+            setPanY(panRef.current.y);
+        } else if (viewCanBeKept && sameShape) {
+            // The container has no size to measure: the same picture at a new pixel size covers the same screen area.
             const newZoom = zoomRef.current * (prev.w / drawnSize.w);
             zoomRef.current = newZoom;
             clampPan();
@@ -341,7 +443,6 @@ export const useCanvasInteraction = (
     // image first loads (the panels settle after the app starts), which
     // leaves the image fitted to a smaller box than the one it ends up in.
     // So refit on any resize until the user has zoomed or panned by hand.
-    const wasZeroSizeRef = useRef(true);
     useEffect(() => {
         const containerElement = containerRef.current;
         // Older WebViews may lack ResizeObserver; the view is then fitted on load only.
@@ -351,17 +452,60 @@ export const useCanvasInteraction = (
             const entry = entries[0];
             if (!entry) return;
             const isZeroSize = entry.contentRect.width === 0 || entry.contentRect.height === 0;
-            const shouldRefit = wasZeroSizeRef.current || !userAdjustedViewRef.current;
+            // A view the person set by hand is kept when the window comes back from being hidden (the
+            // person went to another screen and returned); only the automatic fit follows the size.
+            const shouldRefit = !userAdjustedViewRef.current;
             if (!isZeroSize && shouldRefit && drawnSize.w > 0 && drawnSize.h > 0) {
                 resetView();
             }
-            wasZeroSizeRef.current = isZeroSize;
         });
         observer.observe(containerElement);
         return () => observer.disconnect();
     }, [containerRef, drawnSize.w, drawnSize.h, resetView]);
 
+    /**
+     * Tells which point of the picture is at the center of the view now.
+     *
+     * @returns The point as fractions of the drawn width and height from the top-left corner, or
+     *   null while there is no picture or the container has no size.
+     */
+    const getCenterFraction = useCallback((): { x: number; y: number } | null => {
+        const container = containerRef.current;
+        if (!container || drawnSize.w <= 0 || drawnSize.h <= 0 || container.clientWidth === 0 || container.clientHeight === 0) return null;
+        return {
+            x: ((container.clientWidth / 2 - panRef.current.x) / zoomRef.current) / drawnSize.w,
+            y: ((container.clientHeight / 2 - panRef.current.y) / zoomRef.current) / drawnSize.h,
+        };
+    }, [containerRef, drawnSize.w, drawnSize.h]);
+
+    /**
+     * Moves the view, keeping the zoom, so a point of the picture is at the center. Does nothing
+     * while the view is still the automatic fit, because a fit is centered already, unless the
+     * move is forced.
+     *
+     * @param fraction The point, as fractions of the drawn width and height from the top-left corner.
+     * @param options `force` moves the view even while it is the automatic fit (and then counts as set
+     *   by hand, so a resize does not fit it again). `scale` sets the zoom first.
+     */
+    const placeCenter = useCallback((fraction: { x: number; y: number }, options?: { force?: boolean; scale?: number }) => {
+        const container = containerRef.current;
+        if (!container || drawnSize.w <= 0 || drawnSize.h <= 0) return;
+        if (options?.force) userAdjustedViewRef.current = true;
+        if (!userAdjustedViewRef.current) return;
+        if (options?.scale !== undefined && options.scale > 0) {
+            zoomRef.current = options.scale;
+            setZoom(options.scale);
+        }
+        panRef.current.x = container.clientWidth / 2 - fraction.x * drawnSize.w * zoomRef.current;
+        panRef.current.y = container.clientHeight / 2 - fraction.y * drawnSize.h * zoomRef.current;
+        clampPan();
+        scheduleTransformWrite();
+        flushState();
+    }, [containerRef, drawnSize.w, drawnSize.h, clampPan, scheduleTransformWrite, flushState]);
+
     return {
+        getCenterFraction,
+        placeCenter,
         zoom,
         panX,
         panY,

@@ -31,7 +31,7 @@ A workflow is a plain procedure. When one is named (for example `/manage_mcp`), 
 
 ## MCP servers
 
-The project runs five MCP (Model Context Protocol) servers. For an AI client they look things up, calculate and measure. One tool (`observatory_remote_sync_frames`) brings frames from the telescope into the library. None commands a device. A developer session starts the servers from `.mcp.json`. A read-only companion session starts them from `.claude/companion.mcp.json`.
+The project runs five MCP (Model Context Protocol) servers. For an AI client they look things up, calculate and measure. A few tools write: they bring frames and logs from the telescope into the library, stack a target, name a stack's stars or remake its preview, and each starts the same job in the app as the app's own button. None commands a device. A developer session starts the servers from `.mcp.json`. A read-only companion session starts them from `.claude/companion.mcp.json`.
 
 | Server | Start command | What it offers an AI |
 |---|---|---|

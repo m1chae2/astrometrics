@@ -234,6 +234,41 @@ class StarProfileMeasurement(BaseModel):
         The fraction of the ring's pixels that the neighbor masks removed.
     ring_note : `str` or `None`
         A sentence that says why the ring could not be analyzed, or `None`.
+    signal_to_noise : `float`
+        The peak above the sky divided by the sky noise.
+    edge_distance_px : `float`
+        How far the star's center is from the nearest image edge, in pixels.
+    coverage_fraction : `float`
+        The share of the sky ring's area (the outer radius of the photometry
+        sky ring) that lies inside the image and holds a real value.
+    aperture_radius_px, sky_inner_px, sky_outer_px : `float`
+        The photometry circle and the radii of its sky ring, in pixels.
+    circle_neighbor_count : `int`
+        How many bright neighbors crowd the photometry circle.
+    sky_ring_neighbor_count : `int`
+        How many neighbors lie in the photometry sky ring.
+    star_elongation : `float` or `None`
+        The star's core elongation, long axis divided by short axis (1 is
+        round), from the second moments of its light. It is the one-star form
+        of the estimator that makes the frame's `frame.star_elongation`. `None`
+        when ``star_shape_judgeable`` is `False`.
+    star_elongation_angle_deg : `float` or `None`
+        The direction of the long axis, from 0 up to but not including 180
+        degrees, measured from the image x axis (increasing column) toward the
+        image y axis (increasing row). It is set by noise for a round star.
+        `None` when the shape is not judgeable.
+    star_shape_judgeable : `bool`
+        `True` when the frame measurement would accept this star: bright
+        enough, not clipped, no close neighbor, inside the image, and a
+        Moffat fit within its limits.
+    star_shape_note : `str` or `None`
+        The short reason the shape is not judgeable (for example "a neighbor
+        is too close"), or `None`.
+    star_shape_detail : `str` or `None`
+        The same reason as a full sentence, or `None`.
+    trailing_elongation_limit : `float` or `None`
+        The elongation above which stacking sets a frame aside as trailed.
+        The library fills it in; `None` when it is not known.
     """
 
     path: str
@@ -282,3 +317,17 @@ class StarProfileMeasurement(BaseModel):
     ring_masked_neighbor_count: int
     ring_masked_fraction: float
     ring_note: str | None = None
+    signal_to_noise: float = 0.0
+    edge_distance_px: float = 0.0
+    coverage_fraction: float = 1.0
+    aperture_radius_px: float = 0.0
+    sky_inner_px: float = 0.0
+    sky_outer_px: float = 0.0
+    circle_neighbor_count: int = 0
+    sky_ring_neighbor_count: int = 0
+    star_elongation: float | None = None
+    star_elongation_angle_deg: float | None = None
+    star_shape_judgeable: bool = False
+    star_shape_note: str | None = None
+    star_shape_detail: str | None = None
+    trailing_elongation_limit: float | None = None

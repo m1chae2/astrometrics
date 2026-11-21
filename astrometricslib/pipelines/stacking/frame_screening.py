@@ -286,7 +286,10 @@ def _quarantine_bad_frames(
         logger.info("Quarantine check for target '%s': %s", target.id, note)
     screening.gate_results.append(quarantine_gate(quarantine_report))
     if not screening.frames:
-        raise ProcessingError("Target has no frames available to stack after quarantining bad frames.")
+        why = "; ".join(quarantine_report.warnings) or f"{len(quarantine_report.moved)} frame(s) set aside"
+        raise ProcessingError(
+            f"Nothing was stacked: every frame failed a quality check and was set aside ({why})."
+        )
 
 
 def _drop_background_outliers(target: Target, screening: FrameScreening) -> None:

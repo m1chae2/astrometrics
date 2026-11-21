@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers, model classes, pipeline modules, and the scripts and tests that check them. It lists each pipeline's tuned values with status labels.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the code and the tests that check it. It lists each pipeline's tuned values with status labels.
 
 The [glossary](../Glossary.md) defines the terms; this document defines each at first use.
 
@@ -72,8 +72,8 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frame geometry (§3.4).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores frame rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for astrometry (§4.2) and the one registration reader (`is_already_registered`). `record_quality.FrameGeometryRows` keeps rotation and pointing rows apart. Evidence: [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`/`optic_selection.py`, `assess_input_quality.py`.
 - **Calibration frame checks (§3.4.1).** Limits: `ZERO_PIXEL_FRACTION_LIMIT` 0.001, `VALUE_STEP_ALLOWANCE` 2, `NOISE_RATIO_LOW` and `NOISE_RATIO_HIGH` 0.9 and 1.1, `CEILING_SHARE_LIMIT` 0.001, `DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND` 0.002 and `THIN_SET_FRAME_COUNT` 10. Evidence: [STK-47](validation/stacking.md#stk-47) to [STK-56](validation/stacking.md#stk-56); STK-D36. <!-- impl: astrometricslib.pipelines.shared.quality.calibration_frame_measurement.measure_calibration_frame --> <!-- impl: astrometricslib.pipelines.stacking.calibration_measurement_run.measure_calibration_frames --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.assess_dark_or_bias_frames --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health.assess_stack_calibration -->
-- **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (§3.4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> Without a header or reference-frame solution, the noise step tries up to `MEMBER_FRAME_ATTEMPTS` member frames of the reference group. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> Last, `_plate_solve_stack_wcs` solves it with `AstrometryPipeline.solve_wcs`, refit from the Gaia cache (`PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_REFIT_WCS_SOURCE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_UNREFINED_WCS_SOURCE --> The aperture set file keeps one set per camera, optic and reference exposure (`camera|telescope|focal|exp=<s>`). Subset and odd–even difference stacks use the library stack's recorded set (`find_library_set_key`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.record_library_set_key --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.find_library_set_key --> `stacking.frames_stacked_count` (definition version 2) counts the frames of the member rows (`stack_membership.count_frames_stacked`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.count_frames_stacked --> `post_processing/normalization_scale.py` measures Siril's normalization scale and stores `stacking.normalization_scale`; the expected-noise rows (definition version 2) are multiplied by it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.EXPOSURE_MATCH_FRACTION --> The noise and weights come from `post_processing/stack_noise.py`, `empty_apertures.py`, `difference_noise.py`, `stack_image.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
+- **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`. Eq. 5: `fwhm_sampling.measure_fwhm_degradation` (definition version 2). <!-- impl: astrometricslib.pipelines.stacking.fwhm_sampling.stored_frame_widths --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm -->
+- **Stack measurements (§3.4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> Without a solution, the noise step tries up to `MEMBER_FRAME_ATTEMPTS` member frames of the reference group. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> Last, `_plate_solve_stack_wcs` solves it with `AstrometryPipeline.solve_wcs`, refit from the Gaia cache (`PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_REFIT_WCS_SOURCE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_UNREFINED_WCS_SOURCE --> The aperture set file keeps one set per camera, optic and reference exposure (`camera|telescope|focal|exp=<s>`). Subset and odd–even stacks use the library stack's set (`find_library_set_key`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.record_library_set_key --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.find_library_set_key --> `stacking.frames_stacked_count` (definition version 2) counts the frames of the member rows (`stack_membership.count_frames_stacked`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.count_frames_stacked --> `post_processing/normalization_scale.py` measures Siril's normalization scale and stores `stacking.normalization_scale`; the expected-noise rows (definition version 2) are multiplied by it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.EXPOSURE_MATCH_FRACTION --> The noise and weights come from `post_processing/stack_noise.py`, `empty_apertures.py`, `difference_noise.py`, `stack_image.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
 - **Predicted noise of an exposure-group stack (§3.4).** `expected_noise.expected_exposure_group_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_exposure_group_noise --> gives frame `i` of group `g` the coefficient `W_g ŵ_i / (ΣW · G_g)` in counts per second (`W_g` the combine weight, `ŵ_i` the frame's share, `G_g` the applied gain, 1 when unmeasured, which marks the rows assumed). The noise follows from the squared coefficients times each frame's variance (times `k_i` squared, `FrameNoiseInput.exposure_scale`), the mean exposure, the unit scale and the aperture multiplier. `record_science.compute_expected_noise` refuses (not measured) when `clipped_exposure_groups` is not empty, and gives the membership's reason when the weights are unknown. Register: [STK-38](validation/stacking.md#stk-38), [STK-59](validation/stacking.md#stk-59), [STK-60](validation/stacking.md#stk-60) (failed).
 - **Aperture set identity (§3.4).** `stacking.aperture_set_number` (every noise stack) and its odd–even difference twin hold the set's identity as one number (`aperture_identity_to_number`, `aperture_identity_from_number`, `aperture_set_measurement`). Design estimate; evidence: [STK-36](validation/stacking.md#stk-36), [STK-42](validation/stacking.md#stk-42). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.aperture_set_measurement -->
 - **Subset stacks (§3.4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. `stack_subset(..., record_forecast_rows=True)` stores the forecast rows; the restack labels its all-but-the-last-night subset `EARLIER_NIGHTS_VARIANT`. <!-- impl: astrometricslib.reports.EARLIER_NIGHTS_VARIANT --> Evidence: [STK-37](validation/stacking.md#stk-37), [STK-38](validation/stacking.md#stk-38).
@@ -91,12 +91,13 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Interfaces (§4.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection and centroids (§4.2).** `processing/star_identifier.py`, `pre_processing/source_detection.py`, `pre_processing/fwhm.py`.
-- **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`; `utilities/catalog_seeding.py`.
+- **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
+- **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets the depth; `processing/gaia_field_stars.py` fills and reads the tiles. Missing tiles give `astrometry.notice_gaia_tiles_missing`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
 - **Target clipping (§4.4).** `post_processing/target_clipping.py` (`target_clipping_measurements`). Evidence: [AST-19](validation/astrometry.md#ast-19).
 - **Expected residual (§4.4).** `post_processing/expected_residual.py` stores four `astrometry.expected_*` metrics. Evidence: [AST-21](validation/astrometry.md#ast-21).
-- **Target position.** `astrometricslib/pipelines/shared/target_position.py` takes a target's RA/Dec from its SIMBAD position (ICRS, epoch J2000), not from a frame center; `astrometricslib/scripts/audit_target_positions.py` checks the stored ones.
+- **Target position.** `astrometricslib/pipelines/shared/target_position.py` takes a target's RA/Dec from SIMBAD, not a frame center; `scripts/audit_target_positions.py` checks them.
 
 ### 4.3 Photometry (Architecture §5)
 
@@ -139,7 +140,8 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frames and targets.** `frame_grouping.py`, `frame_scanning.py`, `target_records.py`, `target_sessions.py`.
 - **Images, stars and state.** `image_conversions.py`, `star_recording.py`, `catalog_star_identity.py`, `session_identification.py`, `analysis_context.py`.
 - **Recording.** `provenance_recording.py`, `applied_camera_profile.py`, `quality/notices.py` ([STK-58](validation/stacking.md#stk-58)). <!-- impl: astrometricslib.pipelines.shared.quality.notices.notice_measurement -->
-- **Quality primitives.** `quality/` (`saturation.py`, `raw_frame_check.py`, `frame_measurement.py`; the shared README lists the rest).
+- **Quality primitives.** `quality/` (`saturation.py`, `raw_frame_check.py`, `frame_measurement.py`).
+- **Star card shape.** `measure_single_star_shape` is the frame fit for one star; round is at most `TRAILED_ELONGATION_LIMIT` ([AST-17](validation/astrometry.md#ast-17)). <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.measure_single_star_shape -->
 
 ### 4.7 Drivers and pixel-level primitives
 
@@ -149,7 +151,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Siril.** `siril_stacking_driver.py`, `siril_interface/`.
 - **Catalogs and services.** `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`.
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `catalog_access.py`.
-- **Images.** `fits_access.py`, `image.py`. The drivers README lists the rest.
+- **Images.** `fits_access.py`, `image.py`.
 
 `catalog_access.py` uses the Butler (Section 4.8) [9], not SQL.
 
@@ -177,9 +179,9 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | Frame measurement: CPU time; fit grid cells | 60 s; 196 | Design estimate ([AST-17](validation/astrometry.md#ast-17)) | §3.4 |
 | Pixel blur factor $c$; field grid and region cells per side | 2 ln 2 / 3; 14 and 4 | Design estimate ([AST-18](validation/astrometry.md#ast-18)) | §3.4 |
 | Frame screening: session gap | 4 h | Design estimate ([table](validation/stacking.md#design-estimates)) | §3.4.1 |
-| Frame screening: fewest frames to judge; clouded frame star count; trailed frame roundness | 8; below 0.5 of session median; below 0.80 and 0.15 under median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
-| Roundness drop, color camera | at least 0.20 under median | Measured ([STK-02](validation/stacking.md#stk-02)) | §3.4.1 |
-| Largest share of a session moved aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
+| Frame screening: fewest frames to judge; clouded frame star count; trailed frame elongation | 8; below 0.5 of session median; above 1.32 and 0.12 over median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
+| Elongation rise, color camera | at least 0.22 over median | Measured ([STK-02](validation/stacking.md#stk-02)) | §3.4.1 |
+| Warning share of a session set aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
 | Dark temperature slot width | 3 °C | Partly measured ([STK-06](validation/stacking.md#stk-06)) | §3.2 |
 | Minimum frames kept after quality filtering | 5 | Partly measured ([STK-10](validation/stacking.md#stk-10)) | §3.3 (Table 3, step 3) and §3.4.1 |
 | Brightness scale: fewest shared stars before pixel fallback | 16 | Measured ([STK-19](validation/stacking.md#stk-19)) | §3.2 |
@@ -338,13 +340,13 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.SESSION_GAP_SECONDS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MINIMUM_FRAMES_TO_JUDGE -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.CLOUD_STAR_FRACTION -->
-<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.TRAILED_ROUNDNESS_LIMIT -->
-<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.ROUNDNESS_DROP_BELOW_MEDIAN -->
-<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MAXIMUM_QUARANTINED_FRACTION -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.TRAILED_ELONGATION_LIMIT -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.ELONGATION_RISE_ABOVE_MEDIAN -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.WARN_QUARANTINED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT -->
 <!-- impl: astrometricslib.pipelines.stacking.stack_runner.MINIMUM_REGISTERED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD -->
-<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN -->
 <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_MINIMUM_STARS -->
 <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.SKY_RATIO_LIMIT -->
 
@@ -354,28 +356,29 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 
 | Parameter | Default | Status | Architecture section |
 | --- | --- | --- | --- |
-| Star detection threshold; sharpness and roundness ranges | 5σ; 0.2 to 1.0; ±0.6 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 1) |
-| Minimum stars to attempt a solve | 4 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
-| Minimum stars for a local solve | 10 | Partly measured ([AST-13](validation/astrometry.md#ast-13)) | §4.4.1 |
-| Pixel-scale window; further widening by the solver | ±5%; 20% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
-| Brightest stars sent to the online solver | 100 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 2) |
+| Detection threshold; sharpness; roundness | 5σ; 0.2 to 1.0; ±0.6 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 1) |
+| Fewest stars for a solve | 4 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
+| Fewest stars for a local solve | 10 | Partly measured ([AST-13](validation/astrometry.md#ast-13)) | §4.4.1 |
+| Pixel-scale window; solver widening | ±5%; 20% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
+| Stars sent to the online solver | 100 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 2) |
 | Gaia refit: fewest matched stars | 40 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 6) |
-| Gaia refit: largest field shift | 30 arcsec | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
-| Gaia refit: match radii; clip; passes; distortion order | 4 px and 1.5 px; 3σ; 5; second-order SIP | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
-| Gaia query time limits; depth steps after a slow answer only | 45 s and 60 s; 2 steps of 1 mag | Partly measured ([AST-08](validation/astrometry.md#ast-08)) | §4.2 (step 4) |
-| Gaia search depth: margin; limits; default | 1.0 mag; G 14 to 20; G 18 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
-| Catalog match radius | 10 arcsec | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
-| Same-star position tolerance between catalogs | 2 arcsec | Measured ([AST-11](validation/astrometry.md#ast-11)) | §4.2 (step 4) |
-| Radius for unresolved catalog companions | 3 arcsec | Partly measured ([AST-10](validation/astrometry.md#ast-10)) | §4.2 (step 4) |
-| Variable-star catalog match radius | 3 arcsec | Partly measured ([AST-12](validation/astrometry.md#ast-12)) | §5.2 (concept 4) |
-| Unsolved spectral frame center star: search radius; area; faintest peak | 5 arcmin; 0.10 of shorter side; 0.10 of brightest pixel | Partly measured ([AST-09](validation/astrometry.md#ast-09)) | §6.2 (concept 6) |
-| Minimum catalog-matched stars | 20 | Partly measured ([AST-05](validation/astrometry.md#ast-05)) | §4.4.2 |
+| Gaia refit: largest shift | 30″ | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
+| Gaia refit: match radii; clip; passes; SIP order | 4 and 1.5 px; 3σ; 5; 2 | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
+| Gaia time limits; depth steps after a slow answer | 45 s, 60 s; 2 of 1 mag | Partly measured ([AST-08](validation/astrometry.md#ast-08)) | §4.2 (step 4) |
+| Gaia depth: throughput; star width; sky; signal-to-noise; margin; cap; default | 0.62; 5″; 18.7 mag/″²; 11.6; 1 mag; G 21; G 18 | Partly measured ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
+| Gaia tile level | 7, split at 50,000 rows | Partly measured ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
+| Catalog match radius | 10″ | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
+| Same-star tolerance between catalogs | 2″ | Measured ([AST-11](validation/astrometry.md#ast-11)) | §4.2 (step 4) |
+| Unresolved catalog companions radius | 3″ | Partly measured ([AST-10](validation/astrometry.md#ast-10)) | §4.2 (step 4) |
+| Variable-star match radius | 3″ | Partly measured ([AST-12](validation/astrometry.md#ast-12)) | §5.2 (concept 4) |
+| Unsolved spectral frame center star: radius; area; faintest peak | 5′; 0.10 of shorter side; 0.10 of peak | Partly measured ([AST-09](validation/astrometry.md#ast-09)) | §6.2 (concept 6) |
+| Fewest catalog-matched stars | 20 | Partly measured ([AST-05](validation/astrometry.md#ast-05)) | §4.4.2 |
 | Residual limit | 0.5 of a star width | Partly measured ([AST-04](validation/astrometry.md#ast-04)) | §4.4.2 |
-| Failed catalog lookups allowed | under 50% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.2 |
-| Target clipping: disc radius; frame cap; read time limit; least peak above sky | 30 arcsec; 200; 120 s; 5σ | Partly measured ([AST-19](validation/astrometry.md#ast-19)) | §4.4 |
-| Expected residual: centroid factor; pixel-phase rms per axis at widths 1.5 to 5 px | √(2/π); 0.092 to 0.008 px (six widths) | Partly measured ([AST-21](validation/astrometry.md#ast-21)) | §4.4 |
-| Target position tolerance: floor; extent factor | 15 arcmin; 1.0 of the object's radius | Partly measured ([AST-20](validation/astrometry.md#ast-20)) | §4.2 |
-| Margin around the solved frame for a catalog position | 15 arcmin | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 |
+| Failed lookups allowed | under 50% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.2 |
+| Target clipping: disc radius; frame cap; read time; least peak | 30″; 200; 120 s; 5σ | Partly measured ([AST-19](validation/astrometry.md#ast-19)) | §4.4 |
+| Expected residual: centroid factor; pixel-phase rms at widths 1.5 to 5 px | √(2/π); 0.092 to 0.008 px | Partly measured ([AST-21](validation/astrometry.md#ast-21)) | §4.4 |
+| Target position tolerance: floor; extent factor | 15′; 1.0 of the radius | Partly measured ([AST-20](validation/astrometry.md#ast-20)) | §4.2 |
+| Margin around the solved frame for a catalog position | 15′ | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
@@ -404,10 +407,15 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_ESA_TIMEOUT_SECONDS -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEPTH_STEP_MAGNITUDES -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEPTH_STEPS_DOWN -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MAGNITUDE_LIMIT_MARGIN -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MINIMUM_MAGNITUDE_LIMIT -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MAXIMUM_MAGNITUDE_LIMIT -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEFAULT_MAGNITUDE_LIMIT -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MINIMUM_STARS_FOR_DEPTH_ESTIMATE -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.OPTICS_THROUGHPUT -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.DEFAULT_FWHM_ARCSEC -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.FALLBACK_SKY_MAG_PER_ARCSEC2 -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.DETECTION_SIGNAL_TO_NOISE -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.GAIA_DEPTH_MARGIN -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.GAIA_DEPTH_CAP -->
+<!-- impl: astrometricslib._internal.drivers.catalog_store.GAIA_TILE_LEVEL -->
 <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.SAME_STAR_POSITION_TOLERANCE_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.UNRESOLVED_COMPANION_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.shared.variable_star_catalogs.MATCH_RADIUS_ARCSEC -->

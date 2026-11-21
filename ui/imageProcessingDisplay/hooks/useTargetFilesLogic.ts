@@ -5,6 +5,9 @@ import { emitToast } from '../../common/utils/emitToast';
 import { useOnValueChange } from './useOnValueChange';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';
+import { putBackFrames } from '../../common/services/imaging/frameReviewService';
+import { useStarShapeReview } from './useStarShapeReview';
+import { useFrameStatuses } from './useFrameStatuses';
 import { buildOpticOptions, chooseDefaultOptic, filterFilesByCamera, filterFilesByOptic } from '../utils/opticSelection';
 
 /**
@@ -30,6 +33,10 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const pendingFilesKey = selectedTarget && shouldFetch ? `${selectedTarget}:${reloadKey}` : null;
     const [settledFilesKey, setSettledFilesKey] = useState<string | null>(null);
     const isLoadingFiles = pendingFilesKey !== null && settledFilesKey !== pendingFilesKey;
+
+    // The star-shape review of this target, and each frame's status (with the frames set aside).
+    const starShapeReview = useStarShapeReview(selectedTarget, reloadKey, shouldFetch);
+    const frameReview = useFrameStatuses(selectedTarget, reloadKey, starShapeReview, shouldFetch);
 
     const [allFiles, setAllFiles] = useState<FileItem[]>([]);
     const [exposureCounts, setExposureCounts] = useState<Record<string, number>>({});
@@ -125,8 +132,42 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const filteredFiles = useMemo(() => {
         const opticFiles = filterFilesByOptic(filterFilesByCamera(allFiles, selectedCamera), selectedOptic);
         if (!fileFilterText) return opticFiles;
-        return opticFiles.filter(f => matchesQuery(f, fileFilterText));
-    }, [allFiles, fileFilterText, selectedCamera, selectedOptic]);
+        return opticFiles.filter(f => matchesQuery({ ...f, status: frameReview.statuses.get(f.path)?.filterText }, fileFilterText));
+    }, [allFiles, fileFilterText, selectedCamera, selectedOptic, frameReview.statuses]);
+
+    // The frames the stacker moved into `_excluded`. They are not part of the target's frames, so
+    // they stay out of every stack and delete; the File Browser shows them so none disappears.
+    const setAsideFiles = useMemo<FileItem[]>(
+        () => (frameReview.report?.frames ?? [])
+            .filter(frame => frame.state === 'set_aside')
+            .map(frame => ({
+                path: frame.path,
+                name: frame.name,
+                camera: frame.camera ?? '',
+                iso: '',
+                exposure: frame.exposure ?? '',
+                filter: frame.filter ?? '',
+                date: frame.date ?? '',
+            })),
+        [frameReview.report],
+    );
+
+    /** Moves one set-aside frame back into the target, then reads the frames and statuses again. */
+    const putBackFrame = useCallback(async (path: string) => {
+        if (!selectedTarget) return;
+        try {
+            const restored = await putBackFrames(selectedTarget, [path]);
+            if (restored.length > 0) {
+                emitToast('Put the frame back. The next stack may set it aside again.', 'success');
+            } else {
+                emitToast('The frame could not be put back: its old place is taken or it has no record.', 'warning');
+            }
+            loadTargetFiles(selectedTarget, `${selectedTarget}:${reloadKey}`);
+            frameReview.reload();
+        } catch (e) {
+            emitToast(`Failed to put the frame back: ${e}`, 'error');
+        }
+    }, [selectedTarget, reloadKey, loadTargetFiles, frameReview]);
 
     const handleRequestDeleteFiles = (paths: string[]) => {
         setFilesToDelete(paths);
@@ -206,6 +247,11 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         toggleAllFiles,
         stackedImage,
         stackedSpectralTarget,
-        totalExposure
+        totalExposure,
+        starShapeReview,
+        frameStatuses: frameReview.statuses,
+        frameReport: frameReview.report,
+        setAsideFiles,
+        putBackFrame,
     };
 };

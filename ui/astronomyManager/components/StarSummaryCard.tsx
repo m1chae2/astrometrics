@@ -6,8 +6,7 @@
 import React from 'react';
 import '../styles/astronomyManager.css';
 import {
-    describePatternBadges,
-    describeStarTypeBadges,
+    describeAliases,
     formatCatalogMagnitude,
     formatDeclinationSexagesimal,
     formatRightAscensionSexagesimal,
@@ -17,6 +16,9 @@ import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { Button } from '../../common/components/Button';
 import { Badge } from '../../common/components/Badge';
+import { StarBadges } from '../../common/components/StarBadges';
+import { useArrivedFromImage } from '../../common/hooks/useArrivedFromImage';
+import { RETURN_TO_IMAGE_ACTION } from '../../common/utils/imageViewStore';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -124,6 +126,8 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     starId,
 }) => {
     const targetContext = useOptionalTargetContext();
+    // Set when the person came here by clicking a star in the Image Processing picture.
+    const arrivedFromImage = useArrivedFromImage();
 
     if (!starId && !astronomyData) {
         return null;
@@ -138,28 +142,26 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
     const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
     const catalogMagnitudeText = formatCatalogMagnitude(astronomyData ?? {});
-    const typeBadges = describeStarTypeBadges(spectralType, astronomyData?.spectroscopy);
-    const patternBadges = describePatternBadges(astronomyData?.photometry);
+    const aliasList = describeAliases(astronomyData?.aliases, String(name));
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
 
     return (
         <div className="star-summary-card">
             <div className="star-summary-card__header">
-                <span className="star-summary-card__title">{name}</span>
-                {typeBadges.map((badge) => (
-                    <span
-                        key={badge.text}
-                        className={`badge spectral-badge spectral-badge--${badge.tone}`}
-                        title={badge.title}
+                {arrivedFromImage !== null && (
+                    <Button
+                        variant="secondary"
+                        size="small"
+                        title="Go back to the same place in the Image Processing picture"
+                        onClick={() => {
+                            void navigateToElement({ targetDisplay: 'Image Processing', action: RETURN_TO_IMAGE_ACTION, payload: null });
+                        }}
                     >
-                        {badge.text}
-                    </span>
-                ))}
-                {patternBadges.map((badge) => (
-                    <span key={badge.text} className="badge variability-badge" title={badge.title}>
-                        {badge.text}
-                    </span>
-                ))}
+                        Back to image
+                    </Button>
+                )}
+                <span className="star-summary-card__title">{name}</span>
+                <StarBadges star={astronomyData ? { ...astronomyData, spectralType } : null} />
                 {canLocate && (
                     <Button
                         variant="secondary"
@@ -188,6 +190,19 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                 {catalogMagnitudeText !== null && (
                     <span className="star-summary-card__item" title="Brightness in magnitudes. A smaller number is brighter.">
                         <span className="item-label">Mag:</span> {catalogMagnitudeText}
+                    </span>
+                )}
+                {aliasList.shown.length > 0 && (
+                    <span className="star-summary-card__item" data-testid="star-aliases">
+                        <span className="item-label">Also known as:</span> {aliasList.shown.join(', ')}
+                        {aliasList.hidden.length > 0 && (
+                            <>
+                                {', '}
+                                <span title={aliasList.hidden.join(', ')} data-testid="star-aliases-more">
+                                    +{aliasList.hidden.length} more
+                                </span>
+                            </>
+                        )}
                     </span>
                 )}
                 {targetIds.length > 0 && (

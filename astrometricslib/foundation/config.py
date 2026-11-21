@@ -107,7 +107,7 @@ MINIMUM_CALIBRATION_FRAMES = TunedParameter(
 )
 COSMIC_CLARITY_DENOISE_STRENGTH = TunedParameter(
     name="stacking.cosmic_clarity_denoise_strength",
-    default=0.9,
+    default=0.5,
     unit="fraction (0 to 1)",
     description="How strongly Cosmic Clarity removes noise from the stack preview.",
     role=ParameterRole.MEASUREMENT,
@@ -756,10 +756,10 @@ class AppConfiguration:
         -------
         strength : `float`
             The configured strength, kept between 0 and 1. A missing or
-            unreadable setting gives 0.9. On the M 101, M 57, NGC 4438 and
-            M 81 stacks, 0.9 cut the sky grain by 14-39% compared with 0.75
-            and left star peaks unchanged. On the M 13 stack, 0.5 left
-            visible grain. The denoise runs after the stretch.
+            unreadable setting gives 0.5. On the NGC 7331 and M 31 stacks,
+            0.5 halved the sky noise without widening stars; 0.7 smeared
+            the diffuse galaxy NGC 7320 more. Strength 0.9 smeared Stephan's
+            Quintet. The denoise runs after the stretch (STK-30).
         """
         raw = self.get_value(
             "Processing.CosmicClarity",

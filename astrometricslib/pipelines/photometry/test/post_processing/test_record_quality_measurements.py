@@ -120,7 +120,7 @@ def test_a_healthy_run_emits_every_declared_metric_once() -> None:
     names = [measurement.metric for measurement in measurements]
 
     assert set(names) == _declared_names()
-    assert len(names) == len(set(names)) == 27
+    assert len(names) == len(set(names)) == 28
     assert {m.subject.level for m in measurements} == {SubjectLevel.RUN}
     assert {m.origin for m in measurements} == {MeasurementOrigin.MEASURED}
     assert {m.run_id for m in measurements} == {"job-1"}

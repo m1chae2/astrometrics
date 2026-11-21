@@ -67,9 +67,16 @@ GROUP_EXPOSURE_PATTERN = re.compile(r"#group-\d+-([0-9.]+)s$")
 QUARANTINE_METRICS = (
     "frame.quarantine_roundness",
     "frame.quarantine_sky_median_adu",
+    "frame.sky_unevenness",
+    "frame.pointing_offset_fraction",
+    "frame.star_elongation",
     "frame.detected_region_count",
 )
-"""The frame rows that the stacker's quarantine step stores."""
+"""The frame rows that the stacker's quarantine step stores, or judges on.
+
+``frame.quarantine_roundness`` is retired: the step no longer writes it, and
+it stays here so rows written earlier are still cited as evidence.
+"""
 
 FRAME_WEIGHT_METRIC = "stacking.frame_weight"
 GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"

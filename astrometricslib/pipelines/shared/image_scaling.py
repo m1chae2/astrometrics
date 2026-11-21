@@ -89,27 +89,56 @@ _AUTOSTRETCH_DUST_FRACTION_OF_PEAK = TunedParameter(
     register_entry="STK-D45",
 )
 
-# The fewest populated pixels trusted to describe the background. Below
-# this, the whole image is used instead. Unvalidated beyond keeping a
-# median/MAD from resting on a handful of pixels.
-_AUTOSTRETCH_MINIMUM_POPULATED_PIXELS = TunedParameter(
-    name="shared.autostretch_minimum_populated_pixels",
-    default=100,
+# About how many pixels the sky grid holds (see `measure_sky_background`).
+# The median's error shrinks with the square root of the sample size: at this
+# size it is about 0.2% of the noise (sigma) for a typical image, far below one
+# display grey level, while measuring a 24-megapixel frame takes about 20 ms
+# instead of 1-2 s. Checked on two real 24-megapixel frames, not tuned
+# further.
+_AUTOSTRETCH_SKY_SAMPLE_COUNT = 500_000
+
+# How many columns apart the two pixels of a noise difference are, when the
+# sky noise is measured (see `measure_sky_background`). Registration
+# resamples the frames, which blends neighbouring pixels and makes their noise
+# partly alike, so two pixels that are too close cancel too much and the noise
+# reads too low. Measured on the M 31 and NGC 7331 L stacks on 2026-11-20 (the
+# same test as the viewer's Linear mode): M 31 read 3.56e-5 at 1 px, 4.28e-5
+# at 3 px and 4.42e-5 at 8 px, so it settles from about 3 px. 4 px is the
+# first spacing past that, close enough that a galaxy's smooth light still
+# cancels in the difference.
+_SKY_NEIGHBOR_SPACING_PIXELS = TunedParameter(
+    name="shared.sky_neighbor_spacing_pixels",
+    default=4,
     unit="pixels",
-    description="Fewest populated pixels needed to measure the sky statistics from them alone.",
-    role=ParameterRole.RECOMMENDATION,
+    description="Columns between the two pixels whose difference measures the sky noise.",
+    role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D45",
 )
 
-# How many randomly chosen pixels stand in for the whole image when the sky
-# is measured from a sample (see `measure_sky`). The median's error shrinks
-# with the square root of the sample size: at this size it is about 0.2% of
-# the noise (sigma) for a typical image, far below one display grey level,
-# while measuring a 24-megapixel frame takes about 20 ms instead of 1-2 s.
-# Checked on two real 24-megapixel frames, not tuned further.
-_AUTOSTRETCH_SKY_SAMPLE_COUNT = 500_000
+# A sampled pixel further than this many sky sigmas from the sky level is
+# left out of the sky statistics, and the clipping repeats until nothing more
+# is dropped. 3 sigma drops stars and galaxy light but keeps 99.7% of
+# Gaussian sky. The same value the viewer's Linear mode uses.
+_SKY_CLIP_SIGMAS = TunedParameter(
+    name="shared.sky_clip_sigmas",
+    default=3.0,
+    unit="sigma",
+    description="Sky pixels further than this from the sky level are clipped out of its statistics.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D45",
+)
+
+# The most clipping rounds. Each round drops the bright tail, so the median
+# moves down toward the sky. Five rounds settled on the two real stacks
+# (the viewer's Linear mode uses the same limit).
+_SKY_MAXIMUM_CLIP_ROUNDS = 5
+
+# The fewest sampled pixels that can describe the sky.
+_SKY_MINIMUM_SAMPLE_PIXELS = 25
 
 # The picture is scaled to 0-255 this many pixels at a time. Whole-image
 # arithmetic makes several temporary copies of the image (192 MB each for a
@@ -171,50 +200,89 @@ def _solve_midtones_balance(normalized_median: float, target_background: float) 
     return float(numerator / denominator)
 
 
-def measure_sky(arr: np.ndarray, sample_pixels: bool = False) -> tuple[float, float, float] | None:
-    """Measure the sky level and noise of an image, as the autostretch does.
+def _clipped_median_and_sigma(values: np.ndarray) -> tuple[float, float] | None:
+    """Find the middle and spread of values by repeated sigma clipping.
+
+    Each round takes the median as the middle and the median absolute
+    deviation (scaled to a standard deviation) as the spread, then drops the
+    values further than the clip limit from the middle. It stops when nothing
+    more is dropped.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        Finite values, 1-D.
+
+    Returns
+    -------
+    middle_and_sigma : `tuple` [`float`, `float`] or `None`
+        The middle and the spread, or `None` when too few values are left or
+        the spread is not above zero.
+    """
+    kept = np.sort(values)
+    clip_sigmas = resolve(_SKY_CLIP_SIGMAS).value
+    middle = sigma = 0.0
+    for _ in range(_SKY_MAXIMUM_CLIP_ROUNDS):
+        if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
+            return None
+        middle = float(np.median(kept))
+        sigma = float(np.median(np.abs(kept - middle))) * _MAD_TO_SIGMA
+        if not sigma > 0.0:
+            return None
+        clipped = kept[np.abs(kept - middle) <= clip_sigmas * sigma]
+        if clipped.size == kept.size:
+            break
+        kept = clipped
+    if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
+        return None
+    return middle, sigma
+
+
+def measure_sky_background(arr: np.ndarray) -> tuple[float, float] | None:
+    """Measure the empty sky's level and noise, ignoring big bright objects.
+
+    This is the library's one sky measurement. A plain median of every pixel
+    would be galaxy light, not sky, when a galaxy covers much of the frame.
+    This function samples the image on a regular grid and clips out
+    everything that stands above the sky, so a large galaxy or nebula does
+    not raise the level. The noise comes from differences between pixels a
+    few columns apart: smooth light cancels in a difference, so the noise is
+    not widened by the galaxy.
 
     Parameters
     ----------
     arr : `numpy.ndarray`
-        The image, 2-D or colour.
-    sample_pixels : `bool`, optional
-        When `True`, the sky level and noise are measured from about
-        500,000 randomly chosen pixels instead of every pixel. That is much
-        faster on a large image and gives nearly the same numbers. The
-        brightest pixel is always found from the whole image. The same
-        pixels are chosen every time, so the same image always gives the
-        same answer. Defaults to `False`, which uses every pixel.
+        The image, 2-D.
 
     Returns
     -------
-    sky : `tuple` [`float`, `float`, `float`] or `None`
-        The sky level (the median), the noise (the median absolute
-        deviation scaled to a standard deviation) and the brightest pixel.
-        `None` when the image has no measurable sky: it is empty, has no
-        finite pixels, or has no spread (for instance one that is almost
-        entirely exactly 0). Pixels smaller than a tiny fraction of the
-        brightest one are left out, because they are numerical dust and not
-        sky.
+    sky : `tuple` [`float`, `float`] or `None`
+        The sky level and the noise (one standard deviation). `None` when the
+        image is not 2-D or the sky cannot be measured (too few usable
+        pixels, or no spread). Pixels smaller than a tiny fraction of the
+        brightest one are numerical dust (empty registration borders) and are
+        left out.
     """
-    if arr.size == 0:
+    if arr.ndim != 2 or arr.size == 0:
         return None
     peak = float(np.nanmax(arr))
     if not np.isfinite(peak):
         return None
-    sky_pixels = arr
-    if sample_pixels and arr.size > _AUTOSTRETCH_SKY_SAMPLE_COUNT:
-        chosen = np.random.default_rng(0).integers(0, arr.size, _AUTOSTRETCH_SKY_SAMPLE_COUNT)
-        sky_pixels = arr.flat[chosen]
-    populated = sky_pixels[np.abs(sky_pixels) > peak * resolve(_AUTOSTRETCH_DUST_FRACTION_OF_PEAK).value]
-    stats_source = (
-        populated if populated.size >= resolve(_AUTOSTRETCH_MINIMUM_POPULATED_PIXELS).value else sky_pixels
-    )
-    median = float(np.nanmedian(stats_source))
-    sigma = float(np.nanmedian(np.abs(stats_source - median))) * _MAD_TO_SIGMA
-    if not sigma > 0.0:
+    spacing = int(resolve(_SKY_NEIGHBOR_SPACING_PIXELS).value)
+    step = max(1, int(np.sqrt(arr.size / _AUTOSTRETCH_SKY_SAMPLE_COUNT)))
+    rows = np.arange(step // 2, arr.shape[0], step)
+    columns = np.arange(step // 2, arr.shape[1] - spacing, step)
+    if rows.size == 0 or columns.size == 0:
         return None
-    return median, sigma, peak
+    sample = arr[np.ix_(rows, columns)].astype(np.float64)
+    partner = arr[np.ix_(rows, columns + spacing)].astype(np.float64)
+    dust = peak * resolve(_AUTOSTRETCH_DUST_FRACTION_OF_PEAK).value
+    usable = np.isfinite(sample) & np.isfinite(partner) & (np.abs(sample) > dust) & (np.abs(partner) > dust)
+    from_sample = _clipped_median_and_sigma(sample[usable])
+    from_differences = _clipped_median_and_sigma((partner - sample)[usable])
+    if from_sample is None or from_differences is None:
+        return None
+    return from_sample[0], from_differences[1] / float(np.sqrt(2.0))
 
 
 def sky_level_for_peak(normalized_median: float, normalized_peak: float, peak_brightness: float) -> float:
@@ -311,10 +379,11 @@ def stretch_like_autostretch(values: np.ndarray, arr: np.ndarray, sky_level: flo
         `values`. `None` when the image has no measurable sky to anchor the
         stretch to.
     """
-    sky = measure_sky(arr)
+    sky = measure_sky_background(arr)
     if sky is None:
         return None
-    median, sigma, peak = sky
+    median, sigma = sky
+    peak = float(np.nanmax(arr))
     black_point = max(median + resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value * sigma, float(np.nanmin(arr)))
     if peak <= black_point:
         return None
@@ -360,18 +429,14 @@ def white_fraction_after_autostretch(arr: np.ndarray, sky_level: float) -> float
     return float(np.mean(stretched >= resolve(_WHITE_FRACTION_OF_FULL_BRIGHTNESS).value))
 
 
-def _autostretch_parameters(
-    arr: np.ndarray, sample_pixels: bool = False
-) -> tuple[float, float, float] | None:
+def _autostretch_parameters(arr: np.ndarray) -> tuple[float, float, float] | None:
     """Choose the black point, white point and midtones balance for an image.
 
     Parameters
     ----------
     arr : `numpy.ndarray`
-        The image, 2-D or colour.
-    sample_pixels : `bool`, optional
-        Measure the sky from a sample of the pixels (see `measure_sky`).
-        Defaults to `False`.
+        The image, 2-D or colour (colour axis last). A colour image has its
+        sky measured on the average of its channels.
 
     Returns
     -------
@@ -381,11 +446,14 @@ def _autostretch_parameters(
         (for instance one that is almost entirely exactly 0). The caller
         should fall back to a plain percentile stretch then.
     """
-    sky = measure_sky(arr, sample_pixels=sample_pixels)
+    # The empty sky sets the black point and midtones, so a large galaxy that
+    # covers much of the frame does not pull them.
+    sky = measure_sky_background(arr.mean(axis=2) if arr.ndim == 3 else arr)
     if sky is None:
         logger.debug("Image background has no measurable spread; using a percentile stretch instead.")
         return None
-    median, sigma, peak = sky
+    median, sigma = sky
+    peak = float(np.nanmax(arr))
 
     black_point = max(median + resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value * sigma, float(np.nanmin(arr)))
     if peak <= black_point:
@@ -500,16 +568,13 @@ class ImageScaler:
     """Adjust an astronomy image's brightness and contrast for viewing."""
 
     @staticmethod
-    def autostretch_parameters(data: np.ndarray, sample_sky: bool = False) -> StretchParameters | None:
+    def autostretch_parameters(data: np.ndarray) -> StretchParameters | None:
         """Return the automatic stretch `scale_to_uint8` would use.
 
         Parameters
         ----------
         data : `numpy.ndarray`
             The raw image data, 2-D or colour.
-        sample_sky : `bool`, optional
-            Measure the sky from a sample of the pixels (see
-            `measure_sky`), as `scale_to_uint8` does when asked to.
 
         Returns
         -------
@@ -518,7 +583,7 @@ class ImageScaler:
             when the image has no measurable sky (then `scale_to_uint8`
             uses a plain percentile stretch).
         """
-        autostretch = _autostretch_parameters(_display_array(data), sample_pixels=sample_sky)
+        autostretch = _autostretch_parameters(_display_array(data))
         if autostretch is None:
             return None
         black_point, white_point, midtones = autostretch
@@ -531,7 +596,6 @@ class ImageScaler:
         vmax: float | None = None,
         stretch: bool = True,
         percentiles: tuple[float, float] = (1.0, 99.0),
-        sample_sky: bool = False,
     ) -> tuple[np.ndarray, float, float]:
         """Convert raw image data into standard computer colors (0-255).
 
@@ -563,10 +627,6 @@ class ImageScaler:
             Whether to apply the automatic stretch. Defaults to `True`.
         percentiles : `tuple` [`float`, `float`], optional
             Percentiles used for the plain linear stretch.
-        sample_sky : `bool`, optional
-            Measure the sky for the autostretch from a sample of the pixels
-            instead of all of them (see `measure_sky`). Much faster on a
-            large image, with nearly identical output. Defaults to `False`.
 
         Returns
         -------
@@ -577,11 +637,7 @@ class ImageScaler:
         # Handle multi-channel data (e.g. RGB FITS)
         arr = _display_array(data)
 
-        autostretch = (
-            _autostretch_parameters(arr, sample_pixels=sample_sky)
-            if stretch and vmin is None and vmax is None
-            else None
-        )
+        autostretch = _autostretch_parameters(arr) if stretch and vmin is None and vmax is None else None
         midtones: float | None = None
         if autostretch is not None:
             vmin, vmax, midtones = autostretch

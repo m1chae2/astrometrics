@@ -21,6 +21,7 @@ from astropy.wcs import WCS
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces import PlateSolveDriver, SimbadDriver, plate_solve_driver
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
 FIELD_RA_DEG = 250.42
 FIELD_DEC_DEG = 36.46
@@ -138,7 +139,7 @@ def run_identifier(monkeypatch: pytest.MonkeyPatch, answer: fits.Header | None) 
     identifier : `StarIdentifier`
         The identifier after the run.
     """
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (None, None)))
+    use_field_stars(monkeypatch)
     config = MagicMock()
     config.get_maximum_identified_stars.return_value = None
     config.get_value.return_value = None
@@ -232,7 +233,7 @@ def test_the_gaia_refit_gets_every_detection_not_only_the_identified_ones(
         return wcs
 
     monkeypatch.setattr(StarIdentifier, "_refine_wcs_against_gaia", record)
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (None, None)))
+    use_field_stars(monkeypatch)
     config = MagicMock()
     config.get_maximum_identified_stars.return_value = 3
     config.get_value.return_value = None

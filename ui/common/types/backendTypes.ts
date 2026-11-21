@@ -274,6 +274,20 @@ export interface TargetFilesResponse {
 }
 
 /**
+ * What the stacker would use of one calibration kind for a light group.
+ *
+ * The numbers come from the same selection the stacking stage runs
+ * (`CalibrationLibrary.select_dark_frames`, `select_bias_frames` and
+ * `select_flat_frames`), so a count above zero with no notes means stacking
+ * finds an exact match.
+ */
+export interface CalibrationGroupMatch {
+  count?: number;
+  fallbacks?: string[];
+  problem?: string;
+}
+
+/**
  * A count of how many images share the same filter and exposure time.
  */
 export interface GroupedFrameStat {
@@ -283,6 +297,11 @@ export interface GroupedFrameStat {
   count: number;
   darks?: string | null;
   camera?: string | null;
+  offset?: string | null;
+  binning?: string | null;
+  darkMatch?: CalibrationGroupMatch | null;
+  flatMatch?: CalibrationGroupMatch | null;
+  biasMatch?: CalibrationGroupMatch | null;
 }
 
 /**
@@ -299,6 +318,7 @@ export interface PlotData {
 export interface Spectrum {
   id?: string;
   name?: string;
+  aliases?: string[];
   ra?: any;
   dec?: any;
   flux?: any;
@@ -952,6 +972,10 @@ export interface PhotometryResult {
   errorsAssumeZeroReadNoise?: boolean | null;
   timeBjdTdb?: number[];
   timeBasis?: string | null;
+  nearestNeighborDistancePx?: number | null;
+  nearestNeighborFluxRatio?: number | null;
+  maskedSkyFraction?: number | null;
+  crowded?: boolean | null;
   periodogram?: PeriodogramResult | null;
   transitCandidate?: TransitCandidate | null;
   meanFlux?: number | null;
@@ -980,6 +1004,70 @@ export interface FrameCopyPulse {
   targetId?: string | null;
   measured?: number | null;
   total?: number | null;
+}
+
+/**
+ * The status of one frame, with the reason when there is one.
+ *
+ * Attributes
+ * ----------
+ * path : `str`
+ * The frame's file. For a set-aside frame, its place in `_excluded`.
+ * name : `str`
+ * The file name.
+ * state : `str`
+ * ``included``, ``not_stacked`` or ``set_aside``.
+ * kind : `str` or `None`
+ * The kind the stacker recorded for a set-aside frame, such as
+ * ``clouded``, ``trailed`` or ``off_field``. `None` when none is
+ * recorded.
+ * reason : `str`
+ * The stacker's own words for a set-aside frame; empty otherwise.
+ * date : `str`
+ * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
+ * file name has no date (set-aside frames only).
+ * camera : `str`
+ * The camera name from the frame's header (set-aside frames only).
+ * filter : `str`
+ * The filter name from the frame's header (set-aside frames only).
+ * exposure : `str`
+ * The exposure in seconds, for a set-aside frame; empty otherwise.
+ * original_path : `str` or `None`
+ * Where a set-aside frame was before it was moved.
+ * restorable : `bool`
+ * Whether the app can put a set-aside frame back.
+ * restore_note : `str`
+ * Why a set-aside frame cannot be put back, when it cannot.
+ */
+export interface FrameStatus {
+  path: string;
+  name: string;
+  state: string;
+  kind?: string | null;
+  reason?: string;
+  date?: string;
+  camera?: string;
+  filter?: string;
+  exposure?: string;
+  originalPath?: string | null;
+  restorable?: boolean;
+  restoreNote?: string;
+}
+
+/**
+ * The statuses of every frame of a target.
+ *
+ * Attributes
+ * ----------
+ * frames : `list` [`FrameStatus`]
+ * One entry per frame in the target, then one per set-aside frame.
+ * stacked_at : `float` or `None`
+ * When the latest stack file was written, in seconds since the Unix
+ * epoch. `None` when the target has no stack.
+ */
+export interface FrameStatusReport {
+  frames?: FrameStatus[];
+  stackedAt?: number | null;
 }
 
 /**
@@ -1876,6 +1964,8 @@ export interface StackingPipelineQualityMetrics {
   framesExcludedForGain?: number;
   framesExcludedForBackground?: number;
   framesQuarantined?: number;
+  stackCropReason?: string | null;
+  stackCropAreaFraction?: number | null;
   rejectedPixelFraction?: number | null;
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;
@@ -1950,6 +2040,8 @@ export interface AstrometryPipelineQualityMetrics {
   gaiaFitStarCount?: number | null;
   wcsRefinementShiftArcsec?: number | null;
   astrometryFlags?: string[];
+  gaiaTilesCount?: number;
+  gaiaTilesMissingCount?: number;
   plateScaleArcsecPerPixel?: number | null;
   starFwhmPx?: number | null;
   remoteCatalogQueriesAttempted?: number;
@@ -2926,6 +3018,16 @@ export interface StarDetection {
  * `True` when the image has color channels and the finder searched an
  * averaged, smaller copy, as the run does. Positions are given back
  * in full image pixels.
+ * star_width_px : `float` or `None`
+ * The star width measured on this image, in pixels, on the library's
+ * one star-width scale. It sizes the photometry circle. `None` when no
+ * star could be measured; the active setup's typical width was used
+ * instead.
+ * aperture_radius_px : `float` or `None`
+ * The radius, in image pixels, of the circle that photometry measures
+ * every star in, sized from ``star_width_px``. It is the same for every
+ * star, because all stars in one image share one shape. `None` when it
+ * was not set.
  */
 export interface DetectionsMeasurement {
   path: string;
@@ -2936,6 +3038,8 @@ export interface DetectionsMeasurement {
   merged_count: number;
   kernel_fwhm_px: number;
   binned_on_color?: boolean;
+  star_width_px?: number | null;
+  aperture_radius_px?: number | null;
 }
 
 /**
@@ -3058,6 +3162,41 @@ export interface DetectionsMeasurement {
  * The fraction of the ring's pixels that the neighbor masks removed.
  * ring_note : `str` or `None`
  * A sentence that says why the ring could not be analyzed, or `None`.
+ * signal_to_noise : `float`
+ * The peak above the sky divided by the sky noise.
+ * edge_distance_px : `float`
+ * How far the star's center is from the nearest image edge, in pixels.
+ * coverage_fraction : `float`
+ * The share of the sky ring's area (the outer radius of the photometry
+ * sky ring) that lies inside the image and holds a real value.
+ * aperture_radius_px, sky_inner_px, sky_outer_px : `float`
+ * The photometry circle and the radii of its sky ring, in pixels.
+ * circle_neighbor_count : `int`
+ * How many bright neighbors crowd the photometry circle.
+ * sky_ring_neighbor_count : `int`
+ * How many neighbors lie in the photometry sky ring.
+ * star_elongation : `float` or `None`
+ * The star's core elongation, long axis divided by short axis (1 is
+ * round), from the second moments of its light. It is the one-star form
+ * of the estimator that makes the frame's `frame.star_elongation`. `None`
+ * when ``star_shape_judgeable`` is `False`.
+ * star_elongation_angle_deg : `float` or `None`
+ * The direction of the long axis, from 0 up to but not including 180
+ * degrees, measured from the image x axis (increasing column) toward the
+ * image y axis (increasing row). It is set by noise for a round star.
+ * `None` when the shape is not judgeable.
+ * star_shape_judgeable : `bool`
+ * `True` when the frame measurement would accept this star: bright
+ * enough, not clipped, no close neighbor, inside the image, and a
+ * Moffat fit within its limits.
+ * star_shape_note : `str` or `None`
+ * The short reason the shape is not judgeable (for example "a neighbor
+ * is too close"), or `None`.
+ * star_shape_detail : `str` or `None`
+ * The same reason as a full sentence, or `None`.
+ * trailing_elongation_limit : `float` or `None`
+ * The elongation above which stacking sets a frame aside as trailed.
+ * The library fills it in; `None` when it is not known.
  */
 export interface StarProfileMeasurement {
   path: string;
@@ -3106,6 +3245,20 @@ export interface StarProfileMeasurement {
   ring_masked_neighbor_count: number;
   ring_masked_fraction: number;
   ring_note?: string | null;
+  signal_to_noise?: number;
+  edge_distance_px?: number;
+  coverage_fraction?: number;
+  aperture_radius_px?: number;
+  sky_inner_px?: number;
+  sky_outer_px?: number;
+  circle_neighbor_count?: number;
+  sky_ring_neighbor_count?: number;
+  star_elongation?: number | null;
+  star_elongation_angle_deg?: number | null;
+  star_shape_judgeable?: boolean;
+  star_shape_note?: string | null;
+  star_shape_detail?: string | null;
+  trailing_elongation_limit?: number | null;
 }
 
 /**
@@ -3683,6 +3836,47 @@ export interface NightQuality {
   polarAlignment?: NightPolarAlignment | null;
   notes?: string[];
   generatedAt?: string;
+}
+
+/**
+ * What the stored star shapes say about one target.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * scope : `str`
+ * What was judged: ``"stack"`` (the stack's own numbers, when it has
+ * them), ``"frames"`` (the median of the frames), ``"night"`` or
+ * ``"frame_list"``.
+ * frame_count : `int`
+ * Frames with a stored elongation.
+ * roundness : `ShapeVerdict`
+ * Round or elongated, against the equipment's own history.
+ * direction : `ShapeVerdict`
+ * Whether the stretch points one way, and what that suggests.
+ * standout : `ShapeVerdict`
+ * Whether some frames stand out, with ``standout_frames`` listing them.
+ * corners : `ShapeVerdict`
+ * The corner and center widths. Always reported as not validated.
+ * standout_frames : `list` [`StandoutFrame`]
+ * Frames that are candidates to set aside, most extreme first.
+ * series : `list` [`FrameStarShape`]
+ * Every frame with a stored elongation, oldest first, for a chart.
+ * notes : `list` [`str`]
+ * Anything that limited the review, such as a missing history.
+ */
+export interface StarShapeReview {
+  targetId: string;
+  scope: string;
+  frameCount: number;
+  roundness: ShapeVerdict;
+  direction: ShapeVerdict;
+  standout: ShapeVerdict;
+  corners: ShapeVerdict;
+  standoutFrames?: StandoutFrame[];
+  series?: FrameStarShape[];
+  notes?: string[];
 }
 
 /**
@@ -4283,8 +4477,57 @@ export interface SetAsideFrameRecord {
   exposureSeconds?: number | null;
   captureSettingId?: number | null;
   movedAt?: string | null;
+  camera?: string;
+  filter?: string;
+  date?: string;
   restorable?: boolean;
   restoreNote?: string;
+}
+
+/**
+ * A frame, a typical frame of its session and one star in both.
+ *
+ * Parameters
+ * ----------
+ * found : `bool`
+ * `True` when a typical frame and a reference star were found.
+ * reason : `str`
+ * Why nothing was found, or an empty string.
+ * path : `str`
+ * The frame that was asked about.
+ * typical_path : `str` or `None`
+ * The frame of the same session whose stored star elongation and sky
+ * unevenness lie closest to the session's medians.
+ * star_x, star_y : `float` or `None`
+ * The reference star in ``path``, in 1-based pixels.
+ * typical_star_x, typical_star_y : `float` or `None`
+ * The same star in ``typical_path``, in 1-based pixels.
+ * turned : `bool`
+ * `True` when ``typical_path`` is turned half a revolution from
+ * ``path``.
+ * votes : `int`
+ * How many star pairs agreed when the two frames were lined up.
+ * session_frame_count : `int`
+ * How many frames of the session could be a typical frame.
+ * width, height : `int`
+ * The size of the frames in pixels (both frames share one size), so a
+ * picture drawn at another size can place the star. 0 when nothing was
+ * found.
+ */
+export interface BlinkPair {
+  found: boolean;
+  reason?: string;
+  path: string;
+  typicalPath?: string | null;
+  starX?: number | null;
+  starY?: number | null;
+  typicalStarX?: number | null;
+  typicalStarY?: number | null;
+  turned?: boolean;
+  votes?: number;
+  sessionFrameCount?: number;
+  width?: number;
+  height?: number;
 }
 
 /**
@@ -5136,6 +5379,84 @@ export interface NightPolarAlignment {
   hourAngleSpanDeg?: number | null;
   sampleCount?: number;
   reason: string;
+}
+
+/**
+ * One plain verdict with the numbers behind it.
+ *
+ * Parameters
+ * ----------
+ * state : `str`
+ * The verdict's state, one of `VERDICT_STATES`.
+ * sentence : `str`
+ * One short sentence in plain English, for the screen.
+ * numbers : `dict` [`str`, `float` or `None`]
+ * The numbers the sentence rests on, by name.
+ */
+export interface ShapeVerdict {
+  state: string;
+  sentence: string;
+  numbers?: Record<string, number | null>;
+}
+
+/**
+ * A frame whose elongation is far from the usual one.
+ *
+ * Parameters
+ * ----------
+ * path : `str`
+ * The frame's path.
+ * timestamp : `float` or `None`
+ * When the frame was taken, in seconds since the Unix epoch.
+ * elongation : `float`
+ * The frame's elongation.
+ * spreads_above_typical : `float`
+ * How many robust spreads the frame lies above the typical value.
+ */
+export interface StandoutFrame {
+  path: string;
+  timestamp?: number | null;
+  elongation: number;
+  spreadsAboveTypical: number;
+}
+
+/**
+ * The stored star-shape numbers of one frame (or of one stack).
+ *
+ * Parameters
+ * ----------
+ * path : `str`
+ * The frame's path, or the stack's subject id.
+ * timestamp : `float` or `None`
+ * When the frame was taken, in seconds since the Unix epoch. `None`
+ * for a stack.
+ * elongation : `float` or `None`
+ * Long axis divided by short axis (1 is round).
+ * angle_degrees : `float` or `None`
+ * Direction of the long axis, from 0 up to but not including 180
+ * degrees.
+ * direction_coherence : `float` or `None`
+ * From 0 (the stars point every which way) to 1 (they all point the
+ * same way), read from the angle measurement's reason text.
+ * center_width_px : `float` or `None`
+ * Median star width at the center of the field, in pixels.
+ * corner_widths_px : `dict` [`str`, `float`]
+ * Median star width in each corner, in pixels, by corner name.
+ * elongation_row_id : `int` or `None`
+ * The id of the stored elongation row, so a statement can cite it.
+ * standout : `bool`
+ * Whether this frame's elongation stands out from the others.
+ */
+export interface FrameStarShape {
+  path: string;
+  timestamp?: number | null;
+  elongation?: number | null;
+  angleDegrees?: number | null;
+  directionCoherence?: number | null;
+  centerWidthPx?: number | null;
+  cornerWidthsPx?: Record<string, number>;
+  elongationRowId?: number | null;
+  standout?: boolean;
 }
 
 /**
@@ -6139,6 +6460,7 @@ export const RPC_METHODS = [
   "processing:stack_summary",
   "processing:remake_preview",
   "quality:set_aside_frames",
+  "quality:choose_blink_pair",
   "quality:measure_stack",
   "quality:record_frame_measurements",
   "processing:measure_noise",
@@ -6149,6 +6471,8 @@ export const RPC_METHODS = [
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",
+  "analysis:identify_stack",
+  "analysis:get_stack_identification",
   "target:list",
   "target:get",
   "target:get_targets",
@@ -6159,6 +6483,8 @@ export const RPC_METHODS = [
   "target:send_to_phone",
   "target:refresh",
   "target:get_files",
+  "target:get_frame_statuses",
+  "target:put_back_frames",
   "target:get_camera_index",
   "target:get_frames",
   "target:get_frames_grouped",
@@ -6169,6 +6495,7 @@ export const RPC_METHODS = [
   "astronomy:spectral_class_summary",
   "astronomy:stars_by_spectral_class",
   "astronomy:get",
+  "astronomy:existing_ids",
   "astronomy:save",
   "astronomy:delete",
   "astronomy:analyze_periodicity",
@@ -6219,6 +6546,7 @@ export const RPC_METHODS = [
   "advisory:target_report",
   "advisory:tonight",
   "advisory:result",
+  "advisory:star_shapes",
   "advisory:depth_goal",
   "advisory:set_depth_goal",
   "history:nights",

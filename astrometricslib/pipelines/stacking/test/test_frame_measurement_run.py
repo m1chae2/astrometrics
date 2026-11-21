@@ -66,7 +66,11 @@ from astrometricslib.pipelines.stacking.frame_measurement_run import (
     record_frame_measurements_for_target,
     record_stage_frame_quality,
 )
-from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
+from astrometricslib.pipelines.stacking.metrics import (
+    FRAME_POINTING_OFFSET_FRACTION,
+    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SKY_UNEVENNESS,
+)
 
 GAIN_SETTING = "100"
 BIAS_LEVEL_ADU = 100.0
@@ -478,8 +482,8 @@ def test_the_capture_setting_describes_the_frame(target: Target) -> None:
     assert setting.filter_name is None
 
 
-def test_quarantine_numbers_become_two_rows_and_a_missing_roundness_is_not_measured(target: Target) -> None:
-    """The roundness row says why when no star could be measured."""
+def test_quarantine_numbers_become_three_rows_and_a_missing_check_is_not_measured(target: Target) -> None:
+    """Sky unevenness and pointing rows say why a check could not be made."""
     common = {
         "run_id": "run-test",
         "job_id": None,
@@ -487,18 +491,27 @@ def test_quarantine_numbers_become_two_rows_and_a_missing_roundness_is_not_measu
         "capture_setting_id": 7,
     }
     rows = quarantine_measurements_for_frame(
-        {"roundness": 0.91, "sky_median_adu": 512.0}, target.frames[0], "M 99", **common
+        {"sky_median_adu": 512.0, "sky_unevenness": 0.04, "pointing_offset_fraction": 0.01},
+        target.frames[0],
+        "M 99",
+        **common,
     )
     by_metric = {row.metric: row for row in rows}
-    assert by_metric[FRAME_QUARANTINE_ROUNDNESS].value == pytest.approx(0.91)
     assert by_metric[FRAME_QUARANTINE_SKY_MEDIAN].value == pytest.approx(512.0)
+    assert by_metric[FRAME_SKY_UNEVENNESS].value == pytest.approx(0.04)
+    assert by_metric[FRAME_POINTING_OFFSET_FRACTION].value == pytest.approx(0.01)
 
     rows = quarantine_measurements_for_frame(
-        {"roundness": None, "sky_median_adu": 512.0}, target.frames[0], "M 99", **common
+        {"sky_median_adu": 512.0, "sky_unevenness": None, "pointing_offset_fraction": None},
+        target.frames[0],
+        "M 99",
+        **common,
     )
-    roundness = next(row for row in rows if row.metric == FRAME_QUARANTINE_ROUNDNESS)
-    assert roundness.status == MeasurementStatus.NOT_MEASURED
-    assert roundness.reason
+    assert len(rows) == 3
+    for metric in (FRAME_SKY_UNEVENNESS, FRAME_POINTING_OFFSET_FRACTION):
+        missing = next(row for row in rows if row.metric == metric)
+        assert missing.status == MeasurementStatus.NOT_MEASURED
+        assert missing.reason
 
 
 def test_the_stage_records_quarantine_rows_for_kept_frames(
@@ -509,7 +522,12 @@ def test_the_stage_records_quarantine_rows_for_kept_frames(
     recording = FrameQualityRecording(configuration=config, calibration_library=_Library(biases))
     lights = target.frames[:3]
     measurements = [
-        {"path": frame.path, "roundness": 0.9, "sky_median_adu": 500.0 + index}
+        {
+            "path": frame.path,
+            "sky_median_adu": 500.0 + index,
+            "sky_unevenness": 0.05,
+            "pointing_offset_fraction": 0.01,
+        }
         for index, frame in enumerate(lights)
     ]
 
@@ -518,7 +536,7 @@ def test_the_stage_records_quarantine_rows_for_kept_frames(
     )
 
     store = QualityStore.from_configuration(config)
-    quarantine_rows = store.query(metric=FRAME_QUARANTINE_ROUNDNESS)
+    quarantine_rows = store.query(metric=FRAME_QUARANTINE_SKY_MEDIAN)
     assert len(quarantine_rows) == 3
     assert summary.frames_measured == 2
     assert summary.rows_written > 6

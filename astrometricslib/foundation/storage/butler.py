@@ -228,6 +228,16 @@ class DatasetSpec:
     The expression runs once, in the same call that adds the column, and
     never again, so later writes are never overwritten. Columns that
     were not just added are ignored."""
+    read_columns: tuple[str, ...] = ()
+    """Columns read back together with ``data_json`` and handed to
+    `deserializer`. Each is ``"id"`` or a key of `extra_column_types`.
+    Lets a serializer leave out of ``data_json`` the fields a column
+    already holds, so they are not stored twice."""
+    deserializer: Callable[[dict[str, Any], dict[str, Any]], Any] | None = None
+    """Override for building a model instance from a row:
+    ``deserializer(payload, columns)``, where ``payload`` is the parsed
+    ``data_json`` and ``columns`` maps each name in `read_columns` to the
+    row's value. Defaults to ``model_class.model_validate(payload)``."""
     data_version_kind: str | None = None
     """The kind of data this table holds, as named in
     `astrometricslib.foundation.storage.data_versions`. When set, every write
@@ -389,8 +399,23 @@ class Butler(AbstractButler):
                 f"CREATE INDEX IF NOT EXISTS {index_name} ON {spec.table_name}({', '.join(index_columns)})"
             )
 
+    @staticmethod
+    def _read_columns_sql(spec: DatasetSpec) -> str:
+        """Name the columns a full read of a row selects, as SQL text.
+
+        Returns
+        -------
+        columns_sql : `str`
+            ``data_json`` followed by the spec's `DatasetSpec.read_columns`,
+            comma-separated.
+        """
+        return ", ".join(("data_json", *spec.read_columns))
+
     def _row_to_obj(self, spec: DatasetSpec, row: Any) -> Any:
-        return spec.model_class.model_validate(json.loads(row["data_json"]))
+        payload = json.loads(row["data_json"])
+        if spec.deserializer is None:
+            return spec.model_class.model_validate(payload)
+        return spec.deserializer(payload, {column: row[column] for column in spec.read_columns})
 
     def _row_values(self, spec: DatasetSpec, obj: Any) -> dict[str, Any]:
         payload = spec.serializer(obj) if spec.serializer is not None else obj.serialize()
@@ -425,7 +450,7 @@ class Butler(AbstractButler):
         try:
             cursor = conn.cursor()
             self._ensure_table(cursor, spec)
-            cursor.execute(f"SELECT data_json FROM {spec.table_name}")
+            cursor.execute(f"SELECT {self._read_columns_sql(spec)} FROM {spec.table_name}")
             return [self._row_to_obj(spec, row) for row in cursor.fetchall()]
         finally:
             conn.close()
@@ -768,11 +793,66 @@ class Butler(AbstractButler):
             for start in range(0, len(ids), _IDS_PER_QUERY):
                 id_chunk = list(ids[start : start + _IDS_PER_QUERY])
                 placeholders = ",".join("?" for _ in id_chunk)
-                cursor.execute(
-                    f"SELECT data_json FROM {spec.table_name} WHERE id IN ({placeholders})", id_chunk
-                )
+                columns_sql = self._read_columns_sql(spec)
+                query = f"SELECT {columns_sql} FROM {spec.table_name} WHERE id IN ({placeholders})"
+                cursor.execute(query, id_chunk)
                 records.extend(self._row_to_obj(spec, row) for row in cursor.fetchall())
             return records
+        finally:
+            conn.close()
+
+    @_recheck_schema_once
+    def read_record_field(self, dataset_type: str, ids: list[str], record_key: str) -> dict[str, Any]:
+        """Read one top-level field of the stored records of some rows.
+
+        The database picks the field out of each row's ``data_json``, so
+        no record is parsed or turned into a model. Built for a caller that
+        needs one small value of rows whose records are large.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        ids : `list` [`str`]
+            The rows to read.
+        record_key : `str`
+            The key of the field in the stored record, letters, digits and
+            underscores only (it becomes part of the SQL text).
+
+        Returns
+        -------
+        values : `dict` [`str`, `Any`]
+            The value for each id that has a row; `None` when the record
+            leaves the field out.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `record_key` holds any other character.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_]+", record_key):
+            raise InvalidArgumentError(f"read_record_field: unsafe record key {record_key!r}")
+        if not ids:
+            return {}
+        spec = self._spec(dataset_type)
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return {}
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            values: dict[str, Any] = {}
+            for start in range(0, len(ids), _IDS_PER_QUERY):
+                id_chunk = list(ids[start : start + _IDS_PER_QUERY])
+                placeholders = ",".join("?" for _ in id_chunk)
+                cursor.execute(
+                    f"SELECT id, json_extract(data_json, '$.{record_key}') FROM {spec.table_name} "
+                    f"WHERE id IN ({placeholders})",
+                    id_chunk,
+                )
+                values.update((row[0], row[1]) for row in cursor.fetchall())
+            return values
         finally:
             conn.close()
 

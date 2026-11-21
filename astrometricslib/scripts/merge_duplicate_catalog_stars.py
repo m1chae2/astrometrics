@@ -9,9 +9,10 @@ rows saved before that change. It finds rows whose sky positions agree to
 within `SAME_STAR_POSITION_TOLERANCE_ARCSEC`, keeps one row per star, and
 folds the others into it so nothing is lost:
 
-* The survivor is the row with a Henry Draper or Durchmusterung name
-  (HD, BD, CD, CPD) if there is one, otherwise the Gaia DR3 row,
-  otherwise the first by name.
+* The survivor is the Gaia DR3 row if there is one, otherwise the row
+  with a Henry Draper or Durchmusterung name (HD, BD, CD, CPD), otherwise
+  the first by name. It takes the most familiar of all the rows' names as
+  its display name and keeps the others as aliases.
 * Fields the survivor is missing are filled from the other rows (the
   same rule `reconcile_position_only_star_catalog` uses), and the lists
   of targets are combined.
@@ -44,13 +45,25 @@ from scipy.spatial import cKDTree
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
     catalog_family,
     choose_survivor_id,
-    merge_duplicate_into_survivor,
+    merge_cluster,
+    merge_light_curves,
 )
+
+# `catalog_family`, `merge_cluster` and `merge_light_curves` live in
+# `catalog_star_identity`, shared with the id cleanup script; they are named
+# here too so this script's callers and tests can keep using them.
+__all__ = [
+    "catalog_family",
+    "choose_survivor_id",
+    "find_duplicate_clusters",
+    "merge_cluster",
+    "merge_light_curves",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +71,6 @@ logger = logging.getLogger(__name__)
 # star is plausible (HD, Gaia, 2MASS, TYC); more than that is more likely
 # a crowded patch where distinct stars chain together.
 MAXIMUM_CLUSTER_SIZE = 4
-
-# Per-measurement lists of a light curve. Each is either empty or has one
-# entry per timestamp.
-_PER_MEASUREMENT_FIELDS = (
-    "fluxes",
-    "fluxes_normalized",
-    "fluxes_detrended",
-    "airmasses",
-    "magnitudes",
-    "is_saturated",
-    "flux_errors",
-    "fluxes_normalized_errors",
-    "fluxes_detrended_errors",
-    "time_bjd_tdb",
-)
 
 _POSITION_ONLY_PREFIX = "FIELD_J"
 
@@ -122,107 +120,6 @@ def find_duplicate_clusters(summaries: list) -> list[list[str]]:
     for summary, label in zip(positioned, labels, strict=True):
         members.setdefault(int(label), []).append(summary.id)
     return [sorted(ids) for ids in members.values() if len(ids) > 1]
-
-
-def merge_light_curves(first: PhotometryResult, second: PhotometryResult) -> PhotometryResult | None:
-    """Join two light curves of the same star by measurement time.
-
-    Where both have a measurement at the same time, the first is kept.
-    A per-measurement list is kept only when both light curves have it.
-
-    Parameters
-    ----------
-    first : `PhotometryResult`
-        The survivor's light curve.
-    second : `PhotometryResult`
-        The other row's light curve.
-
-    Returns
-    -------
-    merged : `PhotometryResult` or `None`
-        The joined light curve, or `None` when a list is out of step with
-        its timestamps in either curve (pairing values with times would
-        then be a guess).
-    """
-    if not second.timestamps:
-        return first
-    if not first.timestamps:
-        return second
-    for light_curve in (first, second):
-        for name in _PER_MEASUREMENT_FIELDS:
-            values = getattr(light_curve, name)
-            if values and len(values) != len(light_curve.timestamps):
-                return None
-
-    rows: dict = {}
-    for light_curve in (second, first):  # the first is added last, so it wins ties
-        for index, timestamp in enumerate(light_curve.timestamps):
-            rows[timestamp] = {
-                name: (getattr(light_curve, name)[index] if getattr(light_curve, name) else None)
-                for name in _PER_MEASUREMENT_FIELDS
-            }
-    merged = PhotometryResult(timestamps=sorted(rows))
-    for name in _PER_MEASUREMENT_FIELDS:
-        if getattr(first, name) and getattr(second, name):
-            setattr(merged, name, [rows[timestamp][name] for timestamp in merged.timestamps])
-    series = merged.fluxes_detrended or merged.fluxes_normalized
-    if len(series) >= 2 and float(np.mean(series)) > 0:
-        merged.mean_flux = float(np.mean(series))
-        merged.coefficient_of_variation = float(np.std(series) / np.mean(series))
-    return merged
-
-
-def merge_cluster(stars: dict[str, StellarObject], survivor_id: str) -> tuple[StellarObject, list[str]] | str:
-    """Fold every other row of a cluster into the survivor.
-
-    Parameters
-    ----------
-    stars : `dict` [`str`, `StellarObject`]
-        The cluster's rows, by id.
-    survivor_id : `str`
-        The id of the row to keep.
-
-    Returns
-    -------
-    result : `tuple` or `str`
-        ``(survivor, removed_ids)`` when the merge is safe, otherwise a
-        sentence saying why the cluster was left alone.
-    """
-    survivor = stars[survivor_id]
-    others = [star for star_id, star in stars.items() if star_id != survivor_id]
-
-    # A catalog gives every object its own id, so two ids from the same
-    # catalog are two different objects, however close together (a close
-    # binary, or neighboring sources in a cluster).
-    families = [catalog_family(star_id) for star_id in stars]
-    if len(set(families)) < len(families):
-        return "two rows come from the same catalog, so they are different objects"
-
-    # Keep the spectrum with the most measured samples, wherever it is held
-    # (the survivor may have none at all, and the fill rule below cannot
-    # move it: an empty spectrum result still counts as "set"). The
-    # survivor is listed first, so it wins a tie.
-    spectra_holders = [star for star in [survivor, *others] if star.has_spectra]
-    if spectra_holders:
-        best_holder = max(spectra_holders, key=lambda star: len(star.spectroscopy.wavelengths_angstrom))
-        if best_holder is not survivor and len(best_holder.spectroscopy.wavelengths_angstrom) > len(
-            survivor.spectroscopy.wavelengths_angstrom
-        ):
-            survivor.spectroscopy = best_holder.spectroscopy
-
-    merged_curve = survivor.photometry
-    for other in others:
-        if merged_curve is None or other.photometry is None:
-            continue
-        merged_curve = merge_light_curves(merged_curve, other.photometry)
-        if merged_curve is None:
-            return "the light curves cannot be joined safely"
-
-    for other in others:
-        merge_duplicate_into_survivor(survivor, other)
-    if merged_curve is not None:
-        survivor.photometry = merged_curve
-    return survivor, [star.id for star in others]
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:

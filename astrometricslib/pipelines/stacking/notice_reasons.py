@@ -10,6 +10,8 @@ __all__ = [
     "flat_calibration_issue_reason",
     "frames_moved_to_excluded_reason",
     "single_frame_stack_reason",
+    "stack_cropped_reason",
+    "stack_turned_reason",
     "uncovered_flat_calibration_issues",
 ]
 
@@ -106,3 +108,37 @@ def uncovered_flat_calibration_issues(issues: list[str]) -> list[str]:
     noise_issues = [issue for issue in issues if issue.startswith(NOISY_FLAT_ISSUE_PREFIX)]
     covered = {UNREADABLE_FLATS_ISSUE, *level_issues[:1], *noise_issues[:1]}
     return [issue for issue in issues if issue not in covered]
+
+
+def stack_cropped_reason(crop_reason: str) -> str:
+    """Write the sentence for a stack whose edges were cropped.
+
+    Parameters
+    ----------
+    crop_reason : `str`
+        The crop's own reason, with the sides, pixels, frame counts and the
+        rule's numbers.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"stack cropped at the edges: {crop_reason}"
+
+
+def stack_turned_reason(turn_reason: str) -> str:
+    """Write the sentence for a stack that was turned by a quarter turn.
+
+    Parameters
+    ----------
+    turn_reason : `str`
+        The turn's own reason, with the degrees turned and where the top of
+        the picture pointed before and after.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"stack turned so that north is near the top: {turn_reason}"

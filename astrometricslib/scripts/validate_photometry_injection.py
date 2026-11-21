@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from astrometricslib import Astrometrics
+from astrometricslib._internal.drivers.catalog_access import STAR_RECORD_COLUMNS, stellar_object_from_row
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
@@ -76,7 +77,7 @@ DEFAULT_REALIZATIONS = 80
 DEFAULT_MINIMUM_POINTS = 25
 
 _QUERY = """
-    SELECT data_json FROM stellar_objects
+    SELECT data_json, id, name, ra, dec, magnitude, target_id FROM stellar_objects
     WHERE target_id = ?
       AND json_extract(data_json, '$.photometry.falseDiscoveryQValue') IS NOT NULL
 """
@@ -403,8 +404,12 @@ def load_field(target: str, minimum_points: int) -> tuple[list[StellarObject], s
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     stars = []
     known = set()
-    for (data_json,) in connection.execute(_QUERY, (target,)):
-        star = StellarObject.model_validate(json.loads(data_json))
+    for data_json, *column_values in connection.execute(_QUERY, (target,)):
+        # A saved star's record leaves out what its columns hold, so the
+        # columns are read too and put back in.
+        star = stellar_object_from_row(
+            json.loads(data_json), dict(zip(STAR_RECORD_COLUMNS, column_values, strict=True))
+        )
         if star.photometry is None or len(star.photometry.fluxes_normalized) < minimum_points:
             continue
         stars.append(star)

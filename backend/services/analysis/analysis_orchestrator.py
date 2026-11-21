@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The job log file of a stack's star identification starts with this, so the
+# analysis result reader and the duplicate check can tell it from an analysis.
+STACK_IDENTIFICATION_LOG_PREFIX = "stack_astrometry_"
+
 # How many stars are measured in the master stacked spectral image. It has
 # the best signal-to-noise ratio of any spectral image, so the brightest
 # ten stars are enough to set the baseline without spending time on faint
@@ -75,6 +79,78 @@ def _is_same_file(first_path: str, second_path: str) -> bool:
         return False
 
 
+def _is_identification_job(job: Any) -> bool:
+    """Say whether a job record is a stack's star identification.
+
+    Parameters
+    ----------
+    job : `ProcessingJob`
+        A job record.
+
+    Returns
+    -------
+    is_identification : `bool`
+        True when its log file name starts with the identification prefix.
+    """
+    log_file = getattr(job, "log_file_path", None) or ""
+    return os.path.basename(log_file).startswith(STACK_IDENTIFICATION_LOG_PREFIX)
+
+
+def _identification_payload(identification: Any) -> dict[str, Any]:
+    """Turn a stack identification into the plain data the app reads.
+
+    Parameters
+    ----------
+    identification : `StackIdentification`
+        The library's result.
+
+    Returns
+    -------
+    payload : `dict`
+        ``stars`` in the overlay layout, placed on the viewer's copy of the
+        stack (moved by its crop offset), the counts, ``solutionReused``,
+        ``gaiaDepth``, ``catalogOnlyLimit``, ``gaiaTilesMissing``,
+        ``simbadUsed`` and ``notes``.
+    """
+    # The viewer shows the stack's stretched copy, which may be a crop of it.
+    offset_x = getattr(identification, "viewer_offset_x", 0) or 0
+    offset_y = getattr(identification, "viewer_offset_y", 0) or 0
+    shown_width = getattr(identification, "viewer_width", 0) or identification.width
+    shown_height = getattr(identification, "viewer_height", 0) or identification.height
+    stars = [
+        {
+            "id": star.id,
+            "name": star.name,
+            "x": star.x - offset_x,
+            "y": star.y - offset_y,
+            "spectralType": "",
+            "isCatalogIdentified": star.kind != "unmatched",
+            "referenceWidth": shown_width,
+            "referenceHeight": shown_height,
+            "radiusPx": None,
+            "matchKind": star.kind,
+            "raDeg": star.ra_deg,
+            "decDeg": star.dec_deg,
+            "gMag": star.g_mag,
+            "gaiaSourceId": star.gaia_source_id,
+            "nameSource": star.name_source,
+        }
+        for star in identification.stars
+    ]
+    return {
+        "stars": stars,
+        "matchedCount": identification.matched_count,
+        "unmatchedCount": identification.unmatched_count,
+        "catalogOnlyCount": identification.catalog_only_count,
+        "solutionReused": identification.solution_reused,
+        "gaiaDepth": identification.gaia_depth,
+        "catalogOnlyLimit": identification.catalog_only_limit,
+        "gaiaTilesMissing": identification.gaia_tiles_missing,
+        "simbadUsed": identification.simbad_used,
+        "notes": list(identification.notes),
+    }
+
+
 class AnalysisOrchestrator(BaseBackgroundService):
     """Service for managing background scientific analysis tasks.
 
@@ -104,6 +180,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # the same target instead of one deduplicated by the
         # already-running check below.
         self._analyze_submit_lock = threading.Lock()
+        # The stop switch of each running star identification, by job id.
+        self._identification_stops: dict[str, threading.Event] = {}
 
     def analyze_image(
         self, target_id: str, image_files: Any, filter_name: str | None = None, type: str = "photometry"
@@ -158,7 +236,11 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # Fix: Priority 1 - Use JobService to find the MOST RECENT
         # analysis job for this target
         if self._job_service:
-            recent_jobs = self._job_service.get_jobs_for_target(target_id, job_type="analysis", limit=5)
+            recent_jobs = [
+                job
+                for job in self._job_service.get_jobs_for_target(target_id, job_type="analysis", limit=10)
+                if not _is_identification_job(job)
+            ]
             if recent_jobs:
                 job = recent_jobs[0]
 
@@ -217,12 +299,184 @@ class AnalysisOrchestrator(BaseBackgroundService):
         if self._job_service:
             active = self._job_service.get_jobs_for_target(target_id, job_type="analysis", status="started")
             if active:
+                stop = self._identification_stops.get(active[0].id)
+                if stop is not None:
+                    stop.set()
+                    return {"cancelled": True, "own_process": True, "reason": None}
                 return self.cancel_processing(active[0].id)
         return {
             "cancelled": False,
             "own_process": False,
             "reason": "There is no active analysis job for this target.",
         }
+
+    def identify_stack(self, target_id: str, stack_path: str) -> dict[str, Any]:
+        """Start naming the detected stars of a target's stack, as a job.
+
+        The job has the type of an analysis, so the Analyze Target button
+        shows it as running and its Cancel button stops it. A raw frame is
+        refused; its star names come from the overlay instead.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        stack_path : `str`
+            The stack, inside the library folders.
+
+        Returns
+        -------
+        result : `dict`
+            ``status`` (``started`` or ``already_running``) and ``jobId``.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the path is outside the library or not a stack.
+        """
+        checked = self._checked_stack_path(stack_path)
+        try:
+            frame_count = int(self.astrometrics.targets.read_frame_header(checked).get("STACKCNT", 0) or 0)
+        except FITS_READ_ERRORS as error:
+            raise InvalidArgumentError(f"The stack could not be read: {error}") from error
+        if frame_count <= 1:
+            raise InvalidArgumentError("Star names are made for stacks only, not for single frames.")
+        safe_target = target_id.replace(" ", "_").replace("/", "_")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_name = f"{STACK_IDENTIFICATION_LOG_PREFIX}{safe_target}_{timestamp}.log"
+        log_file = str(self._config_service.get_logs_path() / log_name)
+        with self._analyze_submit_lock:
+            if self._job_service:
+                active = self._job_service.get_jobs_for_target(
+                    target_id, job_type="analysis", status="started"
+                )
+                for job in active:
+                    if _is_identification_job(job):
+                        return {"status": "already_running", "jobId": job.id}
+            stop = threading.Event()
+            job_id = self._submit_job(
+                target_id, "analysis", self._run_stack_identification, checked, stop, log_file_path=log_file
+            )
+            self._identification_stops[job_id] = stop
+        return {"status": "started", "jobId": job_id}
+
+    def get_stack_identification(self, target_id: str, stack_path: str) -> dict[str, Any]:
+        """Read the star names of a stack, and whether a job is making them.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        stack_path : `str`
+            The stack, inside the library folders.
+
+        Returns
+        -------
+        result : `dict`
+            ``running`` (a job is naming the stars), ``jobId``, ``progress``
+            (0 to 1) and ``message`` of that job, ``error`` of the last
+            failed job, and ``identification``: the saved result with the
+            stars in the overlay layout (``id``, ``name``, ``x``, ``y``,
+            ``referenceWidth``, ``referenceHeight``, ``isCatalogIdentified``,
+            ``matchKind``, ``raDeg``, ``decDeg``, ``gMag``), or `None`.
+        """
+        checked = self._checked_stack_path(stack_path)
+        answer: dict[str, Any] = {
+            "running": False,
+            "jobId": None,
+            "progress": None,
+            "message": None,
+            "error": None,
+        }
+        if self._job_service:
+            jobs = [
+                job
+                for job in self._job_service.get_jobs_for_target(target_id, job_type="analysis", limit=10)
+                if _is_identification_job(job)
+            ]
+            if jobs:
+                latest = jobs[0]
+                answer["jobId"] = latest.id
+                if latest.status in ("started", "running"):
+                    answer["running"] = True
+                    total = latest.progress_total or 100
+                    answer["progress"] = min(1.0, max(0.0, (latest.progress_current or 0) / total))
+                    answer["message"] = latest.message
+                elif latest.status == "failed":
+                    answer["error"] = latest.message
+        identification = self.astrometrics.processing.get_stack_identification(checked)
+        answer["identification"] = None if identification is None else _identification_payload(identification)
+        return answer
+
+    def _checked_stack_path(self, stack_path: str) -> str:
+        """Refuse a path outside the library folders.
+
+        Returns
+        -------
+        path : `str`
+            The resolved path.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If no path is given or it is outside the library.
+        """
+        if not stack_path:
+            raise InvalidArgumentError("No stack was given.")
+        if self._stellar_service is None:
+            return stack_path
+        return self._stellar_service._checked_image_path(stack_path)
+
+    def _run_stack_identification(
+        self, job_id: str, target_id: str, stack_path: str, stop: threading.Event, **kwargs: Any
+    ) -> dict[str, Any]:
+        """Name the stack's stars, logging to the job and reporting progress.
+
+        Returns
+        -------
+        result : `dict`
+            A short summary: the counts and the notes.
+        """
+        from astrometricslib.jobs import capture_job_logs
+
+        job = self._job_service.get_job(job_id) if self._job_service else None
+
+        def report(share: float, message: str) -> None:
+            """Store the progress on the job record.
+
+            Parameters
+            ----------
+            share : `float`
+                The share done, 0 to 1.
+            message : `str`
+                What is being done.
+            """
+            logger.info("[%s] %s (%.0f%%)", target_id, message, share * 100)
+            if self._job_service:
+                self._job_service.update_job(job_id, progress=share * 100, status_message=message)
+
+        try:
+            with capture_job_logs(
+                job_id=job_id,
+                log_file_path=job.log_file_path if job else None,
+                job_store=self._job_service.repository if self._job_service else None,
+            ):
+                identification = self.astrometrics.processing.identify_stack(
+                    stack_path, progress=report, should_stop=stop.is_set
+                )
+                result = {
+                    "status": "finished",
+                    "kind": "stack_identification",
+                    "matched": identification.matched_count,
+                    "unmatched": identification.unmatched_count,
+                    "catalogOnly": identification.catalog_only_count,
+                    "aliasRecordsUpdated": identification.alias_records_updated,
+                    "notes": list(identification.notes),
+                }
+                self._store_job_result(job_id, result)
+                return result
+        finally:
+            self._identification_stops.pop(job_id, None)
 
     def _start_analysis_task(
         self,

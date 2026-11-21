@@ -190,14 +190,17 @@ DECISIONS = {
     # ---- Not offered yet: parts of the old sync set not built ----
     "observatory_remote_sync_frames": ToolDecision(
         "keep",
-        "Built 2026-10-03; since 2026-10-05 it also copies calibration folders, every folder, chosen files "
-        "and a local folder. The AI may ingest frames from the telescope: adds, never deletes.",
+        "Built 2026-10-03. The AI may ingest frames from the telescope: adds, never deletes. Since "
+        "2026-11-21 the astrometrics-backend server serves it through telescope:sync, so it is the app's "
+        "own sync of one target (or Bias, Dark, Flat) and a remote_sync job in the job list; dry_run "
+        "reports the plan. Copying every folder, chosen files or a local folder is no longer offered.",
         "ingest",
     ),
     "observatory_remote_sync_logs": ToolDecision(
         "keep",
         "Built 2026-10-03. The AI may ingest the guide and Ekos logs: adds or updates records, "
-        "never deletes.",
+        "never deletes. Since 2026-11-21 the astrometrics-backend server serves it through "
+        "telescope:sync_logs, the app's own log sync, recorded as a remote_sync job named logs.",
         "ingest",
     ),
     "quality_measure_frames": ToolDecision(
@@ -281,7 +284,8 @@ DECISIONS = {
         "stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and "
         "never reach the configuration. The old pictures are copied into _previous_preview first and put "
         "back if the run fails. The stack file is never written. Writes only the preview JPEG, the "
-        "processed FITS and the target's processed-image pointer.",
+        "processed FITS and the target's processed-image pointer. Since 2026-11-21 the "
+        "astrometrics-backend server serves it through processing:remake_preview, so the app runs the job.",
         "process",
     ),
     "processing_stack": ToolDecision(
@@ -290,7 +294,9 @@ DECISIONS = {
         "button does, choosing imaging or spectral frames, a filter and a file or time range. "
         "plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad "
         "frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since "
-        "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
+        "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack. Since "
+        "2026-11-21 the astrometrics-backend server serves it through processing:stack, the Stack "
+        "button's own job, so it shows in the job list and the app's Cancel reaches it.",
         "process",
     ),
     "target_imaged_field_centers": ToolDecision(
@@ -311,6 +317,20 @@ DECISIONS = {
     ),
     "planning_lookup_coordinates": ToolDecision(
         "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
+    ),
+    "processing_get_stack_identification": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution "
+        "it came from. Writes nothing.",
+    ),
+    "processing_identify_stack": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected "
+        "stars, as a background job. Writes the solution into the stack and its viewer copy and saves the "
+        "identification; raw frames are never written. Since 2026-11-21 the astrometrics-backend server "
+        "serves it through analysis:identify_stack, the Astrometry button's own analysis job, so it shows "
+        "in the job list and the app's Cancel stops it.",
+        "process",
     ),
     "processing_stack_summary": ToolDecision(
         "keep",
@@ -335,6 +355,19 @@ DECISIONS = {
         "keep",
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
+    ),
+    "quality_choose_blink_pair": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Picks a typical frame of a frame's session and one reference star in both, "
+        "for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is "
+        "stored.",
+        tool_class="compute",
+    ),
+    "quality_match_frame_positions": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Says where positions of one frame lie in another frame of the same field, "
+        "allowing for drift and a meridian flip. Reads the files only; nothing is stored.",
+        tool_class="compute",
     ),
     "quality_measure_tuned_parameters": ToolDecision(
         "withhold",
@@ -499,6 +532,13 @@ DECISIONS = {
         "own frames. Reads only; nothing is stored. The first call fits the model and is slow.",
         "observe",
     ),
+    "review_get_star_shape_review": ToolDecision(
+        "keep",
+        "Built 2026-11-20 (#199). Says in plain words how round a target's stars are, whether the stretch "
+        "points one way, and which frames stand out, from the stored star-shape measurements. Reads only; "
+        "nothing is measured or stored. Corner widths are reported as not validated (AST-18).",
+        "observe",
+    ),
     "observatory_mount_get_centering_exposure": ToolDecision(
         "keep",
         "Built 2026-11-08. Works out the plate-solve centering exposure from the library's zero point and "
@@ -642,6 +682,13 @@ DECISIONS = {
         "withhold",
         "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules "
         "trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status.",
+        "change-data",
+    ),
+    "quality_put_back_set_aside_frames": ToolDecision(
+        "withhold",
+        "Moves chosen set-aside frames out of a target's _excluded folder back into the target and "
+        "rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File "
+        "Browser. The AI lists them with quality_set_aside_frames.",
         "change-data",
     ),
     "quality_forget": ToolDecision(

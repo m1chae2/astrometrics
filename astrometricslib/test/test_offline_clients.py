@@ -70,24 +70,25 @@ def test_simbad_refuses_every_query_without_pausing() -> None:
     assert not simbad._paused_until  # no cooldown: nothing was tried
 
 
-def test_gaia_cone_clients_refuse() -> None:
-    """Both Gaia cone clients (VizieR and the ESA archive) refuse."""
-    from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+def test_gaia_tile_clients_refuse() -> None:
+    """Both Gaia clients (VizieR and the ESA archive) refuse."""
+    from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_vizier, query_gaia_tile_esa
 
     with pytest.raises(ConnectionError, match="VizieR"):
         query_gaia_cone_vizier(10.0, 20.0, 0.5, 16.0, 100, 5.0)
     with pytest.raises(ConnectionError, match="Gaia"):
-        query_gaia_cone_esa(10.0, 20.0, 0.5, 16.0, 100)
+        query_gaia_tile_esa(7, 1000, 0.0, 16.0, 100)
 
 
 def test_the_star_identifier_skips_gaia_quietly(caplog: pytest.LogCaptureFixture) -> None:
-    """The cone fetch gives up at once, with no warning or mark."""
+    """No tile fetcher is made, with no warning or mark."""
     from astrometricslib.pipelines.astrometry.processing import star_identifier
 
     with caplog.at_level("DEBUG"):
-        table = star_identifier._fetch_gaia_cone(10.0, 20.0, 0.5, 16.0, 100, "test")
+        fetch, reason = star_identifier.make_gaia_tile_fetcher()
 
-    assert table is None
+    assert fetch is None
+    assert "nothing off the computer" in reason
     assert not [record for record in caplog.records if record.levelname in ("WARNING", "ERROR")]
     assert not star_identifier._is_gaia_service_unreachable("VizieR")
 

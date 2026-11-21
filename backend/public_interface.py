@@ -195,6 +195,9 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:remake_preview",
     # The frames the stacker set aside for a target, with the reason (a read).
     "quality:set_aside_frames",
+    # A typical frame and a reference star for the viewer's Blink button
+    # (a read).
+    "quality:choose_blink_pair",
     # Measures a stack and the one before it the same way and compares them
     # (a background job; it records a job and writes no quality rows).
     "quality:measure_stack",
@@ -215,6 +218,8 @@ RPC_METHODS: tuple[str, ...] = (
     "analysis:analyze_image",
     "analysis:get_results",
     "analysis:cancel",
+    "analysis:identify_stack",
+    "analysis:get_stack_identification",
     # Target library
     "target:list",
     "target:get",
@@ -226,6 +231,8 @@ RPC_METHODS: tuple[str, ...] = (
     "target:send_to_phone",
     "target:refresh",
     "target:get_files",
+    "target:get_frame_statuses",
+    "target:put_back_frames",
     "target:get_camera_index",
     "target:get_frames",
     "target:get_frames_grouped",
@@ -237,6 +244,7 @@ RPC_METHODS: tuple[str, ...] = (
     "astronomy:spectral_class_summary",
     "astronomy:stars_by_spectral_class",
     "astronomy:get",
+    "astronomy:existing_ids",
     "astronomy:save",
     "astronomy:delete",
     "astronomy:analyze_periodicity",
@@ -297,6 +305,7 @@ RPC_METHODS: tuple[str, ...] = (
     "advisory:target_report",
     "advisory:tonight",
     "advisory:result",
+    "advisory:star_shapes",
     "advisory:depth_goal",
     "advisory:set_depth_goal",
     "history:nights",

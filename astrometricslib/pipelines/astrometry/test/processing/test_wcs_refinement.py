@@ -24,6 +24,7 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing import wcs_refinement
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
 CENTRE_RA_DEG = 250.445
 CENTRE_DEC_DEG = 36.157
@@ -262,11 +263,7 @@ def test_the_identifier_refits_the_solution_and_records_the_flag(monkeypatch: py
     """With Gaia stars for the field, the refit replaces the solution."""
     measured, gaia, truth = make_field()
     identifier = make_identifier()
-    monkeypatch.setattr(
-        StarIdentifier,
-        "_query_gaia_region",
-        staticmethod(lambda *a, **k: (gaia_table_for(gaia), gaia)),
-    )
+    use_field_stars(monkeypatch, gaia_table_for(gaia), gaia)
     sources = [{"x_centroid": x, "y_centroid": y} for x, y in measured]
 
     refined = identifier._refine_wcs_against_gaia(alnath_like_solution(), sources, *IMAGE_SHAPE)
@@ -279,7 +276,7 @@ def test_the_identifier_refits_the_solution_and_records_the_flag(monkeypatch: py
 def test_a_failed_gaia_download_keeps_the_solver_solution(monkeypatch: pytest.MonkeyPatch) -> None:
     """With no Gaia stars the solution is returned as it came, with a flag."""
     identifier = make_identifier()
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (None, None)))
+    use_field_stars(monkeypatch)
     solver = alnath_like_solution()
 
     result = identifier._refine_wcs_against_gaia(
@@ -329,9 +326,7 @@ def _refit_with_peaks(
     identifier = make_identifier()
     identifier.detector.last_background_noise = noise
     identifier._detected_on_binned_copy = binned
-    monkeypatch.setattr(
-        StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (gaia_table_for(gaia), gaia))
-    )
+    use_field_stars(monkeypatch, gaia_table_for(gaia), gaia)
     sources = [
         {"x_centroid": x, "y_centroid": y, "peak": peak_of(index)} for index, (x, y) in enumerate(measured)
     ]

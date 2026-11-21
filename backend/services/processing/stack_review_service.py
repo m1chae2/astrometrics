@@ -112,6 +112,9 @@ class StackReviewService:
         denoise: bool | None = None,
         denoise_strength: float | None = None,
         star_toning: bool | None = None,
+        starnet: bool = False,
+        star_strength: float | None = None,
+        star_stretch: float | None = None,
     ) -> StackReviewStart:
         """Make a target's preview picture again, as a background job.
 
@@ -132,6 +135,13 @@ class StackReviewService:
             Cosmic Clarity's strength for this run, from 0 to 1.
         star_toning : `bool`, optional
             Turn the star toning on or off for this run.
+        starnet : `bool`, optional
+            Stretch the stars and the rest of the picture on their own, with
+            StarNet. Off by default.
+        star_strength : `float`, optional
+            With ``starnet``, how much of the stars layer is blended, 0 to 1.
+        star_stretch : `float`, optional
+            With ``starnet``, the strength of the stars' own stretch.
 
         Returns
         -------
@@ -146,6 +156,9 @@ class StackReviewService:
                 denoise=denoise,
                 denoise_strength=denoise_strength,
                 star_toning=star_toning,
+                starnet=starnet,
+                star_strength=star_strength,
+                star_stretch=star_stretch,
                 register_job=True,
             )
         )

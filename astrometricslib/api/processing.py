@@ -2091,6 +2091,75 @@ class ProcessingPipelines:
         )
         return wcs
 
+    def identify_stack(
+        self,
+        stack_path: str,
+        *,
+        progress: Callable[[float, str], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> Any:
+        """Name every star the stack's own star finder detected.
+
+        The stack's saved plate solution is used when it is real (header
+        ``PLTSOLVD``); otherwise the stack is solved and the solution is
+        written into the stack and its viewer copy. The stack's detections
+        are matched to the Gaia stars of the cache tiles under it (filled to
+        the depth the equipment predicts) and, when online, to SIMBAD, whose
+        most familiar designation wins (proper name, Bayer, Flamsteed, HD,
+        HIP, TYC, then ``Gaia DR3 <id>``; among equals, alphabetical). The
+        other SIMBAD names of each star are its ``aliases``. A star the
+        library already has a record of (``Gaia DR3 <id>``) gains the names
+        it lacks as aliases; no record is created or otherwise changed. The
+        result is saved next to the stack; see `get_stack_identification`.
+        Raw frames are refused.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The imaging stack.
+        progress : `Callable`, optional
+            Called with the share done (0 to 1) and a sentence.
+        should_stop : `Callable`, optional
+            Returns True to stop before the next step or Gaia tile; the call
+            then raises an `AstrometricsError` that says it was stopped.
+
+        Returns
+        -------
+        identification : `StackIdentification`
+            Fields: ``path``, ``width``, ``height``, ``solution_reused``,
+            ``stars`` (each with ``id``, ``name``, ``kind`` -- ``matched``,
+            ``unmatched`` or ``catalog_only`` --, ``x`` and ``y`` in 0-based
+            pixels, ``ra_deg``, ``dec_deg``, ``g_mag``, ``gaia_source_id``,
+            ``name_source`` and ``aliases``), the three counts, ``gaia_depth``,
+            ``catalog_only_limit``, ``gaia_tiles_missing``, ``simbad_used``,
+            ``notes`` and ``alias_records_updated``.
+        """
+        from astrometricslib.pipelines.astrometry.processing.stack_identification import identify_stack_stars
+
+        return identify_stack_stars(
+            stack_path, config=self._config, drivers=self._drivers, progress=progress, should_stop=should_stop
+        )
+
+    def get_stack_identification(self, stack_path: str) -> Any | None:
+        """Read the saved result of `identify_stack` for an unchanged stack.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The imaging stack.
+
+        Returns
+        -------
+        identification : `StackIdentification` or `None`
+            The saved result, or `None` when there is none or the stack
+            changed since.
+        """
+        from astrometricslib.pipelines.astrometry.processing.stack_identification import (
+            read_stack_identification,
+        )
+
+        return read_stack_identification(stack_path)
+
     # -- Limits on how much heavy work runs at once -------------------------
 
     def acquire_job_slot(self) -> AbstractContextManager:

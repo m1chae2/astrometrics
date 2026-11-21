@@ -53,6 +53,62 @@
   overflow: hidden;
 }
 
+/* The File Browser header holds its toolbar and the Collapse button side by side. */
+.image-processing-display__browser-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+/* Folded panels under the viewer: the File Browser row stretches; Image Controls keeps to the right. */
+.image-processing-display__collapsed-row {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.image-processing-display__collapsed-row-fill {
+  flex: 1 1 auto;
+}
+
+.image-processing-display__collapsed-row-end {
+  width: auto;
+  margin-left: auto;
+}
+
+/* Both right panels folded: the column narrows to the Frame Analysis rail, so the viewer widens. */
+.layout:has(.image-processing-display__right--collapsed) {
+  --layout-right-col-width: 36px;
+}
+
+.image-processing-display__right--collapsed {
+  display: flex;
+  height: 100%;
+}
+
+/* Frame Analysis folded, Image Controls open: the column narrows so the viewer widens. The controls
+   keep their own height at the bottom, beside the full-height Frame Analysis rail. */
+.layout:has(.image-processing-display__right--split) {
+  --layout-right-col-width: 260px;
+}
+
+.image-processing-display__right--split {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+}
+
+.image-processing-display__right--split > .panel:not(.panel--collapsed) {
+  align-self: flex-end;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 /* Right Panel structure */
 .image-processing-display__right {
   height: 100%;
@@ -71,6 +127,11 @@
   overflow: hidden;
   max-height: 100%;
   touch-action: none;
+}
+
+/* Held back while a saved view waits to be put back, so the fitted view does not show first. */
+.fits-renderer__canvas-container--restoring {
+  visibility: hidden;
 }
 
 .fits-renderer__canvas {
@@ -319,16 +380,25 @@
   transform: translateY(-50%);
 }
 
+/* The viewer toolbar wraps onto more lines in a narrow panel, so the panel never scrolls sideways. */
 .fits-header-controls {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   align-items: center;
+  min-width: 0;
 }
 
-/* The reason the astrometry overlay is off, small and muted beside the buttons. */
+/* The Blink note, small and muted beside the buttons. */
 .fits-header-controls__note {
   font-size: var(--small-font-size);
   color: var(--text-muted);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -372,9 +442,34 @@
   flex: 1;
 }
 
+/* The list takes the keyboard focus after a click so the arrow keys can move through it. */
+.file-browser__list:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
 .file-browser__list {
   flex: 1;
   overflow-y: auto;
+}
+
+/* Star stretch block in Frame Analysis: it reuses the stack summary look; only the chart and its count line are its own. */
+.star-shape-chart__count {
+  margin: 0 0 var(--space-1);
+  font-size: var(--compact-font-size);
+}
+
+.star-shape-chart {
+  height: var(--star-shape-chart-height);
+  width: 100%;
+}
+
+/* The Status cell holds one or two chips and, for a set-aside frame, the Put back button. */
+.file-browser__status-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -675,10 +770,6 @@
   white-space: nowrap;
 }
 
-.data-tab-filter {
-  margin-bottom: 10px;
-}
-
 .file-browser__checkbox-cell {
   width: 40px;
 }
@@ -826,88 +917,6 @@
   border-bottom-right-radius: var(--radius-md);
 }
 
-/* Category Cell Styling */
-.category-cell {
-  font-weight: 600;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.category-icon {
-  opacity: 0.7;
-  font-size: var(--large-font-size);
-  width: 20px;
-  text-align: center;
-}
-
-/* Status Indicators */
-.cal-status {
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
-  border-radius: var(--radius-xl);
-  font-size: var(--control-font-size);
-}
-
-.cal-status--success {
-  color: var(--status-green-dim);
-  /* bright green */
-  background: color-mix(in srgb, var(--status-green-dim) 10%, transparent);
-}
-
-.cal-status--warning {
-  color: var(--status-yellow);
-  /* amber */
-  background: color-mix(in srgb, var(--warning-amber) 10%, transparent);
-}
-
-.cal-status--missing {
-  color: var(--status-red);
-  /* red */
-  background: color-mix(in srgb, var(--btn-red-pending) 10%, transparent);
-}
-
-.cal-status--checking {
-  opacity: 0.7;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-.frame-analysis-empty {
-  padding: 1rem;
-  text-align: center;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.category-cell-duration {
-  color: var(--text-muted);
-  font-size: var(--control-font-size);
-}
-
-.session-count-cell {
-  font-weight: 700;
-}
-
-.session-count--placeholder {
-  opacity: 0.3;
-  font-weight: 400;
-}
-
-.cal-status__icon {
-  margin-right: 2px;
-}
-
-.cal-status__label-suffix {
-  opacity: 0.7;
-  font-size: var(--compact-font-size);
-  margin-left: 2px;
-}
-
 /* Separator for analysis results */
 .analysis-separator td {
   height: 8px;
@@ -970,17 +979,6 @@
   margin-right: var(--space-3);
 }
 
-/* The "Session Frames" heading row with the camera picker on the right. */
-.frame-analysis-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin-bottom: var(--space-3);
-  font-weight: bold;
-  font-size: var(--large-font-size);
-}
-
 .image-processing-display__analysis-section .tab-view__content {
   padding: 0;
   background: transparent;
@@ -992,36 +990,9 @@
   flex-direction: column;
 }
 
-.analysis-results-content,
-.frame-analysis-content {
-  padding-top: 4px;
-}
-
-/* Session Frames fills the rest of the Data tab. The table scrolls inside
-   it, and never gets shorter than 280px; when the panels above it are
-   opened, the whole tab scrolls instead. */
-.frame-analysis-content {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 280px;
-}
-
-.frame-analysis-table-container {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
 .analysis-results-content {
+  padding-top: 4px;
   margin-bottom: 8px;
-}
-
-.data-tab-filter {
-  margin-bottom: 6px;
-  display: flex;
-  justify-content: flex-start;
 }
 
 .stacked-image-panel-container {
@@ -1221,32 +1192,6 @@
   font-size: var(--compact-font-size);
   color: var(--text-muted, var(--text-dimmest));
 }
-.category-cell--nested {
-  padding-left: 20px;
-  font-size: var(--control-font-size);
-  opacity: 0.9;
-}
-.category-cell__tree-icon {
-  margin-right: 8px;
-  opacity: 0.5;
-}
-.cal-status--right {
-  justify-content: flex-end;
-}
-.frame-count-group-header {
-  padding: 8px 12px;
-  font-size: var(--compact-font-size);
-  opacity: 0.6;
-  text-transform: uppercase;
-}
-.frame-count-section-header {
-  padding: 12px 12px 4px 12px;
-  font-size: var(--section-label-size);
-  font-weight: bold;
-  color: var(--text-dim);
-  letter-spacing: 0.05em;
-}
-
 .analysis-modal-content {
   display: flex;
   flex-direction: column;
@@ -1412,6 +1357,58 @@
   font-size: var(--section-label-size);
 }
 
+/* Calibration block (Data tab): missing frames first, all groups on request. */
+.calibration-report__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.calibration-report__note,
+.calibration-report__subheading {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.calibration-report__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calibration-report__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.calibration-report__settings {
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
+}
+
+.calibration-report__table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.calibration-report__table th,
+.calibration-report__table td {
+  padding: 2px var(--space-2);
+  border-top: 1px solid var(--grey-medium, var(--text-darkest));
+  font-weight: normal;
+  vertical-align: middle;
+}
+
+.calibration-report__table thead th {
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
+}
+
 /* The "Make the picture again" disclosure in the Stack Summary block. */
 .preview-remake {
   display: flex;
@@ -1476,6 +1473,9 @@
   pointer-events: none;
   /* Read by FitsRenderer when it draws the star markers. */
   --star-marker-color: var(--accent-sky);
+  /* A stack's detection with no catalog star, and a catalog star with no detection. */
+  --star-marker-unmatched-color: var(--warning-orange);
+  --star-marker-catalog-color: var(--accent-purple);
 }
 
 /* The pixel readout floats over the bottom-left corner of the image, so the image keeps its full height.

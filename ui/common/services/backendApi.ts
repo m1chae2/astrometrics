@@ -191,6 +191,7 @@ export interface ActionRegistry {
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
     "astronomy:get": { payload: { star_id: string }; response: Spectrum | null };
+    "astronomy:existing_ids": { payload: { star_ids: string[] }; response: string[] };
     "astronomy:analyze_periodicity": { payload: { star_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
@@ -655,6 +656,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:list',
     'astronomy:count',
     'astronomy:get',
+    'astronomy:existing_ids',
     'astronomy:get_status',
     'astronomy:visible',
     'astronomy:target_data_availability',

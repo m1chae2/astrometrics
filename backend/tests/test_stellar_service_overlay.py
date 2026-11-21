@@ -176,3 +176,16 @@ def test_a_link_out_of_the_library_is_refused(tmp_path: Path) -> None:
     with pytest.raises(InvalidArgumentError, match="library"):
         service.get_astrometry_overlay_stars("M 31", image_path=str(link))
     assert calls == []
+
+
+def test_existing_star_ids_asks_the_library_once_with_no_cap() -> None:
+    """One `exists` query says which ids have a record."""
+    astrometrics = MagicMock()
+    astrometrics.stars.query.return_value = StarQueryResult(detail="exists", found=["Gaia DR3 1"])
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    assert service.get_existing_star_ids(["Gaia DR3 1", "HD 2"]) == ["Gaia DR3 1"]
+    astrometrics.stars.query.assert_called_once_with(ids=["Gaia DR3 1", "HD 2"], detail="exists", limit=None)
+    astrometrics.stars.query.reset_mock()
+    assert service.get_existing_star_ids([]) == []
+    astrometrics.stars.query.assert_not_called()

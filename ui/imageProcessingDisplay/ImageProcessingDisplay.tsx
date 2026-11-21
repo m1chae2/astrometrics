@@ -17,7 +17,7 @@ import { useStackOrientation } from './hooks/useStackOrientation';
 import { FrameAnalysisPanel } from './components/FrameAnalysisPanel';
 import { addTargetData, createTarget, fetchTargetObject } from '../common/services/targetService';
 import { useQuery } from '@tanstack/react-query';
-import { fetchAstrometryOverlayStars, findCatalogRecord, AstrometryOverlayStar } from '../common/services/astronomyService';
+import { fetchAstrometryOverlayStars, AstrometryOverlayStar } from '../common/services/astronomyService';
 import { emit as emitEvent } from '../common/utils/eventBus';
 import { emitToast } from '../common/utils/emitToast';
 import { reportError } from '../common/utils/reportError';
@@ -31,6 +31,7 @@ import {
 import type { SavedImageView, SavedViewport } from '../common/utils/imageViewStore';
 import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
 import type { DisplayMode } from '../common/fitsViewer/displayMode';
+import { useLibraryStars } from './hooks/useLibraryStars';
 import { useStackIdentification } from './hooks/useStackIdentification';
 
 /**
@@ -257,7 +258,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     enabled: Boolean(selectedTarget) && showAstrometryOverlay && !isStackShown,
     staleTime: 30_000,
   });
-  const overlayStars: AstrometryOverlayStar[] = useMemo(
+  const namedOverlayStars: AstrometryOverlayStar[] = useMemo(
     () => {
       if (!showAstrometryOverlay || !selectedTarget) return [];
       if (isStackShown) return stackIdentification.stars;
@@ -265,6 +266,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
     },
     [showAstrometryOverlay, selectedTarget, isStackShown, stackIdentification.stars, overlayQuery.data]
   );
+  // One call says which of these stars the library has a record of; only those can open in the Astronomy Manager.
+  const overlayStars = useLibraryStars(namedOverlayStars, `${selectedTarget ?? ''}|${selectedFile ?? ''}`);
   const overlayReason: string | null = isStackShown
     ? stackIdentification.statusText
     : overlayQuery.data?.reason ?? null;
@@ -404,21 +407,12 @@ const ImageProcessingDisplayInner: React.FC = () => {
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
    * Hands off the selected star and navigates to the Astronomy Display.
    */
-  const handleStarClick = React.useCallback(async (star: AstrometryOverlayStar) => {
+  const handleStarClick = React.useCallback((star: AstrometryOverlayStar) => {
     // The star's own id keeps it selected on the image; the library knows it by its catalog key.
     const selectionKey = star.id || star.name;
     if (!selectionKey) return;
-    let recordId: string | null;
-    try {
-      recordId = (await findCatalogRecord(star))?.id ?? null;
-    } catch {
-      // The lookup reported its own error.
-      return;
-    }
-    if (!recordId) {
-      emitToast(`${star.name} has no record in the library yet`, 'info', 'Astrometry');
-      return;
-    }
+    const recordId = star.libraryId;
+    if (!recordId) return;
 
     setSelectedStarId(selectionKey);
     // Remember the view, so the "Back to image" button (or any way back) lands on the same spot.

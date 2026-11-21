@@ -24,33 +24,36 @@ const GAIA_ONLY_NAME_PREFIX = 'Gaia DR3 ';
 /**
  * Says whether the Astronomy Manager can open an overlay star.
  *
- * A star can be opened when a catalog matched it and its name is a real catalog name. A star with no
- * match, no name, or only a Gaia source number (such as "Gaia DR3 123") has no record there.
+ * A star can be opened when the library has a record for it (its `libraryId`, set once the library
+ * was asked). Gaia DR3-named records count. A star with no record has nothing to show there.
  *
  * @param star The overlay star.
  * @returns True when opening the star in the Astronomy Manager can show it.
  */
-export function canOpenInAstronomyManager(star: Pick<OverlayStar, 'name'> & { id?: string; matchKind?: string }): boolean {
-  if (star.matchKind === 'unmatched') return false;
-  const name = star.name;
-  if (!name || name === UNNAMED_STAR || name.startsWith(GAIA_ONLY_NAME_PREFIX)) return false;
-  return Boolean(star.id || name);
+export function canOpenInAstronomyManager(star: { libraryId?: string | null }): boolean {
+  return Boolean(star.libraryId);
 }
+
+/** A stack's own id for a star ("detection-5", "gaia-123"), which is not a library id. */
+const STACK_STAR_ID = /^(detection|gaia)-\d+$/;
 
 /**
  * Lists the keys under which the library may hold an overlay star, best first.
  *
  * The library saves a Gaia-matched star under "Gaia DR3 <source id>" and any other catalog star under
- * its catalog name. A stack's own detection id ("detection-5") is not a catalog key and is never listed.
+ * its catalog name. A star read from the library carries its record id. A stack's own id
+ * ("detection-5") is not a library key and is never listed.
  *
  * @param star The overlay star.
- * @returns The Gaia DR3 id (when known), then the catalog name (when it is a real one).
+ * @returns The Gaia DR3 id (when known), the catalog name (when it is a real one), then the star's own id.
  */
-export function catalogKeysOfStar(star: Pick<OverlayStar, 'name'> & { gaiaSourceId?: string | null }): string[] {
+export function catalogKeysOfStar(star: Pick<OverlayStar, 'name'> & { id?: string; gaiaSourceId?: string | null }): string[] {
   const keys: string[] = [];
   if (star.gaiaSourceId) keys.push(`${GAIA_ONLY_NAME_PREFIX}${star.gaiaSourceId}`);
   const name = (star.name || '').trim();
   if (name && name !== UNNAMED_STAR && !keys.includes(name)) keys.push(name);
+  const ownId = (star.id || '').trim();
+  if (ownId && !STACK_STAR_ID.test(ownId) && !keys.includes(ownId)) keys.push(ownId);
   return keys;
 }
 

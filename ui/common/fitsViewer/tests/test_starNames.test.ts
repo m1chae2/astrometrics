@@ -26,15 +26,13 @@ describe('nameStarAt', () => {
 
 describe('canOpenInAstronomyManager', () => {
   /**
-   * Only matched stars with a real catalog name can be opened in the Astronomy Manager.
+   * A star opens when the library has a record of it, whatever its name looks like.
    */
-  it('accepts catalog names and refuses Gaia-only, unmatched and unnamed stars', () => {
-    expect(canOpenInAstronomyManager({ name: 'Vega', id: 'HIP 91262' })).toBe(true);
-    expect(canOpenInAstronomyManager({ name: 'HD 1', matchKind: 'matched' })).toBe(true);
-    expect(canOpenInAstronomyManager({ name: 'Gaia DR3 123', id: 'G1', matchKind: 'matched' })).toBe(false);
-    expect(canOpenInAstronomyManager({ name: 'Vega', matchKind: 'unmatched' })).toBe(false);
-    expect(canOpenInAstronomyManager({ name: UNNAMED_STAR })).toBe(false);
-    expect(canOpenInAstronomyManager({ name: '' })).toBe(false);
+  it('accepts a star with a library record, Gaia DR3-named ones included, and refuses the rest', () => {
+    expect(canOpenInAstronomyManager({ libraryId: 'Gaia DR3 123' })).toBe(true);
+    expect(canOpenInAstronomyManager({ libraryId: 'Vega' })).toBe(true);
+    expect(canOpenInAstronomyManager({ libraryId: null })).toBe(false);
+    expect(canOpenInAstronomyManager({})).toBe(false);
   });
 });
 
@@ -47,5 +45,8 @@ describe('catalogKeysOfStar', () => {
     expect(catalogKeysOfStar({ name: 'HD 1' })).toEqual(['HD 1']);
     expect(catalogKeysOfStar({ name: UNNAMED_STAR })).toEqual([]);
     expect(catalogKeysOfStar({ name: 'Gaia DR3 99', gaiaSourceId: '99' })).toEqual(['Gaia DR3 99']);
+    expect(catalogKeysOfStar({ id: 'detection-5', name: 'HD 1' })).toEqual(['HD 1']);
+    expect(catalogKeysOfStar({ id: 'Gaia DR3 7', name: 'Gaia DR3 7' })).toEqual(['Gaia DR3 7']);
+    expect(catalogKeysOfStar({ id: 'HIP 5', name: 'Vega' })).toEqual(['Vega', 'HIP 5']);
   });
 });

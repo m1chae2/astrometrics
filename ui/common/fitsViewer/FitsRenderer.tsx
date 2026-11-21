@@ -803,7 +803,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const star = findStarAt(profileState.measurement.center_x, profileState.measurement.center_y, overlayStarsAsSent);
     return star && canOpenInAstronomyManager(star) ? star : null;
   }, [starProfile.state, showOverlay, overlayStarsAsSent]);
-  const profileStarIdentity = useStarIdentity(profileCatalogStar ?? null);
+  const profileStarIdentity = useStarIdentity(profileCatalogStar?.libraryId ?? null);
   const openProfileStarInManager = React.useMemo(
     () => (profileCatalogStar && onStarClick ? () => onStarClick(profileCatalogStar) : undefined),
     [profileCatalogStar, onStarClick],

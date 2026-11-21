@@ -666,6 +666,23 @@ class StellarService:
             raise InvalidArgumentError("Missing search term or star_id")
         return self.get_object_fuzzy(term)
 
+    def get_existing_star_ids(self, star_ids: list[str]) -> list[str]:
+        """Tell which of the given star ids have a record in the library.
+
+        Parameters
+        ----------
+        star_ids : `list` [`str`]
+            The ids to look for. Any number is accepted.
+
+        Returns
+        -------
+        found : `list` [`str`]
+            The ids that have a record, sorted.
+        """
+        if not star_ids:
+            return []
+        return self.astrometrics.stars.query(ids=star_ids, detail="exists", limit=None).found or []
+
     def analyze_periodicity(self, star_id: str) -> StellarObject | None:
         """Search a star's light curve for a repeating pattern, and save it.
 

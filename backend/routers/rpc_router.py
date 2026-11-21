@@ -222,6 +222,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "astronomy:spectral_class_summary": ("stellar_service", "get_spectral_class_summary"),
     "astronomy:stars_by_spectral_class": ("stellar_service", "get_stars_by_spectral_class"),
     "astronomy:get": ("stellar_service", "get_object_fuzzy_by_id"),
+    "astronomy:existing_ids": ("stellar_service", "get_existing_star_ids"),
     "astronomy:save": ("stellar_service", "save_objects"),
     "astronomy:delete": ("stellar_service", "delete_object"),
     "astronomy:analyze_periodicity": ("stellar_service", "analyze_periodicity"),

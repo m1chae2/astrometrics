@@ -244,6 +244,7 @@ RPC_METHODS: tuple[str, ...] = (
     "astronomy:spectral_class_summary",
     "astronomy:stars_by_spectral_class",
     "astronomy:get",
+    "astronomy:existing_ids",
     "astronomy:save",
     "astronomy:delete",
     "astronomy:analyze_periodicity",

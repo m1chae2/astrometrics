@@ -6,7 +6,6 @@
 
 import { callBackend } from './backendApi';
 import { reportError } from '../utils/reportError';
-import { catalogKeysOfStar } from '../fitsViewer/utils/starNames';
 import { OverlayStar, Spectrum, TargetStarCount } from '../types/backendTypes';
 
 export interface AstronomyListOptions {
@@ -214,6 +213,8 @@ export type AstrometryOverlayStar = OverlayStar & {
     gaiaSourceId?: string | null;
     /** Where the name came from: `simbad`, `gaia` or `none`. */
     nameSource?: string;
+    /** The id of the star's record in the library, set when the library has one (see `useLibraryStars`). */
+    libraryId?: string | null;
 };
 
 /** The saved star names of a stack. */
@@ -312,22 +313,13 @@ export async function fetchAstrometryOverlayStars(
 }
 
 /**
- * Finds the library record of an overlay star.
+ * Asks which of some star ids have a record in the library, in one call.
  *
- * Tries each catalog key of the star in order (see `catalogKeysOfStar`) and stops at the first the
- * library knows. A star the library has never saved has no record, which gives null.
- *
- * @param star The overlay star.
- * @param signal Optional signal that cancels the lookup.
- * @returns The record, or null when the library has no record of the star.
+ * @param starIds The ids to look for.
+ * @returns The ids that have a record.
  */
-export async function findCatalogRecord(
-    star: Pick<AstrometryOverlayStar, 'name' | 'gaiaSourceId'>,
-    signal?: AbortSignal
-): Promise<Spectrum | null> {
-    for (const key of catalogKeysOfStar(star)) {
-        const record = (await fetchAstronomyData(key, signal)) as Spectrum | null;
-        if (record?.id) return record;
-    }
-    return null;
+export async function fetchExistingStarIds(starIds: string[]): Promise<string[]> {
+    if (starIds.length === 0) return [];
+    const found = await callBackend("astronomy:existing_ids", { star_ids: starIds });
+    return Array.isArray(found) ? found : [];
 }

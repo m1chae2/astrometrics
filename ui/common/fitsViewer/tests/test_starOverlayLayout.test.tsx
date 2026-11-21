@@ -52,7 +52,8 @@ function makeGridStars() {
     for (let column = 0; column < 40; column++) {
       stars.push({
         id: `S${row}_${column}`, name: `Star ${row}-${column}`, x: column * 100 + 50, y: row * 100 + 50,
-        spectralType: 'G2V', isCatalogIdentified: true, referenceWidth: 4000, referenceHeight: 5000
+        spectralType: 'G2V', isCatalogIdentified: true, referenceWidth: 4000, referenceHeight: 5000,
+        libraryId: `S${row}_${column}` as string | null
       });
     }
   }
@@ -264,11 +265,11 @@ describe('FitsRenderer star overlay', () => {
   });
 
   /**
-   * A star named only by a Gaia source number has no Astronomy Manager record: no hint, no open.
+   * A star the library has no record of gets no hint and does not open, whatever its name.
    */
-  it('does not open or promise to open a star named only by a Gaia number', async () => {
+  it('does not open or promise to open a star with no library record', async () => {
     const onStarClick = vi.fn();
-    const stars = makeGridStars().map((star) => ({ ...star, name: 'Gaia DR3 123456', matchKind: 'matched' as const }));
+    const stars = makeGridStars().map((star) => ({ ...star, name: 'Gaia DR3 123456', libraryId: null, matchKind: 'matched' as const }));
     const { container } = await renderOverlay(stars, onStarClick);
     const viewer = container.querySelector('.fits-renderer__canvas-container') as HTMLElement;
     fireEvent.pointerMove(viewer, { clientX: 770.5, clientY: 965.5 });

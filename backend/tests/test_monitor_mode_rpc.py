@@ -82,6 +82,7 @@ READ_ONLY_METHODS = frozenset({
     "analysis:get_stack_identification",
     "astronomy:analyze_periodicity",
     "astronomy:count",
+    "astronomy:existing_ids",
     "astronomy:get",
     "astronomy:get_overlay_stars",
     "astronomy:get_status",

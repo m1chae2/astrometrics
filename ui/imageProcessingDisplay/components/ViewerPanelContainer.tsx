@@ -139,6 +139,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
             {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
               <span
                 className="fits-header-controls__note"
+                title={overlayReason}
                 data-testid="astrometry-overlay-reason"
               >
                 {overlayReason}

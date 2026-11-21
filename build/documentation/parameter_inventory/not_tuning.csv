@@ -16,7 +16,6 @@ astrometricslib/_internal/drivers/catalog_access.py,AbstractCatalogAccess.query_
 astrometricslib/_internal/drivers/catalog_access.py,CatalogAccess.query_star_summary_page.offset,Pagination start; 0 means from the first row
 astrometricslib/_internal/drivers/catalog_access.py,_BOX_MARGIN_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/catalog_access.py,_FULL_CIRCLE_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
-astrometricslib/_internal/drivers/catalog_store.py,_COVERAGE_TOLERANCE_DEG,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/catalog_store.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
 astrometricslib/_internal/drivers/catalog_store.py,_SCHEMA_VERSION,Version number of the cache file layout; plumbing
 astrometricslib/_internal/drivers/catalog_store.py,_SQL_CHUNK,Rows per database query; plumbing
@@ -62,7 +61,7 @@ astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
 astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
 astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,"A direction chosen by the caller; 0 means along a column"
+astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/stars.py,StellarCatalog.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
@@ -94,7 +93,7 @@ astrometricslib/foundation/jobs/store.py,JobStore._connect.timeout,Timeout or wa
 astrometricslib/foundation/jobs/store.py,JobStore.get_jobs_by_target.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_jobs.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_log_entries_for_job.limit,Row or item cap that callers pass; plumbing
-astrometricslib/foundation/jobs/store.py,JobStore.interrupt_orphaned_jobs.stale_after_minutes,"Housekeeping for old jobs that have no owner"
+astrometricslib/foundation/jobs/store.py,JobStore.interrupt_orphaned_jobs.stale_after_minutes,Housekeeping for old jobs that have no owner
 astrometricslib/foundation/jobs/store.py,JobStore.query_jobs.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.query_jobs.offset,Pagination start; 0 means from the first row
 astrometricslib/foundation/logging.py,_LOG_FILES_KEPT,software plumbing
@@ -148,7 +147,10 @@ astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_CACHE_L
 astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_FILE_VERSION,Version number of the saved detection-list layout; plumbing
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,_BAND_SAMPLES,Sampling resolution of the passband integral; structure
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,predict_gaia_query_depth.central_obstruction_fraction,Argument default of 0 for an optic with no central obstruction; the caller passes the real value
+astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_CHILDREN_PER_TILE,A HEALPix tile always has four children one level finer; structure
+astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
 astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_CONSECUTIVE_FAILURE_LIMIT,Network retry limit; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ROW_LIMIT,Plumbing: query size
@@ -156,7 +158,6 @@ astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_VIZIER_T
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE_SOLVE_SOURCES,Decided not tuning in the #175 review (AST-D05): speed cap; the brightest stars are enough to solve
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._seed_gaia_cache_for_field.radius_deg,Search radius that callers always pass
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
@@ -217,14 +218,14 @@ astrometricslib/pipelines/shared/quality/raw_frame_check.py,TRAIL_ANGLE_STEP_DEG
 astrometricslib/pipelines/shared/quality/raw_frame_check.py,TRAIL_CANDIDATE_LINES,Search structure: lines checked in full
 astrometricslib/pipelines/shared/quality/record_measurements.py,UNKNOWN_DEFINITION_VERSION,software plumbing
 astrometricslib/pipelines/shared/quality/saturation.py,NORMALISED_STACK_MAXIMUM,Format fact: Siril stacks top out at 1.0
-astrometricslib/pipelines/shared/quality/star_profile.py,MINIMUM_RADIUS_PX,"Fewest pixels the four-number Moffat fit needs; refuses a smaller request"
-astrometricslib/pipelines/shared/quality/star_profile.py,_BETA_LIMITS,"Bounds that keep the Moffat fit from running off to a flat or a spiked curve"
-astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,"Number of points drawn for the fitted curve; does not change a measured value"
-astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,"A direction chosen by the caller; 0 means along a column"
+astrometricslib/pipelines/shared/quality/star_profile.py,MINIMUM_RADIUS_PX,Fewest pixels the four-number Moffat fit needs; refuses a smaller request
+astrometricslib/pipelines/shared/quality/star_profile.py,_BETA_LIMITS,Bounds that keep the Moffat fit from running off to a flat or a spiked curve
+astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,Number of points drawn for the fitted curve; does not change a measured value
+astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_ITERATIONS,"Rounds of sigma clipping for the ring sky plane; the same 5 rounds as the profile sky, and the fit settles in fewer"
-astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,"Clipping limit of the ring sky plane; the same 3 sigma as the profile sky"
+astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,Clipping limit of the ring sky plane; the same 3 sigma as the profile sky
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_MINIMUM_PIXELS,"Fewest pixels the sky annulus needs, as for the profile's sky; below it the profile sky is used"
 astrometricslib/pipelines/shared/quality/time_budget.py,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,Plumbing: time budget
 astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries

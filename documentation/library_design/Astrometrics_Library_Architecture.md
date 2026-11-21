@@ -235,7 +235,7 @@ Both noises, $\sigma_{\text{star}}$ and $\sigma_{\text{box}}$, come from Equatio
 
 ## 4. Astrometry pipeline
 
-**In plain words.** This pipeline compares the star patterns in your photo to a star catalog to determine exactly where on the sky the telescope was pointing.
+**In plain words.** This pipeline compares your photo's star patterns with a catalog to find where the telescope pointed.
 
 The astrometry pipeline finds exactly where a stacked image is pointed, a step called plate solving. It matches pixels to sky coordinates: Right Ascension $\alpha$ and Declination $\delta$. The result is a World Coordinate System (WCS) [27], [28], a formula that converts any pixel position to a sky position and back. Evidence for its settings is in the [astrometry register](validation/astrometry.md). For a step-by-step review, see the [Astrometry review guide](pipelines/astrometry.md).
 
@@ -248,8 +248,8 @@ The astrometry pipeline finds exactly where a stacked image is pointed, a step c
 
 Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \delta)$ in six steps:
 
-1. **Star detection.** A matched-filter star finder (DAOFIND [29], through photutils [5]) slides a star-shaped template over the background-subtracted image and responds most where the image looks like a star. A Gaussian fit to bright stars measures the star width (FWHM), which sets the acceptable position error. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm -->
-2. **Quad-star matching.** Nearby stars are grouped into four-star shapes ("quads") whose relative side lengths do not change under rotation, reflection, or scaling. Comparing them with a pre-built star index identifies the patch of sky. The Astrometry.net solver [3] does this, locally first and then online. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->
+1. **Star detection.** A matched-filter star finder (DAOFIND [29], through photutils [5]) slides a star-shaped template over the background-subtracted image. A Gaussian fit to bright stars measures the star width (FWHM), which sets the acceptable position error. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm -->
+2. **Quad-star matching.** Nearby stars form four-star shapes ("quads") whose relative side lengths survive rotation, reflection and scaling. Matching them to a pre-built index identifies the sky patch. The Astrometry.net solver [3] does this, locally first and then online. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->
 3. **Fitting the distortion map.** Pixel offsets $(u, v)$ from a reference pixel $(x_{\text{ref}}, y_{\text{ref}})$ become offsets $(\xi, \eta)$ on the tangent plane (a flat sky projection touching the sphere at the reference pixel). Four linear coefficients $K$ handle rotation, scale, and flips. Real optics also bend the map, mostly near the edges, so a Simple Imaging Polynomial (SIP) [30] first corrects the pixel offsets, with second-order and higher terms only, because $K$ holds the linear part:
 
    $$
@@ -259,10 +259,10 @@ Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \d
    \end{aligned} \tag{10}
    $$
 
-   The WCS is written into the FITS header with its SIP terms, so a later reader keeps the lens correction. <!-- impl: astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header -->
-4. **Naming the stars.** Each detected star is matched to the nearest entry in the SIMBAD database [31] or the Gaia catalog [32]. Gaia lists positions for one fixed date, the catalog epoch, with each star's proper motion (its yearly drift across the sky). Over a decade a fast star can drift a whole match radius, so each Gaia position is moved to the observation date first. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch -->
+   The WCS is written to the FITS header with its SIP terms. <!-- impl: astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header -->
+4. **Naming the stars.** Each detected star is matched to the nearest entry in the SIMBAD database [31] or the Gaia catalog [32]. Gaia lists positions for one fixed date, the catalog epoch, with each star's proper motion (its yearly drift across the sky). A fast star can drift a match radius in a decade, so each Gaia position is first moved to the observation date. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch -->
 5. **Judging the fit.** Two numbers come from the solve. The *fit residual* is the root mean square (RMS) distance, in arcseconds, between each matched star's position under the fitted WCS and its position in the solver's index. The *catalog match separation* is the RMS distance from each detected star to its nearest catalog star within the match radius. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.read_corr_fit_statistics --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
-6. **Refitting to Gaia.** The solver fits a few dozen bright stars of its own index, which carry the index's errors, so a solution can be a pixel off and still agree with itself. The pipeline therefore fits a new low-order SIP solution to the detected stars matched to Gaia stars at the observation date. It drops stars far from the fit (blends, double stars, wrong matches) and repeats until the set is stable. The new solution replaces the solver's only when it fits better. The residual against Gaia is recorded either way, and it does not depend on the solver. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia -->
+6. **Refitting to Gaia.** The solver fits a few dozen bright index stars, which carry the index's errors, so a solution can be a pixel off yet agree with itself. The pipeline refits a low-order SIP solution to the detections matched to Gaia at the observation date, dropping outliers (blends, doubles, wrong matches) until the set is stable. The new solution replaces the solver's only when it fits better. The residual against Gaia is recorded either way, and it does not depend on the solver. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia -->
 
 ### 4.3 Astrometry procedure
 
@@ -275,8 +275,10 @@ Table 5 lists the steps.
 | 1 | Source detection | Find stars. |
 | 2 | Quad pattern hashing | Turn each four-star shape into a numeric code (a hash) to look up in the index. |
 | 3 | WCS and distortion fit | Fit Equation (10) and write it into the header. |
-| 4 | Catalog cross-match | Refit to Gaia and name the stars. |
+| 4 | Catalog cross-match | Fill the Gaia tiles, refit to Gaia, name the stars. |
 | 5 | Solution check | Judge the residual against the star width. |
+
+Before naming, every Gaia sky tile under the image is filled to a depth predicted from the equipment and exposure. Stars are matched only in complete tiles, because a tile missing faint stars could give a detection a neighbor's name. Missing tiles are counted.
 
 ### 4.4 Quality metrics and solution validation
 

@@ -2039,6 +2039,8 @@ export interface AstrometryPipelineQualityMetrics {
   gaiaFitStarCount?: number | null;
   wcsRefinementShiftArcsec?: number | null;
   astrometryFlags?: string[];
+  gaiaTilesCount?: number;
+  gaiaTilesMissingCount?: number;
   plateScaleArcsecPerPixel?: number | null;
   starFwhmPx?: number | null;
   remoteCatalogQueriesAttempted?: number;

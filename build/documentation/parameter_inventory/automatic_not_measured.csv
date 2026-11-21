@@ -18,7 +18,6 @@ astrometry.centre_star_search_radius_fraction,AST-09,measurement,Partly measured
 astrometry.clip_sigmas,AST-02,exclusion criteria,Partly measured
 astrometry.color_detection_bin_factor,AST-D03,measurement,Design estimate
 astrometry.default_field_radius_degrees,AST-D20,measurement,Design estimate
-astrometry.default_magnitude_limit,AST-D20,measurement,Design estimate
 astrometry.fwhm_excluded_core_radius_px,AST-07,exclusion criteria,Partly measured
 astrometry.fwhm_fit_box_radius_px,AST-07,exclusion criteria,Partly measured
 astrometry.fwhm_maximum_centre_shift_px,AST-D17,exclusion criteria,Design estimate
@@ -34,9 +33,6 @@ astrometry.fwhm_saturation_fraction,AST-07,exclusion criteria,Partly measured
 astrometry.gaia_default_magnitude_limit,AST-D11,measurement,Design estimate
 astrometry.gaia_depth_step_magnitudes,AST-08,measurement,Partly measured
 astrometry.gaia_depth_steps_down,AST-08,measurement,Partly measured
-astrometry.gaia_magnitude_limit_margin,AST-D11,measurement,Design estimate
-astrometry.gaia_maximum_magnitude_limit,AST-D11,measurement,Design estimate
-astrometry.gaia_minimum_magnitude_limit,AST-D11,measurement,Design estimate
 astrometry.gaia_tile_level,AST-D22,measurement,Design estimate
 astrometry.initial_match_radius_pixels,AST-02,exclusion criteria,Partly measured
 astrometry.maximum_failed_lookup_fraction,AST-D09,judgment,Design estimate

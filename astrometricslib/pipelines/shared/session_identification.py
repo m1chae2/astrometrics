@@ -81,6 +81,16 @@ class SessionStarIdentifier(Protocol):
         """
         ...
 
+    def use_image_header(self, header: Any) -> None:
+        """Set the Gaia query depth from the header of the image to be named.
+
+        Parameters
+        ----------
+        header : `Any`
+            The image's FITS header.
+        """
+        ...
+
     def identify_stars_with_wcs(
         self, stellar_objects: list[StellarObject], wcs: WCS, width: int, height: int
     ) -> list[StellarObject]:
@@ -495,6 +505,7 @@ def identify_session_stars(
     data, unique_sources, sources_detected = _detect_and_limit_session_sources(
         reference_image, star_identifier, max_detections
     )
+    star_identifier.use_image_header(getattr(reference_image, "header", None))
 
     stellar_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
 

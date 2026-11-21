@@ -38,7 +38,7 @@ from astrometricslib.models.quality.gate_result import (
     unchecked_gate,
 )
 from astrometricslib.models.quality.limit import LimitTier
-from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
 from astrometricslib.models.tuned_parameter import (
@@ -59,6 +59,7 @@ from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_GATE_PLATE_SOLVE,
     ASTROMETRY_GATE_SOURCE_DETECTION,
     ASTROMETRY_METRICS,
+    ASTROMETRY_NOTICE_GAIA_TILES_MISSING,
     ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL,
     ASTROMETRY_PLATE_SOLVE_ATTEMPTS,
     ASTROMETRY_PLATE_SOLVE_FIT_RESIDUAL_RMS_ARCSEC,
@@ -73,6 +74,7 @@ from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC,
 )
 from astrometricslib.pipelines.astrometry.post_processing.target_clipping import target_clipping_measurements
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -515,6 +517,13 @@ def astrometry_run_measurements(
             )
         )
 
+    if metrics.gaia_tiles_missing_count > 0:
+        measurements.append(
+            gaia_tiles_missing_notice_measurement(
+                metrics.gaia_tiles_missing_count, metrics.gaia_tiles_count, context, subject
+            )
+        )
+
     gates_by_name = {gate.name: gate for gate in gates}
     for gate_name, limit_source in GATE_LIMIT_SOURCES.items():
         gate = gates_by_name.get(gate_name)
@@ -538,6 +547,38 @@ def astrometry_run_measurements(
             )
         )
     return measurements
+
+
+def gaia_tiles_missing_notice_measurement(
+    missing_count: int, tile_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some Gaia tiles under the image were missing.
+
+    Parameters
+    ----------
+    missing_count : `int`
+        How many tiles were not complete to the query depth.
+    tile_count : `int`
+        How many tiles lie under the image.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of missing tiles.
+    """
+    return notice_measurement(
+        _SPEC_BY_NAME[ASTROMETRY_NOTICE_GAIA_TILES_MISSING],
+        float(missing_count),
+        context,
+        subject,
+        f"{missing_count} of {tile_count} Gaia sky tiles under the image were not in the cache to the query "
+        "depth, so stars there got position-only names",
+        action_taken="named the stars of the complete tiles and left the others for a later run",
+    )
 
 
 def record_astrometry_quality(

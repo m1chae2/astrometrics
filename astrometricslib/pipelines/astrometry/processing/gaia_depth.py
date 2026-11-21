@@ -6,9 +6,11 @@ query that goes too deep costs time and cache space. This module works out
 the depth from the equipment and the exposure, so it does not depend on
 SIMBAD matches or on bright, saturated stars.
 
-The model follows the star finder's meaning of "detected": a star counts when
-its light in a small circle is at least ``k`` times the noise in that circle
-(``k`` is `STAR_FINDER_THRESHOLD_SIGMA`, 5). It has three steps.
+The model asks when a star is "detected": a star counts when its light in a
+small circle is at least ``k`` times the noise in that circle. ``k`` is
+`DETECTION_SIGNAL_TO_NOISE`, fitted to where the star finder really finds half
+the Gaia stars (the finder's own threshold of 5 is set on a smoothed image and
+means a larger ``k`` in the circle). It has three steps.
 
 1. **Star light.** A star of Gaia G magnitude ``G`` sends ``R0 * 10^(-0.4 G)``
    electrons per second to the sensor, where ``R0`` is the electron rate of a
@@ -46,17 +48,19 @@ catalog is complete only to about G 20.7).
 
 `depth_limits.py` does not give this prediction. It works backward from a
 stack's measured noise and a zero point from the stack's own stars, so it
-needs the finished stack. The two share the 5-sigma meaning and the radius,
-and nothing is duplicated.
+needs the finished stack. The two share the radius, and nothing is
+duplicated.
 
-This module only calculates. It reads no files and changes nothing. Nothing
-calls it yet. When an input is missing, the prediction says why and gives the
-offline default depth.
+`predict_gaia_depth_from_header` gathers the inputs from an image's FITS
+header (camera, aperture, pixel scale, exposure and frame count) and the
+camera profiles, for the star identifier. It reads the camera profiles and
+changes nothing. When an input is missing, the prediction says why and gives
+the offline default depth.
 """
 
 import math
 from dataclasses import dataclass
-from typing import TypeGuard
+from typing import Any, TypeGuard
 
 import numpy as np
 
@@ -68,8 +72,6 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.astrometry.processing.star_identifier import GAIA_DEFAULT_MAGNITUDE_LIMIT
-from astrometricslib.pipelines.shared.quality.star_profile_fitting import STAR_FINDER_THRESHOLD_SIGMA
 
 __all__ = [
     "GAIA_BAND_PHOTON_RATE_G0",
@@ -77,6 +79,7 @@ __all__ = [
     "GAIA_DEPTH_MARGIN",
     "GaiaDepthPrediction",
     "depth_exceeded",
+    "predict_gaia_depth_from_header",
     "predict_gaia_query_depth",
 ]
 
@@ -124,14 +127,16 @@ GAIA_BAND_UPPER_NM = TunedParameter(
     register_entry="AST-D21",
 )
 
-# The share of light that gets through the lenses (or mirrors), the filter
-# and the camera window. 0.85 is a typical value for a four-element
-# multi-coated refractor with an L filter (about 0.97 per coated surface
-# pair, 0.95 for the filter). A design estimate until a measured star on a
-# stack gives the real value.
+# The share of the G-band light that gets through the lenses (or mirrors),
+# the filter and the camera window. Measured on 12 ASI 533MM stacks through
+# the 75 mm refractor with the L filter (2026-11-20, AST-D21): the electrons
+# per second of a G = 0 star, from the Gaia stars of G 13 to 16 matched in
+# each stack, had a median of 5.5e7 (3.3e7 to 9.1e7) against 7.56e7 from
+# the old value 0.85, so the value is 0.62. It is lower than the optics alone
+# because the L filter cuts the G band above about 700 nm.
 OPTICS_THROUGHPUT = TunedParameter(
     name="astrometry.gaia_depth_optics_throughput",
-    default=0.85,
+    default=0.62,
     unit="fraction",
     description="Share of the light that passes the telescope's optics and filter.",
     role=ParameterRole.RECOMMENDATION,
@@ -140,12 +145,12 @@ OPTICS_THROUGHPUT = TunedParameter(
     register_entry="AST-D21",
 )
 
-# The star width (FWHM) used when the image gives none. 3 arcsec is a
-# common figure for seeing plus guiding on a small refractor. A design
-# estimate.
+# The star width (FWHM) used when the image gives none. Measured: the ASI
+# 533MM deep-sky L stacks have star widths of 2.19 to 3.10 px, median 2.6 px,
+# at 1.92 arcsec per pixel, so 5.0 arcsec (AST-D21, 2026-11-20).
 DEFAULT_FWHM_ARCSEC = TunedParameter(
     name="astrometry.gaia_depth_default_fwhm_arcsec",
-    default=3.0,
+    default=5.0,
     unit="arcsec",
     description="Star width assumed for the depth prediction when no width is measured.",
     role=ParameterRole.RECOMMENDATION,
@@ -154,13 +159,15 @@ DEFAULT_FWHM_ARCSEC = TunedParameter(
     register_entry="AST-D21",
 )
 
-# The sky brightness used when no sky rate is measured. 21.0 mag/arcsec^2 is
-# a typical rural dark sky in the V band (Bortle 3 to 4), and the G band is
-# close to V for a sky with a mostly solar-like spectrum. A design
-# estimate. A measured sky rate replaces it.
+# The sky brightness used when no sky rate is measured. Measured: the median
+# frame sky of the ASI 533MM stacks is 6.5 electrons per second per pixel,
+# which with the measured G = 0 rate of 5.5e7 electrons per second is G 18.7
+# per square arcsecond (range 17.9 to 19.1; AST-D21, 2026-11-20). This is
+# brighter than a dark site in V because the G band reaches far into the red,
+# where the night sky is bright. A measured sky rate replaces it.
 FALLBACK_SKY_MAG_PER_ARCSEC2 = TunedParameter(
     name="astrometry.gaia_depth_fallback_sky_mag_per_arcsec2",
-    default=21.0,
+    default=18.7,
     unit="magnitudes/arcsec^2",
     description="Sky brightness assumed for the depth prediction when no sky rate is measured.",
     role=ParameterRole.RECOMMENDATION,
@@ -195,6 +202,25 @@ GAIA_DEPTH_CAP = TunedParameter(
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D21",
+)
+
+# The signal-to-noise a star must reach, in a circle of radius one FWHM, for
+# the star finder to find it. The finder's own threshold is 5, but it is set
+# on a smoothed image whose kernel is cut and made zero-mean, which gives
+# about 0.66 times the signal-to-noise of the circle; the stack's noise is
+# also about 1.15 times what the frames predict, and the shape cuts drop some
+# faint stars. Fitted on the 50 percent completeness of isolated Gaia stars
+# in three ASI 533MM stacks (NGC 7331, M 31, M 101; AST-D21, 2026-11-20):
+# 10.8, 12.2 and 11.8, so 11.6.
+DETECTION_SIGNAL_TO_NOISE = TunedParameter(
+    name="astrometry.gaia_depth_detection_signal_to_noise",
+    default=11.6,
+    unit="sigma",
+    description="Signal-to-noise in a one-FWHM circle at which the star finder finds half the stars.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="AST-D21",
 )
 
@@ -269,6 +295,9 @@ def _fallback(reason: str) -> GaiaDepthPrediction:
     prediction : `GaiaDepthPrediction`
         A prediction flagged as a fallback.
     """
+    # Imported here: the star identifier imports this module.
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import GAIA_DEFAULT_MAGNITUDE_LIMIT
+
     return GaiaDepthPrediction(
         query_depth=float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value),
         limiting_magnitude=None,
@@ -386,7 +415,9 @@ def predict_gaia_query_depth(
     mean_qe = _mean_qe_over_band(camera_profile)
     if mean_qe is None:
         return _fallback("no quantum efficiency curve that covers the Gaia G band")
-    noise_entry = camera_profile.sensor_noise_for(gain_setting, offset, binning)
+    # A stack's sky is far above zero, so the read noise of the same gain at
+    # another offset may stand in (see `CameraProfile.sensor_noise_for`).
+    noise_entry = camera_profile.sensor_noise_for(gain_setting, offset, binning, clipped_at_zero=False)
     if noise_entry is None or noise_entry.read_noise_e is None:
         return _fallback("no read noise for this camera setting")
     read_noise_e = noise_entry.read_noise_e.value
@@ -417,7 +448,7 @@ def predict_gaia_query_depth(
     )
     aperture_pixels = max(math.pi * width_px**2, 1.0)
 
-    threshold = float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value)
+    threshold = float(resolve(DETECTION_SIGNAL_TO_NOISE).value)
     empty_circle_variance = aperture_pixels * (
         sky_rate * exposure_time_s + read_noise_e**2 * (exposure_time_s / read_time) ** 2
     )
@@ -471,3 +502,116 @@ def depth_exceeded(prediction: GaiaDepthPrediction, faintest_detected_g: float |
     if faintest_detected_g is None or not math.isfinite(faintest_detected_g):
         return False
     return faintest_detected_g > prediction.query_depth
+
+
+def _header_float(header: Any, *keywords: str) -> float | None:
+    """Read the first of several header keywords that holds a positive number.
+
+    Parameters
+    ----------
+    header : `Any`
+        A FITS header, or any mapping with ``get``.
+    *keywords : `str`
+        The keywords to try, in order.
+
+    Returns
+    -------
+    value : `float` or `None`
+        The first finite value above zero, or `None`.
+    """
+    for keyword in keywords:
+        try:
+            value = float(header.get(keyword))
+        except TypeError, ValueError:
+            continue
+        if math.isfinite(value) and value > 0.0:
+            return value
+    return None
+
+
+def _aperture_from_configuration(header: Any, config: Any) -> float | None:
+    """Find the aperture of the header's telescope in the configured optics.
+
+    Parameters
+    ----------
+    header : `Any`
+        A FITS header with ``TELESCOP``.
+    config : `AppConfiguration` or `None`
+        The configuration whose optics list a focal length and focal ratio.
+
+    Returns
+    -------
+    diameter_mm : `float` or `None`
+        The focal length over the focal ratio, or `None` when the optic is
+        not listed.
+    """
+    name = str(header.get("TELESCOP") or "").strip()
+    if not name or config is None:
+        return None
+    try:
+        optic = config.get_observatory_setups().optic_named(name)
+    except AttributeError, KeyError, TypeError, ValueError:
+        return None
+    if optic is None or not optic.focal_ratio:
+        return None
+    return float(optic.focal_length_mm) / float(optic.focal_ratio)
+
+
+def predict_gaia_depth_from_header(
+    header: Any, config: Any = None, *, fwhm_px: float | None = None
+) -> GaiaDepthPrediction:
+    """Predict the Gaia query depth of an image from its FITS header.
+
+    The camera profile comes from ``INSTRUME``. The aperture is ``APTDIA``,
+    or the configured optic named by ``TELESCOP``. The pixel scale is
+    ``SCALE`` or ``SECPIX1``, or the pixel size (``XPIXSZ`` times
+    ``XBINNING``) over ``FOCALLEN``. The exposure is ``EXPTIME``; for a stack
+    of ``STACKCNT`` frames that is the total, and the read-noise time is the
+    total over the square root of the frame count. The sky is not in the
+    header, so the fallback sky brightness is used.
+
+    Parameters
+    ----------
+    header : `Any`
+        The image's FITS header.
+    config : `AppConfiguration`, optional
+        The configuration, for the camera profiles and the optics.
+    fwhm_px : `float`, optional
+        The measured star width, in pixels.
+
+    Returns
+    -------
+    prediction : `GaiaDepthPrediction`
+        The prediction, or a fallback with a reason.
+    """
+    from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+
+    if header is None:
+        return _fallback("no FITS header")
+    camera_name = str(header.get("INSTRUME") or "").strip() or None
+    profile = resolve_camera_profile(camera_name, config) if camera_name else None
+    if profile is not None and profile.is_generic_fallback:
+        profile = None
+    aperture_mm = _header_float(header, "APTDIA") or _aperture_from_configuration(header, config)
+    binning = _header_float(header, "XBINNING") or 1.0
+    scale = _header_float(header, "SCALE", "SECPIX1")
+    if scale is None:
+        pixel_um = _header_float(header, "XPIXSZ")
+        focal_mm = _header_float(header, "FOCALLEN")
+        if pixel_um is not None and focal_mm is not None:
+            scale = 206.265 * pixel_um * binning / focal_mm
+    total_s = _header_float(header, "EXPTIME", "EXPOSURE")
+    frame_count = _header_float(header, "STACKCNT") or 1.0
+    read_time_s = None if total_s is None else total_s / math.sqrt(frame_count)
+    binning_text = f"{int(binning)}x{int(binning)}"
+    return predict_gaia_query_depth(
+        profile,
+        gain_setting=header.get("GAIN", header.get("ISOSPEED")),
+        offset=header.get("OFFSET"),
+        binning=binning_text,
+        aperture_diameter_mm=aperture_mm,
+        pixel_scale_arcsec_per_px=scale,
+        exposure_time_s=total_s,
+        read_noise_time_s=read_time_s,
+        fwhm_px=fwhm_px,
+    )

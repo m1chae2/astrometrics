@@ -1,4 +1,4 @@
-"""Download Gaia DR3 stars in a circle of sky, from either of two services.
+"""Download the Gaia DR3 stars of one sky tile, from either of two services.
 
 Plate solving names the stars it finds by matching them with Gaia DR3. The
 same catalog is served in two places:
@@ -8,23 +8,20 @@ same catalog is served in two places:
   in 10 s.
 - **The ESA Gaia archive** (table ``gaiadr3.gaia_source``). On the same day
   the same query failed with HTTP 408 after 64 s, and the archive's own
-  message said it may be unstable while it prepares for Gaia DR4. Every
-  remote lookup of 22 of 23 targets had failed this way.
+  message said it may be unstable while it prepares for Gaia DR4.
 
-Both functions here return one table shape, so the caller does not care
-which service answered: columns ``source_id``, ``ra``, ``dec`` (degrees,
-ICRS, epoch 2016.0), ``phot_g_mean_mag``, ``designation`` and ``pmra``,
-``pmdec`` (milliarcseconds per year; ``pmra`` already includes the cos(dec)
-factor, as in Gaia). Rows come brightest first, so a table cut at the row
-limit loses the faintest stars. Neither function retries or waits for a
-deadline; the caller decides the order of services and the time allowed.
-
-The tile functions at the end of the file fetch one HEALPix sky tile instead
-of a circle, for the tile-based cache (see ``catalog_store``). A tile is one
-of the equal-area pieces of sky that ``sky_tiles`` defines, and every Gaia
-star's ID tells which tile it is in. `fetch_gaia_tile` tries the services in
-the same order as the cone search and reports how deep the answer is
-complete, so the cache can record it.
+The cache is cut into HEALPix sky tiles (see ``catalog_store``). A tile is
+one of the equal-area pieces of sky that ``sky_tiles`` defines, and every
+Gaia star's ID tells which tile it is in. The ESA archive is asked for a
+tile's range of source IDs. VizieR has no such search, so it is asked for
+the circle around the tile (`query_gaia_cone_vizier`) and the answer is cut
+to the tile. Both return one table shape: columns ``source_id``, ``ra``,
+``dec`` (degrees, ICRS, epoch 2016.0), ``phot_g_mean_mag``, ``designation``
+and ``pmra``, ``pmdec`` (milliarcseconds per year; ``pmra`` already includes
+the cos(dec) factor, as in Gaia). Rows come brightest first, so a table cut
+at the row limit loses the faintest stars. `fetch_gaia_tile` tries the
+services in turn and reports how deep the answer is complete, so the cache
+can record it.
 """
 
 import math
@@ -126,68 +123,6 @@ def query_gaia_cone_vizier(
             [f"Gaia DR3 {source_id}" for source_id in source_ids],
             _as_float_column(found["pmRA"]),
             _as_float_column(found["pmDE"]),
-        ],
-        names=GAIA_CONE_COLUMNS,
-    )
-
-
-def query_gaia_cone_esa(
-    ra_center: float,
-    dec_center: float,
-    radius_deg: float,
-    max_magnitude: float,
-    row_limit: int,
-) -> Table:
-    """Download Gaia DR3 stars in a circle from the ESA Gaia archive.
-
-    The archive's client offers no timeout, so the caller must run this
-    under a deadline of its own.
-
-    Parameters
-    ----------
-    ra_center, dec_center, radius_deg : `float`
-        The search circle, in degrees.
-    max_magnitude : `float`
-        Only stars brighter than this G magnitude are returned.
-    row_limit : `int`
-        The most rows to return, brightest first.
-
-    Returns
-    -------
-    table : `astropy.table.Table`
-        The stars, in the column layout of `GAIA_CONE_COLUMNS`.
-
-    Network and service errors are not caught here; they reach the caller
-    as astroquery raised them.
-    """
-    require_online("the ESA Gaia archive")
-    from astroquery.gaia import Gaia
-
-    # The table is pinned (gaiadr3.gaia_source) rather than left to the
-    # archive's current default release, so it always matches the
-    # "Gaia DR3 ..." names and the local cache.
-    # Every value is turned into a number before it joins the query, so no
-    # text can reach it. The parts are joined, not formatted into one string.
-    query = " ".join([
-        "SELECT TOP",
-        str(int(row_limit)),
-        "source_id, ra, dec, phot_g_mean_mag, designation, pmra, pmdec",
-        "FROM gaiadr3.gaia_source WHERE phot_g_mean_mag <",
-        repr(float(max_magnitude)),
-        "AND CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS',",
-        f"{float(ra_center)!r}, {float(dec_center)!r}, {float(radius_deg)!r}))=1",
-        "ORDER BY phot_g_mean_mag ASC",
-    ])
-    found = Gaia.launch_job_async(query, dump_to_file=False).get_results()
-    return Table(
-        [
-            [str(value) for value in found["source_id"]],
-            _as_float_column(found["ra"]),
-            _as_float_column(found["dec"]),
-            _as_float_column(found["phot_g_mean_mag"]),
-            [str(value) for value in found["designation"]],
-            _as_float_column(found["pmra"]),
-            _as_float_column(found["pmdec"]),
         ],
         names=GAIA_CONE_COLUMNS,
     )
@@ -512,7 +447,7 @@ def fetch_gaia_tile(
 ) -> TileFetch:
     """Download the missing depth of one sky tile, trying each service in turn.
 
-    The order is the one the cone search uses: VizieR, then the ESA Gaia
+    The order is VizieR, then the ESA Gaia
     archive, both at `want_magnitude`; then VizieR again at up to
     `depth_steps_down` brighter limits, each `depth_step_magnitudes` brighter
     than the last. A limit not fainter than `have_magnitude` is skipped. The
@@ -532,7 +467,7 @@ def fetch_gaia_tile(
         The most rows one answer may have.
     vizier_timeout_seconds, esa_timeout_seconds : `float`
         The deadline for each service. VizieR also gets 5 s more for the
-        runner, as the cone search does.
+        runner.
     depth_step_magnitudes : `float`
         How much brighter each repeat VizieR query is.
     depth_steps_down : `int`

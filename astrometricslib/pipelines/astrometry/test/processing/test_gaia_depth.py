@@ -121,16 +121,19 @@ def _hand_limit(exposure_s: float, read_noise_time_s: float) -> float:
     Returns
     -------
     limit : `float`
-        The G magnitude where a star reaches 5 sigma.
+        The G magnitude where a star reaches the detection signal-to-noise
+        k = 11.6, with throughput 0.62, a 5 arcsec star and a sky of 18.7
+        magnitudes per square arcsecond.
     """
+    k = 11.6
     area_cm2 = math.pi * 3.75**2
-    rate_g0 = 3.2e6 * area_cm2 * 0.85 * FLAT_QE
-    sky_rate = rate_g0 * 10.0 ** (-0.4 * 21.0) * PIXEL_SCALE**2
-    pixels = math.pi * (3.0 / PIXEL_SCALE) ** 2
+    rate_g0 = 3.2e6 * area_cm2 * 0.62 * FLAT_QE
+    sky_rate = rate_g0 * 10.0 ** (-0.4 * 18.7) * PIXEL_SCALE**2
+    pixels = math.pi * (5.0 / PIXEL_SCALE) ** 2
     variance_empty = pixels * (sky_rate * exposure_s + READ_NOISE**2 * (exposure_s / read_noise_time_s) ** 2)
-    electrons = (25.0 + math.sqrt(625.0 + 100.0 * variance_empty)) / 2.0
-    # Check that the star electrons really give 5 sigma.
-    assert electrons / math.sqrt(electrons + variance_empty) == pytest.approx(5.0)
+    electrons = (k**2 + math.sqrt(k**4 + 4.0 * k**2 * variance_empty)) / 2.0
+    # Check that the star electrons really give k sigma.
+    assert electrons / math.sqrt(electrons + variance_empty) == pytest.approx(k)
     return -2.5 * math.log10(electrons / exposure_s / rate_g0)
 
 
@@ -141,17 +144,25 @@ def test_sixty_second_frame_matches_hand_calculation() -> None:
     assert not prediction.is_fallback
     assert prediction.limiting_magnitude == pytest.approx(expected)
     assert prediction.query_depth == pytest.approx(expected + 1.0)
-    assert 18.9 < expected < 19.1
+    assert 16.2 < expected < 16.4
     assert prediction.mean_qe == pytest.approx(FLAT_QE)
 
 
-def test_ten_thousand_second_stack_matches_hand_calculation_and_hits_cap() -> None:
-    """A 10,000 s stack of 60 s frames matches the hand value and is capped."""
+def test_ten_thousand_second_stack_matches_hand_calculation() -> None:
+    """A 10,000 s stack of 60 s frames matches the hand value."""
     read_time = 60.0 * math.sqrt(10000.0 / 60.0)
     prediction = _predict(exposure_time_s=10000.0, read_noise_time_s=read_time)
     expected = _hand_limit(10000.0, read_time)
     assert prediction.limiting_magnitude == pytest.approx(expected)
-    assert expected > 21.0
+    assert 19.0 < expected < 19.2
+    assert prediction.query_depth == pytest.approx(expected + 1.0)
+
+
+def test_a_very_long_stack_is_capped() -> None:
+    """A stack deep enough to pass G 20 asks no deeper than the cap."""
+    read_time = 60.0 * math.sqrt(1.0e6 / 60.0)
+    prediction = _predict(exposure_time_s=1.0e6, read_noise_time_s=read_time)
+    assert prediction.limiting_magnitude is not None and prediction.limiting_magnitude > 20.0
     assert prediction.query_depth == pytest.approx(21.0)
 
 

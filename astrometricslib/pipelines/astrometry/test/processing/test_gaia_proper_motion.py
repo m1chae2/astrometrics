@@ -23,6 +23,7 @@ from astropy.time import Time
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
 # A star near M 13 that moves 1 arcsecond per year, in right ascension.
 START_RA_DEG = 250.42
@@ -148,17 +149,13 @@ def match_one_detection(
     still_unmatched : `list` [`StellarObject`]
         The detections no Gaia star matched.
     """
-    monkeypatch.setattr(
-        StarIdentifier, "_query_gaia_region", staticmethod(lambda *args, **kwargs: (table, coords))
-    )
+    use_field_stars(monkeypatch, table, coords)
     detection = StellarObject(id="Star_1", name="Star_1")
     shifted = SkyCoord(START_RA_DEG * u.deg, START_DEC_DEG * u.deg).directional_offset_by(
         90 * u.deg, 20 * u.arcsec
     )
     sky_positions = {id(detection): (float(shifted.ra.deg), float(shifted.dec.deg))}
-    return identifier._match_stars_against_gaia(
-        [detection], sky_positions, START_RA_DEG, START_DEC_DEG, None, 1000, 1000, 0.05
-    )
+    return identifier._match_stars_against_gaia([detection], sky_positions, None, 1000, 1000)
 
 
 def test_a_fast_star_matches_only_after_it_is_moved_to_the_observation_epoch(

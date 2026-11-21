@@ -12,7 +12,7 @@ from typing import Any
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.foundation.errors import ExternalServiceError, InvalidArgumentError
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
@@ -133,10 +133,7 @@ class AstrometryPipeline:
         object_name = self._resolve_object_name(image)
         extended_source_hint = self._build_extended_source_hint(object_name, wcs, target_ra, target_dec)
 
-        # Start downloading Gaia DR3 stars for this image's area in the
-        # background.
-        self._seed_gaia_cache_from_wcs(image, wcs)
-
+        field = self.star_identifier.field_gaia_stars
         return AnalysisContext(
             image=image,
             stellar_objects=stellar_objects,
@@ -154,6 +151,8 @@ class AstrometryPipeline:
             gaia_fit_peak_over_noise=self.star_identifier.gaia_fit_peak_over_noise,
             gaia_fit_signal_reason=self.star_identifier.gaia_fit_signal_reason,
             astrometry_flags=list(self.star_identifier.astrometry_flags),
+            gaia_tiles_count=0 if field is None else len(field.tiles),
+            gaia_tiles_missing_count=0 if field is None else len(field.missing_tiles),
         )
 
     def solve_wcs(
@@ -167,12 +166,12 @@ class AstrometryPipeline:
 
         This detects the stars and runs the plate solver, as `process` does,
         then stops. It skips the refit to Gaia, the naming of stars from
-        SIMBAD and Gaia, the extended-source hint and the Gaia cache seeding,
-        so it asks no online catalog. It is for callers that need only a
+        SIMBAD and Gaia and the extended-source hint, so it asks no online
+        catalog. It is for callers that need only a
         place to put apertures. By default the solution is returned unrefined
         (see `process` for the refined one). With `refit_from_cache`, it is
-        refit to Gaia when a complete cached download covers the field, using
-        the cache alone; `last_solve_was_refit` then says whether that
+        refit to the Gaia stars of the cache tiles that are already complete,
+        using the cache alone; `last_solve_was_refit` then says whether that
         happened.
         A field the solver cannot solve raises `PlateSolveFailedError`, as in
         `process`.
@@ -185,8 +184,8 @@ class AstrometryPipeline:
             A hint for where the telescope was pointing, in degrees. Left
             out, the image's FITS header supplies one.
         refit_from_cache : `bool`, optional
-            If True, refit the solution to cached Gaia stars when a complete
-            download covers the field. Never sends a query.
+            If True, refit the solution to the Gaia stars of the cache tiles
+            that are already complete. Never sends a query.
 
         Returns
         -------
@@ -501,28 +500,6 @@ class AstrometryPipeline:
         )
         logger.info("Recorded extended-source hint for '%s'.", object_name)
         return extended_source_hint
-
-    def _seed_gaia_cache_from_wcs(self, image: AstrometricsImage, wcs: Any) -> None:
-        """Kick off a background Gaia DR3 seed for this image's sky area.
-
-        This speeds things up by saving the stars to the local database.
-        """
-        if wcs is None or not wcs.is_celestial:
-            return
-        try:
-            from astropy.wcs.utils import proj_plane_pixel_scales
-
-            scales = proj_plane_pixel_scales(wcs)
-            deg_per_px = float(scales[0])
-            width = image.data.shape[1] if hasattr(image, "data") and image.data is not None else 1000
-            height = image.data.shape[0] if hasattr(image, "data") and image.data is not None else 1000
-            field_radius_deg = (max(width, height) * deg_per_px) / 2.0
-            field_radius_deg = min(max(0.2, field_radius_deg), 1.0)
-
-            ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
-            self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
-        except (ConfigurationError, *DATA_ERRORS) as e:
-            logger.warning("Automatic Gaia cache seeding skipped: %s", e)
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
         """Ask the SIMBAD database if this target is an extended object.

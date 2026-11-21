@@ -900,7 +900,7 @@ describe('StarProfilePanel', () => {
     }
     expect(screen.queryByText('Clipped')).toBeNull();
     expect(screen.getByText('distance through the star (px)')).toBeTruthy();
-    expect(screen.getByText('brightness above sky')).toBeTruthy();
+    expect(screen.getByText('above sky')).toBeTruthy();
     const traces = plotData['star-profile-plot'];
     expect(traces.map((trace) => trace.name)).toEqual(['pixels along the cut', 'fitted shape', 'FWHM']);
     // 2 x 20 + 1 samples, half a pixel apart, from -10 to +10; along a column the ramp rises 1 per pixel.
@@ -999,7 +999,7 @@ describe('StarProfilePanel', () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('star-profile-plot-yaxis-type').textContent).toBe('log');
-    expect(screen.getByText('brightness above sky, log (raised to the sky noise)')).toBeTruthy();
+    expect(screen.getByText('above sky, log')).toBeTruthy();
     const traces = plotData['star-profile-plot'];
     expect(traces[0].y).toEqual([3.5, 3.5, 900]);
     expect(traces[1].y).toEqual([3.5, 480, 890, 890, 480, 3.5]);

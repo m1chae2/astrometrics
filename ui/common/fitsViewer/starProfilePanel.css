@@ -352,7 +352,3 @@
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
-
-.star-profile__optics-toggle {
-  align-self: flex-start;
-}

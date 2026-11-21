@@ -242,7 +242,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
   const layout = useMemo(() => {
     const base = buildLayout({
       xTitle: 'distance through the star (px)',
-      yTitle: logScale ? 'brightness above sky, log (raised to the sky noise)' : 'brightness above sky',
+      yTitle: logScale ? 'above sky, log' : 'above sky',
       margin: { l: 56, r: 10, t: 8, b: 44 },
     });
     return {
@@ -302,7 +302,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
   const layout = useMemo(() => {
     const base = buildLayout({
       xTitle: 'direction around the star (degrees)',
-      yTitle: logScale ? 'brightness above sky, log (raised to the sky noise)' : 'brightness above sky',
+      yTitle: logScale ? 'above sky, log' : 'above sky',
       margin: { l: 56, r: 10, t: 8, b: 56 },
     });
     const partner = (angleDegrees + 180) % 360;
@@ -457,8 +457,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
                 </Button>
                 <Button
                   size="small"
-                  variant="ghost"
-                  className="star-profile__optics-toggle"
+                  variant="secondary"
                   aria-expanded={opticsOpen}
                   title="The ring of light around the star, for checking tracking and focus."
                   onClick={() => setOpticsOpen(!opticsOpen)}

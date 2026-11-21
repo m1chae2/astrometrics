@@ -746,22 +746,32 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         STACKING_MEDIAN_INPUT_FWHM_PX,
         "px",
-        "The median star width of a sample of the input frames.",
-        "The median of `measure_image_fwhm` over at most 15 frames spaced evenly over the set.",
-        "At most 15 input frames.",
+        "The median star width of the frames in the stack.",
+        (
+            "The median of `measure_image_fwhm` over every frame in the stack, unweighted. A width "
+            "the frame quality step stored (`frame.star_width_gaussian_brightest_px`, the same "
+            "estimator) is reused instead of measuring the frame again."
+        ),
+        "Every frame in the stack (the member frames of `determine_stack_members`).",
         f"{_STACKING}.fwhm_sampling.measure_fwhm_degradation",
         better=Direction.LOWER,
         register_entry="STK-25",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EXPECTED_STACK_FWHM_PX,
         "px",
         "The star width the stack should have, given the widths of its input frames.",
-        "The root mean square of the sampled input widths (`expected_stack_fwhm`).",
-        "The same sample of at most 15 input frames.",
+        (
+            "The weighted root mean square of the member frames' widths (`expected_stack_fwhm`), each "
+            "frame weighted as the stack weighted it (`normalized_weights`; Siril's `-weight=wfwhm` "
+            "weights rebuilt by `wfwhm_weights`). Equal weights when the weights are unknown."
+        ),
+        "Every frame in the stack, the same frames as `stacking.median_input_fwhm_px`.",
         "pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm",
         better=Direction.LOWER,
         register_entry="STK-25",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_DURATION_S,

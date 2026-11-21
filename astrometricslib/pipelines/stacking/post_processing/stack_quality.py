@@ -6,6 +6,9 @@ final image is blurrier than the original single frames, and whether too
 many pixels had to be thrown out.
 """
 
+import math
+from collections.abc import Sequence
+
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -16,16 +19,16 @@ from astrometricslib.models.tuned_parameter import (
 )
 
 # From the original plan text. The ratio is the stack's FWHM divided by the
-# FWHM its input frames predict (the RMS of a sample of their FWHMs, see
-# `expected_stack_fwhm`), both measured with `measure_image_fwhm`. Measured on
-# six real ASI533MM Pro stacks on 2026-10-03: Bubble Nebula 1.10, M 27 1.16,
-# M 81 1.06, M 13 1.01, M 101 0.85, NGC 2244 0.77. None reached 1.2, so the
-# flag does not fire on a normal stack; M 27 mixes three nights and two camera
-# offsets and sits closest. Against the median of the inputs the same stacks
-# ranged up to 1.34 (M 81), which is why the RMS is used. True-positive
-# sensitivity -- whether 1.2x catches a *genuine* registration failure --
-# remains unvalidated: no real failed-registration session exists in the
-# library to check against.
+# FWHM its input frames predict (see `expected_stack_fwhm`), both measured
+# with `measure_image_fwhm`. Re-measured on 2026-11-21 with the weighted
+# prediction over every frame, on fifteen ASI533MM Pro stacks of the library
+# copy: 0.76 (NGC 2244) to 1.13 (M 31, NGC 1893), so the flag does not fire
+# on a normal stack (STK-25). The first check (plain RMS of at most 15
+# frames, six stacks, 2026-10-03) gave 0.77 to 1.16. Against the median of
+# the inputs those stacks ranged up to 1.34 (M 81), which is why the RMS is
+# used. True-positive sensitivity -- whether 1.2x catches a *genuine*
+# registration failure -- remains unvalidated: no real failed-registration
+# session exists in the library to check against.
 DEFAULT_FWHM_DEGRADATION_RATIO = TunedParameter(
     name="stacking.default_fwhm_degradation_ratio",
     default=1.2,
@@ -55,29 +58,52 @@ DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD = TunedParameter(
 )
 
 
-def expected_stack_fwhm(input_fwhms: list[float]) -> float | None:
+def expected_stack_fwhm(input_fwhms: Sequence[float], weights: Sequence[float] | None = None) -> float | None:
     """Predict the star width of a stack from the widths of its input frames.
 
-    A stack's star is the average of the stars in its frames. For round
-    Gaussian stars of widths w1, w2, ... that average has a variance equal to
-    the mean of the individual variances, so its FWHM is the root mean
-    square (RMS) of the individual FWHMs. A set of frames from nights with
-    different seeing therefore stacks wider than its median frame, and a
-    check against the median would call that normal blur a failure.
+    A stack's star is the weighted average of the stars in its frames, after
+    each frame is scaled to the same brightness. For round Gaussian stars of
+    widths w1, w2, ... that average has a variance equal to the weighted mean
+    of the individual variances, so its FWHM is the weighted root mean square
+    (RMS) of the individual FWHMs: sqrt(sum(a_i w_i^2) / sum(a_i)), where a_i
+    is frame i's weight in the stack. With equal weights this is the plain
+    RMS. A set of frames from nights with different seeing therefore stacks
+    wider than its median frame, and a check against the median would call
+    that normal blur a failure. A stack weighted by star width counts its
+    sharp frames more, so it is sharper than the plain RMS says.
 
     Parameters
     ----------
-    input_fwhms : `list` [`float`]
-        The FWHM of a sample of the stack's input frames, in pixels.
+    input_fwhms : `Sequence` [`float`]
+        The FWHM of each of the stack's input frames, in pixels.
+    weights : `Sequence` [`float`], optional
+        The weight each frame had in the stack, in any scale, in the order of
+        `input_fwhms`. Equal weights when omitted.
 
     Returns
     -------
     expected : `float` or `None`
-        The RMS of the widths, or `None` for an empty list.
+        The weighted RMS of the widths, or `None` for an empty list or when
+        the weights add up to zero.
+
+    Raises
+    ------
+    ValueError
+        If `weights` is not the same length as `input_fwhms`.
     """
     if not input_fwhms:
         return None
-    return float((sum(width * width for width in input_fwhms) / len(input_fwhms)) ** 0.5)
+    if weights is None:
+        weights = [1.0] * len(input_fwhms)
+    if len(weights) != len(input_fwhms):
+        raise ValueError(f"{len(weights)} weights were given for {len(input_fwhms)} widths")
+    total_weight = math.fsum(weights)
+    if not total_weight > 0:
+        return None
+    weighted_squares = math.fsum(
+        weight * width * width for weight, width in zip(weights, input_fwhms, strict=True)
+    )
+    return float((weighted_squares / total_weight) ** 0.5)
 
 
 def is_stacked_fwhm_degraded(

@@ -18,7 +18,7 @@ from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
-from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation
+from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation, stored_frame_widths
 from astrometricslib.pipelines.stacking.registration_records import (
     check_spectral_registration_quality,
     update_frame_registration_results,
@@ -618,6 +618,8 @@ def _summarize_stack(run: StackRun) -> StackQualitySummary:
         background_split=run.background_split,
         stacked_path=run.stacked_path,
         gate_results=run.gate_results,
+        stack_weight=run.stack_weight,
+        configuration=None if run.quality_recording is None else run.quality_recording.configuration,
     )
     if run.has_spectral:
         run.target.spectral_stacking.quality_summary = summary
@@ -1668,14 +1670,44 @@ def _build_stack_quality_summary(
     background_split: dict | list[dict] | None,
     stacked_path: str | None,
     gate_results: list[GateResult] | None = None,
+    stack_weight: str | None = None,
+    configuration: Any = None,
 ) -> StackQualitySummary:
     """Gather diagnostic data into a final `StackQualitySummary`.
 
     This checks the quality of the stack differently depending on the type
     of image. For regular images, it compares the overall sharpness (FWHM)
-    of the final stack against the average sharpness of the original frames.
-    For spectroscopy images, it uses a special tracking analysis because
-    measuring the sharpness of stretched-out light spectrums doesn't work.
+    of the final stack against the width its frames predict, each frame
+    weighted as the stacking program weighted it (see
+    `measure_fwhm_degradation`). For spectroscopy images, it uses a special
+    tracking analysis because measuring the sharpness of stretched-out light
+    spectrums doesn't work.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target that was stacked.
+    is_spectral : `bool`
+        Whether the stack is spectral.
+    frames_submitted : `int`
+        How many frames were offered to the stage.
+    target_frames : `list`
+        The frames given to the stacking program.
+    excluded_frames : `list`
+        The frames left out before stacking.
+    diagnostics : `dict`
+        What the stacking run reported.
+    background_split : `dict`, `list` [`dict`] or `None`
+        The background-split check's result.
+    stacked_path : `str` or `None`
+        The stacked image, or `None` when there is none.
+    gate_results : `list` [`GateResult`], optional
+        Gates already judged before the summary was built.
+    stack_weight : `str`, optional
+        The Siril ``-weight`` mode the stack used, `None` for equal weights.
+    configuration : `AppConfiguration`, optional
+        Says where the quality store is, for the frame widths the frame
+        quality step stored. The process-wide one if omitted.
 
     Returns
     -------
@@ -1707,11 +1739,15 @@ def _build_stack_quality_summary(
 
         if not is_spectral and summary.quality_processing_applied:
             update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
+            stack_frames = _frames_in_combined_groups(target_frames, diagnostics)
             measure_fwhm_degradation(
                 summary,
                 stacked_path,
-                _frames_in_combined_groups(target_frames, diagnostics),
+                stack_frames,
                 stacked_fwhm=diagnostics.get("stacked_fwhm_px"),
+                diagnostics=diagnostics,
+                stack_weight=stack_weight,
+                stored_widths=stored_frame_widths(target.id, stack_frames, configuration),
             )
 
         if is_spectral and summary.quality_processing_applied:

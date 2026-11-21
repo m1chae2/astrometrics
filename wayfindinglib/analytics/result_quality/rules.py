@@ -219,8 +219,9 @@ REJECTED_PIXEL_FRACTION_LIMIT = TunedParameter(
 # The most a stack's star width may exceed the width its input frames predict
 # (stack width divided by predicted width) before the rule warns. It equals
 # astrometricslib's `DEFAULT_FWHM_DEGRADATION_RATIO` (1.2), set in STK-25:
-# six normal stacks measured 0.77 to 1.16. Partly measured: no real failed
-# alignment was available. A test compares this copy with the library's value.
+# fifteen normal stacks measured 0.76 to 1.13 against the weighted prediction
+# (2026-11-21). Partly measured: no real failed alignment was available. A
+# test compares this copy with the library's value.
 STACK_SHARPNESS_RATIO_LIMIT = TunedParameter(
     name="wayfinding.stack_sharpness_ratio_limit",
     default=1.2,
@@ -569,7 +570,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         severity=Severity.WARNING,
         requires=[
             MetricRequirement(name=STACKED_STAR_WIDTH_METRIC, definition_version=1),
-            MetricRequirement(name=EXPECTED_STACK_STAR_WIDTH_METRIC, definition_version=1),
+            MetricRequirement(name=EXPECTED_STACK_STAR_WIDTH_METRIC, definition_version=2),
         ],
         limits=[
             QualityLimit(
@@ -577,11 +578,11 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
                 unit="ratio",
                 tier=LimitTier.VALIDATED_DATASET,
                 derivation=(
-                    "STK-25: six normal stacks measured 0.77 to 1.16 times the width their input frames "
-                    "predict, so 1.2 does not fire on them. Whether 1.2 catches a real failed alignment "
-                    "is untested."
+                    "STK-25: fifteen normal stacks measured 0.76 to 1.13 times the width their input "
+                    "frames predict, so 1.2 does not fire on them. Whether 1.2 catches a real failed "
+                    "alignment is untested."
                 ),
-                sample_count=6,
+                sample_count=15,
                 register_entry="STK-25",
             )
         ],

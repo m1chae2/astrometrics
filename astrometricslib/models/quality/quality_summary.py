@@ -320,8 +320,9 @@ class StackingPipelineQualityMetrics(BaseModel):
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
     # The star width the stack should have given its input frames: the root
-    # mean square of a sample of their widths. The sharpness gate compares
-    # the stack with this, not with the median.
+    # mean square of the widths of every frame in the stack, each weighted as
+    # the stack weighted it. The sharpness gate compares the stack with this,
+    # not with the median.
     expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
 
     # Spectral-only.

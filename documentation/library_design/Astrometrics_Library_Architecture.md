@@ -176,14 +176,14 @@ Each frame is judged against its own session: frames with the same camera, optic
 
 #### 3.4.2 After stacking: checking the final image
 
-Six checks run on the stacked image, and three more on multi-length stacks. The star sharpness ratio compares the star width in the stack with the width its frames predict. The width is the FWHM (full width at half maximum), the width of a star's image at half its peak. A stack's star is the average of its frames' stars. For round Gaussian stars the variances average, so the expected width is the root mean square of the input widths. A median would call the normal blur of nights with different seeing (air turbulence) a failure: <!-- impl: astrometricslib.pipelines.stacking.post_processing.assess_output_quality.output_quality_gates -->
+Six checks run on the stacked image, and three more on multi-length stacks. The sharpness ratio compares the stack's star width with the width its frames predict. The width is the FWHM (full width at half maximum) of a star's image. A stack's star is the weighted average of its frames' stars. For round Gaussian stars the variances average, so the expected width is the weighted root mean square of the widths of all $N$ frames, $a_j$ being frame $j$'s stack weight. A median would call the normal blur of mixed seeing (air turbulence) a failure: <!-- impl: astrometricslib.pipelines.stacking.post_processing.assess_output_quality.output_quality_gates --> <!-- impl: astrometricslib.pipelines.stacking.fwhm_sampling.measure_fwhm_degradation -->
 
 $$
-\rho_{\text{FWHM}} = \frac{\text{FWHM}_{\text{stack}}}{\text{FWHM}_{\text{expected}}}, \qquad \text{FWHM}_{\text{expected}} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^{\,2}} \tag{5}
+\rho_{\text{FWHM}} = \frac{\text{FWHM}_{\text{stack}}}{\text{FWHM}_{\text{expected}}}, \qquad \text{FWHM}_{\text{expected}} = \sqrt{\frac{\sum_{j=1}^{N} a_j\,\text{FWHM}_j^{\,2}}{\sum_{j=1}^{N} a_j}} \tag{5}
 $$
 
-A value clearly above 1 fails, since small misalignments blurred the stack. The other checks cover the share of rejected, saturated, zero (for example, a bias removed twice), and negative pixels, and whether a spectral stack's zero-order image jumps between frames. For several exposure lengths, each group must be one scale factor of the reference, no group may be missing, and raw frames must not be clipped at zero by a low camera offset. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.zero_fraction_threshold --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.evaluate_spectral_registration_quality --> <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.measure_exposure_group_gains --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_group_linearity_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_groups_combined_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.raw_frame_clipping_gate -->
-Besides gates, the pipelines store continuous measurements, such as aperture statistics, star shapes, field rotation, and the noise of empty sky. The last is described next.
+A value clearly above 1 fails: misalignment blurred the stack. Other checks cover the shares of rejected, saturated, zero (such as a bias removed twice) and negative pixels, and zero-order jumps in spectral stacks. With several exposure lengths, each group must be one scale factor of the reference, none may be missing, and no raw frame may be clipped at zero by a low offset. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.zero_fraction_threshold --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.evaluate_spectral_registration_quality --> <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.measure_exposure_group_gains --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_group_linearity_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_groups_combined_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.raw_frame_clipping_gate -->
+Besides gates, the pipelines store continuous measurements: aperture statistics, star shapes, field rotation and the noise of empty sky, described next.
 
 #### 3.4.3 Noise in empty sky
 
@@ -704,6 +704,7 @@ Each symbol has one meaning in this paper. The index symbols $i$, $c$, $j$, and 
 | $\lambda$ | Wavelength | Å |
 | $\Phi(\lambda)$, $\Phi_{\text{cal}}(\lambda)$ | Spectral flux (raw and calibrated), a relative energy flux per unit wavelength | relative |
 | $N$ | Number of light frames in a stack | frames |
+| $a_j$ | Weight of frame $j$ in a stack | none |
 | $z(N)$ | Chauvenet rejection cutoff for a stack of $N$ frames | $\sigma$ |
 | $z_{\text{high}}(N)$, $z_{\text{low}}(N)$ | Upper and lower pixel-rejection cutoffs | $\sigma$ |
 | $z_{\text{floor}}$ | Lowest value allowed for the upper cutoff | $\sigma$ |

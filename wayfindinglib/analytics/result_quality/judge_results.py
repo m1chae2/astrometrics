@@ -877,7 +877,7 @@ def _judge_stack_sharpness_poor(case: _Case) -> list[TargetStatement]:
         "limit": limit,
     }
     reason = (
-        f"The stack's star width is {stacked_width:.2f} px; the root mean square of its sampled input "
+        f"The stack's star width is {stacked_width:.2f} px; the weighted root mean square of its input "
         f"frames' widths is {expected_width:.2f} px, a ratio of {ratio:.2f} against the limit {limit:g} "
         "(STK-25)."
     )

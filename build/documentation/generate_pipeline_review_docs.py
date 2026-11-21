@@ -690,8 +690,8 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
     "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",
     "stacked_fwhm_px": "Measured FWHM of the stacked image.",
-    "median_input_fwhm_px": "Median FWHM of all light frames that were kept.",
-    "expected_fwhm_px": "Predicted stack FWHM: the RMS of a sample of input-frame FWHMs.",
+    "median_input_fwhm_px": "Median FWHM of all frames in the stack.",
+    "expected_fwhm_px": "Predicted stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "fwhm_degradation_ratio": "Measured stack FWHM over the expected FWHM; 1 means no extra blur.",
     "fwhm_degradation_flagged": "True if the final image is clearly blurrier than its inputs.",
     "stacking_engine": "Program that did the pixel processing (for example Siril).",
@@ -715,7 +715,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "gaia_fit_star_count": "Stars used in the Gaia refit.",
     "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
-    "expected_stack_fwhm_px": "Expected stack FWHM: the RMS of a sample of input-frame FWHMs.",
+    "expected_stack_fwhm_px": "Expected stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
     ),
@@ -3474,11 +3474,15 @@ A binning mismatch never falls back.
 FWHM (full width at half maximum) is the width of a star's light profile at half its peak
 height; a smaller FWHM means a sharper image. Averaging aligned frames adds no blur of its own,
 so the stack's FWHM follows from the input FWHMs. The pipeline predicts that FWHM and checks the
-stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are
-$\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
-inputs:
+stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ stacked frames
+are $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
+inputs, each weighted by the weight $a_j$ the frame had in the stack (Siril's star-width weights
+for `-weight=wfwhm`, all equal otherwise):
 
-$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^2} \tag{2}$$
+$$\text{FWHM}_\text{expected} = \sqrt{\frac{\sum_{j=1}^{N} a_j\,\text{FWHM}_j^2}{\sum_j a_j}} \tag{2}$$
+
+Every frame in the stack counts. A frame width the frame quality step already stored is reused,
+because it comes from the same estimator.
 
 The ratio $\rho_\text{FWHM}$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means
 the alignment or the combination blurred the stars. The stack passes when

@@ -78,9 +78,11 @@ The dark is still applied; the flag makes `calibration_metadata` fail. When no d
 
 ### 3.2 Expected stack FWHM
 
-FWHM (full width at half maximum) is the width of a star's light profile at half its peak height; a smaller FWHM means a sharper image. Averaging aligned frames adds no blur of its own, so the stack's FWHM follows from the input FWHMs. The pipeline predicts that FWHM and checks the stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the inputs:
+FWHM (full width at half maximum) is the width of a star's light profile at half its peak height; a smaller FWHM means a sharper image. Averaging aligned frames adds no blur of its own, so the stack's FWHM follows from the input FWHMs. The pipeline predicts that FWHM and checks the stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ stacked frames are $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the inputs, each weighted by the weight $a_j$ the frame had in the stack (Siril's star-width weights for `-weight=wfwhm`, all equal otherwise):
 
-$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^2} \tag{2}$$
+$$\text{FWHM}_\text{expected} = \sqrt{\frac{\sum_{j=1}^{N} a_j\,\text{FWHM}_j^2}{\sum_j a_j}} \tag{2}$$
+
+Every frame in the stack counts. A frame width the frame quality step already stored is reused, because it comes from the same estimator.
 
 The ratio $\rho_\text{FWHM}$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means the alignment or the combination blurred the stars. The stack passes when
 
@@ -254,8 +256,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `zero_pixel_fraction` | `float \| None` | Share of stack pixels that are exactly zero. |
 | `negative_pixel_max_percent` | `int \| None` | Largest percentage of negative pixels the stacking engine reported. |
 | `stacked_fwhm_px` | `float \| None` | Measured FWHM of the stacked image. |
-| `median_input_fwhm_px` | `float \| None` | Median FWHM of all light frames that were kept. |
-| `expected_stack_fwhm_px` | `float \| None` | Expected stack FWHM: the RMS of a sample of input-frame FWHMs. |
+| `median_input_fwhm_px` | `float \| None` | Median FWHM of all frames in the stack. |
+| `expected_stack_fwhm_px` | `float \| None` | Expected stack FWHM: the weighted RMS of all input-frame FWHMs. |
 | `spectral_registration_flags` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames about which the spectral registration (alignment) test raised a concern. |
 | `spectral_registration_checked` | `bool` | Whether the spectral registration (alignment) test ran. |
 | `stacking_duration_seconds` | `float \| None` | How long the stacking run took, in seconds. |

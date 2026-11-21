@@ -915,15 +915,15 @@ Every Python example assumes the library is installed and configured with your o
 
 **The sharpness limit: a stack at most 1.2 times wider than expected**
 
-- **Claim:** A stack's expected star width is the root mean square of a sample of its input frames' widths. Normal stacks measure 0.77 to 1.16 times that, so a limit of 1.2 does not fire on them.
+- **Claim:** A stack's expected star width is the root mean square of the widths of all its frames, each weighted as the stack weighted it. Normal stacks measure 0.76 to 1.13 times that, so a limit of 1.2 does not fire on them.
 - **Settings it supports:**
   - code constant `DEFAULT_FWHM_DEGRADATION_RATIO` = 1.2 in `pipelines/stacking/post_processing/stack_quality.py` (changing it means editing the code); false-positive side: normal stacks stay below the limit. Relation: confirmed by this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO -->
   - code constant `STACK_SHARPNESS_RATIO_LIMIT` = 1.2 in `wayfindinglib/analytics/result_quality/rules.py`, a copy the rule `stack_sharpness_poor` compares the ratio of the stored stack width to the stored predicted width with; the same test fails if the copy and the constant above differ (changing the limit means editing both). Relation: derived from this entry. <!-- impl: wayfindinglib.analytics.result_quality.rules.STACK_SHARPNESS_RATIO_LIMIT -->
   - the same constant, detection side: whether the limit catches a real failed alignment (the library holds no such session). Relation: sanity check only; it is a warning threshold and blocks nothing.
-  - the prediction `expected_stack_fwhm`. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm -->
-- **Status:** Partly measured. The false-positive side is measured on six stacks; whether 1.2 catches a real failed alignment is untested, because the library holds no such session.
+  - the prediction `expected_stack_fwhm`, over every member frame with the stack's own weights (`measure_fwhm_degradation`). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm -->
+- **Status:** Partly measured. The false-positive side is measured on fifteen stacks; whether 1.2 catches a real failed alignment is untested, because the library holds no such session.
 - **Data you need:** Several imaging stacks, ideally including one made from several nights of different seeing.
-- **Procedure:** Stack each target and read the stacked, median-input and expected widths.
+- **Procedure:** Stack each target and read the stacked, median-input and expected widths. Without restacking, `measure_fwhm_degradation` can be run on a stack's stored registration record (its `_registration_frames.json` and `.seq`) with the stored stack width.
 
   ```python
   from astrometricslib import Astrometrics
@@ -941,12 +941,12 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Acceptance criterion:** A well-aligned stack is near 1. A ratio above 1.2 fails `stack_sharpness`.
 - **What to look at:** The ratio of stacked to expected width (no units; near 1 is a well-aligned stack, above 1.2 fails `stack_sharpness`). Also the ratio against the median input width, to see why the root mean square is used.
-- **Our result:** Six ZWO ASI533MM Pro stacks on 2026-10-03: Bubble Nebula 1.10, M 27 1.16, M 81 1.06, M 13 1.01, M 101 0.85, NGC 2244 0.77. Against the median of the inputs the same stacks reached up to 1.34 (M 81). In a combined exposure-group stack, stars whose cores came from a shorter group read too wide: on the M 57 stack of 2026-10-03 they read 3.40 px against 2.38 px for the other stars, which is why they are left out of the measurement. In the earlier campaign (median-based check, the first validation campaign in [index.md](index.md#6-validation-sessions) Section 6), M 81 (DS-M81) gave 1.03 and NGC 2403 (DS-NGC2403) 1.20 (rounded; flagged) with only 0.85% of pixels rejected. NGC 2403 has not been re-measured with the current check.
+- **Our result:** Fifteen ZWO ASI533MM Pro stacks on the library copy of 2026-11-21, with the stored stack widths, the stored frame widths and the new prediction. Eight single-length stacks, with Siril's `-weight=wfwhm` weights rebuilt: M 42 1.01, M 45 1.00, NGC 4438 1.04, M 101 1.06, NGC 7331 1.07, M 13 1.08, Bubble Nebula 1.12, M 31 1.13. Seven mixed-length stacks, whose group weights exist only during a stack run, with equal weights over all frames: NGC 2244 0.76, NGC 2903 0.89, M 81 0.99, M 57 1.04, M 27 1.05, NGC 2403 1.06, NGC 1893 1.13. None reaches 1.2, so the limit stays. The old prediction (plain root mean square of at most 15 frames) gave 0.80 to 1.12 on the same stacks; it overstated the width of weighted stacks by up to 31% (M 101, 3.51 against 2.67 px, nine frames) and had about 3.5% sampling noise. NGC 7331 (94 frames): expected 2.447 px before, 2.340 px now, stack 2.506 px; ratio 1.02 to 1.07. M 31 (120 frames): 2.058 px before, 1.980 px now, stack 2.242 px; ratio 1.09 to 1.13. Siril's interpolation clamping still widens these stacks by several percent (a separate fix), which is part of why ratios sit above 1. The stored frame widths matched a fresh measurement of all 120 M 31 frames exactly; with them the step takes under 0.1 s, and measuring all 120 frames with 8 workers takes 64 s. An earlier campaign (six stacks on 2026-10-03, old prediction) gave 0.77 to 1.16, and up to 1.34 (M 81) against the median of the inputs, which is why the root mean square is used. In a combined exposure-group stack, stars whose cores came from a shorter group read too wide: on the M 57 stack of 2026-10-03 they read 3.40 px against 2.38 px for the other stars, which is why they are left out of the measurement.
 - **Verdict:** Not judged.
-- **Limits:** No real failed-registration session; six stacks from one camera.
+- **Limits:** No real failed-registration session; fifteen stacks from one camera; the mixed-length stacks were checked with equal weights.
 - **To tune for your setup:** Read the ratio on your normal stacks; keep the limit a little above the largest.
 - **Regenerate with:** `astrometricslib/scripts/run_empirical_validation.py` (the first validation campaign) and `astrometricslib/scripts/report_gate_limits.py`.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_fwhm_degradation_sampling.py` and `test_combined_stack_fwhm.py`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_fwhm_degradation_sampling.py`, `test_stack_quality_tasks.py` and `test_combined_stack_fwhm.py`.
 - **Raw record:** None kept.
 
 ### STK-26

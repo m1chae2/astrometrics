@@ -172,3 +172,16 @@ def test_the_star_radius_is_read_without_loading_the_records(tmp_path: Path) -> 
     radii = catalog_access.read_star_radii([with_radius.id, _unmeasured_star().id, "missing"])
 
     assert radii == {with_radius.id: 4.5, _unmeasured_star().id: None}
+
+
+def test_a_star_is_found_by_an_alias_when_no_id_or_name_matches(tmp_path: Path) -> None:
+    """Check a search by an older SIMBAD id finds the star saved under Gaia."""
+    catalog_access = _make_catalog_access_in(tmp_path)
+    star = _unmeasured_star()
+    star.name = "Albireo"
+    star.aliases = ["* bet01 Cyg", "HD 183912"]
+    catalog_access.put([star], "stellar_catalog", {})
+
+    assert catalog_access.find_star_ids_by_name("hd 183912") == [star.id]
+    assert catalog_access.find_star_ids_by_name("Albireo") == [star.id]
+    assert catalog_access.find_star_ids_by_name("HD 1") == []

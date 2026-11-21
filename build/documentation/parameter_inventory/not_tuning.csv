@@ -157,6 +157,8 @@ astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._seed_gaia_cache_for_field.radius_deg,Search radius that callers always pass
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
+astrometricslib/pipelines/astrometry/processing/star_identifier.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base

@@ -66,7 +66,9 @@ from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
 )
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
+    display_name_rank,
     gaia_dr3_source_id_from_names,
+    order_names_by_familiarity,
 )
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
 from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
@@ -74,6 +76,13 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERROR
 from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
 logger = logging.getLogger(__name__)
+
+# The SIMBAD names kept as a star's aliases: proper, Bayer, Flamsteed and
+# variable-star names, and the bright-star catalogs (rank 0 and 1 of
+# `display_name_rank`). At most this many are kept, so the record stays
+# small. Not tuning: a choice of what to show, not a measurement.
+_ALIAS_NAME_RANK_LIMIT = 1
+_MAXIMUM_ALIASES = 6
 
 # A centre star matched to a catalog star farther than this from the position
 # hint is reported as a probable mislabel. Only a warning, nothing is changed
@@ -3124,6 +3133,7 @@ class StarIdentifier:
 
         common_name = None
         gaia_dr3_source_id = None
+        familiar_ids: list[str] = []
         ids_col = next((c for c in ["IDS", "ids"] if c in match.colnames), None)
         if ids_col:
             all_ids = match[ids_col]
@@ -3131,13 +3141,20 @@ class StarIdentifier:
                 all_ids = all_ids.decode("utf-8")
             id_list = [i.strip() for i in str(all_ids).split("|")]
             # SIMBAD lists the star's Gaia DR3 name among its identifiers.
-            # Keep the number: the Gaia XP spectrum check needs it, and the
-            # star's own id is its SIMBAD main id, not this.
+            # The number becomes the star's saved id (see below), and the
+            # Gaia XP spectrum check needs it too.
             gaia_dr3_source_id = gaia_dr3_source_id_from_names(id_list)
             for ident in id_list:
                 if ident.startswith("NAME "):
                     common_name = ident.replace("NAME ", "").strip()
                     break
+            # Only the names a reader may know the star by are kept as
+            # aliases, not every survey number SIMBAD lists.
+            familiar_ids = [
+                ident
+                for ident in id_list
+                if not ident.startswith("NAME ") and display_name_rank(ident) <= _ALIAS_NAME_RANK_LIMIT
+            ]
 
         spectral_type = "Unknown"
         for col in ["SP_TYPE", "sp_type"]:
@@ -3156,7 +3173,16 @@ class StarIdentifier:
         stellar_object.simbad_object_types = read_simbad_object_types(match)
         stellar_object.gaia_dr3_source_id = gaia_dr3_source_id
         stellar_object.name = common_name if common_name else str(main_id)
-        stellar_object.id = str(main_id)
+        # A star Gaia DR3 lists is saved under its Gaia number, which every
+        # star in a field has and which never changes; the SIMBAD names stay
+        # its display name and aliases. A star Gaia does not list (the
+        # brightest ones) keeps its SIMBAD main id.
+        stellar_object.id = f"Gaia DR3 {gaia_dr3_source_id}" if gaia_dr3_source_id else str(main_id)
+        stellar_object.aliases = [
+            name
+            for name in order_names_by_familiarity([str(main_id), *familiar_ids])
+            if name not in (stellar_object.id, stellar_object.name)
+        ][:_MAXIMUM_ALIASES]
         stellar_object.spectral_type = str(spectral_type)
         stellar_object.stellar_spectral_type = str(spectral_type)
         stellar_object.magnitude = magnitude

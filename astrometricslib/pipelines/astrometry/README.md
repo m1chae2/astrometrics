@@ -93,6 +93,10 @@ The `astrometric_residual` gate judges `gaia_fit_rms_arcsec` first, because it d
 - When the header has neither but has `PIXSCAL` (a scale in arcsec/pixel), the identifier uses that value as the scale and applies no binning to it.
 - When the X and Y cards differ (`XPIXSZ` and `YPIXSZ`, or `XBINNING` and `YBINNING` for the `PIXSIZE1` rule), the identifier uses their mean and records the flag `scale_hint_binning_mismatch`.
 
+## Star ids and names
+
+A star that Gaia DR3 lists is saved under its Gaia number, such as `Gaia DR3 2026116260337482112`. Every star in a field has one and it never changes, so each run finds the star under the same id whichever catalog named it. A SIMBAD match whose list of names includes a Gaia DR3 number is saved under that number. Its SIMBAD common name (or else its main id) is the display name (`name`), and its main id and bright-star catalog names (HD, HR, HIP and the like) are kept as `aliases`, most familiar first. A star Gaia does not list, such as Vega, keeps its SIMBAD main id. A star matched only in Gaia is named by its Gaia number. A star no catalog matched gets a position-only id (`FIELD_J...`). A search by name also looks at the aliases, so the old SIMBAD id still finds the star.
+
 ## SIMBAD object types
 
 When a detected star is matched to SIMBAD, the star keeps every object type SIMBAD lists for it (`simbad_object_types`, such as `*|**|EB*|SB*|V*`). `StellarObject.known_variability` reads them (see `models/known_variability.py`). The codes mean:

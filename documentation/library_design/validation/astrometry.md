@@ -1029,6 +1029,58 @@ for metric in (
 - **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_expected_residual.py` (the bound by hand, the finder against the bound on noisy stars, the table against the finder on noise-free stars, missing inputs, the rows), `astrometricslib/pipelines/astrometry/test/processing/test_wcs_refinement.py` (the fit's stars and their peak over noise) and `astrometricslib/pipelines/astrometry/test/pre_processing/test_background_noise_report.py`.
 - **Raw record:** None kept.
 
+### AST-22
+
+**The same-star radius of 3 arcsec for a star known only by position**
+
+- **Claim:** A position-only row (a star saved as `FIELD_J...` because no catalog named it) within 3 arcsec of a Gaia DR3 star, or of another star, is the same star. Of 247,678 position-only rows, 99,103 lie within 3 arcsec of a cached Gaia star, against 4,218 when every position is moved 30 arcsec north (the chance count). Beyond 3 arcsec the chance count grows faster than the real one. Pairs of position-only rows level off at the same radius.
+- **Settings it supports:**
+  - code constant `POSITION_ONLY_SAME_STAR_RADIUS_ARCSEC` = 3.0 in `astrometricslib/pipelines/shared/catalog_star_identity.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.POSITION_ONLY_SAME_STAR_RADIUS_ARCSEC -->
+  - The 1 arcsec radius at which the cleanup script gives a named row without a stored Gaia number the number of the nearest cached Gaia star (`NAMED_STAR_GAIA_RADIUS_ARCSEC` in `astrometricslib/scripts/reconcile_position_only_star_catalog.py`). Relation: derived from this entry. <!-- impl: astrometricslib.scripts.reconcile_position_only_star_catalog.NAMED_STAR_GAIA_RADIUS_ARCSEC -->
+  - The factor of 2 in flux beyond which two rows with light-curve points at the same times are two stars, so the cleanup script does not merge them (`SAME_FRAME_FLUX_RATIO_LIMIT` in the same script). Relation: derived from this entry. <!-- impl: astrometricslib.scripts.reconcile_position_only_star_catalog.SAME_FRAME_FLUX_RATIO_LIMIT -->
+- **Status:** Measured. On a copy of our star catalog and our Gaia cache.
+- **Data you need:** A star catalog with position-only rows, and a Gaia cache (downloaded tiles) covering the same fields.
+- **Procedure:**
+  1. Read the position of every position-only row from the star table, and every cached Gaia star with its proper motion (internal functions, not part of the public API; may change). <!-- impl: astrometricslib._internal.drivers.catalog_store.stars_in_tiles -->
+  2. Move each Gaia position from epoch 2016.0 to 2026.0 by its proper motion.
+  3. Count the rows whose nearest Gaia star is within 1, 2, 3, 4, 5 and 10 arcsec. Repeat with every row moved 30 arcsec north; that count is the chance matches.
+  4. Count the pairs of position-only rows within 1, 2, 3 and 5 arcsec of each other.
+
+```python
+import numpy as np
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+
+from astrometricslib import Astrometrics
+from astrometricslib._internal.drivers.catalog_store import stars_in_tiles
+from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points
+
+astrometrics = Astrometrics()
+rows = [s for s in astrometrics.stars.query(detail="summary").stars if s.id.startswith("FIELD_J")]
+ra = np.array([s.right_ascension for s in rows])
+dec = np.array([s.declination for s in rows])
+tiles = sorted(set(healpix_pixels_of_points(7, ra, dec).tolist()))
+gaia = stars_in_tiles(astrometrics.config, tiles, 99.0, include_proper_motion=True)
+g_ra = np.array([g[1] for g in gaia]) + np.nan_to_num(
+    np.array([g[5] or 0.0 for g in gaia])
+) * 10 / 3.6e6 / np.cos(np.radians([g[2] for g in gaia]))
+g_dec = np.array([g[2] for g in gaia]) + np.nan_to_num(np.array([g[6] or 0.0 for g in gaia])) * 10 / 3.6e6
+catalog = SkyCoord(g_ra * u.deg, g_dec * u.deg)
+for shift in (0.0, 30.0):
+    _, separation, _ = SkyCoord(ra * u.deg, (dec + shift / 3600) * u.deg).match_to_catalog_sky(catalog)
+    print(shift, [int(np.sum(separation.arcsec <= r)) for r in (1, 2, 3, 4, 5, 10)])
+```
+
+- **Acceptance criterion:** The radius keeps most real matches (the count minus the chance count) while the chance count stays a small share of the matches.
+- **What to look at:** The real-minus-chance count against the radius, and the chance share.
+- **Our result:** 2026-11-20, a copy of the library catalog (292,287 rows, 247,678 position-only) and the Gaia cache (1,212,451 stars). Within 1, 2, 3, 4, 5 and 10 arcsec of a cached Gaia star: 44,079, 80,899, 99,103, 107,959, 112,888 and 123,215 rows; chance counts 502, 1,949, 4,218, 7,155, 10,620 and 35,382. Real minus chance: 43,577, 78,950, 94,885, 100,804, 102,268 and 87,833. At 3 arcsec the chance share is 4.3 percent and 93 percent of the real matches at 5 arcsec are kept; at 5 arcsec the chance share is 9.4 percent. In 5,028 rows a second Gaia star is also within 3 arcsec; the cleanup takes the nearest only when the next is at least twice as far. Pairs of position-only rows within 1, 2, 3 and 5 arcsec: 44,927, 74,496, 83,762 and 88,185. For a named row, the chance count at 1 arcsec is 0.2 percent of rows. Of the rows the cleanup would merge, 3,371 groups hold two light curves with points at the same times (102,488 such points). The median flux ratio there had its middle half from 0.82 to 0.99 (two runs that measured one star) and its 5th percentile at 0.22 (a neighbor). Rows already named by a Gaia number lie a median 0.92 arcsec from their own Gaia star (90th percentile 6.2 arcsec), because their saved position is the one measured on an image. The star table is the only place that refers to star ids: the quality rows name frames, stacks and runs, and no target record holds a star id (searched on the same copy).
+- **Verdict:** Pass.
+- **Limits:** One catalog from one camera at about 1.9 arcsec per pixel. The chance count assumes the sky 30 arcsec away is as crowded. In a crowded field (a globular cluster core) a 3 arcsec radius can join two real stars. A position-only row more than 3 arcsec from its Gaia star (a poor plate solution) is not matched.
+- **To tune for your setup:** Run the procedure and choose the radius where the chance count starts to grow faster than the real one, about 1.5 times your pixel scale.
+- **Regenerate with:** The procedure above. `astrometricslib/scripts/reconcile_position_only_star_catalog.py` (dry run by default) lists the merges this radius makes.
+- **Guarded by tests:** `astrometricslib/test/test_reconcile_position_only_star_catalog.py` and `astrometricslib/pipelines/shared/test/test_star_recording_identified_reconciliation.py` check the merges at this radius, not the radius.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These values have not been measured. Each is a code constant unless the table says otherwise; changing a code constant means editing the code. Paths are relative to `astrometricslib/`.

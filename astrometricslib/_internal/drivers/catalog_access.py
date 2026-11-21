@@ -5,6 +5,7 @@ following a standard pattern so different parts of the code don't have to
 worry about where the data actually lives.
 """
 
+import json
 import logging
 import math
 import os
@@ -36,6 +37,7 @@ __all__ = [
     "StarPosition",
     "StarSummary",
     "stellar_object_from_row",
+    "stellar_row_values",
     "stellar_storage_payload",
 ]
 
@@ -634,10 +636,17 @@ class AbstractCatalogAccess(ABC):
         if not name:
             return []
         wanted_name = name.lower()
-        return [
+        matching_ids = [
             summary.id
             for summary in self.list_star_summaries()
             if summary.id == name or (summary.name and summary.name.lower() == wanted_name)
+        ]
+        if matching_ids:
+            return matching_ids
+        return [
+            record.id
+            for record in self.get_by_ids("stellar_catalog", self.list_star_ids())
+            if any(alias.lower() == wanted_name for alias in record.aliases)
         ]
 
 
@@ -769,6 +778,32 @@ def stellar_storage_payload(stellar_object: Any) -> dict[str, Any]:
     if target_ids is not None and _split_target_ids(columns["target_id"]) == target_ids:
         del payload["targetIds"]
     return payload
+
+
+def stellar_row_values(stellar_object: Any) -> dict[str, Any]:
+    """Give every column of a star's row, as the catalog saves it.
+
+    For a script that writes the star table with SQL of its own, so its rows
+    are the same as the ones the catalog writes.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The star to save.
+
+    Returns
+    -------
+    values : `dict`
+        ``id``, ``data_json`` (the record as JSON text, see
+        `stellar_storage_payload`) and the extra columns, by column name.
+    """
+    from astrometricslib.foundation.storage.local_database import safe_json_dumps
+
+    return {
+        "id": stellar_object.id,
+        "data_json": safe_json_dumps(stellar_storage_payload(stellar_object)),
+        **_stellar_extra_columns(stellar_object),
+    }
 
 
 def stellar_object_from_row(payload: dict[str, Any], columns: dict[str, Any]) -> Any:
@@ -1172,6 +1207,42 @@ class CatalogAccess(AbstractCatalogAccess):
         matching_ids.extend(
             found_id for found_id in self.existing_star_ids([name]) if found_id not in matching_ids
         )
+        if not matching_ids:
+            matching_ids = self._find_star_ids_by_alias(name)
+        return matching_ids
+
+    def _find_star_ids_by_alias(self, name: str) -> list[str]:
+        """Find the ids of stars that list `name` among their aliases.
+
+        A star saved under its Gaia number keeps its older SIMBAD id (such
+        as ``HD 183912``) as an alias, so a search by that id still finds
+        it. The database narrows the rows to records that contain the name;
+        this reads every record's text once, so it runs only when no id or
+        name matched.
+
+        Parameters
+        ----------
+        name : `str`
+            The name to look for.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of every star with an alias equal to `name`, ignoring
+            case.
+        """
+        wanted_name = name.lower()
+        candidate_rows = self._generic.list_projected(
+            "stellar_catalog", ["id", "data_json"], like={"data_json": name}
+        )
+        matching_ids = []
+        for row in candidate_rows:
+            try:
+                aliases = json.loads(row["data_json"]).get("aliases") or []
+            except TypeError, ValueError, AttributeError:
+                continue
+            if any(str(alias).lower() == wanted_name for alias in aliases):
+                matching_ids.append(row["id"])
         return matching_ids
 
     def count_star_groups(self, include_unresolved: bool = False) -> list[StarGroupCount]:

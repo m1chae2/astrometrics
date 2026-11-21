@@ -805,9 +805,10 @@ def find_star_named(
     A target that is a star is matched by its catalog identity, not by how
     near a star lies to the target's position, so a bright neighbor cannot
     stand in for it. The match compares the target's id and common name with
-    each star's id and name (SIMBAD's common name when it has one, else its
-    main identifier). Stars known only by their position (ids starting with
-    ``FIELD_J``) are never chosen.
+    each star's id, name and aliases (SIMBAD's common name when it has one,
+    else its main identifier; a star saved under its Gaia number keeps its
+    SIMBAD main id as an alias). Stars known only by their position (ids
+    starting with ``FIELD_J``) are never chosen.
 
     Parameters
     ----------
@@ -827,7 +828,11 @@ def find_star_named(
     for star in stellar_objects:
         if not star.is_catalog_identified or star.id.startswith(POSITION_ONLY_STAR_ID_PREFIX):
             continue
-        if {_normalized_name(star.id), _normalized_name(star.name)} & wanted:
+        if {
+            _normalized_name(star.id),
+            _normalized_name(star.name),
+            *map(_normalized_name, star.aliases),
+        } & wanted:
             return star
     return None
 

@@ -101,6 +101,7 @@ UNUSED_DECISION_METRICS = {
     "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,
     "stacking.notice_stack_cropped": _NOTICE_ROW_REASON,
     "stacking.notice_stack_turned": _NOTICE_ROW_REASON,
+    "astrometry.notice_gaia_tiles_missing": _NOTICE_ROW_REASON,
     "frame.sky_unevenness": (
         "evidence of a set-aside frame, cited by the target report inputs next to the star count; the "
         "quarantine step judges it, no rule of this table compares it with a limit"

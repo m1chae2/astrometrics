@@ -390,7 +390,7 @@
   min-width: 0;
 }
 
-/* The reason the astrometry overlay is off, small and muted beside the buttons. */
+/* The Blink note, small and muted beside the buttons. */
 .fits-header-controls__note {
   font-size: var(--small-font-size);
   color: var(--text-muted);

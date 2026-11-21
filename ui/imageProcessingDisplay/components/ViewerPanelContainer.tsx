@@ -114,6 +114,14 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
     return null;
   }, [shownFile, selectedFile, imageFrameInfo]);
 
+  // The Astrometry button explains itself on hover; the result counts or the reason the overlay is empty follow.
+  const astrometryBase = isLoadingOverlay
+    ? "Getting astrometry results"
+    : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay");
+  const astrometryTooltip = showAstrometryOverlay && overlayReason && !isLoadingOverlay
+    ? `${astrometryBase}. ${overlayReason}`
+    : astrometryBase;
+
   return (
     <div className="image-processing-display__center">
       <SectionPanel
@@ -128,23 +136,10 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
               active={showAstrometryOverlay}
               onClick={onToggleAstrometryOverlay}
               disabled={isLoadingOverlay}
-              title={
-                isLoadingOverlay
-                  ? "Getting astrometry results"
-                  : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay")
-              }
+              title={astrometryTooltip}
             >
               {isLoadingOverlay ? "Getting stars" : "Astrometry"}
             </Button>
-            {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
-              <span
-                className="fits-header-controls__note"
-                title={overlayReason}
-                data-testid="astrometry-overlay-reason"
-              >
-                {overlayReason}
-              </span>
-            )}
             {blink?.applies && (
               <>
                 <Button

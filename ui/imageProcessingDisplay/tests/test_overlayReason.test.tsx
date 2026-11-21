@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tests for the astrometry overlay in Image Processing: the displayed file's path
- * is sent to the backend, and the reason is shown in the viewer header when an image has no sky
- * solution, instead of markers.
+ * is sent to the backend, and the reason goes into the Astrometry button's tooltip when an image has no sky
+ * solution, instead of inline text.
  */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
@@ -81,18 +81,20 @@ describe('astrometry overlay for the displayed image', () => {
         expect(result.reason).toBe('No sky solution for this image yet');
     });
 
-    it('shows the reason in the viewer header when the overlay is on', () => {
-        renderPanel('No sky solution for this image yet');
-        expect(screen.getByTestId('astrometry-overlay-reason').textContent).toBe(
-            'No sky solution for this image yet'
+    it('puts the reason in the Astrometry button tooltip, not inline', () => {
+        renderPanel('16,450 named, 404 with no catalog star');
+        expect(screen.getByRole('button', { name: 'Astrometry' }).getAttribute('title')).toBe(
+            'Hide Astrometry Overlay. 16,450 named, 404 with no catalog star'
         );
+        expect(screen.queryByTestId('astrometry-overlay-reason')).toBeNull();
+        expect(screen.queryByText('16,450 named, 404 with no catalog star')).toBeNull();
     });
 
-    it('shows nothing when there is no reason or the overlay is off', () => {
+    it('keeps the plain tooltip when there is no reason or the overlay is off', () => {
         const { unmount } = renderPanel(null);
-        expect(screen.queryByTestId('astrometry-overlay-reason')).toBeNull();
+        expect(screen.getByRole('button', { name: 'Astrometry' }).getAttribute('title')).toBe('Hide Astrometry Overlay');
         unmount();
         renderPanel('No sky solution for this image yet', false);
-        expect(screen.queryByTestId('astrometry-overlay-reason')).toBeNull();
+        expect(screen.getByRole('button', { name: 'Astrometry' }).getAttribute('title')).toBe('Show Astrometry Overlay');
     });
 });

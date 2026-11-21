@@ -38,6 +38,23 @@ export function canOpenInAstronomyManager(star: Pick<OverlayStar, 'name'> & { id
 }
 
 /**
+ * Lists the keys under which the library may hold an overlay star, best first.
+ *
+ * The library saves a Gaia-matched star under "Gaia DR3 <source id>" and any other catalog star under
+ * its catalog name. A stack's own detection id ("detection-5") is not a catalog key and is never listed.
+ *
+ * @param star The overlay star.
+ * @returns The Gaia DR3 id (when known), then the catalog name (when it is a real one).
+ */
+export function catalogKeysOfStar(star: Pick<OverlayStar, 'name'> & { gaiaSourceId?: string | null }): string[] {
+  const keys: string[] = [];
+  if (star.gaiaSourceId) keys.push(`${GAIA_ONLY_NAME_PREFIX}${star.gaiaSourceId}`);
+  const name = (star.name || '').trim();
+  if (name && name !== UNNAMED_STAR && !keys.includes(name)) keys.push(name);
+  return keys;
+}
+
+/**
  * Finds the overlay star at a measured center.
  *
  * @param centerX Column of the center, 1-based (as the star profile gives it).

@@ -17,7 +17,7 @@ import { useStackOrientation } from './hooks/useStackOrientation';
 import { FrameAnalysisPanel } from './components/FrameAnalysisPanel';
 import { addTargetData, createTarget, fetchTargetObject } from '../common/services/targetService';
 import { useQuery } from '@tanstack/react-query';
-import { fetchAstrometryOverlayStars, AstrometryOverlayStar } from '../common/services/astronomyService';
+import { fetchAstrometryOverlayStars, findCatalogRecord, AstrometryOverlayStar } from '../common/services/astronomyService';
 import { emit as emitEvent } from '../common/utils/eventBus';
 import { emitToast } from '../common/utils/emitToast';
 import { reportError } from '../common/utils/reportError';
@@ -404,16 +404,28 @@ const ImageProcessingDisplayInner: React.FC = () => {
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
    * Hands off the selected star and navigates to the Astronomy Display.
    */
-  const handleStarClick = React.useCallback((star: AstrometryOverlayStar) => {
-    const starId = star.id || star.name;
-    if (!starId) return;
-
-    setSelectedStarId(starId);
-    // Remember the view, so the "Back to image" button (or any way back) lands on the same spot.
-    persistView({ returnPending: true, arrivedFromStar: starId });
+  const handleStarClick = React.useCallback(async (star: AstrometryOverlayStar) => {
+    // The star's own id keeps it selected on the image; the library knows it by its catalog key.
+    const selectionKey = star.id || star.name;
+    if (!selectionKey) return;
+    let recordId: string | null;
     try {
-      localStorage.setItem('astrometrics:imageProcessingSelectedStar', starId);
-      localStorage.setItem('planetariumSelectedStar', starId);
+      recordId = (await findCatalogRecord(star))?.id ?? null;
+    } catch {
+      // The lookup reported its own error.
+      return;
+    }
+    if (!recordId) {
+      emitToast(`${star.name} has no record in the library yet`, 'info', 'Astrometry');
+      return;
+    }
+
+    setSelectedStarId(selectionKey);
+    // Remember the view, so the "Back to image" button (or any way back) lands on the same spot.
+    persistView({ returnPending: true, arrivedFromStar: selectionKey });
+    try {
+      localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectionKey);
+      localStorage.setItem('planetariumSelectedStar', recordId);
     } catch {
       // Ignore
     }
@@ -422,9 +434,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
       targetDisplay: 'Astronomy Manager',
       targetElement: 'spectrumViewer',
       action: 'astronomySelectStar',
-      payload: starId,
+      payload: recordId,
       toast: {
-        message: `Opening ${star.name || starId} in Astronomy Manager`,
+        message: `Opening ${star.name || recordId} in Astronomy Manager`,
         type: 'info',
         title: 'Astrometry',
       },

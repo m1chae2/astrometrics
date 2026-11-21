@@ -25,7 +25,7 @@ import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
 import type { SkyPosition } from './wcs';
 import { createPixelToSky } from './wcs';
-import { canOpenInAstronomyManager, findStarAt, nameStarAt } from './utils/starNames';
+import { canOpenInAstronomyManager, catalogKeysOfStar, findStarAt, nameStarAt } from './utils/starNames';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -79,7 +79,9 @@ export function formatStarDisplayName(name: string): string {
 /**
  * Checks if a given overlay star matches the currently selected star identifier.
  *
- * Compares primary identifiers, display names, and catalog substrings case-insensitively.
+ * The match is exact and ignores case: the star's own id, its catalog keys (Gaia DR3 id and name), or
+ * its display name with cluster prefixes removed (so "Cl* NGC 6205 KAD 656" matches "KAD 656").
+ * It never matches part of an id, so "detection-5" does not select "detection-50".
  *
  * @param star Astrometry overlay star item.
  * @param selectedId Target selected star identifier string.
@@ -87,20 +89,15 @@ export function formatStarDisplayName(name: string): string {
  */
 export function isStarSelected(star: AstrometryOverlayStar, selectedId?: string | null): boolean {
   if (!selectedId) return false;
-  const sId = selectedId.trim().toLowerCase();
-  const starId = (star.id || '').trim().toLowerCase();
-  const starName = (star.name || '').trim().toLowerCase();
-  if (starId === sId || starName === sId) return true;
-  if (starId && (sId.includes(starId) || starId.includes(sId))) return true;
-  if (starName && (sId.includes(starName) || starName.includes(sId))) return true;
+  const wanted = selectedId.trim().toLowerCase();
+  if (!wanted) return false;
+  const keys = [star.id || '', ...catalogKeysOfStar(star)].map((key) => key.trim().toLowerCase());
+  if (keys.includes(wanted)) return true;
 
   // Compare formatted display names (e.g. "Cl* NGC 6205 KAD 656" vs "CI* NGC 6205 KAD 656" both normalize to "KAD 656")
   const normSelected = formatStarDisplayName(selectedId).trim().toLowerCase();
   const normStarName = formatStarDisplayName(star.name || star.id).trim().toLowerCase();
-  if (normSelected && normStarName && normSelected === normStarName) return true;
-  if (normSelected && normStarName && (normSelected.includes(normStarName) || normStarName.includes(normSelected))) return true;
-
-  return false;
+  return Boolean(normSelected && normStarName && normSelected === normStarName);
 }
 
 /**
@@ -806,7 +803,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const star = findStarAt(profileState.measurement.center_x, profileState.measurement.center_y, overlayStarsAsSent);
     return star && canOpenInAstronomyManager(star) ? star : null;
   }, [starProfile.state, showOverlay, overlayStarsAsSent]);
-  const profileStarIdentity = useStarIdentity(profileCatalogStar ? (profileCatalogStar.id || profileCatalogStar.name) : null);
+  const profileStarIdentity = useStarIdentity(profileCatalogStar ?? null);
   const openProfileStarInManager = React.useMemo(
     () => (profileCatalogStar && onStarClick ? () => onStarClick(profileCatalogStar) : undefined),
     [profileCatalogStar, onStarClick],

@@ -31,7 +31,7 @@ def _identification() -> SimpleNamespace:
         One matched star, no notes.
     """
     star = SimpleNamespace(id="detection-0", name="Vega", kind="matched", x=1.0, y=2.0, ra_deg=279.2,
-                           dec_deg=38.8, g_mag=0.1)  # fmt: skip
+                           dec_deg=38.8, g_mag=0.1, gaia_source_id="123", name_source="simbad")  # fmt: skip
     return SimpleNamespace(
         width=10, height=10, stars=[star], matched_count=1, unmatched_count=0, catalog_only_count=0,
         solution_reused=True, gaia_depth=20.0, catalog_only_limit=19.0, gaia_tiles_missing=0,

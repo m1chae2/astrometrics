@@ -132,6 +132,8 @@ def _identification_payload(identification: Any) -> dict[str, Any]:
             "raDeg": star.ra_deg,
             "decDeg": star.dec_deg,
             "gMag": star.g_mag,
+            "gaiaSourceId": star.gaia_source_id,
+            "nameSource": star.name_source,
         }
         for star in identification.stars
     ]

@@ -1063,10 +1063,10 @@ Every Python example assumes the library is installed and configured with your o
 - **Claim:** Placing the brightest extended light at a fixed display brightness gives faint targets a lighter sky and bright targets a darker one, in the right order across many stacks.
 - **Settings it supports:**
   - code constant `EXTENDED_LIGHT_BRIGHTNESS` = 0.36 <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level.EXTENDED_LIGHT_BRIGHTNESS --> in `pipelines/stacking/post_processing/sky_level.py` (changing it means editing the code). Relation: sanity check only; it is a warning threshold and blocks nothing.
-  - code constant `LIGHTEST_SKY_LEVEL` = 0.20 <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level.LIGHTEST_SKY_LEVEL --> in `pipelines/stacking/post_processing/sky_level.py` (changing it means editing the code). Relation: sanity check only; it is a warning threshold and blocks nothing.
+  - code constant `LIGHTEST_SKY_LEVEL` = 0.13 <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level.LIGHTEST_SKY_LEVEL --> in `pipelines/stacking/post_processing/sky_level.py` (changing it means editing the code). Relation: sanity check only; it is a warning threshold and blocks nothing.
   - code constant `DARKEST_SKY_LEVEL` = 0.11 <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level.DARKEST_SKY_LEVEL --> in `pipelines/stacking/post_processing/sky_level.py` (changing it means editing the code). Relation: sanity check only; it is a warning threshold and blocks nothing.
   - code constant `FALLBACK_SKY_LEVEL` = 0.18 <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level.FALLBACK_SKY_LEVEL --> in `pipelines/stacking/post_processing/sky_level.py` (changing it means editing the code). Relation: sanity check only; it is a warning threshold and blocks nothing.
-- **Status:** Partly measured. The tuned number was set by eye on one stack and checked for order on 22 others.
+- **Status:** Partly measured. The lightest level (0.13) was set by eye on one stack (NGC 7331) from measured comparisons, and the rule was checked for order on 22 others.
 - **Data you need:** Stacks of faint and bright targets from your camera.
 - **Procedure:**
 
@@ -1082,8 +1082,10 @@ Every Python example assumes the library is installed and configured with your o
 - **Acceptance criterion:** Fainter targets get lighter skies; then the pictures are judged by eye.
 - **What to look at:** The chosen sky level (0 to 1 of full brightness) against the extended light's signal-to-noise ratio. Fainter targets should get lighter skies; then judge the pictures by eye.
 - **Our result:** ASI533MM Pro stacks: 0.20 for M 101, M 81, M 27 and the faint star fields, about 0.19 for the Bubble Nebula, 0.11 for M 42. The tuned number was set by eye on the Bubble Nebula stack, where the user found a sky of 0.15 too black and chose a level near 0.20 from rendered options. On M 27 a sky of 0.234 looked grainier than 0.19; 0.18 was judged best on M 81; a sky of 0.11 gave M 42 the strongest contrast while M 101's faint arms nearly vanished. Checked on 22 other stacks, where the levels stayed in order. Dates not recorded.
+
+  On 2026-11-21, once the preview was denoised after the stretch (STK-30), the lightest level was lowered from 0.20 to 0.13. On NGC 7331 (extended light 2.9σ above the sky, so held at the old cap) three previews were compared, all with Cosmic Clarity at 0.5: sky 0.20, 0.15 and 0.13 (display units 0 to 255, measured on the same places in each picture). Sky noise fell 7.41, 5.94, 5.25. The same noise after binning 4 by 4 pixels fell 2.94, 2.37, 2.10. The contrast-to-noise ratio of a galaxy arm rose 11.8, 13.4, 14.2. Star width did not grow: 3.30, 3.16, 3.11 px. The cost was a fainter arm over the sky (90, 81, 75) and less sharpness on the diffuse NGC 7320 (26.8, 21.5, 22.6; sharpness is not directly comparable across sky levels). The user chose 0.13 by eye. The method is in the comparison's `METHOD.md`; the measured table is in its `comparison.md`. Across the library, 28 of 49 stacks that have a preview move from a level above 0.13 to 0.13; the rest (bright targets and spectral stacks, at or below 0.13) are unchanged. Only NGC 7331 has been judged by eye at 0.13.
 - **Verdict:** Not judged.
-- **Limits:** Judged by eye; one camera.
+- **Limits:** Judged by eye; one camera; the 0.13 level was compared on one faint galaxy only.
 - **To tune for your setup:** Raise `EXTENDED_LIGHT_BRIGHTNESS` for darker skies overall, lower it for lighter; adjust the two limits if your stacks are grainier or cleaner.
 - **Regenerate with:** No script; judged by eye.
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_sky_level.py`.

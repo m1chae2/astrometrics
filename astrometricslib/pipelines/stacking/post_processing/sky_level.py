@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 LIGHTEST_SKY_LEVEL = TunedParameter(
     name="stacking.lightest_sky_level",
-    default=0.20,
+    default=0.13,
     unit="fraction",
     description="Brightest sky level the display rule gives, as a fraction of full brightness.",
     role=ParameterRole.MEASUREMENT,
@@ -67,12 +67,15 @@ LIGHTEST_SKY_LEVEL = TunedParameter(
 """The brightest sky the rule gives, as a fraction of full brightness.
 
 A lighter sky shows fainter structure, but it also lifts the grain of the
-stack into view. On the M 27 stack (82 frames over three nights), a sky level
-of 0.234 gave a visibly grainier and greyer picture than 0.19, and weakening
-the denoise made the grain worse, not better. 0.20 sits close to the 0.18 that
-was judged best on M 81 and to the 0.193 chosen on the Bubble Nebula. Siril's
-own Autostretch uses 0.25. Faint targets that the rule would lift past 0.20
-get 0.20.
+stack into view. Before the preview was denoised after the stretch, the cap
+was 0.20: on the M 27 stack a sky level of 0.234 looked grainier and greyer
+than 0.19. With Cosmic Clarity at strength 0.5 running after the stretch, the
+sky noise is lower, and the user judged a darker sky of 0.13 best on the
+NGC 7331 stack (extended light 2.9 sigma above the sky, which the old cap of
+0.20 held at its limit). At 0.13 against 0.20 the sky noise was 5.25 against
+7.41 display units and the faint arm stood out more clearly (STK-29).
+Siril's own Autostretch uses 0.25. Faint targets that the rule would lift past
+0.13 get 0.13.
 """
 
 DARKEST_SKY_LEVEL = TunedParameter(

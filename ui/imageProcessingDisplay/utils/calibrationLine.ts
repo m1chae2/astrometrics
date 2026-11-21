@@ -113,3 +113,56 @@ export const buildCalibrationReport = (groups: GroupedFrameStat[]): CalibrationR
         nearMatches: reports.filter((report) => !hasStatus(report, 'missing') && hasStatus(report, 'near')),
     };
 };
+
+/** Capitalizes the first letter of a sentence. */
+const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** Writes a temperature with a real minus sign, so "-6.6" reads as "−6.6". */
+const temperatureText = (value: string): string => value.replace('-', '\u2212');
+
+/**
+ * Turns one near-match reason from the library into a short phrase that follows the frame name,
+ * such as "are 3.4 °C colder than the lights (−10.0 vs −6.6 °C)". The library writes four
+ * wordings (a dark at another temperature, a light with no temperature, frames at another gain
+ * and offset, and the "frames binned differently" block, which is a miss and not a near match),
+ * so each one is matched by its fixed text. Any other wording is returned as null.
+ * @param reason The full sentence from the library.
+ * @return The short phrase, or null when the wording is not known.
+ */
+export const shortFallbackPhrase = (reason: string): string | null => {
+    const temperature = reason.match(
+        /No dark frame was within [\d.]+ C of .*? taken at (-?[\d.]+) C, so the nearest dark master, taken at (-?[\d.]+) C .*?, was applied, ([\d.]+) C away/,
+    );
+    if (temperature) {
+        const [, lights, darks, away] = temperature;
+        const direction = Number(darks) < Number(lights) ? 'colder' : 'warmer';
+        return `are ${away} \u00b0C ${direction} than the lights `
+            + `(${temperatureText(darks)} vs ${temperatureText(lights)} \u00b0C)`;
+    }
+    if (/temperature of .* is not recorded and the library holds darks/.test(reason)) {
+        return 'were used without a temperature check (the lights have no temperature)';
+    }
+    const settings = reason.match(
+        /No \w+ frames matched gain (\S+) and offset ([^\s,]+), so \w+ frames taken at (.+?) were applied/,
+    );
+    if (settings) {
+        return `were taken at ${settings[3]}, not gain ${plainNumber(settings[1])}, offset ${plainNumber(settings[2])}`;
+    }
+    return null;
+};
+
+/**
+ * Writes the one short "Check" line for a group's near matches.
+ * @param group The group.
+ * @return A line such as "Darks for L 30 s are 3.4 °C colder than the lights (−10.0 vs −6.6 °C)".
+ */
+export const nearMatchLine = (group: CalibrationGroupReport): string =>
+    group.parts.filter((part) => part.status === 'near').map((part) => {
+        const phrase = shortFallbackPhrase(part.reason);
+        const subject = `${capitalize(part.noun)} for ${group.label}`;
+        return phrase ? `${subject} ${phrase}` : `${subject}: ${capitalize(part.reason)}`;
+    }).join('. ');
+
+/** The full library sentences of a group's near matches, for the row's tooltip. */
+export const nearMatchDetail = (group: CalibrationGroupReport): string =>
+    group.parts.filter((part) => part.status === 'near').map((part) => part.reason).join('\n');

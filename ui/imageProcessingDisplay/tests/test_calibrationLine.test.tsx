@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { buildCalibrationReport } from '../utils/calibrationLine';
+import { buildCalibrationReport, shortFallbackPhrase } from '../utils/calibrationLine';
 import { CalibrationLine } from '../components/CalibrationLine';
 import type { CalibrationGroupMatch, GroupedFrameStat } from '../../common/types/backendTypes';
 
@@ -84,8 +84,7 @@ describe('CalibrationLine', () => {
         const block = screen.getByTestId('calibration-line');
         expect(block.textContent).toContain('Complete');
         const check = screen.getByTestId('calibration-check');
-        expect(check.textContent).toContain('darks for L 30 s');
-        expect(check.textContent).toContain('another temperature');
+        expect(check.textContent).toContain('Darks for L 30 s: Darks are at another temperature');
     });
 
     it('opens and closes the table of every group', () => {
@@ -100,5 +99,47 @@ describe('CalibrationLine', () => {
         expect(rows[1].textContent).toContain('L 60 s');
         fireEvent.click(screen.getByRole('button', { name: 'Hide all groups' }));
         expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
+    });
+});
+
+const TEMPERATURE_SENTENCE = 'No dark frame was within 3 C of the light frames, which were taken at -6.6 C, '
+    + 'so the nearest dark master, taken at -10.0 C (30 dark frame(s) from -10.0 to -9.9 C), was applied, 3.4 C away.';
+
+describe('shortFallbackPhrase', () => {
+    it('shortens the dark temperature sentence', () => {
+        expect(shortFallbackPhrase(TEMPERATURE_SENTENCE))
+            .toBe('are 3.4 \u00b0C colder than the lights (\u221210.0 vs \u22126.6 \u00b0C)');
+    });
+
+    it('says warmer when the darks are warmer', () => {
+        const warmer = TEMPERATURE_SENTENCE.replace('taken at -10.0 C (', 'taken at 5.0 C (');
+        expect(shortFallbackPhrase(warmer)).toContain('warmer than the lights');
+    });
+
+    it('shortens the sentence for lights with no temperature', () => {
+        expect(shortFallbackPhrase('The temperature of the light frames is not recorded and the library holds darks '
+            + 'at 2 temperatures (-10 C, 0 C), so the 5 dark frame(s) near -10 C, the largest set, were applied '
+            + 'without a temperature check.')).toContain('without a temperature check');
+    });
+
+    it('shortens the other gain and offset sentence', () => {
+        expect(shortFallbackPhrase('No bias frames matched gain 100.0 and offset 10, so bias frames taken at '
+            + 'gain 100, offset 0 were applied to the light frames.'))
+            .toBe('were taken at gain 100, offset 0, not gain 100, offset 10');
+    });
+
+    it('returns null for a wording it does not know', () => {
+        expect(shortFallbackPhrase('something new')).toBeNull();
+    });
+});
+
+describe('CalibrationLine near match wording', () => {
+    it('shows the short line and keeps the full sentence in the tooltip', () => {
+        render(<CalibrationLine lightFrames={[
+            group('L', '30', found(30, [TEMPERATURE_SENTENCE]), found(1), found(1)),
+        ]} />);
+        const row = screen.getByTestId('calibration-check').querySelector('li') as HTMLElement;
+        expect(row.textContent).toContain('Darks for L 30 s are 3.4 \u00b0C colder than the lights');
+        expect(row.getAttribute('title')).toBe(TEMPERATURE_SENTENCE);
     });
 });

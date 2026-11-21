@@ -12,6 +12,8 @@ import { Button } from '../../common/components/Button';
 import { StatusChip } from '../../common/components/StatusChip';
 import {
     buildCalibrationReport,
+    nearMatchDetail,
+    nearMatchLine,
     type CalibrationGroupReport,
     type CalibrationPart,
 } from '../utils/calibrationLine';
@@ -96,18 +98,16 @@ export const CalibrationLine: React.FC<CalibrationLineProps> = ({ lightFrames })
                 <>
                     <div className="calibration-report__subheading">Check</div>
                     <ul className="calibration-report__list" data-testid="calibration-check">
-                        {nearMatches.map((group) => {
-                            const near = group.parts.filter((part) => part.status === 'near');
-                            return (
-                                <li key={group.label + group.settings} className="calibration-report__item">
-                                    <span>
-                                        {joinNames(near.map((part) => part.noun))} for {group.label}:{' '}
-                                        {near.map((part) => part.reason).join('; ')}
-                                    </span>
-                                    <span className="calibration-report__settings">({group.settings})</span>
-                                </li>
-                            );
-                        })}
+                        {nearMatches.map((group) => (
+                            <li
+                                key={group.label + group.settings}
+                                className="calibration-report__item"
+                                title={nearMatchDetail(group)}
+                            >
+                                <span>{nearMatchLine(group)}</span>
+                                <span className="calibration-report__settings">({group.settings})</span>
+                            </li>
+                        ))}
                     </ul>
                 </>
             )}

@@ -368,6 +368,8 @@ export interface ActionRegistry {
     "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
     // The frames the stacker set aside for a target, each with the reason it has on record.
     "quality:set_aside_frames": { payload: { target: string }; response: import('../types/backendTypes').SetAsideFrameRecord[] };
+    // A typical frame of a frame's session and one reference star in both, for the Blink button (a read; nothing is stored).
+    "quality:choose_blink_pair": { payload: { target: string; path: string }; response: import('../types/backendTypes').BlinkPair };
 
     // Quality measurements: the stored ones, and what each metric means.
     // Parameter names are snake_case (target_id, not targetId); the router
@@ -627,6 +629,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:depth_goal',
     'processing:stack_summary',
     'quality:set_aside_frames',
+    'quality:choose_blink_pair',
     'history:nights',
     'history:night_quality',
     'history:target_changes',

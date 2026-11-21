@@ -4433,6 +4433,46 @@ export interface SetAsideFrameRecord {
 }
 
 /**
+ * A frame, a typical frame of its session and one star in both.
+ *
+ * Parameters
+ * ----------
+ * found : `bool`
+ * `True` when a typical frame and a reference star were found.
+ * reason : `str`
+ * Why nothing was found, or an empty string.
+ * path : `str`
+ * The frame that was asked about.
+ * typical_path : `str` or `None`
+ * The frame of the same session whose stored star elongation and sky
+ * unevenness lie closest to the session's medians.
+ * star_x, star_y : `float` or `None`
+ * The reference star in ``path``, in 1-based pixels.
+ * typical_star_x, typical_star_y : `float` or `None`
+ * The same star in ``typical_path``, in 1-based pixels.
+ * turned : `bool`
+ * `True` when ``typical_path`` is turned half a revolution from
+ * ``path``.
+ * votes : `int`
+ * How many star pairs agreed when the two frames were lined up.
+ * session_frame_count : `int`
+ * How many frames of the session could be a typical frame.
+ */
+export interface BlinkPair {
+  found: boolean;
+  reason?: string;
+  path: string;
+  typicalPath?: string | null;
+  starX?: number | null;
+  starY?: number | null;
+  typicalStarX?: number | null;
+  typicalStarY?: number | null;
+  turned?: boolean;
+  votes?: number;
+  sessionFrameCount?: number;
+}
+
+/**
  * The answer to starting a slow stack review.
  *
  * Attributes
@@ -6362,6 +6402,7 @@ export const RPC_METHODS = [
   "processing:stack_summary",
   "processing:remake_preview",
   "quality:set_aside_frames",
+  "quality:choose_blink_pair",
   "quality:measure_stack",
   "quality:record_frame_measurements",
   "processing:measure_noise",

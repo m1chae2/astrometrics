@@ -165,6 +165,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
     "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    # A typical frame and a reference star for the viewer's Blink button
+    # (a read).
+    "quality:choose_blink_pair": ("astrometrics.quality", "choose_blink_pair"),
     # Compares a target's stack with the previous one. A failed plate solve can
     # take about ten minutes, so the service starts it as a background job.
     "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),

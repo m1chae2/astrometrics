@@ -915,12 +915,44 @@ def describe_many_set_aside(decisions: Sequence[QuarantineDecision], batch_size:
     return f"{len(decisions)} of {batch_size} frames set aside: {parts}"
 
 
+def stored_frame_values(target_id: str, metric: str) -> dict[str, float]:
+    """Read the stored value of one frame metric for each frame of a target.
+
+    A frame stored by colour plane has one row per plane, and the median of
+    the planes is used. The store is only read.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's id.
+    metric : `str`
+        A frame-level metric name, for example ``frame.star_elongation``.
+
+    Returns
+    -------
+    values : `dict` [`str`, `float`]
+        The newest stored value of each frame, by the frame's subject id
+        (see `frame_subject_id`). Empty when the library has no such rows or
+        no quality database.
+    """
+    try:
+        store = QualityStore.from_configuration(get_configuration())
+        rows = store.query(metric=metric, level=SubjectLevel.FRAME, target_id=target_id, library_only=True)
+    except (AstrometricsError, sqlite3.Error, OSError) as error:
+        logger.debug("Could not read the stored %s of '%s': %s", metric, target_id, error)
+        return {}
+    by_frame: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        if row.value is not None and math.isfinite(row.value):
+            by_frame[row.subject.subject_id].append(row.value)
+    return {subject_id: statistics.median(values) for subject_id, values in by_frame.items()}
+
+
 def stored_star_elongations(target_id: str) -> dict[str, float]:
     """Read the stored star elongation of each frame of a target.
 
     The frame measurement stores ``frame.star_elongation`` for every frame it
-    measures. A frame stored by colour plane has one row per plane, and the
-    median of the planes is used. The store is only read.
+    measures (see `stored_frame_values`).
 
     Parameters
     ----------
@@ -930,23 +962,9 @@ def stored_star_elongations(target_id: str) -> dict[str, float]:
     Returns
     -------
     elongations : `dict` [`str`, `float`]
-        The newest stored value of each frame, by the frame's subject id
-        (see `frame_subject_id`). Empty when the library has no such rows or
-        no quality database.
+        The newest stored value of each frame, by the frame's subject id.
     """
-    try:
-        store = QualityStore.from_configuration(get_configuration())
-        rows = store.query(
-            metric=FRAME_STAR_ELONGATION, level=SubjectLevel.FRAME, target_id=target_id, library_only=True
-        )
-    except (AstrometricsError, sqlite3.Error, OSError) as error:
-        logger.debug("Could not read the stored star elongations of '%s': %s", target_id, error)
-        return {}
-    by_frame: dict[str, list[float]] = defaultdict(list)
-    for row in rows:
-        if row.value is not None and math.isfinite(row.value):
-            by_frame[row.subject.subject_id].append(row.value)
-    return {subject_id: statistics.median(values) for subject_id, values in by_frame.items()}
+    return stored_frame_values(target_id, FRAME_STAR_ELONGATION)
 
 
 def measure_star_elongation(path: str, camera: str | None) -> float | None:

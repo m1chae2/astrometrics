@@ -311,9 +311,11 @@ SUB_API_MEMBERS = {
     },
     "quality": {
         "calibration_identities",
+        "choose_blink_pair",
         "get_aperture_record",
         "capture_settings",
         "forget",
+        "match_frame_positions",
         "measure_detections",
         "measure_folder",
         "measure_frames",

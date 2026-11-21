@@ -126,6 +126,7 @@ READ_ONLY_METHODS = frozenset({
     "plan:get",
     "processing:stack_summary",
     "quality:set_aside_frames",
+    "quality:choose_blink_pair",
     "plan:current_session",
     "plan:list_packages",
     "plan:package_for_target",

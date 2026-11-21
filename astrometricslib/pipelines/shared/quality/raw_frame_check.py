@@ -882,17 +882,57 @@ def _match_shift(previous_stars: np.ndarray, stars: np.ndarray) -> tuple[tuple[f
     return (float(offsets[agree, 0].mean()), float(offsets[agree, 1].mean())), votes
 
 
+def measure_field_shift(
+    reference_stars: np.ndarray, stars: np.ndarray, shape: tuple[int, int]
+) -> tuple[float, float, int, bool] | None:
+    """Measure how the stars of a frame sit against those of a reference frame.
+
+    The brightest stars of the two frames are matched by `_match_shift`. The
+    frame is tried as it is and with the reference turned half a revolution
+    about the frame centre, because a German equatorial mount turns the
+    camera half a revolution at a meridian flip. The try with more agreeing
+    star pairs wins.
+
+    Parameters
+    ----------
+    reference_stars, stars : `numpy.ndarray`
+        Star rows from `detect_stars` for the reference frame and the frame.
+    shape : `tuple` [`int`, `int`]
+        ``(height, width)`` of the frames in pixels.
+
+    Returns
+    -------
+    shift : `tuple` [`float`, `float`, `int`, `bool`] or `None`
+        ``(dy, dx, votes, turned)``. A star at ``p`` (row, column, counted
+        from 0) in the reference frame sits at ``p + (dy, dx)`` in the frame
+        when ``turned`` is `False`, and at ``(height - 1 - row, width - 1 -
+        column) + (dy, dx)`` when ``turned`` is `True`. ``votes`` is how many
+        star pairs agreed. `None` when fewer than `POINTING_MINIMUM_VOTES`
+        pairs agree.
+    """
+    height, width = shape
+    turned_reference = reference_stars.copy()
+    turned_reference[:, 0] = height - 1 - reference_stars[:, 0]
+    turned_reference[:, 1] = width - 1 - reference_stars[:, 1]
+    plain_shift, plain_votes = _match_shift(reference_stars, stars)
+    turned_shift, turned_votes = _match_shift(turned_reference, stars)
+    if max(plain_votes, turned_votes) < resolve(POINTING_MINIMUM_VOTES).value:
+        return None
+    if turned_votes > plain_votes and turned_shift is not None:
+        return turned_shift[0], turned_shift[1], turned_votes, True
+    if plain_shift is None:
+        return None
+    return plain_shift[0], plain_shift[1], plain_votes, False
+
+
 def measure_field_offset(
     reference_stars: np.ndarray, stars: np.ndarray, shape: tuple[int, int]
 ) -> tuple[float, float, int, bool] | None:
     """Measure where a frame points, compared with a reference frame.
 
-    The brightest stars of the two frames are matched by `_match_shift`. The
-    frame is tried as it is and with the reference turned half a revolution
-    about the frame centre, because a German equatorial mount turns the
-    camera half a revolution at a meridian flip. A frame that points at the
-    same field after a flip is therefore not offset. The try with more
-    agreeing star pairs wins.
+    The stars are matched by `measure_field_shift`, which tries the frame as
+    it is and turned half a revolution. A frame that points at the same field
+    after a meridian flip is therefore not offset.
 
     Parameters
     ----------
@@ -910,23 +950,17 @@ def measure_field_offset(
         turned half a revolution from the reference. `None` when fewer than
         `POINTING_MINIMUM_VOTES` pairs agree.
     """
-    height, width = shape
-    turned_reference = reference_stars.copy()
-    turned_reference[:, 0] = height - 1 - reference_stars[:, 0]
-    turned_reference[:, 1] = width - 1 - reference_stars[:, 1]
-    plain_shift, plain_votes = _match_shift(reference_stars, stars)
-    turned_shift, turned_votes = _match_shift(turned_reference, stars)
-    if max(plain_votes, turned_votes) < resolve(POINTING_MINIMUM_VOTES).value:
+    found = measure_field_shift(reference_stars, stars, shape)
+    if found is None:
         return None
-    if turned_votes > plain_votes and turned_shift is not None:
+    shift_y, shift_x, votes, turned = found
+    if turned:
         # A star at p in the reference sits at (size - 1 - p) + shift in the
         # frame, so the frame centre falls at the reference centre + shift.
-        return float(turned_shift[0]), float(turned_shift[1]), turned_votes, True
-    if plain_shift is None:
-        return None
+        return float(shift_y), float(shift_x), votes, True
     # A star at p in the reference sits at p + shift in the frame, so the
     # frame centre falls at the reference centre - shift.
-    return -float(plain_shift[0]), -float(plain_shift[1]), plain_votes, False
+    return -float(shift_y), -float(shift_x), votes, False
 
 
 def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = None) -> dict[str, Any]:

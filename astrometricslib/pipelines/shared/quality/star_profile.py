@@ -22,6 +22,7 @@ reads a file but changes nothing.
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 from astropy.stats import sigma_clipped_stats
@@ -46,7 +47,34 @@ from astrometricslib.pipelines.shared.quality.star_ring import (
     analyze_star_ring,
 )
 
-__all__ = ["measure_star_profile_in_file"]
+__all__ = ["PhotometryGeometry", "measure_star_profile_in_file"]
+
+
+@dataclass(frozen=True)
+class PhotometryGeometry:
+    """The photometry circle, sky ring and crowding limits, as numbers.
+
+    The caller reads these from the photometry parameters and passes them in,
+    so this module needs no knowledge of the photometry pipeline.
+
+    Attributes
+    ----------
+    aperture_radius_px : `float`
+        The radius of the photometry circle.
+    sky_inner_px, sky_outer_px : `float`
+        The inner and outer radius of the photometry sky ring.
+    crowding_margin_px : `float`
+        How far beyond the circle a neighbor still counts as crowding it.
+    crowding_neighbor_peak_fraction : `float`
+        The share of the star's peak a neighbor must reach to crowd the circle.
+    """
+
+    aperture_radius_px: float
+    sky_inner_px: float
+    sky_outer_px: float
+    crowding_margin_px: float
+    crowding_neighbor_peak_fraction: float
+
 
 # The default radius of the profile. A Moffat star with a typical beta has
 # most of its light within about 3 FWHM, and the wings out to 6 FWHM give the
@@ -481,11 +509,12 @@ def _survey_surroundings(
     sky_noise: float,
     peak: float,
     find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None,
+    geometry: PhotometryGeometry,
 ) -> dict[str, float | int]:
     """Describe what lies around a star the way photometry would see it.
 
-    The photometry circle and its sky ring come from the photometry
-    parameters. The result says how far the star is from the image edge, how
+    The photometry circle and its sky ring come from ``geometry``. The
+    result says how far the star is from the image edge, how
     much of the sky ring lies on real pixels, and how many neighbors crowd the
     circle or sit in the sky ring.
 
@@ -502,6 +531,8 @@ def _survey_surroundings(
     find_neighbors : callable or `None`
         The star finder for a piece of the image, as in
         `measure_star_profile_in_file`. `None` finds no neighbors.
+    geometry : `PhotometryGeometry`
+        The photometry circle, sky ring and crowding limits.
 
     Returns
     -------
@@ -510,21 +541,13 @@ def _survey_surroundings(
         ``aperture_radius_px``, ``sky_inner_px``, ``sky_outer_px``,
         ``circle_neighbor_count`` and ``sky_ring_neighbor_count``.
     """
-    from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
-        APERTURE_RADIUS_PX,
-        CROWDING_MARGIN_PX,
-        CROWDING_NEIGHBOR_PEAK_FRACTION,
-        SKY_ANNULUS_INNER_RADIUS_PX,
-        SKY_ANNULUS_OUTER_RADIUS_PX,
-    )
-
     column, row = center
     height, width = data.shape
-    aperture = float(resolve(APERTURE_RADIUS_PX).value)  # type: ignore[arg-type]
-    sky_inner = float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value)  # type: ignore[arg-type]
-    sky_outer = float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value)  # type: ignore[arg-type]
-    margin = float(resolve(CROWDING_MARGIN_PX).value)  # type: ignore[arg-type]
-    peak_fraction = float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value)  # type: ignore[arg-type]
+    aperture = geometry.aperture_radius_px
+    sky_inner = geometry.sky_inner_px
+    sky_outer = geometry.sky_outer_px
+    margin = geometry.crowding_margin_px
+    peak_fraction = geometry.crowding_neighbor_peak_fraction
     edge_distance = float(min(column, row, width - 1 - column, height - 1 - row))
 
     # Coverage: the share of the pixels within the sky ring that hold a value.
@@ -585,6 +608,8 @@ def measure_star_profile_in_file(
     cut_half_length_px: float | None = None,
     search_radius_px: float | None = None,
     find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None = None,
+    *,
+    photometry_geometry: PhotometryGeometry,
 ) -> StarProfileMeasurement:
     """Measure a star's radial profile, a straight cut and the ring around it.
 
@@ -609,6 +634,10 @@ def measure_star_profile_in_file(
         A star finder for the ring's neighbor mask: it takes a piece of the
         image and returns the 0-based ``(column, row)`` of each star in it.
         `None` leaves neighbors in the ring.
+    photometry_geometry : `PhotometryGeometry`
+        The photometry circle, sky ring and crowding limits, resolved by
+        the caller, used to report how the star's surroundings look to
+        photometry.
 
     Returns
     -------
@@ -757,7 +786,7 @@ def measure_star_profile_in_file(
     )
 
     surroundings = _survey_surroundings(
-        data, (center_column, center_row), float(sky_noise), peak, find_neighbors
+        data, (center_column, center_row), float(sky_noise), peak, find_neighbors, photometry_geometry
     )
 
     return StarProfileMeasurement(

@@ -1130,9 +1130,27 @@ class QualityRecords:
             ``sky_ring_neighbor_count`` say whether the star is measurable.
 
         """
+        from astrometricslib.foundation.parameters import resolve
         from astrometricslib.pipelines.astrometry.processing.detections import find_star_centers
-        from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
+        from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+            APERTURE_RADIUS_PX,
+            CROWDING_MARGIN_PX,
+            CROWDING_NEIGHBOR_PEAK_FRACTION,
+            SKY_ANNULUS_INNER_RADIUS_PX,
+            SKY_ANNULUS_OUTER_RADIUS_PX,
+        )
+        from astrometricslib.pipelines.shared.quality.star_profile import (
+            PhotometryGeometry,
+            measure_star_profile_in_file,
+        )
 
+        geometry = PhotometryGeometry(
+            aperture_radius_px=float(resolve(APERTURE_RADIUS_PX).value),  # type: ignore[arg-type]
+            sky_inner_px=float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value),  # type: ignore[arg-type]
+            sky_outer_px=float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value),  # type: ignore[arg-type]
+            crowding_margin_px=float(resolve(CROWDING_MARGIN_PX).value),  # type: ignore[arg-type]
+            crowding_neighbor_peak_fraction=float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value),  # type: ignore[arg-type]
+        )
         return measure_star_profile_in_file(
             path,
             x,
@@ -1142,6 +1160,7 @@ class QualityRecords:
             cut_half_length_px,
             search_radius_px,
             find_neighbors=find_star_centers,
+            photometry_geometry=geometry,
         )
 
     def measure_detections(self, path: str) -> DetectionsMeasurement:

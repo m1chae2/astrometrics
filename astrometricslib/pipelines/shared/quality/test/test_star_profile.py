@@ -6,6 +6,7 @@ file, and checks what `measure_star_profile_in_file` reports.
 
 import math
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -13,10 +14,38 @@ from astropy.io import fits
 from scipy.ndimage import maximum_filter
 
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
-from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.quality.star_profile import StarProfileMeasurement
+from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    APERTURE_RADIUS_PX,
+    CROWDING_MARGIN_PX,
+    CROWDING_NEIGHBOR_PEAK_FRACTION,
+    SKY_ANNULUS_INNER_RADIUS_PX,
+    SKY_ANNULUS_OUTER_RADIUS_PX,
+)
+from astrometricslib.pipelines.shared.quality.star_profile import PhotometryGeometry
+from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file as _measure
 
 SIZE = 101
 SKY = 500.0
+
+
+def measure_star_profile_in_file(*args: Any, **kwargs: Any) -> StarProfileMeasurement:
+    """Measure a star, passing the photometry geometry the API passes.
+
+    Returns
+    -------
+    measurement : `StarProfileMeasurement`
+        What `measure_star_profile_in_file` returns.
+    """
+    geometry = PhotometryGeometry(
+        aperture_radius_px=float(resolve(APERTURE_RADIUS_PX).value),
+        sky_inner_px=float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value),
+        sky_outer_px=float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value),
+        crowding_margin_px=float(resolve(CROWDING_MARGIN_PX).value),
+        crowding_neighbor_peak_fraction=float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value),
+    )
+    return _measure(*args, photometry_geometry=geometry, **kwargs)
 
 
 def _write(tmp_path: Path, stars: list[tuple[float, float, float, float]], clip: float | None = None) -> str:

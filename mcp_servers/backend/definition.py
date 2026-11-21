@@ -69,8 +69,13 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], ToolFunction]] = []
 function. `build_registry` registers them all."""
 
 
-def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[[ToolFunction], ToolFunction]:
-    """Build a decorator that adds a function to `TOOL_SPECS`.
+def tool(
+    name: str,
+    description: str,
+    input_schema: dict[str, Any],
+    specs: list[tuple[str, str, dict[str, Any], ToolFunction]] = TOOL_SPECS,
+) -> Callable[[ToolFunction], ToolFunction]:
+    """Build a decorator that adds a function to a list of tool specs.
 
     Parameters
     ----------
@@ -80,6 +85,9 @@ def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[
         What the tool does, shown to the client.
     input_schema : `dict`
         The JSON schema of the tool's arguments.
+    specs : `list`, optional
+        The list to add the tool to. Defaults to `TOOL_SPECS`; the job tools
+        in `mcp_servers.backend.app_jobs` keep their own list.
 
     Returns
     -------
@@ -95,7 +103,7 @@ def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[
         func : `Callable`
             The same function.
         """
-        TOOL_SPECS.append((name, description, input_schema, func))
+        specs.append((name, description, input_schema, func))
         return func
 
     return decorator
@@ -155,11 +163,16 @@ def build_registry() -> ToolRegistry:
     Returns
     -------
     registry : `ToolRegistry`
-        All tools, before a profile removes any. A failed call's error
-        holds a recovery hint from `suggest_remediation`.
+        All tools, before a profile removes any, including the job tools of
+        `mcp_servers.backend.app_jobs`. A failed call's error holds a
+        recovery hint from `suggest_remediation`.
     """
+    # The job tools call `execute_rpc` from this module, so they are loaded
+    # here, once this module is complete.
+    from mcp_servers.backend.app_jobs import JOB_TOOL_SPECS
+
     registry = ToolRegistry(remediation=suggest_remediation)
-    for name, description, input_schema, func in TOOL_SPECS:
+    for name, description, input_schema, func in [*TOOL_SPECS, *JOB_TOOL_SPECS]:
         registry.register(name, description, input_schema)(func)
     return registry
 

@@ -79,13 +79,6 @@
       "interim_block": "",
       "note": "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution it came from. Writes nothing."
     },
-    "processing_identify_stack": {
-      "tool_class": "process",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected stars, as a background job. Writes the solution into the stack and its viewer copy and saves the identification; raw frames are never written."
-    },
     "processing_measure_noise": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -121,26 +114,12 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "processing_remake_preview": {
-      "tool_class": "process",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer."
-    },
     "processing_run_spectroscopy_by_session": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "fix",
       "interim_block": "",
       "note": "Needs Python objects, so it cannot be called through MCP. Consider making it a stage of pipeline_run."
-    },
-    "processing_stack": {
-      "tool_class": "process",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack."
     },
     "processing_stack_summary": {
       "tool_class": "observe",

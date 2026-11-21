@@ -10,6 +10,7 @@ developer tool, the model contract check. The server's manifest,
 from pathlib import Path
 
 from astrometricslib import Astrometrics
+from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
 from mcp_servers.common.reflection import register_reflected_tools
 from mcp_servers.common.tool_registry import ToolRegistry
 from mcp_servers.devtools import contract_validator
@@ -39,9 +40,11 @@ def build_registry() -> ToolRegistry:
     -------
     registry : `ToolRegistry`
         All tools, before a profile removes any. Path arguments are checked
-        against the library folders.
+        against the library folders. The tools in `APP_JOB_TOOLS` are left
+        out: the astrometrics-backend server serves them, so the app runs
+        their work as its own job.
     """
     registry = ToolRegistry(sandbox_paths=True)
-    register_reflected_tools(registry, Astrometrics(), BRANCH_PREFIXES)
+    register_reflected_tools(registry, Astrometrics(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS)
     contract_validator.register(registry)
     return registry

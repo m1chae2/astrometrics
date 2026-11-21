@@ -289,20 +289,6 @@
       "interim_block": "",
       "note": "Lists folders or files on the telescope computer. Reads only."
     },
-    "observatory_remote_sync_frames": {
-      "tool_class": "ingest",
-      "category": "observatory-sync",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-03; since 2026-10-05 it also copies calibration folders, every folder, chosen files and a local folder. The AI may ingest frames from the telescope: adds, never deletes."
-    },
-    "observatory_remote_sync_logs": {
-      "tool_class": "ingest",
-      "category": "observatory-sync",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-03. The AI may ingest the guide and Ekos logs: adds or updates records, never deletes."
-    },
     "observatory_safety_apply_promotion_decision": {
       "tool_class": "change-data",
       "category": "observatory-config",

@@ -13,7 +13,7 @@ import asyncio
 import inspect
 import re
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any, Union
 
 
@@ -197,7 +197,9 @@ def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[s
     return arguments
 
 
-def register_reflected_tools(registry: Any, api_object: Any, branch_mapping: dict[str, str]) -> int:
+def register_reflected_tools(
+    registry: Any, api_object: Any, branch_mapping: dict[str, str], skip: Collection[str] = ()
+) -> int:
     """Register the public methods of a library's API object as tools.
 
     A tool passes the client's arguments to the method as they are. The
@@ -215,6 +217,9 @@ def register_reflected_tools(registry: Any, api_object: Any, branch_mapping: dic
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
         key of ``""`` maps to root astrometrics methods. A dotted name
         (e.g. ``"processing.calibration"``) walks nested attributes.
+    skip : `Collection` [`str`], optional
+        Tool names to leave out, such as the tools another server serves
+        (`mcp_servers.common.app_job_tools.APP_JOB_TOOLS`).
 
     Returns
     -------
@@ -245,6 +250,8 @@ def register_reflected_tools(registry: Any, api_object: Any, branch_mapping: dic
                 continue
 
             tool_name = f"{prefix}_{method_name}" if prefix else method_name
+            if tool_name in skip:
+                continue
 
             # Extract human-readable summary from docstring
             doc = inspect.getdoc(method) or ""

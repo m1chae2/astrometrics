@@ -57,12 +57,13 @@ def test_rows_on_the_same_spot_form_a_cluster_and_neighbors_do_not() -> None:
     assert find_duplicate_clusters(summaries) == [["Gaia DR3 1", "HD 1"]]
 
 
-def test_survivor_prefers_hd_or_bd_then_gaia() -> None:
-    """Verify the preferred name wins."""
-    assert choose_survivor_id(["Gaia DR3 9", "HD 5", "2MASS J1"]) == "HD 5"
-    assert choose_survivor_id(["Gaia DR3 9", "BD+36  2764"]) == "BD+36  2764"
-    assert choose_survivor_id(["2MASS J1", "Gaia DR3 9", "TYC 1-2-3"]) == "Gaia DR3 9"
+def test_survivor_prefers_gaia_then_hd_or_bd() -> None:
+    """Verify the Gaia number wins as the id, then HD or BD."""
+    assert choose_survivor_id(["Gaia DR3 9", "HD 5", "2MASS J1"]) == "Gaia DR3 9"
+    assert choose_survivor_id(["HD 5", "BD+36  2764", "2MASS J1"]) == "BD+36  2764"
+    assert choose_survivor_id(["2MASS J1", "TYC 1-2-3", "HD 5"]) == "HD 5"
     assert choose_survivor_id(["TYC 1-2-3", "2MASS J1"]) == "2MASS J1"
+    assert choose_survivor_id(["FIELD_J1.0000+1.0000", "TYC 1-2-3"]) == "TYC 1-2-3"
 
 
 def test_two_light_curves_are_joined_by_time_with_the_first_winning_ties() -> None:
@@ -173,6 +174,7 @@ def test_end_to_end_on_an_isolated_catalog(tmp_path: Path) -> None:
     catalog_access.merge_and_record("stellar_catalog", [survivor], lambda _existing, updated: updated)
     catalog_access.delete_by_ids("stellar_catalog", removed)
 
-    assert catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1"]) == []
-    (kept,) = catalog_access.get_by_ids("stellar_catalog", ["HD 1"])
+    assert catalog_access.get_by_ids("stellar_catalog", ["HD 1"]) == []
+    (kept,) = catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1"])
     assert len(kept.photometry.timestamps) == 2
+    assert kept.name == "HD 1"

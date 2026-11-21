@@ -426,8 +426,8 @@ def build_overlay(
         if rows:
             placed = _summary_pass(rows, wcs, width, height, limit)
             if placed:
-                records = storage.get_by_ids("stellar_catalog", [star.id for star in placed])
-                radii = {record.id: record.radius_px for record in records}
+                # Only the radius is read, never the stars' full records.
+                radii = storage.read_star_radii([star.id for star in placed])
                 for star in placed:
                     star.radius_px = radii.get(star.id)
                 return placed, None

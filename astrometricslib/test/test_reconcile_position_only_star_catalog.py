@@ -1,25 +1,35 @@
-"""Purpose: Tests for the position-only stellar catalog duplicate cleanup.
+"""Purpose: Tests for the one-time star id cleanup script.
 
-Description: Verifies the pure clustering/merge logic
-`reconcile_position_only_star_catalog` depends on, and exercises the full
-find-clusters -> apply -> delete flow end to end against a throwaway
-isolated catalog database -- never the real one.
+Description: Builds a throwaway catalog database and a throwaway Gaia cache
+(never the real ones) and runs `reconcile_position_only_star_catalog` on
+them. Checks that stars move to their Gaia DR3 number with every reference
+updated, that position-only rows fold into the star they duplicate with
+their measurements kept, that genuine non-Gaia sources stay, that a second
+run changes nothing, and that a dry run writes nothing. Also keeps the
+tests of the shared merge rules the script relies on.
 """
 
+import math
+import sqlite3
 from pathlib import Path
 
-from astrometricslib._internal.drivers.catalog_access import CatalogAccess, StarPosition
+import pytest
+
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_store import GAIA_TILE_LEVEL, insert_gaia_sources
+from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points, pixel_source_id_range
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.storage.local_database import safe_json_dumps
+from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     is_empty_value,
     merge_duplicate_into_survivor,
 )
-from astrometricslib.scripts.reconcile_position_only_star_catalog import (
-    apply_clusters,
-    cluster_position_only_stars,
-    find_position_only_clusters,
-)
+from astrometricslib.scripts.reconcile_position_only_star_catalog import run_cleanup
+
+_DECLINATION = 34.7
+_ARCSEC = 1.0 / 3600.0
 
 
 def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
@@ -32,64 +42,249 @@ def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
     """
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)
-    frames_path = library_path / "frames"
-    frames_path.mkdir(parents=True)
-
+    (library_path / "frames").mkdir(parents=True)
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(library_path)}})
     return config
 
 
-class _FakeAstrometrics:
-    """Minimal stand-in exposing only what this script's functions read."""
+def _ra(base: float, arcsec_east: float) -> float:
+    """Move a right ascension by a true sky distance at the test declination.
 
-    def __init__(self, config: AppConfiguration) -> None:
-        self.config = config
-        self._catalog_access = CatalogAccess(config)
-
-
-def _star(id_: str, ra: float, dec: float, target_id: str = "M42") -> StarPosition:
-    return StarPosition(id=id_, right_ascension=ra, declination=dec, target_ids=[target_id])
-
-
-def test_cluster_position_only_stars_groups_nearby_positions() -> None:
-    """Verify stars within the match radius cluster and distant ones don't."""
-    close_pair = [
-        _star("FIELD_J083344.3000-263740.0000", 128.834300, -26.627778),
-        _star("FIELD_J083344.3050-263739.9980", 128.834305, -26.627770),
-    ]
-    distant = _star("FIELD_J083744.3000-263740.0000", 129.334300, -26.627778)
-
-    clusters = cluster_position_only_stars([*close_pair, distant])
-
-    sizes = sorted(len(cluster) for cluster in clusters)
-    assert sizes == [1, 2]
-
-
-def test_cluster_position_only_stars_chains_through_intermediate_points() -> None:
-    """Verify clustering chains: A-B and B-C close, A-C not directly close.
-
-    A chain of independent re-solves lands each new solve near the
-    *previous* one, not necessarily near the very first -- three stars
-    a few arcsec apart in sequence must still collapse to one cluster
-    even though the first and last are further apart than the radius
-    on their own.
+    Returns
+    -------
+    right_ascension : `float`
+        The shifted right ascension, in degrees.
     """
-    # ~3 arcsec steps at this declination.
-    step_deg = 3.0 / 3600.0 / 0.894  # roughly correct for cos(dec) at -26.6
-    stars = [_star(f"FIELD_J{i}", 128.8343 + i * step_deg, -26.627778) for i in range(4)]
-
-    clusters = cluster_position_only_stars(stars)
-
-    assert len(clusters) == 1
-    assert len(clusters[0]) == 4
+    return base + arcsec_east * _ARCSEC / math.cos(math.radians(_DECLINATION))
 
 
-def test_cluster_position_only_stars_handles_zero_and_one_star() -> None:
-    """Verify the trivial cases return without touching the scipy machinery."""
-    assert cluster_position_only_stars([]) == []
-    single = _star("FIELD_J1", 128.0, -26.0)
-    assert cluster_position_only_stars([single]) == [[single]]
+def _gaia_source_id(right_ascension: float, declination: float, serial: int) -> int:
+    """Make a Gaia-like source number that lies in the tile of a position.
+
+    Returns
+    -------
+    source_id : `int`
+        A number whose tile, read from its bits, holds the position.
+    """
+    level = int(resolve(GAIA_TILE_LEVEL).value)
+    tile = int(healpix_pixels_of_points(level, right_ascension, declination))
+    low, _ = pixel_source_id_range(level, tile)
+    return low + serial
+
+
+def _curve(times: list[str], flux: float) -> PhotometryResult:
+    """Build a light curve with one flux per time.
+
+    Returns
+    -------
+    curve : `PhotometryResult`
+        The light curve.
+    """
+    return PhotometryResult(timestamps=times, fluxes=[flux] * len(times), mean_flux=flux)
+
+
+def _days(curve: PhotometryResult) -> list[str]:
+    """List the days of a light curve's measurements.
+
+    Returns
+    -------
+    days : `list` [`str`]
+        Each measurement time as ``YYYY-MM-DD``.
+    """
+    return [str(timestamp)[:10] for timestamp in curve.timestamps]
+
+
+def _star(star_id: str, ra: float, **fields: object) -> StellarObject:
+    """Build a saved star of NGC 7331 at the test declination.
+
+    Returns
+    -------
+    star : `StellarObject`
+        The star.
+    """
+    return StellarObject(
+        id=star_id,
+        name=star_id,
+        ra=ra,
+        dec=_DECLINATION,
+        targetIds=["NGC 7331"],
+        isCatalogIdentified=not star_id.startswith("FIELD_J"),
+        **fields,
+    )
+
+
+def _field_id(ra: float) -> str:
+    """Write the position-only id of a star at the test declination.
+
+    Returns
+    -------
+    star_id : `str`
+        The ``FIELD_J`` id.
+    """
+    return f"FIELD_J{ra:.4f}{_DECLINATION:+.4f}"
+
+
+@pytest.fixture
+def catalog(tmp_path: Path) -> tuple[AppConfiguration, Path, dict[str, int]]:
+    """Build a small catalog and Gaia cache covering every cleanup case.
+
+    Returns
+    -------
+    config, database_path, gaia : `tuple`
+        The configuration, the catalog database file, and the Gaia numbers
+        of the two cached stars (``"A"`` and ``"B"``).
+    """
+    config = _make_isolated_config(tmp_path)
+    star_a_ra, star_b_ra = 339.0, 339.1
+    gaia = {
+        "A": _gaia_source_id(star_a_ra, _DECLINATION, 11),
+        "B": _gaia_source_id(star_b_ra, _DECLINATION, 12),
+    }
+    insert_gaia_sources(
+        config,
+        [
+            (str(gaia["A"]), star_a_ra, _DECLINATION, 9.0, f"Gaia DR3 {gaia['A']}", 0.0, 0.0),
+            (str(gaia["B"]), star_b_ra, _DECLINATION, 12.0, f"Gaia DR3 {gaia['B']}", 0.0, 0.0),
+        ],
+    )
+    spectrum = SpectroscopyResult(wavelengthsAngstrom=[4000.0, 4010.0], intensities=[1.0, 2.0])
+    duplicate_ra, alone_ra, vega_ra = 339.2, 339.3, 339.4
+    stars = [
+        # Star A: an HD row whose SIMBAD names list Gaia A, and two
+        # position-only rows of it holding light curves of two nights.
+        _star("HD 1", _ra(star_a_ra, 0.3), gaiaDr3SourceId=gaia["A"], magnitude=9.2, spectroscopy=spectrum),
+        _star(_field_id(_ra(star_a_ra, 2.0)), _ra(star_a_ra, 2.0), photometry=_curve(["2026-01-01"], 5.0)),
+        _star(_field_id(_ra(star_a_ra, -2.5)), _ra(star_a_ra, -2.5), photometry=_curve(["2026-01-02"], 6.0)),
+        # Star B: a Tycho row with no stored Gaia number, 0.5 arcsec away.
+        _star("TYC 1-1-1", _ra(star_b_ra, 0.5), magnitude=12.4),
+        # Two position-only rows of one source Gaia does not list.
+        _star(_field_id(duplicate_ra), duplicate_ra, photometry=_curve(["2026-01-01"], 1.0)),
+        _star(
+            _field_id(_ra(duplicate_ra, 1.5)), _ra(duplicate_ra, 1.5), photometry=_curve(["2026-01-03"], 1.1)
+        ),
+        # A lone source with no Gaia star (an artifact, say).
+        _star(_field_id(alone_ra), alone_ra),
+        # A bright named star Gaia does not list, and a position-only row.
+        _star("* alf Lyr", vega_ra, magnitude=0.03),
+        _star(_field_id(_ra(vega_ra, 2.0)), _ra(vega_ra, 2.0), photometry=_curve(["2026-01-04"], 9.0)),
+    ]
+    CatalogAccess(config).put(stars, "stellar_catalog", {})
+    database_path = Path(config.get_library_path()) / "astrometrics.db"
+    # One row in the old full form, with a field today's model no longer
+    # reads, to check the rewrite keeps it.
+    with sqlite3.connect(database_path) as connection:
+        old_star = _star("Gaia DR3 777", 10.0)
+        record = old_star.serialize()
+        record["spectraHistory"] = [{"timestamp": "2026-01-17"}]
+        connection.execute(
+            "INSERT INTO stellar_objects (id, target_id, name, ra, dec, magnitude, data_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (old_star.id, "NGC 7331", old_star.name, 10.0, _DECLINATION, None, safe_json_dumps(record)),
+        )
+    return config, database_path, gaia
+
+
+def _dump(database_path: Path) -> list[tuple]:
+    """Read every row of the star table, in id order.
+
+    Returns
+    -------
+    rows : `list` [`tuple`]
+        Every column of every row.
+    """
+    with sqlite3.connect(database_path) as connection:
+        return connection.execute("SELECT * FROM stellar_objects ORDER BY id").fetchall()
+
+
+def _run(config: AppConfiguration, database_path: Path, apply: bool):  # ruff: ignore[missing-return-type-private-function]
+    """Run the cleanup on the test database.
+
+    Returns
+    -------
+    report : `CleanupReport`
+        What the run found or did.
+    """
+    connection = sqlite3.connect(database_path)
+    try:
+        return run_cleanup(connection, config, apply=apply)
+    finally:
+        connection.close()
+
+
+def test_the_cleanup_moves_stars_to_gaia_ids_and_folds_position_only_rows(catalog: tuple) -> None:
+    """Check every case: Gaia rename, merges, a lone source kept, data kept."""
+    config, database_path, gaia = catalog
+
+    report = _run(config, database_path, apply=True)
+
+    access = CatalogAccess(config)
+    ids = sorted(access.list_star_ids())
+    assert ids == sorted([
+        f"Gaia DR3 {gaia['A']}",
+        f"Gaia DR3 {gaia['B']}",
+        "Gaia DR3 777",
+        "* alf Lyr",
+        _field_id(339.2),
+        _field_id(339.3),
+    ])
+    (star_a,) = access.get_by_ids("stellar_catalog", [f"Gaia DR3 {gaia['A']}"])
+    assert star_a.name == "HD 1"
+    assert star_a.gaia_dr3_source_id == gaia["A"]
+    assert star_a.spectroscopy.wavelengths_angstrom == [4000.0, 4010.0]
+    assert _days(star_a.photometry) == ["2026-01-01", "2026-01-02"]
+    (star_b,) = access.get_by_ids("stellar_catalog", [f"Gaia DR3 {gaia['B']}"])
+    assert star_b.name == "TYC 1-1-1"
+    assert star_b.is_catalog_identified
+    (duplicate,) = access.get_by_ids("stellar_catalog", [_field_id(339.2)])
+    assert _days(duplicate.photometry) == ["2026-01-01", "2026-01-03"]
+    (vega,) = access.get_by_ids("stellar_catalog", ["* alf Lyr"])
+    assert vega.photometry.fluxes == [9.0]
+
+    assert report.rows_before == 10
+    assert report.rows_after == 6
+    assert report.ids_rewritten == 2
+    assert report.rows_merged == 4
+    assert report.gaia_groups == 2
+    assert report.position_only_into_named == 1
+    assert report.position_only_duplicate_groups == 1
+
+
+def test_every_row_ends_in_the_short_form_and_old_fields_are_kept(catalog: tuple) -> None:
+    """Check no row keeps worked-out values; an old field with data stays."""
+    config, database_path, _ = catalog
+
+    _run(config, database_path, apply=True)
+
+    with sqlite3.connect(database_path) as connection:
+        records = dict(connection.execute("SELECT id, data_json FROM stellar_objects").fetchall())
+    assert all('"plotData"' not in record and '"hasSpectra"' not in record for record in records.values())
+    assert '"spectraHistory"' in records["Gaia DR3 777"]
+    assert '"id"' not in records["Gaia DR3 777"]
+
+
+def test_a_second_run_changes_nothing(catalog: tuple) -> None:
+    """Check the cleanup is idempotent."""
+    config, database_path, _ = catalog
+    _run(config, database_path, apply=True)
+    rows_after_first_run = _dump(database_path)
+
+    report = _run(config, database_path, apply=True)
+
+    assert _dump(database_path) == rows_after_first_run
+    assert (report.ids_rewritten, report.rows_merged, report.rows_compacted) == (0, 0, 0)
+
+
+def test_a_dry_run_writes_nothing(catalog: tuple) -> None:
+    """Check a run without apply writes nothing but counts the plan."""
+    config, database_path, _ = catalog
+    rows_before = _dump(database_path)
+
+    report = _run(config, database_path, apply=False)
+
+    assert _dump(database_path) == rows_before
+    assert report.rows_merged == 4
+    assert report.rows_compacted > 0
 
 
 def test_is_empty_value_covers_every_shape_of_empty() -> None:
@@ -137,76 +332,50 @@ def test_merge_duplicate_into_survivor_never_touches_identity_fields() -> None:
     assert survivor.id == "FIELD_JA"
     assert survivor.name == "FIELD_JA"
     assert survivor.is_catalog_identified is False
+    assert survivor.aliases == []
 
 
-def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_path: Path) -> None:
-    """End-to-end: two duplicate rows in a throwaway catalog collapse to one.
+def test_a_gaia_row_keeps_its_own_number_over_a_copied_one(catalog: tuple) -> None:
+    """Check a row named by a Gaia number is never moved by a copied number."""
+    config, database_path, gaia = catalog
+    access = CatalogAccess(config)
+    star = _star("Gaia DR3 555", 20.0)
+    star.gaia_dr3_source_id = gaia["B"]
+    access.merge_and_record("stellar_catalog", [star], lambda _existing, updated: updated)
 
-    Never touches the real library -- everything here runs against a
-    fresh, isolated tmp_path database.
-    """
-    config = _make_isolated_config(tmp_path)
-    astrometrics = _FakeAstrometrics(config)
+    report = _run(config, database_path, apply=True)
 
-    survivor = StellarObject(id="FIELD_J083344.3000-263740.0000", name="FIELD_J083344.3000-263740.0000")
-    survivor.right_ascension = 128.834300
-    survivor.declination = -26.627778
-    survivor.magnitude = 15.2
-    survivor.target_ids = ["M42"]
-
-    duplicate = StellarObject(id="FIELD_J083344.3050-263739.9980", name="FIELD_J083344.3050-263739.9980")
-    duplicate.right_ascension = 128.834305
-    duplicate.declination = -26.627770
-    duplicate.photometry = PhotometryResult(fluxes=[10.0, 11.0])
-    duplicate.target_ids = ["M42"]
-
-    unrelated = StellarObject(id="FIELD_J090000.0000-260000.0000", name="FIELD_J090000.0000-260000.0000")
-    unrelated.right_ascension = 135.0
-    unrelated.declination = -26.0
-    unrelated.target_ids = ["M42"]
-
-    astrometrics._catalog_access.merge_and_record(
-        "stellar_catalog", [survivor, duplicate, unrelated], lambda _existing, updated: updated
-    )
-
-    clusters_by_target = find_position_only_clusters(astrometrics)
-    assert set(clusters_by_target) == {"M42"}
-    clusters = clusters_by_target["M42"]
-    assert len(clusters) == 1
-    assert {star.id for star in clusters[0]} == {survivor.id, duplicate.id}
-
-    rows_removed = apply_clusters(astrometrics, clusters_by_target)
-
-    assert rows_removed == 1
-    remaining = astrometrics._catalog_access.get_by_ids(
-        "stellar_catalog", [survivor.id, duplicate.id, unrelated.id]
-    )
-    remaining_by_id = {obj.id: obj for obj in remaining}
-    assert set(remaining_by_id) == {survivor.id, unrelated.id}
-    # The duplicate's light curve was gap-filled onto the surviving row,
-    # not lost when the duplicate's own row was deleted.
-    assert remaining_by_id[survivor.id].photometry.fluxes == [10.0, 11.0]
-    assert remaining_by_id[survivor.id].magnitude == 15.2  # ruff: ignore[float-equality-comparison]
+    (kept,) = access.get_by_ids("stellar_catalog", ["Gaia DR3 555"])
+    assert kept.gaia_dr3_source_id == 555
+    assert report.gaia_numbers_corrected == 2  # this row, and the old-form row that had none
+    assert access.get_by_ids("stellar_catalog", [f"Gaia DR3 {gaia['B']}"])[0].name == "TYC 1-1-1"
 
 
-def test_find_position_only_clusters_respects_target_id_filter(tmp_path: Path) -> None:
-    """Verify --target scoping only surfaces one target's clusters."""
-    config = _make_isolated_config(tmp_path)
-    astrometrics = _FakeAstrometrics(config)
+def test_a_chain_of_position_only_rows_joins_the_gaia_star_in_one_run(catalog: tuple) -> None:
+    """Check a row chained to a Gaia star's row joins it in the first run."""
+    config, database_path, gaia = catalog
+    chained = _star(_field_id(_ra(339.0, 4.2)), _ra(339.0, 4.2), photometry=_curve(["2026-01-05"], 7.0))
+    CatalogAccess(config).merge_and_record("stellar_catalog", [chained], lambda _existing, updated: updated)
 
-    for target_id in ("M42", "M43"):
-        first = StellarObject(id=f"FIELD_J_{target_id}_A", name=f"FIELD_J_{target_id}_A")
-        first.right_ascension = 100.0
-        first.declination = 10.0
-        first.target_ids = [target_id]
-        second = StellarObject(id=f"FIELD_J_{target_id}_B", name=f"FIELD_J_{target_id}_B")
-        second.right_ascension = 100.0001
-        second.declination = 10.0001
-        second.target_ids = [target_id]
-        astrometrics._catalog_access.merge_and_record(
-            "stellar_catalog", [first, second], lambda _existing, updated: updated
-        )
+    _run(config, database_path, apply=True)
+    rows_after_first_run = _dump(database_path)
+    second = _run(config, database_path, apply=True)
 
-    clusters_by_target = find_position_only_clusters(astrometrics, target_ids=["M42"])
+    (star_a,) = CatalogAccess(config).get_by_ids("stellar_catalog", [f"Gaia DR3 {gaia['A']}"])
+    assert _days(star_a.photometry) == ["2026-01-01", "2026-01-02", "2026-01-05"]
+    assert _dump(database_path) == rows_after_first_run
+    assert second.rows_merged == 0
 
-    assert set(clusters_by_target) == {"M42"}
+
+def test_a_neighbor_measured_in_the_same_frames_is_not_merged(catalog: tuple) -> None:
+    """Check a nearby row 5 times fainter in the same frames stays apart."""
+    config, database_path, gaia = catalog
+    neighbor = _star(_field_id(_ra(339.0, 2.8)), _ra(339.0, 2.8), photometry=_curve(["2026-01-01"], 1.0))
+    CatalogAccess(config).merge_and_record("stellar_catalog", [neighbor], lambda _existing, updated: updated)
+
+    report = _run(config, database_path, apply=True)
+
+    assert report.rows_kept_as_neighbors == 1
+    assert CatalogAccess(config).get_by_ids("stellar_catalog", [neighbor.id])
+    (star_a,) = CatalogAccess(config).get_by_ids("stellar_catalog", [f"Gaia DR3 {gaia['A']}"])
+    assert star_a.photometry.fluxes == [5.0, 6.0]

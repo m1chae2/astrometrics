@@ -23,8 +23,10 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+import numpy as np
+
 from astrometricslib.foundation.run_bases import factor_for
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
@@ -69,6 +71,22 @@ CATALOG_MATCH_RADIUS_ARCSEC = TunedParameter(
     reference_value=10.0,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D07",
+)
+
+# A star seen only by position, with no catalog identity, counts as the same
+# star as a catalog star (or as another such star) this close to it. Each
+# solve of a field puts a star a fraction of an arcsecond to a few arcseconds
+# from where the last one did, and the star stays within this radius of its
+# Gaia DR3 position for most stars; the counts are in AST-22.
+POSITION_ONLY_SAME_STAR_RADIUS_ARCSEC = TunedParameter(
+    name="shared.position_only_same_star_radius_arcsec",
+    default=3.0,
+    unit="arcsec",
+    description="Largest distance at which a star known only by position is the same as another star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="AST-22",
 )
 
 # Names that beat every other catalog, best first. A name matching the
@@ -116,8 +134,35 @@ def name_preference_rank(star_id: str) -> int:
     return len(_PREFERRED_NAME_PATTERNS)
 
 
+def identity_rank(star_id: str) -> int:
+    """Rank how good an id is as a star's saved identity; lower is better.
+
+    A star that Gaia DR3 lists is saved under its Gaia number: every star
+    in a field has one, it never changes, and the local Gaia cache can be
+    checked against it. Names people know the star by are kept as its
+    display name and aliases instead.
+
+    Parameters
+    ----------
+    star_id : `str`
+        A catalog id.
+
+    Returns
+    -------
+    rank : `int`
+        ``0`` for ``Gaia DR3 <digits>``, ``1`` for an HD/BD/CD/CPD name,
+        ``2`` for any other catalog name and ``3`` for a position-only
+        (``FIELD_J``) id.
+    """
+    if _GAIA_DR3_NAME_PATTERN.match(star_id):
+        return 0
+    if star_id.startswith("FIELD_J"):
+        return 3
+    return 1 if re.match(_PREFERRED_NAME_PATTERNS[0], star_id) else 2
+
+
 def choose_survivor_id(ids: list[str]) -> str:
-    """Pick which name of one star to keep.
+    """Pick which id of one star to keep.
 
     Parameters
     ----------
@@ -127,10 +172,75 @@ def choose_survivor_id(ids: list[str]) -> str:
     Returns
     -------
     survivor_id : `str`
-        An HD/BD/CD/CPD name if any, else a Gaia DR3 name, else the
-        first id alphabetically.
+        A Gaia DR3 number if any, else an HD/BD/CD/CPD name, else the
+        first other id alphabetically (see `identity_rank`).
     """
-    return min(sorted(ids), key=name_preference_rank)
+    return min(sorted(ids), key=identity_rank)
+
+
+# Survey catalogs whose names are long numbers few people know a star by.
+_SURVEY_NAME_PATTERN = re.compile(
+    r"^(2MASS|TYC|UCAC\d?|GSC|SDSS|ZTF|ATO|GPM|LAMOST|WISE|AllWISE|PS1|USNO|Gaia DR\d|\[)"
+)
+
+# Bright-star catalogs a reader is likely to know: Henry Draper, the Bright
+# Star (HR), Hipparcos, the Durchmusterungen and the SAO catalog.
+_BRIGHT_STAR_NAME_PATTERN = re.compile(r"^(HD|HR|HIP|BD|CD|CPD|SAO)[\s+\-\d]")
+
+
+def display_name_rank(name: str) -> int:
+    """Rank how familiar a star's name is to a reader; lower is better.
+
+    Parameters
+    ----------
+    name : `str`
+        A name of the star.
+
+    Returns
+    -------
+    rank : `int`
+        ``0`` for a proper name (no digits), a Bayer or Flamsteed name
+        (``* alf Lyr``) or a variable-star name (``V* RR Lyr``); ``1`` for
+        a bright-star catalog name (HD, HR, HIP, BD, CD, CPD, SAO); ``2``
+        for any other catalog name; ``3`` for a survey catalog name (2MASS,
+        Tycho and the like); ``4`` for a Gaia name; ``5`` for a
+        position-only id.
+    """
+    text = name.strip()
+    if text.startswith("FIELD_J"):
+        return 5
+    if text.startswith("Gaia DR3 "):
+        return 4
+    if _SURVEY_NAME_PATTERN.match(text):
+        return 3
+    if _BRIGHT_STAR_NAME_PATTERN.match(text):
+        return 1
+    if text.startswith(("* ", "V* ")) or not re.search(r"\d", text):
+        return 0
+    return 2
+
+
+def order_names_by_familiarity(names: Iterable[str]) -> list[str]:
+    """List a star's names, most familiar first, each once.
+
+    Parameters
+    ----------
+    names : `Iterable` [`str`]
+        Names of one star, in the order they were found. Empty names are
+        left out.
+
+    Returns
+    -------
+    ordered : `list` [`str`]
+        The names, sorted by `display_name_rank`; names of equal rank keep
+        their order.
+    """
+    unique: list[str] = []
+    for name in names:
+        text = str(name or "").strip()
+        if text and text not in unique:
+            unique.append(text)
+    return sorted(unique, key=display_name_rank)
 
 
 # A Gaia DR3 name with a source number, such as "Gaia DR3 1328045433153485824".
@@ -187,13 +297,42 @@ def gaia_dr3_source_id_of(star: StellarObject) -> int | None:
     return gaia_dr3_source_id_from_names(str(text or "") for text in (star.id, star.name, *star.target_ids))
 
 
+def settle_names(survivor: StellarObject, others: Iterable[StellarObject]) -> None:
+    """Give a merged star its most familiar name and keep the rest as aliases.
+
+    Every id, name and alias of the survivor and of the rows merged into it
+    is a name of the one star. The most familiar (see `display_name_rank`)
+    becomes the survivor's name, unless it is a position-only id, and the
+    others, except the survivor's id and position-only ids, become its
+    aliases.
+
+    Parameters
+    ----------
+    survivor : `StellarObject`
+        The row that is kept, with its final id already set. Changed in
+        place.
+    others : `Iterable` [`StellarObject`]
+        The rows merged into it.
+    """
+    names = [survivor.name, *survivor.aliases]
+    for other in others:
+        names.extend([other.name, other.id, *other.aliases])
+    ordered = [name for name in order_names_by_familiarity(names) if not name.startswith("FIELD_J")]
+    best = ordered[0] if ordered else survivor.id
+    if display_name_rank(best) >= display_name_rank(survivor.id):
+        # No name is more familiar than the id itself (a Gaia number).
+        best = survivor.id
+    survivor.name = best
+    survivor.aliases = [name for name in ordered if name not in (survivor.id, survivor.name)]
+
+
 # Fields that identify the row itself or are recomputed fresh by every
 # pipeline run regardless of what is already on disk -- never gap-filled
 # from a duplicate, either because overwriting them from an arbitrary
 # cluster member would be wrong (id/name) or because a value here says
 # nothing about which duplicate is "more complete" (is_catalog_identified
 # is always False for a FIELD_J row by construction).
-MERGE_EXCLUDED_FIELDS = frozenset({"id", "name", "target_ids", "is_catalog_identified"})
+MERGE_EXCLUDED_FIELDS = frozenset({"id", "name", "aliases", "target_ids", "is_catalog_identified"})
 
 
 def is_empty_value(value: Any) -> bool:
@@ -242,6 +381,13 @@ def merge_duplicate_into_survivor(survivor: StellarObject, duplicate: StellarObj
     for field_name in duplicate.target_ids:
         if field_name not in survivor.target_ids:
             survivor.target_ids.append(field_name)
+    # The duplicate's names stay known as the survivor's aliases. A
+    # position-only id is no name, and the survivor's own id and name are
+    # not repeated.
+    names = order_names_by_familiarity([*survivor.aliases, duplicate.name, duplicate.id, *duplicate.aliases])
+    survivor.aliases = [
+        name for name in names if name not in (survivor.id, survivor.name) and not name.startswith("FIELD_J")
+    ]
 
     for field_name in type(survivor).model_fields:
         if field_name in MERGE_EXCLUDED_FIELDS:
@@ -250,3 +396,122 @@ def merge_duplicate_into_survivor(survivor: StellarObject, duplicate: StellarObj
             duplicate_value = getattr(duplicate, field_name)
             if not is_empty_value(duplicate_value):
                 setattr(survivor, field_name, duplicate_value)
+
+
+# Per-measurement lists of a light curve. Each is either empty or has one
+# entry per timestamp.
+_PER_MEASUREMENT_FIELDS = (
+    "fluxes",
+    "fluxes_normalized",
+    "fluxes_detrended",
+    "airmasses",
+    "magnitudes",
+    "is_saturated",
+    "flux_errors",
+    "fluxes_normalized_errors",
+    "fluxes_detrended_errors",
+    "time_bjd_tdb",
+)
+
+
+def merge_light_curves(first: PhotometryResult, second: PhotometryResult) -> PhotometryResult | None:
+    """Join two light curves of the same star by measurement time.
+
+    Where both have a measurement at the same time, the first is kept.
+    A per-measurement list is kept only when both light curves have it.
+
+    Parameters
+    ----------
+    first : `PhotometryResult`
+        The survivor's light curve.
+    second : `PhotometryResult`
+        The other row's light curve.
+
+    Returns
+    -------
+    merged : `PhotometryResult` or `None`
+        The joined light curve, or `None` when a list is out of step with
+        its timestamps in either curve (pairing values with times would
+        then be a guess).
+    """
+    if not second.timestamps:
+        return first
+    if not first.timestamps:
+        return second
+    for light_curve in (first, second):
+        for name in _PER_MEASUREMENT_FIELDS:
+            values = getattr(light_curve, name)
+            if values and len(values) != len(light_curve.timestamps):
+                return None
+
+    rows: dict = {}
+    for light_curve in (second, first):  # the first is added last, so it wins ties
+        for index, timestamp in enumerate(light_curve.timestamps):
+            rows[timestamp] = {
+                name: (getattr(light_curve, name)[index] if getattr(light_curve, name) else None)
+                for name in _PER_MEASUREMENT_FIELDS
+            }
+    merged = PhotometryResult(timestamps=sorted(rows))
+    for name in _PER_MEASUREMENT_FIELDS:
+        if getattr(first, name) and getattr(second, name):
+            setattr(merged, name, [rows[timestamp][name] for timestamp in merged.timestamps])
+    series = merged.fluxes_detrended or merged.fluxes_normalized
+    if len(series) >= 2 and float(np.mean(series)) > 0:
+        merged.mean_flux = float(np.mean(series))
+        merged.coefficient_of_variation = float(np.std(series) / np.mean(series))
+    return merged
+
+
+def merge_cluster(stars: dict[str, StellarObject], survivor_id: str) -> tuple[StellarObject, list[str]] | str:
+    """Fold every other row of a cluster into the survivor.
+
+    Parameters
+    ----------
+    stars : `dict` [`str`, `StellarObject`]
+        The cluster's rows, by id.
+    survivor_id : `str`
+        The id of the row to keep.
+
+    Returns
+    -------
+    result : `tuple` or `str`
+        ``(survivor, removed_ids)`` when the merge is safe, otherwise a
+        sentence saying why the cluster was left alone.
+    """
+    survivor = stars[survivor_id]
+    others = [star for star_id, star in stars.items() if star_id != survivor_id]
+
+    # A catalog gives every object its own id, so two ids from the same
+    # catalog are two different objects, however close together (a close
+    # binary, or neighboring sources in a cluster).
+    # A position-only id carries no catalog identity, so it is left out.
+    families = [catalog_family(star_id) for star_id in stars if not star_id.startswith("FIELD_J")]
+    if len(set(families)) < len(families):
+        return "two rows come from the same catalog, so they are different objects"
+
+    # Keep the spectrum with the most measured samples, wherever it is held
+    # (the survivor may have none at all, and the fill rule below cannot
+    # move it: an empty spectrum result still counts as "set"). The
+    # survivor is listed first, so it wins a tie.
+    spectra_holders = [star for star in [survivor, *others] if star.has_spectra]
+    if spectra_holders:
+        best_holder = max(spectra_holders, key=lambda star: len(star.spectroscopy.wavelengths_angstrom))
+        if best_holder is not survivor and len(best_holder.spectroscopy.wavelengths_angstrom) > len(
+            survivor.spectroscopy.wavelengths_angstrom
+        ):
+            survivor.spectroscopy = best_holder.spectroscopy
+
+    merged_curve = survivor.photometry
+    for other in others:
+        if merged_curve is None or other.photometry is None:
+            continue
+        merged_curve = merge_light_curves(merged_curve, other.photometry)
+        if merged_curve is None:
+            return "the light curves cannot be joined safely"
+
+    for other in others:
+        merge_duplicate_into_survivor(survivor, other)
+    if merged_curve is not None:
+        survivor.photometry = merged_curve
+    settle_names(survivor, others)
+    return survivor, [star.id for star in others]

@@ -1157,6 +1157,11 @@ class StellarObject(BaseModel):
 
     id: str = Field(default="", alias="id")
     name: str = Field(default="", alias="name")
+    # Other names of the star, most familiar first, such as its SIMBAD main
+    # identifier and its HD or HIP number. A star matched in Gaia DR3 is
+    # saved under its Gaia id ("Gaia DR3 <number>"), so the names people
+    # know it by are kept here and in `name`. Empty when the star has none.
+    aliases: list[str] = Field(default_factory=list, alias="aliases")
     # Where the star is in the sky (right ascension is like longitude,
     # declination is like latitude, but for the sky instead of Earth).
     # `None` until identification/resolution sets it -- e.g. the

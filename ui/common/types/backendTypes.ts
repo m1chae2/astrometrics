@@ -318,6 +318,7 @@ export interface PlotData {
 export interface Spectrum {
   id?: string;
   name?: string;
+  aliases?: string[];
   ra?: any;
   dec?: any;
   flux?: any;

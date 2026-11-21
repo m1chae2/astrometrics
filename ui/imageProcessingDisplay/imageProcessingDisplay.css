@@ -442,6 +442,12 @@
   flex: 1;
 }
 
+/* The list takes the keyboard focus after a click so the arrow keys can move through it. */
+.file-browser__list:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
 .file-browser__list {
   flex: 1;
   overflow-y: auto;

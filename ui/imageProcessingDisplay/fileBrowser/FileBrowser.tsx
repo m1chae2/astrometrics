@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { EmptyState } from '../../common/components/EmptyState';
 import { PopoverSelect } from '../../common/components/PopoverSelect';
@@ -316,6 +316,32 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
 
     const isRejected = (path: string) => rejectedFiles.includes(path);
 
+    const listRef = useRef<HTMLDivElement>(null);
+    // True when the last change of the selected file came from an arrow key, so only then is the row scrolled into view.
+    const keyMovedRef = useRef(false);
+    const rowId = (path: string) => `file-browser-row-${path.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    const selectedInList = selectedFile !== null && sortedFiles.some(file => file.path === selectedFile);
+
+    useEffect(() => {
+        if (!keyMovedRef.current || selectedFile === null) return;
+        keyMovedRef.current = false;
+        document.getElementById(rowId(selectedFile))?.scrollIntoView?.({ block: 'nearest' });
+    }, [selectedFile]);
+
+    /** Up and Down open the file above or below the selected one, in the order the list shows. They stop at the ends. */
+    const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        // Leave keys alone when a control inside the list (a checkbox or button) has the focus.
+        if (event.target !== event.currentTarget) return;
+        const current = sortedFiles.findIndex(file => file.path === selectedFile);
+        if (current < 0) return;
+        event.preventDefault();
+        const next = current + (event.key === 'ArrowDown' ? 1 : -1);
+        if (next < 0 || next >= sortedFiles.length) return;
+        keyMovedRef.current = true;
+        onSelectFile(sortedFiles[next].path);
+    };
+
     return (
         <div className="file-browser">
             <ConfirmDialog
@@ -329,7 +355,15 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 }}
                 onCancel={() => setPutBackPath(null)}
             />
-            <div className="file-browser__list">
+            <div
+                className="file-browser__list"
+                ref={listRef}
+                tabIndex={0}
+                role="group"
+                aria-label="Files. Use the up and down arrow keys to move between files."
+                aria-activedescendant={selectedInList ? rowId(selectedFile as string) : undefined}
+                onKeyDown={handleListKeyDown}
+            >
                 <table className="data-table">
                     <thead>
                         <tr>
@@ -376,6 +410,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             return (
                                 <tr
                                     key={key}
+                                    id={rowId(file.path)}
                                     className={`${selectedFile === file.path ? 'selected' : ''} ${isOutlier ? 'row-outlier' : ''}`}
                                     onContextMenu={(e) => {
                                         e.preventDefault();

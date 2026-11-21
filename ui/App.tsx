@@ -23,7 +23,7 @@ import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { IngestionJobsProvider } from './common/context/IngestionJobsContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
 import { AstrometricsProvider, useAstrometrics } from './common/context/AstrometricsContext';
-import { DISPLAY_DEFINITIONS, isDisplayEnabled } from './common/constants/displayFlags';
+import { fallbackDisplayMode } from './common/constants/displayFlags';
 import { normalizeAppMode } from './common/utils/normalizeAppMode';
 import { useIsModeReady } from './common/utils/appBootReadiness';
 import { postHandoff } from './common/utils/displayHandoffStore';
@@ -260,6 +260,9 @@ const AppContent: React.FC = () => {
   });
 
   const { config } = useAstrometrics();
+  // The display the person last opened on purpose. It stays shown even when Settings turns it off,
+  // so a click that opens a star in the Astronomy Manager works. The saved settings never change.
+  const [requestedMode, setRequestedMode] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState<string>('');
 
   // Tracks every mode that's been mounted (and thus stays mounted, hidden via
@@ -284,9 +287,9 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     if (!config || !config['Frontend']) return;
-    if (isDisplayEnabled(config, mode)) return;
+    const fallbackMode = fallbackDisplayMode(config, mode, requestedMode);
+    if (!fallbackMode) return;
 
-    const fallbackMode = DISPLAY_DEFINITIONS.find((d) => isDisplayEnabled(config, d.mode))?.mode || 'Image Viewer';
     console.log(`[App] Mode '${mode}' is disabled in settings. Falling back to '${fallbackMode}'.`);
     setMode(fallbackMode);
     try {
@@ -294,7 +297,7 @@ const AppContent: React.FC = () => {
     } catch {
       // Ignore localStorage access failures (e.g. in private browsing)
     }
-  }, [mode, config]);
+  }, [mode, config, requestedMode]);
 
   useEffect(() => {
     // Track the socket action handler so we can remove the exact same reference on cleanup.
@@ -377,6 +380,7 @@ const AppContent: React.FC = () => {
       const rawDetail = (e as CustomEvent).detail;
       const detail = normalizeAppMode(rawDetail);
       setMode(detail);
+      setRequestedMode(detail);
       try {
         const isAuxWindow = Boolean(new URLSearchParams(window.location.search).get('windowId'));
         if (!isAuxWindow) {

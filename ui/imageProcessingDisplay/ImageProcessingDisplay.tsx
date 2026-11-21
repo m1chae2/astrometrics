@@ -1,6 +1,4 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useAstrometrics } from '../common/context/AstrometricsContext';
-import { isDisplayEnabled } from '../common/constants/displayFlags';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useTargetActions } from '../common/hooks/useTargetActions';
@@ -245,9 +243,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // On the imaging stack, the Astrometry button shows the stack's own star names: every detection,
   // named from Gaia and SIMBAD, and the catalog stars it missed (made by a job on first use). On a
   // raw frame it shows the target's catalog stars, placed only when the frame has a real solution.
-  // A star can only open in the Astronomy Manager when that display is turned on in the settings.
-  const { config: appConfig } = useAstrometrics();
-  const astronomyManagerEnabled = !appConfig || isDisplayEnabled(appConfig, 'Astronomy Manager');
   const isStackShown = Boolean(selectedFile && stackedImage && selectedFile === stackedImage);
   const stackIdentification = useStackIdentification(
     selectedTarget, isStackShown ? selectedFile : null, showAstrometryOverlay && isStackShown
@@ -648,7 +643,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       onToggleAstrometryOverlay={handleToggleAstrometryOverlay}
       isLoadingOverlay={isLoadingOverlay}
       overlayReason={overlayReason}
-      onStarClick={astronomyManagerEnabled ? handleStarClick : undefined}
+      onStarClick={handleStarClick}
       selectedStarId={selectedStarId}
       stackOrientation={stackOrientation}
       blink={blink}

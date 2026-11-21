@@ -41,3 +41,25 @@ export const isDisplayEnabled = (
 /** Return every display mode that is currently enabled, in dropdown order. */
 export const getEnabledDisplayModes = (config: Record<string, Record<string, unknown>>): string[] =>
   DISPLAY_DEFINITIONS.filter((d) => isDisplayEnabled(config, d.mode)).map((d) => d.mode);
+
+/**
+ * Decide which display to show instead of `mode`, or none when `mode` may stay.
+ *
+ * A turned-off display stays shown for this visit when the person asked for it
+ * (for example by clicking a star that opens in the Astronomy Manager). The
+ * saved settings are never changed. Otherwise a turned-off display is replaced
+ * by the first enabled one.
+ *
+ * @param config The app settings.
+ * @param mode The display being shown.
+ * @param requestedMode The display the person last asked to open on purpose, or null.
+ * @returns The display to switch to, or null to keep `mode`.
+ */
+export const fallbackDisplayMode = (
+  config: Record<string, Record<string, unknown>>,
+  mode: string,
+  requestedMode: string | null
+): string | null => {
+  if (isDisplayEnabled(config, mode) || mode === requestedMode) return null;
+  return DISPLAY_DEFINITIONS.find((d) => isDisplayEnabled(config, d.mode))?.mode || 'Image Viewer';
+};

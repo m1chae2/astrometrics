@@ -312,6 +312,18 @@ DECISIONS = {
     "planning_lookup_coordinates": ToolDecision(
         "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
     ),
+    "processing_get_stack_identification": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution "
+        "it came from. Writes nothing.",
+    ),
+    "processing_identify_stack": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected "
+        "stars, as a background job. Writes the solution into the stack and its viewer copy and saves the "
+        "identification; raw frames are never written.",
+        "process",
+    ),
     "processing_stack_summary": ToolDecision(
         "keep",
         "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "

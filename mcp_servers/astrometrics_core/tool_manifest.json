@@ -72,6 +72,20 @@
       "interim_block": "",
       "note": "Internal concurrency lock exposed by reflection."
     },
+    "processing_get_stack_identification": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution it came from. Writes nothing."
+    },
+    "processing_identify_stack": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected stars, as a background job. Writes the solution into the stack and its viewer copy and saves the identification; raw frames are never written."
+    },
     "processing_measure_noise": {
       "tool_class": "change-data",
       "category": "image-processing",

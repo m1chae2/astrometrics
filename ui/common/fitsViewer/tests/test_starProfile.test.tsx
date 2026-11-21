@@ -915,7 +915,7 @@ describe('StarProfilePanel', () => {
     expect(traces[2].x).toEqual([-1.6, 1.6]);
     expect(traces[2].y).toEqual([445, 445]);
     expect(screen.getByText(PLOT_CAPTION)).toBeTruthy();
-    expect(PLOT_CAPTION).toBe('Pixels along the dashed line');
+    expect(PLOT_CAPTION).toBe('Along the dashed line');
     fireEvent.focus(screen.getByRole('button', { name: 'About the cut angle' }));
     expect(screen.getByRole('note').textContent).toBe(CUT_ANGLE_EXPLANATION);
   });
@@ -1013,12 +1013,12 @@ describe('StarProfilePanel', () => {
     expect(Number(screen.getByTestId('star-profile-plot-annotation-y').textContent)).toBeCloseTo(Math.log10(445), 6);
   });
 
-  it('shows the Clipped chip with its reason as the tooltip, and the notes as one line', () => {
+  it('gives the clipped reason as the saturation row tooltip, and the notes as one line', () => {
     const measurement = makeMeasurement({ clipped: true, clipped_reason: 'Three pixels share the peak value.', color_note: 'Color image: channels averaged.' });
     render(
       <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} pictureNote="Already stretched." />
     );
-    expect(screen.getByText('Clipped').closest('[title]')?.getAttribute('title')).toBe('Three pixels share the peak value.');
+    expect(screen.getByTestId('star-profile-row-saturation').getAttribute('title')).toBe('Three pixels share the peak value.');
     expect(screen.getByTestId('star-profile-note').textContent).toBe('Color image: channels averaged. Already stretched.');
   });
 

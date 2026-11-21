@@ -196,6 +196,8 @@
   --heading-font-size: 22px;   /* dialog and page headings */
   --title-font-size: 24px;     /* view titles */
   --display-font-size: 28px;   /* the largest numbers and titles */
+  --star-card-label-width: 84px;   /* the label column of the star card's slider rows */
+  --star-card-plot-height: 150px;  /* the preferred height of the star card's plot */
 
   /* Named translucent surfaces (white or black over the panel color). */
   --surface-subtle: rgba(255, 255, 255, 0.04);    /* card header at rest */

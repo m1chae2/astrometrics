@@ -1,23 +1,22 @@
 /**
  * @file StarProfilePanel.tsx
- * @description The star profile panel of the FITS viewer, a star inspector card. It shows what the backend
- * measured for the star the user clicked: the width (FWHM) from the fit, a Clipped chip when the star is clipped,
- * the star's identity and a "Measurable here?" list (see StarInspector), and one plot shaped like a bell curve. The points are the real pixels along a straight cut through the star
- * (the angle is set with a slider). The curve is the fitted star shape, mirrored to both sides, with a
- * dashed line at half its height to show the width. The "Optics detail" link opens a view that plots the library's ring (the
- * brightness by direction with the neighbor stars left out), the smooth curve of its significant Fourier terms,
- * and a small bar chart of the size of each term, with a one-line summary.
+ * @description The star profile panel of the FITS viewer, a compact star card. It shows what the backend
+ * measured for the star the user clicked: the star's name, a stat strip and a "Measurable here?" list (see
+ * StarInspector), and one short plot shaped like a bell curve. The points are the real pixels along a straight
+ * cut through the star (the angle is set with a slider). The curve is the fitted star shape, mirrored to both
+ * sides, with a dashed line at half its height to show the width. The "Optics detail" button swaps the plot for a
+ * view of the library's ring (the brightness by direction with the neighbor stars left out), the smooth curve of
+ * its significant Fourier terms, and a small bar chart of the size of each term, with a one-line summary.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/Button';
 import { InfoButton } from '../components/InfoButton';
 import { Slider } from '../components/Slider';
-import { StatusChip } from '../components/StatusChip';
 import { BasePlot } from '../components/plotting/BasePlot';
 import { buildLayout, getVar, getVarAsNum } from '../utils/plotTools';
 import type { PlotlyTrace } from '../utils/plotTools';
 import type { ProfileFit, RingHarmonic, Spectrum, StarProfileMeasurement } from '../types/backendTypes';
-import { StarInspector } from './StarInspector';
+import { CloseStarButton, StarInspector } from './StarInspector';
 import type { StarProfileState } from './hooks/useStarProfile';
 import { rebuildCut } from './utils/starCut';
 import { describeRing, harmonicCurve, hasFewPixels, screenDirection } from './utils/starRing';
@@ -30,7 +29,7 @@ export const CUT_ANGLE_EXPLANATION = 'The dashed line on the image is the cut th
 export const SET_DISPLAY_TO_LINEAR_MESSAGE = 'Set Display to Linear to measure stars here.';
 
 /** The caption above the plot, which ties it to the dashed line on the image. */
-export const PLOT_CAPTION = 'Pixels along the dashed line';
+export const PLOT_CAPTION = 'Along the dashed line';
 
 /** The note shown when some direction bins hold few pixels. */
 export const FEW_PIXELS_NOTE = 'Few pixels per direction this close in';
@@ -425,50 +424,49 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
 
   return (
     <aside className="star-profile" aria-label="Star profile" data-testid="star-profile-panel">
-      <div className="star-profile__header">
-        {measurement ? (
-          <span
-            className={`star-profile__width${measurement.star_found ? '' : ' star-profile__width--plain'}`}
-            data-testid="star-profile-width"
-          >{describeWidth(measurement)}</span>
-        ) : (
+      {measurement ? (
+        <StarInspector
+          measurement={measurement}
+          starName={starName}
+          identity={identity}
+          frameWidthPx={frameWidthPx}
+          onOpenInManager={onOpenInManager}
+          widthText={describeWidth(measurement)}
+          onClose={onClose}
+        />
+      ) : (
+        <div className="star-profile__header">
           <span className="star-profile__title">Star profile</span>
-        )}
-        {measurement?.clipped && <StatusChip status="warning" label="Clipped" title={measurement.clipped_reason} />}
-        <Button variant="ghost" size="square" onClick={onClose} aria-label="Close star profile" title="Close star profile">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-          </svg>
-        </Button>
-      </div>
-      {measurement && (
-        <StarInspector measurement={measurement} starName={starName} identity={identity} frameWidthPx={frameWidthPx} onOpenInManager={onOpenInManager} />
+          <CloseStarButton onClose={onClose} />
+        </div>
       )}
       {followNote && <p className="star-profile__note" title={followNote.note} data-testid="star-profile-follow">{describeFollow(followNote.method)}</p>}
       {message}
       {measurement && (
         <div className={`star-profile__body${state.status === 'measuring' ? ' star-profile__body--updating' : ''}`}>
           {notes && <p className="star-profile__note" data-testid="star-profile-note">{notes}</p>}
-          <Button
-            size="small"
-            variant="ghost"
-            className="star-profile__optics-toggle"
-            aria-expanded={opticsOpen}
-            title="The ring of light around the star, for checking tracking and focus."
-            onClick={() => setOpticsOpen(!opticsOpen)}
-            data-testid="star-profile-optics-toggle"
-          >
-            {opticsOpen ? 'Hide optics detail' : 'Optics detail'}
-          </Button>
           <div
             className="star-profile__tabpanel"
             data-testid="star-profile-plots"
           >
             <div className="star-profile__plot-heading">
-              <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Mean brightness in the ring, by direction'}</span>
-              <Button size="small" pressed={logScale} variant={logScale ? 'default' : 'secondary'} title={LOG_SCALE_TOOLTIP} onClick={() => setLogScale(!logScale)}>
-                Log scale
-              </Button>
+              <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Ring brightness by direction'}</span>
+              <span className="star-profile__plot-tools">
+                <Button size="small" pressed={logScale} variant={logScale ? 'default' : 'secondary'} title={LOG_SCALE_TOOLTIP} onClick={() => setLogScale(!logScale)}>
+                  Log scale
+                </Button>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  className="star-profile__optics-toggle"
+                  aria-expanded={opticsOpen}
+                  title="The ring of light around the star, for checking tracking and focus."
+                  onClick={() => setOpticsOpen(!opticsOpen)}
+                  data-testid="star-profile-optics-toggle"
+                >
+                  {opticsOpen ? 'Hide optics detail' : 'Optics detail'}
+                </Button>
+              </span>
             </div>
             {tabId === 'line' ? (
               <ProfilePlot measurement={measurement} logScale={logScale} angleDegrees={cutAngleDegrees} halfLengthPx={cutHalfLengthPx} />
@@ -492,8 +490,8 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
               </>
             )}
           </div>
-          <div className="star-profile__angle">
-            <span>{`Cut angle ${cutAngleDegrees}°`}</span>
+          <div className="star-profile__slider-row">
+            <span className="star-profile__slider-label">{`Cut angle ${cutAngleDegrees}°`}</span>
             <Slider
               aria-label="Cut angle in degrees"
               min={0}
@@ -505,8 +503,8 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
             <InfoButton text={CUT_ANGLE_EXPLANATION} label="About the cut angle" />
           </div>
           {tabId === 'line' ? (
-            <div className="star-profile__angle">
-              <span>{`Cut length ${Math.round(cutLengthPx ?? measurement.cut_half_length_px)} px`}</span>
+            <div className="star-profile__slider-row">
+              <span className="star-profile__slider-label">{`Cut length ${Math.round(cutLengthPx ?? measurement.cut_half_length_px)} px`}</span>
               <Slider
                 aria-label="Cut length in pixels"
                 min={CUT_LENGTH_RANGE.min}
@@ -517,8 +515,8 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
               />
             </div>
           ) : (
-            <div className="star-profile__angle">
-              <span>{`Ring ${Math.round(ringLimits.innerPx)} to ${Math.round(ringLimits.outerPx)} px`}</span>
+            <div className="star-profile__slider-row">
+              <span className="star-profile__slider-label">{`Ring ${Math.round(ringLimits.innerPx)} to ${Math.round(ringLimits.outerPx)} px`}</span>
               <span data-testid="star-profile-ring-neighbors">{describeNeighbors(measurement.ring_masked_neighbor_count)}</span>
             </div>
           )}

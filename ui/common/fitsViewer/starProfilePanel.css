@@ -1,20 +1,20 @@
 /*
- * The star profile panel: a card over the top right of the FITS viewer. It has the same
+ * The star profile panel: a compact card over the top right of the FITS viewer. It has the same
  * background and corners as the app's other panels, and is as tall as its contents, so the
  * image shows below it. In a short viewer it stops at the bottom edge and the plot gives up
- * height first.
+ * height first. Every gap is a spacing token, and every block shares the card's left edge.
  */
 .star-profile {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--space-2);
+  right: var(--space-2);
   z-index: 5;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: min(360px, 90%);
-  max-height: calc(100% - 16px);
-  padding: 8px;
+  gap: var(--space-2);
+  width: min(340px, 90%);
+  max-height: calc(100% - 2 * var(--space-2));
+  padding: var(--space-2) var(--space-3) var(--space-3);
   overflow: hidden;
   box-sizing: border-box;
   border: 1px solid var(--border-subtle);
@@ -24,18 +24,77 @@
   box-shadow: var(--shadow-card);
 }
 
+/* The name and the close button, on one row. */
 .star-profile__header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+/* The close button's top and right sit in the card's padding, so the name lines up with the rest. */
+.star-profile__close {
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-1)) calc(-1 * var(--space-1)) 0;
 }
 
 .star-profile__title,
-.star-profile__width {
+.star-profile__name {
   flex: 1;
   min-width: 0;
+  margin: 0;
+  font-size: var(--compact-font-size);
   font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* The identity block: the header with the muted line under it. */
+.star-profile__identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* One muted line: the sky position, the magnitude, the type chips and the link to the Astronomy Manager. */
+.star-profile__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+}
+
+.star-profile__position,
+.star-profile__magnitude {
+  font-family: var(--font-family-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.star-profile__open {
+  margin-left: auto;
+}
+
+/* The key numbers, in one strip. */
+.star-profile__stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset-strong);
+  font-size: var(--small-font-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.star-profile__width {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--compact-font-size);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* The reason a profile is not a star: plain text, since it is not a failure. */
@@ -43,12 +102,12 @@
   font-weight: normal;
 }
 
-/* The body holds the tabs, the plot and the sliders. */
+/* The body holds the plot and the sliders. */
 .star-profile__body {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   min-height: 0;
 }
 
@@ -57,11 +116,8 @@
   opacity: 0.6;
 }
 
-.star-profile__message,
-/* The measured star's name, at the top of the panel. */
-.star-profile__name {
+.star-profile__message {
   margin: 0;
-  font-weight: 600;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -72,23 +128,26 @@
   color: var(--text-muted);
 }
 
-.star-profile__message {
-  color: var(--text-primary);
-}
-
 .star-profile__message--error {
   color: var(--danger-red);
 }
 
-.star-profile__angle {
+/* A slider row: the label and its value on the left in a fixed column, so the sliders line up. */
+.star-profile__slider-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   font-size: var(--small-font-size);
   white-space: nowrap;
 }
 
-.star-profile__angle input {
+.star-profile__slider-label {
+  flex: 0 0 var(--star-card-label-width);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.star-profile__slider-row input {
   flex: 1;
   min-width: 0;
 }
@@ -97,11 +156,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-1);
+}
+
+.star-profile__plot-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .star-profile__caption {
   font-size: var(--small-font-size);
+  font-weight: 600;
   color: var(--text-muted);
 }
 
@@ -109,7 +175,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   min-height: 0;
 }
 
@@ -119,8 +185,8 @@
 
 /* The bar chart of the Fourier terms is short and fixed in height, so the ring plot keeps the room. */
 .star-profile__plot-area--bars {
-  flex: 0 0 110px;
-  min-height: 110px;
+  flex: 0 0 100px;
+  min-height: 100px;
 }
 
 .star-profile__summary {
@@ -136,10 +202,10 @@
   pointer-events: none;
 }
 
-/* The plot is 260 px tall when there is room and shrinks to 140 px in a short viewer. */
+/* The plot is short: it takes its preferred height when there is room and shrinks in a short viewer. */
 .star-profile__plot-area {
-  flex: 1 1 260px;
-  min-height: 140px;
+  flex: 1 1 var(--star-card-plot-height);
+  min-height: 110px;
 }
 
 /* The marker drawn on the image while the panel is open: a ring at the center and the cut line. */
@@ -251,33 +317,17 @@
   pointer-events: none;
 }
 
-/* The identity line: the name, the magnitude, the type chips and the link to the Astronomy Manager. */
-.star-profile__identity {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.star-profile__identity .star-profile__name {
-  flex: 1 1 auto;
-}
-
-.star-profile__magnitude {
-  font-size: var(--small-font-size);
-  color: var(--text-muted);
-}
-
+/* "Measurable here?": a small icon, the check, and its value on the right. */
 .star-profile__measurable {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .star-profile__rows {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -286,16 +336,19 @@
 .star-profile__row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   font-size: var(--small-font-size);
 }
 
 .star-profile__row-label {
+  flex: 0 0 auto;
   font-weight: 600;
 }
 
 .star-profile__row-value {
+  flex: 1;
   min-width: 0;
+  text-align: right;
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }

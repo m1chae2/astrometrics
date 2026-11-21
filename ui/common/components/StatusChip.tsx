@@ -18,6 +18,11 @@ export interface StatusChipProps {
     shortLabel?: string;
     /** The tooltip. With `shortLabel` it defaults to the full label. */
     title?: string;
+    /**
+     * Draws only the icon, as a small round chip for tight lists. The word stays in the page for screen readers
+     * and in the tooltip.
+     */
+    compact?: boolean;
 }
 
 /** Inline SVG icons, one shape per status so the shapes differ as well as the colors. */
@@ -34,12 +39,12 @@ const STATUS_ICON_PATHS: Record<StatusChipStatus, React.ReactNode> = {
  * @param props See {@link StatusChipProps}.
  * @return The chip element.
  */
-export const StatusChip: React.FC<StatusChipProps> = ({ status, label, shortLabel, title }) => (
+export const StatusChip: React.FC<StatusChipProps> = ({ status, label, shortLabel, title, compact = false }) => (
     <Badge
-        title={title ?? (shortLabel ? label : undefined)}
+        title={title ?? (shortLabel || compact ? label : undefined)}
         {...(shortLabel ? { role: 'img', 'aria-label': label } : {})}
         tone={status}
-        className={`status-chip status-chip--${status}`}
+        className={`status-chip status-chip--${status}${compact ? ' status-chip--compact' : ''}`}
         data-status={status}
         icon={(
             <svg className="badge__icon status-chip__icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false">

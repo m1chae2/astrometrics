@@ -55,6 +55,18 @@ function neighborWords(count: number): string {
 }
 
 /**
+ * Says how round the star is, for the stat strip.
+ *
+ * @param measurement The backend's answer.
+ * @returns "Round", "Oval 29%", or null when the star was not found.
+ */
+export function describeRoundness(measurement: StarProfileMeasurement): string | null {
+  if (!measurement.star_found) return null;
+  const oval = measurement.ring_harmonics.find((term) => term.order === 2 && term.significant && term.amplitude_debiased >= NOTICEABLE_OVAL_AMPLITUDE);
+  return oval ? `Oval ${(oval.amplitude_debiased * 100).toFixed(0)}%` : 'Round';
+}
+
+/**
  * Builds the rows of the "Measurable here?" list.
  *
  * @param measurement The backend's answer for the star.

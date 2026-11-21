@@ -6,7 +6,8 @@ import type { FitsRendererHandle } from './FitsRenderer';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { StretchParameters } from '../types/backendTypes';
 import type { StackOrientation } from './displayTurn';
-import type { FocusStar } from './FitsRenderer';
+import type { FocusStar, RestoreView } from './FitsRenderer';
+import type { SavedViewport } from '../utils/imageViewStore';
 
 export type { FitsRendererHandle, FocusStar };
 
@@ -65,6 +66,10 @@ interface Props {
   stackOrientation?: StackOrientation | null;
   /** A star to put at the center of the view whenever a picture is drawn; see `FitsRenderer`. */
   focusStar?: FocusStar | null;
+  /** A saved view to put back; see `FitsRenderer`. */
+  restoreView?: RestoreView | null;
+  /** Called when the zoom or the point at the center changes; see `FitsRenderer`. */
+  onViewChange?: (view: SavedViewport) => void;
 }
 
 /**
@@ -94,7 +99,9 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   noPixelDataMessage,
   starProfilePictureNote,
   stackOrientation,
-  focusStar
+  focusStar,
+  restoreView,
+  onViewChange
 }, ref) => {
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
   if (imageUrl || imageBlob || previewBlob) {
@@ -124,6 +131,8 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         starProfilePictureNote={starProfilePictureNote}
         stackOrientation={stackOrientation}
         focusStar={focusStar}
+        restoreView={restoreView}
+        onViewChange={onViewChange}
       />
     );
   }

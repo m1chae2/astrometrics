@@ -34,6 +34,8 @@ function renderPanel(blink: BlinkState | undefined, shownFile: string | null = '
     return render(
         <ViewerPanelContainer
             fitsRendererRef={{ current: null }}
+            detectionsEnabled={false}
+            onDetectionsChange={() => undefined}
             imageUrl={null}
             imageBlob={null}
             imageFrameInfo={null}

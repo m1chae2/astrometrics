@@ -3,9 +3,11 @@
  * @description Tests that the star card lists the star's other names: a few shown, the rest behind "+N more".
  */
 import React from 'react';
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { StarSummaryCard } from '../components/StarSummaryCard';
+import { clearImageView, saveImageView } from '../../common/utils/imageViewStore';
+import { peekHandoffs } from '../../common/utils/displayHandoffStore';
 import { describeAliases } from '../../common/utils/starDisplayFormat';
 
 describe('describeAliases', () => {
@@ -32,5 +34,28 @@ describe('StarSummaryCard aliases', () => {
   it('shows no line when the star has no other names', () => {
     render(<StarSummaryCard starId="Vega" astronomyData={{ id: 'Vega', name: 'Vega' }} />);
     expect(screen.queryByTestId('star-aliases')).toBeNull();
+  });
+});
+
+describe('StarSummaryCard Back to image', () => {
+  beforeEach(() => {
+    clearImageView();
+    window.localStorage.clear();
+  });
+
+  it('shows no button when the person did not come from the Image Processing picture', () => {
+    render(<StarSummaryCard starId="Vega" astronomyData={{ id: 'Vega', name: 'Vega' }} />);
+    expect(screen.queryByRole('button', { name: 'Back to image' })).toBeNull();
+  });
+
+  it('shows the button after a star was opened from the picture, and asks Image Processing to put the view back', () => {
+    saveImageView({
+      target: 'M 81', file: '/stack/M81.fits', displayMode: 'linear', astrometry: true, detections: false,
+      view: { x: 0.4, y: 0.5, zoomOverFit: 3, turn: 0 }, returnPending: true, arrivedFromStar: 'Vega',
+    });
+    render(<StarSummaryCard starId="Vega" astronomyData={{ id: 'Vega', name: 'Vega' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Back to image' }));
+    expect(window.localStorage.getItem('appMode')).toBe('Image Processing');
+    expect(peekHandoffs('Image Processing', 'returnToImage')).toHaveLength(1);
   });
 });

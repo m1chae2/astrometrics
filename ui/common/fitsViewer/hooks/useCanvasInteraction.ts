@@ -8,6 +8,23 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, RefObject } from 'react';
 import { clamp, overlayTransformBetween } from '../utils/transformUtils';
 
+/** The share of the window the fitted picture covers, which leaves a small margin. */
+export const FIT_MARGIN = 0.95;
+
+/**
+ * Gives the zoom that fits a whole picture in a window.
+ *
+ * @param containerWidth The window's width in screen pixels.
+ * @param containerHeight The window's height in screen pixels.
+ * @param drawnWidth The picture's width as drawn.
+ * @param drawnHeight The picture's height as drawn.
+ * @returns The zoom, or 0 while the window or the picture has no size.
+ */
+export function fitScaleFor(containerWidth: number, containerHeight: number, drawnWidth: number, drawnHeight: number): number {
+    if (containerWidth <= 0 || containerHeight <= 0 || drawnWidth <= 0 || drawnHeight <= 0) return 0;
+    return Math.min(containerWidth / drawnWidth, containerHeight / drawnHeight) * FIT_MARGIN;
+}
+
 interface InteractionState {
     zoom: number;
     panX: number;
@@ -335,9 +352,7 @@ export const useCanvasInteraction = (
         // view; the resize observer below fits again once there is a real size.
         if (cW === 0 || cH === 0) return;
 
-        const scaleX = cW / drawnSize.w;
-        const scaleY = cH / drawnSize.h;
-        const fitScale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave a small margin
+        const fitScale = fitScaleFor(cW, cH, drawnSize.w, drawnSize.h);
         userAdjustedViewRef.current = false;
 
         zoomRef.current = fitScale;
@@ -428,7 +443,6 @@ export const useCanvasInteraction = (
     // image first loads (the panels settle after the app starts), which
     // leaves the image fitted to a smaller box than the one it ends up in.
     // So refit on any resize until the user has zoomed or panned by hand.
-    const wasZeroSizeRef = useRef(true);
     useEffect(() => {
         const containerElement = containerRef.current;
         // Older WebViews may lack ResizeObserver; the view is then fitted on load only.
@@ -438,11 +452,12 @@ export const useCanvasInteraction = (
             const entry = entries[0];
             if (!entry) return;
             const isZeroSize = entry.contentRect.width === 0 || entry.contentRect.height === 0;
-            const shouldRefit = wasZeroSizeRef.current || !userAdjustedViewRef.current;
+            // A view the person set by hand is kept when the window comes back from being hidden (the
+            // person went to another screen and returned); only the automatic fit follows the size.
+            const shouldRefit = !userAdjustedViewRef.current;
             if (!isZeroSize && shouldRefit && drawnSize.w > 0 && drawnSize.h > 0) {
                 resetView();
             }
-            wasZeroSizeRef.current = isZeroSize;
         });
         observer.observe(containerElement);
         return () => observer.disconnect();

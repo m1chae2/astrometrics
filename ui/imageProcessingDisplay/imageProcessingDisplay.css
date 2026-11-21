@@ -129,6 +129,11 @@
   touch-action: none;
 }
 
+/* Held back while a saved view waits to be put back, so the fitted view does not show first. */
+.fits-renderer__canvas-container--restoring {
+  visibility: hidden;
+}
+
 .fits-renderer__canvas {
   display: block;
   background: var(--grey-darker, var(--grey-darkest));

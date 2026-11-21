@@ -15,6 +15,8 @@ import type { StackOrientation } from '../../common/fitsViewer/displayTurn';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
 import type { BlinkState } from '../hooks/useBlinkPair';
 import type { BlinkFocus } from '../utils/blinkView';
+import type { RestoreView } from '../../common/fitsViewer/FitsRenderer';
+import type { SavedViewport } from '../../common/utils/imageViewStore';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */
 
@@ -48,6 +50,14 @@ interface ViewerPanelContainerProps {
   shownFile?: string | null;
   /** The star to center in the picture on screen, from Blink. */
   focusStar?: BlinkFocus | null;
+  /** True while the Detections overlay is on. */
+  detectionsEnabled: boolean;
+  /** Called when the Detections switch is changed. */
+  onDetectionsChange: (enabled: boolean) => void;
+  /** A saved view for the viewer to put back, or null. */
+  restoreView?: RestoreView | null;
+  /** Called when the viewer's zoom or center changes. */
+  onViewChange?: (view: SavedViewport) => void;
 
   // File Browser Props
   allFiles: any[];
@@ -85,12 +95,11 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   autoPanTrigger, disableStretch, displayMode, onDisplayModeChange,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
   selectedStarId, stackOrientation, blink, shownFile, focusStar,
+  detectionsEnabled, onDetectionsChange, restoreView, onViewChange,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame, onOpenImageControls
 }) => {
-  // True while the image shows a marker at every star the astrometry run's star finder detects.
-  const [detectionsEnabled, setDetectionsEnabled] = useState(false);
   // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
   const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:imageProcessing:browserCollapsed', false);
 
@@ -113,7 +122,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         headerContent={
           <div className="fits-header-controls">
             <DisplayModeSelect mode={displayMode} onChange={onDisplayModeChange} />
-            <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
+            <DetectionsToggle enabled={detectionsEnabled} onChange={onDetectionsChange} />
             <Button
               size="small"
               active={showAstrometryOverlay}
@@ -183,6 +192,8 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           resolveMeasurePath={resolveMeasurePath}
           acceptPrefetch={Boolean(blink?.ready)}
           focusStar={focusStar}
+          restoreView={restoreView}
+          onViewChange={onViewChange}
         />
       </SectionPanel>
       {browserCollapsed ? null : (

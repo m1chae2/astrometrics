@@ -5,13 +5,14 @@
  */
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { useFitsLoader, ParsedFitsData } from './hooks/useFitsLoader';
-import { useCanvasInteraction } from './hooks/useCanvasInteraction';
+import { fitScaleFor, useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
 import { usePreviewBitmap } from './hooks/usePreviewBitmap';
 import { useBitmapTurn } from './hooks/useBitmapTurn';
 import { PixelReadout } from './PixelReadout';
 import { StarProfilePanel, SET_DISPLAY_TO_LINEAR_MESSAGE } from './StarProfilePanel';
 import type { StarProfileView } from './StarProfilePanel';
+import type { SavedViewport } from '../utils/imageViewStore';
 import { useStarProfile } from './hooks/useStarProfile';
 import { useDetections } from './hooks/useDetections';
 import { useStarIdentity } from './hooks/useStarIdentity';
@@ -211,7 +212,28 @@ export interface FitsRendererProps {
    * file that is on screen.
    */
   focusStar?: FocusStar | null;
+  /**
+   * A view to put back, for example when the person returns to this screen. It is applied once for each key,
+   * as soon as a picture is drawn, and the picture stays hidden until then so the fitted view does not show first.
+   */
+  restoreView?: RestoreView | null;
+  /** Called after the view changes (zoom or pan) once a picture is drawn, with where the view is now. */
+  onViewChange?: (view: SavedViewport) => void;
 }
+
+/** A view to put back, with a key that changes for each request. */
+export interface RestoreView {
+  /** Names the request. The view is applied once for each key. */
+  key: string;
+  /** The point at the center and the zoom. */
+  view: SavedViewport;
+}
+
+/** The longest, in milliseconds, the picture stays hidden while it waits for a view to be put back. */
+export const RESTORE_HIDE_LIMIT_MS = 1500;
+
+/** For this long, in milliseconds, after a view is put back, a new drawn size puts it back again. */
+export const RESTORE_REAPPLY_WINDOW_MS = 800;
 
 export interface FitsRendererHandle {
   zoomIn: () => void;
@@ -247,7 +269,9 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     noPixelDataMessage = SET_DISPLAY_TO_LINEAR_MESSAGE,
     starProfilePictureNote,
     stackOrientation = null,
-    focusStar = null
+    focusStar = null,
+    restoreView = null,
+    onViewChange,
   } = props;
 
   // Local State
@@ -408,6 +432,53 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     }
     return () => { cancelled = true; };
   }, [focusStar, mainDrawn, drawnObject, drawnSize.w, drawnSize.h, parsedData, turn, placeCenter, workerRef]);
+
+  // Put a saved view back (the person returned to this screen): the point at the center and the zoom.
+  // A picture that is not drawn yet stays hidden until the view is in place, so the fitted view never shows first.
+  const restoreKey = restoreView?.key ?? null;
+  const [restoreRequest, setRestoreRequest] = useState<{ key: string; hide: boolean } | null>(null);
+  if (restoreKey !== (restoreRequest?.key ?? null)) {
+    setRestoreRequest(restoreKey ? { key: restoreKey, hide: !firstFrameDrawn } : null);
+  }
+  const [appliedRestoreKey, setAppliedRestoreKey] = useState<string | null>(null);
+  const [timedOutRestoreKey, setTimedOutRestoreKey] = useState<string | null>(null);
+  const restoreWaiting = restoreKey !== null && appliedRestoreKey !== restoreKey && timedOutRestoreKey !== restoreKey;
+  const restoreHidesPicture = restoreWaiting && Boolean(restoreRequest?.hide);
+  const lastRestoreRef = useRef<{ key: string; w: number; h: number; at: number } | null>(null);
+  useEffect(() => {
+    if (!restoreView || !firstFrameDrawn || drawnSize.w <= 0 || drawnSize.h <= 0) return;
+    const container = containerRef.current;
+    const fitScale = container ? fitScaleFor(container.clientWidth, container.clientHeight, drawnSize.w, drawnSize.h) : 0;
+    if (fitScale <= 0) return;
+    const last = lastRestoreRef.current;
+    const sameRequest = last !== null && last.key === restoreView.key;
+    // A change of the drawn size just after the view was put back (the preview replaced by the full image, or the first
+    // fit) is put back again; a change long after it is the person's own doing and is left alone.
+    if (sameRequest && last.w === drawnSize.w && last.h === drawnSize.h) return;
+    if (sameRequest && Date.now() - last.at > RESTORE_REAPPLY_WINDOW_MS) return;
+    lastRestoreRef.current = { key: restoreView.key, w: drawnSize.w, h: drawnSize.h, at: sameRequest ? last.at : Date.now() };
+    const { x, y, zoomOverFit } = restoreView.view;
+    placeCenter({ x, y }, { force: true, scale: zoomOverFit * fitScale });
+    setAppliedRestoreKey(restoreView.key);
+  }, [restoreView, firstFrameDrawn, drawnSize.w, drawnSize.h, placeCenter]);
+  // A view that cannot be put back (the picture never draws) must not leave the picture hidden.
+  useEffect(() => {
+    if (!restoreKey || !restoreHidesPicture) return undefined;
+    const timer = window.setTimeout(() => setTimedOutRestoreKey(restoreKey), RESTORE_HIDE_LIMIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [restoreKey, restoreHidesPicture]);
+
+  // Tell the caller where the view is, so it can be saved and put back later. Nothing is sent while a saved view waits to be put back.
+  const onViewChangeRef = useRef(onViewChange);
+  onViewChangeRef.current = onViewChange;
+  useEffect(() => {
+    if (!firstFrameDrawn || restoreWaiting) return;
+    const container = containerRef.current;
+    const fitScale = container ? fitScaleFor(container.clientWidth, container.clientHeight, drawnSize.w, drawnSize.h) : 0;
+    const center = getCenterFraction();
+    if (!center || fitScale <= 0 || zoom <= 0) return;
+    onViewChangeRef.current?.({ x: center.x, y: center.y, zoomOverFit: zoom / fitScale, turn });
+  }, [firstFrameDrawn, restoreWaiting, zoom, panX, panY, drawnSize.w, drawnSize.h, turn, getCenterFraction]);
 
   // Disable automatic stretching for stacked images.
   const isStacked = disableStretch ?? (
@@ -800,7 +871,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     <div className="fits-renderer">
       <div
         ref={containerRef}
-        className="fits-renderer__canvas-container"
+        className={`fits-renderer__canvas-container${restoreHidesPicture ? ' fits-renderer__canvas-container--restoring' : ''}`}
         onPointerDown={(event) => { pressStartRef.current = { x: event.clientX, y: event.clientY }; onPointerDown(event); }}
         onPointerMove={(event) => { onPointerMove(event); handleHoverMove(event); }}
         onPointerUp={(event) => { onPointerUp(event); handleStarRelease(event); }}
@@ -1079,6 +1150,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.resolveMeasurePath === nextProps.resolveMeasurePath &&
     prevProps.noPixelDataMessage === nextProps.noPixelDataMessage &&
     prevProps.starProfilePictureNote === nextProps.starProfilePictureNote &&
-    prevProps.stackOrientation === nextProps.stackOrientation
+    prevProps.stackOrientation === nextProps.stackOrientation &&
+    prevProps.restoreView === nextProps.restoreView
   );
 });

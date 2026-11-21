@@ -17,6 +17,8 @@ import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { Button } from '../../common/components/Button';
 import { Badge } from '../../common/components/Badge';
 import { StarBadges } from '../../common/components/StarBadges';
+import { useArrivedFromImage } from '../../common/hooks/useArrivedFromImage';
+import { RETURN_TO_IMAGE_ACTION } from '../../common/utils/imageViewStore';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -124,6 +126,8 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     starId,
 }) => {
     const targetContext = useOptionalTargetContext();
+    // Set when the person came here by clicking a star in the Image Processing picture.
+    const arrivedFromImage = useArrivedFromImage();
 
     if (!starId && !astronomyData) {
         return null;
@@ -144,6 +148,18 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     return (
         <div className="star-summary-card">
             <div className="star-summary-card__header">
+                {arrivedFromImage !== null && (
+                    <Button
+                        variant="secondary"
+                        size="small"
+                        title="Go back to the same place in the Image Processing picture"
+                        onClick={() => {
+                            void navigateToElement({ targetDisplay: 'Image Processing', action: RETURN_TO_IMAGE_ACTION, payload: null });
+                        }}
+                    >
+                        Back to image
+                    </Button>
+                )}
                 <span className="star-summary-card__title">{name}</span>
                 <StarBadges star={astronomyData ? { ...astronomyData, spectralType } : null} />
                 {canLocate && (

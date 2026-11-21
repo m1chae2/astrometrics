@@ -24,7 +24,13 @@ import { reportError } from '../common/utils/reportError';
 import { navigateToElement } from '../common/utils/displayCoordinator';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { Button } from '../common/components/Button';
-import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
+import { peekHandoffs, useHandoffConsumer } from '../common/utils/displayHandoffStore';
+import {
+  loadImageView, markImageViewReturned, RETURN_TO_IMAGE_ACTION, saveImageView,
+} from '../common/utils/imageViewStore';
+import type { SavedImageView, SavedViewport } from '../common/utils/imageViewStore';
+import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
+import type { DisplayMode } from '../common/fitsViewer/displayMode';
 import { useStackIdentification } from './hooks/useStackIdentification';
 
 /**
@@ -67,6 +73,9 @@ export const ImageProcessingDisplay: React.FC = () => {
     </ImageProcessingProvider>
   );
 };
+
+/** How long, in milliseconds, the view must rest before it is written to storage. */
+const SAVE_VIEW_DELAY_MS = 300;
 
 /**
  * Inner component that consumes context.
@@ -178,6 +187,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
     'Image Processing',
     'targetSelected',
     (raw) => {
+      // Opening a target on purpose wins over the view saved when the screen was left.
+      markImageViewReturned();
       const targetId = typeof raw === 'string' ? raw : raw?.targetId;
       if (targetId) {
         setFilterText('');
@@ -310,6 +321,85 @@ const ImageProcessingDisplayInner: React.FC = () => {
     setShowAstrometryOverlay(true);
   }, [showAstrometryOverlay, selectedTarget, isStackShown, setShowAstrometryOverlay]);
 
+  // --- The saved view: leaving this screen and coming back lands on the same spot ---
+  // The Detections switch lives here, so it can be saved with the rest of the view.
+  const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+  // Where the view of the picture is now, as reported by the viewer.
+  const latestViewRef = useRef<SavedViewport | null>(null);
+  // What would be saved if the screen were left now. It is rewritten on every render.
+  const snapshotRef = useRef<Omit<SavedImageView, 'view' | 'returnPending' | 'arrivedFromStar'>>({
+    target: null, file: null, displayMode: 'auto-stretch', astrometry: false, detections: false,
+  });
+  useEffect(() => {
+    snapshotRef.current = {
+      target: selectedTarget || null,
+      file: selectedFile,
+      displayMode,
+      astrometry: showAstrometryOverlay,
+      detections: detectionsEnabled,
+    };
+  });
+  const saveTimerRef = useRef<number | null>(null);
+  /**
+   * Writes the saved view now. Nothing is written before a target and a file are chosen, so a screen that has
+   * not settled yet cannot replace a good record.
+   *
+   * @param options `returnPending` is true when the screen is being left; `arrivedFromStar` names the star that
+   *   was opened from the picture (left out, the star already recorded is kept while the screen is being left).
+   */
+  const persistView = React.useCallback((options: { returnPending: boolean; arrivedFromStar?: string | null }) => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const snapshot = snapshotRef.current;
+    if (!snapshot.target || !snapshot.file) return;
+    const arrivedFromStar = options.arrivedFromStar !== undefined
+      ? options.arrivedFromStar
+      : options.returnPending ? loadImageView()?.arrivedFromStar ?? null : null;
+    saveImageView({ ...snapshot, view: latestViewRef.current, returnPending: options.returnPending, arrivedFromStar });
+  }, []);
+  // The viewer reports each change of zoom or center; the record is written once the view rests.
+  const handleViewChange = React.useCallback((view: SavedViewport) => {
+    latestViewRef.current = view;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => persistView({ returnPending: false }), SAVE_VIEW_DELAY_MS);
+  }, [persistView]);
+
+  // A view to put back, waiting for the target and its files; then the request handed to the viewer.
+  const [pendingRestore, setPendingRestore] = useState<SavedImageView | null>(null);
+  const [restoreView, setRestoreView] = useState<RestoreView | null>(null);
+  const restoreCountRef = useRef(0);
+  const selectedTargetRef = useRef(selectedTarget);
+  const setSelectedTargetRef = useRef(setSelectedTarget);
+  useEffect(() => {
+    selectedTargetRef.current = selectedTarget;
+    setSelectedTargetRef.current = setSelectedTarget;
+  });
+  const beginRestore = React.useCallback((saved: SavedImageView) => {
+    markImageViewReturned();
+    if (saved.target && saved.target !== selectedTargetRef.current) setSelectedTargetRef.current(saved.target);
+    setPendingRestore(saved);
+  }, []);
+
+  // When this screen is shown (on first mount, or again after another screen), put back the view that was
+  // saved when it was left. When it is hidden, save the view. An explicit request to open a target wins over the saved view.
+  useEffect(() => {
+    const saved = loadImageView();
+    if (saved?.returnPending) {
+      if (peekHandoffs('Image Processing', 'targetSelected').length > 0) markImageViewReturned();
+      else beginRestore(saved);
+    }
+    return () => persistView({ returnPending: true });
+  }, [beginRestore, persistView]);
+
+  // The "Back to image" button of the Astronomy Manager asks for the view too; this also works when this
+  // screen is already showing (in another window, for example).
+  useHandoffConsumer<null>('Image Processing', RETURN_TO_IMAGE_ACTION, () => {
+    const saved = loadImageView();
+    if (saved) beginRestore(saved);
+  });
+
   /**
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
    * Hands off the selected star and navigates to the Astronomy Display.
@@ -319,6 +409,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (!starId) return;
 
     setSelectedStarId(starId);
+    // Remember the view, so the "Back to image" button (or any way back) lands on the same spot.
+    persistView({ returnPending: true, arrivedFromStar: starId });
     try {
       localStorage.setItem('astrometrics:imageProcessingSelectedStar', starId);
       localStorage.setItem('planetariumSelectedStar', starId);
@@ -345,7 +437,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
         }
       }
     });
-  }, []);
+  }, [persistView]);
 
   // Merge remote targets into the list if they don't exist locally
   const allItems = useMemo(() => {
@@ -442,6 +534,32 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
 
 
+  // Put the saved view back once its target and files are ready: the file, the display mode, the overlays,
+  // and (through the viewer) the zoom and the point at the center.
+  React.useEffect(() => {
+    if (!pendingRestore || isLoadingFiles) return;
+    if (pendingRestore.target && selectedTarget !== pendingRestore.target) return;
+    const saved = pendingRestore;
+    const fileKnown = saved.file !== null && (
+      saved.file === stackedImage || saved.file === stackedSpectralTarget || allFiles.some((file) => file.path === saved.file)
+    );
+    if (saved.file && fileKnown) {
+      // The saved file is the person's own choice and is not replaced by the default.
+      pickedByUserRef.current = true;
+      stackShownRef.current = true;
+      setSelectedFile(saved.file);
+    }
+    if (saved.displayMode === 'linear' || saved.displayMode === 'auto-stretch') setDisplayMode(saved.displayMode as DisplayMode);
+    setShowAstrometryOverlay(saved.astrometry);
+    setDetectionsEnabled(saved.detections);
+    latestViewRef.current = saved.view;
+    if (saved.view && fileKnown) {
+      restoreCountRef.current += 1;
+      setRestoreView({ key: `restore-${restoreCountRef.current}`, view: saved.view });
+    }
+    setPendingRestore(null);
+  }, [pendingRestore, isLoadingFiles, selectedTarget, allFiles, stackedImage, stackedSpectralTarget, setSelectedFile, setDisplayMode]);
+
   const handleAddImages = async (): Promise<void> => {
     if (!selectedTarget) return;
     try {
@@ -531,6 +649,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
       blink={blink}
       shownFile={blink.shownPath}
       focusStar={blink.focusFor(loadedPath)}
+      detectionsEnabled={detectionsEnabled}
+      onDetectionsChange={setDetectionsEnabled}
+      restoreView={restoreView}
+      onViewChange={handleViewChange}
       allFiles={allFiles}
       filteredFiles={filteredFiles}
       fileFilterText={fileFilterText}

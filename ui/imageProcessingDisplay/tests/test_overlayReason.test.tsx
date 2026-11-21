@@ -29,6 +29,8 @@ function renderPanel(overlayReason: string | null, showAstrometryOverlay = true)
     return render(
         <ViewerPanelContainer
             fitsRendererRef={{ current: null }}
+            detectionsEnabled={false}
+            onDetectionsChange={() => undefined}
             imageUrl={null}
             imageBlob={null}
             imageFrameInfo={null}

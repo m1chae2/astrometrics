@@ -39,6 +39,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackingDriver,
     StackSettings,
 )
+from astrometricslib._internal.drivers.siril_interface.run_models import SIRIL_COMMUNICATION_ERROR_KEY
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
 from astrometricslib.models.tuned_parameter import (
@@ -263,7 +264,9 @@ def _stack_one_batch(
 
     For spectral frames the standard star detection is tried first. If too
     few frames register, the relaxed detection is tried as well and the run
-    that registered more frames is kept.
+    that registered more frames is kept. The relaxed detection is not tried
+    when Siril failed to answer a command: that is a Siril problem, not a
+    star detection problem.
 
     Returns
     -------
@@ -313,6 +316,17 @@ def _stack_one_batch(
             diagnostics["spectral_star_detection"] = mode
             diagnostics["registered_fraction"] = fraction
         attempts.append((path, diagnostics, fraction))
+        communication_error = diagnostics.get(SIRIL_COMMUNICATION_ERROR_KEY)
+        if communication_error and not path:
+            # Siril stopped answering. Other star detection settings would
+            # not help, so the run is not repeated with them.
+            logger.error(
+                "Stacking %d frames for '%s' stopped because Siril did not answer: %s",
+                len(frames),
+                target_id,
+                communication_error,
+            )
+            break
         if path and fraction >= minimum_registered_fraction:
             break
         if mode is not None and attempt_index + 1 < len(modes):

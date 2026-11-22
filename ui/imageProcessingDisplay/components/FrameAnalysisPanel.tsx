@@ -71,6 +71,13 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       openSiril, requestJobHistory
     } = useImageProcessingContext();
 
+  // The selected job's own record decides the log panel's header; a running job is looked up live first.
+  const selectedJobStatus = useMemo(() => {
+    if (!activeJobId) return null;
+    const record = [...(targetActiveJobs ?? []), ...(jobHistory ?? [])].find(job => job.id === activeJobId);
+    return record?.status ?? null;
+  }, [activeJobId, targetActiveJobs, jobHistory]);
+
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('data');
   // The job history only shows on the Analysis tab, so it is read when that tab is first opened.
   useEffect(() => {
@@ -189,6 +196,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
 
                   <ProcessingStatus
                     isProcessing={isProcessing || isAnalyzing}
+                    jobStatus={selectedJobStatus}
                     logLines={logLines}
                     onCancel={isProcessing ? cancelProcessingJob : (isAnalyzing ? cancelAnalysisJob : undefined)}
                     onClear={clearLogs}

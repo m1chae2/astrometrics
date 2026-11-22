@@ -40,7 +40,7 @@ from astrometricslib._internal.drivers.siril_interface.script_builders import (
     build_master_calibration_commands,
     calibration_count_flags,
 )
-from astrometricslib._internal.drivers.siril_interface.session import siril_process_lock
+from astrometricslib._internal.drivers.siril_interface.session import SirilStatusQueue, siril_process_lock
 from astrometricslib._internal.drivers.siril_interface.spectral_stacker import SirilSpectralStacker
 from astrometricslib._internal.drivers.siril_interface.staging import (
     _frames_use_color_filter_array,
@@ -232,7 +232,7 @@ class SirilImagingStacker(SirilSpectralStacker):
         # halves explicitly, rather than instance state:
         # max_concurrent_jobs allows several process_target calls to
         # share one ImageProcessing instance, and each needs its own.
-        status_queue: queue.Queue[str] = queue.Queue()
+        status_queue: queue.Queue[str] = SirilStatusQueue()
 
         # Get actual counts to handle 1-frame sequence issue in
         # Siril. Siril's 'convert' does not create a .seq file

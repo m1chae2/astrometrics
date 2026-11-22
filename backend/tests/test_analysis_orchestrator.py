@@ -1,13 +1,10 @@
-"""Purpose: Unit tests for AnalysisOrchestrator's spectroscopy analysis path.
+"""Purpose: Unit tests for AnalysisOrchestrator's analysis routing.
 
-Description: Verifies _run_spectroscopy_analysis's wiring to the
-session-grouped astrometricslib astrometrics -- the part most likely to
-silently misbehave given this orchestrator had no regression coverage
-at all until now. Coverage for the quality-summary aggregation itself
-now lives in
-astrometricslib/pipelines/spectroscopy/test/test_spectroscopy_batch_tasks.py,
-alongside _attach_spectroscopy_quality_summary, since that's where the
-aggregation now runs.
+Description: Verifies how analyze_image routes frames by type and how the
+chosen stages reach the library's process_target. Raw spectral frames now go
+through the spectroscopy stage; the per-frame work (the spectral variation
+stage) lives in the library, and its tests are in
+astrometricslib/pipelines/spectroscopy/test/test_spectral_variation.py.
 """
 
 import contextlib
@@ -18,7 +15,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib import FrameRecord, Target
-from astrometricslib._internal.results import BatchRunSummary
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.jobs import JobStore
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
@@ -40,124 +36,6 @@ def _make_session(session_id: str, frame_paths: list[str]) -> SimpleNamespace:
     return SimpleNamespace(id=session_id, frame_paths=frame_paths)
 
 
-class TestRunSpectroscopyAnalysis:
-    """Unit tests for AnalysisOrchestrator._run_spectroscopy_analysis."""
-
-    def test_resolves_paths_to_frame_records_and_calls_session_grouped_astrometrics(
-        self, tmp_path: Path
-    ) -> None:
-        """Verify paths resolve to FrameRecords for grouped astrometrics."""
-        # A plain object (not a Mock/MagicMock instance) standing in
-        # for the real astrometricslib astrometrics: _run_spectroscopy_analysis
-        # has a dedicated branch for `isinstance(self.astrometrics, Mock)`
-        # that takes an entirely different (older, mock-pipeline) code
-        # path for existing tests -- using a real MagicMock here would
-        # accidentally exercise that branch instead of the real one
-        # this test means to cover.
-        frame_a = FrameRecord(path="/lib/a.fits", role="LIGHT", timestamp=1000.0)
-        frame_b = FrameRecord(path="/lib/b.fits", role="LIGHT", timestamp=1005.0)
-        target = Target(id="OrchestratorWiringTestTarget", frames=[frame_a, frame_b])
-
-        summary = BatchRunSummary(
-            succeeded=["/lib/a.fits", "/lib/b.fits"],
-            failed=[],
-            results={
-                "/lib/a.fits": {"status": "success", "stars_processed": 2},
-                "/lib/b.fits": {"status": "success", "stars_processed": 3},
-            },
-        )
-        session = _make_session(
-            "OrchestratorWiringTestTarget:2026-01-01:800:0", ["/lib/a.fits", "/lib/b.fits"]
-        )
-        run_spectroscopy_by_session = MagicMock(
-            return_value=(summary, [(session, SimpleNamespace(wcs=None))])
-        )
-        astrometrics = SimpleNamespace(
-            processing=SimpleNamespace(
-                run_spectroscopy_by_session=run_spectroscopy_by_session,
-                acquire_job_slot=lambda: contextlib.nullcontext(),
-            )
-        )
-
-        orchestrator = _make_orchestrator(astrometrics=astrometrics)
-        orchestrator._target_service.get_targets.return_value = target
-        orchestrator._config_service.get_photometry_workers.return_value = 1
-        orchestrator._config_service.get_max_concurrent_jobs.return_value = 1
-        orchestrator._config_service.get_library_path.return_value = str(tmp_path)
-
-        results = orchestrator._run_spectroscopy_analysis(
-            "job1", "OrchestratorWiringTestTarget", ["/lib/a.fits", "/lib/b.fits", "/unmatched.fits"]
-        )
-
-        call_args = run_spectroscopy_by_session.call_args
-        assert call_args.args[0] is target
-        assert call_args.args[1] == [frame_a, frame_b]  # unmatched path excluded
-        assert call_args.kwargs["max_workers"] is None  # resolved internally by the library
-
-        assert results["starsProcessed"] == 5
-        assert results["spectraExtracted"] == 5
-        # target.quality.spectroscopy is now attached by the
-        # library's run_spectroscopy_by_session itself (mocked here, so
-        # not exercised) -- see test_spectroscopy_batch_tasks.py's
-        # TestAttachSpectroscopyQualitySummary for that coverage.
-
-
-class TestMasterSpectralStackAnalysis:
-    """Tests for stage one, the master stacked spectral image."""
-
-    def _make_setup(self, stacked_path: str) -> tuple[AnalysisOrchestrator, MagicMock, MagicMock]:
-        frame = FrameRecord(path="/lib/a.fits", role="LIGHT", timestamp=1000.0)
-        target = Target(id="MasterStackTestTarget", frames=[frame], stacked_spectral_target=stacked_path)
-        session = _make_session("MasterStackTestTarget:2026-01-01:800:0", ["/lib/a.fits"])
-        summary = BatchRunSummary(
-            succeeded=["/lib/a.fits"], failed=[], results={"/lib/a.fits": {"stars_processed": 2}}
-        )
-        run_spectroscopy_by_session = MagicMock(
-            return_value=(summary, [(session, SimpleNamespace(wcs=None))])
-        )
-        process_target = MagicMock(
-            return_value=SimpleNamespace(results={"spectroscopy": {"stellar_objects": [object()] * 3}})
-        )
-        astrometrics = SimpleNamespace(
-            catalog_access=object(),
-            processing=SimpleNamespace(
-                process_target=process_target,
-                run_spectroscopy_by_session=run_spectroscopy_by_session,
-                acquire_job_slot=lambda: contextlib.nullcontext(),
-            ),
-        )
-        orchestrator = _make_orchestrator(astrometrics=astrometrics)
-        orchestrator._target_service.get_targets.return_value = target
-        return orchestrator, process_target, run_spectroscopy_by_session
-
-    def test_analyzes_the_master_stack_on_its_own_without_session_grouping(self) -> None:
-        """Verify the master stack is analyzed as one image."""
-        stacked_path = "/lib/Target_SPEC_Stacked.fits"
-        orchestrator, process_target, run_by_session = self._make_setup(stacked_path)
-
-        results = orchestrator._run_spectroscopy_analysis("job1", "MasterStackTestTarget", [stacked_path])
-
-        process_target.assert_called_once()
-        assert process_target.call_args.kwargs["stages"] == ["spectroscopy"]
-        assert process_target.call_args.kwargs["spectroscopy"]["path"] == stacked_path
-        run_by_session.assert_not_called()
-        assert results["starsProcessed"] == 3
-
-    def test_raw_frames_still_go_through_session_grouping(self) -> None:
-        """Verify raw frames are grouped and the master stack is not."""
-        stacked_path = "/lib/Target_SPEC_Stacked.fits"
-        orchestrator, process_target, run_by_session = self._make_setup(stacked_path)
-
-        results = orchestrator._run_spectroscopy_analysis(
-            "job1", "MasterStackTestTarget", [stacked_path, "/lib/a.fits"]
-        )
-
-        process_target.assert_called_once()
-        frame_records = run_by_session.call_args.args[1]
-        assert [frame.path for frame in frame_records] == ["/lib/a.fits"]
-        assert results["starsProcessed"] == 3 + 2
-
-
 class TestStartAnalysisTaskClassification:
     """Verify _start_analysis_task routes paths by real FrameRecord.filter."""
 
@@ -165,7 +43,7 @@ class TestStartAnalysisTaskClassification:
         orchestrator = _make_orchestrator()
         orchestrator._target_service.get_targets.return_value = target
         orchestrator._run_photometry_analysis = MagicMock(return_value={"status": "finished"})
-        orchestrator._run_spectroscopy_analysis = MagicMock(return_value={"status": "finished"})
+        orchestrator._run_chosen_stages = MagicMock(return_value={"status": "finished"})
         return orchestrator
 
     def test_routes_light_frame_to_photometry_via_frame_record_filter(self) -> None:
@@ -178,7 +56,7 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._run_photometry_analysis.assert_called_once()
         assert orchestrator._run_photometry_analysis.call_args.args[2] == ["/lib/light.fits"]
-        orchestrator._run_spectroscopy_analysis.assert_not_called()
+        orchestrator._run_chosen_stages.assert_not_called()
 
     def test_routes_spec_frame_to_spectroscopy_via_frame_record_filter(self) -> None:
         """Verify a SPEC-filter frame routes to spectroscopy only."""
@@ -188,8 +66,9 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._start_analysis_task("job1", "ClassifySpecTarget", ["/lib/spec.fits"], None)
 
-        orchestrator._run_spectroscopy_analysis.assert_called_once()
-        assert orchestrator._run_spectroscopy_analysis.call_args.args[2] == ["/lib/spec.fits"]
+        orchestrator._run_chosen_stages.assert_called_once()
+        assert orchestrator._run_chosen_stages.call_args.args[2] == ["/lib/spec.fits"]
+        assert orchestrator._run_chosen_stages.call_args.args[4] == ["spectroscopy"]
         orchestrator._run_photometry_analysis.assert_not_called()
 
     def test_mixed_batch_runs_both_and_returns_combined_result(self) -> None:
@@ -205,8 +84,8 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._run_photometry_analysis.assert_called_once()
         assert orchestrator._run_photometry_analysis.call_args.args[2] == ["/lib/light.fits"]
-        orchestrator._run_spectroscopy_analysis.assert_called_once()
-        assert orchestrator._run_spectroscopy_analysis.call_args.args[2] == ["/lib/spec.fits"]
+        orchestrator._run_chosen_stages.assert_called_once()
+        assert orchestrator._run_chosen_stages.call_args.args[2] == ["/lib/spec.fits"]
 
         assert "photometry" in result
         assert "spectroscopy" in result
@@ -218,7 +97,7 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._start_analysis_task("job1", "ClassifyUnmatchedTarget", ["/tmp/unmatched.fits"], "SPEC")
 
-        orchestrator._run_spectroscopy_analysis.assert_called_once()
+        orchestrator._run_chosen_stages.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
 
     def test_unmatched_frame_with_spectral_filter_header_is_spectroscopy(self) -> None:
@@ -230,7 +109,7 @@ class TestStartAnalysisTaskClassification:
         orchestrator._start_analysis_task("job1", "ClassifyHeaderTarget", ["/tmp/adhoc.fits"], "ALL")
 
         orchestrator.astrometrics.targets.read_frame_header.assert_called_once_with("/tmp/adhoc.fits")
-        orchestrator._run_spectroscopy_analysis.assert_called_once()
+        orchestrator._run_chosen_stages.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
 
     def test_unreadable_header_is_logged_and_the_frame_stays_light(self) -> None:
@@ -241,7 +120,7 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._start_analysis_task("job1", "ClassifyBadHeaderTarget", ["/tmp/adhoc.fits"], "ALL")
 
-        orchestrator._run_spectroscopy_analysis.assert_not_called()
+        orchestrator._run_chosen_stages.assert_not_called()
         orchestrator._run_photometry_analysis.assert_called_once()
 
 
@@ -377,9 +256,14 @@ class TestChosenStages:
 
     def test_stages_are_kept_once_in_running_order(self) -> None:
         """Verify the checked list is deduplicated and ordered."""
-        checked = AnalysisOrchestrator._checked_stages(["spectroscopy", "astrometry", "spectroscopy"])
+        checked = AnalysisOrchestrator._checked_stages([
+            "spectral_variation",
+            "spectroscopy",
+            "astrometry",
+            "spectroscopy",
+        ])
 
-        assert checked == ["astrometry", "spectroscopy"]
+        assert checked == ["astrometry", "spectroscopy", "spectral_variation"]
         assert AnalysisOrchestrator._checked_stages(None) is None
 
     def test_chosen_stages_reach_the_worker(self) -> None:
@@ -470,6 +354,47 @@ class TestChosenStages:
         assert result["message"] == f"Ran no stage. Skipped photometry ({reason})."
         assert result["results"] == {"photometry": "skipped"}
 
+    def test_spectral_variation_follows_the_sent_raw_spectral_frames(self) -> None:
+        """Verify the sent raw spectral frames become the stage's frames."""
+        spec_a = FrameRecord(path="/lib/a.fits", role="LIGHT", filter="SPEC")
+        spec_b = FrameRecord(path="/lib/b.fits", role="LIGHT", filter="SPEC")
+        target = Target(id="VariationTarget", frames=[spec_a, spec_b])
+        orchestrator, process_target = self._make_setup(
+            target, self._outcome(stages_run=["spectral_variation"])
+        )
+
+        orchestrator._run_chosen_stages(
+            "job1", "VariationTarget", ["/lib/b.fits"], "SPEC", ["spectral_variation"]
+        )
+
+        keywords = process_target.call_args.kwargs
+        assert keywords["stages"] == ["spectral_variation"]
+        assert keywords["spectral_variation"] == {"frames": [spec_b]}
+
+    def test_a_skipped_spectral_variation_reason_is_in_the_message(self) -> None:
+        """Verify a stage skipped for too few frames says why."""
+        target = Target(id="FewFramesTarget")
+        orchestrator, _process_target = self._make_setup(
+            target,
+            self._outcome(
+                stages_run=["spectral_variation"],
+                results={
+                    "spectral_variation": {
+                        "status": "skipped",
+                        "reason": "no session has 2 or more raw spectral frames",
+                    }
+                },
+            ),
+        )
+
+        result = orchestrator._run_chosen_stages(
+            "job1", "FewFramesTarget", [], "SPEC", ["spectral_variation"]
+        )
+
+        assert (
+            "Skipped spectral_variation (no session has 2 or more raw spectral frames)." in result["message"]
+        )
+
     def test_the_worker_routes_chosen_stages_to_the_library_call(self) -> None:
         """Verify `_start_analysis_task` takes the `stages` path when given."""
         target = Target(id="RoutedTarget")
@@ -480,3 +405,61 @@ class TestChosenStages:
 
         process_target.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
+
+
+class TestCancelAnalysis:
+    """Verify cancelling an analysis job stops it and marks it cancelled."""
+
+    def test_cancel_while_waiting_for_a_slot_ends_the_job_as_cancelled(self, tmp_path: Path) -> None:
+        """A job queued for a slot gives up and is cancelled, not failed."""
+        import threading
+        import time
+
+        from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
+
+        slot_held = threading.Event()
+        release_slot = threading.Event()
+
+        def hold_the_only_slot() -> None:
+            """Hold the only slot, in a thread of its own, until released."""
+            with acquire_resource_slot(None, "cancel_analysis_test", 1):
+                slot_held.set()
+                release_slot.wait(30)
+
+        holder = threading.Thread(target=hold_the_only_slot)
+        holder.start()
+        assert slot_held.wait(10)
+
+        orchestrator = _make_orchestrator()
+        orchestrator._job_service = JobService(JobStore(str(tmp_path / "jobs.db")))
+
+        def wait_for_slot(*_arguments: object) -> dict:
+            """Queue for the slot the way the analysis does.
+
+            Returns
+            -------
+            result : `dict`
+                Never reached while the slot is held.
+            """
+            with acquire_resource_slot(None, "cancel_analysis_test", 1, poll_interval_seconds=0.05):
+                return {"status": "finished"}
+
+        orchestrator._run_analysis_task_body = wait_for_slot  # type: ignore[method-assign]
+        job_id = orchestrator._submit_job(
+            "M 52", "analysis", orchestrator._start_analysis_task, ["f.fits"], None
+        )
+        end = time.monotonic() + 10
+        while job_id not in orchestrator._analysis_abandonments:
+            assert time.monotonic() < end, "the job never started"
+            time.sleep(0.02)
+
+        answer = orchestrator.cancel_analysis("M 52")
+
+        orchestrator._jobs[job_id]["future"].result(timeout=10)
+        release_slot.set()
+        holder.join(10)
+        record = orchestrator._job_service.get_job(job_id)
+        assert answer["cancelled"] is True
+        assert record.status == "cancelled"
+        assert record.message == "Cancelled by user."
+        assert job_id not in orchestrator._analysis_abandonments

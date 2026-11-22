@@ -9,6 +9,20 @@ import { AnalysisResults } from '../analysisResults/AnalysisResults';
 import { FileBrowser } from '../fileBrowser/FileBrowser';
 
 describe('AnalysisResults', () => {
+    it('shows no count blocks for photometry or spectroscopy, and keeps the spectroscopy note', () => {
+        const { container, rerender } = render(
+            <AnalysisResults results={{ status: 'completed', targetId: 'M 31', analysisMode: 'photometry', totalImages: 10, starsFound: 5, framesProcessed: 9 }} />
+        );
+        expect(container.firstChild).toBeNull();
+        rerender(
+            <AnalysisResults results={{ status: 'completed', targetId: 'M 31', analysisMode: 'spectroscopy', totalImages: 10, starsProcessed: 3, spectraExtracted: 2 }} />
+        );
+        for (const label of ['Total Images', 'Stars Found', 'Frames Processed', 'Stars Processed', 'Spectra Extracted']) {
+            expect(screen.queryByText(label)).toBeNull();
+        }
+        expect(screen.getByText(/saved to the global StellarObject registry/)).toBeTruthy();
+    });
+
     it('shows no total, unusual brightness or accepted blocks, and no job message', () => {
         render(
             <AnalysisResults

@@ -3,7 +3,7 @@
 Description: On 2026-10-10 the ESA Gaia archive timed out on the pipeline's
 G < 18 query for M 13 while VizieR returned the same stars in 10 s, and every
 remote lookup of 22 of 23 targets had failed. Each Gaia sky tile is now asked
-of VizieR first, the ESA archive second, and VizieR again at brighter limits
+of the ESA archive first, VizieR second, and VizieR again at brighter limits
 (`star_identifier.make_gaia_tile_fetcher`). These tests check that order,
 that the depth actually fetched is the one reported, how the circuit breaker
 counts, and that VizieR's columns are mapped to the archive's. They use fake
@@ -138,28 +138,31 @@ def _fetch() -> gaia_cone_driver.TileFetch | None:
         return None
 
 
-def test_vizier_answers_first_and_the_archive_is_not_asked(services: dict[str, Any]) -> None:
-    """A VizieR answer at full depth ends the search."""
-    services["answers"]["vizier", 18.0] = _stars()
-
-    table = _fetch()
-
-    assert table is not None
-    assert services["calls"] == [("vizier", 18.0)]
-    assert table.service == "VizieR"
-    assert table.complete_to_g == pytest.approx(18.0)
-
-
-def test_the_archive_answers_when_vizier_fails(services: dict[str, Any]) -> None:
-    """The ESA archive is the second choice at full depth."""
+def test_the_archive_answers_first_and_vizier_is_not_asked(services: dict[str, Any]) -> None:
+    """An ESA answer at full depth ends the search."""
     services["answers"]["esa", 18.0] = _stars()
 
     table = _fetch()
 
     assert table is not None
-    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
+    assert services["calls"] == [("esa", 18.0)]
     assert table.service == "ESA Gaia archive"
     assert table.complete_to_g == pytest.approx(18.0)
+
+
+def test_vizier_answers_when_the_archive_fails_and_no_failure_counts(services: dict[str, Any]) -> None:
+    """VizieR is second choice; an ESA failure alone does not count."""
+    services["answers"]["vizier", 18.0] = _stars()
+
+    table = _fetch()
+
+    assert table is not None
+    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
+    assert table.service == "VizieR"
+    assert table.complete_to_g == pytest.approx(18.0)
+    statistics = star_identifier_module.get_gaia_query_statistics()
+    assert statistics["failed"] == 0
+    assert not statistics["circuit_breaker_tripped"]
 
 
 def test_a_connection_failure_rules_out_the_brighter_limits(services: dict[str, Any]) -> None:
@@ -169,7 +172,7 @@ def test_a_connection_failure_rules_out_the_brighter_limits(services: dict[str, 
     table = _fetch()
 
     assert table is None
-    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
+    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
 
 
 def test_a_read_timeout_keeps_the_brighter_limits(
@@ -178,9 +181,10 @@ def test_a_read_timeout_keeps_the_brighter_limits(
     """A slow VizieR (reached, no answer in time) is asked again at G < 17."""
     services["answers"]["vizier", 17.0] = _stars()
     real_runner = star_identifier_module._run_with_daemon_thread_timeout
+    slow_calls: list[float] = []
 
     def slow_at_full_depth(query: Any, timeout_seconds: float) -> Any:
-        """Time out the first VizieR call, run every other call normally.
+        """Time out the first VizieR call, run the rest normally.
 
         Parameters
         ----------
@@ -199,7 +203,8 @@ def test_a_read_timeout_keeps_the_brighter_limits(
         ExternalServiceError
             For the first VizieR call.
         """
-        if not services["calls"]:
+        if timeout_seconds > star_identifier_module.GAIA_ESA_TIMEOUT_SECONDS and not slow_calls:
+            slow_calls.append(timeout_seconds)
             services["calls"].append(("vizier", 18.0))
             raise ExternalServiceError("Timed out")
         return real_runner(query, timeout_seconds)
@@ -209,7 +214,8 @@ def test_a_read_timeout_keeps_the_brighter_limits(
     table = _fetch()
 
     assert table is not None
-    assert services["calls"][0] == ("vizier", 18.0)
+    assert services["calls"][0] == ("esa", 18.0)
+    assert ("vizier", 18.0) in services["calls"]
     assert ("vizier", 17.0) in services["calls"]
     assert table.complete_to_g == pytest.approx(17.0)
     assert table.service == "VizieR"
@@ -236,7 +242,7 @@ def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> N
     table = _fetch()
 
     assert table is None
-    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
+    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
     statistics = star_identifier_module.get_gaia_query_statistics()
     assert statistics["attempted"] == 1
     assert statistics["failed"] == 1
@@ -266,20 +272,19 @@ def test_a_new_run_tries_the_services_again(services: dict[str, Any]) -> None:
     table = _fetch()
 
     assert table is not None
-    assert services["calls"] == [("vizier", 18.0)]
+    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
 
 
 def test_a_working_network_asks_the_same_questions_as_before(services: dict[str, Any]) -> None:
-    """With VizieR down and the archive up, the order is unchanged."""
-    services["answers"]["esa", 18.0] = _stars()
-
+    """With the archive up, a new run asks it first again and nothing else."""
+    services["answers"]["vizier", 18.0] = _stars()
     _fetch()
     services["calls"].clear()
     star_identifier_module.reset_gaia_query_statistics()
-    services["answers"]["vizier", 18.0] = _stars()
+    services["answers"]["esa", 18.0] = _stars()
     _fetch()
 
-    assert services["calls"] == [("vizier", 18.0)]
+    assert services["calls"] == [("esa", 18.0)]
 
 
 def test_an_open_breaker_refuses_every_later_tile(services: dict[str, Any]) -> None:

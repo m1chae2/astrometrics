@@ -16,6 +16,7 @@ import { useTargetContext } from '../../common/context/TargetContext';
 import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
 import { useJobEndWatcher } from './useJobEndWatcher';
+import { announceFinishedStack } from '../utils/announceFinishedStack';
 
 export type LightFrameRow = [string, string, number];
 
@@ -68,6 +69,8 @@ export function useStackingJob(
     const [jobHistory, setJobHistory] = useState<ProcessingJob[]>([]);
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
     const prevIsProcessing = useRef<boolean>(false);
+    /** The id of the stacking job the running-jobs feed showed last, to announce it when it ends. */
+    const lastFeedJobId = useRef<string | null>(null);
     const isProcessingRef = useRef<boolean>(false);
     /** The running-job ids seen last time, to notice when one starts or finishes. */
     const previousActiveJobIds = useRef<string>('');
@@ -83,6 +86,7 @@ export function useStackingJob(
         setProcessingError(null);
         setWatchedJobId(null);
         prevIsProcessing.current = false;
+        lastFeedJobId.current = null;
         previousActiveJobIds.current = '';
         historyLoadedForTarget.current = null;
     });
@@ -193,7 +197,10 @@ export function useStackingJob(
         // of frames and job history (a one-off fetch, not a recurring poll).
         if (prevIsProcessing.current && !currentlyProcessing) {
             invalidate('frames');
+            // Tell the viewers to read the restacked picture (once per job, whoever sees the end).
+            if (lastFeedJobId.current) void announceFinishedStack(selectedTarget, lastFeedJobId.current);
         }
+        if (activeJob) lastFeedJobId.current = activeJob.id;
 
         setIsProcessing(currentlyProcessing);
         prevIsProcessing.current = currentlyProcessing;
@@ -277,6 +284,7 @@ export function useStackingJob(
         if (prevIsProcessing.current || isProcessingRef.current) {
             invalidate('frames');
         }
+        void announceFinishedStack(selectedTarget, job.id, job);
         prevIsProcessing.current = false;
         setIsProcessing(false);
     });

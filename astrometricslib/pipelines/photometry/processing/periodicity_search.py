@@ -505,7 +505,7 @@ class _FrequencyPlan:
         )
 
 
-def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan:
+def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan | None:
     """Build the frequency grids for a Lomb-Scargle search.
 
     Parameters
@@ -520,13 +520,17 @@ def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan
     plan : `_FrequencyPlan`
         The full-resolution grid and the stride that thins it to at most
         `_MAXIMUM_SEARCH_GRID_POINTS` points. A grid already within the limit
-        has a stride of 1 and is used unchanged.
+        has a stride of 1 and is used unchanged. `None` when the period
+        range is so narrow that the grid holds fewer than two frequencies,
+        so there is no step to work with and nothing to search.
     """
     frequency = model.autofrequency(
         minimum_frequency=1.0 / grid.maximum_period_days,
         maximum_frequency=1.0 / grid.minimum_period_days,
         samples_per_peak=_SAMPLES_PER_PEAK,
     )
+    if frequency.size < 2:
+        return None
     stride = max(1, math.ceil(frequency.size / _MAXIMUM_SEARCH_GRID_POINTS))
     return _FrequencyPlan(frequency=frequency, stride=stride, span_days=grid.span_days)
 
@@ -549,7 +553,8 @@ def describe_frequency_grid(time_days: np.ndarray) -> GridResolution | None:
     grid = build_search_grid(time_days)
     if grid is None:
         return None
-    return _plan_frequency_grid(LombScargle(time_days, np.zeros_like(time_days)), grid).resolution
+    plan = _plan_frequency_grid(LombScargle(time_days, np.zeros_like(time_days)), grid)
+    return None if plan is None else plan.resolution
 
 
 def _strongest_peak_indices(power: np.ndarray, count: int) -> np.ndarray:
@@ -901,6 +906,8 @@ def lomb_scargle_search(
     errors = _usable_flux_errors(flux_errors, flux.size)
     model = LombScargle(time_days, flux, errors)
     plan = _plan_frequency_grid(model, grid)
+    if plan is None:
+        return PeriodogramResult(verdict=VERDICT_INSUFFICIENT_DATA, note=_insufficient_note(time_days))
     best_frequency, best_power = _strongest_peak(model, plan)
     best_period = 1.0 / best_frequency
 

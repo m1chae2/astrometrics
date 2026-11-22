@@ -1,7 +1,8 @@
 """Purpose: Unit tests for the analysis stage prerequisites.
 
 Description: Astrometry is a hard prerequisite of photometry and
-spectroscopy. These tests check the `STAGE_PREREQUISITES` table, the rule
+spectroscopy, and spectroscopy of spectral variation. These tests check
+the `STAGE_PREREQUISITES` table, the rule
 `stage_result_is_current` uses to tell whether a saved astrometry result still
 matches the imaging stack, and how `process_target` adds a missing or old
 astrometry run, skips the stages that need it when it cannot run, and leaves
@@ -20,8 +21,13 @@ import pytest
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
-from astrometricslib.models.quality.quality_summary import AstrometryQualitySummary, StackQualitySummary
-from astrometricslib.models.target import Target
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
+from astrometricslib.models.quality.quality_summary import (
+    AstrometryQualitySummary,
+    SpectroscopyQualitySummary,
+    StackQualitySummary,
+)
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared.provenance_recording import stacked_image_entity_id
 
@@ -419,3 +425,138 @@ def test_several_targets_refuse_run_prerequisites_false(pipelines: ProcessingPip
     """Verify the full pipeline, which always solves first, refuses it."""
     with pytest.raises(InvalidArgumentError, match="run_prerequisites"):
         pipelines.process_target(["M 1", "M 2"], camera_id="ZWO", run_prerequisites=False)
+
+
+def _spectral_variation_target(
+    tmp_path: Path, spectroscopy_at: datetime | None, with_raw_frames: bool = True
+) -> Target:
+    """Build a target with a solved stack, a spectral stack and raw frames.
+
+    Returns
+    -------
+    target : `Target`
+        The target. The spectral stack's recorded time is `_NOW`, and its
+        saved spectroscopy summary (if asked for) is made at
+        `spectroscopy_at`.
+    """
+    spectral_stack = tmp_path / "spec_stack.fits"
+    spectral_stack.write_bytes(b"")
+    target = _target_with_astrometry(_stack_file(tmp_path), _NOW + timedelta(hours=1))
+    target.spectral_stacking.stacked_image = str(spectral_stack)
+    target.spectral_stacking.quality_summary = StackQualitySummary.model_construct(created_at=_NOW)
+    if with_raw_frames:
+        target.frames = [
+            FrameRecord(path=f"/lib/raw_{index}.fits", role="LIGHT", filter="SPEC", timestamp=1000.0 + index)
+            for index in range(3)
+        ]
+    if spectroscopy_at is not None:
+        target.quality.spectroscopy = SpectroscopyQualitySummary.model_construct(
+            created_at=spectroscopy_at, upstream_quality_summary_reference="stacking"
+        )
+    return target
+
+
+def test_spectral_variation_needs_spectroscopy() -> None:
+    """Verify spectroscopy is the prerequisite of spectral variation."""
+    assert tasks.STAGE_PREREQUISITES["spectral_variation"] == ("spectroscopy",)
+    assert (
+        tasks.ANALYSIS_STAGES.index("spectral_variation") == tasks.ANALYSIS_STAGES.index("spectroscopy") + 1
+    )
+
+
+def test_a_current_spectroscopy_result_is_not_rerun(
+    pipelines: ProcessingPipelines, recorder: _RecordingPipelineMatch, tmp_path: Path
+) -> None:
+    """Verify spectral variation alone runs when spectroscopy is current."""
+    target = _spectral_variation_target(tmp_path, _NOW + timedelta(hours=1))
+
+    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+
+    assert recorder.stages == ["spectral_variation"]
+    assert result.prerequisites_run == []
+
+
+@pytest.mark.parametrize("spectroscopy_at", [None, _NOW - timedelta(hours=1)])
+def test_a_missing_or_old_spectroscopy_result_adds_spectroscopy_and_astrometry(
+    pipelines: ProcessingPipelines,
+    recorder: _RecordingPipelineMatch,
+    tmp_path: Path,
+    spectroscopy_at: datetime | None,
+) -> None:
+    """Verify spectroscopy and astrometry run before spectral variation."""
+    target = _spectral_variation_target(tmp_path, spectroscopy_at)
+    target.quality.astrometry = None
+
+    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+
+    assert recorder.stages == ["astrometry", "spectroscopy", "spectral_variation"]
+    assert result.prerequisites_run == ["astrometry", "spectroscopy"]
+
+
+def test_a_spectroscopy_summary_from_raw_frames_is_not_current(tmp_path: Path) -> None:
+    """Verify a per-frame summary does not count as the stack's result."""
+    target = _spectral_variation_target(tmp_path, _NOW + timedelta(hours=1))
+    target.quality.spectroscopy.upstream_quality_summary_reference = "raw_frames"
+
+    assert tasks.stage_staleness_reason(target, "spectroscopy") == (
+        "its result came from raw frames, not from the spectral stack"
+    )
+
+
+def test_spectral_variation_with_no_raw_frames_is_skipped_and_adds_nothing(
+    pipelines: ProcessingPipelines, recorder: _RecordingPipelineMatch, tmp_path: Path
+) -> None:
+    """Verify a target with no raw frames skips the stage with a reason."""
+    target = _spectral_variation_target(tmp_path, None, with_raw_frames=False)
+
+    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+
+    assert recorder.stages == []
+    assert result.results["spectral_variation"]["status"] == "skipped"
+    assert result.results["spectral_variation"]["reason"] == "target has no raw spectral frames"
+
+
+def test_a_failed_spectroscopy_prerequisite_skips_spectral_variation(
+    pipelines: ProcessingPipelines, recorder: _RecordingPipelineMatch, tmp_path: Path
+) -> None:
+    """Verify spectral variation is skipped when spectroscopy fails."""
+    target = _spectral_variation_target(tmp_path, None)
+    recorder.failures["spectroscopy"] = ProcessingError("no spectra")
+
+    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+
+    assert "spectral_variation" not in recorder.stages
+    assert result.stages_skipped["spectral_variation"].startswith("needs spectroscopy:")
+
+
+def test_a_cancelled_run_stops_before_the_next_stage(
+    pipelines: ProcessingPipelines,
+    recorder: _RecordingPipelineMatch,
+    tmp_path: Path,
+) -> None:
+    """Verify a run given up on during astrometry never starts photometry."""
+    abandonment = RunAbandonment()
+    original_call = recorder.__class__.__call__
+
+    def cancel_during_astrometry(self: _RecordingPipelineMatch, *args: object, **kwargs: object) -> dict:
+        """Run the stand-in stage, then give up on the run.
+
+        Returns
+        -------
+        result : `dict`
+            The stand-in stage's result.
+        """
+        result = original_call(self, *args, **kwargs)
+        abandonment.abandon()
+        return result
+
+    target = _target_with_astrometry(_stack_file(tmp_path), _NOW - timedelta(hours=1))
+    with (
+        bind_abandonment(abandonment),
+        pytest.MonkeyPatch.context() as patch,
+    ):
+        patch.setattr(_RecordingPipelineMatch, "__call__", cancel_during_astrometry)
+        with pytest.raises(RunAbandonedError):
+            pipelines.process_target(target, stages=["photometry"], register_job=False)
+
+    assert recorder.stages == ["astrometry"]

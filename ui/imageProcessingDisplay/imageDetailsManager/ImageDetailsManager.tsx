@@ -23,6 +23,11 @@ const ANALYSIS_STAGE_MENU: { id: AnalysisStage; label: string; detail: string }[
   { id: 'astrometry', label: 'Astrometry', detail: 'Solve the stack to find where the stars are' },
   { id: 'photometry', label: 'Photometry', detail: 'Runs astrometry first when needed' },
   { id: 'spectroscopy', label: 'Spectroscopy', detail: 'Runs astrometry first when needed' },
+  {
+    id: 'spectral_variation',
+    label: 'Spectral Variation',
+    detail: "Follow how each star's spectrum changes across the raw frames. Runs spectroscopy first when needed",
+  },
 ];
 
 /**
@@ -45,6 +50,8 @@ export interface ImageDetailsManagerProps {
   framesToStack?: () => string[];
   /** Callback to cancel a processing operation. */
   onCancel?: () => void;
+  /** Callback to cancel the running analysis; the Cancel shown while analyzing calls it (else `onCancel`). */
+  onCancelAnalysis?: () => void;
   /** Callback to add new images to the target. */
   onAddImages?: () => void;
   /** Callback to manually add a new target entry. */
@@ -71,8 +78,6 @@ export interface ImageDetailsManagerProps {
   analysisSelectionInput?: AnalysisSelectionInput;
   /** Callback to run one named stage from the Analyze Target menu. */
   onAnalyzeStage?: (stage: AnalysisStage) => void;
-  /** Callback to follow the spectrum of each star across the raw frames (stage two of spectral analysis). */
-  onAnalyzeTemporalVariation?: () => void;
   /** Whether analysis is currently in progress. */
   isAnalyzing?: boolean;
   /** Whether multiple filter types are selected. */
@@ -101,6 +106,7 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   onProcess,
   framesToStack,
   onCancel,
+  onCancelAnalysis,
   onAddImages,
   onAddTarget,
   isProcessing,
@@ -114,7 +120,6 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   analyzeDisabledReason,
   analysisSelectionInput,
   onAnalyzeStage,
-  onAnalyzeTemporalVariation,
   isAnalyzing,
   hasMultipleFilters,
   onOpenSiril,
@@ -201,24 +206,10 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
               />
             )}
 
-            {onAnalyzeTemporalVariation && !isAnalyzing && (
-              <Button
-                onClick={() => {
-                  if (!isAnalyzing && !isProcessing) {
-                    onAnalyzeTemporalVariation();
-                  }
-                }}
-                disabled={isProcessing}
-                title="Follow how each star's spectrum changes across the raw frames. Analyze the master stack first."
-              >
-                Analyze Temporal Variation
-              </Button>
-            )}
-
-            {isAnalyzing && onCancel && (
+            {isAnalyzing && (onCancelAnalysis ?? onCancel) && (
               <Button
                 variant="danger"
-                onClick={onCancel}
+                onClick={onCancelAnalysis ?? onCancel}
               >
                 Cancel
               </Button>

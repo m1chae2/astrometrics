@@ -313,7 +313,7 @@ class AsteroidDetectionResult(BaseModel):
 
 
 class TargetQualitySummaries(BaseModel):
-    """The three per-pipeline quality summaries `Target` keeps by itself.
+    """The per-pipeline quality summaries `Target` keeps by itself.
 
     Astrometry, photometry, and spectroscopy each write their per-star
     findings onto `StellarObject`, not `Target` -- they don't own a
@@ -327,6 +327,12 @@ class TargetQualitySummaries(BaseModel):
     astrometry: AstrometryQualitySummary | None = Field(default=None, alias="astrometry")
     photometry: PhotometryQualitySummary | None = Field(default=None, alias="photometry")
     spectroscopy: SpectroscopyQualitySummary | None = Field(default=None, alias="spectroscopy")
+    # The summary of the spectral variation stage, which follows the stars
+    # across the raw spectral frames. It is kept apart from `spectroscopy`,
+    # which describes the master stack, so neither replaces the other.
+    spectroscopy_variation: SpectroscopyQualitySummary | None = Field(
+        default=None, alias="spectroscopyVariation"
+    )
 
 
 class TargetObjectType(StrEnum):

@@ -152,7 +152,7 @@ SESSION_RULES: tuple[QualityRule, ...] = (
         "Only {samples} measured guide samples exist for this night; at least {minimum} are needed.",
         "A night with too few guide samples cannot be judged, so the analysis says so and stops.",
         plain_wording=(
-            "We have only {samples:.0f} guide readings for this night, too few to judge the guiding. Guide "
+            "Only {samples:.0f} guide readings exist for this night, too few to judge the guiding. Guide "
             "for at least six minutes with the guide log on."
         ),
     ),
@@ -320,7 +320,7 @@ SESSION_RULES: tuple[QualityRule, ...] = (
         "Only {nights} nights have measurements with a known pointing; at least {minimum} are needed.",
         "Parts of the sky cannot be compared without enough nights.",
         plain_wording=(
-            "Only {nights:.0f} nights have sky data we can use, and we need at least {minimum} to compare "
+            "Only {nights:.0f} nights have usable sky data, and at least {minimum} are needed to compare "
             "parts of the sky. Keep imaging and check again."
         ),
     ),
@@ -332,7 +332,7 @@ SESSION_RULES: tuple[QualityRule, ...] = (
         "{what} {where} than in the rest of the same nights.",
         "A part of the sky that is measurably worse can be avoided when planning.",
         plain_wording=(
-            "{what} {where} than on the rest of the same nights, so we expect that part of the sky to give "
+            "{what} {where} than on the rest of the same nights, so that part of the sky is expected to give "
             "worse pictures. Plan around it when you can."
         ),
     ),
@@ -356,8 +356,8 @@ SESSION_RULES: tuple[QualityRule, ...] = (
         "{count} parts of the sky were reached on too few nights, so they were not judged.",
         "Says which parts of the sky have no verdict and how more nights would give one.",
         plain_wording=(
-            "{count} parts of the sky were seen on too few nights to judge, so we cannot say how the "
-            "telescope does there yet. Image them on more nights."
+            "{count} parts of the sky were seen on too few nights to judge, so the "
+            "telescope's performance there cannot be judged yet. Image them on more nights."
         ),
     ),
 )

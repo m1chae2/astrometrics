@@ -262,6 +262,7 @@ astrometricslib/pipelines/shared/target_overview.py,describe_target.include_fram
 astrometricslib/pipelines/shared/target_sessions.py,SESSION_NIGHT_BOUNDARY_HOUR,Noon night boundary convention; duplicates item 193
 astrometricslib/pipelines/spectroscopy/batch.py,MAXIMUM_TRACKED_STARS_PER_FRAME,Decided not tuning in the #175 review (SPE-D28): workload cap
 astrometricslib/pipelines/spectroscopy/batch.py,_BRIGHTEST_CATALOG_MAGNITUDE,"Brightest real catalog magnitude; instrument-reading sentinel, duplicated in backend"
+astrometricslib/pipelines/spectroscopy/batch.py,MINIMUM_FRAMES_PER_SESSION_FOR_VARIATION,Fewest frames a change over time can be compared across; a logical minimum of two points
 astrometricslib/pipelines/spectroscopy/metrics.py,GAIA_XP_BAND_EDGES_ANGSTROM,Band definitions of the comparison; method choice
 astrometricslib/pipelines/spectroscopy/pipeline.py,DISPERSION_ANGLE_MAXIMUM_REFIT_COUNT,Iteration cap; result settled before cap on tested stars
 astrometricslib/pipelines/spectroscopy/pipeline.py,DISPERSION_ANGLE_REFIT_TOLERANCE,"Convergence tolerance, below measured scatter"

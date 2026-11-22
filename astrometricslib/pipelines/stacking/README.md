@@ -110,15 +110,16 @@ A satellite or aircraft streak does not trigger it, because the stacker's pixel 
 **What it does.** Stacking a target rebuilds every stack it has: one per filter and one for spectra. Before it stacks, `stack_inputs.py` writes down what the stack is made from:
 
 - the frames (path, size and modification time);
-- the calibration frames the library picks for them (darks, biases and flats, with their modification times);
+- the calibration frames the library picks for them (darks, biases and flats, with their modification times; a dark the defect check left out is not listed);
+- the recipes that build the master dark and master flat from those frames;
 - the settings that change the pixels;
 - a version number of the stacking code.
 
-It saves that record, with a hash of it (a short fingerprint that changes whenever the record changes), next to the stack as `<stack name>_inputs.json`. On the next run it builds the record again. If the hash matches and the stack file is still there, the stage keeps the stack and returns its path. If not, it logs what changed (for example `3 frame(s) added`, `the flat frames changed`, `settings changed: get_stack_weight`) and rebuilds.
+It saves that record, with a hash of it (a short fingerprint that changes whenever the record changes), next to the stack as `<stack name>_inputs.json`. On the next run it builds the record again. If the hash matches and the stack file is still there, the stage keeps the stack and returns its path. If not, it logs what changed (for example `3 frame(s) added`, `the flat frames changed`, `the master dark recipe changed`, `settings changed: get_stack_weight`) and rebuilds.
 
 Adding luminance frames (imaging frames taken through a clear filter that passes all visible colors) to a target does not rebuild its spectral stack. Only the stacking step is skipped. Astrometry, photometry and spectroscopy still run on the stack that is there.
 
-**When it never skips.** The skip never triggers when the stack has no record or when the inputs cannot be read. A stack with no record is rebuilt once. The record travels with the stack into the `_previous` folder.
+**When it never skips.** The skip never triggers when the stack has no record or when the inputs cannot be read. A stack with no record is rebuilt once, and so is one whose record lacks the master recipes (made before they were recorded). A change that touches only the preview (stretch, toning, the background-gradient side file) does not restack; Post Process Target remakes the preview. The record travels with the stack into the `_previous` folder.
 
 **Settings.** To rebuild anyway, pass `force=True` to `ProcessingPipelines.stack`, pass `--force-restack` to `scripts/run_all_target_processing.py`, or turn off `skip_unchanged_stacks_enabled`.
 

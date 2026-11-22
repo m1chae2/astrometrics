@@ -751,7 +751,7 @@ def refresh_ranking_packages(
                 continue
             gain = candidate.gain_per_hour_fraction
             reason = f"Ranked number {candidate.rank} for {ranked_list.use.value} tonight." + (
-                f" We expect one more hour to cut its noise by roughly {gain * 100:.0f}%."
+                f" One more hour is expected to cut its noise by roughly {gain * 100:.0f}%."
                 if gain is not None
                 else ""
             )

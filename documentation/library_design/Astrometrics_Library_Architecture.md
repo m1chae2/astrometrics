@@ -395,7 +395,7 @@ The comparison set must hold a minimum number of stars, the same in every frame,
 
 **In plain words.** This pipeline spreads starlight into a rainbow of colors to measure a star's surface temperature, chemical elements, and motion.
 
-The pipeline extracts, calibrates, and classifies a star's spectrum from images taken through a transmission grating (a plate ruled with fine parallel lines, here a Star Analyser 200) in front of the camera. The grating spreads each star's light into a spectrum without a slit (slitless spectroscopy). Each star leaves an undispersed point image, the zero order, and beside it the first-order spectrum, which the pipeline measures. Evidence for its settings: [spectroscopy register](validation/spectroscopy.md). Step-by-step review: [Spectroscopy review guide](pipelines/spectroscopy.md).
+The pipeline extracts, calibrates, and classifies a star's spectrum from images taken through a transmission grating (a plate ruled with fine lines, here a Star Analyser 200) in front of the camera. The grating spreads each star's light into a spectrum without a slit (slitless spectroscopy). Each star leaves a point image, the zero order, beside its first-order spectrum. An optional step follows stars across raw frames. Evidence: [spectroscopy register](validation/spectroscopy.md). Step-by-step review: [Spectroscopy review guide](pipelines/spectroscopy.md).
 
 ### 6.1 Inputs and outputs
 

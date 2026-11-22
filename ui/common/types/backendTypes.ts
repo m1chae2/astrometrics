@@ -203,7 +203,7 @@ export interface AsteroidDetectionResult {
 }
 
 /**
- * The three per-pipeline quality summaries `Target` keeps by itself.
+ * The per-pipeline quality summaries `Target` keeps by itself.
  *
  * Astrometry, photometry, and spectroscopy each write their per-star
  * findings onto `StellarObject`, not `Target` -- they don't own a
@@ -215,6 +215,7 @@ export interface TargetQualitySummaries {
   astrometry?: AstrometryQualitySummary | null;
   photometry?: PhotometryQualitySummary | null;
   spectroscopy?: SpectroscopyQualitySummary | null;
+  spectroscopyVariation?: SpectroscopyQualitySummary | null;
 }
 
 /**

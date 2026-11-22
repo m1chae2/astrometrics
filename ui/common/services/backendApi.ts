@@ -393,7 +393,7 @@ export interface ActionRegistry {
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
-    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string; stages?: ('astrometry' | 'photometry' | 'spectroscopy')[] }; response: AnalysisResult };
+    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string; stages?: ('astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation')[] }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
     // Names the detected stars of a stack (a job of the analysis type), and reads the saved names.

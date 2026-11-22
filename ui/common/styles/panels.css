@@ -554,6 +554,7 @@
 }
 
 .panel__collapsed-note {
+    white-space: nowrap;
     color: var(--text-muted);
     font-size: var(--control-font-size);
     font-weight: normal;

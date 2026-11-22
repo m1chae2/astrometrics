@@ -130,9 +130,13 @@ def test_several_flats_are_stacked_and_then_blurred() -> None:
 
 
 def test_only_the_flat_master_has_a_recipe_in_its_cache_key() -> None:
-    """Bias and dark masters keep their old keys; the flat key is new."""
+    """Bias masters keep their old key; the dark and flat keys carry a recipe.
+
+    The dark recipe was added when master darks became median stacks, so
+    masters built the old way are not reused.
+    """
     assert _master_recipe("bias") == ""
-    assert _master_recipe("dark") == ""
+    assert _master_recipe("dark") != ""
     assert _master_recipe("flat") != ""
 
 

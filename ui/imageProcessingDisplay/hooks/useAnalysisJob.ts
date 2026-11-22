@@ -3,8 +3,9 @@
  * @description Hook for managing variability analysis jobs and results.
  */
 import { useState, useEffect, useRef } from 'react';
-import { analyzeTarget, fetchAnalysisResults, streamJobLog, type AnalysisStageName } from '../../common/services/imaging/processingService';
+import { analyzeTarget, cancelAnalysis, fetchAnalysisResults, streamJobLog, type AnalysisStageName } from '../../common/services/imaging/processingService';
 import { reportError } from '../../common/utils/reportError';
+import { emitToast } from '../../common/utils/emitToast';
 import { AnalysisResult } from '../../common/types/backendTypes';
 import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
@@ -16,6 +17,8 @@ export interface AnalysisJobResult {
     analysisError: string | null;
     analysisResults: AnalysisResult | null;
     startAnalysis: (imageFiles?: string[], filterType?: string, stages?: AnalysisStageName[]) => Promise<void>;
+    /** Stops the running analysis job. The busy state ends when the job reaches cancelled. */
+    cancelAnalysisJob: () => Promise<void>;
 }
 
 export function useAnalysisJob(
@@ -215,10 +218,25 @@ export function useAnalysisJob(
         }
     };
 
+    const cancelAnalysisJob = async () => {
+        if (!selectedTarget) return;
+        const result = await cancelAnalysis(selectedTarget);
+        if (result === null) {
+            // The request itself failed: the user asked for this, so say so.
+            reportError(new Error('The analysis could not be cancelled.'), 'cancelAnalysisJob');
+            return;
+        }
+        // A job the backend could not stop keeps running: say why and keep showing it.
+        if (!result.cancelled) {
+            emitToast(result.reason || 'The analysis could not be cancelled.', 'warning', 'cancelAnalysisJob');
+        }
+    };
+
     return {
         isAnalyzing: analyzingTargetId === selectedTarget,
         analysisError,
         analysisResults,
-        startAnalysis
+        startAnalysis,
+        cancelAnalysisJob
     };
 }

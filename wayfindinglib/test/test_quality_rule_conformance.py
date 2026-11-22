@@ -96,6 +96,18 @@ _NOTICE_ROW_REASON = (
     "issue 97."
 )
 UNUSED_DECISION_METRICS = {
+    "frame.dark_longest_streak_px": (
+        "judged by the stacking step's dark defect check (`dark_defect_judgement`), which keeps or leaves "
+        "out a dark before the stack; no rule of this table compares it with a limit"
+    ),
+    "frame.dark_edge_to_edge_streak": (
+        "judged by the stacking step's dark defect check (`dark_defect_judgement`), which leaves out a dark "
+        "with a track from edge to edge; no rule of this table compares it with a limit"
+    ),
+    "frame.dark_outlier_pixel_count": (
+        "judged by the stacking step's dark defect check (`dark_defect_judgement`), which leaves out a dark "
+        "with too many outlying pixels; no rule of this table compares it with a limit"
+    ),
     "stacking.notice_frames_moved_to_excluded": _NOTICE_ROW_REASON,
     "frame.notice_synthetic": _NOTICE_ROW_REASON,
     "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,

@@ -26,8 +26,10 @@ export interface SectionPanelProps {
      * title running down it. Clicking the title (`onTitleClick`) opens the panel again.
      */
     collapsed?: 'down' | 'right';
-    /** A short muted note beside the title while the panel is folded down, such as a count. */
+    /** A short muted note beside the title while the panel is folded (down or right), such as a count or a selection. */
     collapsedNote?: string;
+    /** Accessible name of the title button while the panel is folded, when it should say more than the shown title. */
+    collapsedAriaLabel?: string;
 }
 
 /**
@@ -50,17 +52,18 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
     onTitleClick,
     titleButtonLabel,
     collapsed,
-    collapsedNote
+    collapsedNote,
+    collapsedAriaLabel
 }) => {
     const fullHeightClass = fullHeight ? 'panel--full-height' : '';
     if (collapsed) {
         return (
             <div id={id} className={`panel panel--collapsed panel--collapsed-${collapsed} ${className}`} style={style}>
                 <div className="panel__header">
-                    <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-expanded={false}>
+                    <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-label={collapsedAriaLabel} aria-expanded={false}>
                         {title}
                     </Button>
-                    {collapsed === 'down' && collapsedNote && <span className="panel__collapsed-note">{collapsedNote}</span>}
+                    {collapsedNote && <span className="panel__collapsed-note">{collapsedNote}</span>}
                 </div>
             </div>
         );

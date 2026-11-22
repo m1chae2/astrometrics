@@ -20,6 +20,8 @@ export interface UseImageProcessingResult {
     isProcessing: boolean;
     startProcessing: (imageFiles?: string[], logFile?: string) => Promise<void>;
     cancelProcessingJob: () => Promise<void>;
+    /** Stops the running analysis job (not the stacking job). */
+    cancelAnalysisJob: () => Promise<void>;
     clearLogs: () => void;
     refreshFrames: () => void;
     isAnalyzing: boolean;
@@ -63,6 +65,7 @@ export function useImageProcessing(
         isProcessing: stacking.isProcessing,
         startProcessing: stacking.startProcessing,
         cancelProcessingJob: stacking.cancelProcessingJob,
+        cancelAnalysisJob: analysis.cancelAnalysisJob,
         clearLogs: stacking.clearLogs,
         refreshFrames: stacking.refreshFrames,
         isAnalyzing: analysis.isAnalyzing,

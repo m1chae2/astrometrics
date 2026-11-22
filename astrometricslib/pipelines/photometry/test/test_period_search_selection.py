@@ -186,3 +186,24 @@ def test_nothing_is_saved_when_no_star_can_be_searched(catalog_access: CatalogAc
     stars = [_star("HD 1", mean_flux=50.0, points=2)]
 
     assert search_periods_and_save(stars, _TARGET, catalog_access) == 0
+
+
+@pytest.mark.parametrize("points_left", [0, 1, 2])
+def test_a_star_cut_short_by_saturation_is_skipped_and_the_slot_goes_on(points_left: int) -> None:
+    """Verify a star left with 0, 1 or 2 points is skipped for the next star.
+
+    Saturated-point removal can leave a star with almost no light curve; it
+    must not be searched, and the next-brightest star takes its place.
+    """
+    short = _star("HD 1", mean_flux=100.0, points=12)
+    short.photometry.timestamps = short.photometry.timestamps[:points_left]
+    short.photometry.fluxes_normalized = short.photometry.fluxes_normalized[:points_left]
+    short.photometry.fluxes_detrended = short.photometry.fluxes_detrended[:points_left]
+    stars = [short, _star("HD 2", mean_flux=50.0), _star("HD 3", mean_flux=10.0)]
+
+    chosen = select_period_search_stars(stars, None, None, limit=2)
+
+    assert [star.id for star in chosen] == ["HD 2", "HD 3"]
+    analyzer = VariabilityAnalyzer()
+    assert analyzer.run_lomb_scargle_periodogram(short) is None
+    assert analyzer.run_bls_transit_search(short) is None

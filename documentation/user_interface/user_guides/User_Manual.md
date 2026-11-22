@@ -203,8 +203,7 @@ The Image Controls panel has these buttons.
 
 | Control | What it does |
 | --- | --- |
-| Analyze Target | Starts a star analysis. It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
-| Analyze Temporal Variation | Appears only for spectral frames that already have a spectral stack. It follows how each star's spectrum changes across the raw frames |
+| Analyze Target | Starts a star analysis. The arrow opens a menu that runs one stage: Astrometry, Photometry, Spectroscopy or Spectral Variation (it follows how each star's spectrum changes across the raw spectral frames, and is on only while the spectral filter is in view). It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
 | Cancel | Replaces Analyze Target while an analysis runs |
 | Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. It is also off when the frames come from more than one optic, such as with All optics. The label then reads Pick one optic to stack, and the tooltip names the focal lengths. |
 | Open Siril | Opens Siril for the target. Siril is the outside program that does the stacking |

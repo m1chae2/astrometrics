@@ -214,3 +214,28 @@ def test_an_image_without_a_date_keeps_positions_at_2016_and_a_flag_says_so(
 
     assert len(still_unmatched) == 1
     assert identifier.astrometry_flags == [star_identifier_module.FLAG_GAIA_EPOCH_UNKNOWN]
+
+
+def test_use_image_header_sets_the_observation_time_and_resets_it(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """DATE-OBS moves the stars with no warning; without it, it warns."""
+    monkeypatch.setattr(star_identifier_module, "predict_gaia_depth_from_header", lambda header, config: None)
+    identifier = make_identifier()
+    table, coords = make_gaia_table(ARCSEC_PER_YEAR_IN_MAS, 0.0)
+
+    identifier.use_image_header(fits.Header({"DATE-OBS": "2026-10-03T04:20:52.448"}))
+    with caplog.at_level("WARNING"):
+        moved = identifier._move_gaia_coords_to_observation_epoch(table, coords)
+
+    assert identifier.observation_time is not None
+    assert "no usable DATE-OBS" not in caplog.text
+    assert moved.ra.deg[0] > START_RA_DEG
+
+    caplog.clear()
+    identifier.use_image_header(fits.Header())
+    with caplog.at_level("WARNING"):
+        identifier._move_gaia_coords_to_observation_epoch(table, coords)
+
+    assert identifier.observation_time is None
+    assert "no usable DATE-OBS" in caplog.text

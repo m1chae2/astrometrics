@@ -1903,11 +1903,13 @@ class ProcessingPipelines:
         on_item_complete: Callable[[str, dict, int, int], None] | None = None,
         register_job: bool = True,
         run_prerequisites: bool = True,
+        spectral_variation: dict[str, Any] | None = None,
     ) -> ProcessTargetResult | BatchRunSummary:
         """Run the analysis stages for one target, or the pipeline for many.
 
         For one target, the chosen ``stages`` run in this process, always
-        in the order astrometry, photometry, spectroscopy, asteroids.
+        in the order astrometry, photometry, spectroscopy, spectral
+        variation, asteroids.
         Photometry measures only the frames of one camera and one optic,
         chosen the way the batch run chooses them: the camera the batch
         would give the target to (the first camera in the config's setups
@@ -1929,6 +1931,14 @@ class ProcessingPipelines:
         run on a guess, and the reason, ``needs astrometry: ...``, is in
         ``stages_skipped``. ``prerequisites_run`` lists the stages added.
 
+        The ``"spectral_variation"`` stage follows each star's spectrum
+        across the target's raw spectral frames, one observing session at a
+        time. It needs spectroscopy first (added when its result is missing
+        or older than the spectral stack), keeps its summary in
+        ``quality.spectroscopy_variation`` and leaves the stack's spectra as
+        they are. A session with fewer than two frames is skipped, with the
+        reason in the result.
+
         For a list of targets, or `None` for every target, each target runs
         the full pipeline in its own worker process: stack the frames of
         ``camera_id``, plate solve, measure star brightness, and extract
@@ -1938,8 +1948,9 @@ class ProcessingPipelines:
         Arguments used by each form (any other argument is refused):
 
         - one target: ``stages``, ``astrometry``, ``photometry``,
-          ``spectroscopy``, ``asteroids``, ``run_prerequisites``, and
-          optionally ``camera_id`` and ``focal_length_mm``.
+          ``spectroscopy``, ``spectral_variation``, ``asteroids``,
+          ``run_prerequisites``, and optionally ``camera_id`` and
+          ``focal_length_mm``.
         - several targets: ``camera_id`` (needed), ``focal_length_mm``,
           ``on_item_complete``. The full pipeline always runs astrometry
           before photometry, so ``run_prerequisites=False`` is refused.
@@ -1992,6 +2003,10 @@ class ProcessingPipelines:
             spectroscopy when its result is missing or out of date.
             Defaults to `True`. Pass `False` only when astrometry has just
             run on this stack, or to run a stage alone on purpose.
+        spectral_variation : `dict`, optional
+            Options for the spectral variation stage: ``frames`` (the raw
+            spectral frames to follow; the selected camera's by default) and
+            ``max_workers``.
 
         Returns
         -------
@@ -2022,6 +2037,7 @@ class ProcessingPipelines:
                     "photometry": photometry is not None,
                     "spectroscopy": spectroscopy is not None,
                     "asteroids": asteroids is not None,
+                    "spectral_variation": spectral_variation is not None,
                     "run_prerequisites": not run_prerequisites,
                 },
             )
@@ -2062,6 +2078,7 @@ class ProcessingPipelines:
             "astrometry": astrometry,
             "photometry": photometry,
             "spectroscopy": spectroscopy,
+            "spectral_variation": spectral_variation,
             "asteroids": asteroids,
         }
         for stage, options in stage_options.items():
@@ -2076,7 +2093,7 @@ class ProcessingPipelines:
         moving_object_config_from_options((asteroids or {}).get("moving_object_config"))
         resolved = self._resolve(target)
         frame_selection = None
-        if "photometry" in chosen_stages or "spectroscopy" in chosen_stages:
+        if any(stage in chosen_stages for stage in ("photometry", "spectroscopy", "spectral_variation")):
             frame_selection = resolve_processing_frames(resolved, self._config, camera_id, focal_length_mm)
         return tasks.run_target_stages(
             resolved,

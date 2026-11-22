@@ -27,6 +27,17 @@ from astrometricslib.pipelines import tasks
 EXPECTED_RESULT_KEYS: dict[str, set[str]] = {
     "astrometry": {"context", "stellar_objects", "wcs", "image_stats"},
     "spectroscopy": {"context", "stellar_objects"},
+    "spectral_variation": {
+        "status",
+        "reason",
+        "frames_followed",
+        "frames_failed",
+        "stars_processed",
+        "skipped_frames",
+        "followed_stars",
+        "stars_named",
+        "stars_unnamed",
+    },
     "photometry": {
         "status",
         "targetId",

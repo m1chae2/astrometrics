@@ -263,6 +263,18 @@ def test_the_preferred_simbad_server_is_harvard_unless_told_otherwise(
     assert config.get_simbad_preferred_server() == "simbad.harvard.edu"
 
 
+def test_the_preferred_vizier_server_is_harvard_unless_told_otherwise(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """Harvard is the default, CDS can be chosen, bad values give Harvard."""
+    config = config_in_tmp_path
+    assert config.get_vizier_preferred_server() == "vizier.cfa.harvard.edu"
+    config.app_config.set("Catalogs", "vizier_preferred_server", "VIZIER.cds.unistra.fr")
+    assert config.get_vizier_preferred_server() == "vizier.cds.unistra.fr"
+    config.app_config.set("Catalogs", "vizier_preferred_server", "example.org")
+    assert config.get_vizier_preferred_server() == "vizier.cfa.harvard.edu"
+
+
 def test_the_colour_calibration_method_is_pcc_unless_told_otherwise(
     config_in_tmp_path: AppConfiguration,
 ) -> None:

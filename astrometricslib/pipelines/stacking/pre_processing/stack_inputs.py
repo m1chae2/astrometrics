@@ -8,7 +8,10 @@ the stacker skip a stack when nothing that goes into it has changed.
 A stack depends on four things:
 
 1. The frames: which files, and whether any file was replaced.
-2. The calibration frames (darks, biases and flats) the library picks for them.
+2. The calibration frames (darks, biases and flats) the library picks for them,
+   and the recipes that build the master dark and master flat from them. A
+   change of recipe (for example the dark combine going from a sigma-clipped
+   mean to a median) changes the masters, so it restacks.
 3. The settings that change the pixels: rejection, weighting, trimming and
    the frame filters.
 4. The stacking code itself.
@@ -257,6 +260,25 @@ def _calibration_files(frames: list[Any], library: Any) -> dict[str, list[list[A
     return {kind: [_file_state(path) for path in sorted(paths)] for kind, paths in found.items()}
 
 
+def _master_recipes() -> dict[str, str]:
+    """Name how the master calibration frames are built.
+
+    These are the recipe names that already key the master cache, so a stack
+    is rebuilt exactly when its masters would be. The master bias has no
+    recipe: it is built the standard way.
+
+    Returns
+    -------
+    recipes : `dict` [`str`, `str`]
+        ``{"dark": ..., "flat": ...}``. The flat's name leaves out the bias
+        fingerprint, because the bias frames are listed with the calibration
+        frames.
+    """
+    from astrometricslib._internal.drivers.siril_interface.staging import _master_recipe
+
+    return {"dark": _master_recipe("dark"), "flat": _master_recipe("flat")}
+
+
 def _stacking_settings(configuration: Any, options: dict[str, Any]) -> dict[str, Any]:
     """Collect the values of every setting that changes a stack.
 
@@ -320,6 +342,7 @@ def build_stack_inputs_record(
             "settings": _stacking_settings(configuration, options),
             "frames": sorted(_file_state(getattr(frame, "path", "")) for frame in frames),
             "calibration": _calibration_files(frames, library),
+            "master_recipes": _master_recipes(),
         }
     except (AstrometricsError, *FITS_READ_ERRORS) as error:
         logger.warning("Could not record the inputs of a stack, so it will not be skipped: %s", error)
@@ -408,6 +431,14 @@ def describe_changes(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
     for count, wording in ((added, "added"), (removed, "removed"), (replaced, "replaced")):
         if count:
             reasons.append(f"{count} frame(s) {wording}")
+    old_recipes = old.get("master_recipes")
+    new_recipes = new.get("master_recipes", {})
+    if old_recipes is None:
+        reasons.append("the stack's record does not say how its master calibration frames were built")
+    else:
+        for kind in ("dark", "flat"):
+            if old_recipes.get(kind) != new_recipes.get(kind):
+                reasons.append(f"the master {kind} recipe changed")
     for kind in ("darks", "biases", "flats"):
         if old.get("calibration", {}).get(kind) != new.get("calibration", {}).get(kind):
             reasons.append(f"the {kind[:-1]} frames changed")

@@ -103,7 +103,7 @@ def test_the_esa_query_asks_for_the_missing_depth_only(monkeypatch: pytest.Monke
         """A fake archive client."""
 
         @staticmethod
-        def launch_job_async(query: str, dump_to_file: bool = False) -> _Job:
+        def launch_job(query: str, dump_to_file: bool = False) -> _Job:
             """Remember the query.
 
             Parameters
@@ -178,6 +178,156 @@ def test_the_vizier_path_keeps_only_rows_in_the_tile(monkeypatch: pytest.MonkeyP
     assert 0.1 < float(seen["radius"]) < 0.45
 
 
+CDS_VIZIER = "vizier.cds.unistra.fr"
+HARVARD_VIZIER = "vizier.cfa.harvard.edu"
+
+
+class _FakeVizierConfiguration:
+    """Stands in for the configuration, giving a chosen preferred server."""
+
+    def __init__(self, preferred_server: str) -> None:
+        """Remember the server to prefer.
+
+        Parameters
+        ----------
+        preferred_server : `str`
+            The server `get_vizier_preferred_server` returns.
+        """
+        self.preferred_server = preferred_server
+
+    def get_vizier_preferred_server(self) -> str:
+        """Return the preferred VizieR server.
+
+        Returns
+        -------
+        server : `str`
+            The preferred server.
+        """
+        return self.preferred_server
+
+
+def _install_fake_vizier(
+    monkeypatch: pytest.MonkeyPatch, outcomes: dict[str, object], preferred_server: str = HARVARD_VIZIER
+) -> list[tuple[str, float]]:
+    """Replace astroquery's `Vizier` with one that answers per server.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The fixture that undoes the replacement.
+    outcomes : `dict` [`str`, `object`]
+        For each server, an exception to raise or a value to return.
+    preferred_server : `str`, optional
+        The server the setting names.
+
+    Returns
+    -------
+    asked : `list` [`tuple` [`str`, `float`]]
+        Filled in as the code runs: each server asked and the timeout it got.
+    """
+    asked: list[tuple[str, float]] = []
+
+    class FakeVizier:
+        """A VizieR client that answers from `outcomes`."""
+
+        def __init__(self, **options: object) -> None:
+            """Remember the server and timeout asked for.
+
+            Parameters
+            ----------
+            **options : `object`
+                The options the code passed, including `vizier_server`.
+            """
+            self.server = str(options["vizier_server"])
+            self.timeout = float(options["timeout"])  # type: ignore[arg-type]
+
+        def query_region(self, *args: object, **kwargs: object) -> object:
+            """Raise or return what `outcomes` says for this server.
+
+            Returns
+            -------
+            result : `object`
+                The configured value.
+            """
+            asked.append((self.server, self.timeout))
+            outcome = outcomes[self.server]
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    monkeypatch.setitem(sys.modules, "astroquery.vizier", types.SimpleNamespace(Vizier=FakeVizier))
+    monkeypatch.setattr(
+        gaia_cone_driver, "get_configuration", lambda: _FakeVizierConfiguration(preferred_server)
+    )
+    monkeypatch.setattr(gaia_cone_driver, "_last_answered_vizier_server", None)
+    monkeypatch.setattr(gaia_cone_driver, "_vizier_preference_when_remembered", None)
+    return asked
+
+
+def _cone() -> Table:
+    """Run a cone download with the fake client.
+
+    Returns
+    -------
+    table : `astropy.table.Table`
+        What `query_gaia_cone_vizier` returned.
+    """
+    return gaia_cone_driver.query_gaia_cone_vizier(10.0, 20.0, 0.5, 18.0, 100, 40.0)
+
+
+def test_vizier_asks_harvard_first_and_remembers_the_one_that_answered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Harvard goes first by default; a server that is down is skipped next."""
+    asked = _install_fake_vizier(monkeypatch, {HARVARD_VIZIER: ConnectionError("down"), CDS_VIZIER: []})
+    assert len(_cone()) == 0
+    assert [server for server, _ in asked] == [HARVARD_VIZIER, CDS_VIZIER]
+    assert all(timeout == pytest.approx(40.0) for _, timeout in asked)
+    asked.clear()
+    _cone()
+    assert [server for server, _ in asked] == [CDS_VIZIER]
+
+
+def test_vizier_does_not_leave_a_server_that_answers_or_replies_badly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad reply is raised at once; the other server has the same data."""
+    asked = _install_fake_vizier(monkeypatch, {HARVARD_VIZIER: ValueError("unreadable"), CDS_VIZIER: []})
+    with pytest.raises(ValueError, match="unreadable"):
+        _cone()
+    assert [server for server, _ in asked] == [HARVARD_VIZIER]
+
+
+def test_vizier_raises_when_neither_server_can_be_reached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With both servers down, the last connection error reaches the caller."""
+    asked = _install_fake_vizier(
+        monkeypatch, {HARVARD_VIZIER: ConnectionError("first"), CDS_VIZIER: TimeoutError("second")}
+    )
+    with pytest.raises(TimeoutError, match="second"):
+        _cone()
+    assert len(asked) == 2
+
+
+def test_a_strasbourg_preference_and_a_changed_preference_for_vizier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setting picks the first server; a change drops the last one."""
+    asked = _install_fake_vizier(
+        monkeypatch, {HARVARD_VIZIER: [], CDS_VIZIER: []}, preferred_server=CDS_VIZIER
+    )
+    _cone()
+    assert [server for server, _ in asked] == [CDS_VIZIER]
+    monkeypatch.setattr(
+        gaia_cone_driver, "get_configuration", lambda: _FakeVizierConfiguration(HARVARD_VIZIER)
+    )
+    asked.clear()
+    _cone()
+    assert [server for server, _ in asked] == [HARVARD_VIZIER]
+
+
+def test_the_two_vizier_servers_are_strasbourg_and_harvard() -> None:
+    """The driver knows exactly the two VizieR servers."""
+    assert set(gaia_cone_driver.VIZIER_SERVERS) == {CDS_VIZIER, HARVARD_VIZIER}
+
+
 def _fetch(**overrides: object) -> TileFetch:
     """Run `fetch_gaia_tile` with small settings and the given fakes.
 
@@ -202,12 +352,12 @@ def _fetch(**overrides: object) -> TileFetch:
     return fetch_gaia_tile(LEVEL, 10, 0.0, 18.0, 4, **arguments)  # type: ignore[arg-type]
 
 
-def test_vizier_is_tried_first_and_a_full_answer_is_complete_to_the_depth() -> None:
+def test_esa_is_tried_first_and_a_full_answer_is_complete_to_the_depth() -> None:
     """The first service that answers wins; the depth is the one asked for."""
     calls: list[str] = []
 
-    def vizier(*arguments: object) -> Table:
-        """Answer from fake VizieR.
+    def esa(*arguments: object) -> Table:
+        """Answer from the fake ESA archive.
 
         Parameters
         ----------
@@ -219,25 +369,67 @@ def test_vizier_is_tried_first_and_a_full_answer_is_complete_to_the_depth() -> N
         table : `astropy.table.Table`
             Two stars.
         """
-        calls.append("vizier")
+        calls.append("esa")
         return _table(10, [10.0, 11.0])
 
-    result = _fetch(vizier_query=vizier)
+    def vizier(*arguments: object) -> Table:
+        """Record a call that should not happen.
 
-    assert calls == ["vizier"]
-    assert (result.service, result.complete_to_g, result.row_limit_reached) == ("VizieR", 18.0, False)
+        Parameters
+        ----------
+        *arguments : `object`
+            The query arguments.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("VizieR must not be asked")
+
+    result = _fetch(esa_query=esa, vizier_query=vizier)
+
+    assert calls == ["esa"]
+    assert (result.service, result.complete_to_g, result.row_limit_reached) == (
+        "ESA Gaia archive",
+        18.0,
+        False,
+    )
+
+
+def test_a_failed_esa_falls_through_to_vizier() -> None:
+    """VizieR answers when the archive is down."""
+
+    def esa(*arguments: object) -> Table:
+        """Fail like an archive in downtime.
+
+        Parameters
+        ----------
+        *arguments : `object`
+            The query arguments.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("down")
+
+    result = _fetch(esa_query=esa, vizier_query=lambda *a: _table(10, [10.0]))
+
+    assert (result.service, result.complete_to_g) == ("VizieR", 18.0)
 
 
 def test_a_row_limit_hit_records_the_faintest_g_reached() -> None:
     """A full table is complete only to its faintest G."""
-    result = _fetch(vizier_query=lambda *a: _table(10, [10.0, 11.0, 12.0, 13.5]))
+    result = _fetch(esa_query=lambda *a: _table(10, [10.0, 11.0, 12.0, 13.5]))
 
     assert result.row_limit_reached
     assert result.complete_to_g == pytest.approx(13.5)
 
 
-def test_esa_follows_vizier_then_vizier_goes_shallower() -> None:
-    """VizieR, ESA at full depth, then VizieR at G < 17 and G < 16."""
+def test_vizier_follows_esa_then_vizier_goes_shallower() -> None:
+    """ESA, VizieR at full depth, then VizieR at G < 17 and G < 16."""
     calls: list[tuple[str, float]] = []
 
     def vizier(level: int, tile: int, have: float, want: float, limit: int, timeout: float) -> Table:
@@ -294,9 +486,9 @@ def test_esa_follows_vizier_then_vizier_goes_shallower() -> None:
         vizier_query=vizier, esa_query=esa, on_error=lambda service, error: errors.append(service)
     )
 
-    assert calls == [("vizier", 18.0), ("esa", 18.0), ("vizier", 17.0), ("vizier", 16.0)]
+    assert calls == [("esa", 18.0), ("vizier", 18.0), ("vizier", 17.0), ("vizier", 16.0)]
     assert result.complete_to_g == pytest.approx(16.0)
-    assert errors == ["VizieR", "ESA Gaia archive", "VizieR"]
+    assert errors == ["ESA Gaia archive", "VizieR", "VizieR"]
 
 
 def test_every_failure_raises_and_skipped_services_are_not_called() -> None:

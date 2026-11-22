@@ -30,6 +30,7 @@ import psutil
 
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.foundation.paths import locks_directory
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 
 logger = logging.getLogger(__name__)
 
@@ -301,10 +302,12 @@ def acquire_resource_slot(
         Extra logger that receives the "still waiting" reports, besides this
         module's logger.
 
-    Waiting has no time limit. Every `HOLDER_REPORT_INTERVAL_SECONDS` a
-    waiter logs which holders it is behind and for how long. The holder
-    record is information only; the operating system lock alone decides who
-    holds a slot, and a failure to read or write the record never delays it.
+    Waiting has no time limit, except that a run given up on stops waiting
+    (`RunAbandonedError`, see `run_abandonment`). Every
+    `HOLDER_REPORT_INTERVAL_SECONDS` a waiter logs which holders it is
+    behind and for how long. The holder record is information only; the
+    operating system lock alone decides who holds a slot, and a failure to
+    read or write the record never delays it.
 
     A slot the calling work already holds is reused, not taken again: a
     nested request for the same resource runs at once inside the slot already
@@ -348,6 +351,8 @@ def acquire_resource_slot(
             except DeviceInUseError:
                 continue
         time.sleep(poll_interval_seconds)
+        # A run given up on stops waiting for a slot it will not use.
+        raise_if_abandoned()
         if time.monotonic() >= next_report_at:
             next_report_at = time.monotonic() + HOLDER_REPORT_INTERVAL_SECONDS
             _report_wait(resource_name, max_slots, work_name, time.monotonic() - wait_started_at, wait_logger)

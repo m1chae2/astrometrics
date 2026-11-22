@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 # (see `spectrum_star_limit` in runner.py).
 MAXIMUM_TRACKED_STARS_PER_FRAME = 10
 
+# A change over time needs at least two frames of a session to compare.
+# With one frame there is nothing to follow, so the session is skipped and
+# the reason is recorded.
+MINIMUM_FRAMES_PER_SESSION_FOR_VARIATION = 2
+
 # A magnitude below this is an instrument reading, not a catalog
 # magnitude. Must match _BRIGHTEST_CATALOG_MAGNITUDE in
 # backend/services/data/stellar_service.py.
@@ -58,6 +63,22 @@ _BRIGHTEST_CATALOG_MAGNITUDE = -2.0
 # matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
 # astrometricslib/_internal/drivers/catalog_access.py.
 _POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
+
+
+def _is_named(star: StellarObject) -> bool:
+    """Say whether a star has a catalog name (not just a position name).
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        The star to check.
+
+    Returns
+    -------
+    is_named : `bool`
+        `True` for a catalog match, `False` for a ``FIELD_J`` position name.
+    """
+    return bool(star.is_catalog_identified) and not star.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
 
 
 def _is_verified_catalog_star(star: StellarObject) -> bool:
@@ -154,6 +175,54 @@ def select_temporal_tracking_stars(
     )
     tracked_stars = ([primary_star] if primary_star is not None else []) + verified_stars
     return tracked_stars[:limit]
+
+
+def select_brightest_stars(
+    stellar_objects: list[StellarObject], limit: int = MAXIMUM_TRACKED_STARS_PER_FRAME
+) -> list[StellarObject]:
+    """Choose the brightest detected stars of a session to follow.
+
+    The spectral variation stage uses this rule. A star is ranked by the
+    flux of its detection in the session's reference frame (its peak when
+    the flux is missing), so a star the catalog cannot name is still
+    followed. A star with no sky position is left out, because it cannot be
+    placed on the other frames.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars identified in the session's reference image.
+    limit : `int`, optional
+        The most stars to return.
+
+    Returns
+    -------
+    brightest : `list` [`StellarObject`]
+        The brightest stars first, at most `limit`.
+    """
+
+    def _brightness(star: StellarObject) -> float:
+        """Rank one star by its detection flux, then its peak.
+
+        Returns
+        -------
+        brightness : `float`
+            The flux, the peak, or minus infinity when neither is known.
+        """
+        flux = getattr(star, "flux", None)
+        if isinstance(flux, int | float) and math.isfinite(flux) and flux > 0:
+            return float(flux)
+        peak = (star.star_data or {}).get("peak") if isinstance(star.star_data, dict) else None
+        if isinstance(peak, int | float) and math.isfinite(peak):
+            return float(peak)
+        return -math.inf
+
+    placed = [
+        star
+        for star in stellar_objects
+        if star.right_ascension not in (None, "") and star.declination not in (None, "")
+    ]
+    return sorted(placed, key=_brightness, reverse=True)[:limit]
 
 
 def _angular_separation_degrees(
@@ -278,8 +347,14 @@ def _process_single_spectroscopy_frame_worker_v2(
     target_id: str,
     session_stars: list[StellarObject],
     session_wcs_header: dict | None,
+    follow_only: bool = False,
 ) -> dict:
     """Extract spectra for one image, using the session's known stars.
+
+    With ``follow_only`` (the spectral variation stage), the frame is
+    measured but nothing is saved to the star catalog, so the spectra of the
+    master stack stay as they are, and a frame that cannot be tied to the
+    session's stars is skipped instead of analyzed on its own.
 
     This tries to map the known stars from the observing session onto
     this specific image. If this image has its own coordinate mapping (WCS),
@@ -312,7 +387,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         catalog_access = CatalogAccess()
 
         if not session_stars:
-            return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
+            return _fallback_or_skip(catalog_access, target_id, path, result, follow_only)
 
         frame_image = AstrometricsImage(path)
         wcs = frame_image.wcs if frame_image.wcs is not None and frame_image.wcs.is_celestial else None
@@ -327,11 +402,11 @@ def _process_single_spectroscopy_frame_worker_v2(
                 wcs = WCS(session_wcs_header, naxis=2)
 
         if wcs is None:
-            return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
+            return _fallback_or_skip(catalog_access, target_id, path, result, follow_only)
 
         projected_stars = _project_session_stars_to_frame_pixels(session_stars, wcs)
         if not projected_stars:
-            return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
+            return _fallback_or_skip(catalog_access, target_id, path, result, follow_only)
 
         from astrometricslib.pipelines.spectroscopy.pipeline import (
             SpectroscopyPipeline,
@@ -347,11 +422,20 @@ def _process_single_spectroscopy_frame_worker_v2(
             record_and_flag_spectroscopy_stars,
         )
 
-        stellar_objects, _breakdown, result["spectral_classification_concerns"] = (
-            record_and_flag_spectroscopy_stars(
-                stellar_objects, catalog_access=catalog_access, target_id=target_id
+        if follow_only:
+            from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
+                build_spectral_classification_concerns,
             )
-        )
+
+            result["spectral_classification_concerns"] = build_spectral_classification_concerns(
+                stellar_objects
+            )
+        else:
+            stellar_objects, _breakdown, result["spectral_classification_concerns"] = (
+                record_and_flag_spectroscopy_stars(
+                    stellar_objects, catalog_access=catalog_access, target_id=target_id
+                )
+            )
 
         result["stars_processed"] = len(stellar_objects)
         result["spectrum_facts"] = spectrum_facts(stellar_objects)
@@ -386,6 +470,38 @@ def _process_single_spectroscopy_frame_worker_v2(
     return result
 
 
+def _fallback_or_skip(
+    catalog_access: Any, target_id: str, path: str, result: dict, follow_only: bool
+) -> dict:
+    """Analyze a frame on its own, or skip it when only following stars.
+
+    Parameters
+    ----------
+    catalog_access : `Any`
+        The star catalog.
+    target_id : `str`
+        The target.
+    path : `str`
+        The frame.
+    result : `dict`
+        The worker's result so far.
+    follow_only : `bool`
+        `True` for the spectral variation stage, which never analyzes a frame
+        on its own because that would replace the master stack's spectra.
+
+    Returns
+    -------
+    result : `dict`
+        The updated result. A skipped frame has status ``"skipped"`` and the
+        reason in ``"error"``.
+    """
+    if follow_only:
+        result["status"] = "skipped"
+        result["error"] = "the session's stars could not be placed on this frame"
+        return result
+    return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
+
+
 def _merge_batch_summaries(summaries: list[parallel_batch.BatchRunSummary]) -> parallel_batch.BatchRunSummary:
     """Combine the results from multiple batch processing runs into one.
 
@@ -412,6 +528,7 @@ def process_spectroscopy_frames_by_session(
     job_id: str | None = None,
     drivers: Drivers | None = None,
     measured_at: datetime | None = None,
+    follow_only: bool = False,
 ) -> tuple[parallel_batch.BatchRunSummary, list]:
     """Process a target's spectroscopy images, grouped by observing session.
 
@@ -444,6 +561,13 @@ def process_spectroscopy_frames_by_session(
         time zone. Pipeline code never reads the clock, so the caller
         supplies it. Without it the run stores no measurements and logs a
         warning.
+    follow_only : `bool`, optional
+        Run as the spectral variation stage does. A session with fewer than
+        two frames is skipped (its frames are listed in the summary's
+        ``skipped`` with the reason), nothing is saved to the star catalog,
+        and the summary is kept in ``target.quality.spectroscopy_variation``
+        so it does not replace the master stack's
+        ``target.quality.spectroscopy``.
 
     Returns
     -------
@@ -474,6 +598,25 @@ def process_spectroscopy_frames_by_session(
     session_results = []
     session_summaries = []
 
+    skipped_frames: list[tuple[str, str]] = []
+    followed_stars: dict[str, dict[str, list[str]]] = {}
+    if follow_only:
+        for session in sessions:
+            if len(session.frame_paths) < MINIMUM_FRAMES_PER_SESSION_FOR_VARIATION:
+                skipped_frames.extend(
+                    (
+                        path,
+                        f"session {session.id} has fewer than {MINIMUM_FRAMES_PER_SESSION_FOR_VARIATION} "
+                        "frames, too few to follow a change",
+                    )
+                    for path in session.frame_paths
+                )
+        sessions = [
+            session
+            for session in sessions
+            if len(session.frame_paths) >= MINIMUM_FRAMES_PER_SESSION_FOR_VARIATION
+        ]
+
     for session in sessions:
         reference_image = AstrometricsImage(session.frame_paths[0])
         identify_result = identify_session_stars(
@@ -484,10 +627,21 @@ def process_spectroscopy_frames_by_session(
         session_wcs_header = (
             identify_result.wcs.to_header(relax=True) if identify_result.wcs is not None else None
         )
-        # Only follow the target star and a few verified catalog stars.
-        # Sending every detection would extract hundreds of unvetted
-        # spectra from every frame.
-        tracked_stars = select_temporal_tracking_stars(identify_result.stellar_objects, center_ra, center_dec)
+        # Only follow a few stars. Sending every detection would extract
+        # hundreds of faint spectra from every frame.
+        if follow_only:
+            # Follow the brightest detections, named where the catalog has a
+            # match and by position otherwise (SPE-D28).
+            tracked_stars = select_brightest_stars(identify_result.stellar_objects)
+            named_ids = [star.id for star in tracked_stars if _is_named(star)]
+            followed_stars[session.id] = {
+                "named": named_ids,
+                "unnamed": [star.id for star in tracked_stars if star.id not in named_ids],
+            }
+        else:
+            tracked_stars = select_temporal_tracking_stars(
+                identify_result.stellar_objects, center_ra, center_dec
+            )
         logger.info(
             "[%s] Following %d of %d identified stars across %d frame(s) of session %s.",
             target.id,
@@ -500,7 +654,7 @@ def process_spectroscopy_frames_by_session(
             parallel_batch.run_parallel_batch(
                 session.frame_paths,
                 _process_single_spectroscopy_frame_worker_v2,
-                worker_arguments=(target.id, tracked_stars, session_wcs_header),
+                worker_arguments=(target.id, tracked_stars, session_wcs_header, follow_only),
                 max_workers=max_workers,
                 niceness=config.get_worker_niceness(),
                 on_item_complete=on_item_complete,
@@ -508,7 +662,12 @@ def process_spectroscopy_frames_by_session(
         )
 
     merged_summary = _merge_batch_summaries(session_summaries)
-    _attach_spectroscopy_quality_summary(target, merged_summary, session_results, job_id, measured_at)
+    merged_summary.skipped.extend(skipped_frames)
+    merged_summary.notes["followed_stars"] = followed_stars
+    if session_results or not follow_only:
+        _attach_spectroscopy_quality_summary(
+            target, merged_summary, session_results, job_id, measured_at, follow_only=follow_only
+        )
     return merged_summary, session_results
 
 
@@ -518,11 +677,15 @@ def _attach_spectroscopy_quality_summary(
     session_results: list,
     job_id: str | None = None,
     measured_at: datetime | None = None,
+    follow_only: bool = False,
 ) -> None:
     """Gather up all the worker results into a single quality report.
 
     This updates the target with a summary of how well the spectroscopy
-    processing went across all the images.
+    processing went across all the images. The summary goes in
+    ``target.quality.spectroscopy``, or in
+    ``target.quality.spectroscopy_variation`` with ``follow_only``, so a run
+    that follows the raw frames never replaces the master stack's summary.
     """
     import statistics
 
@@ -577,7 +740,7 @@ def _attach_spectroscopy_quality_summary(
     target_session_breakdown = build_target_session_breakdown(sessions, failed_paths)
 
     wavelength_scale = summarize_wavelength_scale(all_stage_quality_rows)
-    target.quality.spectroscopy = SpectroscopyQualitySummary(
+    quality_summary = SpectroscopyQualitySummary(
         target_id=target.id,
         target_session_ids=[session.id for session, _identify_result in session_results],
         target_session_breakdown=target_session_breakdown,
@@ -598,6 +761,10 @@ def _attach_spectroscopy_quality_summary(
             wavelength_scale_summary=wavelength_scale,
         ),
     )
+    if follow_only:
+        target.quality.spectroscopy_variation = quality_summary
+    else:
+        target.quality.spectroscopy = quality_summary
     gates = [
         *spectroscopy_run_gates(
             all_spectrum_facts,
@@ -608,7 +775,7 @@ def _attach_spectroscopy_quality_summary(
         gaia_xp_gate(all_gaia_xp_rows),
     ]
     for gate in gates:
-        target.quality.spectroscopy.record_gate(gate)
+        quality_summary.record_gate(gate)
 
     # The same numbers, roll-ups and gates, stored as measurements next to
     # the summary. Nothing is stored when the caller gave no time (a warning
@@ -623,7 +790,7 @@ def _attach_spectroscopy_quality_summary(
     )
     if measurement_context is not None:
         record_spectroscopy_quality(
-            target.quality.spectroscopy.spectroscopy_metrics,
+            quality_summary.spectroscopy_metrics,
             gates,
             measurement_context,
             star_identification_counted=False,
@@ -635,7 +802,7 @@ def _attach_spectroscopy_quality_summary(
     )
 
     record_camera_profile(
-        target.quality.spectroscopy,
+        quality_summary,
         camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
         measurement_context,
     )
@@ -643,7 +810,7 @@ def _attach_spectroscopy_quality_summary(
     from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run
 
     record_pipeline_run(
-        summary=target.quality.spectroscopy,
+        summary=quality_summary,
         job_id=job_id,
         target_id=target.id,
         pipeline_name="spectroscopy",

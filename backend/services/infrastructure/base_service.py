@@ -95,14 +95,17 @@ class BaseBackgroundService:
                 # A task fails by raising; a falsy result means no output.
                 status = "completed" if result else "failed"
 
-                self._job_service.update_job(jid, status=status, progress=100.0)
+                # A job the user cancelled stays cancelled.
+                if not self._was_cancelled(jid):
+                    self._job_service.update_job(jid, status=status, progress=100.0)
                 self._update_central_processing_jobs()
                 return result
             except Exception as e:
                 import traceback
 
                 error_msg = f"{e!s}\n{traceback.format_exc()}"
-                self._job_service.update_job(jid, status="failed", status_message=str(e))
+                if not self._was_cancelled(jid):
+                    self._job_service.update_job(jid, status="failed", status_message=str(e))
                 # Also log to file if it exists
                 if log_file_path and os.path.exists(log_file_path):
                     with open(log_file_path, "a") as f:
@@ -122,6 +125,18 @@ class BaseBackgroundService:
 
         self._update_central_processing_jobs()
         return job_id
+
+    def _was_cancelled(self, job_id: str) -> bool:
+        """Say whether the user already cancelled this job.
+
+        Returns
+        -------
+        cancelled : `bool`
+            `True` if the job record says "cancelled", so the end of the
+            task must not write over it.
+        """
+        record = self._job_service.get_job(job_id) if self._job_service else None
+        return record is not None and record.status == "cancelled"
 
     def get_job_status(self, job_id: str) -> dict | None:
         """Get the status of a specific job, prioritizing the database.

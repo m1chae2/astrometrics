@@ -73,11 +73,11 @@ To see what stacking would do before you start it, open the same menu and choose
 The next job plate solves your frames and then measures the brightness of every star in each frame.
 
 1. In the File Browser, click the check box in the table header. This ticks every frame.
-2. In the Image Controls panel, click Analyze Target. The arrow beside it opens a menu that runs only Astrometry, Photometry or Spectroscopy. Photometry and Spectroscopy run astrometry first when the stack has no solve or the solve is older than the stack.
+2. In the Image Controls panel, click Analyze Target. The arrow beside it opens a menu that runs only Astrometry, Photometry, Spectroscopy or Spectral Variation. Photometry and Spectroscopy run astrometry first when the stack has no solve or the solve is older than the stack. Spectral Variation follows each star's spectrum across the raw spectral frames, so it is on only while the spectral filter is in view. It runs Spectroscopy first when that result is missing or older than the spectral stack. The main Analyze Target click does not run it.
 3. Click the Analysis tab and watch the log until the job ends.
 4. Click the Data tab.
 
-**What you should see.** The log shows the job running, and the button changes to Cancel until the job ends. The Data tab then shows three counts: Total Images, Stars Found and Frames Processed. Stars Found is above zero.
+**What you should see.** The log shows the job running, and the button changes to Cancel until the job ends. The Frame status timeline on the Data tab shows the frames the job processed.
 
 Now check the plate solve.
 

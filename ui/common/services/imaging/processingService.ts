@@ -2,7 +2,7 @@
  * Service for managing image processing, log tailing, and variability analysis actions via the JSON-RPC backend api.
  */
 
-import { callBackend, CancelProcessingResult } from '../backendApi';
+import { callBackend, CancelAnalysisResult, CancelProcessingResult } from '../backendApi';
 import { ProcessStatus, AnalysisResult, ProcessingJob } from '../../types/backendTypes';
 
 /**
@@ -65,8 +65,24 @@ export async function cancelProcessing(
     }
 }
 
+/**
+ * Requests cancellation of the analysis job of a target.
+ * @return The answer, whose `reason` says why no job was stopped (for example, it runs in
+ *   another program or none is running), or null if the request failed.
+ */
+export async function cancelAnalysis(
+    objectId: string
+): Promise<CancelAnalysisResult | null> {
+    try {
+        const result = await callBackend('analysis:cancel', { target_id: objectId });
+        return result as CancelAnalysisResult;
+    } catch {
+        return null;
+    }
+}
+
 /** The analysis stages a caller can ask the backend to run by name. */
-export type AnalysisStageName = 'astrometry' | 'photometry' | 'spectroscopy';
+export type AnalysisStageName = 'astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation';
 
 /**
  * Initiates scientific image analysis (astrometry, photometry, or spectroscopy) for a target.
@@ -75,7 +91,7 @@ export type AnalysisStageName = 'astrometry' | 'photometry' | 'spectroscopy';
  * @param imageFiles The files chosen in the UI. The backend uses a target's stack when it has one.
  * @param filterType The filter name to tell the backend, if known.
  * @param type The analysis type, used when no stages are named.
- * @param stages The stages to run, a non-empty subset of astrometry, photometry and spectroscopy.
+ * @param stages The stages to run, a non-empty subset of astrometry, photometry, spectroscopy and spectral variation.
  *   Leave it out to let the backend choose from the file type. The backend runs astrometry first
  *   when a picked stage needs it and its result is missing or old.
  * @returns The started job, or null if the request failed.

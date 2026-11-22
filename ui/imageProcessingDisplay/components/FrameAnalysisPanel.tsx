@@ -17,7 +17,7 @@ import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../c
 import { FrameStatusReport, GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
 import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
-import { chooseAnalysisSelection, chooseStageSelection, chooseTemporalVariationSelection, NO_SOURCE_TO_ANALYZE_REASON, type AnalysisStage } from '../utils/analysisSelection';
+import { chooseAnalysisSelection, chooseStageSelection, NO_SOURCE_TO_ANALYZE_REASON, type AnalysisStage } from '../utils/analysisSelection';
 
 interface FrameAnalysisPanelProps {
   // Data Tab Props
@@ -65,7 +65,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   } = useTargetContext();
 
     const {
-      analysisResults, isProcessing, logLines, cancelProcessingJob, clearLogs,
+      analysisResults, isProcessing, logLines, cancelProcessingJob, cancelAnalysisJob, clearLogs,
       startProcessing, isAnalyzing, startAnalysis, jobError,
       jobHistory, loadingHistory, onSelectJob, targetActiveJobs, activeJobId,
       openSiril, requestJobHistory
@@ -125,8 +125,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   const framesToStack = (): string[] =>
     checkedFiles.size > 0 ? Array.from(checkedFiles) : filteredFiles.map(f => f.path);
 
-  // What the two Analyze actions would send right now. Stage one analyzes the
-  // master stacked spectral image; stage two follows the raw spectral frames.
+  // What the Analyze actions would send right now.
   const selectionInput = {
     filterType: filterStatus.filterType,
     stackedImage,
@@ -139,7 +138,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       : null,
   };
   const analysisSelection = chooseAnalysisSelection(selectionInput);
-  const temporalVariationSelection = chooseTemporalVariationSelection(selectionInput);
 
   // Frame Analysis folded: a thin rail on the right edge.
   const analysisRail = (
@@ -192,7 +190,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                   <ProcessingStatus
                     isProcessing={isProcessing || isAnalyzing}
                     logLines={logLines}
-                    onCancel={isProcessing ? cancelProcessingJob : undefined}
+                    onCancel={isProcessing ? cancelProcessingJob : (isAnalyzing ? cancelAnalysisJob : undefined)}
                     onClear={clearLogs}
                   />
                   <JobHistoryList
@@ -260,6 +258,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           onProcess={filteredFiles.length > 0 ? () => startProcessing(framesToStack()) : undefined}
           framesToStack={filteredFiles.length > 0 ? framesToStack : undefined}
           onCancel={cancelProcessingJob}
+          onCancelAnalysis={cancelAnalysisJob}
           onShowPicture={handleSelectFile}
           onAddImages={handleAddImages}
           onAddTarget={() => setIsAddModalOpen(true)}
@@ -281,9 +280,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
             const stageSelection = chooseStageSelection(selectionInput, stage);
             if (stageSelection) startAnalysis(stageSelection.paths, stageSelection.filterType, [stage]);
           }}
-          onAnalyzeTemporalVariation={temporalVariationSelection
-            ? () => startAnalysis(temporalVariationSelection.paths, temporalVariationSelection.filterType)
-            : undefined}
           isAnalyzing={isAnalyzing}
           onOpenSiril={() => {
             openSiril();

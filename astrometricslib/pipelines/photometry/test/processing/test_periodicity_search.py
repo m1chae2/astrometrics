@@ -403,3 +403,27 @@ def test_noise_on_a_thinned_long_baseline_keeps_its_nominal_false_alarm_rate(
 
     assert sum(value <= 0.1 for value in false_alarms) <= 5
     assert float(np.mean(false_alarms)) > 0.3
+
+
+def test_a_period_range_too_narrow_for_two_frequencies_is_insufficient_data() -> None:
+    """Verify five very close points give a verdict, not an IndexError.
+
+    These times leave a searchable period range so narrow that the
+    frequency grid holds one value. That once raised "index 1 is out of
+    bounds for axis 0 with size 1" from the grid-step calculation.
+    """
+    import numpy as np
+
+    from astrometricslib.pipelines.photometry.processing.periodicity_search import (
+        VERDICT_INSUFFICIENT_DATA,
+        describe_frequency_grid,
+        lomb_scargle_search,
+    )
+
+    times = np.array([0.00019175, 0.00089375, 0.00104722, 0.00126478, 0.00131742])
+    fluxes = np.array([1.0, 1.01, 0.99, 1.0, 1.02])
+
+    result = lomb_scargle_search(times, fluxes, shuffle_count=3)
+
+    assert result.verdict == VERDICT_INSUFFICIENT_DATA
+    assert describe_frequency_grid(times) is None

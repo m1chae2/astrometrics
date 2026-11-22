@@ -397,7 +397,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         plain_wording=(
             "In {exposure_phrase}, the sky glow is only {ratio:.1f} times stronger than the camera's "
             "own noise, "
-            "so we expect longer frames to help. {advice_text}"
+            "so longer frames are expected to help. {advice_text}"
         ),
         purpose=(
             "Short frames spend part of their noise on the camera instead of the sky, so more of "
@@ -519,7 +519,8 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "{advice_text}"
         ),
         plain_wording=(
-            "Your combined flat frame is noisier than we like: {noise_percent:.2f}% against a limit of "
+            "Your combined flat frame is noisier than the limit allows: {noise_percent:.2f}% against "
+            "a limit of "
             "{limit_percent:.1f}%. "
             "{advice_text}"
         ),
@@ -555,7 +556,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ),
         plain_wording=(
             "About {rejected_percent:.1f}% of the pixel values were thrown out while stacking, which is at "
-            "or above the {limit_percent:.0f}% we expect to see. "
+            "or above the expected {limit_percent:.0f}%. "
             "The frames disagree, often from clouds or poor alignment, so look through them."
         ),
         purpose=(
@@ -594,7 +595,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ),
         plain_wording=(
             "The stars in the stack are {ratio:.2f} times as wide as the single frames predict, above the "
-            "{limit:.1f} we expect to see. "
+            "expected {limit:.1f}. "
             "The frames may not line up, so look through them."
         ),
         purpose=("A stack wider than its input frames predict has been blurred, usually by poor alignment."),
@@ -621,7 +622,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         wording="{lost_count} of {frame_count} frames were set aside ({reason_text}).",
         plain_wording=(
             "{lost_count} of your {frame_count} frames were left out of the final picture ({reason_text}). "
-            "We expect clearer skies or better guiding to save more of them."
+            "Clearer skies or better guiding are expected to save more of them."
         ),
         purpose="Frames set aside for cloud or trailing are time that did not reach the stack.",
         computed_by="report_rules",
@@ -770,7 +771,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "best focus, refocus every {interval:.1f} degrees C (give or take {tolerance:.1f})."
         ),
         plain_wording=(
-            "Stars get wider as the temperature changes, so we expect to refocus roughly every "
+            "Stars get wider as the temperature changes, so refocus roughly every "
             "{interval:.1f} "
             "degrees C "
             "(give or take {tolerance:.1f})."
@@ -862,7 +863,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         wording="Seeing limits the detail on this target; more time adds depth, not detail.",
         plain_wording=(
             "The air limits how much detail you can get on this target. "
-            "We expect more time to add depth, not sharper detail."
+            "More time is expected to add depth, not sharper detail."
         ),
         purpose=(
             "When the star width is already at the seeing limit, only better nights (not more "
@@ -900,7 +901,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The efficiency of this capture setting cannot be judged: no reference exists for it.",
         plain_wording=(
-            "We cannot yet say how well this setting performed, because there is nothing fair to "
+            "How well this setting performed cannot be judged yet, because there is nothing fair to "
             "compare it with."
             " "
             "The reason says what is missing."

@@ -218,11 +218,12 @@ RPC_METHODS: tuple[str, ...] = (
     "quality:resolve_rows",
     # The job history. `detail="warnings"` lists the warnings one job detected.
     "jobs:query",
-    # Astrometry, photometry and spectroscopy analysis. `analyze_image` takes
-    # `target_id`, `image_files`, `filter_name`, `type` and an optional
-    # `stages` (a list from astrometry, photometry, spectroscopy; omitted, the
-    # file type chooses). The library adds astrometry first when it is needed
-    # and missing or older than the stack.
+    # Astrometry, photometry, spectroscopy and spectral variation analysis.
+    # `analyze_image` takes `target_id`, `image_files`, `filter_name`, `type`
+    # and an optional `stages` (a list from astrometry, photometry,
+    # spectroscopy, spectral_variation; omitted, the file type chooses). The
+    # library adds a stage first when another needs it and its result is
+    # missing or older than the stack.
     "analysis:analyze_image",
     "analysis:get_results",
     "analysis:cancel",

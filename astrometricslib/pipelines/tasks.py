@@ -49,7 +49,12 @@ from astrometricslib.foundation.errors import (
 )
 from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
 from astrometricslib.foundation.parameter_context import frames_parameter_context, record_basis
-from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
+from astrometricslib.foundation.run_abandonment import (
+    RunAbandonedError,
+    RunAbandonment,
+    bind_abandonment,
+    raise_if_abandoned,
+)
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
@@ -66,6 +71,7 @@ from astrometricslib.pipelines.shared.frame_grouping import (
 )
 from astrometricslib.pipelines.shared.provenance_recording import stacked_image_entity_id
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
+from astrometricslib.pipelines.spectroscopy.spectral_variation import run_spectral_variation_analysis
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
@@ -390,6 +396,7 @@ def stack_frames_with_timeout(
 PIPELINE_RUNNERS = {
     "astrometry": run_astrometry_analysis,
     "spectroscopy": run_spectroscopy_analysis,
+    "spectral_variation": run_spectral_variation_analysis,
     "photometry": run_photometry_analysis,
     "asteroid_detection": run_asteroid_detection_analysis,
 }
@@ -505,7 +512,7 @@ def _run_analysis_pipeline_match(
 
 # -- Running chosen analysis stages for one target ----------------------
 
-ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "asteroids")
+ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "spectral_variation", "asteroids")
 """The analysis stages `run_target_stages` can run, in the order run."""
 
 DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
@@ -515,6 +522,7 @@ STAGE_OPTIONS = {
     "astrometry": frozenset({"path"}),
     "photometry": frozenset({"frames", "filter_name", "use_astrometry_seed", "max_workers"}),
     "spectroscopy": frozenset({"path", "limit"}),
+    "spectral_variation": frozenset({"frames", "max_workers"}),
     "asteroids": frozenset({"moving_object_config"}),
 }
 """The options each stage accepts in its options dictionary."""
@@ -523,6 +531,7 @@ _PIPELINE_TYPES = {
     "astrometry": "astrometry",
     "photometry": "photometry",
     "spectroscopy": "spectroscopy",
+    "spectral_variation": "spectral_variation",
     "asteroids": "asteroid_detection",
 }
 
@@ -547,6 +556,11 @@ STAGE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     # (`spectroscopy/runner.py`, about lines 302 and 535). The spectral
     # stack is never plate-solved. Same ruling as photometry.
     "spectroscopy": ("astrometry",),
+    # The spectral variation stage follows each star's spectrum across the
+    # raw spectral frames. It reads the stars the master-stack spectroscopy
+    # found and must not overwrite that result, so it needs spectroscopy
+    # first (and spectroscopy needs astrometry, so the chain runs in order).
+    "spectral_variation": ("spectroscopy",),
     # The asteroid search works on a stack and needs no solution.
     "asteroids": (),
 }
@@ -642,7 +656,7 @@ def stage_staleness_reason(target: Target, stage: str, image_path: str | None = 
     target : `Target`
         The target to check.
     stage : `str`
-        The stage, which must be ``"astrometry"``.
+        The stage, ``"astrometry"`` or ``"spectroscopy"``.
     image_path : `str`, optional
         An image the caller wants the stage to run on instead of the stack.
 
@@ -655,8 +669,11 @@ def stage_staleness_reason(target: Target, stage: str, image_path: str | None = 
     Raises
     ------
     InvalidArgumentError
-        If the stage is not ``"astrometry"``, the only stage with a rule.
+        If the stage is neither ``"astrometry"`` nor ``"spectroscopy"``, the
+        two stages another stage can need.
     """
+    if stage == "spectroscopy":
+        return _spectroscopy_staleness_reason(target, image_path)
     if stage != "astrometry":
         raise InvalidArgumentError(f"No staleness rule exists for the {stage!r} stage.")
     if image_path:
@@ -682,6 +699,48 @@ def stage_staleness_reason(target: Target, stage: str, image_path: str | None = 
     return None
 
 
+def _spectroscopy_staleness_reason(target: Target, image_path: str | None) -> str | None:
+    """Say why the saved spectroscopy result cannot be used, or `None`.
+
+    The result is current when the target has a spectroscopy summary made
+    from the spectral stack, and the summary is no older than that stack
+    (its quality summary's time, or the file's modification time when it has
+    none). A summary built from raw frames (an older run that followed the
+    frames only) is not a stack result, so it is out of date. An image the
+    caller names is never current.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to check.
+    image_path : `str` or `None`
+        An image the caller wants the stage to run on instead of the stack.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A short phrase, or `None` when the saved result is current.
+    """
+    if image_path:
+        return "an image was named, so the saved result may not match it"
+    summary = target.quality.spectroscopy
+    if summary is None:
+        return "its result is missing"
+    if summary.upstream_quality_summary_reference == "raw_frames":
+        return "its result came from raw frames, not from the spectral stack"
+    stack_path = target.spectral_stacking.stacked_image
+    if not stack_path or not os.path.exists(stack_path):
+        return "the target has no spectral stack to compare it with"
+    stack_summary = target.spectral_stacking.quality_summary
+    if stack_summary is not None:
+        stack_time = _as_utc(stack_summary.created_at)
+    else:
+        stack_time = datetime.fromtimestamp(os.path.getmtime(stack_path), UTC)
+    if _as_utc(summary.created_at) < stack_time:
+        return "its result is older than the spectral stack"
+    return None
+
+
 def _prerequisite_blocker(target: Target, stage: str, options: dict[str, Any]) -> str | None:
     """Say why a prerequisite stage cannot run, or `None` when it can.
 
@@ -702,6 +761,10 @@ def _prerequisite_blocker(target: Target, stage: str, options: dict[str, Any]) -
     reason : `str` or `None`
         Why the stage cannot run, or `None`.
     """
+    if stage == "spectroscopy":
+        if options.get("path") or target.spectral_stacking.stacked_image:
+            return None
+        return "the target has no spectral stack to extract from and no image was given"
     if stage != "astrometry":
         return None
     named_path = options.get("path")
@@ -742,6 +805,31 @@ def _has_spectral_input(
     )
 
 
+def _has_raw_spectral_frames(
+    target: Target, options: dict[str, Any], frame_selection: ProcessingFrameSelection | None
+) -> bool:
+    """Say whether the spectral variation stage has raw spectral frames.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    options : `dict`
+        The spectral variation stage's options.
+    frame_selection : `ProcessingFrameSelection` or `None`
+        The chosen frames, or `None` to use every frame of the target.
+
+    Returns
+    -------
+    has_frames : `bool`
+        `True` when the frames the stage would follow hold a spectral frame.
+    """
+    candidates = options.get("frames")
+    if candidates is None:
+        candidates = frame_selection.spectral_frames if frame_selection is not None else target.frames or []
+    return any(frame_is_spectral(frame) for frame in candidates)
+
+
 def _stages_to_add(
     target: Target,
     requested: tuple[str, ...],
@@ -769,20 +857,21 @@ def _stages_to_add(
         missing or out of date, in `ANALYSIS_STAGES` order.
     """
     wanted: set[str] = set()
-    for stage in requested:
-        if stage in skipped_for_no_input:
-            continue
+    pending = [stage for stage in requested if stage not in skipped_for_no_input]
+    while pending:
+        stage = pending.pop()
         for prerequisite in STAGE_PREREQUISITES[stage]:
             image_path = (stage_options.get(prerequisite) or {}).get("path")
-            if prerequisite in requested:
+            if prerequisite in requested or prerequisite in wanted:
                 continue
             reason = stage_staleness_reason(target, prerequisite, image_path)
             if reason is not None:
-                if prerequisite not in wanted:
-                    logger.info(
-                        "[%s] Running %s first: %s needs it and %s", target.id, prerequisite, stage, reason
-                    )
+                logger.info(
+                    "[%s] Running %s first: %s needs it and %s", target.id, prerequisite, stage, reason
+                )
                 wanted.add(prerequisite)
+                # The added stage has prerequisites of its own.
+                pending.append(prerequisite)
     return tuple(stage for stage in ANALYSIS_STAGES if stage in wanted)
 
 
@@ -799,10 +888,11 @@ def run_target_stages(
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
-    The order is astrometry, photometry, spectroscopy, asteroids, whatever
-    order ``stages`` lists them in. Spectroscopy is skipped, with a
-    ``{"status": "skipped", ...}`` entry, when the target has no spectral
-    data.
+    The order is astrometry, photometry, spectroscopy, spectral variation,
+    asteroids, whatever order ``stages`` lists them in. Spectroscopy is
+    skipped, with a ``{"status": "skipped", ...}`` entry, when the target
+    has no spectral data, and spectral variation when it has no raw
+    spectral frames.
 
     With ``run_prerequisites``, a stage that another stage needs (see
     `STAGE_PREREQUISITES`) is added to the run when its result is missing or
@@ -863,6 +953,10 @@ def run_target_stages(
         target, dict(stage_options.get("spectroscopy") or {}), frame_selection
     ):
         skipped_for_no_input.add("spectroscopy")
+    if "spectral_variation" in requested and not _has_raw_spectral_frames(
+        target, dict(stage_options.get("spectral_variation") or {}), frame_selection
+    ):
+        skipped_for_no_input.add("spectral_variation")
     added = (
         _stages_to_add(target, requested, skipped_for_no_input, stage_options) if run_prerequisites else ()
     )
@@ -871,11 +965,17 @@ def run_target_stages(
     for stage in ANALYSIS_STAGES:
         if stage not in requested and stage not in added:
             continue
+        # A cancelled job stops before the next stage starts.
+        raise_if_abandoned()
         prerequisite_failures = [
             f"needs {prerequisite}: {blocked[prerequisite]}"
             for prerequisite in STAGE_PREREQUISITES[stage]
             if prerequisite in blocked
         ]
+        if prerequisite_failures and stage in added:
+            # An added stage whose own prerequisite failed is blocked too.
+            blocked[stage] = "; ".join(prerequisite_failures)
+            continue
         if prerequisite_failures and stage in requested:
             reason = "; ".join(prerequisite_failures)
             result.results[stage] = {"status": "skipped", "reason": reason}
@@ -886,10 +986,21 @@ def run_target_stages(
         if "filter_name" in options:
             # The stage runner still names this argument ``filter_type``.
             options["filter_type"] = options.pop("filter_name")
-        if drivers is not None and stage in ("astrometry", "photometry", "spectroscopy"):
+        if drivers is not None and stage in (
+            "astrometry",
+            "photometry",
+            "spectroscopy",
+            "spectral_variation",
+        ):
             options["drivers"] = drivers
         if stage == "photometry" and frame_selection is not None:
             options.setdefault("frames", frame_selection.frames)
+        if stage == "spectral_variation" and frame_selection is not None:
+            options.setdefault("frames", frame_selection.spectral_frames)
+        if stage == "spectral_variation" and stage in skipped_for_no_input:
+            result.results[stage] = {"status": "skipped", "reason": "target has no raw spectral frames"}
+            result.stages_run.append(stage)
+            continue
         if stage == "spectroscopy" and stage in skipped_for_no_input:
             result.results[stage] = {"status": "skipped", "reason": "target has no spectral data"}
             result.stages_run.append(stage)

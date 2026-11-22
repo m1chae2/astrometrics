@@ -42,6 +42,7 @@ import psutil
 
 from astrometricslib.foundation.jobs import JOB_LOG_PACKAGES
 from astrometricslib.foundation.logging import configure_logging, get_job_log_router, log_context
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.foundation.system import lower_process_priority
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ class BatchRunSummary:
     failed: list[tuple[str, str]] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
     results: dict[str, Any] = field(default_factory=dict)
+    # Facts about the run as a whole that are not tied to one item.
+    notes: dict[str, Any] = field(default_factory=dict)
 
 
 def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -> None:
@@ -368,6 +371,8 @@ def run_parallel_batch(
         try:
             while active_futures:
                 done_futures, _ = wait(active_futures.keys(), return_when=FIRST_COMPLETED)
+                # A cancelled job starts no more items.
+                raise_if_abandoned()
                 for future in done_futures:
                     item_id = active_futures.pop(future)
                     try:
@@ -462,6 +467,6 @@ def run_parallel_batch(
                     current_max_workers = 1
                 pending_item_ids = still_pending_item_ids
         finally:
-            executor.shutdown(wait=False)
+            executor.shutdown(wait=False, cancel_futures=True)
 
     return summary

@@ -11,7 +11,7 @@ import {
     chooseAnalysisSelection,
     chooseStageSelection,
     describeStageAvailability,
-    chooseTemporalVariationSelection,
+    NO_RAW_SPECTRAL_FRAMES_REASON,
 } from '../utils/analysisSelection';
 
 const baseInput: AnalysisSelectionInput = {
@@ -132,24 +132,28 @@ describe('chooseStageSelection', () => {
     });
 });
 
-describe('chooseTemporalVariationSelection', () => {
-    it('offers the raw frames once a master spectral stack exists', () => {
-        expect(chooseTemporalVariationSelection(baseInput)).toEqual({
+describe('the Spectral Variation stage', () => {
+    it('follows every raw frame in view when none is ticked', () => {
+        expect(chooseStageSelection(baseInput, 'spectral_variation')).toEqual({
             paths: ['/lights/Vega/raw_001.fits', '/lights/Vega/raw_002.fits'],
             filterType: 'SPEC',
         });
     });
 
     it('prefers the ticked frames', () => {
-        const selection = chooseTemporalVariationSelection({
-            ...baseInput,
-            checkedFiles: new Set(['/lights/Vega/raw_002.fits']),
-        });
+        const selection = chooseStageSelection(
+            { ...baseInput, checkedFiles: new Set(['/lights/Vega/raw_002.fits']) },
+            'spectral_variation'
+        );
         expect(selection?.paths).toEqual(['/lights/Vega/raw_002.fits']);
     });
 
-    it('is not offered without a master stack or for a non-spectral filter', () => {
-        expect(chooseTemporalVariationSelection({ ...baseInput, stackedSpectralTarget: null })).toBeNull();
-        expect(chooseTemporalVariationSelection({ ...baseInput, filterType: 'L' })).toBeNull();
+    it('is off, with a reason, for a non-spectral filter', () => {
+        const input = { ...baseInput, filterType: 'L' };
+        expect(describeStageAvailability(input).spectral_variation).toEqual({
+            enabled: false,
+            reason: NO_RAW_SPECTRAL_FRAMES_REASON,
+        });
+        expect(chooseStageSelection(input, 'spectral_variation')).toBeNull();
     });
 });

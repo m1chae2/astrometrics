@@ -2,7 +2,8 @@
 
 Description: The `Jobs` class that `Astrometrics.jobs` is an instance of, the
 job store and its records, the decorators and helpers that run a function as a
-tracked background job, and the logging context, including the marker for
+tracked background job, the switch that gives up on a running job
+(`RunAbandonment`), and the logging context, including the marker for
 background work. Each name is imported from the module where its code lives
 today.
 """
@@ -20,14 +21,18 @@ from astrometricslib.foundation.jobs.runner import (
 )
 from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
 from astrometricslib.foundation.logging import background_log_context, log_context, new_request_id
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
 
 __all__ = [
     "DbLogHandler",
     "JobStore",
     "Jobs",
     "ProcessingJob",
+    "RunAbandonedError",
+    "RunAbandonment",
     "background_job",
     "background_log_context",
+    "bind_abandonment",
     "capture_job_logs",
     "close_interrupted_jobs",
     "get_current_job",

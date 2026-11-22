@@ -45,6 +45,7 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.foundation.run_bases import RunBasis, factor_for
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality.quality_summary import (
@@ -1224,7 +1225,19 @@ class VariabilityAnalyzer:
             with ProcessPoolExecutor(
                 max_workers=max_workers, mp_context=multiprocessing.get_context("spawn")
             ) as executor:
-                results = list(executor.map(_process_single_frame_worker, worker_arguments))
+                frame_futures = [
+                    executor.submit(_process_single_frame_worker, arguments) for arguments in worker_arguments
+                ]
+                results = []
+                try:
+                    for frame_future in frame_futures:
+                        # A cancelled job schedules no more frames.
+                        raise_if_abandoned()
+                        results.append(frame_future.result())
+                except BaseException:
+                    for frame_future in frame_futures:
+                        frame_future.cancel()
+                    raise
 
             # 3. Aggregate Results back into the StellarObjects
             stellar_object_map = {star.id: star for star in self.stellar_objects}

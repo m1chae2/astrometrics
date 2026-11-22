@@ -320,18 +320,24 @@ FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
 FLAG_WCS_REFINED = "wcs_refined_against_gaia"
 FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
 
-# Gaia DR3 is downloaded from VizieR first and from the ESA Gaia archive
-# second (see `drivers/gaia_cone_driver.py` for why). VizieR answered a
-# 14,000-star field in 10 s on 2026-10-10, so 45 s leaves room for a slow
-# day; the ESA archive keeps its earlier 60 s deadline. If both fail at the
-# requested depth, VizieR is asked again up to GAIA_DEPTH_STEPS_DOWN times,
-# each GAIA_DEPTH_STEP_MAGNITUDES brighter: a shallower answer still names
-# the brighter stars, and the depth reached is recorded, so the cache never
-# claims stars it was not given. On the same day the ESA archive timed out at
-# G < 18 but answered G < 17 in 6 s. These are design choices, not limits
-# validated over many nights.
+# Gaia DR3 is downloaded from the ESA Gaia archive first (a synchronous
+# query) and from VizieR second (see `drivers/gaia_cone_driver.py`). On
+# 2026-11-22 a level-7 tile of the M 52 field (G < 19.6) came back from ESA
+# with 8,129 stars in 2.8 s; VizieR's Harvard server needed 39.7 s for
+# 24,551 stars (its circle is about three times the tile) and the CDS server
+# timed out. So ESA gets a short 20 s deadline, long enough for a slow day
+# and short enough that a failure falls through to VizieR quickly. An ESA
+# failure alone never trips the circuit breaker; only a tile that fails on
+# both services counts. The ESA archive has announced downtime from
+# 2026-11-25 12:00 CET until the Gaia DR4 release on 2026-12-02. In that
+# window every tile is served by VizieR, which gets 45 s per server. If both
+# fail at the requested depth, VizieR is asked again up to
+# GAIA_DEPTH_STEPS_DOWN times, each GAIA_DEPTH_STEP_MAGNITUDES brighter: a
+# shallower answer still names the brighter stars, and the depth reached is
+# recorded, so the cache never claims stars it was not given. These are
+# design choices, not limits validated over many nights.
 GAIA_VIZIER_TIMEOUT_SECONDS = 45
-GAIA_ESA_TIMEOUT_SECONDS = 60
+GAIA_ESA_TIMEOUT_SECONDS = 20
 GAIA_DEPTH_STEP_MAGNITUDES = TunedParameter(
     name="astrometry.gaia_depth_step_magnitudes",
     default=1.0,
@@ -1163,7 +1169,11 @@ class StarIdentifier:
         self.field_gaia_stars: FieldGaiaStars | None = None
 
     def use_image_header(self, header: Any) -> None:
-        """Set the Gaia query depth from the header of the image to be named.
+        """Set the Gaia query depth and observation time from an image header.
+
+        The observation time (``DATE-OBS``) is what moves Gaia positions from
+        epoch 2016.0 to the night of the image. It is reset here too, so a
+        header with no usable ``DATE-OBS`` never keeps the last image's time.
 
         `process_image` does this itself. A caller that names the stars of
         another image with `identify_stars_with_wcs` calls it first.
@@ -1176,6 +1186,7 @@ class StarIdentifier:
         self.gaia_depth_prediction = (
             None if header is None else predict_gaia_depth_from_header(header, self.config)
         )
+        self.observation_time = read_observation_time(header)
         self.field_gaia_stars = None
 
     def _add_flag(self, flag: str) -> None:

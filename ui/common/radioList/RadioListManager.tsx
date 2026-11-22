@@ -188,13 +188,18 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
 
     if (onCollapsedChange && collapsed) {
         // A thin strip: clicking it, or tabbing to it and pressing Enter, shows the column again.
+        const stripTitle = topPanel ? topPanelTitle : title;
+        const selectedLabel = items.find((item) => item.id === selectedId)?.label;
+        const fullStripLabel = selectedLabel ? `${stripTitle}, ${selectedLabel}` : stripTitle;
         return (
             <div className={`manager manager--collapsed panel-group ${className}`}>
                 <SectionPanel
-                    title={topPanel ? topPanelTitle : title}
+                    title={stripTitle}
+                    collapsedNote={selectedLabel}
                     collapsed="right"
                     onTitleClick={() => onCollapsedChange(false)}
-                    titleButtonLabel={showLabel}
+                    titleButtonLabel={selectedLabel ? fullStripLabel : showLabel}
+                    collapsedAriaLabel={selectedLabel ? fullStripLabel : undefined}
                 >
                     {null}
                 </SectionPanel>

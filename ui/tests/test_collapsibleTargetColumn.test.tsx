@@ -13,7 +13,7 @@ import { RadioListManager } from '../common/radioList/RadioListManager';
 import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
 
 /** A column whose folded state is kept in storage, like the real screens. */
-function Harness({ persist }: { persist: boolean }) {
+function Harness({ persist, selectedId, items }: { persist: boolean; selectedId?: string; items?: { id: string; value: string; label: string }[] }) {
     const [saved, setSaved] = usePersistentFlag('test:targetListCollapsed', false);
     const [local, setLocal] = useState(false);
     return (
@@ -22,7 +22,8 @@ function Harness({ persist }: { persist: boolean }) {
             actionsTitle="Target Controls"
             topPanel={<div>filters</div>}
             topPanelTitle="Filter Targets"
-            items={[{ id: 'M 81', value: 'M 81', label: 'M 81' }]}
+            items={items ?? [{ id: 'M 81', value: 'M 81', label: 'M 81' }]}
+            selectedId={selectedId}
             onSelect={() => undefined}
             actions={<div>buttons</div>}
             collapsed={persist ? saved : local}
@@ -76,5 +77,28 @@ describe('collapsible target column', () => {
         expect(controls.className).not.toContain('flex-fill');
         const list = screen.getByText('Targets').closest('.panel') as HTMLElement;
         expect(list.className).toContain('flex-fill');
+    });
+
+    it('names the selected target on the folded strip', async () => {
+        render(<Harness persist={false} selectedId="M 81" />);
+        await userEvent.click(screen.getByTitle('Hide target list'));
+        const strip = screen.getByRole('button', { name: 'Filter Targets, M 81' });
+        expect(strip.textContent).toBe('Filter Targets');
+        expect(screen.getByText('M 81').className).toContain('panel__collapsed-note');
+    });
+
+    it('keeps the plain title when no target is selected', async () => {
+        render(<Harness persist={false} />);
+        await userEvent.click(screen.getByTitle('Hide target list'));
+        expect(screen.getByTitle('Show target list').textContent).toBe('Filter Targets');
+    });
+
+    it('shows a long target name in full, with the tooltip and accessible name', async () => {
+        const longName = 'M 52 - Bubble Nebula';
+        render(<Harness persist={false} selectedId="x" items={[{ id: 'x', value: 'x', label: longName }]} />);
+        await userEvent.click(screen.getByTitle('Hide target list'));
+        const strip = screen.getByTitle(`Filter Targets, ${longName}`);
+        expect(screen.getByText(longName).className).toContain('panel__collapsed-note');
+        expect(strip.getAttribute('aria-label')).toBe(`Filter Targets, ${longName}`);
     });
 });

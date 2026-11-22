@@ -4,13 +4,13 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the source in `astrometricslib/`, naming the code, its tests and each pipeline's tuned values with status labels.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the source in `astrometricslib/`, naming the code, tests and tuned values with status labels.
 
 ## 1. Scope
 
-**Statement of need.** The [glossary](../Glossary.md) defines the terms. Theory: [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence: the [validation register](validation/index.md). Paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) detail each stage.
+**Statement of need.** The [glossary](../Glossary.md) defines the terms. Theory: [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence: the [validation register](validation/index.md). Paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) detail stages.
 
-The entry point is the package root (`from astrometricslib import Astrometrics`). Besides 16 root names, `exceptions.py`, `reports.py`, `jobs.py` and `drivers/` are public. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
+The entry point is the package root (`from astrometricslib import Astrometrics`). Besides 16 root names, `exceptions.py`, `reports.py`, `jobs.py` and `drivers/` are public. It builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
 
 ## 2. Package layering
 
@@ -31,11 +31,11 @@ Each layer imports only from layers below it (enforced by the Appendix A ratchet
 
 Outside services: Siril for headless stacking, Astrometry.net [3] and Gaia through VizieR [4] or the ESA archive via astroquery [5] and SIMBAD [6] for plate solving and star identification, Gaia XP and DR3 for spectroscopy, and IMCCE SkyBoT for asteroid detection.
 
-`process_target` (`api/processing.py`) runs chosen stages through `pipelines.tasks.run_target_stages`, adding astrometry per `STAGE_PREREQUISITES`; a list runs each in a process (`pipelines.target_batch.process_targets_in_parallel`).
+`process_target` (`api/processing.py`) runs chosen stages through `pipelines.tasks.run_target_stages`, adding prerequisites per `STAGE_PREREQUISITES` (`spectral_variation` follows spectra across frames); a list runs each in a process (`pipelines.target_batch.process_targets_in_parallel`).
 
 ## 3. Data models
 
-`models/` classes hold fields and validation only (Table 2 maps Architecture §2's records).
+`models/` classes hold only fields and validation (Table 2 maps Architecture §2's records).
 
 **Table 2.** Architecture records and their classes.
 

@@ -107,6 +107,7 @@
   --black: #000;
 
   --accent-red: #e01b24;
+  --color-danger-hover: #e73c43;  /* danger button on hover: +7.8 points of lightness, as slate-blue-hover is over slate-blue */
   --frame-padding: 6px;
   --grey-darkest: #1e1e20;
   /* RGB token for use with rgba(var(--grey-darkest-rgb), alpha) so overlays can

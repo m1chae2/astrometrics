@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AppConfiguration, Astrometrics, FilterType
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, InvalidArgumentError
+from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 if TYPE_CHECKING:
@@ -34,7 +35,9 @@ MASTER_STACK_STAR_LIMIT = 10
 # The stages a client may ask for with the `stages` argument of
 # `analyze_image`. They run in this order. Photometry and spectroscopy need
 # astrometry, which the library adds on its own when it is missing or old.
-SELECTABLE_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
+# Spectral variation needs spectroscopy, which the library also adds when
+# its result is missing or older than the spectral stack.
+SELECTABLE_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "spectral_variation")
 
 
 def _json_default(value: Any) -> Any:
@@ -58,30 +61,6 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, os.PathLike):
         return os.fspath(value)
     raise TypeError(f"Cannot store {type(value).__name__} in a job result.")
-
-
-def _is_same_file(first_path: str, second_path: str) -> bool:
-    """Say whether two paths point at the same file.
-
-    Parameters
-    ----------
-    first_path : `str`
-        One path.
-    second_path : `str`
-        Another path.
-
-    Returns
-    -------
-    is_same : `bool`
-        `True` when the paths are the same once normalized (extra
-        slashes and ``..`` removed), or resolve to the same file.
-    """
-    if os.path.normpath(first_path) == os.path.normpath(second_path):
-        return True
-    try:
-        return os.path.samefile(first_path, second_path)
-    except OSError:
-        return False
 
 
 def _is_identification_job(job: Any) -> bool:
@@ -187,6 +166,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         self._analyze_submit_lock = threading.Lock()
         # The stop switch of each running star identification, by job id.
         self._identification_stops: dict[str, threading.Event] = {}
+        # The give-up switch of each running analysis job, by job id.
+        self._analysis_abandonments: dict[str, RunAbandonment] = {}
 
     def analyze_image(
         self,
@@ -211,13 +192,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
         type : `str`, optional
             The kind of analysis when ``stages`` is not given.
         stages : `list` [`str`], optional
-            The stages to run, from ``"astrometry"``, ``"photometry"`` and
-            ``"spectroscopy"``. When left out, the stages come from the
-            kind of the image files, as before. Either way the library
-            first runs astrometry when it is needed and its result is
-            missing or older than the stack. When given, the stack is used
-            for each stage that has one, and a sent file only for a stage
-            whose stack the target lacks.
+            The stages to run, from ``"astrometry"``, ``"photometry"``,
+            ``"spectroscopy"`` and ``"spectral_variation"``. When left out, the
+            stages come from the kind of the image files, as before.
+            Either way the library first runs astrometry when it is needed
+            and its result is missing or older than the stack. When given,
+            the stack is used for each stage that has one, and a sent file
+            only for a stage whose stack the target lacks.
 
         Returns
         -------
@@ -372,7 +353,17 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 if stop is not None:
                     stop.set()
                     return {"cancelled": True, "own_process": True, "reason": None}
-                return self.cancel_processing(active[0].id)
+                abandonment = self._analysis_abandonments.get(active[0].id)
+                outcome = self.cancel_processing(active[0].id)
+                if abandonment is not None:
+                    # Running: stop its programs, slot wait and next stage.
+                    abandonment.abandon()
+                    outcome = {"cancelled": True, "own_process": True, "reason": None}
+                if outcome["cancelled"]:
+                    self._job_service.update_job(
+                        active[0].id, status="cancelled", progress=0, status_message="Cancelled by user."
+                    )
+                return outcome
         return {
             "cancelled": False,
             "own_process": False,
@@ -594,7 +585,19 @@ class AnalysisOrchestrator(BaseBackgroundService):
             log_file_path=job.log_file_path if job else None,
             job_store=self._job_service.repository if self._job_service else None,
         ):
-            result = self._run_analysis_task_body(job_id, target_id, image_files, filter_name, type, stages)
+            abandonment = RunAbandonment()
+            self._analysis_abandonments[job_id] = abandonment
+            try:
+                with bind_abandonment(abandonment):
+                    result = self._run_analysis_task_body(
+                        job_id, target_id, image_files, filter_name, type, stages
+                    )
+            except RunAbandonedError:
+                # The user cancelled the job. `cancel_analysis` marked it.
+                logger.info("[%s] The analysis was cancelled.", target_id)
+                return {"status": "cancelled"}
+            finally:
+                self._analysis_abandonments.pop(job_id, None)
             self._store_job_result(job_id, result)
             return result
 
@@ -764,8 +767,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 len(light_paths),
                 len(spec_paths),
             )
-            spectroscopy_result = self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, filter_name or "SPEC", logger=logger
+            spectroscopy_result = self._run_chosen_stages(
+                job_id, target_id, spec_paths, filter_name or "SPEC", ["spectroscopy"]
             )
             photometry_result = self._run_photometry_analysis(
                 job_id, target_id, light_paths, filter_name, logger=logger
@@ -777,8 +780,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
             }
 
         if spec_paths:
-            return self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, filter_name or "SPEC", logger=logger
+            return self._run_chosen_stages(
+                job_id, target_id, spec_paths, filter_name or "SPEC", ["spectroscopy"]
             )
 
         if light_paths or type == "photometry":
@@ -842,6 +845,14 @@ class AnalysisOrchestrator(BaseBackgroundService):
         elif sent_spectral_paths:
             spectroscopy_options = {"path": sent_spectral_paths[0]}
 
+        # A raw spectral frame the app sent is a frame to follow. Without
+        # one, the stage follows every spectral frame of the target.
+        spectral_variation_options: dict[str, Any] = {}
+        if sent_spectral_paths and "spectral_variation" in stages:
+            spectral_variation_options["frames"] = [
+                frame for frame in target.frames if frame.path in set(sent_spectral_paths)
+            ]
+
         self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
         with self.astrometrics.processing.acquire_job_slot():
             outcome = self.astrometrics.processing.process_target(
@@ -850,6 +861,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 astrometry=astrometry_options or None,
                 photometry={"filter_name": filter_name, "use_astrometry_seed": True},
                 spectroscopy=spectroscopy_options or None,
+                spectral_variation=spectral_variation_options or None,
                 run_prerequisites=True,
                 # This job is already tracked (job_id), so the stages
                 # register none of their own.
@@ -917,6 +929,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
         parts[0] += "."
         for stage, reason in outcome.stages_skipped.items():
             parts.append(f"Skipped {stage} ({reason}).")
+        variation = outcome.results.get("spectral_variation")
+        if isinstance(variation, dict) and variation.get("status") == "skipped":
+            parts.append(f"Skipped spectral_variation ({variation.get('reason')}).")
         return " ".join(parts)
 
     def _update_job_progress(
@@ -929,152 +944,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
         with self._lock:
             if job_id in self._jobs:
                 self._jobs[job_id]["progress"] = {"current": current, "total": total}
-
-    def _run_spectroscopy_analysis(
-        self,
-        job_id: str,
-        target_id: str,
-        paths: list[str],
-        filter_name: str | None = None,
-        logger: logging.Logger | None = None,
-    ) -> dict[str, Any]:
-        """Pipeline for spectroscopy extraction.
-
-        Groups frames into observing sessions, identifies each
-        session's stars once (reusing an existing FITS-header WCS when
-        present), and extracts spectra for those same identified stars
-        from every frame in that session -- see
-        `ProcessingPipelines.run_spectroscopy_by_session`.
-        Builds `target.quality.spectroscopy` here, in this
-        (parent) process, from the aggregated per-frame results:
-        earlier, each frame worker built its own quality summary
-        against its own freshly-fetched `Target` copy inside its own
-        subprocess, which was never the same object this orchestrator
-        holds and so never actually reached `save_targets()`.
-
-        Returns
-        -------
-        results : `dict`
-            Summary dict with `"totalImages"`, `"starsProcessed"`,
-            `"spectraExtracted"`, and `"status"`.
-        """
-        log = logger or logging
-        log.info("[%s] Running spectroscopy analysis via Target.analyze_target", target_id)
-
-        results = {
-            "targetId": target_id,
-            "totalImages": len(paths),
-            "starsProcessed": 0,
-            "spectraExtracted": 0,
-            "status": "finished",
-            "analysisMode": "spectroscopy",
-        }
-
-        # Resolve the Target domain object
-        target = self._target_service.get_targets(target_id)
-        if not target:
-            target = self._target_service.create_target(target_id)
-
-        def _on_frame_complete(
-            path: str, frame_result: dict[str, Any], completed_count: int, total_count: int
-        ) -> None:
-            self._update_job_progress(job_id, target_id, completed_count, total_count, filter_name="SPEC")
-
-        # Stage one: the master stacked spectral image. It is a generated
-        # file that lives outside `target.frames`, so it cannot be grouped
-        # into observing sessions. It is analyzed on its own, as one
-        # high-signal image, which sets the baseline (dispersion geometry,
-        # wavelengths, features, spectral type) that stage two relies on.
-        # Stage two (the raw per-session frames, below) then follows how
-        # the spectra change over time.
-        stacked_spectral_path = getattr(getattr(target, "spectral_stacking", None), "stacked_image", None)
-        master_paths = [
-            path for path in paths if stacked_spectral_path and _is_same_file(path, stacked_spectral_path)
-        ]
-        paths = [path for path in paths if path not in master_paths]
-        for master_path in master_paths:
-            log.info("[%s] Analyzing the master stacked spectral image: %s", target_id, master_path)
-            with self.astrometrics.processing.acquire_job_slot():
-                master_result = self.astrometrics.processing.process_target(
-                    target,
-                    stages=["spectroscopy"],
-                    spectroscopy={"path": master_path, "limit": MASTER_STACK_STAR_LIMIT},
-                    register_job=False,
-                ).results["spectroscopy"]
-            master_star_count = len((master_result or {}).get("stellar_objects") or [])
-            results["starsProcessed"] += master_star_count
-            results["spectraExtracted"] += master_star_count
-            self._update_job_progress(job_id, target_id, 1, results["totalImages"], filter_name="SPEC")
-
-        if not paths:
-            try:
-                self._target_service.save_targets()
-            except AstrometricsError, sqlite3.Error, OSError:
-                log.exception("[%s] Failed to record target after master stack analysis", target_id)
-            log.info(
-                "[%s] Master stack analysis complete. %s spectra extracted from %s stars.",
-                target_id,
-                results["spectraExtracted"],
-                results["starsProcessed"],
-            )
-            return results
-
-        # Resolve bare path strings back to their real FrameRecord, so
-        # derive_target_sessions() can group them; a path with no
-        # matching frame (e.g. an ad hoc file never ingested) can't be
-        # session-assigned and is skipped, matching photometry's
-        # existing "no usable timestamp" exclusion.
-        path_to_frame = {frame.path: frame for frame in target.frames}
-        frame_records = [path_to_frame[path] for path in paths if path in path_to_frame]
-        unmatched_paths = [path for path in paths if path not in path_to_frame]
-        if unmatched_paths:
-            log.warning(
-                "[%s] %s path(s) have no matching FrameRecord on the target and will be skipped: %s",
-                target_id,
-                len(unmatched_paths),
-                unmatched_paths,
-            )
-
-        with self.astrometrics.processing.acquire_job_slot():
-            summary, _session_results = self.astrometrics.processing.run_spectroscopy_by_session(
-                target,
-                frame_records,
-                max_workers=None,
-                on_item_complete=_on_frame_complete,
-            )
-
-        for frame_result in summary.results.values():
-            stars_processed = frame_result.get("stars_processed", 0)
-            results["starsProcessed"] += stars_processed
-            results["spectraExtracted"] += stars_processed
-
-        for path, error_message in summary.failed:
-            log.error("[%s] Failed to process %s for spectroscopy: %s", target_id, path, error_message)
-
-        # target.quality.spectroscopy is now built and attached
-        # by run_spectroscopy_by_session itself.
-
-        try:
-            self._target_service.save_targets()
-        except AstrometricsError, sqlite3.Error, OSError:
-            log.exception("[%s] Failed to record target after spectroscopy analysis", target_id)
-
-        log.info(
-            "[%s] Spectroscopy analysis complete. %s spectra extracted from %s stars.",
-            target_id,
-            results["spectraExtracted"],
-            results["starsProcessed"],
-        )
-
-        if self._notification_service:
-            self._notification_service.notify(
-                target_id,
-                f"Spectroscopy analysis complete for {target_id}. "
-                f"{results['spectraExtracted']} spectra extracted.",
-                status="success",
-            )
-
-        return results
 
     def _run_photometry_analysis(
         self,

@@ -50,7 +50,7 @@ describe('ImageDetailsManager Analyze Target split button', () => {
         expect(onAnalyzeStage).not.toHaveBeenCalled();
     });
 
-    /** The menu lists the three stages and reports the picked one. */
+    /** The menu lists the four stages and reports the picked one. */
     it('reports the picked stage', async () => {
         const user = userEvent.setup();
         const { onAnalyze, onAnalyzeStage } = setup();
@@ -59,6 +59,7 @@ describe('ImageDetailsManager Analyze Target split button', () => {
             expect.stringContaining('Astrometry'),
             expect.stringContaining('Photometry'),
             expect.stringContaining('Spectroscopy'),
+            expect.stringContaining('Spectral Variation'),
         ]);
         for (const item of screen.getAllByRole('menuitem')) {
             expect(item.querySelector('.split-button__item-detail')).toBeNull();
@@ -90,6 +91,26 @@ describe('ImageDetailsManager Analyze Target split button', () => {
         expect(spectroscopy.getAttribute('aria-disabled')).toBe('true');
         expect(spectroscopy.getAttribute('title')).toContain('spectral');
         expect(screen.getByRole('menuitem', { name: /Photometry/ }).getAttribute('aria-disabled')).toBeNull();
+    });
+
+    /** Spectral Variation is on when raw spectral frames are in view, off with a reason otherwise. */
+    it('turns Spectral Variation on only with raw spectral frames in view', async () => {
+        const user = userEvent.setup();
+        const spectralView = { ...bothStacks, filterType: 'SPEC', filteredFilePaths: ['/raw_001.fits', '/raw_002.fits'] };
+        const { onAnalyzeStage } = setup({ analysisSelectionInput: spectralView });
+        await user.click(screen.getByRole('button', { name: 'Choose an analysis stage' }));
+        await user.click(screen.getByRole('menuitem', { name: /Spectral Variation/ }));
+        expect(onAnalyzeStage).toHaveBeenCalledWith('spectral_variation');
+    });
+
+    /** Without raw spectral frames in view, Spectral Variation is off and says why. */
+    it('turns Spectral Variation off without raw spectral frames', async () => {
+        const user = userEvent.setup();
+        setup();
+        await user.click(screen.getByRole('button', { name: 'Choose an analysis stage' }));
+        const variation = screen.getByRole('menuitem', { name: /Spectral Variation/ });
+        expect(variation.getAttribute('aria-disabled')).toBe('true');
+        expect(variation.getAttribute('title')).toContain('raw spectral frames');
     });
 
     /** A reason from the panel turns the main click off and becomes its tooltip. */

@@ -473,6 +473,12 @@ flat_match_time_limit_seconds = "300"
 # "simbad.cds.unistra.fr" (Strasbourg). If the first cannot be reached, the
 # other is asked. Any other value is ignored with a warning.
 simbad_preferred_server = "simbad.harvard.edu"
+# Which VizieR server to ask first (it serves the Gaia star tiles). VizieR has
+# two servers with the same catalogs: "vizier.cfa.harvard.edu" (the Harvard
+# mirror, the default) and "vizier.cds.unistra.fr" (Strasbourg). If the first
+# cannot be reached, the other is asked. Any other value is ignored with a
+# warning.
+vizier_preferred_server = "vizier.cfa.harvard.edu"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

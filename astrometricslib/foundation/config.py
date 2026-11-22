@@ -44,6 +44,12 @@ _instance = None
 SIMBAD_SERVER_CHOICES = ("simbad.cds.unistra.fr", "simbad.harvard.edu")
 DEFAULT_SIMBAD_SERVER = "simbad.harvard.edu"
 
+# The two VizieR servers, Strasbourg (CDS) and its Harvard mirror, which hold
+# the same catalogs. `[Catalogs] vizier_preferred_server` must be one of them.
+# astroquery takes the host name as `Vizier(vizier_server=...)`.
+VIZIER_SERVER_CHOICES = ("vizier.cds.unistra.fr", "vizier.cfa.harvard.edu")
+DEFAULT_VIZIER_SERVER = "vizier.cfa.harvard.edu"
+
 # Defaults of the processing settings below. Each is a `TunedParameter`
 # whose value comes from the config file; the default is used when the
 # file has none. The getters of `AppConfiguration` read them.
@@ -627,7 +633,10 @@ class AppConfiguration:
             },
             # Harvard first: the Strasbourg server was down for days and each
             # start waited out a 30 s timeout before trying the mirror.
-            "Catalogs": {"simbad_preferred_server": DEFAULT_SIMBAD_SERVER},
+            "Catalogs": {
+                "simbad_preferred_server": DEFAULT_SIMBAD_SERVER,
+                "vizier_preferred_server": DEFAULT_VIZIER_SERVER,
+            },
             "Processing": {
                 # Off: the user wants nothing to download until they allow it.
                 "prefetch_frames": "false",
@@ -1206,6 +1215,32 @@ class AppConfiguration:
             DEFAULT_SIMBAD_SERVER,
         )
         return DEFAULT_SIMBAD_SERVER
+
+    def get_vizier_preferred_server(self) -> str:
+        """Return the VizieR server to ask first.
+
+        VizieR has two servers with the same catalogs. The Gaia tile download
+        asks this one first and falls back to the other if it cannot be
+        reached.
+
+        Returns
+        -------
+        server : `str`
+            ``"vizier.cfa.harvard.edu"`` or ``"vizier.cds.unistra.fr"``. A
+            missing setting, or any other value, gives
+            ``"vizier.cfa.harvard.edu"`` with a warning.
+        """
+        raw = str(self.get_value("Catalogs", "vizier_preferred_server", fallback=DEFAULT_VIZIER_SERVER))
+        server = raw.strip().lower()
+        if server in VIZIER_SERVER_CHOICES:
+            return server
+        logging.getLogger(__name__).warning(
+            "[Catalogs] vizier_preferred_server is %r; it must be one of %s. Using %s.",
+            raw,
+            ", ".join(VIZIER_SERVER_CHOICES),
+            DEFAULT_VIZIER_SERVER,
+        )
+        return DEFAULT_VIZIER_SERVER
 
     def get_preview_remove_green_noise_enabled(self) -> bool:
         """Return whether the stack preview removes excess green.

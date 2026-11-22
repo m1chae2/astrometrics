@@ -353,6 +353,33 @@ def test_an_unchanged_stack_is_skipped(tmp_path: Path, inputs: SimpleNamespace) 
     assert decision.reasons == []
 
 
+def test_a_changed_dark_recipe_is_rebuilt_and_the_reason_is_given(
+    tmp_path: Path, inputs: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new way of building the master dark restacks and says so."""
+    from astrometricslib._internal.drivers.siril_interface import staging
+
+    stack, _ = make_stack_with_record(tmp_path, inputs)
+    monkeypatch.setattr(staging, "DARK_MASTER_RECIPE", "dark-recipe-next")
+
+    decision = si.decide_whether_to_restack(stack, record_for(inputs))
+
+    assert not decision.skip
+    assert decision.reasons == ["the master dark recipe changed"]
+
+
+def test_a_record_without_master_recipes_is_rebuilt(tmp_path: Path, inputs: SimpleNamespace) -> None:
+    """A record saved before recipes were recorded is never unchanged."""
+    stack, record = make_stack_with_record(tmp_path, inputs)
+    old_record = {key: value for key, value in record.items() if key != "master_recipes"}
+    si.write_stack_inputs(stack, old_record)
+
+    decision = si.decide_whether_to_restack(stack, record)
+
+    assert not decision.skip
+    assert "does not say how its master calibration frames were built" in decision.reasons[0]
+
+
 def test_a_changed_stack_is_rebuilt_and_the_reason_is_given(tmp_path: Path, inputs: SimpleNamespace) -> None:
     """New frames lead to a rebuild that names them."""
     stack, _ = make_stack_with_record(tmp_path, inputs)

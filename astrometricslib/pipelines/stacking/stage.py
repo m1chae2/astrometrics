@@ -460,8 +460,9 @@ def _stack_is_unchanged(run: StackRun) -> bool:
     )
     if decision.skip:
         logger.info(
-            "Skipping the stack of '%s' at %s: its frames, calibration frames, settings and the "
-            "stacking code are the same as when it was made. Pass force=True to rebuild it.",
+            "Skipping the stack of '%s' at %s: its frames, calibration frames, master calibration "
+            "recipes, stacking settings and stacking code are the same as when it was made. "
+            "Pass force=True to rebuild it.",
             run.target.id,
             run.expected_path,
         )

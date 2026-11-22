@@ -39,6 +39,9 @@ PIPELINES_ROOT = LIBRARY_ROOT / "pipelines"
 REGISTER_DIR = LIBRARY_ROOT.parent / "documentation" / "library_design" / "validation"
 NAME_FORM = re.compile(r"^[a-z][a-z_]*\.[a-z][a-z0-9_]*$")
 REGISTER_ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2,3})\s*$", re.MULTILINE)
+# A design estimate is a row of the register's "Design estimates" table,
+# not a heading.
+REGISTER_DESIGN_ESTIMATE_ROW = re.compile(r"^\| ([A-Z]{3}-D\d{2,3}) \|", re.MULTILINE)
 # The ending a metric name must have for each unit, so a reader sees the unit
 # in the name. A unitless metric (unit "") has no required ending.
 UNIT_NAME_ENDING: dict[str, str] = {
@@ -337,7 +340,9 @@ def _register_entry_ids() -> set[str]:
     """
     entry_ids: set[str] = set()
     for path in REGISTER_DIR.glob("*.md"):
-        entry_ids.update(REGISTER_ENTRY_HEADING.findall(path.read_text(encoding="utf-8")))
+        text = path.read_text(encoding="utf-8")
+        entry_ids.update(REGISTER_ENTRY_HEADING.findall(text))
+        entry_ids.update(REGISTER_DESIGN_ESTIMATE_ROW.findall(text))
     return entry_ids
 
 

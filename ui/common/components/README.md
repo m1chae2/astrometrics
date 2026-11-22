@@ -11,7 +11,7 @@ Small components give the displays one look and one set of keyboard and screen-r
 - `Card.tsx` is a bordered box with an optional title bar. A `selected` card has a blue outline. A `current` card sets `aria-current` and a thick left edge. A card with an `onClick` can be focused and works with Enter and Space.
 - `Tabs.tsx` is a tab strip that follows the WAI-ARIA tab pattern (arrow keys, Home, End and `aria-selected`). WAI-ARIA is the web standard that makes controls readable by screen readers. A tab can show a count. `TabPanel` in the same file is the matching panel. Tabs have one look: muted text with a 3px blue underline under the selected tab. Pass `size="compact"` for a tight panel (narrower side padding). `TabView.tsx` draws its header with `Tabs`. Two-way switches such as "By catalog / By camera" also use `Tabs` (the sort order of the target list too), so there is no second tab look.
 - `InfoButton.tsx` is a small "i" button. Its text shows on hover, on keyboard focus and on click, so keyboard and touch users can read it. Escape or moving focus away hides it.
-- `StatusChip.tsx` is a `Badge` with an icon and a word, so a status is never told by color alone. Its statuses are ok, warning, error, info and neutral, and each has its own icon shape. `quality/ConfidenceChip.tsx` is also a `Badge`.
+- `StatusChip.tsx` is a `Badge` with an icon and a word, so a status is never told by color alone. Its statuses are ok, warning, error, info and neutral, and each has its own icon shape. With `details` the chip is focusable and shows that content in a popover on hover and on keyboard focus (Escape hides it). `quality/ConfidenceChip.tsx` is also a `Badge`.
 - `ProgressBar.tsx` is a bar with `role="progressbar"` and visible text such as "12 of 20 frames". The text is also the bar's `aria-valuetext`.
 - `FormRow.tsx` is a label, an input slot, an optional unit and an inline error. The label points to the input with `htmlFor`. An error shows as an alert under the input.
 
@@ -25,6 +25,7 @@ Every button, text field, checkbox and badge in the app comes from one of these 
 | An icon, a close mark or a row that is a button | `Button` with `variant="ghost"`. Its rules have no weight, so the row's own class decides the look. |
 | A small status or tag | `Badge.tsx` with a `tone`: ok, warning, error, info, neutral, accent or purple. With `onClick` it is a button. `StatusChip` adds an icon and a word. |
 | One choice from a list | `PopoverSelect.tsx` (no native select anywhere). |
+| A main action with a few related actions behind an arrow | `SplitButton.tsx`. The left part is a `Button` (same `variant` and `size`); the arrow opens a menu of `options` and reports the picked id. `fill` spans the container (the main part grows, the arrow keeps its width). The menu is drawn in a portal under the control, or above it near the bottom of the window, using `useAnchoredMenu.ts`, which `PopoverSelect` shares. `busy` turns both parts off. A disabled option shows its `title` as the reason. |
 | Text, password or search | `TextInput.tsx` (`width="short"` or `"fill"`, `centered`, `size="small"` for a panel header or toolbar). |
 | A number | `NumberInput.tsx`. It takes the same props, plus `min`, `max` and `step`. |
 | A yes or no | `Checkbox.tsx`. Pass `label`, or `aria-label` for a box with no text. |
@@ -37,14 +38,14 @@ The `btn` class family lives in `Button.css`: 36px tall, 14px text and 6px corne
 ### Lint rules
 
 - ESLint (`eslint.config.js`) fails a raw `<button>`, `<input>`, `<select>` or `<textarea>` in any `.tsx` file outside this folder and the tests. It also fails a `className` that holds the word `btn` or a `btn--` modifier (use `<Button variant size>`), and an inline `style` color (`color`, `background`, `backgroundColor`, `borderColor`, `fill` or `stroke`) that starts with `#`, `rgb` or `hsl`. Use a CSS class with theme tokens from `ui/common/styles/theme.css` instead.
-- Stylelint (`build/stylelint/selector-ownership.mjs`) gives each control's classes to one stylesheet: `.btn*` and `.btn-ghost*` to `Button.css`, `.tabs*` to `sharedComponents.css`, `.badge*` and `.status-chip*` to `Badge.css`, `.popover-select*` to `popoverSelect.css`, `.entry*` to `TextInput.css` and `.checkbox*` to `Checkbox.css`. Any other stylesheet that names them, even in a descendant selector such as `.panel .btn`, fails, and so does a legacy one. To change a control for one screen, use a prop (`fit`, `truncate` and `fullWidth` on `Button`, `fill` on `PopoverSelect`, `width` on `TextInput`) or add a prop here. Give a layout `className` to the component and style that class instead.
+- Stylelint (`build/stylelint/selector-ownership.mjs`) gives each control's classes to one stylesheet: `.btn*` and `.btn-ghost*` to `Button.css`, `.tabs*` to `sharedComponents.css`, `.badge*` and `.status-chip*` to `Badge.css`, `.popover-select*` to `popoverSelect.css`, `.split-button*` to `splitButton.css`, `.entry*` to `TextInput.css` and `.checkbox*` to `Checkbox.css`. Any other stylesheet that names them, even in a descendant selector such as `.panel .btn`, fails, and so does a legacy one. To change a control for one screen, use a prop (`fit`, `truncate` and `fullWidth` on `Button`, `fill` on `PopoverSelect`, `width` on `TextInput`) or add a prop here. Give a layout `className` to the component and style that class instead.
 
 ### Allowed raw elements
 
 These are the only raw controls. All of them are inside `ui/common/components/`, which the lint rule skips.
 
 - The component files themselves: `Button.tsx`, `TextInput.tsx`, `Checkbox.tsx`, `Slider.tsx` and `FileInput.tsx` render the native element.
-- `Tabs.tsx` (a tab is a native button with `role="tab"` and its own arrow-key handling), `PopoverSelect.tsx` (its trigger and menu entries) and `InfoButton.tsx` (its trigger, which owns focus and the hover text): their look is a tab, a menu row or an info mark, not a regular button.
+- `Tabs.tsx` (a tab is a native button with `role="tab"` and its own arrow-key handling), `PopoverSelect.tsx` (its trigger and menu entries), `SplitButton.tsx` (its menu entries) and `InfoButton.tsx` (its trigger, which owns focus and the hover text): their look is a tab, a menu row or an info mark, not a regular button.
 - `SelectableList.tsx` draws one radio input per row. A list can hold thousands of rows, so each row is kept as light as possible.
 
 ## Loading

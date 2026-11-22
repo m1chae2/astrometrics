@@ -92,7 +92,9 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
     in SIMBAD. The solved image's center is only a fallback for a name
     SIMBAD cannot resolve or whose answer lies outside the image, and the
     target is then marked unverified (see `fill_target_position`). A
-    position already set is never changed. Moving bodies and calibration
+    position already set is never changed, but a target with a set position
+    and no SIMBAD object type gets that type (and a missing major axis)
+    from the same lookup. Moving bodies and calibration
     targets never get a fixed position. A SIMBAD failure never stops the
     run: it is logged and the fallback applies.
 
@@ -108,7 +110,11 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
     """
     if has_no_fixed_position(target.id):
         return
-    if parse_target_position(target) is not None and not target.position_unverified:
+    if (
+        parse_target_position(target) is not None
+        and not target.position_unverified
+        and (target.simbad_object_type or "").strip()
+    ):
         return
     frame_center = None
     footprint_radius = None

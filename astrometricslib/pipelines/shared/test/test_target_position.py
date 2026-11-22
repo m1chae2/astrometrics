@@ -21,6 +21,7 @@ from astrometricslib.pipelines.shared.target_position import (
     FILL_CATALOG,
     FILL_FRAME_CENTER,
     FILL_NONE,
+    FILL_TYPE_ONLY,
     fill_target_position,
     parse_target_position,
 )
@@ -35,9 +36,14 @@ class FakeSimbad:
     """A SIMBAD stand-in that answers from a dictionary."""
 
     def __init__(
-        self, answers: dict[str, tuple[float, float]], fail: bool = False, error: Exception | None = None
+        self,
+        answers: dict[str, tuple[float, float]],
+        fail: bool = False,
+        error: Exception | None = None,
+        object_type: str | None = None,
     ) -> None:
-        """Remember the known names and how lookups should fail."""
+        """Remember the known names, the object type and how lookups fail."""
+        self.object_type = object_type
         self.answers = answers
         self.fail = fail
         self.error = error
@@ -71,7 +77,10 @@ class FakeSimbad:
         if object_name not in self.answers:
             return None
         ra, dec = self.answers[object_name]
-        return Table({"ra": np.array([ra]), "dec": np.array([dec])})
+        table = Table({"ra": np.array([ra]), "dec": np.array([dec])})
+        if self.object_type is not None:
+            table["otype"] = [self.object_type]
+        return table
 
 
 def test_catalog_position_beats_frame_center() -> None:
@@ -113,7 +122,7 @@ def test_no_catalog_and_no_frame_leaves_target_empty() -> None:
 
 def test_existing_position_is_never_overwritten() -> None:
     """A set, verified position is left alone; SIMBAD is not asked."""
-    target = Target(id="M 57", ra="18 53 35.08", dec="+33 01 45.03")
+    target = Target(id="M 57", ra="18 53 35.08", dec="+33 01 45.03", simbad_object_type="PN")
     simbad = FakeSimbad({"M 57": (1.0, 2.0)})
     assert fill_target_position(target, simbad, OFFSET_FRAME_CENTER) == FILL_NONE
     assert target.ra == "18 53 35.08"
@@ -211,3 +220,64 @@ def test_hand_entered_position_clears_the_unverified_flag(monkeypatch: pytest.Mo
     monkeypatch.setattr(target_records, "save_targets", lambda _api: None)
     target_records.update_target(SimpleNamespace(), "M 57", {"ra": "18 53 35.08"})
     assert not target.position_unverified
+
+
+CONFIRMED_RA = "18 53 35.08"
+CONFIRMED_DEC = "+33 01 45.03"
+
+
+def test_missing_type_is_filled_and_position_kept() -> None:
+    """A confirmed position with no type gets only the type from SIMBAD."""
+    target = Target(id="M 57", ra=CONFIRMED_RA, dec=CONFIRMED_DEC)
+    simbad = FakeSimbad({"M 57": (RING_RA_DEG, RING_DEC_DEG)}, object_type="PN")
+    assert fill_target_position(target, simbad, OFFSET_FRAME_CENTER) == FILL_TYPE_ONLY
+    assert target.simbad_object_type == "PN"
+    assert (target.ra, target.dec) == (CONFIRMED_RA, CONFIRMED_DEC)
+    assert not target.position_unverified
+
+
+def test_present_type_is_not_looked_up() -> None:
+    """A target that already has a type does not query SIMBAD."""
+    target = Target(id="M 57", ra=CONFIRMED_RA, dec=CONFIRMED_DEC, simbad_object_type="PN")
+    simbad = FakeSimbad({"M 57": (RING_RA_DEG, RING_DEC_DEG)}, object_type="G")
+    assert fill_target_position(target, simbad, None) == FILL_NONE
+    assert simbad.asked == []
+    assert target.simbad_object_type == "PN"
+
+
+def test_type_from_catalog_outside_the_frame_is_not_taken(caplog: pytest.LogCaptureFixture) -> None:
+    """A catalog position far outside the solved frame gives no type."""
+    target = Target(id="M 57", ra=CONFIRMED_RA, dec=CONFIRMED_DEC)
+    simbad = FakeSimbad({"M 57": (RING_RA_DEG, RING_DEC_DEG)}, object_type="PN")
+    with caplog.at_level(logging.WARNING):
+        action = fill_target_position(target, simbad, OFFSET_FRAME_CENTER, footprint_radius_arcmin=5.0)
+    assert action == FILL_NONE
+    assert target.simbad_object_type is None
+    assert "Not taking its object type" in caplog.text
+
+
+def test_type_lookup_failure_does_not_fail_astrometry() -> None:
+    """A SIMBAD outage while filling the type leaves the target unchanged."""
+    target = Target(id="M 57", ra=CONFIRMED_RA, dec=CONFIRMED_DEC)
+    assert fill_target_position(target, FakeSimbad({}, fail=True), None) == FILL_NONE
+    drivers = SimpleNamespace(simbad_or_default=lambda: FakeSimbad({}, error=OSError("no network")))
+    runner._fill_target_position(target, SimpleNamespace(wcs=None), drivers)
+    assert target.simbad_object_type is None
+    assert (target.ra, target.dec) == (CONFIRMED_RA, CONFIRMED_DEC)
+
+
+def test_unresolvable_name_leaves_type_empty() -> None:
+    """A name SIMBAD cannot resolve changes nothing."""
+    target = Target(id="Mystery", ra=CONFIRMED_RA, dec=CONFIRMED_DEC)
+    assert fill_target_position(target, FakeSimbad({}), None) == FILL_NONE
+    assert target.simbad_object_type is None
+
+
+def test_runner_fills_missing_type_of_confirmed_target() -> None:
+    """The runner fills the type of a target with a confirmed position."""
+    target = Target(id="M 57", ra=CONFIRMED_RA, dec=CONFIRMED_DEC)
+    simbad = FakeSimbad({"M 57": (RING_RA_DEG, RING_DEC_DEG)}, object_type="PN")
+    runner._fill_target_position(
+        target, SimpleNamespace(wcs=None), SimpleNamespace(simbad_or_default=lambda: simbad)
+    )
+    assert target.simbad_object_type == "PN"

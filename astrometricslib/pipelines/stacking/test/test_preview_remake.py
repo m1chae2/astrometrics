@@ -94,6 +94,9 @@ def fake_preview(
         settings: PreviewSettings | None = None,
         steps_log: list | None = None,
         skipped_steps: list | None = None,
+        background_outcomes: list | None = None,
+        object_category: str | None = None,
+        target_anchor: object | None = None,
     ) -> str | None:
         """Remove the old pictures and write new ones, as the real step does.
 

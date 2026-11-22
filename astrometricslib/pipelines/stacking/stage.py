@@ -1052,6 +1052,11 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     stacked_path : `str`
         The stack that was made.
     """
+    from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+        BackgroundGradientOutcome,
+        record_background_gradient,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
     from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
         record_preview_step_notices,
     )
@@ -1062,7 +1067,18 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     )
 
     skipped_steps: list[SkippedPreviewStep] = []
-    run.preview_path = write_stack_preview(stacked_path, run.preview_settings, skipped_steps=skipped_steps)
+    # A spectral stack has no sky gradient worth measuring: GraXpert's model
+    # is not measured for it.
+    background_outcomes: list[BackgroundGradientOutcome] | None = None if run.has_spectral else []
+    run.preview_path = write_stack_preview(
+        stacked_path,
+        run.preview_settings,
+        skipped_steps=skipped_steps,
+        background_outcomes=background_outcomes,
+        # The masked stretch is for imaging stacks of a nebula or a galaxy.
+        object_category=None if run.has_spectral else run.target.object_category,
+        target_anchor=anchor_for_target(run.target),
+    )
     # A skipped step is a warning of this job, not only a line in the log.
     record_preview_step_notices(
         skipped_steps,
@@ -1072,6 +1088,15 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         run.measured_at,
         None if run.quality_recording is None else run.quality_recording.configuration,
     )
+    if background_outcomes is not None:
+        record_background_gradient(
+            background_outcomes,
+            run.target.id,
+            os.path.basename(stacked_path),
+            run.job_id,
+            run.measured_at,
+            None if run.quality_recording is None else run.quality_recording.configuration,
+        )
     if run.preview_path:
         record_preview_as_processed_image(run.target, run.has_spectral, stacked_path, run.preview_path)
 

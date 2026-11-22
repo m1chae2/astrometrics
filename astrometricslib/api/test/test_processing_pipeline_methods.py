@@ -4,9 +4,10 @@ Description: Each stage takes its options in its own dictionary, so an
 option meant for one stage never reaches another. These tests verify each
 stage's options reach the underlying pipeline dispatch correctly, that an
 unknown option is refused, and that `process_target` runs the stages in the
-right fixed order, respects a `stages` subset, skips spectroscopy gracefully
-when a target has no spectral data, and threads photometry's result into
-the spectroscopy call.
+right fixed order, respects a `stages` subset, and skips spectroscopy
+gracefully when a target has no spectral data. Prerequisite rules are tested
+in `pipelines/test/test_stage_prerequisites.py`; these tests pass
+`run_prerequisites=False` where they run a stage alone.
 """
 
 from unittest.mock import MagicMock
@@ -105,6 +106,7 @@ def test_the_photometry_stage_forwards_its_options(
     pipelines.process_target(
         target,
         stages=["photometry"],
+        run_prerequisites=False,
         photometry={"frames": [frame], "filter_name": "L", "use_astrometry_seed": False, "max_workers": 3},
         register_job=False,
     )
@@ -125,13 +127,18 @@ def test_the_spectroscopy_stage_forwards_its_options(
     pipelines, recorder = recording_pipelines
     target = Target(id="SpectroscopyParamsTarget", stacked_spectral_target="/fake/spec.fits")
 
-    pipelines.process_target(target, stages=["spectroscopy"], spectroscopy={"limit": 5}, register_job=False)
+    pipelines.process_target(
+        target,
+        stages=["spectroscopy"],
+        spectroscopy={"limit": 5},
+        run_prerequisites=False,
+        register_job=False,
+    )
 
     assert len(recorder.calls) == 1
     call = recorder.calls[0]
     assert call["pipeline_type"] == "spectroscopy"
     assert call["limit"] == 5
-    assert call["photometry_result"] is None
 
 
 def test_an_option_a_stage_does_not_know_is_refused(
@@ -169,23 +176,6 @@ def test_process_target_runs_all_three_stages_in_order(
     assert results.stages_run == ["astrometry", "photometry", "spectroscopy"]
 
 
-def test_process_target_threads_photometry_result_into_spectroscopy(
-    recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
-) -> None:
-    """Verify spectroscopy receives photometry's result forwarded to it."""
-    pipelines, recorder = recording_pipelines
-    target = Target(
-        id="ProcessTargetThreadingTarget",
-        stacked_image="/fake/stack.fits",
-        stacked_spectral_target="/fake/spec.fits",
-    )
-
-    results = pipelines.process_target(target, register_job=False)
-
-    spectroscopy_call = next(call for call in recorder.calls if call["pipeline_type"] == "spectroscopy")
-    assert spectroscopy_call["photometry_result"] == results.results["photometry"]
-
-
 def test_process_target_stages_subset_runs_only_the_requested_stages(
     recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
@@ -197,7 +187,9 @@ def test_process_target_stages_subset_runs_only_the_requested_stages(
         stacked_spectral_target="/fake/spec.fits",
     )
 
-    results = pipelines.process_target(target, stages=["spectroscopy", "photometry"], register_job=False)
+    results = pipelines.process_target(
+        target, stages=["spectroscopy", "photometry"], run_prerequisites=False, register_job=False
+    )
 
     assert [call["pipeline_type"] for call in recorder.calls] == ["photometry", "spectroscopy"]
     assert set(results.results) == {"photometry", "spectroscopy"}
@@ -320,7 +312,9 @@ def test_one_target_photometry_defaults_to_the_batch_camera_and_primary_optic(
     """Verify photometry gets the batch's camera and the primary optic."""
     pipelines, recorder = setups_pipelines
 
-    pipelines.process_target(_mixed_target(), stages=["photometry"], register_job=False)
+    pipelines.process_target(
+        _mixed_target(), stages=["photometry"], run_prerequisites=False, register_job=False
+    )
 
     assert _photometry_paths(recorder) == ["/asi405.fits", "/asi_spec.fits"]
 
@@ -332,7 +326,12 @@ def test_one_target_photometry_uses_the_camera_and_optic_asked_for(
     pipelines, recorder = setups_pipelines
 
     pipelines.process_target(
-        _mixed_target(), stages=["photometry"], camera_id="Nikon", focal_length_mm=300.0, register_job=False
+        _mixed_target(),
+        stages=["photometry"],
+        camera_id="Nikon",
+        focal_length_mm=300.0,
+        run_prerequisites=False,
+        register_job=False,
     )
 
     assert _photometry_paths(recorder) == ["/nikon300.fits"]
@@ -346,7 +345,11 @@ def test_one_target_photometry_option_frames_still_win(
     own_frame = FrameRecord(path="/own.fits", filter="Luminance")
 
     pipelines.process_target(
-        _mixed_target(), stages=["photometry"], photometry={"frames": [own_frame]}, register_job=False
+        _mixed_target(),
+        stages=["photometry"],
+        photometry={"frames": [own_frame]},
+        run_prerequisites=False,
+        register_job=False,
     )
 
     assert _photometry_paths(recorder) == ["/own.fits"]
@@ -359,10 +362,14 @@ def test_one_target_spectroscopy_needs_spectral_frames_in_the_selection(
     pipelines, recorder = setups_pipelines
     target = _mixed_target()
 
-    ran = pipelines.process_target(target, stages=["spectroscopy"], register_job=False)
+    ran = pipelines.process_target(
+        target, stages=["spectroscopy"], run_prerequisites=False, register_job=False
+    )
     assert ran.results["spectroscopy"]["pipeline_type"] == "spectroscopy"
 
-    skipped = pipelines.process_target(target, stages=["spectroscopy"], camera_id="Nikon", register_job=False)
+    skipped = pipelines.process_target(
+        target, stages=["spectroscopy"], camera_id="Nikon", run_prerequisites=False, register_job=False
+    )
     assert skipped.results["spectroscopy"]["status"] == "skipped"
     assert len(recorder.calls) == 1
 

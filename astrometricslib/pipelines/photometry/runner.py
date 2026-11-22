@@ -29,6 +29,7 @@ from astrometricslib.pipelines.photometry.post_processing.known_variability_labe
     split_scores_by_catalog_status,
 )
 from astrometricslib.pipelines.photometry.post_processing.record_noise_budget import (
+    aperture_diameter_mm,
     noise_budget_inputs,
     record_noise_budget_quality,
 )
@@ -238,6 +239,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             "all_centroid_shift_summaries": [],
             "all_session_zero_points": [],
             "all_session_noise_inputs": [],
+            "all_session_scintillation": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
             "cross_session_match_count": 0,
@@ -444,6 +446,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # the noise model stored next to the summary (see
         # `SessionNoiseInputs`).
         all_session_noise_inputs = []
+        # What scintillation term each session's flux errors carry (see
+        # `SessionScintillationRecord`).
+        all_session_scintillation = []
         session_empty_reasons = []
         # Sessions whose light curves kept raw flux (see
         # `SessionWithoutComparisonStars`), as (session id, reason, number
@@ -486,6 +491,12 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
 
         for session in photometry_sessions:
             id_prefix = f"{session.id}:" if id_prefix_enabled else ""
+            # The scintillation term needs this session's aperture, taken
+            # from the optic its frames name.
+            session_paths = set(session.frame_paths)
+            session_aperture_mm, session_aperture_reason = aperture_diameter_mm(
+                [frame for frame in target.frames if frame.path in session_paths], get_configuration()
+            )
             analyzer, session_candidates, identify_result = _run_variability_analysis_for_session(
                 session,
                 max_workers,
@@ -493,6 +504,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 target=target,
                 star_identifier=star_identifier,
                 use_astrometry_seed=use_astrometry_seed,
+                aperture_diameter_mm=session_aperture_mm,
+                aperture_reason=session_aperture_reason or None,
             )
             if identify_result is not None:
                 session_wcs_map[session.id] = identify_result.wcs
@@ -535,6 +548,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 all_centroid_shift_summaries.append(centroid_shift_summary)
             if analyzer.session_zero_points is not None:
                 all_session_zero_points.append(replace(analyzer.session_zero_points, session_id=session.id))
+            if analyzer.scintillation is not None:
+                all_session_scintillation.append(
+                    analyzer.scintillation.model_copy(update={"session_id": session.id})
+                )
             try:
                 all_session_noise_inputs.append(
                     SessionNoiseInputs.from_analyzer_results(
@@ -542,6 +559,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                         analyzer.stellar_objects,
                         analyzer.frame_exposure_seconds,
                         analyzer.detector_noise,
+                        analyzer.scintillation_fraction_by_frame,
                     )
                 )
             except (AstrometricsError, AttributeError, *DATA_ERRORS):
@@ -565,6 +583,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         label_known_variability(candidates_formatted, catalog_access)
 
         sessions_missing_wcs: list[str] = []
+        session_tie_records: list[Any] = []
         cross_session_match_count = 0
         long_term_candidates = []
 
@@ -605,6 +624,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     target,
                     session_wcs_map=session_wcs_map,
                     drivers=options.get("drivers"),
+                    session_tie_records=session_tie_records,
                 )
             )
             if cross_session_match_count > 0 and not (unnormalized_ids and not exclude_unnormalized):
@@ -654,9 +674,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "all_centroid_shift_summaries": all_centroid_shift_summaries,
                 "all_session_zero_points": all_session_zero_points,
                 "all_session_noise_inputs": all_session_noise_inputs,
+                "all_session_scintillation": all_session_scintillation,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_without_comparison_stars": sessions_without_comparison_stars,
                 "sessions_missing_wcs": sessions_missing_wcs,
+                "session_ties": session_tie_records,
                 "cross_session_match_count": cross_session_match_count,
                 "long_term_candidate_count": len(long_term_candidates),
                 "astrometry_identified_star_count": astrometry_identified_star_count,
@@ -743,6 +765,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 variable_candidate_count=len(result.candidates),
                 cross_session_match_count=payload["cross_session_match_count"],
                 sessions_missing_wcs=sessions_missing_wcs,
+                session_ties=list(payload.get("session_ties", [])),
+                session_scintillation=list(payload.get("all_session_scintillation", [])),
                 long_term_variable_candidate_count=payload["long_term_candidate_count"],
                 astrometry_identified_star_count=payload["astrometry_identified_star_count"],
                 sessions_with_reused_header_wcs=payload["sessions_with_reused_header_wcs"],
@@ -782,6 +806,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
         )
         noise_model_star_count = len(_noise_model_inputs(star_photometry)[0])
+        saturated_points_removed = sum(photometry.saturated_points_removed for photometry in star_photometry)
+        stars_with_saturated_points = sum(
+            1 for photometry in star_photometry if photometry.saturated_points_removed > 0
+        )
         flux_error_mag = median_flux_error_mag(result.stellar_objects)
         errors_assume_unit_gain = any(photometry.errors_assume_unit_gain for photometry in star_photometry)
         gates = photometry_run_gates(
@@ -836,10 +864,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     centroid_shift_summaries=centroid_shift_summaries,
                     stars_with_scatter=stars_with_scatter,
                     noise_model_star_count=noise_model_star_count,
+                    saturated_points_removed=saturated_points_removed,
+                    stars_with_saturated_points=stars_with_saturated_points,
                     median_flux_error_mag=flux_error_mag,
                     errors_assume_unit_gain=errors_assume_unit_gain,
                     session_zero_points=payload.get("all_session_zero_points", []),
                     sessions_without_comparison_stars=payload.get("sessions_without_comparison_stars", []),
+                    session_ties=payload.get("session_ties", []),
+                    session_scintillation=payload.get("all_session_scintillation", []),
                     logged_warnings=input_and_run_warnings,
                     dropped_logged_warning_count=payload.get("dropped_logged_warning_count", 0),
                 ),

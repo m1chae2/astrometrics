@@ -40,7 +40,16 @@ QUARANTINE_WINDOW = (0.02, 0.43)
 QUALITY_ROWS_WINDOW = (0.45, 0.35)
 BACKGROUND_WINDOW = (0.80, 0.20)
 
+# The reason recorded for a frame, by the check that left it out. The stack
+# check (`predict_stack`) matches on these to say which check it was.
+MINORITY_GAIN_REASON = "minority gain setting"
+EARLIER_QUARANTINE_REASON = "set aside by an earlier quarantine"
+BACKGROUND_SPLIT_REASON = "background-homogeneity split"
+
 __all__ = [
+    "BACKGROUND_SPLIT_REASON",
+    "EARLIER_QUARANTINE_REASON",
+    "MINORITY_GAIN_REASON",
     "FrameScreening",
     "record_frame_quality",
     "refresh_saturated_pixel_fraction",
@@ -65,12 +74,20 @@ class FrameScreening:
     background_split : `dict` or `list` [`dict`] or `None`
         What the background check found, when it found a split in the sky
         background; otherwise `None`.
+    flagged_frames : `list` [`QuarantineDecision`]
+        Frames the quarantine step kept with a warning (an uneven sky with
+        normal stars), each with its reasons.
+    quarantine_report : `QuarantineReport` or `None`
+        What the quarantine step found, when it ran: the session notes, the
+        warnings and the frames it could not read.
     """
 
     frames: list[Any]
     excluded_frames: list[ExcludedFrame] = field(default_factory=list)
     gate_results: list[GateResult] = field(default_factory=list)
     background_split: dict | list[dict] | None = None
+    flagged_frames: list[Any] = field(default_factory=list)
+    quarantine_report: Any = None
 
 
 def screen_frames(
@@ -79,6 +96,7 @@ def screen_frames(
     has_spectral: bool,
     measured_at: datetime | None,
     quality_recording: FrameQualityRecording | None,
+    dry_run: bool = False,
 ) -> FrameScreening:
     """Run the frame checks in order and give back the frames that pass.
 
@@ -86,6 +104,13 @@ def screen_frames(
     step (clouds and trailed stars), and the sky background. The quarantine
     step moves files and stores frame quality rows, so the order and timing
     of these steps must not change.
+
+    With ``dry_run`` the same checks make the same decisions but change
+    nothing: no file is moved, no frame quality row is stored, and the
+    target is left as it was (the checks work on copies of the frames). A
+    check that leaves no frames does not raise; the result simply holds no
+    frames and the later checks are skipped. `check_stack` uses this, so a
+    check and a real stack cannot disagree about which frames are set aside.
 
     Parameters
     ----------
@@ -100,6 +125,8 @@ def screen_frames(
         When the stack started, passed on to the frame quality rows.
     quality_recording : `FrameQualityRecording` or `None`
         The configuration and calibration library for the frame quality rows.
+    dry_run : `bool`, optional
+        Decide only. Change no file, row or record.
 
     Returns
     -------
@@ -109,17 +136,28 @@ def screen_frames(
 
     Notes
     -----
-    A `ProcessingError` is raised when a check leaves no frames.
+    A `ProcessingError` is raised when a check leaves no frames, unless
+    ``dry_run`` is set.
     """
-    screening = FrameScreening(frames=target_frames)
-    _drop_minority_gain(target, screening)
-    _drop_frames_already_set_aside(target, screening)
-    _quarantine_bad_frames(target, screening, has_spectral, measured_at, quality_recording)
-    _drop_background_outliers(target, screening)
+    screening = FrameScreening(
+        frames=[frame.model_copy(deep=True) for frame in target_frames] if dry_run else target_frames
+    )
+    steps = (
+        lambda: _drop_minority_gain(target, screening, dry_run),
+        lambda: _drop_frames_already_set_aside(target, screening, dry_run),
+        lambda: _quarantine_bad_frames(
+            target, screening, has_spectral, measured_at, quality_recording, dry_run
+        ),
+        lambda: _drop_background_outliers(target, screening, dry_run),
+    )
+    for step in steps:
+        step()
+        if dry_run and not screening.frames:
+            break
     return screening
 
 
-def _drop_minority_gain(target: Target, screening: FrameScreening) -> None:
+def _drop_minority_gain(target: Target, screening: FrameScreening, dry_run: bool = False) -> None:
     """Leave out frames whose camera gain is not the most common one.
 
     Stacking frames with different gains messes up the noise calculation,
@@ -133,11 +171,13 @@ def _drop_minority_gain(target: Target, screening: FrameScreening) -> None:
         The target being stacked.
     screening : `FrameScreening`
         The screening state. Updated in place.
+    dry_run : `bool`, optional
+        Do not raise when no frames are left.
 
     Raises
     ------
     ProcessingError
-        If no frames are left.
+        If no frames are left and this is not a dry run.
     """
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import (
@@ -156,13 +196,13 @@ def _drop_minority_gain(target: Target, screening: FrameScreening) -> None:
             [f.path for f in excluded_by_gain],
         )
         screening.excluded_frames.extend(
-            ExcludedFrame(path=f.path, reason="minority gain setting") for f in excluded_by_gain
+            ExcludedFrame(path=f.path, reason=MINORITY_GAIN_REASON) for f in excluded_by_gain
         )
-    if not screening.frames:
+    if not screening.frames and not dry_run:
         raise ProcessingError("Target has no frames available to stack after gain-homogeneity filtering.")
 
 
-def _drop_frames_already_set_aside(target: Target, screening: FrameScreening) -> None:
+def _drop_frames_already_set_aside(target: Target, screening: FrameScreening, dry_run: bool = False) -> None:
     """Leave out frames that an earlier run moved into ``_excluded``.
 
     Such a frame can still be listed on the target, if that run's save of the
@@ -174,20 +214,30 @@ def _drop_frames_already_set_aside(target: Target, screening: FrameScreening) ->
         The target being stacked.
     screening : `FrameScreening`
         The screening state. Updated in place.
+    dry_run : `bool`, optional
+        Leave the target's frame list as it is, and do not raise when no
+        frames are left.
 
     Raises
     ------
     ProcessingError
-        If no frames are left.
+        If no frames are left and this is not a dry run.
     """
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
         drop_frames_already_set_aside,
+        find_frames_already_set_aside,
     )
 
-    screening.frames, already_set_aside = drop_frames_already_set_aside(
-        target, screening.frames, str(get_configuration().get_frames_path())
-    )
+    frames_path = str(get_configuration().get_frames_path())
+    if dry_run:
+        already_set_aside = find_frames_already_set_aside(target.id, screening.frames, frames_path)
+        dropped_paths = {frame.path for frame in already_set_aside}
+        screening.frames = [frame for frame in screening.frames if frame.path not in dropped_paths]
+    else:
+        screening.frames, already_set_aside = drop_frames_already_set_aside(
+            target, screening.frames, frames_path
+        )
     if already_set_aside:
         logger.info(
             "Left out %d frame(s) that an earlier run moved into _excluded for target '%s'.",
@@ -195,10 +245,9 @@ def _drop_frames_already_set_aside(target: Target, screening: FrameScreening) ->
             target.id,
         )
         screening.excluded_frames.extend(
-            ExcludedFrame(path=frame.path, reason="set aside by an earlier quarantine")
-            for frame in already_set_aside
+            ExcludedFrame(path=frame.path, reason=EARLIER_QUARANTINE_REASON) for frame in already_set_aside
         )
-    if not screening.frames:
+    if not screening.frames and not dry_run:
         raise ProcessingError("Target has no frames available to stack after leaving out set-aside frames.")
 
 
@@ -208,6 +257,7 @@ def _quarantine_bad_frames(
     has_spectral: bool,
     measured_at: datetime | None,
     quality_recording: FrameQualityRecording | None,
+    dry_run: bool = False,
 ) -> None:
     """Move frames with clouds or trailed stars out of the target's folder.
 
@@ -230,11 +280,14 @@ def _quarantine_bad_frames(
         When the stack started, for the frame quality rows.
     quality_recording : `FrameQualityRecording` or `None`
         The configuration and calibration library for the frame quality rows.
+    dry_run : `bool`, optional
+        Decide which frames would be set aside (`find_frames_to_quarantine`,
+        the same decision the move uses) but move none and store no rows.
 
     Raises
     ------
     ProcessingError
-        If no frames are left.
+        If no frames are left and this is not a dry run.
     """
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
@@ -257,6 +310,7 @@ def _quarantine_bad_frames(
         return
 
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+        find_frames_to_quarantine,
         quarantine_bad_frames,
         quarantine_gate,
     )
@@ -266,18 +320,26 @@ def _quarantine_bad_frames(
         "Checking %d frames for clouds and trailed stars (this reads every frame)\u2026",
         len(screening.frames),
     )
-    with stage_window(*QUARANTINE_WINDOW):
-        screening.frames, quarantine_report = quarantine_bad_frames(target, screening.frames)
-    logger.info("Measuring the frames that have no stored quality numbers yet\u2026")
-    with stage_window(*QUALITY_ROWS_WINDOW):
-        record_frame_quality(
-            target,
-            screening.frames,
-            quarantine_report,
-            frames_checked_by_quarantine,
-            measured_at,
-            quality_recording,
-        )
+    if dry_run:
+        light_frames = [frame for frame in screening.frames if str(frame.role).upper() == "LIGHT"]
+        quarantine_report = find_frames_to_quarantine(light_frames, None, target.id)
+        moved_paths = {decision.path for decision in quarantine_report.moved}
+        screening.frames = [frame for frame in screening.frames if frame.path not in moved_paths]
+    else:
+        with stage_window(*QUARANTINE_WINDOW):
+            screening.frames, quarantine_report = quarantine_bad_frames(target, screening.frames)
+        logger.info("Measuring the frames that have no stored quality numbers yet\u2026")
+        with stage_window(*QUALITY_ROWS_WINDOW):
+            record_frame_quality(
+                target,
+                screening.frames,
+                quarantine_report,
+                frames_checked_by_quarantine,
+                measured_at,
+                quality_recording,
+            )
+    screening.quarantine_report = quarantine_report
+    screening.flagged_frames.extend(quarantine_report.flagged)
     screening.excluded_frames.extend(
         ExcludedFrame(path=path, reason=reason)
         for path, reason in quarantine_report.reasons_by_path().items()
@@ -285,14 +347,14 @@ def _quarantine_bad_frames(
     for note in quarantine_report.notes:
         logger.info("Quarantine check for target '%s': %s", target.id, note)
     screening.gate_results.append(quarantine_gate(quarantine_report))
-    if not screening.frames:
+    if not screening.frames and not dry_run:
         why = "; ".join(quarantine_report.warnings) or f"{len(quarantine_report.moved)} frame(s) set aside"
         raise ProcessingError(
             f"Nothing was stacked: every frame failed a quality check and was set aside ({why})."
         )
 
 
-def _drop_background_outliers(target: Target, screening: FrameScreening) -> None:
+def _drop_background_outliers(target: Target, screening: FrameScreening, dry_run: bool = False) -> None:
     """Leave out frames whose sky background differs from the rest.
 
     This catches sudden changes in the sky background (like clouds moving
@@ -308,11 +370,14 @@ def _drop_background_outliers(target: Target, screening: FrameScreening) -> None
         The target being stacked.
     screening : `FrameScreening`
         The screening state. Updated in place.
+    dry_run : `bool`, optional
+        Do not measure the saturated pixel fraction (the check does not use
+        it), and do not raise when no frames are left.
 
     Raises
     ------
     ProcessingError
-        If no frames are left.
+        If no frames are left and this is not a dry run.
     """
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
@@ -340,7 +405,8 @@ def _drop_background_outliers(target: Target, screening: FrameScreening) -> None
                 # pipelines/runs read these instead of recomputing them.
                 if frame.measurements.background_level is None:
                     frame.measurements.background_level = measure_frame_background_level(frame.path)
-                refresh_saturated_pixel_fraction(frame)
+                if not dry_run:
+                    refresh_saturated_pixel_fraction(frame)
             except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
@@ -374,10 +440,9 @@ def _drop_background_outliers(target: Target, screening: FrameScreening) -> None
                 [f.path for f in excluded_by_background],
             )
             screening.excluded_frames.extend(
-                ExcludedFrame(path=f.path, reason="background-homogeneity split")
-                for f in excluded_by_background
+                ExcludedFrame(path=f.path, reason=BACKGROUND_SPLIT_REASON) for f in excluded_by_background
             )
-        if not screening.frames:
+        if not screening.frames and not dry_run:
             raise ProcessingError(
                 "Target has no frames available to stack after background-homogeneity filtering."
             )

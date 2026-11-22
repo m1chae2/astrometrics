@@ -952,6 +952,9 @@ export interface SessionPhotometrySummary {
   comparisonStarIds?: string[];
   comparisonScatterMag?: number | null;
   comparisonRejectedCount?: number | null;
+  tieStatus?: string | null;
+  tieFactor?: number | null;
+  tieUncertainty?: number | null;
 }
 
 /**
@@ -965,6 +968,8 @@ export interface PhotometryResult {
   airmasses?: number[];
   magnitudes?: number[];
   isSaturated?: boolean[];
+  saturatedPointsRemoved?: number;
+  lightCurveWithheldReason?: string | null;
   fluxErrors?: number[];
   fluxesNormalizedErrors?: number[];
   fluxesDetrendedErrors?: number[];
@@ -2097,6 +2102,50 @@ export interface NoiseModelPoint {
 }
 
 /**
+ * How one observing session was put on the field's brightness scale.
+ *
+ * Each session divides a star's flux by its own comparison stars, so two
+ * sessions can place the same constant star at different normalized
+ * levels. Before the sessions are joined, every session but the reference
+ * one is multiplied by one factor found from the stars both sessions
+ * measured. This record keeps that factor and what it rests on, so a
+ * reader can judge it. See `pipelines.photometry.session_tie`.
+ */
+export interface SessionTieRecord {
+  sessionId: string;
+  referenceSessionId: string;
+  status: string;
+  factor?: number | null;
+  uncertainty?: number | null;
+  spread?: number | null;
+  tieStarCount?: number;
+  reason?: string | null;
+}
+
+/**
+ * The scintillation term that one session's flux errors carry.
+ *
+ * The CCD equation has no term for scintillation (the twinkling of a star
+ * in the air), so a bright star scatters more than its error says. Each
+ * session adds one term to every point's error: Young's prediction for the
+ * frame times a coefficient. The coefficient is measured from the session's
+ * comparison stars when there are enough of them, and is a documented
+ * factor otherwise. This record keeps both and the reason. See
+ * `pipelines.photometry.processing.scintillation_term`.
+ */
+export interface SessionScintillationRecord {
+  sessionId?: string;
+  source: string;
+  coefficient?: number | null;
+  measuredCoefficient?: number | null;
+  predictedYoungMmag?: number | null;
+  usedMmag?: number | null;
+  memberCount?: number;
+  frameCount?: number;
+  reason?: string | null;
+}
+
+/**
  * Measurements recorded when measuring the brightness of stars.
  *
  * This tracks how many stars were processed and if any variable stars
@@ -2116,6 +2165,8 @@ export interface PhotometryPipelineQualityMetrics {
   crossSessionMatchCount?: number;
   noiseModelCurve?: NoiseModelPoint[];
   sessionsMissingWcs?: string[];
+  sessionTies?: SessionTieRecord[];
+  sessionScintillation?: SessionScintillationRecord[];
   longTermVariableCandidateCount?: number;
   astrometryIdentifiedStarCount?: number;
   sessionsWithReusedHeaderWcs?: string[];
@@ -4459,6 +4510,72 @@ export interface PreviewRemakeResult {
 }
 
 /**
+ * What a stack would do with its frames, made without stacking.
+ *
+ * The frame checks and the calibration choice are the ones the stack runs
+ * (`frame_screening.screen_frames` and `batch_calibration`), so the answer
+ * and the stack cannot disagree. Nothing is stacked, moved, stored or saved.
+ */
+export interface StackPrediction {
+  target_id: string;
+  kind: any;
+  camera?: string | null;
+  frames_selected: number;
+  frames_kept: number;
+  set_aside?: PredictedFrame[];
+  flagged?: PredictedFrame[];
+  groups?: PredictedGroup[];
+  warnings?: string[];
+  gates?: GateResult[];
+  unreadable?: string[];
+  nothing_left?: boolean;
+  note?: string;
+}
+
+/**
+ * One exposure group of a stack and the calibration it would get.
+ */
+export interface PredictedGroup {
+  exposure_seconds: number;
+  night?: string | null;
+  frames_kept: number;
+  first_file: string;
+  last_file: string;
+  filter_name: string;
+  gain: string;
+  offset: string;
+  binning: string;
+  temperature_c?: number | null;
+  dark: PredictedCalibration;
+  bias: PredictedCalibration;
+  flat: PredictedCalibration;
+  flat_bias?: PredictedCalibration | null;
+  warnings?: string[];
+}
+
+/**
+ * The calibration frames of one kind that an exposure group would use.
+ */
+export interface PredictedCalibration {
+  kind: string;
+  frame_count: number;
+  folders?: string[];
+  settings?: string;
+  flags?: string[];
+  blocking_flags?: string[];
+}
+
+/**
+ * One frame a stack would set aside, or keep with a warning.
+ */
+export interface PredictedFrame {
+  path: string;
+  file: string;
+  reason: string;
+  kind: string;
+}
+
+/**
  * One frame that lies in a target's `_excluded` folder.
  *
  * The listing is read-only. Where the reason is known, it comes from the
@@ -6459,6 +6576,7 @@ export const RPC_METHODS = [
   "processing:job_log_tail",
   "processing:stack_summary",
   "processing:remake_preview",
+  "processing:check_stack",
   "quality:set_aside_frames",
   "quality:choose_blink_pair",
   "quality:measure_stack",

@@ -196,7 +196,7 @@ def split_standard_and_spectral_frames(
     standard_frames, spectral_frames : `list` [`FrameRecord`]
         The non-SPEC and SPEC frames, respectively.
     """
-    logger.info("[%s] Stacking frames...", target.id)
+    logger.info("[%s] Sorting frames into luminance and spectral groups...", target.id)
     target_frames = [
         frame
         for frame in camera_frames

@@ -276,7 +276,8 @@ def test_cross_session_matching_keeps_levels_and_feeds_the_long_term_search() ->
     pixel (500, 500) that is 0.3 mag fainter in session B. The matching
     code merges each pair by sky position. The search must flag the fainter
     star and not the constant one, and the merged result must name both
-    sessions in the faded star's summaries.
+    sessions in the faded star's summaries. Thirty more constant stars give
+    the tie to the field enough stars; their factor is 1, so the levels stay.
     """
     from datetime import date
 
@@ -343,6 +344,16 @@ def test_cross_session_matching_keeps_levels_and_feeds_the_long_term_search() ->
         make_star(session_b, "constant", 10.0, 10.0, 1.0, 3),
         make_star(session_b, "faded", 500.0, 500.0, _FAINT_RATIO, 4),
     ]
+    # The sessions are tied to the field before the merge, and a tie needs at
+    # least `MINIMUM_TIE_STARS` shared stars. These 30 constant stars give it,
+    # at the same level in both sessions (a factor of 1).
+    for filler in range(30):
+        stars_a.append(
+            make_star(session_a, f"filler{filler}", 20.0 * filler + 50.0, 900.0, 1.0, 100 + filler)
+        )
+        stars_b.append(
+            make_star(session_b, f"filler{filler}", 20.0 * filler + 50.0, 900.0, 1.0, 200 + filler)
+        )
     wcs = _LinearWcs(100.0, 20.0)
     analyzer_a = _analyzer_stub(100, 5000.0)
     analyzer_a.stellar_objects = stars_a
@@ -357,7 +368,7 @@ def test_cross_session_matching_keeps_levels_and_feeds_the_long_term_search() ->
     )
 
     assert missing_wcs == []
-    assert match_count == 2
+    assert match_count == 32
     flagged = identify_long_term_variable_candidates(merged)
     assert [star.id for star in flagged] == [f"{session_a.id}:faded"]
     assert _second_to_first_median_ratio(flagged[0].photometry) == pytest.approx(_FAINT_RATIO, abs=0.01)

@@ -127,6 +127,9 @@ READ_ONLY_METHODS = frozenset({
     "observatory:safety_status",
     "plan:get",
     "processing:stack_summary",
+    # Reads frames and calibration choices as a background job; stacks, moves
+    # and stores nothing.
+    "processing:check_stack",
     "quality:set_aside_frames",
     "quality:choose_blink_pair",
     "plan:current_session",

@@ -122,7 +122,7 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 
 **Purpose.** Look at the finished image of a target and keep its catalog details up to date.
 
-**Layout.** Three columns. The left column is the [target list](#target-list). The center column shows the image. The right column shows target details and actions.
+**Layout.** Three columns. The left column is the [target list](#target-list). The center column shows the image. The right column shows target details and actions. Click the Filter Targets title to hide the left column, or the Information title to hide the whole right column (Target Controls too); click the thin strip that remains to bring it back, and the image grows to use the space. Both choices are remembered.
 
 **Controls.**
 
@@ -152,7 +152,7 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 
 **Controls.**
 
-The left column has two buttons under Target Controls.
+The left column has two buttons under Target Controls. Click the Filter Targets title to hide the whole left column, so the viewer gets more width. Click the thin strip that remains to show it again. Frame Analysis works the same way on the right: clicking its title also hides Image Controls, and clicking the strip brings both back. Both choices are remembered.
 
 | Control | What it does |
 | --- | --- |

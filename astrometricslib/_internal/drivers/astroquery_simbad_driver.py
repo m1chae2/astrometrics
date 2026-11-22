@@ -23,11 +23,13 @@ configuration. A failed query (no network, a server error, or a reply
 that cannot be read) is raised as `ExternalServiceError`, so callers
 catch one error category.
 
-SIMBAD has two servers holding the same database (`SIMBAD_SERVERS`). When
-one cannot be reached (a refused connection or a request that times out), the
-driver logs it and asks the other, then keeps using the one that answered, so
-later calls do not wait out a timeout. When neither can be reached, the
-driver stops asking for `SIMBAD_COOLDOWN_SECONDS`.
+SIMBAD has two servers holding the same database (`SIMBAD_SERVERS`). The
+`[Catalogs] simbad_preferred_server` setting names the one asked first
+(default: the Harvard mirror). When it cannot be reached (a refused connection
+or a request that times out), the driver logs it and asks the other, then
+keeps using the one that answered, so later calls do not wait out a timeout.
+Changing the setting makes the driver forget which one answered. When
+neither can be reached, the driver stops asking for `SIMBAD_COOLDOWN_SECONDS`.
 Every call in that time raises `ExternalServiceError` at once, instead of
 each waiting out its own timeout. The pause is short and temporary: after
 it the next call tries SIMBAD again, and one good reply clears it early.
@@ -44,6 +46,7 @@ from astroquery.simbad import SimbadClass
 from pyvo.dal.exceptions import DALServiceError
 
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
+from astrometricslib.foundation.config import SIMBAD_SERVER_CHOICES, get_configuration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
@@ -80,14 +83,20 @@ SIMBAD_QUERY_TIMEOUT_SECONDS = 30
 # run.
 SIMBAD_COOLDOWN_SECONDS = 120.0
 
-# The SIMBAD servers, in the order to try them: the main one in Strasbourg and
-# its mirror at Harvard. These are the two astroquery accepts for
-# `SimbadClass.server`.
-SIMBAD_SERVERS = ("simbad.cds.unistra.fr", "simbad.harvard.edu")
+# The two SIMBAD servers: the main one in Strasbourg (CDS) and its mirror at
+# Harvard. These are the two astroquery accepts for `SimbadClass.server`. The
+# setting `[Catalogs] simbad_preferred_server` picks which one is asked first;
+# the list lives in `foundation/config.py` so the setting can check against it.
+SIMBAD_SERVERS = SIMBAD_SERVER_CHOICES
 
-# The position in `SIMBAD_SERVERS` of the server that last answered. Only read
-# or written with `SIMBAD_LOCK` held.
-_server_index: int = 0
+# The server that last answered, or None before the first answer. Only read or
+# written with `SIMBAD_LOCK` held.
+_last_answered_server: str | None = None
+
+# The preferred server that was set when `_last_answered_server` was stored.
+# When the setting changes, the remembered answer is dropped so the new
+# preference takes effect. Only read or written with `SIMBAD_LOCK` held.
+_preference_when_remembered: str | None = None
 
 # The time (from `time.monotonic`) before which calls fail at once, or 0.0
 # when SIMBAD is not paused. Only read or written with `SIMBAD_LOCK` held.
@@ -281,28 +290,31 @@ def _query_with_fallback(client: SimbadClass, query: Callable[[SimbadClass], Any
     ONLINE_QUERY_ERRORS
         What the query raised, when the error is not a connection failure or
         no server could be reached.
-    RuntimeError
-        If `SIMBAD_SERVERS` is empty.
     """
-    global _server_index
-    server_count = len(SIMBAD_SERVERS)
-    for attempt in range(server_count):
-        index = (_server_index + attempt) % server_count
-        client.server = SIMBAD_SERVERS[index]
+    global _last_answered_server, _preference_when_remembered
+    preferred_server = get_configuration().get_simbad_preferred_server()
+    if _preference_when_remembered != preferred_server:
+        _last_answered_server = None
+    servers = [preferred_server, *(server for server in SIMBAD_SERVERS if server != preferred_server)]
+    if _last_answered_server in servers:
+        servers.remove(_last_answered_server)
+        servers.insert(0, _last_answered_server)
+    for attempt, server in enumerate(servers):
+        client.server = server
         try:
             result = query(client)
         except ONLINE_QUERY_ERRORS as query_error:
-            if attempt == server_count - 1 or not _is_connection_failure(query_error):
+            if attempt == len(servers) - 1 or not _is_connection_failure(query_error):
                 raise
             logger.warning(
                 "SIMBAD server %s could not be reached; trying the other one: %s",
-                SIMBAD_SERVERS[index],
+                server,
                 query_error,
             )
             continue
-        _server_index = index
+        _last_answered_server = server
+        _preference_when_remembered = preferred_server
         return result
-    raise RuntimeError("SIMBAD_SERVERS is empty")
 
 
 class AstroquerySimbadDriver(SimbadDriver):

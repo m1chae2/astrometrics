@@ -114,6 +114,8 @@ def _fake_analyzer(star_ids: list[str], failure_reason: str | None) -> SimpleNam
         centroid_shift_summary=lambda: None,
         frame_exposure_seconds={},
         detector_noise=DetectorNoise(),
+        scintillation=None,
+        scintillation_fraction_by_frame={},
     )
 
 
@@ -192,7 +194,7 @@ def _run_two_sessions(
     monkeypatch.setattr(runner, "label_known_variability", lambda *_arguments: None)
 
     request = PipelineRequest(
-        target=SimpleNamespace(id="M 27"),
+        target=SimpleNamespace(id="M 27", frames=[]),
         catalog_access=None,
         options={"use_astrometry_seed": False, "max_workers": 1},
     )

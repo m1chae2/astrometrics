@@ -467,6 +467,13 @@ skip_unchanged_stacks_enabled = "true"
 # not affected.
 flat_match_time_limit_seconds = "300"
 
+["Catalogs"]
+# Which SIMBAD server to ask first. SIMBAD has two servers with the same data:
+# "simbad.harvard.edu" (the Harvard mirror, the default) and
+# "simbad.cds.unistra.fr" (Strasbourg). If the first cannot be reached, the
+# other is asked. Any other value is ignored with a warning.
+simbad_preferred_server = "simbad.harvard.edu"
+
 ["Processing.Parallelism"]
 target_workers = "auto"
 photometry_workers = "auto"

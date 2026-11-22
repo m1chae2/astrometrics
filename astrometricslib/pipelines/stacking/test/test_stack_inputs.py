@@ -81,6 +81,16 @@ class FakeLibrary:
         """
         return list(self.darks)
 
+    def without_omitted_darks(self, paths: list[str]) -> list[str]:
+        """Leave out no dark, as a library with no dark defect marks does.
+
+        Returns
+        -------
+        paths : `list` [`str`]
+            The paths as given.
+        """
+        return list(paths)
+
     def get_bias_frames(self, **_: Any) -> list[str]:
         """Return the bias frames.
 

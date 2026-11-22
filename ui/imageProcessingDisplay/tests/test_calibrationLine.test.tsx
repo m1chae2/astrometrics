@@ -1,11 +1,12 @@
 /**
  * @file test_calibrationLine.test.tsx
  * @description Tests the Calibration block of the Data tab: the report built from the stacker's
- * per-group match, the complete view, the missing and check lists, and the all-groups toggle.
+ * per-group match, the complete and warning chips, the missing list, and the all-groups table shown
+ * when the chip is hovered or focused.
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { buildCalibrationReport, shortFallbackPhrase } from '../utils/calibrationLine';
+import { buildCalibrationReport } from '../utils/calibrationLine';
 import { CalibrationLine } from '../components/CalibrationLine';
 import type { CalibrationGroupMatch, GroupedFrameStat } from '../../common/types/backendTypes';
 
@@ -58,7 +59,9 @@ describe('CalibrationLine', () => {
         ]} />);
         const block = screen.getByTestId('calibration-line');
         expect(block.textContent).toContain('Complete');
-        expect(block.textContent).toContain('all 2 exposure groups');
+        expect(block.querySelector('[data-status="ok"]')?.textContent).toBe('Complete');
+        expect(block.textContent).not.toContain('exposure groups');
+        expect(screen.queryByTestId('calibration-check')).toBeNull();
         expect(screen.queryByTestId('calibration-missing')).toBeNull();
     });
 
@@ -77,69 +80,48 @@ describe('CalibrationLine', () => {
         expect(rows[1].textContent).toContain('gain 0, offset 10, 1×1');
     });
 
-    it('shows a near match as a check item that is not counted as missing', () => {
+    it('turns the chip into a warning when a near match remains, with no Check list', () => {
         render(<CalibrationLine lightFrames={[
             group('L', '30', found(30, ['darks are at another temperature']), found(1), found(1)),
+            group('L', '60', found(7), found(1), found(1)),
         ]} />);
         const block = screen.getByTestId('calibration-line');
-        expect(block.textContent).toContain('Complete');
-        const check = screen.getByTestId('calibration-check');
-        expect(check.textContent).toContain('Darks for L 30 s: Darks are at another temperature');
+        const chip = block.querySelector('.calibration-report__heading [data-status]') as HTMLElement;
+        expect(chip.getAttribute('data-status')).toBe('warning');
+        expect(chip.textContent).toBe('Complete, 1 to check');
+        expect(screen.queryByTestId('calibration-check')).toBeNull();
+        expect(block.textContent).not.toContain('Check');
     });
 
-    it('opens and closes the table of every group', () => {
+    it('has no Show all groups button and no table until the chip is hovered', () => {
+        render(<CalibrationLine lightFrames={[group('L', '60', found(7), found(1), found(1))]} />);
+        expect(screen.queryByRole('button', { name: /all groups/i })).toBeNull();
+        expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
+    });
+
+    it('shows the table of every group while the chip is hovered and hides it again', () => {
         render(<CalibrationLine lightFrames={[
             group('L', '20', missing('no darks'), found(3), found(2)),
             group('L', '60', found(7), found(1), found(1)),
         ]} />);
-        expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
-        fireEvent.click(screen.getByRole('button', { name: 'Show all groups' }));
+        const trigger = screen.getByTestId('calibration-line').querySelector('[tabindex="0"]') as HTMLElement;
+        fireEvent.mouseEnter(trigger);
         const rows = screen.getByTestId('calibration-all-groups').querySelectorAll('tbody tr');
         expect(rows).toHaveLength(2);
         expect(rows[1].textContent).toContain('L 60 s');
-        fireEvent.click(screen.getByRole('button', { name: 'Hide all groups' }));
+        fireEvent.mouseLeave(trigger);
         expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
     });
-});
 
-const TEMPERATURE_SENTENCE = 'No dark frame was within 3 C of the light frames, which were taken at -6.6 C, '
-    + 'so the nearest dark master, taken at -10.0 C (30 dark frame(s) from -10.0 to -9.9 C), was applied, 3.4 C away.';
-
-describe('shortFallbackPhrase', () => {
-    it('shortens the dark temperature sentence', () => {
-        expect(shortFallbackPhrase(TEMPERATURE_SENTENCE))
-            .toBe('are 3.4 \u00b0C colder than the lights (\u221210.0 vs \u22126.6 \u00b0C)');
-    });
-
-    it('says warmer when the darks are warmer', () => {
-        const warmer = TEMPERATURE_SENTENCE.replace('taken at -10.0 C (', 'taken at 5.0 C (');
-        expect(shortFallbackPhrase(warmer)).toContain('warmer than the lights');
-    });
-
-    it('shortens the sentence for lights with no temperature', () => {
-        expect(shortFallbackPhrase('The temperature of the light frames is not recorded and the library holds darks '
-            + 'at 2 temperatures (-10 C, 0 C), so the 5 dark frame(s) near -10 C, the largest set, were applied '
-            + 'without a temperature check.')).toContain('without a temperature check');
-    });
-
-    it('shortens the other gain and offset sentence', () => {
-        expect(shortFallbackPhrase('No bias frames matched gain 100.0 and offset 10, so bias frames taken at '
-            + 'gain 100, offset 0 were applied to the light frames.'))
-            .toBe('were taken at gain 100, offset 0, not gain 100, offset 10');
-    });
-
-    it('returns null for a wording it does not know', () => {
-        expect(shortFallbackPhrase('something new')).toBeNull();
-    });
-});
-
-describe('CalibrationLine near match wording', () => {
-    it('shows the short line and keeps the full sentence in the tooltip', () => {
-        render(<CalibrationLine lightFrames={[
-            group('L', '30', found(30, [TEMPERATURE_SENTENCE]), found(1), found(1)),
-        ]} />);
-        const row = screen.getByTestId('calibration-check').querySelector('li') as HTMLElement;
-        expect(row.textContent).toContain('Darks for L 30 s are 3.4 \u00b0C colder than the lights');
-        expect(row.getAttribute('title')).toBe(TEMPERATURE_SENTENCE);
+    it('shows the table on keyboard focus, keeps the near-match sentence in its cell and closes on Escape', () => {
+        const sentence = 'No flat frames matched gain 0 and offset 0, so flat frames taken at gain 0.0, offset 10 '
+            + 'were applied to the light frames.';
+        render(<CalibrationLine lightFrames={[group('L', '30', found(1), found(5, [sentence]), found(1))]} />);
+        const trigger = screen.getByTestId('calibration-line').querySelector('[tabindex="0"]') as HTMLElement;
+        fireEvent.focus(trigger);
+        const table = screen.getByTestId('calibration-all-groups');
+        expect(table.querySelector(`[title="${sentence}"]`)).not.toBeNull();
+        fireEvent.keyDown(trigger, { key: 'Escape' });
+        expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
     });
 });

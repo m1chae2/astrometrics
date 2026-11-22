@@ -3,8 +3,9 @@
 Description: Some checks on a finished stack take longer than a request should
 wait. Making the preview picture again can take a minute. Comparing a stack
 with the one before it measures both stacks, and a plate solve that fails can
-take about ten minutes. Each is a call of the science library that records its
-own job.
+take about ten minutes. Checking what a stack would do
+(``processing:check_stack``) reads every frame. Each is a call of the science
+library that records its own job.
 
 This service starts such a call in the background (with the library's
 `run_as_background_job`). A call that finishes within a short wait gives its
@@ -21,6 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import run_as_background_job
 
 logger = logging.getLogger(__name__)
@@ -189,3 +191,125 @@ class StackReviewService:
                 target_id, kind=kind, include=[], compare_to="previous", register_job=True
             )
         )
+
+    def start_stack_check(
+        self,
+        target_id: str,
+        image_files: list | None = None,
+        kind: str | None = None,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
+    ) -> StackReviewStart:
+        """Check what a stack would do with its frames, as a background job.
+
+        The check takes the same selection as ``processing:stack``: the
+        frames the app shows as ticked in ``image_files``, or a choice by
+        kind, filter, file range, time window, camera and focal length. It
+        reads every frame, so it runs as a job. Nothing is stacked, moved,
+        stored or saved.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target to check.
+        image_files : `list`, optional
+            The frames to check, as paths or frame dictionaries with a
+            ``path``. Cannot be combined with the frame choices below.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"`` frames, when the frames
+            are chosen here.
+        filter_name : `str`, optional
+            Only frames of this filter.
+        first_file : `str`, optional
+            Only frames from this file onward.
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, optional
+            Only frames taken at or after this ISO time.
+        until : `str`, optional
+            Only frames taken at or before this ISO time.
+        camera_id : `str`, optional
+            Only frames from this camera.
+        focal_length_mm : `float`, optional
+            Only frames taken at this focal length.
+
+        Returns
+        -------
+        reply : `StackReviewStart`
+            The result, when finished, is a `StackPrediction` as a dict.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``image_files`` is combined with a frame choice.
+
+        Notes
+        -----
+        A target that is not in the library, or a listed frame that is not
+        one of its frames, raises `NotFoundError` before the job starts.
+        """
+        choices = (kind, filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
+        frames = None
+        if image_files is not None:
+            if any(value is not None for value in choices):
+                raise InvalidArgumentError(
+                    "Pass image_files, or choose the frames with kind, filter_name, first_file, "
+                    "last_file, since, until, camera_id and focal_length_mm, not both."
+                )
+            frames = self._frames_from_list(target_id, image_files)
+        processing = self._astrometrics.processing
+        return self._start(
+            lambda: processing.predict_stack(
+                target_id,
+                frames=frames,
+                kind=kind or "imaging",
+                filter_name=filter_name,
+                first_file=first_file,
+                last_file=last_file,
+                since=since,
+                until=until,
+                camera_id=camera_id,
+                focal_length_mm=focal_length_mm,
+                register_job=True,
+            )
+        )
+
+    def _frames_from_list(self, target_id: str, image_files: list) -> list[Any]:
+        """Find the target's frame records for a list of paths or dictionaries.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target the frames belong to.
+        image_files : `list`
+            Paths, or dictionaries with a ``path``.
+
+        Returns
+        -------
+        frames : `list`
+            The target's records, in the order given.
+
+        Raises
+        ------
+        NotFoundError
+            If the target is not in the library, or a path is not one of its
+            frames.
+        """
+        target = self._astrometrics.targets.get(target_id)
+        if target is None:
+            raise NotFoundError(f"No target {target_id!r} in the library.", details={"target": target_id})
+        by_path = {frame.path: frame for frame in target.frames}
+        paths = [item.get("path") if isinstance(item, dict) else item for item in image_files]
+        missing = [path for path in paths if path not in by_path]
+        if missing:
+            raise NotFoundError(
+                f"{len(missing)} of the listed frames are not frames of {target_id!r} "
+                f"(first: {missing[0]!r}).",
+                details={"target": target_id},
+            )
+        return [by_path[path] for path in paths]

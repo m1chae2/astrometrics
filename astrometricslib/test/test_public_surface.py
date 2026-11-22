@@ -296,6 +296,7 @@ SUB_API_MEMBERS = {
         "measure_noise",
         "open_in_siril",
         "plate_solve",
+        "predict_stack",
         "predict_stack_weights",
         "stack",
         "stack_summary",

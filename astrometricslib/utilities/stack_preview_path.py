@@ -22,6 +22,10 @@ PREVIEW_SETTINGS_SUFFIX = "_preview_settings.json"
 """Added to the stack's file name, in place of ``.fits``, for the small record
 of what made its preview."""
 
+BACKGROUND_MODEL_SUFFIX = "_background_model.fits"
+"""Added to the stack's file name, in place of ``.fits``, for the small FITS
+that holds the sky background model measured while the preview was made."""
+
 # JPEG quality, in percent, for the saved picture. Tested once, on the M 13
 # luminosity stack (3008 x 3008 pixels): 90 gave a 3.3 MB file with the faint
 # stars, the cluster core and a small background galaxy all visible. Not tuned
@@ -122,3 +126,21 @@ def preview_settings_path_for(stacked_path: str) -> str:
     """
     stem, _ = os.path.splitext(stacked_path)
     return f"{stem}{PREVIEW_SETTINGS_SUFFIX}"
+
+
+def background_model_path_for(stacked_path: str) -> str:
+    """Name the small FITS that holds a stack's binned background model.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stacked FITS file.
+
+    Returns
+    -------
+    model_path : `str`
+        The same folder and file name, with `BACKGROUND_MODEL_SUFFIX` in
+        place of the extension.
+    """
+    stem, _ = os.path.splitext(stacked_path)
+    return f"{stem}{BACKGROUND_MODEL_SUFFIX}"

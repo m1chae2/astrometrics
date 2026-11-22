@@ -91,7 +91,7 @@ The re-centering box has a fixed size. It assumes a star width near 3 to 4 pixel
 
 The first term is the star's own shot noise (the random scatter of a count). The second is the noise of the sky, read-out and dark counts under the circle. The third is the noise in the sky level itself, which the ring measures from a limited number of pixels. The code takes the square root, divides by the gain to get ADU, and divides by the exposure time to get ADU per second.
 
-**Assumptions.** The dark current is zero, because no source records it. The equation assumes the frame has had its bias level (the fixed offset the camera adds to every pixel) removed; a frame with the bias still in it has an overestimated sky term. A star too near the frame edge to measure has a flux of 0 and an error of 0.
+**Assumptions.** The dark current is zero, because no source records it. The equation assumes the frame has had its bias level (the fixed offset the camera adds to every pixel) removed; a frame with the bias still in it has an overestimated sky term. A star too near the frame edge to measure has a flux of 0 and an error of 0. The equation has no term for scintillation (the twinkling of starlight in the air). The processing step adds it later, once the session's comparison stars are known (see [Scintillation](../README.md#scintillation)), so the error stored with a point is larger than this one for a bright star.
 
 The error does not change the flux. `measure_aperture_photometry` returns both, and `_measure_aperture_flux` keeps returning only the flux and the saturation flag.
 
@@ -124,7 +124,7 @@ The rejection reason is kept in `VariabilityAnalyzer.frames_without_usable_date_
 Once a star's full set of measurements for a session is ready, `assess_input_quality.py` builds a report on how good those raw measurements were:
 
 - How many of the session's frames actually gave a usable measurement for this star, out of how many were possible.
-- How often this star's measurement was saturated.
+- How often this star's measurement was saturated. The saturated points themselves are removed from the light curve (see [Saturated points](../README.md#saturated-points)), so this share counts them against all the points the star was measured at.
 - How far the frame-to-frame drift got, at its worst, across every frame this star was measured in.
 
 The report holds numbers only. It sets no yes/no flag for low coverage or unstable tracking. Any reading of the numbers as good or bad is done later, in wayfindinglib. This report travels with the star's brightness history into the later processing and post-processing steps.

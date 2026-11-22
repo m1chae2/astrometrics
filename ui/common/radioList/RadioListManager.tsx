@@ -57,6 +57,18 @@ export interface RadioListManagerProps {
     errorMessage?: React.ReactNode;
     /** Called by the "Try again" button. */
     onRetry?: () => void;
+
+    /**
+     * Whether the whole column is folded to a thin strip at the left edge. Folding is offered only
+     * when `onCollapsedChange` is also given.
+     */
+    collapsed?: boolean;
+    /** Called with the new folded state when the user clicks the first panel's title or the strip. */
+    onCollapsedChange?: (collapsed: boolean) => void;
+    /** Hover text of the first panel's title button, which folds the column. */
+    hideLabel?: string;
+    /** Hover text of the strip that shows the column again. */
+    showLabel?: string;
 }
 
 const noopOptionChange = (): void => {};
@@ -95,6 +107,10 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     isError,
     errorMessage,
     onRetry,
+    collapsed = false,
+    onCollapsedChange,
+    hideLabel = 'Hide list',
+    showLabel = 'Show list',
 }) => {
     const content = (
         <>
@@ -170,15 +186,41 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
         );
     }
 
+    if (onCollapsedChange && collapsed) {
+        // A thin strip: clicking it, or tabbing to it and pressing Enter, shows the column again.
+        return (
+            <div className={`manager manager--collapsed panel-group ${className}`}>
+                <SectionPanel
+                    title={topPanel ? topPanelTitle : title}
+                    collapsed="right"
+                    onTitleClick={() => onCollapsedChange(false)}
+                    titleButtonLabel={showLabel}
+                >
+                    {null}
+                </SectionPanel>
+            </div>
+        );
+    }
+
     return (
         <div className={`manager panel-group ${className}`}>
             {topPanel && (
-                <SectionPanel title={topPanelTitle} className="flex-auto manager__top-panel">
+                <SectionPanel
+                    title={topPanelTitle}
+                    className="flex-auto manager__top-panel"
+                    onTitleClick={onCollapsedChange ? () => onCollapsedChange(true) : undefined}
+                    titleButtonLabel={hideLabel}
+                >
                     {topPanel}
                 </SectionPanel>
             )}
 
-            <SectionPanel title={title} className="flex-fill flex-col manager__list-panel">
+            <SectionPanel
+                title={title}
+                className="flex-fill flex-col manager__list-panel"
+                onTitleClick={onCollapsedChange && !topPanel ? () => onCollapsedChange(true) : undefined}
+                titleButtonLabel={hideLabel}
+            >
                 {content}
             </SectionPanel>
 

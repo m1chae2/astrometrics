@@ -16,7 +16,6 @@ import { useQuery } from '@tanstack/react-query';
 import { callBackend } from '../../common/services/backendApi';
 import { BackendError } from '../../common/services/backendError';
 import type { StackSummary } from '../../common/types/backendTypes';
-import { PreviewRemakeControl } from './PreviewRemakeControl';
 import { StackComparisonControl } from './StackComparisonControl';
 import { SetAsideFramesList } from './SetAsideFramesList';
 import { formatExposureSeconds } from '../utils/stackFormatting';
@@ -38,8 +37,6 @@ interface StackSummaryPanelProps {
     kind?: StackSummaryKind;
     /** Changes when a stack finishes or the library reloads, so the panel reads again. */
     refreshKey?: string | number;
-    /** Opens the stack's picture in the viewer, called after a new picture is made and on display. */
-    onShowPicture?: (stackPath: string) => void;
 }
 
 /** One exposure group, as the backend sends it inside `StackSummary.exposure_groups`. */
@@ -85,7 +82,7 @@ export const describeGroupNotes = (group: ExposureGroupView): string => {
  * `not_found` answer becomes a muted note and not an error.
  */
 export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
-    targetId, kind = 'imaging', refreshKey, onShowPicture,
+    targetId, kind = 'imaging', refreshKey,
 }) => {
     const label = kind === 'spectral' ? 'Spectral stack' : 'Imaging stack';
     // The set-aside list is read only after a person opens it.
@@ -265,7 +262,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
             )}
 
             <StackComparisonControl targetId={targetId} kind={kind} />
-            <PreviewRemakeControl targetId={targetId} kind={kind} onShowPicture={onShowPicture} />
         </details>
     );
 };

@@ -243,6 +243,34 @@ def background_variance_e2(
     return float(np.median(error_electrons**2 - star_electrons)), int(usable.sum())
 
 
+def remove_scintillation_in_quadrature(
+    errors: np.ndarray, fluxes: np.ndarray, fractions: np.ndarray
+) -> np.ndarray:
+    """Take the term back out of errors that carry it.
+
+    The background term of the noise model is worked out from the CCD
+    equation's errors, so it must not see the scintillation term.
+
+    Parameters
+    ----------
+    errors : `numpy.ndarray`
+        Errors that include the term, ADU per second.
+    fluxes : `numpy.ndarray`
+        The fluxes, ADU per second.
+    fractions : `numpy.ndarray`
+        The term of each point as a fraction of its flux. NaN where none was
+        added.
+
+    Returns
+    -------
+    ccd_errors : `numpy.ndarray`
+        The CCD-only errors: ``sqrt(error**2 - (fraction * flux)**2)``, never
+        below 0. A point with no fraction keeps its error.
+    """
+    term = np.where(np.isfinite(fractions), fractions * np.clip(fluxes, 0.0, None), 0.0)
+    return np.sqrt(np.clip(errors**2 - term**2, 0.0, None))
+
+
 @dataclass(frozen=True)
 class SessionNoiseInputs:
     """What one session's frames say about their own noise.
@@ -284,6 +312,7 @@ class SessionNoiseInputs:
         stellar_objects: Sequence[Any],
         frame_exposure_seconds: dict[datetime, float],
         detector_noise: Any,
+        scintillation_fraction_by_frame: dict[datetime, float] | None = None,
     ) -> SessionNoiseInputs:
         """Collect one session's noise inputs from what its analysis kept.
 
@@ -297,6 +326,12 @@ class SessionNoiseInputs:
             The exposure of each frame, keyed by its exposure start.
         detector_noise : `DetectorNoise`
             The gain and read noise the errors were made with.
+        scintillation_fraction_by_frame : `dict`, optional
+            Keyed by `datetime`: the scintillation term the saved errors
+            carry, as a fraction of a star's flux, for each frame. It is
+            taken back out, so the background term is worked out from the
+            CCD equation's errors alone and scintillation is not counted
+            twice (see `scintillation_term`).
 
         Returns
         -------
@@ -315,8 +350,15 @@ class SessionNoiseInputs:
             exposures = [
                 frame_exposure_seconds.get(timestamp, math.nan) for timestamp in photometry.timestamps
             ]
-            flux_parts.append(np.asarray(photometry.fluxes, dtype=float))
-            error_parts.append(np.asarray(photometry.flux_errors, dtype=float))
+            fluxes = np.asarray(photometry.fluxes, dtype=float)
+            errors = np.asarray(photometry.flux_errors, dtype=float)
+            if scintillation_fraction_by_frame:
+                fractions = np.array([
+                    scintillation_fraction_by_frame.get(stamp, math.nan) for stamp in photometry.timestamps
+                ])
+                errors = remove_scintillation_in_quadrature(errors, fluxes, fractions)
+            flux_parts.append(fluxes)
+            error_parts.append(errors)
             exposure_parts.append(np.asarray(exposures, dtype=float))
         background, point_count = (None, 0)
         if flux_parts:

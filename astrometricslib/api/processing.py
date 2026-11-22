@@ -41,6 +41,7 @@ from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.processing_results import (
     PreviewRemakeResult,
     ProcessTargetResult,
+    StackPrediction,
     StackResult,
     StackWeightPrediction,
 )
@@ -83,6 +84,7 @@ from astrometricslib.pipelines.stacking.calibration_ingest import (
     flatten_frame_index,
 )
 from astrometricslib.pipelines.stacking.calibration_measurement_run import measure_calibration_frames
+from astrometricslib.pipelines.stacking.dark_defect_run import measure_dark_defects_in_library
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
     combine_status,
     flat_set_checks,
@@ -994,6 +996,27 @@ class CalibrationCatalog:
                 force=force,
                 progress=report_progress,
             )
+            defect_notes: list[str] = []
+            if kind in (None, "dark"):
+                # The defects of a dark show against the frames of its own
+                # set, so they are measured after the frame numbers.
+                defects = measure_dark_defects_in_library(
+                    self._calibration_library,
+                    QualityStore(quality_database_path(self._config)),
+                    self._config,
+                    run_id=job.job_id or f"calibration-measure-{uuid4().hex}",
+                    job_id=job.job_id or current_job_id(),
+                    measured_at=datetime.now(UTC),
+                    camera=camera_id,
+                    force=force,
+                )
+                if defects.measured_count or defects.warned_count or defects.omitted_count:
+                    defect_notes.append(
+                        f"Dark defects: {defects.measured_count} dark frame(s) measured against their set, "
+                        f"{defects.warned_count} kept with a warning and {defects.omitted_count} left out "
+                        "of the master."
+                    )
+                defect_notes.extend(defects.notes)
         return CalibrationMeasurementReport(
             frameCount=summary.frame_count,
             measuredCount=summary.measured_count,
@@ -1001,7 +1024,7 @@ class CalibrationCatalog:
             unreadableCount=summary.unreadable_count,
             failedCount=summary.failed_count,
             rowsStored=summary.rows_stored,
-            notes=summary.notes,
+            notes=[*summary.notes, *defect_notes],
         )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
@@ -1311,35 +1334,24 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
-        from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
-        from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
-        from astrometricslib.pipelines.stacking.stack_request import (
-            SirilOptions,
-            choose_frames_to_stack,
-            run_stack,
-        )
+        from astrometricslib.pipelines.stacking.stack_request import SirilOptions, run_stack
 
         check_choice("kind", kind, STACK_KINDS)
         if denoise_strength is not None and not 0.0 <= denoise_strength <= 1.0:
             raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
         resolved = self._resolve(target)
-        if frames is not None:
-            choices = (filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
-            if any(value is not None for value in choices):
-                raise InvalidArgumentError(
-                    "Pass frames, or choose them with filter_name, first_file, last_file, since, until, "
-                    "camera_id and focal_length_mm, not both."
-                )
-            if not frames:
-                raise InvalidArgumentError("frames is empty: there is nothing to stack.")
-            ensure_single_camera(frames, target_id=resolved.id)
-            ensure_single_optic(frames, target_id=resolved.id)
-            chosen = list(frames)
-        else:
-            selection = make_frame_selection(
-                filter_name, first_file, last_file, since, until, kind == "spectral"
-            )
-            chosen = choose_frames_to_stack(resolved, kind, selection, camera_id, focal_length_mm)
+        chosen = self._choose_frames(
+            resolved,
+            frames,
+            kind,
+            filter_name,
+            first_file,
+            last_file,
+            since,
+            until,
+            camera_id,
+            focal_length_mm,
+        )
         return run_stack(
             resolved,
             chosen,
@@ -1371,6 +1383,165 @@ class ProcessingPipelines:
         )
 
     @background_job("stacking", grace_period_seconds=8.0)
+    def _choose_frames(
+        self,
+        target: Target,
+        frames: list[FrameRecord] | None,
+        kind: StackKind,
+        filter_name: str | None,
+        first_file: str | None,
+        last_file: str | None,
+        since: TimeInput,
+        until: TimeInput,
+        camera_id: str | None,
+        focal_length_mm: float | None,
+    ) -> list[FrameRecord]:
+        """Choose the frames of a stack, from an exact list or from choices.
+
+        `stack` and `predict_stack` both use this, so a prediction is made
+        for the frames the stack would be given.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        frames : `list` [`FrameRecord`] or `None`
+            The exact frames, or `None` to choose them with the rest.
+        kind : `str`
+            ``"imaging"`` or ``"spectral"``.
+        filter_name : `str` or `None`
+            Only frames of this filter.
+        first_file : `str` or `None`
+            Only frames from this file onward.
+        last_file : `str` or `None`
+            Only frames up to this file or number.
+        since : `str`, `datetime`, `Time` or `None`
+            Only frames taken at or after this time.
+        until : `str`, `datetime`, `Time` or `None`
+            Only frames taken at or before this time.
+        camera_id : `str` or `None`
+            Only frames from this camera.
+        focal_length_mm : `float` or `None`
+            Only frames taken at this focal length.
+
+        Returns
+        -------
+        chosen : `list` [`FrameRecord`]
+            The frames, from one camera and one optic.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``frames`` is combined with a choice or is empty, or the
+            frames come from more than one camera or optic.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+        from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
+        from astrometricslib.pipelines.stacking.stack_request import choose_frames_to_stack
+
+        if frames is not None:
+            choices = (filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
+            if any(value is not None for value in choices):
+                raise InvalidArgumentError(
+                    "Pass frames, or choose them with filter_name, first_file, last_file, since, until, "
+                    "camera_id and focal_length_mm, not both."
+                )
+            if not frames:
+                raise InvalidArgumentError("frames is empty: there is nothing to stack.")
+            ensure_single_camera(frames, target_id=target.id)
+            ensure_single_optic(frames, target_id=target.id)
+            return list(frames)
+        selection = make_frame_selection(filter_name, first_file, last_file, since, until, kind == "spectral")
+        return choose_frames_to_stack(target, kind, selection, camera_id, focal_length_mm)
+
+    def predict_stack(
+        self,
+        target: str | Target,
+        frames: list[FrameRecord] | None = None,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: TimeInput = None,
+        until: TimeInput = None,
+        kind: StackKind = "imaging",
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
+        register_job: bool = False,
+    ) -> StackPrediction:
+        """Say what a stack would do with its frames, without stacking.
+
+        The frames are chosen as in `stack`. Then the same frame checks the
+        stack runs decide which frames it would set aside: clouds, trailed
+        stars, a frame off the field, a minority gain setting, a different
+        sky background, and frames an earlier run already set aside. A frame
+        with an uneven sky but normal stars is kept and listed as flagged.
+        For each exposure group of the frames that remain, the same
+        calibration choice the stack makes names the dark, bias and flat
+        frames it would use, with the library's flags for a near match.
+        Nothing is stacked, moved, stored or saved, so the answer matches the
+        stack as long as the frames, the settings and the calibration library
+        stay the same. The checks read every frame, so a large target takes
+        a while.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target to check.
+        frames : `list` [`FrameRecord`], optional
+            The exact frames to check. Cannot be combined with the frame
+            choices below.
+        filter_name : `str`, optional
+            Only frames of this filter.
+        first_file : `str`, optional
+            Only frames from this file onward.
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, `datetime` or `Time`, optional
+            Only frames taken at or after this time.
+        until : `str`, `datetime` or `Time`, optional
+            Only frames taken at or before this time.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"`` frames.
+        camera_id : `str`, optional
+            Only frames from this camera.
+        focal_length_mm : `float`, optional
+            Only frames taken at this focal length.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `False`.
+
+        Returns
+        -------
+        prediction : `StackPrediction`
+            The counts, the frames set aside and flagged with their reasons,
+            each group's calibration choice, and the checks' warnings.
+
+        Notes
+        -----
+        The errors are those of `stack`: `InvalidArgumentError` for a kind
+        out of range, a time that cannot be read, ``frames`` combined with a
+        frame choice, or frames from more than one camera or optic, and
+        `NotFoundError` when the target, camera or frame choice matches
+        nothing.
+        """
+        from astrometricslib.pipelines.stacking.stack_prediction import predict_stack
+
+        check_choice("kind", kind, STACK_KINDS)
+        resolved = self._resolve(target)
+        chosen = self._choose_frames(
+            resolved,
+            frames,
+            kind,
+            filter_name,
+            first_file,
+            last_file,
+            since,
+            until,
+            camera_id,
+            focal_length_mm,
+        )
+        with registered_job(enabled=register_job, job_type="diagnostics", target_id=resolved.id):
+            return predict_stack(resolved, chosen, kind, self.calibration._calibration_library)
+
     def measure_noise(
         self,
         target: str | Target,
@@ -1731,6 +1902,7 @@ class ProcessingPipelines:
         focal_length_mm: float | None = None,
         on_item_complete: Callable[[str, dict, int, int], None] | None = None,
         register_job: bool = True,
+        run_prerequisites: bool = True,
     ) -> ProcessTargetResult | BatchRunSummary:
         """Run the analysis stages for one target, or the pipeline for many.
 
@@ -1743,10 +1915,19 @@ class ProcessingPipelines:
         optic (``[Observatory.Telescope] focal_length_mm``). Pass
         ``camera_id`` or ``focal_length_mm`` to choose differently.
         Spectroscopy is skipped (with a ``{"status": "skipped", ...}``
-        entry, not an error) when the target has no spectral data, and
-        otherwise receives photometry's result. Each stage's own options
-        are a separate dictionary, so an option meant for one stage never
-        reaches another. Nothing is saved; save the target afterwards.
+        entry, not an error) when the target has no spectral data. Each
+        stage's own options are a separate dictionary, so an option meant
+        for one stage never reaches another. Nothing is saved; save the
+        target afterwards.
+
+        Photometry and spectroscopy need astrometry. With
+        ``run_prerequisites`` (the default), astrometry is added to the run
+        when its saved result is missing or older than the imaging stack.
+        It runs on the image named in ``astrometry={"path": ...}`` or, when
+        none is named, on the imaging stack. If it cannot run (no stack and
+        no image) or it fails, photometry and spectroscopy are skipped, not
+        run on a guess, and the reason, ``needs astrometry: ...``, is in
+        ``stages_skipped``. ``prerequisites_run`` lists the stages added.
 
         For a list of targets, or `None` for every target, each target runs
         the full pipeline in its own worker process: stack the frames of
@@ -1757,10 +1938,11 @@ class ProcessingPipelines:
         Arguments used by each form (any other argument is refused):
 
         - one target: ``stages``, ``astrometry``, ``photometry``,
-          ``spectroscopy``, ``asteroids``, and optionally ``camera_id`` and
-          ``focal_length_mm``.
+          ``spectroscopy``, ``asteroids``, ``run_prerequisites``, and
+          optionally ``camera_id`` and ``focal_length_mm``.
         - several targets: ``camera_id`` (needed), ``focal_length_mm``,
-          ``on_item_complete``.
+          ``on_item_complete``. The full pipeline always runs astrometry
+          before photometry, so ``run_prerequisites=False`` is refused.
 
         Parameters
         ----------
@@ -1805,11 +1987,18 @@ class ProcessingPipelines:
         register_job : `bool`, optional
             For one target, whether each stage shows up in the job list.
             Defaults to `True`.
+        run_prerequisites : `bool`, optional
+            For one target, whether to add astrometry before photometry or
+            spectroscopy when its result is missing or out of date.
+            Defaults to `True`. Pass `False` only when astrometry has just
+            run on this stack, or to run a stage alone on purpose.
 
         Returns
         -------
         result : `ProcessTargetResult` or `BatchRunSummary`
-            For one target, each stage's result keyed by stage name, and
+            For one target, each stage's result keyed by stage name, the
+            prerequisites added (``prerequisites_run``), the stages skipped
+            because a prerequisite could not run (``stages_skipped``), and
             the target's quality summaries afterwards (``quality``). For
             several, which targets succeeded, failed or were skipped.
 
@@ -1833,6 +2022,7 @@ class ProcessingPipelines:
                     "photometry": photometry is not None,
                     "spectroscopy": spectroscopy is not None,
                     "asteroids": asteroids is not None,
+                    "run_prerequisites": not run_prerequisites,
                 },
             )
             if not camera_id:
@@ -1897,6 +2087,7 @@ class ProcessingPipelines:
             drivers=self._drivers,
             frame_selection=frame_selection,
             measured_at=datetime.now(UTC),
+            run_prerequisites=run_prerequisites,
         )
 
     def run_spectroscopy_by_session(

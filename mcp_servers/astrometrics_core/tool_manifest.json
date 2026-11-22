@@ -100,6 +100,13 @@
       "interim_block": "",
       "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
     },
+    "processing_predict_stack": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app runs it as the background job processing:check_stack for its Check Frames button. A library call would hold the tool open. An AI lists the frames already set aside with quality_set_aside_frames."
+    },
     "processing_predict_stack_weights": {
       "tool_class": "unclassified",
       "category": "image-processing",

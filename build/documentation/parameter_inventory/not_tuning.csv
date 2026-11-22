@@ -200,6 +200,9 @@ astrometricslib/pipelines/photometry/processing/periodicity_search.py,_REDUCED_S
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_REFINE_HALF_WIDTH_COARSE_STEPS,Sampling numerics
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_SAMPLES_PER_PEAK,Sampling numerics
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_SLOW_SEARCH_WORK_LIMIT,Compute budget
+astrometricslib/pipelines/photometry/processing/scintillation_term.py,_FIT_PASSES,Number of fit-and-clip passes; the fit settles in two or three
+astrometricslib/pipelines/photometry/processing/scintillation_term.py,_MINIMUM_FIT_COEFFICIENT_SQUARED,Numerical floor so the clip and weights stay finite
+astrometricslib/pipelines/photometry/processing/scintillation_term.py,_MINIMUM_MEMBERS_PER_FRAME,Smallest count that forms a leave-one-out mean of more than one star
 astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MAXIMUM_REPORTED_SIGNIFICANCE,Cap for JSON storage
 astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/photometry/processing/variability_indices.py,_MAD_TO_SIGMA,unit or physical constant
@@ -210,7 +213,10 @@ astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of t
 astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_scaling.py,PREVIEW_SAMPLE_SEED,software plumbing
 astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,Sampling size for sky median
+astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_16_BIT,Largest value of a 16-bit integer image (data format)
+astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_8_BIT,Largest value of an 8-bit integer image (data format)
 astrometricslib/pipelines/shared/image_scaling.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/shared/image_scaling.py,_autostretch_parameters.full_scale,Default full scale of a floating-point image (data format)
 astrometricslib/pipelines/shared/image_scaling.py,_PERCENTILE_SAMPLE_COUNT,"Sample size for display percentiles, seeded"
 astrometricslib/pipelines/shared/image_scaling.py,_SCALING_BLOCK_PIXELS,Memory block size
 astrometricslib/pipelines/shared/image_scaling.py,_SKY_MAXIMUM_CLIP_ROUNDS,Round cap of an iterative clip that settles in fewer rounds
@@ -334,6 +340,8 @@ astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUN
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,CALIBRATION_MEASUREMENT_WORKERS,software plumbing
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/dark_defect_run.py,DARK_DEFECT_WORKERS,software plumbing
+astrometricslib/pipelines/stacking/dark_defect_run.py,_NOTE_LIMIT,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/folder_frame_measurement.py,_NO_CAPTURE_SETTING_ID,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/frame_measurement_run.py,BIAS_FRAMES_FOR_LEVEL,Sample size of a level read; plumbing
 astrometricslib/pipelines/stacking/frame_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
@@ -349,6 +357,12 @@ astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.repeat
 astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.seed,Random seed; reproducibility only
 astrometricslib/pipelines/stacking/post_processing/aperture_placement.py,APERTURE_SEED,software plumbing
 astrometricslib/pipelines/stacking/post_processing/aperture_size_noise.py,_BOOTSTRAP_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,BACKGROUND_BIN_COUNT,"Grid of the measurement map (64 by 64), not a threshold. Design estimate STK-D74."
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,MINIMUM_FINITE_BIN_FRACTION,Plain majority of bins needed before a fit means anything. Design estimate STK-D74.
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,SPREAD_HIGH_PERCENTILE,Upper percentile that defines the spread; not a threshold. Design estimate STK-D74.
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,SPREAD_LOW_PERCENTILE,Lower percentile that defines the spread; not a threshold. Design estimate STK-D74.
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,_CORNER_RADIUS_SQUARED,Geometry of the fit: the corner sits at r squared of 2.
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,_SKY_DIRECTION_STEP_PIXELS,Step used to turn an array direction into a sky angle; any step inside the frame gives the same angle.
 astrometricslib/pipelines/stacking/post_processing/bright_object.py,_SAMPLE_STRIDE,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/depth_limits.py,INDEPENDENT_PIXEL_EXPONENT,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/difference_noise.py,PAIRED_BOOTSTRAP_SEED,software plumbing
@@ -369,6 +383,9 @@ astrometricslib/pipelines/stacking/post_processing/flat_noise_contribution.py,_K
 astrometricslib/pipelines/stacking/post_processing/flat_noise_contribution.py,_SUBPIXEL_PLACES,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/half_pattern.py,BOOTSTRAP_SEED,software plumbing
 astrometricslib/pipelines/stacking/post_processing/half_pattern.py,SHIFTED_MASK_LEVEL,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_MINIMUM_VALUE,Divide-by-zero guard.
+astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_NOISE_CLIP_ROUNDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_NOISE_SAMPLE_STRIDE,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/normalization_scale.py,EXPOSURE_MATCH_FRACTION,exposure equality check; the code says it is not tuned
 astrometricslib/pipelines/stacking/post_processing/odd_even_apertures.py,APERTURE_RECORD_VERSION,software plumbing
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
@@ -652,3 +669,6 @@ wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_SPAN_OBJECTS,Tab
 wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_TIME_STEPS,Table size cap
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_DAY_HOURS,unit or physical constant
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_RATE,unit or physical constant
+astrometricslib/pipelines/photometry/session_tie.py,_MAD_TO_SIGMA,Statistical constant 1.4826 (MAD to standard deviation)
+astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety limit on the clipping loop; it settles in two or three rounds
+astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)

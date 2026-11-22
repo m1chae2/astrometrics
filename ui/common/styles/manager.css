@@ -24,19 +24,27 @@
   flex-direction: column;
 }
 
-/* Overrides the generic .flex-fill (flex: 1 1 auto) that RadioListManager
-   applies to its own SectionPanel: that class's flex-grow would always
-   stretch the list panel to consume every bit of space left over after the
-   actions panel below it, even when the list itself only has a handful of
-   rows -- leaving a large blank area under the last row instead of letting
-   the actions panel sit right below a short list. flex-grow: 0 here means
-   the panel takes its natural (content) height when the list is short, but
-   flex-shrink stays enabled (inherited from .flex-fill, along with
-   min-height: 0) so a long list still gets compressed down to fit -- and
-   still scrolls internally via .manager__list's own overflow -- rather than
-   pushing the actions panel off screen. */
+/* The list panel takes whatever height the column has left, so the panels above and below it
+   (the filters and Target Controls) keep only the height of their content. It still shrinks, and
+   scrolls inside .manager__list, when the list is long. */
 .manager__list-panel.flex-fill {
-  flex-grow: 0;
+  flex-grow: 1;
+}
+
+/* The actions panel is sized to its content, like Image Controls. The extra `.panel` raises this
+   rule above the base `.panel { flex: 1 }`, whatever order the stylesheets load in. */
+.panel.manager__actions-panel {
+  flex: 0 0 auto;
+}
+
+/* A folded column is a thin strip, and the display's grid gives it only that much width. */
+.manager--collapsed {
+  width: 100%;
+  max-width: none;
+}
+
+.layout:has(.manager--collapsed) {
+  --layout-left-col-width: 36px;
 }
 
 .manager__list {

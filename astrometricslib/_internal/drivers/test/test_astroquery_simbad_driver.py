@@ -76,11 +76,41 @@ class _FakeSimbad:
         return self._result
 
 
+CDS_SERVER = "simbad.cds.unistra.fr"
+HARVARD_SERVER = "simbad.harvard.edu"
+
+
+class _FakeConfiguration:
+    """A stand-in settings object that names the preferred SIMBAD server."""
+
+    def __init__(self, preferred_server: str) -> None:
+        """Store the preferred server.
+
+        Parameters
+        ----------
+        preferred_server : `str`
+            The server `get_simbad_preferred_server` returns.
+        """
+        self.preferred_server = preferred_server
+
+    def get_simbad_preferred_server(self) -> str:
+        """Return the stored preference.
+
+        Returns
+        -------
+        server : `str`
+            The preferred SIMBAD server.
+        """
+        return self.preferred_server
+
+
 @pytest.fixture(autouse=True)
 def no_pause(monkeypatch: pytest.MonkeyPatch) -> None:
     """Start every test with SIMBAD not paused."""
     monkeypatch.setattr(simbad_module, "_paused_until", 0.0)
-    monkeypatch.setattr(simbad_module, "_server_index", 0)
+    monkeypatch.setattr(simbad_module, "_last_answered_server", None)
+    monkeypatch.setattr(simbad_module, "_preference_when_remembered", None)
+    monkeypatch.setattr(simbad_module, "get_configuration", lambda: _FakeConfiguration(HARVARD_SERVER))
 
 
 @pytest.fixture
@@ -490,11 +520,11 @@ class _TwoServerSimbad(_FakeSimbad):
         return outcome
 
 
-MAIN_SERVER, MIRROR_SERVER = simbad_module.SIMBAD_SERVERS
+MAIN_SERVER, MIRROR_SERVER = HARVARD_SERVER, CDS_SERVER
 
 
 def test_an_unreachable_server_falls_back_to_the_other(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The mirror answers when the main server is down, and stays in use."""
+    """The other server answers when the preferred one is down."""
     client = _TwoServerSimbad({MAIN_SERVER: ConnectionError("down"), MIRROR_SERVER: "rows"})
     monkeypatch.setattr(simbad_module, "_client", client)
     driver = AstroquerySimbadDriver()
@@ -538,3 +568,37 @@ def test_both_servers_unreachable_starts_the_pause(monkeypatch: pytest.MonkeyPat
     with pytest.raises(ExternalServiceError):
         driver.query_tap("SELECT 2")
     assert client.asked == [MAIN_SERVER, MIRROR_SERVER]
+
+
+def test_harvard_is_asked_first_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the default setting, Harvard is asked before Strasbourg."""
+    client = _TwoServerSimbad({CDS_SERVER: "cds", HARVARD_SERVER: "harvard"})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    assert AstroquerySimbadDriver().query_tap("SELECT 1") == "harvard"
+    assert client.asked == [HARVARD_SERVER]
+
+
+def test_a_strasbourg_preference_asks_strasbourg_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A CDS preference asks it first and falls back to Harvard."""
+    monkeypatch.setattr(simbad_module, "get_configuration", lambda: _FakeConfiguration(CDS_SERVER))
+    client = _TwoServerSimbad({CDS_SERVER: ConnectionError("down"), HARVARD_SERVER: "harvard"})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    assert AstroquerySimbadDriver().query_tap("SELECT 1") == "harvard"
+    assert client.asked == [CDS_SERVER, HARVARD_SERVER]
+
+
+def test_a_changed_preference_replaces_the_remembered_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After the setting changes, the new preferred server goes first."""
+    client = _TwoServerSimbad({CDS_SERVER: "cds", HARVARD_SERVER: ConnectionError("down")})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    monkeypatch.setattr(simbad_module, "get_configuration", lambda: _FakeConfiguration(HARVARD_SERVER))
+    assert AstroquerySimbadDriver().query_tap("SELECT 1") == "cds"
+    monkeypatch.setattr(simbad_module, "get_configuration", lambda: _FakeConfiguration(CDS_SERVER))
+    client.asked.clear()
+    assert AstroquerySimbadDriver().query_tap("SELECT 2") == "cds"
+    assert client.asked == [CDS_SERVER]
+
+
+def test_the_two_servers_are_the_ones_astroquery_accepts() -> None:
+    """The driver knows exactly the two SIMBAD servers."""
+    assert set(simbad_module.SIMBAD_SERVERS) == {CDS_SERVER, HARVARD_SERVER}

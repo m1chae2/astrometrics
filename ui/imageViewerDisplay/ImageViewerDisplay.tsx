@@ -5,6 +5,7 @@ import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { ListActions } from '../common/components/ListActions';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { TargetViewerManager } from './targetViewerManager/TargetViewerManager';
+import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
 import { TargetDetailsManager } from './targetDetailsManager/TargetDetailsManager';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTargetActions } from '../common/hooks/useTargetActions';
@@ -84,10 +85,20 @@ export const ImageViewerDisplay: React.FC = () => {
     setPendingTarget(id);
   }, [setSelectedTarget, setPendingTarget, closeFrame]);
 
+  // The whole left column folds to a thin strip; the choice is remembered for this viewer.
+  const [targetListCollapsed, setTargetListCollapsed] = usePersistentFlag('astrometrics:imageViewer:targetListCollapsed', false);
+
+  // The right column (Information and Target Controls) folds to one strip, remembered separately.
+  const [detailsCollapsed, setDetailsCollapsed] = usePersistentFlag('astrometrics:imageViewer:detailsCollapsed', false);
+
   const leftPanel = (
     <RadioListManager
       className="target-display__targets-manager"
       title="Targets"
+      collapsed={targetListCollapsed}
+      onCollapsedChange={setTargetListCollapsed}
+      hideLabel="Hide target list"
+      showLabel="Show target list"
       items={items}
       selectedId={selectedTarget}
       pendingId={pendingTarget}
@@ -123,6 +134,8 @@ export const ImageViewerDisplay: React.FC = () => {
       onCommonNameChange={setCommonName}
       onSaveTarget={saveTarget}
       onDeleteTarget={handleDeleteTarget}
+      collapsed={detailsCollapsed}
+      onCollapsedChange={setDetailsCollapsed}
     />
   );
 

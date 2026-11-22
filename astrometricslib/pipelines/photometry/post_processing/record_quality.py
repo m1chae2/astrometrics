@@ -25,6 +25,8 @@ warning the run logged (`logged_warnings_notice_measurement`).
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gate_result import (
@@ -37,7 +39,11 @@ from astrometricslib.models.quality.gate_result import (
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.models.quality.metric_spec import MetricSpec
-from astrometricslib.models.quality.quality_summary import PhotometryPipelineQualityMetrics
+from astrometricslib.models.quality.quality_summary import (
+    PhotometryPipelineQualityMetrics,
+    SessionScintillationRecord,
+    SessionTieRecord,
+)
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
@@ -73,8 +79,16 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_NOTICE_LOGGED_WARNINGS,
     PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS,
     PHOTOMETRY_POSITION_ONLY_STAR_COUNT,
+    PHOTOMETRY_SATURATED_POINTS_REMOVED_COUNT,
+    PHOTOMETRY_SCINTILLATION_COEFFICIENT,
+    PHOTOMETRY_SCINTILLATION_NOT_MEASURED_COUNT,
+    PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG,
+    PHOTOMETRY_SESSION_TIE_SPREAD_FRACTION,
+    PHOTOMETRY_SESSIONS_TIED_COUNT,
+    PHOTOMETRY_SESSIONS_UNTIED_COUNT,
     PHOTOMETRY_STARS_FOUND,
     PHOTOMETRY_STARS_PROCESSED,
+    PHOTOMETRY_STARS_WITH_SATURATED_POINTS_COUNT,
     PHOTOMETRY_STARS_WITH_SCATTER,
     PHOTOMETRY_UNRESOLVED_STAR_COUNT,
     PHOTOMETRY_VARIABLE_CANDIDATE_COUNT,
@@ -101,10 +115,16 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     MINIMUM_COMPARISON_STARS,
     ComparisonSetResult,
 )
+from astrometricslib.pipelines.photometry.processing.scintillation_term import SOURCE_MEASURED
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
     MINIMUM_STARS_FOR_NOISE_MODEL,
 )
 from astrometricslib.pipelines.photometry.run_warnings import LoggedWarning, SessionWithoutComparisonStars
+from astrometricslib.pipelines.photometry.session_tie import (
+    TIE_STATUS_REFERENCE,
+    TIE_STATUS_TIED,
+    TIE_STATUS_UNTIED,
+)
 from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
@@ -1018,6 +1038,12 @@ class PhotometryRunInputs:
     noise_model_star_count : `int` or `None`
         Stars the noise model could be fitted from, or `None` when it was
         not counted.
+    saturated_points_removed : `int` or `None`
+        Saturated points removed from the stars' light curves, or `None`
+        when they were not counted.
+    stars_with_saturated_points : `int` or `None`
+        Stars that lost at least one saturated point, or `None` when they
+        were not counted.
     median_flux_error_mag : `float` or `None`
         The median per-point error of the run's light curves, in magnitudes.
     errors_assume_unit_gain : `bool`
@@ -1029,6 +1055,13 @@ class PhotometryRunInputs:
     sessions_without_comparison_stars : `Sequence`
         The sessions whose light curves kept raw flux, as
         `SessionWithoutComparisonStars` records.
+    session_ties : `Sequence` [`SessionTieRecord`]
+        One record per session of a run that joined several sessions: the
+        factor that tied it to the reference session, or why it was left
+        untied. Empty for a run with one session.
+    session_scintillation : `Sequence` [`SessionScintillationRecord`]
+        One record per session: the scintillation term its flux errors
+        carry, and whether the coefficient was measured.
     logged_warnings : `Sequence` [`LoggedWarning`]
         The other warnings the run logged, grouped.
     dropped_logged_warning_count : `int`
@@ -1040,10 +1073,14 @@ class PhotometryRunInputs:
     centroid_shift_summaries: Sequence[CentroidShiftSummary] = field(default_factory=tuple)
     stars_with_scatter: int | None = None
     noise_model_star_count: int | None = None
+    saturated_points_removed: int | None = None
+    stars_with_saturated_points: int | None = None
     median_flux_error_mag: float | None = None
     errors_assume_unit_gain: bool = False
     session_zero_points: Sequence[SessionZeroPoints] = field(default_factory=tuple)
     sessions_without_comparison_stars: Sequence[SessionWithoutComparisonStars] = field(default_factory=tuple)
+    session_ties: Sequence[SessionTieRecord] = field(default_factory=tuple)
+    session_scintillation: Sequence[SessionScintillationRecord] = field(default_factory=tuple)
     logged_warnings: Sequence[LoggedWarning] = field(default_factory=tuple)
     dropped_logged_warning_count: int = 0
 
@@ -1183,6 +1220,22 @@ def steady_number_needs_run_data(gate: GateResult) -> bool:
     )
 
 
+def _median_or_none(values: Sequence[float]) -> float | None:
+    """Find the median of some values, or `None` when there are none.
+
+    Parameters
+    ----------
+    values : `Sequence` [`float`]
+        The values.
+
+    Returns
+    -------
+    median : `float` or `None`
+        The median, or `None` for an empty sequence.
+    """
+    return float(np.median(values)) if values else None
+
+
 def _worst_centroid_values(
     summaries: Sequence[CentroidShiftSummary],
 ) -> tuple[float | None, float | None]:
@@ -1272,6 +1325,21 @@ def photometry_run_measurements(
     }
     counts[PHOTOMETRY_STARS_WITH_SCATTER] = inputs.stars_with_scatter
     counts[PHOTOMETRY_NOISE_MODEL_STAR_COUNT] = inputs.noise_model_star_count
+    counts[PHOTOMETRY_SATURATED_POINTS_REMOVED_COUNT] = inputs.saturated_points_removed
+    counts[PHOTOMETRY_STARS_WITH_SATURATED_POINTS_COUNT] = inputs.stars_with_saturated_points
+    # The reference session is neither tied nor untied: in neither count.
+    scaled_ties = [tie for tie in inputs.session_ties if tie.status != TIE_STATUS_REFERENCE]
+    counts[PHOTOMETRY_SESSIONS_TIED_COUNT] = (
+        sum(tie.status == TIE_STATUS_TIED for tie in scaled_ties) if inputs.session_ties else None
+    )
+    counts[PHOTOMETRY_SESSIONS_UNTIED_COUNT] = (
+        sum(tie.status == TIE_STATUS_UNTIED for tie in scaled_ties) if inputs.session_ties else None
+    )
+    counts[PHOTOMETRY_SCINTILLATION_NOT_MEASURED_COUNT] = (
+        sum(record.source != SOURCE_MEASURED for record in inputs.session_scintillation)
+        if inputs.session_scintillation
+        else None
+    )
     for metric_name, count in counts.items():
         measurements.append(
             build_measurement(
@@ -1294,6 +1362,36 @@ def photometry_run_measurements(
             PHOTOMETRY_COMPARISON_SCATTER_OVER_PREDICTED,
             worst_comparison_scatter_ratio(inputs.comparison_sets),
             "No session had both a comparison-star scatter and a predicted error.",
+        ),
+        (
+            PHOTOMETRY_SESSION_TIE_SPREAD_FRACTION,
+            max(
+                (
+                    tie.spread
+                    for tie in inputs.session_ties
+                    if tie.status == TIE_STATUS_TIED and tie.spread is not None
+                ),
+                default=None,
+            ),
+            "The run had no session tied to the reference session.",
+        ),
+        (
+            PHOTOMETRY_SCINTILLATION_COEFFICIENT,
+            _median_or_none([
+                record.coefficient
+                for record in inputs.session_scintillation
+                if record.coefficient is not None
+            ]),
+            "No session had a scintillation term added.",
+        ),
+        (
+            PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG,
+            _median_or_none([
+                record.used_mmag / 1000.0
+                for record in inputs.session_scintillation
+                if record.used_mmag is not None
+            ]),
+            "No session had a scintillation term added.",
         ),
         (
             PHOTOMETRY_CORNER_DISPLACEMENT_P95_PX,

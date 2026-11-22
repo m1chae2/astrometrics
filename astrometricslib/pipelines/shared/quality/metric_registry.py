@@ -16,7 +16,11 @@ from functools import cache
 from types import MappingProxyType
 
 from astrometricslib.models.quality.metric_spec import MetricSpec
-from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
+from astrometricslib.pipelines.shared.quality.metrics import (
+    CALIBRATION_FRAME_METRICS,
+    DARK_DEFECT_METRICS,
+    FRAME_METRICS,
+)
 
 # The units that a metric declaration may use. "" is a unitless ratio.
 # Convention for rates: the unit is written "1/d" (per day) and the metric
@@ -145,7 +149,7 @@ def get_metric_registry() -> MetricRegistry:
     # Imported here: `frame_notices` needs `notices`, which needs this module.
     from astrometricslib.pipelines.shared.quality.frame_notices import FRAME_NOTICE_METRICS
 
-    specs = [*FRAME_METRICS, *CALIBRATION_FRAME_METRICS, *FRAME_NOTICE_METRICS]
+    specs = [*FRAME_METRICS, *CALIBRATION_FRAME_METRICS, *DARK_DEFECT_METRICS, *FRAME_NOTICE_METRICS]
     for pipeline in PIPELINES_WITH_METRICS:
         specs.extend(load_pipeline_metrics(pipeline))
     return MetricRegistry(tuple(specs))

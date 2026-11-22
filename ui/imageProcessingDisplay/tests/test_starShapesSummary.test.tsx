@@ -92,7 +92,8 @@ describe('buildStarShapeChart', () => {
         const chart = build();
         const flagged = chart.traces[2] as unknown as Points;
         expect(flagged.customdata).toEqual(['/lib/c.fits']);
-        expect(flagged.x).toEqual([3000000]);
+        expect(flagged.x[0]).toBeGreaterThanOrEqual(0);
+        expect(flagged.x[0]).toBeLessThanOrEqual(1);
         expect(flagged.y).toEqual([1]);
         expect((chart.traces[3] as unknown as Points).customdata).toEqual(['/lib/a.fits', '/lib/b.fits']);
         expect(chart.drawnCount).toBe(5);
@@ -112,12 +113,39 @@ describe('buildStarShapeChart', () => {
         expect((ring as unknown as Points).customdata).toEqual(['/lib/d.fits']);
     });
 
-    it('separates nights with a break halfway across a long gap', () => {
-        const nights = [
+    it('gives every frame its own place, one section per night, with a break between', () => {
+        const night = (start: number, count: number) => Array.from({ length: count }, (_, index) => ({
+            path: `/lib/${start}_${index}.fits`, timestamp: start + index * 60, elongation: 1,
+        }));
+        const series = [...night(1000, 10), ...night(1000 + 12 * DAY, 61)];
+        const chart = buildStarShapeChart(series, new Set(), null);
+        expect(chart.drawnCount).toBe(71);
+        const included = chart.traces[0] as unknown as Points;
+        expect(included.x.length).toBe(71);
+        expect(new Set(included.x).size).toBe(71);
+        expect(chart.nights.map((item) => item.count)).toEqual([10, 61]);
+        expect(chart.nights[0].end).toBeLessThan(chart.nights[1].start);
+        expect(chart.nightBreaks.length).toBe(1);
+        expect(included.x.slice(0, 10).every((x) => x >= chart.nights[0].start && x <= chart.nights[0].end)).toBe(true);
+        expect(included.x.slice(10).every((x) => x >= chart.nights[1].start && x <= chart.nights[1].end)).toBe(true);
+    });
+
+    it('draws a single night as one section with no break', () => {
+        const chart = buildStarShapeChart(review().series!, new Set(), null);
+        expect(chart.nights.length).toBe(1);
+        expect(chart.nightBreaks).toEqual([]);
+        expect(new Set((chart.traces[0] as unknown as Points).x).size).toBe(3);
+    });
+
+    it('keeps a one-frame night visible next to a long one', () => {
+        const series = [
             { path: '/lib/a.fits', timestamp: 1000, elongation: 1 },
             { path: '/lib/b.fits', timestamp: 1000 + DAY, elongation: 1 },
+            { path: '/lib/c.fits', timestamp: 1000 + DAY + 3600, elongation: 1 },
         ];
-        expect(buildStarShapeChart(nights, new Set(), null).nightBreaks).toEqual([((1000 + 1000 + DAY) / 2) * 1000]);
+        const chart = buildStarShapeChart(series, new Set(), null);
+        expect(chart.nights.length).toBe(2);
+        expect(chart.nights[0].end - chart.nights[0].start).toBeGreaterThan(0.1);
     });
 });
 

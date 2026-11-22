@@ -65,21 +65,35 @@ export async function cancelProcessing(
     }
 }
 
+/** The analysis stages a caller can ask the backend to run by name. */
+export type AnalysisStageName = 'astrometry' | 'photometry' | 'spectroscopy';
+
 /**
  * Initiates scientific image analysis (astrometry, photometry, or spectroscopy) for a target.
+ *
+ * @param objectId The target to analyze.
+ * @param imageFiles The files chosen in the UI. The backend uses a target's stack when it has one.
+ * @param filterType The filter name to tell the backend, if known.
+ * @param type The analysis type, used when no stages are named.
+ * @param stages The stages to run, a non-empty subset of astrometry, photometry and spectroscopy.
+ *   Leave it out to let the backend choose from the file type. The backend runs astrometry first
+ *   when a picked stage needs it and its result is missing or old.
+ * @returns The started job, or null if the request failed.
  */
 export async function analyzeImage(
     objectId: string,
     imageFiles?: string[],
     filterType?: string,
-    type: string = 'photometry'
+    type: string = 'photometry',
+    stages?: AnalysisStageName[]
 ): Promise<AnalysisResult | null> {
     try {
         const result = await callBackend('analysis:analyze_image', {
             target_id: objectId,
             image_files: imageFiles,
             filter_name: filterType,
-            type: type
+            type: type,
+            ...(stages && stages.length > 0 ? { stages } : {})
         });
         return result || null;
     } catch {
@@ -90,8 +104,9 @@ export async function analyzeImage(
 export const analyzeTarget = (
     objectId: string,
     imageFiles?: string[],
-    filterType?: string
-) => analyzeImage(objectId, imageFiles, filterType, 'photometry');
+    filterType?: string,
+    stages?: AnalysisStageName[]
+) => analyzeImage(objectId, imageFiles, filterType, 'photometry', stages);
 
 
 /**

@@ -6,7 +6,7 @@ import { ImageProcessingProvider, useImageProcessingContext } from './context/Im
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useViewerState } from './hooks/useViewerState';
 import { useBlinkPair, useBlinkPreload } from './hooks/useBlinkPair';
-import { usePersistentFlag } from './hooks/usePersistentFlag';
+import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
 import { ImageProcessingLayout } from './ImageProcessingLayout';
 import { RadioListManager } from '../common/radioList/RadioListManager';
 import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
@@ -106,7 +106,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
-    stackedImage, stackedSpectralTarget, totalExposure,
+    stackedImage, stackedSpectralTarget,
     starShapeReview, frameStatuses, frameReport, setAsideFiles, putBackFrame
   } = files;
 
@@ -159,9 +159,11 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
 
-  // Frame Analysis folds to the right; Image Controls folds down into a tab bar.
+  // Frame Analysis folds the whole right column to a rail; Image Controls also folds down on its own.
   const [analysisCollapsed, setAnalysisCollapsed] = usePersistentFlag('astrometrics:imageProcessing:analysisCollapsed', false);
   const [controlsCollapsed, setControlsCollapsed] = usePersistentFlag('astrometrics:imageProcessing:controlsCollapsed', false);
+  // The whole left column (filters, target list, target controls) folds to a thin strip.
+  const [targetListCollapsed, setTargetListCollapsed] = usePersistentFlag('astrometrics:imageProcessing:targetListCollapsed', false);
   const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
     try {
       return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
@@ -608,6 +610,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
       className="image-processing-display__left"
       title="Targets"
       actionsTitle="Target Controls"
+      collapsed={targetListCollapsed}
+      onCollapsedChange={setTargetListCollapsed}
+      hideLabel="Hide target list"
+      showLabel="Show target list"
       // Searchable target list with grouping
       items={allItems}
       selectedId={selectedTarget}
@@ -678,7 +684,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
       frameStatuses={frameStatuses}
       setAsideFiles={setAsideFiles}
       onPutBackFrame={putBackFrame}
-      onOpenImageControls={analysisCollapsed && controlsCollapsed ? () => setControlsCollapsed(false) : undefined}
     />
   );
 
@@ -689,7 +694,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
       checkedFiles={checkedFiles}
       stackedImage={stackedImage}
       stackedSpectralTarget={stackedSpectralTarget}
-      totalExposure={totalExposure}
       handleSelectFile={pickFile}
       handleAddImages={handleAddImages}
       setIsAddModalOpen={setIsAddModalOpen}

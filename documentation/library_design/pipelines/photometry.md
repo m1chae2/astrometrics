@@ -313,6 +313,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `cross_session_match_count` | `int` | Number of stars matched across sessions from different nights. |
 | `noise_model_curve` | `list[astrometricslib.models.quality.quality_summary.NoiseModelPoint]` | The noise model: typical measured scatter (RMS) against instrumental magnitude (-2.5 log10 of the mean raw flux in ADU per second), in brightness bins. |
 | `sessions_missing_wcs` | `list[str]` | Sessions with no plate-solved WCS (pixel-to-sky map). |
+| `session_ties` | `list[astrometricslib.models.quality.quality_summary.SessionTieRecord]` | Quality metric attribute. |
+| `session_scintillation` | `list[astrometricslib.models.quality.quality_summary.SessionScintillationRecord]` | Quality metric attribute. |
 | `long_term_variable_candidate_count` | `int` | Number of stars flagged as long-term variable candidates. |
 | `astrometry_identified_star_count` | `int` | Stars matched to a SIMBAD or Gaia DR3 catalog star on each session's reference frame, summed over sessions (a star seen in two sessions counts twice). 0 when catalog identification is turned off. |
 | `sessions_with_reused_header_wcs` | `list[str]` | Sessions whose existing header WCS (pixel-to-sky map) was checked and used. |

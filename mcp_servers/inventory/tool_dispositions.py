@@ -644,6 +644,13 @@ DECISIONS = {
         "Reads a file from any path and returns every aperture, which can overflow the reply. "
         "Scripts and wayfindinglib use it.",
     ),
+    "processing_predict_stack": ToolDecision(
+        "drop",
+        "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app "
+        "runs it as the background job processing:check_stack for its Check Frames button. A library "
+        "call would hold the tool open. An AI lists the frames already set aside with "
+        "quality_set_aside_frames.",
+    ),
     "processing_predict_stack_weights": ToolDecision(
         "drop",
         "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",

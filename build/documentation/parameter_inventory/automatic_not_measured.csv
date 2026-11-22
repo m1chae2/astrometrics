@@ -507,6 +507,17 @@ stacking.gain_minimum_pixels,STK-D10,measurement,Design estimate
 stacking.gain_source_sigmas,STK-D10,measurement,Design estimate
 stacking.highlight_knee,STK-32,measurement,Partly measured
 stacking.lightest_sky_level,STK-29,measurement,Partly measured
+stacking.masked_stretch_center_tolerance_fraction,STK-D75,judgment,Design estimate
+stacking.masked_stretch_feather_pixels,STK-D75,measurement,Design estimate
+stacking.masked_stretch_maximum_size_ratio,STK-D75,judgment,Design estimate
+stacking.masked_stretch_minimum_region_pixels,STK-D75,judgment,Design estimate
+stacking.masked_stretch_minimum_size_ratio,STK-D75,judgment,Design estimate
+stacking.masked_stretch_peak_noise_widths,STK-D75,measurement,Design estimate
+stacking.masked_stretch_region_noise_widths,STK-D75,measurement,Design estimate
+stacking.masked_stretch_region_sky_multiple,STK-D75,measurement,Design estimate
+stacking.masked_stretch_star_peak_limit,STK-D75,judgment,Design estimate
+stacking.masked_stretch_star_removal_box_pixels,STK-D75,measurement,Design estimate
+stacking.masked_stretch_white_point_opening_pixels,STK-D75,measurement,Design estimate
 stacking.maximum_edge_noise_ratio,STK-23,measurement,Partly measured
 stacking.maximum_flat_level_fraction,STK-D05,judgment,Design estimate
 stacking.maximum_flat_noise_fraction,STK-05,judgment,Partly measured

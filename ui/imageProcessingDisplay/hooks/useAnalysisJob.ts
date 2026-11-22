@@ -3,16 +3,19 @@
  * @description Hook for managing variability analysis jobs and results.
  */
 import { useState, useEffect, useRef } from 'react';
-import { analyzeTarget, fetchAnalysisResults, streamJobLog } from '../../common/services/imaging/processingService';
+import { analyzeTarget, fetchAnalysisResults, streamJobLog, type AnalysisStageName } from '../../common/services/imaging/processingService';
 import { reportError } from '../../common/utils/reportError';
 import { AnalysisResult } from '../../common/types/backendTypes';
 import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
+import { useJobEndWatcher } from './useJobEndWatcher';
 
 export interface AnalysisJobResult {
     isAnalyzing: boolean;
+    /** Why the last analysis job failed (its own message), or `null`. */
+    analysisError: string | null;
     analysisResults: AnalysisResult | null;
-    startAnalysis: (imageFiles?: string[], filterType?: string) => Promise<void>;
+    startAnalysis: (imageFiles?: string[], filterType?: string, stages?: AnalysisStageName[]) => Promise<void>;
 }
 
 export function useAnalysisJob(
@@ -26,6 +29,9 @@ export function useAnalysisJob(
     const [analyzingTargetId, setAnalyzingTargetId] = useState<string | null>(null);
     const [analysisResults, setAnalysisResults] = useState<AnalysisResult | null>(null);
     const [activeAnalysisJobId, setActiveAnalysisJobId] = useState<string | null>(null);
+    const [analysisError, setAnalysisError] = useState<string | null>(null);
+    /** The job this hook started and is watching to its end. */
+    const [watchedJobId, setWatchedJobId] = useState<string | null>(null);
 
     // useImageProcessing passes onLog/onJobStarted/onClearLogs as fresh inline
     // closures on every render, so callbacks here read the latest version via
@@ -72,6 +78,8 @@ export function useAnalysisJob(
         setAnalysisResults(null);
         setAnalyzingTargetId(null);
         setActiveAnalysisJobId(null);
+        setAnalysisError(null);
+        setWatchedJobId(null);
         confirmedActiveJobIdRef.current = null;
     });
     useEffect(() => {
@@ -120,7 +128,8 @@ export function useAnalysisJob(
                 setAnalysisResults(results);
                 // Store this as the latest analyzed target for other views
                 localStorage.setItem('latestAnalysisTargetId', selectedTarget);
-                onLogRef.current?.(`[${new Date().toLocaleTimeString()}] Analysis complete for ${selectedTarget}.`);
+                const jobMessage = results.message ? ` ${results.message}` : '';
+                onLogRef.current?.(`[${new Date().toLocaleTimeString()}] Analysis complete for ${selectedTarget}.${jobMessage}`);
             } else if (!results || results.status === 'failed') {
                 const msg = results?.error || results?.message || 'Analysis failed';
                 onLogRef.current?.(`[${new Date().toLocaleTimeString()}] ERROR: ${msg}`);
@@ -132,6 +141,32 @@ export function useAnalysisJob(
         });
         return () => { cancelled = true; };
     }, [selectedTarget, shouldFetch, activeJobs]);
+
+    // A job that fails at once never shows in the shared feed, so the effect above cannot see it
+    // end. Watch the job itself: end the busy state and show why it failed.
+    useJobEndWatcher(watchedJobId, (job) => {
+        setWatchedJobId(null);
+        if (analyzingTargetIdRef.current === null) return;
+        confirmedActiveJobIdRef.current = null;
+        if (job.status === 'failed') {
+            const message = job.message || 'Analysis failed';
+            setAnalysisError(message);
+            onLogRef.current?.(`[${new Date().toLocaleTimeString()}] ERROR: ${message}`);
+            setAnalyzingTargetId(null);
+            setActiveAnalysisJobId(null);
+            return;
+        }
+        const finishedTarget = selectedTargetRef.current;
+        fetchAnalysisResults(finishedTarget).then((results) => {
+            if (selectedTargetRef.current !== finishedTarget) return;
+            if (results && (results.status === 'finished' || results.variableCandidates)) {
+                setAnalysisResults(results);
+            }
+        }).catch(() => { /* Ignore */ }).finally(() => {
+            setAnalyzingTargetId(null);
+            setActiveAnalysisJobId(null);
+        });
+    });
 
     // Log Streaming - mirrors the mechanism useStackingJob uses for its own
     // job log panel: poll the DB-backed job log tail for the active job.
@@ -153,20 +188,22 @@ export function useAnalysisJob(
         };
     }, [analyzingTargetId, activeAnalysisJobId]);
 
-    const startAnalysis = async (imageFiles?: string[], filterType?: string) => {
+    const startAnalysis = async (imageFiles?: string[], filterType?: string, stages?: AnalysisStageName[]) => {
         if (!selectedTarget) return;
         const targetToAnalyze = selectedTarget;
         setAnalyzingTargetId(targetToAnalyze);
         setAnalysisResults(null);
+        setAnalysisError(null);
         onClearLogsRef.current?.();
 
         onLogRef.current?.(`[${new Date().toLocaleTimeString()}] Analysis started for ${targetToAnalyze}...`);
 
         try {
-            const result = await analyzeTarget(targetToAnalyze, imageFiles, filterType);
+            const result = await analyzeTarget(targetToAnalyze, imageFiles, filterType, stages);
             const jobId: string | undefined = result ? (result as any).jobId : undefined;
             if (jobId) {
                 setActiveAnalysisJobId(jobId);
+                setWatchedJobId(jobId);
                 onJobStartedRef.current?.(jobId);
             }
             // The activeJobs-driven effect above picks up completion from here.
@@ -180,6 +217,7 @@ export function useAnalysisJob(
 
     return {
         isAnalyzing: analyzingTargetId === selectedTarget,
+        analysisError,
         analysisResults,
         startAnalysis
     };

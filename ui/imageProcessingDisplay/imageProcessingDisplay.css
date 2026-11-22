@@ -63,7 +63,7 @@
   justify-content: flex-end;
 }
 
-/* Folded panels under the viewer: the File Browser row stretches; Image Controls keeps to the right. */
+/* The folded File Browser tab bar under the viewer. */
 .image-processing-display__collapsed-row {
   display: flex;
   gap: 8px;
@@ -74,12 +74,7 @@
   flex: 1 1 auto;
 }
 
-.image-processing-display__collapsed-row-end {
-  width: auto;
-  margin-left: auto;
-}
-
-/* Both right panels folded: the column narrows to the Frame Analysis rail, so the viewer widens. */
+/* Frame Analysis folded: the whole right column narrows to one rail, so the viewer widens. */
 .layout:has(.image-processing-display__right--collapsed) {
   --layout-right-col-width: 36px;
 }
@@ -87,26 +82,6 @@
 .image-processing-display__right--collapsed {
   display: flex;
   height: 100%;
-}
-
-/* Frame Analysis folded, Image Controls open: the column narrows so the viewer widens. The controls
-   keep their own height at the bottom, beside the full-height Frame Analysis rail. */
-.layout:has(.image-processing-display__right--split) {
-  --layout-right-col-width: 260px;
-}
-
-.image-processing-display__right--split {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  height: 100%;
-  min-height: 0;
-}
-
-.image-processing-display__right--split > .panel:not(.panel--collapsed) {
-  align-self: flex-end;
-  flex: 1 1 0;
-  min-width: 0;
 }
 
 /* Right Panel structure */
@@ -666,6 +641,12 @@
   margin-top: 12px;
   font-size: var(--control-font-size);
   color: var(--text-dark);
+}
+
+.analysis-results__message {
+  margin-top: 4px;
+  font-size: var(--control-font-size);
+  color: var(--text-muted);
 }
 
 .analysis-results__empty {
@@ -1364,7 +1345,6 @@
   gap: var(--space-2);
 }
 
-.calibration-report__note,
 .calibration-report__subheading {
   margin: 0;
   color: var(--text-muted);
@@ -1407,34 +1387,6 @@
 .calibration-report__table thead th {
   color: var(--text-muted);
   font-size: var(--section-label-size);
-}
-
-/* The "Make the picture again" disclosure in the Stack Summary block. */
-.preview-remake {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.preview-remake__fields {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  align-items: center;
-  gap: var(--space-1) var(--space-3);
-  margin: var(--space-2) 0;
-}
-
-.preview-remake__hint {
-  grid-column: 2;
-}
-
-.preview-remake__status {
-  min-height: 1.2em;
-}
-
-.preview-remake__result ul {
-  margin: var(--space-1) 0;
-  padding-left: var(--space-3);
 }
 
 /* The list of frames set aside before stacking, opened from the Stack Summary block. */

@@ -333,6 +333,7 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
     result = astrometrics.processing.process_target(
         target,
         stages=["photometry"],
+        run_prerequisites=False,
         photometry={"frames": frames, "max_workers": 1},
         register_job=False,
     )

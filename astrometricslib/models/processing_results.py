@@ -13,20 +13,28 @@ guessing at the keys of a dictionary.
   that ran, and the target's quality summaries afterwards.
 - `StackWeightPrediction` says how the stacker would weight a set of frames:
   the mode, each frame's exposure group and each frame's weight.
+- `StackPrediction` says what a stack would do with its frames: which it
+  would set aside and why, and which darks, flats and bias each exposure
+  group would use. It is made without stacking anything.
 """
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
 from astrometricslib.models.target import TargetQualitySummaries
 
 __all__ = [
+    "PredictedCalibration",
+    "PredictedFrame",
+    "PredictedGroup",
     "PreviewRemakeResult",
     "PreviewSettingsRecord",
     "PreviewSettingsUsed",
     "ProcessTargetResult",
+    "StackPrediction",
     "StackResult",
     "StackWeightPrediction",
 ]
@@ -131,6 +139,14 @@ class ProcessTargetResult(BaseModel):
     target_id: str
     # The stages that ran, in the order they ran.
     stages_run: list[str] = Field(default_factory=list)
+    # The stages that ran only because a stage the caller asked for needs
+    # them and their saved result was missing or out of date (they are also
+    # in `stages_run`).
+    prerequisites_run: list[str] = Field(default_factory=list)
+    # The stages that did not run because a prerequisite could not run, with
+    # the reason (such as "needs astrometry: the target has no imaging
+    # stack to solve"). Each also has a "skipped" entry in `results`.
+    stages_skipped: dict[str, str] = Field(default_factory=dict)
     results: dict[str, Any] = Field(default_factory=dict)
     # The target's astrometry, photometry and spectroscopy quality
     # summaries after the stages ran.
@@ -180,3 +196,88 @@ class StackWeightPrediction(BaseModel):
     weights: list[float] | None = None
     # Why the weights are unknown. Empty when they are known.
     reasons: list[str] = Field(default_factory=list)
+
+
+class PredictedFrame(BaseModel):
+    """One frame a stack would set aside, or keep with a warning."""
+
+    path: str
+    # The file name, for a list.
+    file: str
+    # Why, in one sentence with the frame's value and the limit.
+    reason: str
+    # "clouded", "trailed" or "off_field" (the quarantine step), "uneven_sky"
+    # (kept with a warning), "minority_gain", "already_set_aside" or
+    # "background_split".
+    kind: str
+
+
+class PredictedCalibration(BaseModel):
+    """The calibration frames of one kind that an exposure group would use."""
+
+    # "dark", "bias", "flat" or "flat_bias" (the bias made for the flats).
+    kind: str
+    # How many frames the library would use. Zero when none fits.
+    frame_count: int
+    # The distinct folders the frames lie in, so a person can see which set
+    # of the library was chosen (for example
+    # ``darks/ZWO ASI 533MM Pro/0.0/30.0``).
+    folders: list[str] = Field(default_factory=list)
+    # The gain and offset of the chosen frames, such as "gain 100, offset 10".
+    # Empty when the library does not say.
+    settings: str = ""
+    # Mismatches the library worked around (the frames are still used), such
+    # as a dark of another temperature or flats of another offset.
+    flags: list[str] = Field(default_factory=list)
+    # Mismatches that stop the frames from being used (a binning mismatch).
+    blocking_flags: list[str] = Field(default_factory=list)
+
+
+class PredictedGroup(BaseModel):
+    """One exposure group of a stack and the calibration it would get."""
+
+    exposure_seconds: float
+    # The observing night, for a spectral group split by night; else None.
+    night: str | None = None
+    frames_kept: int
+    first_file: str
+    last_file: str
+    filter_name: str
+    gain: str
+    offset: str
+    binning: str
+    temperature_c: float | None = None
+    dark: PredictedCalibration
+    bias: PredictedCalibration
+    flat: PredictedCalibration
+    # Only when the flats need a bias of their own; else None.
+    flat_bias: PredictedCalibration | None = None
+    # Every flag and note of this group's calibration in one list.
+    warnings: list[str] = Field(default_factory=list)
+
+
+class StackPrediction(BaseModel):
+    """What a stack would do with its frames, made without stacking.
+
+    The frame checks and the calibration choice are the ones the stack runs
+    (`frame_screening.screen_frames` and `batch_calibration`), so the answer
+    and the stack cannot disagree. Nothing is stacked, moved, stored or saved.
+    """
+
+    target_id: str
+    kind: Literal["imaging", "spectral"]
+    camera: str | None = None
+    frames_selected: int
+    frames_kept: int
+    set_aside: list[PredictedFrame] = Field(default_factory=list)
+    flagged: list[PredictedFrame] = Field(default_factory=list)
+    groups: list[PredictedGroup] = Field(default_factory=list)
+    # Checks that failed, were not run, or have a note: one sentence each.
+    warnings: list[str] = Field(default_factory=list)
+    # What each frame check found, in the order they ran.
+    gates: list[GateResult] = Field(default_factory=list)
+    # Frames the quarantine check could not read. They stay in the stack.
+    unreadable: list[str] = Field(default_factory=list)
+    # True when no frame is left, so a stack would fail.
+    nothing_left: bool = False
+    note: str = "Nothing was stacked, moved, stored or saved."

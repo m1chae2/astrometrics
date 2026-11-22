@@ -57,6 +57,7 @@ STACK_COMPANION_SUFFIXES = (
     "_preview.jpg",
     "_processed.fits",
     "_preview_settings.json",
+    "_background_model.fits",
     "_inputs.json",
     "_registration_frames.json",
 )

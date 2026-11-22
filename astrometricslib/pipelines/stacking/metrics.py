@@ -249,6 +249,15 @@ STACKING_NOTICE_STACK_CROPPED = "stacking.notice_stack_cropped"
 STACKING_NOTICE_STACK_TURNED = "stacking.notice_stack_turned"
 STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT = "stacking.notice_exposure_group_left_out"
 STACKING_NOTICE_FLAT_CALIBRATION_NOTE = "stacking.notice_flat_calibration_note"
+STACKING_BACKGROUND_MODEL_LEVEL_STACK_UNIT = "stacking.background_model_level_stack_unit"
+STACKING_BACKGROUND_SPREAD_FRACTION = "stacking.background_spread_fraction"
+STACKING_BACKGROUND_RANGE_FRACTION = "stacking.background_range_fraction"
+STACKING_BACKGROUND_TILT_FRACTION = "stacking.background_tilt_fraction"
+STACKING_BACKGROUND_TILT_ANGLE_DEG = "stacking.background_tilt_angle_deg"
+STACKING_BACKGROUND_TILT_POSITION_ANGLE_DEG = "stacking.background_tilt_position_angle_deg"
+STACKING_BACKGROUND_RADIAL_FRACTION = "stacking.background_radial_fraction"
+STACKING_BACKGROUND_PLANE_FIT_RMS_FRACTION = "stacking.background_plane_fit_rms_fraction"
+STACKING_BACKGROUND_RADIAL_FIT_RMS_FRACTION = "stacking.background_radial_fit_rms_fraction"
 STACKING_NOTICE_PREVIEW_STEP_SKIPPED = "stacking.notice_preview_step_skipped"
 STACKING_REGISTRATION_REFERENCE_STAR_COUNT = "stacking.registration_reference_star_count"
 STACKING_GROUP_EXPOSURE_S = "stacking.group_exposure_s"
@@ -3240,9 +3249,132 @@ STACK_STAR_SHAPE_METRIC_BY_FRAME_METRIC: dict[str, str] = {
     },
 }
 
+_BACKGROUND_COMPUTED_BY = "pipelines.stacking.post_processing.background_gradient.measure_background_model"
+_BACKGROUND_SAMPLE = (
+    "GraXpert's background model of the stack's picture (the stack as cropped for the picture), cut into "
+    "a 64 by 64 grid and reduced to the median of each bin. A bin with no finite pixel is left out. At "
+    "least half the bins must be finite. A color stack's planes are averaged first. Not measured when "
+    "GraXpert is not configured, when the stack is a bright object (its picture skips GraXpert), when "
+    "GraXpert fails or writes no model, or when the stack is spectral. The reason is stored."
+)
+_BACKGROUND_PURPOSE_REASON = (
+    "It records the sky gradient of the stack from GraXpert's model, so one night can be compared with "
+    "another and a tilt (sky) can be told from a round term (flat field). No decision uses it: any limit "
+    "must come from the equipment envelope, which is not measured yet. The design estimate is STK-D74."
+)
+_BACKGROUND_UNCERTAINTY = (
+    "No uncertainty is reported. The model is a smooth fit, not a sample with independent errors."
+)
+
+
+def _background_metric(name: str, unit: str, meaning: str, estimator: str) -> MetricSpec:
+    """Declare one value measured from the stack's GraXpert background model.
+
+    Parameters
+    ----------
+    name : `str`
+        The metric name.
+    unit : `str`
+        The unit of every measurement.
+    meaning : `str`
+        One line in plain words.
+    estimator : `str`
+        How the value is found.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        The declaration, a context metric with no uncertainty.
+    """
+    return _context_metric(
+        name,
+        unit,
+        meaning,
+        estimator,
+        _BACKGROUND_SAMPLE,
+        _BACKGROUND_COMPUTED_BY,
+        purpose_reason=_BACKGROUND_PURPOSE_REASON,
+        uncertainty_method=_BACKGROUND_UNCERTAINTY,
+    )
+
+
+_BACKGROUND_METRICS: tuple[MetricSpec, ...] = (
+    _background_metric(
+        STACKING_BACKGROUND_MODEL_LEVEL_STACK_UNIT,
+        "stack_unit",
+        "The sky level of the stack, as GraXpert's background model gives it.",
+        "The median of the 64 by 64 binned model. The other background values are fractions of it.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_SPREAD_FRACTION,
+        "fraction",
+        "How much the sky background varies across the stack: the 5th to 95th percentile range, as a "
+        "fraction of the level.",
+        "(95th percentile - 5th percentile) / median of the binned model. The two percentiles leave out "
+        "the few bins at the extremes. 0.01 means 1 percent.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_RANGE_FRACTION,
+        "fraction",
+        "The full range of the sky background across the stack, as a fraction of the level.",
+        "(largest - smallest) / median of the binned model. It is always at least the spread.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_TILT_FRACTION,
+        "fraction",
+        "How much a flat, tilted sheet fitted to the sky background changes across the frame, as a "
+        "fraction of the level.",
+        "A plane a + b*x + c*y is fitted to the binned model by least squares, where x and y run from -1 "
+        "to +1 across the columns and rows. The value is 2*sqrt(b^2 + c^2) / median: the change across the "
+        "full width and the full height, combined as the length of a vector. A tilt across the frame "
+        "usually comes from the sky (the Moon, twilight, light pollution, airglow).",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_TILT_ANGLE_DEG,
+        "deg",
+        "The direction in which the fitted sky tilt rises, in the array's own coordinates.",
+        "atan2(c / half the number of rows, b / half the number of columns) of the plane fit, in degrees "
+        "from the column axis toward the row axis, from 0 up to 360. Stacks of one field share the "
+        "array, so their angles compare directly. It has no meaning when the tilt is near zero.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_TILT_POSITION_ANGLE_DEG,
+        "deg",
+        "The direction in which the fitted sky tilt rises, as a position angle on the sky.",
+        "The tilt direction carried through the stack's sky coordinates (WCS): the position angle from "
+        "the frame center to a point 100 pixels along the tilt, in degrees east of north, from 0 up to "
+        "360. Not measured when the stack's header has no sky coordinates.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_RADIAL_FRACTION,
+        "fraction",
+        "How much brighter the corners are than the center after the tilt is removed, as a fraction of "
+        "the level.",
+        "A plane plus a round term d*r^2 + e*r^4 is fitted to the binned model, with r^2 = x^2 + y^2 about "
+        "the frame center. The value is (2*d + 4*e) / median: the round term at the corner (r^2 = 2) "
+        "minus its value at the center. Positive means the corners are brighter. A round term looks like "
+        "a flat-field error (vignetting under- or over-corrected), not a sky gradient.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_PLANE_FIT_RMS_FRACTION,
+        "fraction",
+        "How much of the sky background the plane fit leaves unexplained, as a fraction of the level.",
+        "The root-mean-square residual of the plane fit over the binned model, divided by the median.",
+    ),
+    _background_metric(
+        STACKING_BACKGROUND_RADIAL_FIT_RMS_FRACTION,
+        "fraction",
+        "How much of the sky background the plane plus round-term fit leaves unexplained, as a "
+        "fraction of the level.",
+        "The root-mean-square residual of the plane plus round-term fit over the binned model, divided by "
+        "the median. Compared with the plane fit's residual it shows whether the round term helped.",
+    ),
+)
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_STACK_STAR_SHAPE_METRICS,
+    *_BACKGROUND_METRICS,
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
     *_NIGHT_METRICS,

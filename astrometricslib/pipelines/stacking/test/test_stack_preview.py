@@ -1414,6 +1414,9 @@ def test_a_preview_writes_a_record_of_the_settings_it_used(
 
     record = read_preview_settings(str(stack))
     assert record is not None
+    masked = record["settings_used"].pop("masked_stretch")
+    assert masked["used"] is False
+    assert "not a nebula or a galaxy" in masked["reason"]
     assert record["settings_used"] == {
         "denoise": True,
         "denoise_strength": 0.8,
@@ -1531,6 +1534,8 @@ def test_a_bright_object_record_says_the_cleanup_was_skipped(
     record = read_preview_settings(str(path))
     assert record is not None
     assert record["settings_used"]["bright_object"] is True
+    assert record["settings_used"]["masked_stretch"]["used"] is False
+    assert "bright-object" in record["settings_used"]["masked_stretch"]["reason"]
     assert record["settings_used"]["denoise"] is False
     assert record["settings_used"]["star_toning"] is False
     assert record["custom"] is True
@@ -1569,3 +1574,118 @@ def test_a_missing_or_broken_record_reads_as_unknown(stack: Path) -> None:
     assert read_preview_settings(str(stack)) is None
     Path(preview_settings_path_for(str(stack))).write_text("not json")
     assert read_preview_settings(str(stack)) is None
+
+
+def _ring_stack_path(tmp_path: Path) -> Path:
+    """Write a stack of a smooth ring nebula, like M 57, where a stack belongs.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The FITS file.
+    """
+    from astrometricslib.pipelines.stacking.test.test_masked_stretch import ring_stack
+
+    folder = tmp_path / "M 57"
+    folder.mkdir()
+    path = folder / "M_57_L_Stacked.fits"
+    fits.writeto(path, ring_stack().astype(np.float32))
+    return path
+
+
+def _install_masked_stretch_stand_in(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """Replace the blend with a stand-in that records its calls.
+
+    Returns
+    -------
+    calls : `list` [`tuple` [`str`, `str`]]
+        The (linear stack, picture) paths of each call, added to as it runs.
+    """
+    calls: list[tuple[str, str]] = []
+
+    def blend(linear_path: str, picture_path: str, output_path: str, plan: object) -> bool:
+        """Act like the masked stretch, writing a copy.
+
+        Returns
+        -------
+        succeeded : `bool`
+            Always `True`.
+        """
+        calls.append((linear_path, picture_path))
+        Path(output_path).write_bytes(b"masked")
+        return True
+
+    monkeypatch.setattr(stack_preview, "apply_masked_stretch_in_file", blend)
+    return calls
+
+
+def test_a_nebula_with_a_smooth_bright_region_gets_the_masked_stretch(
+    tmp_path: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stretch is saved first, the blend runs last, the record says so."""
+    path = _ring_stack_path(tmp_path)
+    _configure(monkeypatch, "siril-cli", None)
+    programs = _Programs()
+    programs.install(monkeypatch)
+    calls = _install_masked_stretch_stand_in(monkeypatch)
+    steps: list[str] = []
+
+    assert write_stack_preview(str(path), steps_log=steps, object_category="nebula") is not None
+
+    assert len(calls) == 1
+    assert calls[0][0].endswith("stack.fits")
+    assert calls[0][1].endswith("stretched.fits")
+    assert len(programs.siril_calls) == 2
+    assert 'load "masked.fits"' in programs.siril_calls[1][1]
+    assert any(step.startswith("Masked stretch done on 1 bright smooth region") for step in steps)
+    record = read_preview_settings(str(path))
+    assert record is not None
+    masked = record["settings_used"]["masked_stretch"]
+    assert masked["used"] is True
+    assert masked["region_count"] == 1
+    assert masked["white_point"] > 0
+    assert masked["reason"] == ""
+    assert record["steps_run"] == steps
+
+
+def test_a_cluster_with_the_same_ring_does_not_get_the_masked_stretch(
+    tmp_path: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kind decides: one normal script runs and the record says why."""
+    path = _ring_stack_path(tmp_path)
+    _configure(monkeypatch, "siril-cli", None)
+    programs = _Programs()
+    programs.install(monkeypatch)
+    calls = _install_masked_stretch_stand_in(monkeypatch)
+    steps: list[str] = []
+
+    assert write_stack_preview(str(path), steps_log=steps, object_category="cluster") is not None
+
+    assert calls == []
+    assert len(programs.siril_calls) == 1
+    assert any(
+        command.startswith("mtf ") or command.startswith("autostretch")
+        for command in programs.siril_calls[0][1]
+    )
+    record = read_preview_settings(str(path))
+    assert record is not None
+    assert record["settings_used"]["masked_stretch"]["used"] is False
+    assert "cluster" in record["settings_used"]["masked_stretch"]["reason"]
+
+
+def test_a_failed_masked_stretch_keeps_the_normal_picture_and_is_reported(
+    tmp_path: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blend that fails is skipped like any other step, with a notice."""
+    path = _ring_stack_path(tmp_path)
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    monkeypatch.setattr(stack_preview, "apply_masked_stretch_in_file", lambda *_: False)
+    steps: list[str] = []
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    picture = write_stack_preview(str(path), steps_log=steps, skipped_steps=skipped, object_category="galaxy")
+
+    assert picture is not None
+    assert "Masked stretch skipped after a failure" in steps
+    assert [step.step_name for step in skipped] == ["Masked stretch"]

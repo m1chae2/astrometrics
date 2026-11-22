@@ -5,6 +5,7 @@
  */
 import { useStackingJob, LightFrameRow } from './useStackingJob';
 import { useAnalysisJob } from './useAnalysisJob';
+import type { AnalysisStageName } from '../../common/services/imaging/processingService';
 import { ProcessingJob } from '../../common/types/backendTypes';
 
 export { type LightFrameRow } from './useStackingJob';
@@ -22,8 +23,10 @@ export interface UseImageProcessingResult {
     clearLogs: () => void;
     refreshFrames: () => void;
     isAnalyzing: boolean;
+    /** Why the last stacking or analysis job failed (the job's own message), or `null`. */
+    jobError: string | null;
     analysisResults: any;
-    startAnalysis: (imageFiles?: string[], filterType?: string) => Promise<void>;
+    startAnalysis: (imageFiles?: string[], filterType?: string, stages?: AnalysisStageName[]) => Promise<void>;
     jobHistory: ProcessingJob[];
     loadingHistory: boolean;
     activeJobId: string | null;
@@ -63,6 +66,7 @@ export function useImageProcessing(
         clearLogs: stacking.clearLogs,
         refreshFrames: stacking.refreshFrames,
         isAnalyzing: analysis.isAnalyzing,
+        jobError: stacking.processingError ?? analysis.analysisError,
         analysisResults: analysis.analysisResults,
         startAnalysis: analysis.startAnalysis,
         jobHistory: stacking.jobHistory,

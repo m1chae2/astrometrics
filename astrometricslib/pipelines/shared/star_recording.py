@@ -868,9 +868,13 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     # this time (too few usable flux points this session) keeps the
     # star's last known values instead of wiping them to None; every
     # other photometry field still comes fully from this run.
+    # A star whose saturated points were removed is the exception: the earlier
+    # values came from a light curve that still held those points, so keeping
+    # them would put the removed points back into the star's statistics.
     if (
         updated_photometry is not None
         and updated_photometry.mean_flux is None
+        and updated_photometry.saturated_points_removed == 0
         and existing_photometry is not None
         and existing_photometry.mean_flux is not None
     ):

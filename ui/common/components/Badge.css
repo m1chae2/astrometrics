@@ -118,3 +118,31 @@
     clip-path: inset(50%);
     white-space: nowrap;
 }
+
+/* A chip with details is focusable; hovering or focusing it shows the details popover. */
+.status-chip__details-trigger {
+    display: inline-flex;
+    border-radius: var(--radius-sm);
+}
+
+.status-chip__details-trigger:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: 2px;
+}
+
+.status-chip__details {
+    /* Drawn on the page body and placed by StatusChip, so no panel clips it. */
+    position: fixed;
+    z-index: 1000;
+    width: max-content;
+    max-width: min(480px, calc(100vw - 16px));
+    max-height: 60vh;
+    overflow: auto;
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--grey-medium);
+    border: 1px solid var(--grey-light);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    font-size: var(--section-label-size);
+}

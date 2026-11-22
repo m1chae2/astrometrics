@@ -39,6 +39,11 @@ from astrometricslib.models.tuned_parameter import (
 
 _instance = None
 
+# The two SIMBAD servers, Strasbourg (CDS) and its Harvard mirror, which hold
+# the same database. `[Catalogs] simbad_preferred_server` must be one of them.
+SIMBAD_SERVER_CHOICES = ("simbad.cds.unistra.fr", "simbad.harvard.edu")
+DEFAULT_SIMBAD_SERVER = "simbad.harvard.edu"
+
 # Defaults of the processing settings below. Each is a `TunedParameter`
 # whose value comes from the config file; the default is used when the
 # file has none. The getters of `AppConfiguration` read them.
@@ -620,6 +625,9 @@ class AppConfiguration:
                 "flat_match_time_limit_seconds": "300",
                 "auto_open_gui": "false",
             },
+            # Harvard first: the Strasbourg server was down for days and each
+            # start waited out a 30 s timeout before trying the mirror.
+            "Catalogs": {"simbad_preferred_server": DEFAULT_SIMBAD_SERVER},
             "Processing": {
                 # Off: the user wants nothing to download until they allow it.
                 "prefetch_frames": "false",
@@ -1173,6 +1181,31 @@ class AppConfiguration:
         """
         val = str(self.get_value("Processing.Siril", "preview_colour_calibration_method", fallback="pcc"))
         return val.strip().lower() if val.strip().lower() in ("pcc", "stars") else "pcc"
+
+    def get_simbad_preferred_server(self) -> str:
+        """Return the SIMBAD server to ask first.
+
+        SIMBAD has two servers with the same data. The driver asks this one
+        first and falls back to the other if it cannot be reached.
+
+        Returns
+        -------
+        server : `str`
+            ``"simbad.harvard.edu"`` or ``"simbad.cds.unistra.fr"``. A missing
+            setting, or any other value, gives ``"simbad.harvard.edu"`` with a
+            warning.
+        """
+        raw = str(self.get_value("Catalogs", "simbad_preferred_server", fallback=DEFAULT_SIMBAD_SERVER))
+        server = raw.strip().lower()
+        if server in SIMBAD_SERVER_CHOICES:
+            return server
+        logging.getLogger(__name__).warning(
+            "[Catalogs] simbad_preferred_server is %r; it must be one of %s. Using %s.",
+            raw,
+            ", ".join(SIMBAD_SERVER_CHOICES),
+            DEFAULT_SIMBAD_SERVER,
+        )
+        return DEFAULT_SIMBAD_SERVER
 
     def get_preview_remove_green_noise_enabled(self) -> bool:
         """Return whether the stack preview removes excess green.

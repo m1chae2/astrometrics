@@ -619,7 +619,7 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     report = backfill.run_backfill(database, log=lambda _: None)
     assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8 + 1
     assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1 + 1
-    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1 + 2
+    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
     assert "stacking.frame_weight" not in rows

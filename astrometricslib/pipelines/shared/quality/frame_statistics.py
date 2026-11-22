@@ -241,34 +241,13 @@ def _group_match(
         ``darkMatch``, ``flatMatch`` and ``biasMatch``, each a
         `CalibrationGroupMatch` as a dictionary.
     """
-    from astrometricslib._internal.drivers.siril_interface.staging import (
-        representative_light_binning,
-        representative_light_temperature_c,
-    )
+    from astrometricslib._internal.drivers.batch_calibration import choose_batch_calibration
 
-    first = frames[0]
-    gain, offset = str(first.iso), str(first.offset)
-    binning = representative_light_binning(frames, [])
-    temperature_c = representative_light_temperature_c(frames)
-    filter_name = first.filter.name if hasattr(first.filter, "name") else str(first.filter)
+    chosen = choose_batch_calibration(calibration, frames, [])
+    gain, offset, binning = chosen.gain, chosen.offset, chosen.binning
+    filter_name = chosen.filter_name
     setting_text = f"gain {gain}, offset {offset}, binning {binning}"
-    darks = calibration.select_dark_frames(
-        camera=camera,
-        exposure=exposure,
-        iso=gain,
-        offset=offset,
-        binning=binning,
-        temperature_c=temperature_c,
-    )
-    biases = calibration.select_bias_frames(camera=camera, iso=gain, offset=offset, binning=binning)
-    flats = calibration.select_flat_frames(
-        telescope=first.telescope,
-        camera=camera,
-        filter_type=first.filter,
-        iso=gain,
-        offset=offset,
-        binning=binning,
-    )
+    darks, biases, flats = chosen.dark, chosen.bias, chosen.flat
     return {
         "darkMatch": _selection_to_match(darks, "dark", f"{exposure:g} s, {setting_text}"),
         "flatMatch": _selection_to_match(flats, "flat", f"filter {filter_name}, {setting_text}"),

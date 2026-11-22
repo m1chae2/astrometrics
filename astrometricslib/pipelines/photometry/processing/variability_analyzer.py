@@ -47,7 +47,11 @@ from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import RunBasis, factor_for
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
-from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
+from astrometricslib.models.quality.quality_summary import (
+    ExcludedFrame,
+    FrameEnsembleComposition,
+    SessionScintillationRecord,
+)
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     MINIMUM_POINTS_FOR_TRANSIT_SEARCH,
@@ -106,6 +110,10 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     fractional_to_magnitudes,
     select_comparison_set,
     set_result,
+)
+from astrometricslib.pipelines.photometry.processing.scintillation_term import (
+    add_scintillation_in_quadrature,
+    build_scintillation_term,
 )
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
     MINIMUM_POINTS_FOR_INDICES,
@@ -583,11 +591,14 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
     """Measure how much a star's level changed from one session to another.
 
     Uses the per-session summaries recorded when the sessions were merged.
-    Takes the session with the highest median normalized flux and the one
-    with the lowest. Their difference, divided by the combined expected
-    error of the two medians, is the significance. The expected error of
-    one session's median is 1.2533 x scatter / sqrt(points), where scatter
-    is the robust within-session standard deviation of the normalized flux.
+    Sessions that were not tied to the field (`tie_status` "untied") are
+    left out, because their level is on a different scale. Takes the session
+    with the highest median normalized flux and the one with the lowest.
+    Their difference, divided by the combined expected error of the two
+    medians, is the significance. The expected error of one session's median
+    is 1.2533 x scatter / sqrt(points), where scatter is the robust
+    within-session standard deviation of the normalized flux, added in
+    quadrature to the uncertainty of the session's tie factor.
 
     Parameters
     ----------
@@ -608,10 +619,13 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
     minimum_sessions_for_long_term_search = resolve(MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH).value
     if star.photometry is None:
         return None
+    # A session that could not be tied to the field has its own level scale,
+    # so its median cannot be compared with another session's.
     usable = [
         summary
         for summary in star.photometry.session_summaries
-        if summary.median_normalized_flux is not None
+        if summary.tie_status != "untied"
+        and summary.median_normalized_flux is not None
         and summary.median_normalized_flux > 0
         and summary.normalized_flux_scatter is not None
         and summary.point_count >= minimum_points_per_session_for_long_term_search
@@ -632,7 +646,12 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
             Unitless, on the scale of the normalized flux.
         """
         scatter = summary.normalized_flux_scatter
-        return _MEDIAN_STANDARD_ERROR_FACTOR * scatter / math.sqrt(summary.point_count)
+        median_error = _MEDIAN_STANDARD_ERROR_FACTOR * scatter / math.sqrt(summary.point_count)
+        # The tie factor has its own uncertainty, a fraction of the level,
+        # shared by every point of the session. It adds in quadrature to the
+        # median's.
+        tie_error = (summary.tie_uncertainty or 0.0) * summary.median_normalized_flux
+        return math.hypot(median_error, tie_error)
 
     combined_error = math.hypot(_median_error(brightest), _median_error(faintest))
     difference = brightest.median_normalized_flux - faintest.median_normalized_flux
@@ -652,8 +671,10 @@ def identify_long_term_variable_candidates(
     The search needs light curves merged across sessions, with the
     per-session summaries that the merge records. For each star it:
 
-    1. Takes each session's median normalized flux. The merge does not
-       rescale sessions, so these medians keep the between-night level.
+    1. Takes each session's median normalized flux. The sessions were tied
+       to the field before the merge (`session_tie`), so these medians are
+       on one scale and keep the between-night level. A session left
+       untied is skipped.
     2. Finds the highest and the lowest of those medians and converts the
        ratio to an amplitude in magnitudes: ``2.5 log10(highest / lowest)``.
     3. Divides the difference of the two medians by their combined
@@ -673,12 +694,13 @@ def identify_long_term_variable_candidates(
     within-session scatter measured per session, so this search compares
     two separate quantities and does not mix them.
 
-    The normalized levels of two sessions are only a fair comparison when
-    their comparison ensembles behave alike. The ensembles are chosen per
-    session, so a shift shared by every star in the field points to the
-    ensemble, not the star. Compare the star's amplitude with the other
-    stars' amplitudes and with the `session_summaries` ensemble fields
-    before treating a flag as a real variable.
+    The ensembles are chosen per session, so a shift shared by every star
+    in the field would point to the ensemble, not the star. The tie to the
+    field removes that shared shift before the merge. What is left is the
+    star's own change relative to the other stars, plus the tie's
+    uncertainty, which the significance includes. Compare the star's
+    amplitude with the other stars' amplitudes before treating a flag as a
+    real variable.
 
     Parameters
     ----------
@@ -913,6 +935,19 @@ class VariabilityAnalyzer:
         # field was too small for a noise model.
         self.noise_model: NoiseModel | None = None
         self.variability_thresholds: VariabilityThresholds | None = None
+        # What the scintillation term needs, set by the caller before
+        # `normalize_light_curves()`: the telescope's aperture (and why it is
+        # missing) and the site's height. Without an aperture no term is
+        # added and the record says so.
+        self.aperture_diameter_mm: float | None = None
+        self.aperture_reason: str | None = "the telescope's aperture was not given"
+        self.site_elevation_m = 0.0
+        # The scintillation term added to the flux errors by
+        # `normalize_light_curves()`: the record (session id left empty) and
+        # the term of each frame as a fraction of a star's flux. `None` and
+        # empty before it runs.
+        self.scintillation: SessionScintillationRecord | None = None
+        self.scintillation_fraction_by_frame: dict[datetime, float] = {}
 
     def load_target_images(self, target_id: str) -> list[str]:
         """Not used anymore, kept only so older code doesn't break.
@@ -1364,6 +1399,7 @@ class VariabilityAnalyzer:
         if not self.stellar_objects:
             return
 
+        self._add_scintillation_term()
         self.comparison_set = None
         self.normalization_failure_reason = None
         self.frame_reference_flux = {}
@@ -1425,6 +1461,39 @@ class VariabilityAnalyzer:
         )
         self._apply_frame_normalization()
         self._record_comparison_scatter()
+
+    def _add_scintillation_term(self) -> None:
+        """Add the scintillation term to every point's flux error, once.
+
+        The CCD equation has no scintillation term, so a bright star scatters
+        more than its error says. The term is Young's prediction for each
+        frame times a coefficient measured from this session's comparison
+        stars (see `scintillation_term`). The comparison selection and
+        weights that follow therefore see the larger errors. A second call
+        changes nothing, so the term is never added twice.
+        """
+        if self.scintillation is not None:
+            return
+        term = build_scintillation_term(
+            self.stellar_objects,
+            self.frame_exposure_seconds,
+            self.aperture_diameter_mm,
+            self.aperture_reason,
+            self.site_elevation_m,
+            self.maximum_comparison_stars,
+        )
+        self.scintillation = term.record
+        self.scintillation_fraction_by_frame = term.fraction_by_timestamp
+        add_scintillation_in_quadrature(self.stellar_objects, term.fraction_by_timestamp)
+        if term.record.reason is not None:
+            logger.info("  Scintillation term: %s.", term.record.reason)
+        if term.record.coefficient is not None:
+            logger.info(
+                "  Scintillation term: coefficient %.2f (%s), %.1f mmag per point at the median.",
+                term.record.coefficient,
+                term.record.source,
+                term.record.used_mmag or 0.0,
+            )
 
     def _record_ensemble_signal(
         self, timestamps: tuple[datetime, ...], frame_mask: np.ndarray, signal: Any, member_ids: list[str]
@@ -1574,6 +1643,66 @@ class VariabilityAnalyzer:
             return None
         return self.frame_reference_flux[timestamp], self.frame_reference_flux_error.get(timestamp)
 
+    def _remove_saturated_points(self) -> None:
+        """Remove every star's saturated points from its light curve.
+
+        A frame in which a star's aperture held saturated pixels gives a
+        flux that no longer rises with the star's brightness (see
+        `compute_saturated_pixel_fraction` and `is_saturation_significant`
+        in `pipelines.shared.quality.saturation`). Such a point would look
+        like a dip or a flat top, so it is taken out before the
+        normalization, the variability indices, the scatter figures and the
+        period and dip searches, and it is not stored as a normal point.
+
+        Every per-frame array is cut with the same mask, so they stay
+        aligned, and each star's count is kept in `saturated_points_removed`.
+        A star with no point left gets `light_curve_withheld_reason`. The
+        removal is logged as one warning that names the totals, so the run's
+        warning list shows it. A star whose saturation flags do not line up
+        with its points (an older, truncated record) is left as it is,
+        because pairing them by position would be a guess.
+        """
+        stars_affected = 0
+        points_removed = 0
+        saturated_in_every_frame: list[str] = []
+        for star in self.stellar_objects:
+            photometry = star.photometry
+            if photometry is None:
+                continue
+            flags = photometry.is_saturated or []
+            if not any(flags) or len(flags) != len(photometry.timestamps):
+                continue
+            keep = np.array([not flag for flag in flags], dtype=bool)
+            removed = int(len(keep) - keep.sum())
+            photometry.timestamps = _keep_where(photometry.timestamps, keep)
+            photometry.fluxes = _keep_where(photometry.fluxes, keep)
+            photometry.is_saturated = _keep_where(photometry.is_saturated, keep)
+            photometry.airmasses = _keep_where(photometry.airmasses, keep)
+            photometry.flux_errors = _keep_where(photometry.flux_errors, keep)
+            photometry.time_bjd_tdb = _keep_where(photometry.time_bjd_tdb, keep)
+            if not photometry.time_bjd_tdb:
+                photometry.time_basis = None
+            photometry.saturated_points_removed += removed
+            stars_affected += 1
+            points_removed += removed
+            if not photometry.timestamps:
+                photometry.light_curve_withheld_reason = (
+                    f"saturated in every frame it was measured in ({removed} frames)"
+                )
+                saturated_in_every_frame.append(star.id)
+        if stars_affected:
+            every_frame_ids = ", ".join(saturated_in_every_frame[:5])
+            if len(saturated_in_every_frame) > 5:
+                every_frame_ids += ", ..."
+            logger.warning(
+                "  Saturation: removed %s saturated point(s) from the light curves of %s star(s); "
+                "%s star(s) were saturated in every frame and have no light curve%s.",
+                points_removed,
+                stars_affected,
+                len(saturated_in_every_frame),
+                f" ({every_frame_ids})" if saturated_in_every_frame else "",
+            )
+
     def _apply_frame_normalization(self) -> bool:
         """Divide each star's flux by its frame's normalization factor.
 
@@ -1589,6 +1718,12 @@ class VariabilityAnalyzer:
             star's raw (unnormalized) light curve is left untouched
             rather than destroying its measured photometry.
         """
+        # A saturated point is not a brightness measurement, so it leaves
+        # every star's light curve before any statistic or search reads it.
+        # It runs here, after the comparison set was chosen from the full
+        # frame table and before the table-free steps below.
+        self._remove_saturated_points()
+
         # Safety net: if ensemble normalization couldn't establish a
         # usable per-frame factor for *any* frame (frame_reference_flux
         # empty), the loop below would previously wipe every star's raw
@@ -1710,8 +1845,13 @@ class VariabilityAnalyzer:
             See that class for what each field means.
         """
         timestamps = star.photometry.timestamps
+        # The saturated points were removed, so the fraction counts them
+        # against the points the star was measured at: those removed and
+        # those that remain.
+        removed = star.photometry.saturated_points_removed
         saturation_flags = star.photometry.is_saturated or []
-        saturated_fraction = sum(saturation_flags) / len(saturation_flags) if saturation_flags else 0.0
+        measured_points = len(saturation_flags) + removed
+        saturated_fraction = (sum(saturation_flags) + removed) / measured_points if measured_points else 0.0
         drifts = [
             math.hypot(*self.frame_registration_drift[timestamp])
             for timestamp in timestamps

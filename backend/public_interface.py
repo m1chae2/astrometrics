@@ -193,6 +193,10 @@ RPC_METHODS: tuple[str, ...] = (
     # Makes a stack's preview picture again without restacking (a background
     # job; writes the pictures and the target's processed-image pointer).
     "processing:remake_preview",
+    # What a stack would do with its frames: the frames it would set aside and
+    # why, and the darks, flats and bias each exposure group would use (a read;
+    # a background job, because it reads every frame).
+    "processing:check_stack",
     # The frames the stacker set aside for a target, with the reason (a read).
     "quality:set_aside_frames",
     # A typical frame and a reference star for the viewer's Blink button
@@ -214,7 +218,11 @@ RPC_METHODS: tuple[str, ...] = (
     "quality:resolve_rows",
     # The job history. `detail="warnings"` lists the warnings one job detected.
     "jobs:query",
-    # Photometry and spectroscopy analysis
+    # Astrometry, photometry and spectroscopy analysis. `analyze_image` takes
+    # `target_id`, `image_files`, `filter_name`, `type` and an optional
+    # `stages` (a list from astrometry, photometry, spectroscopy; omitted, the
+    # file type chooses). The library adds astrometry first when it is needed
+    # and missing or older than the stack.
     "analysis:analyze_image",
     "analysis:get_results",
     "analysis:cancel",

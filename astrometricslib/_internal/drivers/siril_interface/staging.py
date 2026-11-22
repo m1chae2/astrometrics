@@ -16,6 +16,10 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from astrometricslib._internal.drivers.batch_calibration import (
+    choose_batch_calibration,
+    choose_flat_bias,
+)
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
@@ -23,11 +27,9 @@ from astrometricslib._internal.drivers.calibration_library import (
     FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
     CalibrationSelection,
-    format_binning,
-    header_binning,
 )
 from astrometricslib._internal.drivers.file_staging import stage_file
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_data, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_data
 from astrometricslib._internal.drivers.frame_prefetch import prefetch_frames
 from astrometricslib._internal.drivers.siril_interface.session import SirilSession
 
@@ -137,6 +139,13 @@ _CALIBRATION_MASTER_KINDS = (
 # shared one cached master between runs that used different biases.
 FLAT_MASTER_RECIPE = "flat-recipe-6"
 
+# Written into the key of the stored master darks, like the flat recipe
+# above. Version 2 combines the darks with the median, so that one cosmic-ray
+# track cannot reach the master (see `build_dark_master_commands`). Version 1
+# was the empty recipe: sigma rejection. Increase it whenever the dark build
+# changes what the master dark contains.
+DARK_MASTER_RECIPE = "dark-recipe-2"
+
 
 def _master_recipe(kind: str, target_folder: str | None = None) -> str:
     """Name how a master of this kind is built, for its cache key.
@@ -156,8 +165,11 @@ def _master_recipe(kind: str, target_folder: str | None = None) -> str:
     Returns
     -------
     recipe : `str`
-        The recipe name. Empty for kinds built the standard way.
+        The recipe name. Empty for kinds built the standard way
+        (the biases).
     """
+    if kind == "dark":
+        return DARK_MASTER_RECIPE
     if kind != "flat":
         return ""
     if target_folder is None:
@@ -169,24 +181,6 @@ def _master_recipe(kind: str, target_folder: str | None = None) -> str:
         flat_bias_directory
     ) or _calibration_source_fingerprint(bias_directory)
     return f"{FLAT_MASTER_RECIPE}|bias={bias_fingerprint or 'none'}"
-
-
-def _describe_bias_settings(selection: CalibrationSelection) -> str:
-    """Name the gain and offset of the bias frames a selection chose.
-
-    Parameters
-    ----------
-    selection : `CalibrationSelection`
-        A bias selection.
-
-    Returns
-    -------
-    text : `str`
-        For example ``"gain 100, offset 0"``; several settings are joined
-        with " or ".
-    """
-    pairs = sorted({(setting.gain, setting.offset) for setting in selection.chosen_settings})
-    return " or ".join(f"gain {gain}, offset {offset:g}" for gain, offset in pairs) or "unknown settings"
 
 
 def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> str | None:
@@ -313,116 +307,6 @@ def work_directory_name(target_id: str, output_file: str | None) -> str:
         return name
     stem = os.path.splitext(os.path.basename(output_file))[0].replace(" ", "_")
     return f"{name}__{stem}"
-
-
-def dominant_exposure(frames: list[Any]) -> str:
-    """Find the exposure length that most of a batch of frames share.
-
-    The dark master is chosen by exposure length, so a batch is calibrated with
-    the dark of its most common length. Before this, the dark of the *first*
-    frame's length was applied to every frame, which put a 600 s dark on 300 s
-    frames in the NGC 2244 and NGC 2903 sessions (2026-01-17/18) and no dark at
-    all on the NGC 1893 session, whose first frame had no dark.
-
-    Parameters
-    ----------
-    frames : `list`
-        Frame records or dictionaries of them, with an ``exposure``.
-
-    Returns
-    -------
-    exposure : `str`
-        The most common exposure, as it was written on the frames (ties go to
-        the one that appears first); ``"0"`` when no frame has one.
-    """
-    counts: dict[str, int] = {}
-    for frame in frames:
-        value = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
-        if value is None:
-            continue
-        key = str(value)
-        counts[key] = counts.get(key, 0) + 1
-    if not counts:
-        return "0"
-    return max(counts, key=counts.__getitem__)
-
-
-def representative_light_temperature_c(frames: list[Any]) -> float | None:
-    """Find a light-frame batch's mean sensor temperature, for dark matching.
-
-    The calibration library files darks by temperature slot and picks the
-    slot nearest this value (see `CalibrationLibrary.select_dark_frames`), so
-    this is where a batch's actual sensor temperature enters the match.
-
-    A dict frame here is always a plain ``model_dump()`` (see
-    `_stack_one_batch`), which uses the Python field name
-    (``sensor_temperature_c``), not the camelCase JSON alias
-    (``sensorTemperatureC``) -- confirmed against a real incident where
-    checking the alias silently found no temperature on every dict
-    frame, so Arcturus's dark-temperature mismatch (a dark master at
-    ~0C applied to light frames that drifted from -2.9C to -10.7C,
-    which Siril reported as 57-64% negative pixels after dark
-    subtraction) went undetected even after this check was added.
-
-    Parameters
-    ----------
-    frames : `list`
-        Frame records or dictionaries of them, with a
-        ``sensor_temperature_c``.
-
-    Returns
-    -------
-    mean_temperature_c : `float` or `None`
-        The mean of every frame's recorded temperature, or `None` if
-        none of them have one.
-    """
-    temperatures = [
-        (
-            frame.get("sensor_temperature_c")
-            if isinstance(frame, dict)
-            else getattr(frame, "sensor_temperature_c", None)
-        )
-        for frame in frames
-    ]
-    temperatures = [t for t in temperatures if t is not None]
-    return sum(temperatures) / len(temperatures) if temperatures else None
-
-
-def representative_light_binning(frames: list[Any], light_paths: list[str]) -> str:
-    """Find the binning a batch of light frames was taken at, for matching.
-
-    The calibration library files frames by binning, and a frame binned
-    differently can never calibrate the lights. The binning is read from the
-    header of the first readable light (its ``XBINNING`` and ``YBINNING``
-    cards). One light speaks for the batch, because lights binned differently
-    have different image sizes and the stacker keeps only the most common
-    size. If no header can be read, the binning recorded on the frame
-    records is used (the most common value; the width factor stands for
-    both axes), and without one, no binning (``"1x1"``).
-
-    Parameters
-    ----------
-    frames : `list`
-        Frame records or dictionaries of them, with a ``binning``.
-    light_paths : `list` [`str`]
-        The light frame paths that can be read, in the order to try them.
-
-    Returns
-    -------
-    binning : `str`
-        The binning as text, such as ``"2x2"``.
-    """
-    for path in light_paths:
-        try:
-            return header_binning(read_header(path))
-        except FITS_READ_ERRORS:
-            continue
-    counts: dict[int, int] = {}
-    for frame in frames:
-        value = frame.get("binning") if isinstance(frame, dict) else getattr(frame, "binning", None)
-        if value is not None:
-            counts[int(value)] = counts.get(int(value), 0) + 1
-    return format_binning(max(counts, key=counts.__getitem__)) if counts else format_binning()
 
 
 class SirilStaging(SirilSession):
@@ -676,44 +560,14 @@ class SirilStaging(SirilSession):
             The bias frames to stage for the flats only. Empty when the
             lights' bias frames also serve the flats.
         """
-        flat_settings = {(setting.gain, setting.offset) for setting in flat_selection.chosen_settings}
-        if staged_flat_count == 0 or not flat_settings or not lights_bias_selection.frames:
-            return []
-        lights_bias_text = _describe_bias_settings(lights_bias_selection)
-        if len(flat_settings) > 1:
-            note = (
-                "The flat frames were taken at several gain and offset settings, so no single bias "
-                f"matches them all; the bias chosen for the lights ({lights_bias_text}) was applied "
-                "to the flats."
-            )
-            self._record_calibration_selection(CalibrationSelection([], [note]), "flat bias", log, warn)
-            return []
-        ((flat_gain, flat_offset),) = flat_settings
-        flat_settings_text = f"gain {flat_gain}, offset {flat_offset:g}"
-        selection = library.select_bias_frames(
-            camera=camera,
-            iso=flat_gain,
-            offset=flat_offset,
-            binning=light_binning,
-            light_label=f"the flat frames ({flat_settings_text})",
+        choice = choose_flat_bias(
+            library, camera, light_binning, flat_selection, staged_flat_count, lights_bias_selection
         )
-        if selection.flags:
-            # Nothing at the flats' settings: say which bias is used and why.
-            note = (
-                f"No bias frames matched the flats' {flat_settings_text}, so the bias chosen for the "
-                f"lights ({lights_bias_text}) was applied to the flats. If its offset differs from the "
-                "flats' offset, the master flat keeps a pedestal."
-            )
+        for note in choice.notes:
             self._record_calibration_selection(CalibrationSelection([], [note]), "flat bias", log, warn)
-            return []
-        if not selection.frames or set(selection.frames) == set(lights_bias_selection.frames):
-            return []
-        log(
-            f"The flats were taken at {flat_settings_text}, which differs from the lights' bias "
-            f"({lights_bias_text}); {len(selection.frames)} bias frame(s) at the flats' settings "
-            "calibrate the flats."
-        )
-        return list(selection.frames)
+        if choice.log_line:
+            log(choice.log_line)
+        return choice.frames
 
     def _record_calibration_selection(
         self,
@@ -903,43 +757,13 @@ class SirilStaging(SirilSession):
                 or (f.get("camera") if isinstance(f, dict) else getattr(f, "camera", "")) == camera_filter
             ]
             if matching_frames:
-                f = matching_frames[0]
-                tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Unknown")
-                cam = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", camera_filter)
-                iso = f.get("iso") if isinstance(f, dict) else getattr(f, "iso", "800")
-                offset = f.get("offset") if isinstance(f, dict) else getattr(f, "offset", "0")
-                # The dark frames are chosen by exposure length. Take the
-                # length most of the batch has, not the first frame's: a
-                # batch that holds a few frames of another length (small
-                # exposure groups are folded into their nearest neighbour)
-                # must get the dark of the majority, not of whichever frame
-                # happens to be first.
-                exp = dominant_exposure(matching_frames)
-                filt = f.get("filter") if isinstance(f, dict) else getattr(f, "filter", "None")
-
-                light_temperature_c = representative_light_temperature_c(matching_frames)
                 staged_light_paths = sorted(readable_light_paths)
-                light_binning = representative_light_binning(matching_frames, staged_light_paths)
-                first_light = staged_light_paths[0] if staged_light_paths else ""
-                # How the calibration flags name this batch of lights.
-                light_label = (
-                    f"the {len(staged_light_paths)} light frame(s) starting with "
-                    f"{os.path.basename(first_light)}"
-                )
+                batch_calibration = choose_batch_calibration(library, matching_frames, staged_light_paths)
+                cam = batch_calibration.camera
+                light_binning = batch_calibration.binning
 
                 dark_frame_paths = self._record_calibration_selection(
-                    library.select_dark_frames(
-                        camera=cam,
-                        exposure=exp,
-                        iso=iso,
-                        offset=offset,
-                        binning=light_binning,
-                        temperature_c=light_temperature_c,
-                        light_label=light_label,
-                    ),
-                    "dark",
-                    log,
-                    warn,
+                    batch_calibration.dark, "dark", log, warn
                 )
                 readable_dark_paths = find_readable_paths(dark_frame_paths)
                 for item in dark_frame_paths:
@@ -954,9 +778,7 @@ class SirilStaging(SirilSession):
                     except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 
-                lights_bias_selection = library.select_bias_frames(
-                    camera=cam, iso=iso, offset=offset, binning=light_binning, light_label=light_label
-                )
+                lights_bias_selection = batch_calibration.bias
                 bias_frame_paths = self._record_calibration_selection(
                     lights_bias_selection, "bias", log, warn
                 )
@@ -975,15 +797,7 @@ class SirilStaging(SirilSession):
                     except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
-                flat_selection = library.select_flat_frames(
-                    telescope=tel,
-                    camera=cam,
-                    filter_type=filt,
-                    iso=iso,
-                    offset=offset,
-                    binning=light_binning,
-                    light_label=light_label,
-                )
+                flat_selection = batch_calibration.flat
                 flat_frame_paths = self._record_calibration_selection(flat_selection, "flat", log, warn)
                 readable_flat_paths = find_readable_paths(flat_frame_paths)
                 for item in flat_frame_paths:

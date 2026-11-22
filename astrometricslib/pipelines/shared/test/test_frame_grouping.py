@@ -5,13 +5,18 @@ both object models and dictionaries across various filter representations
 (FilterType.SPEC, 'SPEC', 'Star Analyzer 200', 'Spectroscopy').
 """
 
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
-from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds, frame_is_spectral
+from astrometricslib.pipelines.shared.frame_grouping import (
+    frame_exposure_seconds,
+    frame_is_spectral,
+    split_standard_and_spectral_frames,
+)
 
 
 def test_frame_is_spectral_with_objects() -> None:
@@ -73,3 +78,14 @@ def test_every_exposure_reader_is_the_one_function() -> None:
     assert exposure_groups.frame_exposure_seconds is frame_exposure_seconds
     assert stack_membership.frame_exposure_seconds is frame_exposure_seconds
     assert frame_measurement.frame_exposure_seconds is frame_exposure_seconds
+
+
+def test_split_logs_that_it_sorts_and_does_not_stack(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify the split logs that it sorts frames, not that it stacks."""
+    target = SimpleNamespace(id="M 57")
+
+    with caplog.at_level(logging.INFO):
+        split_standard_and_spectral_frames(target, [])
+
+    assert "[M 57] Sorting frames into luminance and spectral groups..." in caplog.messages
+    assert not any("Stacking" in message for message in caplog.messages)

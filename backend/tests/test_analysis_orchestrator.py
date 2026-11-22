@@ -322,3 +322,161 @@ class TestResultSurvivesRestart:
         result = self._make_orchestrator_with(job_service).get_analysis_results("M 31")
 
         assert result == {"status": "finished", "jobId": job.id}
+
+
+class TestChosenStages:
+    """Verify the `stages` argument of `analyze_image` and its worker."""
+
+    def _make_setup(self, target: Target, outcome: SimpleNamespace) -> tuple[AnalysisOrchestrator, MagicMock]:
+        """Build an orchestrator whose library call is recorded.
+
+        Returns
+        -------
+        orchestrator : `AnalysisOrchestrator`
+            The orchestrator, with a job service that records updates.
+        process_target : `MagicMock`
+            The recorded library call, which answers with ``outcome``.
+        """
+        process_target = MagicMock(return_value=outcome)
+        astrometrics = SimpleNamespace(
+            processing=SimpleNamespace(
+                process_target=process_target, acquire_job_slot=lambda: contextlib.nullcontext()
+            )
+        )
+        orchestrator = _make_orchestrator(astrometrics=astrometrics)
+        orchestrator._job_service = MagicMock()
+        # The worker writes to the job's log file, so give it no path to write.
+        orchestrator._job_service.get_job.return_value.log_file_path = None
+        orchestrator._target_service.get_targets.return_value = target
+        return orchestrator, process_target
+
+    @staticmethod
+    def _outcome(**fields: object) -> SimpleNamespace:
+        """Build a stand-in for the library's answer.
+
+        Returns
+        -------
+        outcome : `SimpleNamespace`
+            An answer with nothing run unless the fields say otherwise.
+        """
+        values = {"stages_run": [], "prerequisites_run": [], "stages_skipped": {}, "results": {}}
+        values.update(fields)
+        return SimpleNamespace(**values)
+
+    def test_unknown_or_empty_stages_are_refused_before_a_job_starts(self) -> None:
+        """Verify a bad stage name raises and no job is submitted."""
+        orchestrator = _make_orchestrator()
+        orchestrator._submit_job = MagicMock()
+
+        with pytest.raises(InvalidArgumentError, match="asteroids"):
+            orchestrator.analyze_image("M 57", [], stages=["photometry", "asteroids"])
+        with pytest.raises(InvalidArgumentError):
+            orchestrator.analyze_image("M 57", [], stages=[])
+
+        orchestrator._submit_job.assert_not_called()
+
+    def test_stages_are_kept_once_in_running_order(self) -> None:
+        """Verify the checked list is deduplicated and ordered."""
+        checked = AnalysisOrchestrator._checked_stages(["spectroscopy", "astrometry", "spectroscopy"])
+
+        assert checked == ["astrometry", "spectroscopy"]
+        assert AnalysisOrchestrator._checked_stages(None) is None
+
+    def test_chosen_stages_reach_the_worker(self) -> None:
+        """Verify `stages` is handed to the job and `None` is left alone."""
+        orchestrator = _make_orchestrator()
+        orchestrator._job_service = MagicMock()
+        orchestrator._job_service.get_jobs_for_target.return_value = []
+        orchestrator._submit_job = MagicMock(return_value="job1")
+        orchestrator._config_service.get_logs_path.return_value = Path("/tmp")
+
+        orchestrator.analyze_image("M 57", ["/lib/a.fits"], stages=["spectroscopy", "photometry"])
+        orchestrator.analyze_image("M 57", ["/lib/a.fits"])
+
+        assert orchestrator._submit_job.call_args_list[0].args[-1] == ["photometry", "spectroscopy"]
+        assert orchestrator._submit_job.call_args_list[1].args[-1] is None
+
+    def test_a_target_with_stacks_uses_them_and_ignores_the_sent_files(self, tmp_path: Path) -> None:
+        """Verify stacks win over sent files; spectroscopy keeps its limit."""
+        imaging_stack = tmp_path / "stack.fits"
+        spectral_stack = tmp_path / "spec_stack.fits"
+        imaging_stack.write_bytes(b"")
+        spectral_stack.write_bytes(b"")
+        target = Target(
+            id="HasStacksTarget",
+            stacked_image=str(imaging_stack),
+            stacked_spectral_target=str(spectral_stack),
+            frames=[FrameRecord(path="/lib/spec.fits", role="LIGHT", filter="SPEC")],
+        )
+        orchestrator, process_target = self._make_setup(
+            target, self._outcome(stages_run=["astrometry", "spectroscopy"], prerequisites_run=["astrometry"])
+        )
+
+        result = orchestrator._run_chosen_stages(
+            "job1", "HasStacksTarget", ["/lib/light.fits", "/lib/spec.fits"], "L", ["spectroscopy"]
+        )
+
+        keywords = process_target.call_args.kwargs
+        assert keywords["stages"] == ["spectroscopy"]
+        assert keywords["astrometry"] is None
+        assert keywords["spectroscopy"] == {"path": str(spectral_stack), "limit": 10}
+        assert keywords["run_prerequisites"] is True
+        assert keywords["register_job"] is False
+        assert result["prerequisitesRun"] == ["astrometry"]
+        assert result["message"] == (
+            "Ran astrometry, spectroscopy (astrometry added because its result was missing"
+            " or older than the stack)."
+        )
+        orchestrator._job_service.update_job.assert_any_call("job1", status_message=result["message"])
+
+    def test_a_target_without_stacks_uses_the_sent_files(self) -> None:
+        """Verify the sent files stand in for the stacks the target lacks."""
+        target = Target(
+            id="NoStacksTarget",
+            frames=[
+                FrameRecord(path="/lib/light.fits", role="LIGHT", filter="Luminance"),
+                FrameRecord(path="/lib/spec.fits", role="LIGHT", filter="SPEC"),
+            ],
+        )
+        orchestrator, process_target = self._make_setup(target, self._outcome())
+
+        orchestrator._run_chosen_stages(
+            "job1",
+            "NoStacksTarget",
+            ["/lib/spec.fits", "/lib/light.fits"],
+            "L",
+            ["astrometry", "spectroscopy"],
+        )
+
+        keywords = process_target.call_args.kwargs
+        assert keywords["astrometry"] == {"path": "/lib/light.fits"}
+        assert keywords["spectroscopy"] == {"path": "/lib/spec.fits"}
+
+    def test_skipped_stages_are_reported_with_their_reasons(self) -> None:
+        """Verify the job message and result name each skipped stage."""
+        reason = "needs astrometry: the target has no imaging stack to solve and no image was given"
+        target = Target(id="SkippedTarget")
+        orchestrator, _process_target = self._make_setup(
+            target,
+            self._outcome(
+                stages_skipped={"photometry": reason},
+                results={"photometry": {"status": "skipped", "reason": reason}},
+            ),
+        )
+
+        result = orchestrator._run_chosen_stages("job1", "SkippedTarget", [], "L", ["photometry"])
+
+        assert result["stagesSkipped"] == {"photometry": reason}
+        assert result["message"] == f"Ran no stage. Skipped photometry ({reason})."
+        assert result["results"] == {"photometry": "skipped"}
+
+    def test_the_worker_routes_chosen_stages_to_the_library_call(self) -> None:
+        """Verify `_start_analysis_task` takes the `stages` path when given."""
+        target = Target(id="RoutedTarget")
+        orchestrator, process_target = self._make_setup(target, self._outcome(stages_run=["astrometry"]))
+        orchestrator._run_photometry_analysis = MagicMock()
+
+        orchestrator._start_analysis_task("job1", "RoutedTarget", [], "L", "photometry", ["astrometry"])
+
+        process_target.assert_called_once()
+        orchestrator._run_photometry_analysis.assert_not_called()

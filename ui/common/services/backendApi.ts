@@ -347,7 +347,15 @@ export interface ActionRegistry {
     "ingestion:reindex": { payload: Record<string, never>; response: string };
 
     // Processing
-    "processing:stack": { payload: { target_id: string; image_files?: string[]; log_file?: string }; response: ProcessStatus };
+    "processing:stack": {
+        payload: {
+            target_id: string; image_files?: string[]; log_file?: string;
+            plan_only?: boolean; camera_id?: string; focal_length_mm?: number; filter_name?: string;
+        };
+        response: ProcessStatus & {
+            plan?: { frames_selected: number; first_file: string; last_file: string; camera: string | null; kind: string };
+        };
+    };
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
     "processing:cancel": { payload: { target_id: string }; response: CancelProcessingResult };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
@@ -365,6 +373,9 @@ export interface ActionRegistry {
     "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
     // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
     "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
+    // What a stack would do with its frames (a background job that stacks nothing): the answer is the
+    // prediction, or the job to follow. `image_files` are the frames the Stack Frames click would send.
+    "processing:check_stack": { payload: { target_id: string; image_files?: string[]; kind?: 'imaging' | 'spectral'; filter_name?: string; camera_id?: string; focal_length_mm?: number }; response: import('../types/backendTypes').StackReviewStart };
     // Compares a stack with the previous one (a background job): the answer is the report, or the job to follow.
     "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
     // The frames the stacker set aside for a target, each with the reason it has on record.
@@ -382,7 +393,7 @@ export interface ActionRegistry {
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
-    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
+    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string; stages?: ('astrometry' | 'photometry' | 'spectroscopy')[] }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
     // Names the detected stars of a stack (a job of the analysis type), and reads the saved names.

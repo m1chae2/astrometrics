@@ -1,0 +1,90 @@
+/* The shared split button (SplitButton.tsx): a main Button fused with an arrow Button and a menu.
+   The two parts are real Buttons; this file only joins their corners and styles the menu. */
+.split-button {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+/* fill: the control spans its container; the main part grows and the arrow keeps its width. */
+.split-button--fill {
+  display: flex;
+  width: 100%;
+}
+
+.split-button--fill .split-button__main {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+/* Join the two parts: the main part keeps its left corners, the arrow keeps its right corners. */
+.split-button .split-button__main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.split-button .split-button__arrow {
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid var(--border-control);
+  font-size: var(--tiny-font-size);
+}
+
+.split-button__menu {
+  /* Drawn in a portal on document.body; left, top and min-width are set in code from the control's box. */
+  position: fixed;
+  box-sizing: border-box;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface-menu);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card-lifted);
+  z-index: var(--z-popover);
+}
+
+.split-button__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--control-font-size);
+  font-family: var(--font-family-base);
+}
+
+.split-button__item:hover,
+.split-button__item:focus-visible {
+  background: var(--surface-highlight);
+}
+
+.split-button__item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.split-button__item-detail {
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
+}
+
+.split-button__item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.split-button__item[aria-disabled="true"]:hover {
+  background: transparent;
+}

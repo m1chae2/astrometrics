@@ -15,6 +15,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
+import { useJobEndWatcher } from './useJobEndWatcher';
 
 export type LightFrameRow = [string, string, number];
 
@@ -24,6 +25,8 @@ export interface StackingJobResult {
     isLoadingFrames: boolean;
     logLines: string[];
     isProcessing: boolean;
+    /** Why the last stacking job failed (its own message), or `null`. */
+    processingError: string | null;
     startProcessing: (imageFiles?: string[], logFile?: string) => Promise<void>;
     cancelProcessingJob: () => Promise<void>;
     clearLogs: () => void;
@@ -58,10 +61,14 @@ export function useStackingJob(
     const [lightFrames, setLightFrames] = useState<LightFrameRow[]>([]);
     const [logLines, setLogLines] = useState<string[]>([]);
     const [isProcessing, setIsProcessing] = useState<boolean>(false);
+    const [processingError, setProcessingError] = useState<string | null>(null);
+    /** The job this hook started and is watching to its end. */
+    const [watchedJobId, setWatchedJobId] = useState<string | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [jobHistory, setJobHistory] = useState<ProcessingJob[]>([]);
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
     const prevIsProcessing = useRef<boolean>(false);
+    const isProcessingRef = useRef<boolean>(false);
     /** The running-job ids seen last time, to notice when one starts or finishes. */
     const previousActiveJobIds = useRef<string>('');
 
@@ -73,6 +80,8 @@ export function useStackingJob(
         setLogLines([]);
         setLightFrames([]);
         setIsProcessing(false);
+        setProcessingError(null);
+        setWatchedJobId(null);
         prevIsProcessing.current = false;
         previousActiveJobIds.current = '';
         historyLoadedForTarget.current = null;
@@ -254,7 +263,24 @@ export function useStackingJob(
         };
     }, [isProcessing, activeJobId]);
 
-    // Auto-dismissal removed per user request
+    useEffect(() => {
+        isProcessingRef.current = isProcessing;
+    }, [isProcessing]);
+
+    // A job that fails at once never shows in the running-jobs feed, so the effect above cannot
+    // see it end. Watch the job itself, and show why it failed.
+    useJobEndWatcher(watchedJobId, (job) => {
+        setWatchedJobId(null);
+        if (job.status === 'failed') {
+            setProcessingError(job.message || 'The stacking job failed.');
+        }
+        if (prevIsProcessing.current || isProcessingRef.current) {
+            invalidate('frames');
+        }
+        prevIsProcessing.current = false;
+        setIsProcessing(false);
+    });
+
 
     const startProcessing = async (imageFiles?: string[], logFile?: string) => {
         if (!selectedTarget) return;
@@ -262,11 +288,13 @@ export function useStackingJob(
         // Forget the previous job so its log is not streamed while we wait
         // for the new job's id.
         setActiveJobId(null);
+        setProcessingError(null);
         setIsProcessing(true);
         try {
             const result = await processTarget(selectedTarget, imageFiles, logFile);
             if (result && result.jobId) {
                 setActiveJobId(result.jobId);
+                setWatchedJobId(result.jobId);
             }
         } catch (err) {
             setIsProcessing(false);
@@ -292,6 +320,7 @@ export function useStackingJob(
         isLoadingFrames,
         logLines,
         isProcessing,
+        processingError,
         startProcessing,
         cancelProcessingJob,
         clearLogs: () => setLogLines([]),

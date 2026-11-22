@@ -17,7 +17,7 @@ import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../c
 import { FrameStatusReport, GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
 import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
-import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
+import { chooseAnalysisSelection, chooseStageSelection, chooseTemporalVariationSelection, NO_SOURCE_TO_ANALYZE_REASON, type AnalysisStage } from '../utils/analysisSelection';
 
 interface FrameAnalysisPanelProps {
   // Data Tab Props
@@ -26,7 +26,6 @@ interface FrameAnalysisPanelProps {
   checkedFiles: Set<string>;
   stackedImage: string | null;
   stackedSpectralTarget: string | null;
-  totalExposure: number;
   handleSelectFile: (path: string | null) => void;
 
   // Control Props
@@ -53,7 +52,7 @@ interface FrameAnalysisPanelProps {
  * Handles frame analysis results, exposure statistics, and image controls.
  */
 export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
-  allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
+  allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget,
   handleSelectFile,
   handleAddImages, setIsAddModalOpen,
   selectedFile, onShowHeader, starShapeReview = null, frameReport = null, frameStatuses,
@@ -67,7 +66,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
 
     const {
       analysisResults, isProcessing, logLines, cancelProcessingJob, clearLogs,
-      startProcessing, isAnalyzing, startAnalysis,
+      startProcessing, isAnalyzing, startAnalysis, jobError,
       jobHistory, loadingHistory, onSelectJob, targetActiveJobs, activeJobId,
       openSiril, requestJobHistory
     } = useImageProcessingContext();
@@ -121,6 +120,11 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     };
   }, [checkedFiles, allFiles, filteredFiles]);
 
+  // The frames the Stack Frames click sends: the ticked frames, or every listed frame when none is
+  // ticked. Check Frames checks the same frames.
+  const framesToStack = (): string[] =>
+    checkedFiles.size > 0 ? Array.from(checkedFiles) : filteredFiles.map(f => f.path);
+
   // What the two Analyze actions would send right now. Stage one analyzes the
   // master stacked spectral image; stage two follows the raw spectral frames.
   const selectionInput = {
@@ -130,6 +134,9 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     checkedFiles,
     selectedFile,
     filteredFilePaths: filteredFiles.map(f => f.path),
+    selectedFileFilter: selectedFile
+      ? (allFiles?.find(f => f.path === selectedFile)?.filter ?? null)
+      : null,
   };
   const analysisSelection = chooseAnalysisSelection(selectionInput);
   const temporalVariationSelection = chooseTemporalVariationSelection(selectionInput);
@@ -146,17 +153,13 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     </SectionPanel>
   );
 
-  // Both folded: the column is just the rail. The Image Controls row sits under the viewer
-  // (see ViewerPanelContainer).
-  if (analysisCollapsed && controlsCollapsed) {
+  // Frame Analysis folded: the whole right column, Image Controls too, is just the rail.
+  if (analysisCollapsed) {
     return <div className="image-processing-display__right image-processing-display__right--collapsed">{analysisRail}</div>;
   }
 
   return (
-    <div
-      className={`image-processing-display__right ${analysisCollapsed ? 'image-processing-display__right--split' : 'panel-group'}`}
-    >
-      {!analysisCollapsed && (
+    <div className="image-processing-display__right panel-group">
       <SectionPanel
         title="Frame Analysis"
         onTitleClick={() => setAnalysisCollapsed(true)}
@@ -211,7 +214,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                   <StackedImagePanel
                     path={stackedImage || ''}
                     spectralPath={stackedSpectralTarget || ''}
-                    exposureTime={totalExposure}
                     targetId={selectedTarget}
                     selectedFile={selectedFile}
                     onView={handleSelectFile}
@@ -233,7 +235,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           ]}
         />
       </SectionPanel>
-      )}
       {controlsCollapsed ? (
         <SectionPanel
           title="Image Controls"
@@ -256,16 +257,14 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           catalogId={catalogId}
           setPendingTarget={setPendingTarget}
           setReloadKey={forceReload}
-          onProcess={filteredFiles.length > 0 ? () => {
-            const filesToProcess = checkedFiles.size > 0
-              ? Array.from(checkedFiles)
-              : filteredFiles.map(f => f.path);
-            startProcessing(filesToProcess);
-          } : undefined}
+          onProcess={filteredFiles.length > 0 ? () => startProcessing(framesToStack()) : undefined}
+          framesToStack={filteredFiles.length > 0 ? framesToStack : undefined}
           onCancel={cancelProcessingJob}
+          onShowPicture={handleSelectFile}
           onAddImages={handleAddImages}
           onAddTarget={() => setIsAddModalOpen(true)}
           isProcessing={isProcessing}
+          jobError={jobError}
           hasMultipleCameras={multiCameraStatus.hasMultiple}
           selectedCameras={multiCameraStatus.cameras}
           hasMultipleOptics={multiOpticStatus.hasMultiple}
@@ -273,7 +272,15 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           hasNoFiles={checkedFiles.size === 0 && filteredFiles.length === 0}
           hasMultipleFilters={filterStatus.hasMultiple}
           selectedFilters={filterStatus.filters}
-          onAnalyze={analysisSelection ? () => startAnalysis(analysisSelection.paths, analysisSelection.filterType) : undefined}
+          onAnalyze={() => {
+            if (analysisSelection) startAnalysis(analysisSelection.paths, analysisSelection.filterType);
+          }}
+          analyzeDisabledReason={analysisSelection ? undefined : NO_SOURCE_TO_ANALYZE_REASON}
+          analysisSelectionInput={selectionInput}
+          onAnalyzeStage={(stage: AnalysisStage) => {
+            const stageSelection = chooseStageSelection(selectionInput, stage);
+            if (stageSelection) startAnalysis(stageSelection.paths, stageSelection.filterType, [stage]);
+          }}
           onAnalyzeTemporalVariation={temporalVariationSelection
             ? () => startAnalysis(temporalVariationSelection.paths, temporalVariationSelection.filterType)
             : undefined}
@@ -298,7 +305,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
         />
       </SectionPanel>
       )}
-      {analysisCollapsed && analysisRail}
     </div>
   );
 };

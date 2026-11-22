@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
@@ -50,6 +50,9 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import align_calibrated_frames
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+
+if TYPE_CHECKING:
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,42 @@ MINIMUM_REGISTERED_FRACTION = TunedParameter(
 # reference selection or frame filtering the way star-based registration
 # can.
 SPECTRAL_STAR_DETECTION_ORDER = ("standard", "relaxed", "phase_correlation")
+
+
+def split_into_stack_batches(frames: list[Any], is_spectral: bool) -> list[ExposureGroup]:
+    """Split the frames of a stack into the batches it stacks one by one.
+
+    Frames of different exposure lengths are stacked one length at a time,
+    for spectra and for images. Each length needs the dark frames of its own
+    length, and the normalization and rejection of one stack cannot treat
+    frames of different lengths as one population (see `exposure_groups`).
+    The stack check (`predict_stack`) uses this same split, so it reports the
+    batches the stack will make.
+
+    Parameters
+    ----------
+    frames : `list`
+        The frame records to stack.
+    is_spectral : `bool`
+        Whether they are spectroscopy frames. Those are also split by night:
+        the zero order sits on a different pixel each night and registering
+        two nights together can lose most frames (see
+        `split_groups_by_night`).
+
+    Returns
+    -------
+    groups : `list` [`ExposureGroup`]
+        The batches, shortest exposure first. Always at least one.
+    """
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+        split_frames_by_exposure,
+        split_groups_by_night,
+    )
+
+    groups = split_frames_by_exposure(frames)
+    if is_spectral:
+        groups = split_groups_by_night(groups)
+    return groups
 
 
 def run_stack(
@@ -147,21 +186,7 @@ def run_stack(
     """
     if output_file is None:
         output_file = f"{target_id.replace(' ', '_')}_Stacked.fits"
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-        split_frames_by_exposure,
-        split_groups_by_night,
-    )
-
-    # Frames of different exposure lengths are stacked one length at a time,
-    # for spectra and for images. Each length needs the dark frames of its own
-    # length, and the normalization and rejection of one stack cannot treat
-    # frames of different lengths as one population (see `exposure_groups`).
-    groups = split_frames_by_exposure(frames)
-    if is_spectral:
-        # Each night's frames are stacked on their own too: the zero order
-        # sits on a different pixel each night and registering two nights
-        # together can lose most frames (see `split_groups_by_night`).
-        groups = split_groups_by_night(groups)
+    groups = split_into_stack_batches(frames, is_spectral)
     if len(groups) > 1:
         stacked_path, diagnostics = _stack_exposure_groups(
             engine,

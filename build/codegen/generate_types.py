@@ -34,7 +34,13 @@ from astrometricslib.models.moving_object import (
     FrameDetection,
     MovingObjectTrack,
 )
-from astrometricslib.models.processing_results import PreviewRemakeResult
+from astrometricslib.models.processing_results import (
+    PredictedCalibration,
+    PredictedFrame,
+    PredictedGroup,
+    PreviewRemakeResult,
+    StackPrediction,
+)
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.quality.blink_pair import BlinkPair
 from astrometricslib.models.quality.capture_setting import CaptureSetting
@@ -78,6 +84,8 @@ from astrometricslib.models.quality.quality_summary import (
     NoiseModelPoint,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
+    SessionScintillationRecord,
+    SessionTieRecord,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
     StackingPipelineQualityMetrics,
@@ -640,6 +648,8 @@ def render_types() -> str:
         generate_interface(AstrometryQualitySummary, "AstrometryQualitySummary"),
         generate_interface(FrameEnsembleComposition, "FrameEnsembleComposition"),
         generate_interface(NoiseModelPoint, "NoiseModelPoint"),
+        generate_interface(SessionTieRecord, "SessionTieRecord"),
+        generate_interface(SessionScintillationRecord, "SessionScintillationRecord"),
         generate_interface(PhotometryPipelineQualityMetrics, "PhotometryPipelineQualityMetrics"),
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
@@ -724,6 +734,10 @@ def render_types() -> str:
                 JobWarning,
                 StackSummary,
                 PreviewRemakeResult,
+                StackPrediction,
+                PredictedGroup,
+                PredictedCalibration,
+                PredictedFrame,
                 SetAsideFrameRecord,
                 BlinkPair,
                 StackReviewStart,

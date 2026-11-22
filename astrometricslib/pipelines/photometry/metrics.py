@@ -65,6 +65,14 @@ PHOTOMETRY_POSITION_ONLY_STAR_COUNT = "photometry.position_only_star_count"
 PHOTOMETRY_UNRESOLVED_STAR_COUNT = "photometry.unresolved_star_count"
 PHOTOMETRY_STARS_WITH_SCATTER = "photometry.stars_with_light_curve_scatter_count"
 PHOTOMETRY_NOISE_MODEL_STAR_COUNT = "photometry.noise_model_star_count"
+PHOTOMETRY_SATURATED_POINTS_REMOVED_COUNT = "photometry.saturated_points_removed_count"
+PHOTOMETRY_STARS_WITH_SATURATED_POINTS_COUNT = "photometry.stars_with_saturated_points_removed_count"
+PHOTOMETRY_SESSIONS_TIED_COUNT = "photometry.sessions_tied_count"
+PHOTOMETRY_SESSIONS_UNTIED_COUNT = "photometry.sessions_untied_count"
+PHOTOMETRY_SESSION_TIE_SPREAD_FRACTION = "photometry.session_tie_spread_worst_fraction"
+PHOTOMETRY_SCINTILLATION_COEFFICIENT = "photometry.scintillation_coefficient"
+PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG = "photometry.scintillation_term_median_mag"
+PHOTOMETRY_SCINTILLATION_NOT_MEASURED_COUNT = "photometry.scintillation_not_measured_sessions_count"
 PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG = "photometry.light_curve_scatter_rms_median_mag"
 PHOTOMETRY_COMPARISON_SCATTER_OVER_PREDICTED = "photometry.comparison_scatter_over_predicted_worst"
 PHOTOMETRY_CORNER_DISPLACEMENT_P95_PX = "photometry.corner_displacement_p95_worst_px"
@@ -926,6 +934,106 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The stars of the run.",
         "A thin sample makes the noise model unreliable, and the scatter-population check reads it.",
         better=Direction.HIGHER,
+        register_entry="PHO-17",
+    ),
+    _count_metric(
+        PHOTOMETRY_SATURATED_POINTS_REMOVED_COUNT,
+        "How many saturated points were taken out of the stars' light curves.",
+        "Sum, over the stars of the run, of the points removed because the star was saturated in that "
+        "frame (a saturated pixel share of 0.1 percent of the aperture or more). The star records keep "
+        "their own counts in `saturated_points_removed`.",
+        "The stars of the run, one count for each star.",
+        "A saturated point does not follow the star's brightness, so it is left out of every statistic. "
+        "The count shows how much that cost, so the removal is not silent.",
+        better=Direction.LOWER,
+        register_entry="PHO-17",
+    ),
+    _count_metric(
+        PHOTOMETRY_STARS_WITH_SATURATED_POINTS_COUNT,
+        "How many stars lost at least one saturated point.",
+        "Count of the stars whose light curve had one or more saturated points removed. Some of them "
+        "were saturated in every frame and have no light curve; each says so in its "
+        "`light_curve_withheld_reason`.",
+        "The stars of the run.",
+        "It shows how many stars the saturation removal touched, next to the count of points removed.",
+        better=Direction.LOWER,
+        register_entry="PHO-17",
+    ),
+    _count_metric(
+        PHOTOMETRY_SESSIONS_TIED_COUNT,
+        "How many sessions were scaled onto the reference session's brightness scale.",
+        "Count of the sessions, other than the reference session, whose normalized levels were "
+        "multiplied by the factor found from the stars they share with the reference session.",
+        "The sessions of a run that joined several sessions.",
+        "A tied session's level can be compared with the others; the count shows how many were.",
+        better=Direction.HIGHER,
+        register_entry="PHO-14",
+    ),
+    _count_metric(
+        PHOTOMETRY_SESSIONS_UNTIED_COUNT,
+        "How many sessions could not be tied to the reference session.",
+        "Count of the sessions, other than the reference session, left as measured because fewer "
+        "than the minimum number of usable tie stars were shared with the reference session, or "
+        "because the session had no plate solution. Each reason is in the job's warnings.",
+        "The sessions of a run that joined several sessions.",
+        "An untied session's level is on its own scale, so its change between sessions is not "
+        "reported as comparable. The count keeps that visible.",
+        better=Direction.LOWER,
+        register_entry="PHO-14",
+    ),
+    _measurement_metric(
+        PHOTOMETRY_SESSION_TIE_SPREAD_FRACTION,
+        "fraction",
+        "How much the tie stars' level ratios scatter, in the worst tied session.",
+        "For each tied session, 1.4826 times the median absolute deviation of the logarithm of the "
+        "tie stars' level ratios (reference session over this session), after clipping. The value "
+        "is the largest over the tied sessions. 0.1 means 10 percent.",
+        "The tie stars of every tied session.",
+        "The tie factor is only as good as the stars agree on it. A wide spread means the two "
+        "sessions differ by more than one common factor.",
+        "pipelines.photometry.session_tie.measure_session_tie",
+        register_entry="PHO-14",
+    ),
+    _measurement_metric(
+        PHOTOMETRY_SCINTILLATION_COEFFICIENT,
+        "",
+        "The multiplier on Young's scintillation prediction that the flux errors carry.",
+        "For each session, the weighted least-squares fit of the comparison stars' scatter beyond their "
+        "CCD errors against Young's prediction for each frame, as a square root (kept between 0.5 and "
+        "3, or the factor 1.5 when the session has too few stars or frames). The value is the median "
+        "over the sessions.",
+        "The sessions of the run.",
+        "The CCD equation has no scintillation term. This is the size of the term that was added, so a "
+        "reader can see whether the air, the site height or the telescope changed it. 1 means Young's "
+        "formula as written.",
+        "pipelines.photometry.processing.scintillation_term.build_scintillation_term",
+        better=Direction.NONE,
+        register_entry="PHO-17",
+    ),
+    _measurement_metric(
+        PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG,
+        "mag",
+        "The size of the scintillation term in a point's error, in the median frame.",
+        "For each session, Young's prediction for each frame times the coefficient, as a fraction of "
+        "flux in magnitudes (1.0857 times the fraction), taken at the median frame. The value is the "
+        "median over the sessions.",
+        "The sessions of the run.",
+        "It is the floor under a bright star's scatter that no exposure of this length can go below. "
+        "A star that scatters less than it is not noise-limited by the air.",
+        "pipelines.photometry.processing.scintillation_term.build_scintillation_term",
+        better=Direction.NONE,
+        register_entry="PHO-17",
+    ),
+    _count_metric(
+        PHOTOMETRY_SCINTILLATION_NOT_MEASURED_COUNT,
+        "How many sessions have a scintillation coefficient that was not measured.",
+        "Count of the sessions whose coefficient is the documented fallback factor, was limited to the "
+        "plausible range, or was not found at all. The reason of each is in its `sessionScintillation` "
+        "record.",
+        "The sessions of the run.",
+        "A measured coefficient follows the session's own comparison stars. A fallback does not, so the "
+        "count shows how many sessions have a term that is only a published estimate.",
+        better=Direction.LOWER,
         register_entry="PHO-17",
     ),
     _measurement_metric(

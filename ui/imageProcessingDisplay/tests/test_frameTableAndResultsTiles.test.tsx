@@ -1,6 +1,6 @@
 /**
  * @fileoverview Tests that the analysis results tiles and the file browser show only
- * numbers the backend sends: no star width tiles or column that nothing fills.
+ * numbers the backend sends: no frame-count blocks and no star width tiles or column that nothing fills.
  */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
@@ -9,14 +9,16 @@ import { AnalysisResults } from '../analysisResults/AnalysisResults';
 import { FileBrowser } from '../fileBrowser/FileBrowser';
 
 describe('AnalysisResults', () => {
-    it('shows the frame counts and no star width tile', () => {
+    it('shows no total, unusual brightness or accepted blocks, and no job message', () => {
         render(
             <AnalysisResults
-                results={{ status: 'completed', targetId: 'M 31', analysisMode: 'variability', totalImages: 10, rejectedCount: 2 }}
+                results={{ status: 'completed', targetId: 'M 31', analysisMode: 'variability', totalImages: 10, rejectedCount: 2, message: 'Ran photometry.' }}
             />
         );
-        expect(screen.getByText('Accepted')).toBeTruthy();
-        expect(screen.getByText('8')).toBeTruthy();
+        expect(screen.queryByText('Ran photometry.')).toBeNull();
+        expect(screen.queryByText('Total Images')).toBeNull();
+        expect(screen.queryByText('Unusual brightness')).toBeNull();
+        expect(screen.queryByText('Accepted')).toBeNull();
         expect(screen.queryByText(/FWHM/)).toBeNull();
     });
 });

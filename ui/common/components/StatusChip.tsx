@@ -2,7 +2,8 @@
  * @fileoverview StatusChip: a Badge with an icon and a word, so a status is never told by color alone.
  */
 
-import React from 'react';
+import React, { useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Badge } from './Badge';
 
 export type StatusChipStatus = 'ok' | 'warning' | 'error' | 'info' | 'neutral';
@@ -23,7 +24,18 @@ export interface StatusChipProps {
      * and in the tooltip.
      */
     compact?: boolean;
+    /**
+     * Rich content (a table, a list) shown in a popover under the chip while the pointer is over it or
+     * the chip has keyboard focus. The chip becomes focusable; Escape hides the popover. The chip's
+     * word and status stay the only status on the screen; the details explain it.
+     */
+    details?: React.ReactNode;
 }
+
+/** Gap in pixels between the chip and its details popover. */
+const DETAILS_GAP_PX = 4;
+/** Closest the details popover may come to the window edge, in pixels. */
+const DETAILS_EDGE_MARGIN_PX = 8;
 
 /** Inline SVG icons, one shape per status so the shapes differ as well as the colors. */
 const STATUS_ICON_PATHS: Record<StatusChipStatus, React.ReactNode> = {
@@ -39,9 +51,12 @@ const STATUS_ICON_PATHS: Record<StatusChipStatus, React.ReactNode> = {
  * @param props See {@link StatusChipProps}.
  * @return The chip element.
  */
-export const StatusChip: React.FC<StatusChipProps> = ({ status, label, shortLabel, title, compact = false }) => (
+export const StatusChip: React.FC<StatusChipProps> = ({
+    status, label, shortLabel, title, compact = false, details,
+}) => {
+    const chip = (
     <Badge
-        title={title ?? (shortLabel || compact ? label : undefined)}
+        title={details ? title : (title ?? (shortLabel || compact ? label : undefined))}
         {...(shortLabel ? { role: 'img', 'aria-label': label } : {})}
         tone={status}
         className={`status-chip status-chip--${status}${compact ? ' status-chip--compact' : ''}`}
@@ -61,4 +76,73 @@ export const StatusChip: React.FC<StatusChipProps> = ({ status, label, shortLabe
             <span className="status-chip__word">{label}</span>
         )}
     </Badge>
-);
+    );
+    return details ? <StatusChipDetails chip={chip}>{details}</StatusChipDetails> : chip;
+};
+
+/**
+ * Wraps a chip so that hovering or focusing it shows rich content in a popover on the page body, so
+ * no panel clips it. The wrapper is focusable and points to the popover with `aria-describedby`.
+ * @param props The chip and its details.
+ * @return The wrapped chip.
+ */
+const StatusChipDetails: React.FC<{ chip: React.ReactNode; children: React.ReactNode }> = ({ chip, children }) => {
+    const detailsId = useId();
+    const [isHovered, setIsHovered] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    const isShown = isHovered || isFocused;
+    const triggerRef = useRef<HTMLSpanElement>(null);
+    const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+    // Place the popover under the chip, left edges lined up, and follow the chip on scroll or resize.
+    useLayoutEffect(() => {
+        if (!isShown) {
+            setPosition(null);
+            return undefined;
+        }
+        const place = () => {
+            const rect = triggerRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            setPosition({ top: rect.bottom + DETAILS_GAP_PX, left: Math.max(DETAILS_EDGE_MARGIN_PX, rect.left) });
+        };
+        place();
+        window.addEventListener('scroll', place, true);
+        window.addEventListener('resize', place);
+        return () => {
+            window.removeEventListener('scroll', place, true);
+            window.removeEventListener('resize', place);
+        };
+    }, [isShown]);
+
+    return (
+        <span
+            ref={triggerRef}
+            className="status-chip__details-trigger"
+            tabIndex={0}
+            aria-describedby={isShown ? detailsId : undefined}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                    setIsHovered(false);
+                    setIsFocused(false);
+                }
+            }}
+        >
+            {chip}
+            {isShown && createPortal(
+                <div
+                    id={detailsId}
+                    role="tooltip"
+                    className="status-chip__details"
+                    style={position ?? { visibility: 'hidden' }}
+                >
+                    {children}
+                </div>,
+                document.body,
+            )}
+        </span>
+    );
+};

@@ -244,9 +244,10 @@ def _calibration_files(frames: list[Any], library: Any) -> dict[str, list[list[A
     }
     found: dict[str, set[str]] = {"darks": set(), "biases": set(), "flats": set()}
     for telescope, camera, iso, offset, filter_type, exposure in combinations:
-        found["darks"].update(
-            library.get_dark_frames(camera=camera, iso=iso, offset=offset, exposure=exposure)
-        )
+        # A dark the defect job left out is not in the master, so it is not
+        # an input.
+        dark_paths = library.get_dark_frames(camera=camera, iso=iso, offset=offset, exposure=exposure)
+        found["darks"].update(library.without_omitted_darks(dark_paths))
         found["biases"].update(library.get_bias_frames(camera=camera, iso=iso, offset=offset))
         found["flats"].update(
             library.get_flat_frames(

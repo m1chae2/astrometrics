@@ -74,6 +74,12 @@ FRAME_BLOCK_RANGE = "frame.block_range_adu"
 FRAME_NEIGHBOR_NOISE = "frame.neighbor_noise_adu"
 FRAME_PIXEL_CHECKSUM = "frame.pixel_checksum"
 FRAME_VALUE_STEP = "frame.value_step_adu"
+# The metrics that only dark frames get, measured against the dark's own set
+# (`DARK_DEFECT_METRICS`).
+FRAME_DARK_HIT_COUNT = "frame.dark_hit_count"
+FRAME_DARK_LONGEST_STREAK = "frame.dark_longest_streak_px"
+FRAME_DARK_EDGE_STREAK = "frame.dark_edge_to_edge_streak"
+FRAME_DARK_OUTLIER_COUNT = "frame.dark_outlier_pixel_count"
 
 _FRAME_ONLY = (SubjectLevel.FRAME,)
 
@@ -874,3 +880,121 @@ CALIBRATION_FRAME_METRIC_NAMES: tuple[str, ...] = (
     FRAME_SENSOR_TEMPERATURE,
     *(spec.name for spec in CALIBRATION_FRAME_METRICS),
 )
+
+_DARK_DEFECT_SAMPLE = (
+    "Every pixel of the dark frame, after the per-pixel median of the frames of its own set (same "
+    "camera, gain, offset, binning, temperature slot and exposure) is subtracted."
+)
+_DARK_DEFECT_MODULE = "pipelines.shared.quality.dark_defect_measurement"
+_DARK_DEFECT_ESTIMATOR = (
+    "The set's per-pixel median of up to 7 frames is subtracted. Pixels more than 16 noise widths "
+    "above it are outliers (the noise width is the larger of the profile's read noise and the "
+    "frame's own spread). Outliers within 2 pixels of each other form one group."
+)
+
+# These four are measured together, in one pass over a dark frame and its
+# set's reference. They are stored under a separate stamp of their own, so
+# adding them does not measure every dark again.
+DARK_DEFECT_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=FRAME_DARK_HIT_COUNT,
+        definition_version=1,
+        unit="count",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The number of small bright groups (single pixels and short tracks) in a dark frame, "
+            "away from its set's median."
+        ),
+        decisions=("dark defect check",),
+        estimator=(
+            f"{_DARK_DEFECT_ESTIMATOR} The value is the number of groups shorter than the long-track limit."
+        ),
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "Ordinary hits are expected (about one a frame) and never leave a dark out; the count shows "
+            "how busy the frame was."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_DARK_LONGEST_STREAK,
+        definition_version=1,
+        unit="px",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning="The length of the longest bright track in a dark frame, away from its set's median.",
+        decisions=("dark defect check",),
+        estimator=(
+            f"{_DARK_DEFECT_ESTIMATOR} The value is the longer side of the box around the longest group."
+        ),
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A long track inside the frame is a particle or a meteor; the median master ignores it, so "
+            "the dark is kept with a warning."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_DARK_EDGE_STREAK,
+        definition_version=1,
+        unit="",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "1 when a bright track in a dark frame runs from one frame edge to another, 0 when none does."
+        ),
+        decisions=("dark defect check",),
+        estimator=(
+            f"{_DARK_DEFECT_ESTIMATOR} The value is 1 when one group touches two different frame edges and "
+            "is at least half the short side of the frame long."
+        ),
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A straight track across the whole frame is a satellite or aircraft: light reached the "
+            "sensor, so the dark is left out of the master."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_DARK_OUTLIER_COUNT,
+        definition_version=1,
+        unit="count",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning="The number of pixels of a dark frame that are far above its set's median.",
+        decisions=("dark defect check",),
+        estimator=_DARK_DEFECT_ESTIMATOR + " The value is the number of outlier pixels.",
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A light leak, a warm sensor or a damaged file lifts a large share of the pixels at once; "
+            "such a dark is left out of the master."
+        ),
+    ),
+)
+DARK_DEFECT_METRIC_NAMES: tuple[str, ...] = tuple(spec.name for spec in DARK_DEFECT_METRICS)

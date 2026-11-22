@@ -541,6 +541,21 @@ class SessionPhotometrySummary(BaseModel):
     # scatter exceeded what their errors allow, and stars a catalog lists as
     # variable. `None` for a session recorded before the set was vetted.
     comparison_rejected_count: int | None = Field(default=None, alias="comparisonRejectedCount")
+    # How the session was put on the field's brightness scale before the
+    # sessions were joined (see `pipelines.photometry.session_tie`): the
+    # reference session ("reference", scaled by nothing), a session scaled by
+    # the field's factor ("tied") or a session left as measured ("untied",
+    # because too few stars were shared). `None` for a light curve saved
+    # before sessions were tied. When "tied", `median_normalized_flux`,
+    # `normalized_flux_scatter` and the light curve's normalized fluxes are
+    # already multiplied by `tie_factor` (no units).
+    tie_status: str | None = Field(default=None, alias="tieStatus")
+    tie_factor: float | None = Field(default=None, alias="tieFactor")
+    # The uncertainty of the tie factor, as a fraction of the level (0.02 is
+    # 2%). The same for every star of the session, because it is a property of
+    # the session. The between-session significance adds it to the error of
+    # the session's median.
+    tie_uncertainty: float | None = Field(default=None, alias="tieUncertainty")
 
 
 class PhotometryResult(BaseModel):
@@ -558,6 +573,19 @@ class PhotometryResult(BaseModel):
     airmasses: list[float] = Field(default_factory=list, alias="airmasses")
     magnitudes: list[float] = Field(default_factory=list, alias="magnitudes")
     is_saturated: list[bool] = Field(default_factory=list, alias="isSaturated")
+    # How many of this star's measurements were removed from the light curve
+    # because the star was saturated in that frame (a saturated star's flux
+    # no longer follows its brightness). The removed points are in none of
+    # the arrays above, so every array holds only unsaturated points. For a
+    # light curve merged from several sessions this is the sum of the
+    # sessions' counts. 0 when nothing was removed, and for a light curve
+    # saved before saturated points were removed.
+    saturated_points_removed: int = Field(default=0, alias="saturatedPointsRemoved")
+    # Why this star has no light curve although it was measured, in plain
+    # words (for example, that it was saturated in every frame). `None`
+    # when the star has a light curve, or when it was saved before this was
+    # recorded.
+    light_curve_withheld_reason: str | None = Field(default=None, alias="lightCurveWithheldReason")
     # The 1-sigma uncertainty of each entry of `fluxes`, in ADU per second
     # (the same units), from the CCD equation (see
     # `pre_processing.frame_photometry.aperture_flux_error_adu`). Empty, or

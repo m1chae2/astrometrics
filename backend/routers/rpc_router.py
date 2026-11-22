@@ -162,6 +162,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # and the target's processed-image pointer), so the AI's read-only
     # profile withholds it.
     "processing:remake_preview": ("stack_review_service", "start_preview_remake"),
+    # What a stack would do with its frames: which it would set aside and why,
+    # and which darks, flats and bias each exposure group would use. It reads
+    # every frame, so the service runs it as a background job. Nothing is
+    # stacked, moved, stored or saved.
+    "processing:check_stack": ("stack_review_service", "start_stack_check"),
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
     "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),

@@ -2,8 +2,8 @@
  * @file stackReviewService.ts
  * @description Calls the backend for the checks a person can run on a finished stack: making the
  * preview picture again, reading why frames were set aside, and reading the warnings a stack
- * raised. The two slow checks start a background job; the answer is the result, or the job to
- * follow.
+ * raised. The slow checks (the preview remake, the stack comparison and the frame check) start a
+ * background job; the answer is the result, or the job to follow.
  */
 
 import { callBackend } from '../backendApi';
@@ -14,6 +14,7 @@ import type {
     ProcessingJob,
     QualityMeasurement,
     SetAsideFrameRecord,
+    StackPrediction,
     StackReviewStart,
 } from '../../types/backendTypes';
 
@@ -211,4 +212,26 @@ export async function startStackComparison(targetId: string, kind: StackKind): P
 export function stackComparisonReportOf(job: ProcessingJob): StackComparisonReportView | null {
     const stored = job.outputMetrics?.result;
     return stored ? (stored as StackComparisonReportView) : null;
+}
+
+/**
+ * Starts checking what stacking would do with some frames. Nothing is stacked or changed.
+ * @param targetId The target.
+ * @param imageFiles The frames the Stack Frames click would send, as file paths.
+ * @return The prediction when it finished at once, or the job to follow.
+ */
+export async function startStackCheck(targetId: string, imageFiles: string[]): Promise<StackReviewStart> {
+    // Silent: the panel shows the error beside the button, so no second message pops up.
+    return callBackend(
+        'processing:check_stack', { target_id: targetId, image_files: imageFiles }, { silent: true });
+}
+
+/**
+ * Reads the stack prediction out of a finished job.
+ * @param job The job.
+ * @return The prediction the job stored, or `null` if it has none.
+ */
+export function stackPredictionOf(job: ProcessingJob): StackPrediction | null {
+    const stored = job.outputMetrics?.result;
+    return stored ? (stored as StackPrediction) : null;
 }

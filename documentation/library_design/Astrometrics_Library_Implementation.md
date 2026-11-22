@@ -4,19 +4,17 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the code and the tests that check it. It lists each pipeline's tuned values with status labels.
-
-The [glossary](../Glossary.md) defines the terms; this document defines each at first use.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the source in `astrometricslib/`, naming the code, its tests and each pipeline's tuned values with status labels.
 
 ## 1. Scope
 
-**Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence is in the [validation register](validation/index.md). Module paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) detail each stage.
+**Statement of need.** The [glossary](../Glossary.md) defines the terms. Theory: [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence: the [validation register](validation/index.md). Paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) detail each stage.
 
-The supported entry point is the package root (`from astrometricslib import Astrometrics`). Besides 16 root names, `exceptions.py`, `reports.py`, `jobs.py` and `drivers/` are public. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
+The entry point is the package root (`from astrometricslib import Astrometrics`). Besides 16 root names, `exceptions.py`, `reports.py`, `jobs.py` and `drivers/` are public. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
 
 ## 2. Package layering
 
-Each layer imports only from the layers below it; the Appendix A ratchet test enforces this.
+Each layer imports only from layers below it (enforced by the Appendix A ratchet).
 
 **Table 1.** The six layers.
 
@@ -31,88 +29,94 @@ Each layer imports only from the layers below it; the Appendix A ratchet test en
 
 `visualization/` sits outside the layers.
 
-The pipelines delegate to outside services: Siril for headless stacking, Astrometry.net [3] and Gaia through VizieR [4] or the ESA archive via astroquery [5] and SIMBAD [6] for plate solving and star identification, Gaia XP and DR3 for spectroscopy, and IMCCE SkyBoT for asteroid detection.
+Outside services: Siril for headless stacking, Astrometry.net [3] and Gaia through VizieR [4] or the ESA archive via astroquery [5] and SIMBAD [6] for plate solving and star identification, Gaia XP and DR3 for spectroscopy, and IMCCE SkyBoT for asteroid detection.
 
-`process_target` (`api/processing.py`) runs the chosen stages in a fixed order through `pipelines.tasks.run_target_stages`; a target list runs each in its own process (`pipelines.target_batch.process_targets_in_parallel`).
+`process_target` (`api/processing.py`) runs chosen stages through `pipelines.tasks.run_target_stages`, adding astrometry per `STAGE_PREREQUISITES`; a list runs each in a process (`pipelines.target_batch.process_targets_in_parallel`).
 
 ## 3. Data models
 
-Pydantic classes in `models/` hold fields and validation only. Table 2 maps Architecture §2's records to them.
+`models/` classes hold fields and validation only (Table 2 maps Architecture §2's records).
 
 **Table 2.** Architecture records and their classes.
 
 | Architecture record | Classes | Module |
 | --- | --- | --- |
 | Observation target (§2.1) | `Target`, `FrameRecord`, `ImageType` | `models/target.py` |
-| Stellar object (§2.1) | `StellarObject`, with `PhotometryResult`, `PeriodogramResult`, `TransitCandidate`, `SpectroscopyResult` and others | `models/stellar_source.py`, `models/spectral_cross_checks.py` |
+| Stellar object (§2.1) | `StellarObject`, with `PhotometryResult`, `PeriodogramResult`, `TransitCandidate`, `SpectroscopyResult` etc. | `models/stellar_source.py`, `models/spectral_cross_checks.py` |
 | Moving object candidate (§2.1) | `AsteroidDetectionCandidate`, `FrameDetection`, `MovingObjectTrack`, `EphemerisMatch` | `models/moving_object.py` |
-| Quality record (§2.1) | `PipelineQualitySummaryBase`, a subclass per pipeline (such as `StackQualitySummary`), `GateResult`, `GateStatus` | `models/quality/quality_summary.py`, `models/quality/gate_result.py` |
+| Quality record (§2.1) | `PipelineQualitySummaryBase`, a subclass per pipeline (e.g. `StackQualitySummary`), `GateResult`, `GateStatus` | `models/quality/quality_summary.py`, `models/quality/gate_result.py` |
 | Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise`, `ProvenancedValue`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
-| Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent` and `Entity` | `models/provenance.py` |
+| Provenance (§2.3) | IVOA Provenance Data Model [7] classes (`Agent`, `Entity`) | `models/provenance.py` |
 
-Camera profiles: `_internal/drivers/camera_profile_store.py`, `camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py`. Provenance: `pipelines/shared/provenance_recording.py`, `_internal/drivers/provenance_store.py`. Two `CameraProfile` properties give saturation levels: `pixel_saturation_level_adu` (threshold capped at the clip ceiling) counts saturated pixels, and `usable_peak_level_adu` (also capped at the linearity limit) decides whether a star is photometric ([STK-36](validation/stacking.md#stk-36)).
+Camera profiles: `_internal/drivers/camera_profile_store.py`, `camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py`. Provenance: `pipelines/shared/provenance_recording.py`, `_internal/drivers/provenance_store.py`. `CameraProfile` gives two saturation levels: `pixel_saturation_level_adu` (threshold capped at the clip ceiling) counts saturated pixels; `usable_peak_level_adu` (also capped at the linearity limit) decides whether a star is photometric ([STK-36](validation/stacking.md#stk-36)).
 
 ## 4. Pipelines
 
 Paths are relative to the pipeline's folder unless they start with `astrometricslib/`.
 
-### 4.1 Stacking (Architecture §3)
+### 4.1 Stacking (§3)
 
-*Located in:* `astrometricslib/pipelines/stacking/`
+*Code:* `astrometricslib/pipelines/stacking/`
 
 - **Interfaces (§3.1).** `stack_request.py`, `stage.py` (`stack_frames`), `stack_runner.py`.
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/_internal/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
-- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py` and `pre_processing/sensor_noise.py`. `save=True` writes the profile. `CameraProfile.sensor_noise_for` matches gain, offset and binning exactly; with `clipped_at_zero=False` (from the share of exact zeros, `CLIPPED_FRAME_ZERO_FRACTION`) it falls back to the nearest other offset at that gain and binning, ties higher. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for --> Evidence: [STK-35](validation/stacking.md#stk-35); the fallback is a design estimate ([table](validation/stacking.md#design-estimates)).
+- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` calls `sensor_noise_run.py` and `pre_processing/sensor_noise.py`. `CameraProfile.sensor_noise_for` matches gain, offset and binning exactly; with `clipped_at_zero=False` (`CLIPPED_FRAME_ZERO_FRACTION`) it falls back to the nearest offset at that gain and binning, ties higher. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for --> [STK-35](validation/stacking.md#stk-35); the fallback is a design estimate ([table](validation/stacking.md#design-estimates)).
 - **Flat bias.** `staging._select_flat_bias_frames` ([STK-57](validation/stacking.md#stk-57)).
+- **Stack prediction (§3.3).** `predict_stack` runs `screen_frames` with `dry_run=True`, splits with `split_into_stack_batches`, and picks calibration with `choose_batch_calibration` and `choose_flat_bias`, as Siril staging does.
+- **Master darks.** Combined with the median (`stack dark med -nonorm`), so one cosmic-ray track cannot reach the master; the master bias and flat keep sigma rejection (STK-D02, STK-D76).
+- **Dark defects (§3.4.1).** `dark_defect_run.py`, `pre_processing/dark_defect_judgement.py`; `choose_batch_calibration` skips them (STK-D77). <!-- impl: astrometricslib.pipelines.stacking.dark_defect_run.measure_dark_defects_in_library --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.dark_defect_judgement.judge_dark_defects --> <!-- impl: astrometricslib.pipelines.shared.quality.dark_defect_measurement.measure_dark_defects -->
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `stack_filter_floor.py`.
-- **Exposure groups and weights (§3.2).** `processing/exposure_groups.py` and its `group_*.py` helpers; `pre_processing/exposure_weighting.py`. `fold_exposure_lengths` assigns each exposure length a group. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.fold_exposure_lengths --> `combine_exposure_group_images` returns an `ExposureGroupCombination`: each group's applied gain (stored as `stacking.group_gain_applied`), sky level, weight and masks. <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.ExposureGroupCombination --> `post_processing/stack_membership.group_frame_weights` gives frame i of group g the raw weight `W_g * w_i / sum(w)` with `W_g = N t^2 / s^2`, without the gain, and leaves a group's weights unknown, with a reason, in the cases the stacking README lists. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_frame_weights --> In a folded group Siril scales frame `i` to the group's reference frame by `k_i = t_ref / t_i` (`group_exposure_scales`; a design estimate). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_exposure_scales --> `group_references` finds the reference frame; `stacking.group_reference_exposure_s` stores its exposure. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_references --> A group stack's reference frame is the identity line of its heaviest group (`registration_reference_from_diagnostics`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.registration_reference_from_diagnostics --> A group's frame noise `s_g` clips neighbor differences at `NOISE_CLIP_SIGMAS`. <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.NOISE_CLIP_SIGMAS --> Empty apertures stay `uncovered_clearance_px()` from any group's uncovered border. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.uncovered_clearance_px -->
+- **Exposure groups and weights (§3.2).** `processing/exposure_groups.py` and its `group_*.py` helpers; `pre_processing/exposure_weighting.py`. `fold_exposure_lengths` assigns each exposure length a group. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.fold_exposure_lengths --> `combine_exposure_group_images` returns an `ExposureGroupCombination`: each group's applied gain (`stacking.group_gain_applied`), sky level, weight and masks. <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.ExposureGroupCombination --> `post_processing/stack_membership.group_frame_weights` gives frame i of group g the raw weight `W_g * w_i / sum(w)` (`W_g = N t^2 / s^2`) without the gain, and leaves weights unknown, with a reason, in the stacking README's cases. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_frame_weights --> Siril scales frame `i` of a folded group to its reference by `k_i = t_ref / t_i` (`group_exposure_scales`; design estimate). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_exposure_scales --> `group_references` finds the reference frame and `stacking.group_reference_exposure_s` stores its exposure. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_references --> A group stack's reference is the identity line of its heaviest group (`registration_reference_from_diagnostics`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.registration_reference_from_diagnostics --> A group's frame noise `s_g` clips neighbor differences at `NOISE_CLIP_SIGMAS`. <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.NOISE_CLIP_SIGMAS --> Empty apertures stay `uncovered_clearance_px()` from a group's uncovered border. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.uncovered_clearance_px -->
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
-- **Previews (§3.3).** `post_processing/stack_preview.py` and its helpers, `preview_remake.py`.
+- **Previews (§3.3).** `post_processing/stack_preview.py` and `preview_remake.py`. `masked_stretch.py` gives a smooth bright nebula or galaxy region a second stretch (`MASKED_STRETCH_STAR_PEAK_LIMIT` 0.35). Design estimate (STK-D75). <!-- impl: astrometricslib.pipelines.stacking.post_processing.masked_stretch.MASKED_STRETCH_STAR_PEAK_LIMIT -->
 - **Frame measurement (§3.4).** `QualityRecords.record_frame_measurements` (`frame_measurement_run.py`). Evidence: [AST-17](validation/astrometry.md#ast-17), [AST-18](validation/astrometry.md#ast-18).
-- **Frame geometry (§3.4).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores frame rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for astrometry (§4.2) and the one registration reader (`is_already_registered`). `record_quality.FrameGeometryRows` keeps rotation and pointing rows apart. Evidence: [STK-43](validation/stacking.md#stk-43).
+- **Frame geometry (§3.4).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for astrometry (§4.2) and the sole registration reader (`is_already_registered`). `record_quality.FrameGeometryRows` separates rotation and pointing rows. [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`/`optic_selection.py`, `assess_input_quality.py`.
 - **Calibration frame checks (§3.4.1).** Limits: `ZERO_PIXEL_FRACTION_LIMIT` 0.001, `VALUE_STEP_ALLOWANCE` 2, `NOISE_RATIO_LOW` and `NOISE_RATIO_HIGH` 0.9 and 1.1, `CEILING_SHARE_LIMIT` 0.001, `DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND` 0.002 and `THIN_SET_FRAME_COUNT` 10. Evidence: [STK-47](validation/stacking.md#stk-47) to [STK-56](validation/stacking.md#stk-56); STK-D36. <!-- impl: astrometricslib.pipelines.shared.quality.calibration_frame_measurement.measure_calibration_frame --> <!-- impl: astrometricslib.pipelines.stacking.calibration_measurement_run.measure_calibration_frames --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.assess_dark_or_bias_frames --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health.assess_stack_calibration -->
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`. Eq. 5: `fwhm_sampling.measure_fwhm_degradation` (definition version 2). <!-- impl: astrometricslib.pipelines.stacking.fwhm_sampling.stored_frame_widths --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm -->
-- **Stack measurements (§3.4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> Without a solution, the noise step tries up to `MEMBER_FRAME_ATTEMPTS` member frames of the reference group. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> Last, `_plate_solve_stack_wcs` solves it with `AstrometryPipeline.solve_wcs`, refit from the Gaia cache (`PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_REFIT_WCS_SOURCE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_UNREFINED_WCS_SOURCE --> The aperture set file keeps one set per camera, optic and reference exposure (`camera|telescope|focal|exp=<s>`). Subset and odd–even stacks use the library stack's set (`find_library_set_key`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.record_library_set_key --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.find_library_set_key --> `stacking.frames_stacked_count` (definition version 2) counts the frames of the member rows (`stack_membership.count_frames_stacked`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.count_frames_stacked --> `post_processing/normalization_scale.py` measures Siril's normalization scale and stores `stacking.normalization_scale`; the expected-noise rows (definition version 2) are multiplied by it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.EXPOSURE_MATCH_FRACTION --> The noise and weights come from `post_processing/stack_noise.py`, `empty_apertures.py`, `difference_noise.py`, `stack_image.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
-- **Predicted noise of an exposure-group stack (§3.4).** `expected_noise.expected_exposure_group_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_exposure_group_noise --> gives frame `i` of group `g` the coefficient `W_g ŵ_i / (ΣW · G_g)` in counts per second (`W_g` the combine weight, `ŵ_i` the frame's share, `G_g` the applied gain, 1 when unmeasured, which marks the rows assumed). The noise follows from the squared coefficients times each frame's variance (times `k_i` squared, `FrameNoiseInput.exposure_scale`), the mean exposure, the unit scale and the aperture multiplier. `record_science.compute_expected_noise` refuses (not measured) when `clipped_exposure_groups` is not empty, and gives the membership's reason when the weights are unknown. Register: [STK-38](validation/stacking.md#stk-38), [STK-59](validation/stacking.md#stk-59), [STK-60](validation/stacking.md#stk-60) (failed).
-- **Aperture set identity (§3.4).** `stacking.aperture_set_number` (every noise stack) and its odd–even difference twin hold the set's identity as one number (`aperture_identity_to_number`, `aperture_identity_from_number`, `aperture_set_measurement`). Design estimate; evidence: [STK-36](validation/stacking.md#stk-36), [STK-42](validation/stacking.md#stk-42). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.aperture_set_measurement -->
-- **Subset stacks (§3.4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. `stack_subset(..., record_forecast_rows=True)` stores the forecast rows; the restack labels its all-but-the-last-night subset `EARLIER_NIGHTS_VARIANT`. <!-- impl: astrometricslib.reports.EARLIER_NIGHTS_VARIANT --> Evidence: [STK-37](validation/stacking.md#stk-37), [STK-38](validation/stacking.md#stk-38).
-- **Empty-sky noise components (§3.4.3, Table 4).** The random terms come from `record_science.compute_expected_noise` (`expected_noise.expected_exposure_group_noise`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_science.compute_expected_noise --> The master dark's term is `expected_noise.expected_master_dark_noise` (`stacking.expected_master_dark_noise_stack_unit`, one exposure group only). <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_master_dark_noise --> The master flat's term is `stacking.flat_noise_in_aperture_stack_unit` (`flat_noise_contribution.py`). `record_science.noise_ratio_measurements` stores the measured-to-predicted ratio. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_science.noise_ratio_measurements --> Fixed-pattern noise comes from wayfindinglib. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-39](validation/stacking.md#stk-39).
-- **Odd–even difference noise (§3.4.3).** `odd_even_difference_run.py`. `measure_noise(kind="odd_even_difference")` runs `odd_even_difference_run.run_odd_even_difference_noise` for every library stack with `ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames a half. <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF --> It calls `difference_noise.measure_difference_noise`, divides by `ODD_EVEN_DIFFERENCE_NOISE_BIAS` and stores the `stacking.odd_even_difference_*` rows (quality store schema 5). <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS --> `odd_even_apertures.py` writes the per-aperture record `<stack>_odd_even_apertures.json` (`save_odd_even_aperture_record`, `load_odd_even_aperture_record`) and the four row and column scatter rows (`measure_line_pattern`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.save_odd_even_aperture_record --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.load_odd_even_aperture_record --> `scripts/measure_odd_even_bias.py` measures the bias by injection (`odd_even_bias.measure_odd_even_bias`); not yet run. <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.measure_odd_even_bias --> Evidence: [STK-42](validation/stacking.md#stk-42).
-- **Aperture size and depth (§3.4.3).** `aperture_size_noise.measure_aperture_size_noise` stores `stacking.empty_aperture_noise_size_exponent`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.measure_aperture_size_noise --> `depth_limits.measure_depth_limits` stores `stacking.point_source_depth_5sigma_mag` and `stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2`, zero point from `gaia_zero_point`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.measure_depth_limits --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.gaia_zero_point --> Evidence: [STK-36](validation/stacking.md#stk-36).
-- **Frame re-measurement (§3.4).** The sky-rate, sky-noise and read-noise frame metrics are at versions 3, 3 and 2. `frames_whose_camera_profile_gap_closed` queues frames whose camera profile entry was missing and now exists. <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.frames_whose_camera_profile_gap_closed --> Evidence: [AST-17](validation/astrometry.md#ast-17).
-- **Half-stack pattern (§3.4).** `post_processing/half_pattern.py`, called by `odd_even_difference_run._half_pattern_safely`. It adds eight rows to the difference's nine; Evidence: [STK-45](validation/stacking.md#stk-45).
-- **Flat-to-light match (§3.4).** `post_processing/flat_match.py` (`flat_match_rows`) stores ten rows. `_internal/drivers/calibration_library.py` selects flats and biases (`select_flat_frames`, `select_bias_frames`), and staging records them under `flat_frame_paths` and `bias_frame_paths`. Config key `flat_match_time_limit_seconds`. Evidence: [STK-46](validation/stacking.md#stk-46).
+- **Stack measurements (§3.4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> Without a solution, the noise step tries up to `MEMBER_FRAME_ATTEMPTS` reference-group frames. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> `_plate_solve_stack_wcs` then solves it with `AstrometryPipeline.solve_wcs`, refit from the Gaia cache (`PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_REFIT_WCS_SOURCE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.PLATE_SOLVE_UNREFINED_WCS_SOURCE --> The aperture set file keeps one set per camera, optic and reference exposure (`camera|telescope|focal|exp=<s>`). Subset and odd–even stacks reuse it (`find_library_set_key`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.record_library_set_key --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.find_library_set_key --> `stacking.frames_stacked_count` (definition version 2) counts the member rows' frames (`stack_membership.count_frames_stacked`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.count_frames_stacked --> `post_processing/normalization_scale.py` stores Siril's normalization scale as `stacking.normalization_scale`; it multiplies the expected-noise rows (definition version 2). <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.EXPOSURE_MATCH_FRACTION --> Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
+- **Predicted noise of an exposure-group stack (§3.4).** `expected_noise.expected_exposure_group_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_exposure_group_noise --> gives frame `i` of group `g` the coefficient `W_g ŵ_i / (ΣW · G_g)` in counts per second (`W_g` the combine weight, `ŵ_i` the frame's share, `G_g` the applied gain, 1 when unmeasured, which marks the rows assumed). The noise is the squared coefficients times each frame's variance (and `k_i` squared, `FrameNoiseInput.exposure_scale`), the mean exposure, the unit scale and the aperture multiplier. `record_science.compute_expected_noise` refuses (not measured) when `clipped_exposure_groups` is non-empty, and gives the membership's reason for unknown weights. Register: [STK-38](validation/stacking.md#stk-38), [STK-59](validation/stacking.md#stk-59), [STK-60](validation/stacking.md#stk-60) (failed).
+- **Aperture set identity (§3.4).** `stacking.aperture_set_number` (each noise stack) and its odd–even twin hold the set's identity (`aperture_identity_to_number`, `aperture_identity_from_number`, `aperture_set_measurement`). Design estimate; evidence: [STK-36](validation/stacking.md#stk-36), [STK-42](validation/stacking.md#stk-42). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.aperture_set_measurement -->
+- **Subset stacks (§3.4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. `stack_subset(..., record_forecast_rows=True)` stores forecast rows; the restack labels its all-but-the-last-night subset `EARLIER_NIGHTS_VARIANT`. <!-- impl: astrometricslib.reports.EARLIER_NIGHTS_VARIANT --> Evidence: [STK-37](validation/stacking.md#stk-37), [STK-38](validation/stacking.md#stk-38).
+- **Empty-sky noise components (§3.4.3, Table 4).** Random terms: `record_science.compute_expected_noise` (`expected_noise.expected_exposure_group_noise`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_science.compute_expected_noise --> Master dark term: `expected_noise.expected_master_dark_noise` (`stacking.expected_master_dark_noise_stack_unit`, one group only). <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_master_dark_noise --> Master flat term: `stacking.flat_noise_in_aperture_stack_unit` (`flat_noise_contribution.py`). `record_science.noise_ratio_measurements` stores the measured-to-predicted ratio. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_science.noise_ratio_measurements --> Evidence: [STK-36](validation/stacking.md#stk-36), [STK-39](validation/stacking.md#stk-39).
+- **Odd–even difference noise (§3.4.3).** `odd_even_difference_run.py`. `measure_noise(kind="odd_even_difference")` runs `odd_even_difference_run.run_odd_even_difference_noise` on library stacks of at least `ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames a half. <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF --> It calls `difference_noise.measure_difference_noise`, divides by `ODD_EVEN_DIFFERENCE_NOISE_BIAS` and stores the `stacking.odd_even_difference_*` rows (quality store schema 5). <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS --> `odd_even_apertures.py` writes the record `<stack>_odd_even_apertures.json` (`save_odd_even_aperture_record`, `load_odd_even_aperture_record`) and four row and column scatter rows (`measure_line_pattern`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.save_odd_even_aperture_record --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.load_odd_even_aperture_record --> `scripts/measure_odd_even_bias.py` measures it by injection (`odd_even_bias.measure_odd_even_bias`; not run yet). <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.measure_odd_even_bias --> Evidence: [STK-42](validation/stacking.md#stk-42).
+- **Aperture size and depth (§3.4.3).** `aperture_size_noise.measure_aperture_size_noise` stores `stacking.empty_aperture_noise_size_exponent`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.measure_aperture_size_noise --> `depth_limits.measure_depth_limits` stores `stacking.point_source_depth_5sigma_mag` and `stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2`, zero point from `gaia_zero_point`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.measure_depth_limits --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.gaia_zero_point --> [STK-36](validation/stacking.md#stk-36).
+- **Frame re-measurement (§3.4).** The sky-rate, sky-noise and read-noise frame metrics are at versions 3, 3, 2. `frames_whose_camera_profile_gap_closed` queues frames whose missing profile entry now exists. <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.frames_whose_camera_profile_gap_closed --> [AST-17](validation/astrometry.md#ast-17).
+- **Half-stack pattern (§3.4).** `post_processing/half_pattern.py`, called from `odd_even_difference_run._half_pattern_safely`. It adds eight rows to the difference's nine. [STK-45](validation/stacking.md#stk-45).
+- **Flat-to-light match (§3.4).** `post_processing/flat_match.py` (`flat_match_rows`) stores ten rows. `_internal/drivers/calibration_library.py` selects flats and biases (`select_flat_frames`, `select_bias_frames`); staging records them under `flat_frame_paths` and `bias_frame_paths`. Config key `flat_match_time_limit_seconds`. [STK-46](validation/stacking.md#stk-46).
+- **Sky background gradient (§3.4.4).** `post_processing/background_gradient.py`: nine `stacking.background_*` rows and the 64 by 64 map `<stack>_background_model.fits`. Design estimate (STK-D74). <!-- impl: astrometricslib.pipelines.stacking.post_processing.background_gradient.record_background_gradient --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.background_gradient.BACKGROUND_BIN_COUNT -->
 - **Registration step and drift (§3.4).** `post_processing/registration_shifts.py`, called by `frame_geometry_measurements`. Evidence: [STK-44](validation/stacking.md#stk-44).
 
-### 4.2 Astrometry (Architecture §4)
+### 4.2 Astrometry (§4)
 
-*Located in:* `astrometricslib/pipelines/astrometry/`
+*Code:* `astrometricslib/pipelines/astrometry/`
 
 - **Interfaces (§4.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection and centroids (§4.2).** `processing/star_identifier.py`, `pre_processing/source_detection.py`, `pre_processing/fwhm.py`.
 - **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
-- **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets the depth; `processing/gaia_field_stars.py` fills and reads the tiles. Missing tiles give `astrometry.notice_gaia_tiles_missing`.
+- **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets the depth and `processing/gaia_field_stars.py` fills and reads tiles. Missing tiles raise `astrometry.notice_gaia_tiles_missing`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
 - **Target clipping (§4.4).** `post_processing/target_clipping.py` (`target_clipping_measurements`). Evidence: [AST-19](validation/astrometry.md#ast-19).
 - **Expected residual (§4.4).** `post_processing/expected_residual.py` stores four `astrometry.expected_*` metrics. Evidence: [AST-21](validation/astrometry.md#ast-21).
-- **Target position.** `astrometricslib/pipelines/shared/target_position.py` takes a target's RA/Dec from SIMBAD, not a frame center; `scripts/audit_target_positions.py` checks them.
+- **Target position.** `astrometricslib/pipelines/shared/target_position.py` takes a target's RA/Dec from SIMBAD, not a frame; `scripts/audit_target_positions.py` checks them.
 
-### 4.3 Photometry (Architecture §5)
+### 4.3 Photometry (§5)
 
-*Located in:* `astrometricslib/pipelines/photometry/`
+*Code:* `astrometricslib/pipelines/photometry/`
 
 - **Interfaces (§5.1).** `runner.py` (adapter); `batch.py`.
 - **Aperture photometry (§5.2).** `pre_processing/frame_photometry.py`, `detector_noise.py`, `observation_times.py`.
 - **Comparison stars and light curves (§5.2).** `processing/comparison_ensemble.py`, `catalog_zero_point.py`, `variability_analyzer.py`, `variability_indices.py`.
 - **Period search (§5.2).** `processing/periodicity_search.py`, `period_checks.py`, `family_wise_correction.py`.
 - **Checks (§5.4).** `pre_processing/assess_input_quality.py`; `post_processing/record_quality.py`, `variability_skill.py`, `known_variability_labels.py`, `assess_output_quality.py`.
+- **Session tie (§5.2).** `session_tie.MINIMUM_TIE_STARS` (20) and `TIE_CLIP_SIGMA` (3) set the session tie (PHO-D37, design estimate). `_tie_sessions_to_the_field` in `batch.py` picks the reference session (the most measured stars, the earliest on a tie) and scales the others before `_merge_light_curves`. The factor, its uncertainty and its spread are kept in `sessionTies` and in each `SessionPhotometrySummary` (`tieStatus`, `tieFactor`, `tieUncertainty`).
+- **Scintillation term (§5.2).** `scintillation_term.build_scintillation_term` measures the coefficient (5 stars, 20 frames, range 0.5 to 3, fallback 1.5, 5σ clip; PHO-D38) and `add_scintillation_in_quadrature` adds it at the start of `normalize_light_curves`. `noise_budget.remove_scintillation_in_quadrature` takes it out before the background term is found. Each session keeps a `SessionScintillationRecord`.
 - **Run outcomes (§5.2).** `processing/noise_budget.py`, `observing_window.py`, `target_amplitude.py`, the matching `post_processing/record_*.py` steps, and `shared/variable_star_catalogs.py` (VSX range). Evidence: [PHO-17](validation/photometry.md#pho-17), [PHO-18](validation/photometry.md#pho-18), [PHO-19](validation/photometry.md#pho-19).
 
-### 4.4 Spectroscopy (Architecture §6)
+### 4.4 Spectroscopy (§6)
 
-*Located in:* `astrometricslib/pipelines/spectroscopy/`
+*Code:* `astrometricslib/pipelines/spectroscopy/`
 
 - **Interfaces (§6.1).** `pipeline.py`, `runner.py` (adapter), `record_and_flag_spectroscopy_stars.py`, `frame_analysis.py`, `batch.py`.
 - **Star identification (§6.2).** `pre_processing/spectral_star_registration.py`.
@@ -124,9 +128,9 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Checks (§6.4).** `post_processing/record_quality.py`, `compare_to_gaia_xp.py`, `compare_to_catalog.py`, `wavelength_scale.py`.
 - **Signal-to-noise and class gap (§6.2).** `processing/spectral_line_indices.py` (`line_window_signal_to_noise`) fills `snr_at_classifying_lines`; `processing/class_gap_calibration.py` and `data/class_gap_against_snr_zwo_asi_533mm_pro.json` hold the table. Evidence: [SPE-30](validation/spectroscopy.md#spe-30).
 
-### 4.5 Asteroid detection (Architecture §7)
+### 4.5 Asteroid detection (§7)
 
-*Located in:* `astrometricslib/pipelines/asteroid_detection/`
+*Code:* `astrometricslib/pipelines/asteroid_detection/`
 
 - **Interfaces (§7.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection (§7.2).** `detection.py` (blink analysis, tracking), `frame_wcs_composer.py` (per-frame WCS), `ephemeris.py` (IMCCE SkyBoT).
@@ -135,7 +139,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ### 4.6 Shared pipeline code
 
-*Located in:* `astrometricslib/pipelines/shared/`
+*Code:* `astrometricslib/pipelines/shared/`
 
 - **Frames and targets.** `frame_grouping.py`, `frame_scanning.py`, `target_records.py`, `target_sessions.py`.
 - **Images, stars and state.** `image_conversions.py`, `star_recording.py`, `catalog_star_identity.py`, `session_identification.py`, `analysis_context.py`.
@@ -145,9 +149,9 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ### 4.7 Drivers and pixel-level primitives
 
-*Located in:* `astrometricslib/_internal/drivers/`.
+*Code:* `astrometricslib/_internal/drivers/`.
 
-- **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and the types that cross them. `driver_set.py` (`Drivers`) fills empty slots with the built-in drivers.
+- **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and their types. `driver_set.py` (`Drivers`) fills empty slots with built-ins.
 - **Siril.** `siril_stacking_driver.py`, `siril_interface/`.
 - **Catalogs and services.** `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`.
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `catalog_access.py`.
@@ -157,15 +161,15 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ### 4.8 Shared storage backend
 
-*Located in:* `astrometricslib/foundation/storage/`: `butler.py`, `local_database.py`, `process_locks.py`, `mount.py` (no writes under an unmounted frames mount).
+*Code:* `astrometricslib/foundation/storage/`: `butler.py`, `local_database.py`, `process_locks.py`, `mount.py` (no writes to an unmounted frames mount).
 
 ### 4.9 Job framework
 
-*Located in:* `astrometricslib/foundation/jobs/`, shared by both libraries, the backend and the MCP servers: `store.py`, `runner.py`, `models.py`, `process_identity.py`.
+*Code:* `astrometricslib/foundation/jobs/`, shared by both libraries, the backend and the MCP servers: `store.py`, `runner.py`, `models.py`, `process_identity.py`.
 
 ## 5. Tuned parameters and validation status
 
-Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each status label (defined in the [register](validation/index.md#3-status-labels)) links to its evidence; hidden links after each table name each value's code.
+Tables 3 to 7 list each pipeline's tuned values. Status labels ([register](validation/index.md#3-status-labels)) link to evidence; hidden links name the code.
 
 ### 5.1 Stacking settings
 
@@ -551,19 +555,19 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 
 ## 6. Validation tooling
 
-This section maps behaviors the [validation sessions](validation/index.md#6-validation-sessions) rely on to code.
+This section maps what the [validation sessions](validation/index.md#6-validation-sessions) rely on to code.
 
 - **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign), `run_all_target_processing.py` (batch; restack options in the scripts README), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`, `calibrate_class_gap_against_snr.py` (class gap table, [SPE-30](validation/spectroscopy.md#spe-30)), `backfill_variable_star_flags.py` (with `--refresh-vsx-ranges`, [PHO-19](validation/photometry.md#pho-19)).
 - **History fill.** `scripts/backfill_quality_measurements.py`; record: [Section 6.4](validation/index.md#64-history-fill-of-the-quality-store).
-- **Calibration identities.** `QualityStore.write_calibration_identities` (`_internal/drivers/quality_store.py`) stores one row per library stack, keyed by `run_id` and `subject_id`, in the side table `quality_calibration_identity` (schema version 3). The columns include `flat_masters`, `bias_masters`, `flat_bias_masters` and `dark_masters` (path, size and modification time), `siril_version` and `stacking_algorithm_version`. A second write for the same key is ignored. `QualityRecords.calibration_identities(run_ids, target_id)` and the read-only MCP tool `quality_calibration_identities` read it. Each library stacking run writes its record through `record_calibration_identities` (`pipelines/stacking/post_processing/calibration_record.py`), called from `record_stacking_quality`: the files are the flat, bias, flat-bias and dark frames the run staged for Siril (`FLAT_FRAME_PATHS_KEY`, `BIAS_FRAME_PATHS_KEY`, `FLAT_BIAS_FRAME_PATHS_KEY`, `DARK_FRAME_PATHS_KEY`).
+- **Calibration identities.** `QualityStore.write_calibration_identities` (`_internal/drivers/quality_store.py`) stores one row per library stack (key `run_id`, `subject_id`) in the side table `quality_calibration_identity` (schema version 3). The columns include `flat_masters`, `bias_masters`, `flat_bias_masters` and `dark_masters` (path, size, modification time), `siril_version` and `stacking_algorithm_version`. A repeat write is ignored. `QualityRecords.calibration_identities` and the MCP tool `quality_calibration_identities` read it. Each stacking run writes it via `record_calibration_identities` (`pipelines/stacking/post_processing/calibration_record.py`), called from `record_stacking_quality`, for the files staged for Siril.
 - **Capture settings.** `CaptureSetting` rounds `pixel_scale_arcsec` to `PIXEL_SCALE_SIGNIFICANT_FIGURES` = 4 (`round_pixel_scale`). <!-- impl: astrometricslib.models.quality.capture_setting.PIXEL_SCALE_SIGNIFICANT_FIGURES --> Schema version 4 merges equal settings on first open; back up first. Design estimate ([STK-D29](validation/stacking.md#design-estimates)).
 - **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` per `TargetSession` ([PHO-14](validation/photometry.md#pho-14)).
-- **Cross-session star matching** (Architecture §5.2, concept 6): `_match_and_merge_across_sessions` (`pipelines/photometry/batch.py`) uses `search_around_sky` (a KD-tree [10]); `sessions_missing_wcs` isolates a session without a WCS.
+- **Cross-session star matching** (Architecture §5.2): `_match_and_merge_across_sessions` (`pipelines/photometry/batch.py`) uses `search_around_sky` (KD-tree [10]); `sessions_missing_wcs` isolates sessions lacking a WCS.
 - **Track linking.** `MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py` pre-filters pairs with an RA/Dec box; the search is still $O(N \times M)$ ([MOV-07](validation/asteroid_detection.md#mov-07)).
 
 ## Appendix A. Ratchets and import contracts
 
-A ratchet is a test whose exception list may only shrink. `test_no_new_upward_imports` in `astrometricslib/test/test_layer_boundaries.py` fails on a new upward import, even inside a function. Table 8 lists its rules.
+A ratchet is a test whose exceptions may only shrink. `test_no_new_upward_imports` (`astrometricslib/test/test_layer_boundaries.py`) fails on a new upward import, even inside a function (Table 8).
 
 **Table 8.** Layer rules enforced by the ratchet test.
 
@@ -575,15 +579,15 @@ A ratchet is a test whose exception list may only shrink. `test_no_new_upward_im
 | `pipelines/<name>/` | `pipelines.tasks`, `pipelines.target_batch`, `api`, the package root |
 | `pipelines/tasks.py`, `pipelines/target_batch.py` | `api`, the package root |
 
-Not checked: `visualization/`, `api/`, the package root, tests, and imports within one layer.
+Not checked: `visualization/`, `api/`, the package root, tests and same-layer imports.
 
-Three more ratchets (a stale entry fails):
+Three more ratchets (stale entries fail):
 
 - **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`). New code reads FITS through `_internal/drivers/fits_access.py` or `_internal/drivers/image.py`.
-- **Wall clock** (`KNOWN_WALL_CLOCK_SITES`). Nothing under `pipelines/` calls `datetime.now()` or `datetime.utcnow()`.
-- **Unseeded randomness** (`KNOWN_UNSEEDED_RANDOM_SITES`, empty). Nothing under `pipelines/` draws random numbers without a fixed seed.
+- **Wall clock** (`KNOWN_WALL_CLOCK_SITES`). Nothing under `pipelines/` calls `datetime.now()` or `utcnow()`.
+- **Unseeded randomness** (`KNOWN_UNSEEDED_RANDOM_SITES`, empty). Nothing under `pipelines/` draws unseeded random numbers.
 
-The `pyproject.toml` import contracts keep `astrometricslib` from importing `wayfindinglib`, `backend` or `mcp_servers`.
+The `pyproject.toml` import contracts bar `astrometricslib` from importing `wayfindinglib`, `backend` or `mcp_servers`.
 
 ## References
 

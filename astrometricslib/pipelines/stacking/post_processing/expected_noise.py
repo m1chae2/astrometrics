@@ -492,6 +492,10 @@ class MasterDarkNoiseOutcome:
     scale_note: str = ""
 
 
+# Noise of a median of normal samples relative to their mean: sqrt(pi / 2).
+_MEDIAN_NOISE_FACTOR = math.sqrt(math.pi / 2.0)
+
+
 def expected_master_dark_noise(
     expected: ExpectedNoise | None,
     dark_frame_count: int | None,
@@ -500,8 +504,11 @@ def expected_master_dark_noise(
     """Work out the noise the master dark's own read noise adds to an aperture.
 
     One dark frame has the read noise of the light frames' setting. A master
-    dark averaged from N dark frames has that noise divided by sqrt(N), per
-    pixel and independent from pixel to pixel. The master is subtracted from
+    dark made from N dark frames has that noise divided by sqrt(N), times
+    sqrt(pi / 2) (about 1.2533) because the master dark is combined with the
+    median, not the mean (STK-D76), per pixel and independent from pixel to
+    pixel. The master bias and flat are not covered here. The master is
+    subtracted from
     every light, so the same noise pattern is in every frame and stacking does
     not average it away. Its effect on an aperture sum is the per-pixel noise
     times sqrt(aperture area in pixels), as for the read noise in
@@ -541,8 +548,10 @@ def expected_master_dark_noise(
         )
     if not dark_frame_count or dark_frame_count <= 0:
         return MasterDarkNoiseOutcome(None, "no dark frame was applied to this stack")
+    # Median combining of the dark frames costs a factor sqrt(pi / 2) in noise
+    # (the standard error of a median of normal samples, STK-D76).
     return MasterDarkNoiseOutcome(
-        expected.coherent_read_noise / math.sqrt(dark_frame_count),
+        expected.coherent_read_noise * _MEDIAN_NOISE_FACTOR / math.sqrt(dark_frame_count),
         assumed_reason=expected.assumed_reason,
         dark_frame_count=int(dark_frame_count),
         scale_note=expected.scale_note,

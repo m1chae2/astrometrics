@@ -8,11 +8,23 @@ export interface AnalysisResultsProps {
 }
 
 /**
- * Component to display the results of a variability analysis.
- * Shows statistics and a list of top candidates.
+ * Component to display the results of an analysis job: the statistics for its mode.
+ *
+ * @param props See {@link AnalysisResultsProps}.
+ * @returns The results, or nothing when there are none.
  */
 export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => {
     if (!results) return null;
+    return <AnalysisResultsBody results={results} />;
+};
+
+/**
+ * Draws the statistics of one analysis result, laid out for its analysis mode.
+ *
+ * @param props See {@link AnalysisResultsProps}. The results are never null here.
+ * @returns The statistics block.
+ */
+const AnalysisResultsBody: React.FC<{ results: AnalysisResult }> = ({ results }) => {
 
     const total = results.totalImages ?? '-';
     const mode = results.analysisMode;
@@ -63,26 +75,5 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => 
         );
     }
 
-    const rejected = results.rejectedCount ?? 0;
-    const accepted = typeof total === 'number' ? total - rejected : '-';
-    const candidates = results.variableCandidates || [];
-
-    return (
-        <div className="analysis-results-content">
-            <div className="metrics-grid">
-                <div className="metric-box">
-                    <div className="metric-label">Total Images</div>
-                    <div className="metric-value">{total}</div>
-                </div>
-                <div className="metric-box">
-                    <div className="metric-label">Unusual brightness</div>
-                    <div className="metric-value error">{rejected}</div>
-                </div>
-                <div className="metric-box">
-                    <div className="metric-label">Accepted</div>
-                    <div className="metric-value success">{accepted}</div>
-                </div>
-            </div>
-        </div>
-    );
+    return null;
 };

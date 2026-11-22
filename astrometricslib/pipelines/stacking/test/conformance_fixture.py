@@ -11,7 +11,8 @@ the odd–even difference noise, which the subset jobs store
 The quarantine metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
 The stack star-shape rows come from `stack_star_shape_measurements`, as in the
-stage.
+stage, and the background rows from `background_gradient_measurements` on a
+made-up outcome.
 """
 
 import math
@@ -37,6 +38,11 @@ from astrometricslib.pipelines.stacking.odd_even_difference_run import (
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import (
     ApertureSizeNoise,
     ApertureSizeNoiseOutcome,
+)
+from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+    BackgroundGradient,
+    BackgroundGradientOutcome,
+    background_gradient_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoise,
@@ -372,6 +378,27 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     measurements.extend(
         preview_step_skipped_measurements(
             [SkippedPreviewStep("GraXpert", "GraXpert did not finish")], context, "M99_Stacked.fits"
+        )
+    )
+    measurements.extend(
+        background_gradient_measurements(
+            BackgroundGradientOutcome(
+                BackgroundGradient(
+                    level=0.0147,
+                    spread_fraction=0.0082,
+                    range_fraction=0.0125,
+                    tilt_fraction=0.0053,
+                    tilt_angle_deg=35.0,
+                    tilt_position_angle_deg=120.0,
+                    position_angle_reason="",
+                    radial_fraction=-0.0068,
+                    plane_fit_rms_fraction=0.0018,
+                    radial_fit_rms_fraction=0.0015,
+                    bin_count=4096,
+                )
+            ),
+            context,
+            context.stack_subject("M99_Stacked.fits"),
         )
     )
     measurements.extend(

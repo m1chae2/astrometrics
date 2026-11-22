@@ -22,16 +22,15 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS
 logger = logging.getLogger(__name__)
 
 # How many MAD-derived sigmas below the median the black point is set, in
-# the auto-stretch's shadow-clipping step. -2.8 is the standard default
-# used by both PixInsight's "AutoStretch" Screen Transfer Function and
-# Siril's own Autostretch display mode -- not something re-derived for
-# this codebase, but adopted so our stretch looks like the one users
-# already know from those tools.
+# the auto-stretch's shadow-clipping step. -2.8 is Siril's
+# `AS_DEFAULT_SHADOWS_CLIPPING` (`src/filters/mtf.h`, read 2026-11-22), also
+# the PixInsight default -- not something re-derived for this codebase, but
+# adopted so our viewer draws the picture Siril's Autostretch draws.
 _AUTOSTRETCH_SHADOWS_CLIP_SIGMA = TunedParameter(
     name="shared.autostretch_shadows_clip_sigma",
     default=-2.8,
     unit="sigma",
-    description="Offset of the autostretch black point from the sky median, in noise units.",
+    description="Offset of the autostretch black point from the image median, in noise units.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -43,15 +42,15 @@ _AUTOSTRETCH_SHADOWS_CLIP_SIGMA = TunedParameter(
 AUTOSTRETCH_SHADOWS_CLIP_SIGMA = resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value
 
 # The 0-1 brightness the image's own median is pushed to by the auto-
-# stretch's midtones step. 0.25 is the same PixInsight/Siril default as
-# `_AUTOSTRETCH_SHADOWS_CLIP_SIGMA`, chosen there to make faint real
-# structure visible without also lifting near-zero background noise into
-# visibility.
+# stretch's midtones step. 0.25 is Siril's `AS_DEFAULT_TARGET_BACKGROUND`
+# (`src/filters/mtf.h`), adopted like `_AUTOSTRETCH_SHADOWS_CLIP_SIGMA`; it
+# makes faint real structure visible without also lifting near-zero
+# background noise into visibility.
 _AUTOSTRETCH_TARGET_BACKGROUND = TunedParameter(
     name="shared.autostretch_target_background",
     default=0.25,
     unit="fraction",
-    description="Display brightness the autostretch gives the sky background.",
+    description="Display brightness the autostretch gives the image median.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -69,6 +68,37 @@ PREVIEW_SAMPLE_SEED = 20261010
 # MAD -> standard deviation for normally-distributed data (1 / Phi^-1(3/4)).
 # A fixed astronomical/statistical constant, not a tuned parameter.
 _MAD_TO_SIGMA = 1.4826
+
+# The three remaining numbers of Siril's autostretch, adopted from
+# `find_linked_midtones_balance` in `src/filters/mtf.c` (read 2026-11-22), not
+# tuned here. The first is the spread Siril uses when a channel's MAD is
+# exactly 0, a guard against a zero spread ("avoid breakdown point"). The
+# second is the median, as a fraction of full scale, above which a picture
+# counts as inverted (a bright background): Siril then clips the highlights
+# instead of the shadows. The third is Siril's full scale for 16-bit data, its
+# `USHRT_MAX`; 8-bit data uses 255 and floating-point data 1.0.
+_AUTOSTRETCH_ZERO_SPREAD_GUARD = TunedParameter(
+    name="shared.autostretch_zero_spread_guard",
+    default=0.001,
+    unit="fraction of full scale",
+    description="Spread the autostretch uses when the median absolute deviation is exactly 0 (Siril).",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
+_AUTOSTRETCH_INVERTED_MEDIAN = TunedParameter(
+    name="shared.autostretch_inverted_median",
+    default=0.5,
+    unit="fraction of full scale",
+    description="Median above which every channel makes the autostretch clip highlights (Siril).",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
+_FULL_SCALE_16_BIT = 65535.0
+_FULL_SCALE_8_BIT = 255.0
 
 # A pixel smaller than this fraction of the brightest pixel is treated as
 # numerical dust, not background, when measuring the background level.
@@ -429,43 +459,128 @@ def white_fraction_after_autostretch(arr: np.ndarray, sky_level: float) -> float
     return float(np.mean(stretched >= resolve(_WHITE_FRACTION_OF_FULL_BRIGHTNESS).value))
 
 
-def _autostretch_parameters(arr: np.ndarray) -> tuple[float, float, float] | None:
+def _full_scale_of(data: np.ndarray) -> float:
+    """Find the brightness Siril treats as full scale for a data type.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The raw image data, read before it is converted to float.
+
+    Returns
+    -------
+    full_scale : `float`
+        1.0 for floating-point data, 255 for 8-bit integers, and 65535 for
+        every other type (Siril's 16-bit full scale).
+    """
+    dtype = np.asarray(data).dtype
+    if np.issubdtype(dtype, np.floating):
+        return 1.0
+    if dtype.itemsize == 1:
+        return _FULL_SCALE_8_BIT
+    return _FULL_SCALE_16_BIT
+
+
+def _channel_median_and_spread(channel: np.ndarray, full_scale: float) -> tuple[float, float] | None:
+    """Measure one channel's median and spread the way Siril does.
+
+    Siril takes the median and the median absolute deviation (MAD) of every
+    pixel that is not exactly 0 and not a NaN (`src/algos/statistics.c` and
+    `statistics_float.c`), not of a sample of empty sky.
+
+    Parameters
+    ----------
+    channel : `numpy.ndarray`
+        One channel, 2-D.
+    full_scale : `float`
+        The brightness that counts as 1.0 (see `_full_scale_of`).
+
+    Returns
+    -------
+    median_and_spread : `tuple` [`float`, `float`] or `None`
+        The median and the MAD scaled to a standard deviation, both as
+        fractions of full scale. The spread is Siril's guard value when the
+        MAD is exactly 0. `None` when the channel has no usable pixel.
+    """
+    values = channel[np.isfinite(channel) & (np.abs(channel) > 0.0)]
+    if values.size == 0:
+        return None
+    median = float(np.median(values))
+    spread = float(np.median(np.abs(values - median))) / full_scale * _MAD_TO_SIGMA
+    if not spread > 0.0:
+        spread = resolve(_AUTOSTRETCH_ZERO_SPREAD_GUARD).value
+    return median / full_scale, spread
+
+
+def _autostretch_parameters(arr: np.ndarray, full_scale: float = 1.0) -> tuple[float, float, float] | None:
     """Choose the black point, white point and midtones balance for an image.
+
+    This is Siril's autostretch with its channels linked
+    (`find_linked_midtones_balance` in `src/filters/mtf.c`): the median and
+    spread of the whole image, with exact zeros and NaNs left out, set a black
+    point 2.8 spreads below the median and a midtones balance that draws the
+    median at 0.25. White is full scale. When every channel's median is above
+    half of full scale (a bright background), the roles flip: black is 0 and
+    white is 2.8 spreads above the median. The viewer draws every channel with
+    one set of numbers, so a colour image uses Siril's linked form, which
+    averages the channels' medians and black points.
 
     Parameters
     ----------
     arr : `numpy.ndarray`
-        The image, 2-D or colour (colour axis last). A colour image has its
-        sky measured on the average of its channels.
+        The image, 2-D or colour (colour axis last).
+    full_scale : `float`, optional
+        The brightness Siril counts as 1.0 for this data type (see
+        `_full_scale_of`). Floating-point data whose median is above 1.0 is
+        in counts, not normalized, so it uses the 16-bit full scale instead.
+        Defaults to 1.0.
 
     Returns
     -------
     parameters : `tuple` [`float`, `float`, `float`] or `None`
-        The black point, white point and midtones balance, or `None` when
-        the image has no measurable background to anchor a stretch to
-        (for instance one that is almost entirely exactly 0). The caller
-        should fall back to a plain percentile stretch then.
+        The black point and white point (in the image's own units) and the
+        midtones balance, or `None` when Siril's curve cannot be drawn: the
+        image has no pixel that is neither 0 nor NaN, all of those pixels
+        have one value, or the balance does not fall strictly between 0 and
+        1. The caller falls back to a plain percentile stretch then.
     """
-    # The empty sky sets the black point and midtones, so a large galaxy that
-    # covers much of the frame does not pull them.
-    sky = measure_sky_background(arr.mean(axis=2) if arr.ndim == 3 else arr)
-    if sky is None:
-        logger.debug("Image background has no measurable spread; using a percentile stretch instead.")
+    if arr.size == 0:
         return None
-    median, sigma = sky
-    peak = float(np.nanmax(arr))
+    channels = [arr] if arr.ndim == 2 else [arr[..., index] for index in range(arr.shape[-1])]
+    if full_scale <= 1.0:
+        finite_values = arr[np.isfinite(arr) & (np.abs(arr) > 0.0)]
+        if finite_values.size and float(np.median(finite_values)) > 1.0:
+            full_scale = _FULL_SCALE_16_BIT
+    statistics = [_channel_median_and_spread(channel, full_scale) for channel in channels]
+    if any(measured is None for measured in statistics):
+        logger.debug("Image has no usable pixels in a channel; using a percentile stretch instead.")
+        return None
+    nonzero_pixels = arr[np.isfinite(arr) & (np.abs(arr) > 0.0)]
+    if not float(np.max(nonzero_pixels)) > float(np.min(nonzero_pixels)):
+        logger.debug("Image has a single brightness; using a percentile stretch instead.")
+        return None
 
-    black_point = max(median + resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value * sigma, float(np.nanmin(arr)))
-    if peak <= black_point:
+    medians = [measured[0] for measured in statistics if measured is not None]
+    spreads = [measured[1] for measured in statistics if measured is not None]
+    mean_median = float(np.mean(medians))
+    shadows_clip = resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value
+    target = resolve(_AUTOSTRETCH_TARGET_BACKGROUND).value
+    inverted_median = resolve(_AUTOSTRETCH_INVERTED_MEDIAN).value
+    if all(median > inverted_median for median in medians):
+        black = 0.0
+        white = min(
+            float(np.mean([m - shadows_clip * s for m, s in zip(medians, spreads, strict=True)])), 1.0
+        )
+        midtones = 1.0 - _solve_midtones_balance(white - mean_median, target)
+    else:
+        black = max(
+            float(np.mean([m + shadows_clip * s for m, s in zip(medians, spreads, strict=True)])), 0.0
+        )
+        white = 1.0
+        midtones = _solve_midtones_balance(mean_median - black, target)
+    if not (white > black and 0.0 < midtones < 1.0):
         return None
-    normalized_median = (median - black_point) / (peak - black_point)
-    if not 0.0 < normalized_median < 1.0:
-        return None
-    return (
-        black_point,
-        peak,
-        _solve_midtones_balance(normalized_median, resolve(_AUTOSTRETCH_TARGET_BACKGROUND).value),
-    )
+    return black * full_scale, white * full_scale, midtones
 
 
 def _scale_to_uint8_in_blocks(
@@ -583,7 +698,7 @@ class ImageScaler:
             when the image has no measurable sky (then `scale_to_uint8`
             uses a plain percentile stretch).
         """
-        autostretch = _autostretch_parameters(_display_array(data))
+        autostretch = _autostretch_parameters(_display_array(data), _full_scale_of(data))
         if autostretch is None:
             return None
         black_point, white_point, midtones = autostretch
@@ -599,23 +714,20 @@ class ImageScaler:
     ) -> tuple[np.ndarray, float, float]:
         """Convert raw image data into standard computer colors (0-255).
 
-        When `vmin`/`vmax` are not given, this applies the same
-        "Autostretch" curve Siril's own display mode and PixInsight's
-        Screen Transfer Function use: a black point clipped a few sigma
-        below the image's own median, then a nonlinear midtones curve
-        (see `_midtones_transfer_function`) rather than a plain linear
-        ramp. A linear percentile stretch made a harmless, tiny
-        (~1e-4) interpolation-ringing artifact look like a dramatic
-        pattern around bright stars, because it maps the entire
-        near-zero background range up to full visible contrast; the
-        same background is compressed toward black under Autostretch,
-        the way it would be in Siril itself. An image with no measurable
-        background (see `_autostretch_parameters`) falls back to the
-        plain percentile stretch. Passing an explicit `vmin`/`vmax` (e.g.
-        to keep several frames on one fixed scale) always gets plain
-        linear scaling instead, since that is a deliberate choice of
-        absolute brightness range, not a request for the automatic
-        display stretch.
+        When `vmin`/`vmax` are not given, this applies Siril's Autostretch
+        exactly (see `_autostretch_parameters`): the median and spread of
+        the whole image set a black point a few spreads below the median,
+        and a nonlinear midtones curve (see `_midtones_transfer_function`)
+        puts the median at 25% grey. A linear percentile stretch made a
+        harmless, tiny (~1e-4) interpolation-ringing artifact look like a
+        dramatic pattern around bright stars, because it maps the entire
+        near-zero background range up to full visible contrast. An image
+        for which Siril's curve cannot be drawn (see
+        `_autostretch_parameters`) falls back to the plain percentile
+        stretch. Passing an explicit `vmin`/`vmax` (e.g. to keep several
+        frames on one fixed scale) always gets plain linear scaling
+        instead, since that is a deliberate choice of absolute brightness
+        range, not a request for the automatic display stretch.
 
         Parameters
         ----------
@@ -637,7 +749,11 @@ class ImageScaler:
         # Handle multi-channel data (e.g. RGB FITS)
         arr = _display_array(data)
 
-        autostretch = _autostretch_parameters(arr) if stretch and vmin is None and vmax is None else None
+        autostretch = (
+            _autostretch_parameters(arr, _full_scale_of(data))
+            if stretch and vmin is None and vmax is None
+            else None
+        )
         midtones: float | None = None
         if autostretch is not None:
             vmin, vmax, midtones = autostretch

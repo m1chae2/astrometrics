@@ -41,6 +41,8 @@ export const OWNERSHIP = [
     match: (name) => /^(badge|status-chip)($|--|__)/.test(name) },
   { component: 'PopoverSelect', ownerFile: 'ui/common/components/popoverSelect.css',
     match: (name) => /^popover-select($|--|__)/.test(name) },
+  { component: 'SplitButton', ownerFile: 'ui/common/components/splitButton.css',
+    match: (name) => /^split-button($|--|__)/.test(name) },
   { component: 'TextInput and NumberInput', ownerFile: 'ui/common/components/TextInput.css',
     match: (name) => /^entry($|--|__)/.test(name) },
   { component: 'Skeleton, PanelBody and UpdatingBar', ownerFile: 'ui/common/components/Skeleton.css',

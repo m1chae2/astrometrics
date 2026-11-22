@@ -37,6 +37,7 @@ from typing import Any
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
+from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     record_preview_as_processed_image,
     write_stack_preview,
@@ -179,7 +180,15 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.dry_run:
                 print(f"{label}: would {'keep the current preview' if current else 'make a preview'}")
                 continue
-            preview = preview_path_for(stacked_path) if current else write_stack_preview(stacked_path)
+            preview = (
+                preview_path_for(stacked_path)
+                if current
+                else write_stack_preview(
+                    stacked_path,
+                    object_category=None if is_spectral else target.object_category,
+                    target_anchor=anchor_for_target(target),
+                )
+            )
             if not preview:
                 print(f"{label}: FAILED to make a preview")
                 failures += 1

@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 # What `fill_target_position` did, for the caller's log and for tests.
 FILL_CATALOG = "catalog"
 FILL_FRAME_CENTER = "frame_center"
+FILL_TYPE_ONLY = "type_only"
 FILL_NONE = "none"
 
 # Kinds of target that never get a fixed position: they move across the sky
@@ -420,7 +421,11 @@ def fill_target_position(
     """Set a target's RA/Dec from the catalog, else from a frame center.
 
     Only an empty position, or one marked unverified, is changed. A
-    position that is set and not marked unverified is never touched. A
+    position that is set and not marked unverified is never touched. When
+    such a target has no SIMBAD object type (or it is empty), the name is
+    looked up once to fill the missing type, and the major axis if that is
+    missing too; the position stays as it is. A target that has a type is
+    not looked up again. A
     moving body or calibration target is never given a position. The
     catalog answer is tried first. The frame center is the fallback, and
     it marks the target `position_unverified`. The frame center is also used
@@ -446,13 +451,15 @@ def fill_target_position(
     Returns
     -------
     action : `str`
-        `FILL_CATALOG`, `FILL_FRAME_CENTER` or `FILL_NONE`.
+        `FILL_CATALOG`, `FILL_FRAME_CENTER`, `FILL_TYPE_ONLY` (only the
+        missing object type, and perhaps the major axis, was filled) or
+        `FILL_NONE`.
     """
     if has_no_fixed_position(target.id):
         return FILL_NONE
     had_position = parse_target_position(target) is not None
     if had_position and not target.position_unverified:
-        return FILL_NONE
+        return _fill_missing_object_type(target, simbad, frame_center, footprint_radius_arcmin)
 
     resolution = resolve_target_catalog_position(target, simbad)
     catalog = resolution.position
@@ -504,3 +511,62 @@ def fill_target_position(
         target.dec,
     )
     return FILL_FRAME_CENTER
+
+
+def _fill_missing_object_type(
+    target: Any,
+    simbad: SimbadDriver,
+    frame_center: SkyCoord | None,
+    footprint_radius_arcmin: float | None,
+) -> str:
+    """Fill only the missing SIMBAD object type of a confirmed target.
+
+    The position is never changed. SIMBAD is not asked when the target
+    already has a type. A catalog position that lies outside the solved
+    frame plus the margin is distrusted, as in `fill_target_position`, and
+    its type is not taken. A SIMBAD failure is logged and changes nothing.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to update.
+    simbad : `SimbadDriver`
+        The SIMBAD driver to ask.
+    frame_center : `astropy.coordinates.SkyCoord`, optional
+        The center of a solved image of the target.
+    footprint_radius_arcmin : `float`, optional
+        Half the diagonal of the solved image in arcminutes.
+
+    Returns
+    -------
+    action : `str`
+        `FILL_TYPE_ONLY` when a type was filled, else `FILL_NONE`.
+    """
+    if (target.simbad_object_type or "").strip():
+        return FILL_NONE
+    try:
+        catalog = resolve_target_catalog_position(target, simbad).position
+    except (ExternalServiceError, *ONLINE_QUERY_ERRORS) as lookup_error:
+        logger.info("Could not look up the object type of target %s: %s", target.id, lookup_error)
+        return FILL_NONE
+    if catalog is None or not catalog.object_type:
+        return FILL_NONE
+    if frame_center is not None and footprint_radius_arcmin is not None:
+        distance = float(catalog.coordinate.separation(frame_center).to("arcmin").value)
+        if distance > footprint_radius_arcmin + FOOTPRINT_MARGIN_ARCMIN:
+            logger.warning(
+                "The catalog position of target %s (%s) is %.1f arcmin from the center of its solved frame, "
+                "outside the frame (%.1f arcmin) plus a %.0f arcmin margin; the name may have resolved to "
+                "another object. Not taking its object type.",
+                target.id,
+                format_position(catalog.coordinate),
+                distance,
+                footprint_radius_arcmin,
+                FOOTPRINT_MARGIN_ARCMIN,
+            )
+            return FILL_NONE
+    target.simbad_object_type = catalog.object_type
+    if not target.major_axis_arcmin and catalog.major_axis_arcmin:
+        target.major_axis_arcmin = catalog.major_axis_arcmin
+    logger.info("Set the object type of target %s to %s from SIMBAD.", target.id, catalog.object_type)
+    return FILL_TYPE_ONLY

@@ -120,7 +120,7 @@ def test_a_healthy_run_emits_every_declared_metric_once() -> None:
     names = [measurement.metric for measurement in measurements]
 
     assert set(names) == _declared_names()
-    assert len(names) == len(set(names)) == 28
+    assert len(names) == len(set(names)) == 36
     assert {m.subject.level for m in measurements} == {SubjectLevel.RUN}
     assert {m.origin for m in measurements} == {MeasurementOrigin.MEASURED}
     assert {m.run_id for m in measurements} == {"job-1"}
@@ -361,6 +361,8 @@ _NOT_MEASUREMENT_FIELDS = {
     "rejected_frames": "a list of excluded frames; the frame-rejection gate counts them",
     "frame_ensemble_composition": "a table of the comparison ensemble per frame",
     "noise_model_curve": "a curve of points, not one number",
+    "session_ties": "a table of the tie factor of each session; its counts and spread are metrics",
+    "session_scintillation": "a table of each session's scintillation term; its median and count are metrics",
     "sessions_missing_wcs": "a list of session names; the session plate-solve gate counts them",
     "sessions_with_reused_header_wcs": "a list of session names",
     "sessions_with_replaced_header_wcs": "a list of session names",

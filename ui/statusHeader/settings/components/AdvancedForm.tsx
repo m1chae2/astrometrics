@@ -1,4 +1,5 @@
 import { Checkbox } from '../../../common/components/Checkbox';
+import { PopoverSelect } from '../../../common/components/PopoverSelect';
 import { TextInput } from '../../../common/components/TextInput';
 import { ConfigData } from '../utils/configUtils';
 
@@ -11,6 +12,11 @@ interface AdvancedFormProps {
 const LOCAL_SOLVER_SECTION = 'Processing.Astrometry.Local Solver';
 const SIRIL_SECTION = 'Processing.Siril';
 const PARALLELISM_SECTION = 'Processing.Parallelism';
+const CATALOGS_SECTION = 'Catalogs';
+const SIMBAD_SERVER_OPTIONS = [
+    { id: 'simbad.harvard.edu', label: 'Harvard (simbad.harvard.edu)' },
+    { id: 'simbad.cds.unistra.fr', label: 'Strasbourg (simbad.cds.unistra.fr)' },
+];
 
 export const AdvancedForm: React.FC<AdvancedFormProps> = ({
     configData,
@@ -62,6 +68,23 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                         weight frames by measured star sharpness.
                     </div>
                 </label>
+            </div>
+
+            <div className="settings__divider">
+                <h4>Catalogs</h4>
+                <div className="settings__field settings__field--spaced">
+                    <span className="settings__label">SIMBAD Server</span>
+                    <PopoverSelect
+                        label="SIMBAD Server"
+                        options={SIMBAD_SERVER_OPTIONS}
+                        selectedId={String(configData[CATALOGS_SECTION]?.['simbad_preferred_server'] || 'simbad.harvard.edu')}
+                        onSelect={(id) => handleConfigChange(CATALOGS_SECTION, 'simbad_preferred_server', id ?? 'simbad.harvard.edu')}
+                        disabled={loadingConfig}
+                    />
+                    <div className="settings__help">
+                        The SIMBAD server asked first. If it cannot be reached, the other one is used.
+                    </div>
+                </div>
             </div>
 
             <div className="settings__divider">

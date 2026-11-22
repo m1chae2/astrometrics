@@ -313,3 +313,54 @@ def test_flat_bias_is_used_even_without_a_lights_bias(lone_flat: bool) -> None:
     counts = StagedFrameCounts(0, 0, 1 if lone_flat else 3, 5, flat_biases=2)
     commands = build_master_calibration_commands("/w", counts, set(), False, None)
     assert any("-bias=flat_bias_stacked" in command for command in commands)
+
+
+def select_flats(library: CalibrationLibrary, light_filter: str = "Luminance") -> object:
+    """Choose the flats for offset-0 lights at gain 100.
+
+    Returns
+    -------
+    selection : `CalibrationSelection`
+        The library's flat selection.
+    """
+    return library.select_flat_frames(
+        telescope="T",
+        camera=CAMERA,
+        filter_type=light_filter,
+        iso="100",
+        offset=str(LIGHT_OFFSET),
+        binning="1x1",
+    )
+
+
+def test_flats_at_another_offset_with_their_own_bias_are_not_flagged(tmp_path: Path) -> None:
+    """A flat bias at the flats' offset makes a full match."""
+    library = make_library(tmp_path)
+    paths = add_frames(tmp_path, library, [LIGHT_OFFSET, FLAT_OFFSET], FLAT_OFFSET)
+
+    selection = select_flats(library)
+
+    assert sorted(selection.frames) == sorted(paths["flats"])
+    assert selection.flags == []
+    assert selection.blocking_flags == []
+
+
+def test_flats_at_another_offset_without_their_own_bias_stay_flagged(tmp_path: Path) -> None:
+    """With no bias at the flats' offset the flag stays."""
+    library = make_library(tmp_path)
+    add_frames(tmp_path, library, [LIGHT_OFFSET], FLAT_OFFSET)
+
+    selection = select_flats(library)
+
+    assert len(selection.flags) == 1
+    assert "offset 10" in selection.flags[0]
+
+
+def test_flats_at_another_offset_stay_flagged_when_the_library_has_no_bias(tmp_path: Path) -> None:
+    """With no bias frames at all the flag stays."""
+    library = make_library(tmp_path)
+    add_frames(tmp_path, library, [], FLAT_OFFSET)
+
+    selection = select_flats(library)
+
+    assert len(selection.flags) == 1

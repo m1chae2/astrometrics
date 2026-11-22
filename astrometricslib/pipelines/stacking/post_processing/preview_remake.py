@@ -25,10 +25,16 @@ from pydantic import ValidationError
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.models.processing_results import PreviewRemakeResult, PreviewSettingsRecord
 from astrometricslib.pipelines.shared.stack_preview_path import (
+    background_model_path_for,
     preview_path_for,
     preview_settings_path_for,
     processed_fits_path_for,
 )
+from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+    BackgroundGradientOutcome,
+    record_background_gradient,
+)
+from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
 from astrometricslib.pipelines.stacking.post_processing.preview_notices import record_preview_step_notices
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     PreviewSettings,
@@ -64,6 +70,7 @@ def _keep_old_pictures(stacked_path: str) -> list[str]:
         preview_path_for(stacked_path),
         processed_fits_path_for(stacked_path),
         preview_settings_path_for(stacked_path),
+        background_model_path_for(stacked_path),
     ):
         if os.path.isfile(picture):
             os.makedirs(folder, exist_ok=True)
@@ -171,10 +178,25 @@ def remake_stack_preview(
     kept = _keep_old_pictures(stacked_path) if keep_previous else []
     steps: list[str] = []
     skipped_steps: list[SkippedPreviewStep] = []
-    preview_path = write_stack_preview(stacked_path, settings, steps, skipped_steps)
+    # A spectral stack has no sky gradient worth measuring.
+    background_outcomes: list[BackgroundGradientOutcome] | None = None if spectral else []
+    preview_path = write_stack_preview(
+        stacked_path,
+        settings,
+        steps,
+        skipped_steps,
+        background_outcomes,
+        # The masked stretch is for imaging stacks of a nebula or a galaxy.
+        object_category=None if spectral else target.object_category,
+        target_anchor=anchor_for_target(target),
+    )
     record_preview_step_notices(
         skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
     )
+    if background_outcomes is not None:
+        record_background_gradient(
+            background_outcomes, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
+        )
     if preview_path is None:
         if kept:
             _put_old_pictures_back(stacked_path, kept)

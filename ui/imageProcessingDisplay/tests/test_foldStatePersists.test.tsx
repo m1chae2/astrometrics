@@ -70,15 +70,17 @@ describe('Image Processing fold state', () => {
 
     it('keeps folded panels folded after a refresh', async () => {
         const first = renderDisplay();
-        await userEvent.click(await screen.findByTitle('Collapse to the right'));
-        await userEvent.click(screen.getByTitle('Collapse down'));
+        await userEvent.click(await screen.findByTitle('Collapse down'));
+        await userEvent.click(screen.getByTitle('Collapse to the right'));
         await userEvent.click(screen.getByTitle('Collapse the File Browser to a tab bar'));
         first.unmount();
 
         renderDisplay();
         expect(await screen.findByTitle('Expand Frame Analysis')).toBeTruthy();
-        expect(screen.getByTitle('Expand Image Controls')).toBeTruthy();
         expect(screen.getByTitle('Expand the File Browser')).toBeTruthy();
+        // Image Controls was folded too; it stays folded once the column opens again.
+        await userEvent.click(screen.getByTitle('Expand Frame Analysis'));
+        expect(screen.getByTitle('Expand Image Controls')).toBeTruthy();
     });
 
     it('opens every panel when storage throws', async () => {
@@ -91,5 +93,21 @@ describe('Image Processing fold state', () => {
         // Folding still works for this session even though nothing can be saved.
         await userEvent.click(screen.getByTitle('Collapse down'));
         expect(screen.getByTitle('Expand Image Controls')).toBeTruthy();
+    });
+
+    it('folds Frame Analysis and Image Controls together and opens both again', async () => {
+        renderDisplay();
+        const hide = await screen.findByTitle('Collapse to the right');
+        expect(hide.getAttribute('aria-expanded')).toBe('true');
+        expect(screen.getByTitle('Collapse down')).toBeTruthy();
+        await userEvent.click(hide);
+        const show = screen.getByTitle('Expand Frame Analysis');
+        expect(show.getAttribute('aria-expanded')).toBe('false');
+        // Image Controls goes with the column: neither its panel nor a tab for it is left.
+        expect(screen.queryByTitle('Collapse down')).toBeNull();
+        expect(screen.queryByTitle('Expand Image Controls')).toBeNull();
+        await userEvent.click(show);
+        expect(screen.getByTitle('Collapse to the right')).toBeTruthy();
+        expect(screen.getByTitle('Collapse down')).toBeTruthy();
     });
 });

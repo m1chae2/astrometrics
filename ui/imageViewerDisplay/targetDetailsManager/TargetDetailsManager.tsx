@@ -26,6 +26,10 @@ export interface TargetDetailsManagerProps {
   onSaveTarget?: () => void;
   /** Callback to trigger deleting the target from the library. */
   onDeleteTarget?: () => void;
+  /** True when the whole right column is folded to a thin strip. */
+  collapsed?: boolean;
+  /** Called with the new fold state when the Information title or the strip is clicked. */
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 /**
@@ -43,6 +47,8 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   onCommonNameChange,
   onSaveTarget,
   onDeleteTarget,
+  collapsed = false,
+  onCollapsedChange,
 }) => {
   const [camera, setCamera] = useState<string>('');
   const [telescope, setTelescope] = useState<string>('');
@@ -220,9 +226,30 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
     }
   };
 
+  // Folded: the whole right column, Target Controls too, is just a strip on the right edge.
+  if (collapsed && onCollapsedChange) {
+    return (
+      <div className="target-details-manager target-details-manager--collapsed">
+        <SectionPanel
+          title="Information"
+          collapsed="right"
+          onTitleClick={() => onCollapsedChange(false)}
+          titleButtonLabel="Expand Information"
+        >
+          {null}
+        </SectionPanel>
+      </div>
+    );
+  }
+
   return (
-    <div className="panel-group">
-      <SectionPanel title="Information" className="flex-fill target-details-manager__panel">
+    <div className="target-details-manager panel-group">
+      <SectionPanel
+        title="Information"
+        className="flex-fill target-details-manager__panel"
+        onTitleClick={onCollapsedChange ? () => onCollapsedChange(true) : undefined}
+        titleButtonLabel="Collapse Information"
+      >
         <TargetDetails
           catalogId={catalogId}
           commonName={commonName}

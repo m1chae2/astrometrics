@@ -251,6 +251,18 @@ def test_green_removal_of_the_preview_is_on_by_default_and_can_be_turned_off(
     assert config.get_preview_remove_green_noise_enabled() is False
 
 
+def test_the_preferred_simbad_server_is_harvard_unless_told_otherwise(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """Harvard is the default, CDS can be chosen, bad values give Harvard."""
+    config = config_in_tmp_path
+    assert config.get_simbad_preferred_server() == "simbad.harvard.edu"
+    config.app_config.set("Catalogs", "simbad_preferred_server", "SIMBAD.CDS.unistra.fr")
+    assert config.get_simbad_preferred_server() == "simbad.cds.unistra.fr"
+    config.app_config.set("Catalogs", "simbad_preferred_server", "example.org")
+    assert config.get_simbad_preferred_server() == "simbad.harvard.edu"
+
+
 def test_the_colour_calibration_method_is_pcc_unless_told_otherwise(
     config_in_tmp_path: AppConfiguration,
 ) -> None:

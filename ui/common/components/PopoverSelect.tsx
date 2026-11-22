@@ -6,22 +6,10 @@
  * `emptyLabel` to add a first entry that stands for "nothing picked" (it reports null), such as "Live".
  */
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useAnchoredMenu } from './useAnchoredMenu';
 import './popoverSelect.css';
-
-/** The gap in pixels between the button and the menu. */
-const MENU_GAP_PX = 8;
-/** The space in pixels kept between the menu and the window edge. */
-const WINDOW_MARGIN_PX = 8;
-
-/** Where the menu is drawn, in window pixels. */
-interface MenuPosition {
-    left: number;
-    top: number;
-    /** The button's width, used as the menu's width when `fill` is set. */
-    buttonWidth: number;
-}
 
 /** One choice the picker can offer. */
 export interface PopoverSelectOption {
@@ -87,53 +75,12 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
     const triggerRef = useRef<HTMLButtonElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
     const [isOpen, setIsOpen] = useState(false);
-    const [position, setPosition] = useState<MenuPosition | null>(null);
-    const selectedOption = selectedId === null ? undefined : options.find((option) => option.id === selectedId);
+        const selectedOption = selectedId === null ? undefined : options.find((option) => option.id === selectedId);
     const selectedText = selectedOption ? selectedOption.label : (emptyLabel ?? placeholder);
 
     const close = useCallback(() => setIsOpen(false), []);
 
-    /** Places the menu next to the button: on the preferred side, or the other side when it does not fit. */
-    const updatePosition = useCallback(() => {
-        const trigger = triggerRef.current;
-        if (!trigger) return;
-        const rect = trigger.getBoundingClientRect();
-        const menuHeight = menuRef.current?.offsetHeight ?? 0;
-        const menuWidth = menuRef.current?.offsetWidth ?? 0;
-        const roomBelow = window.innerHeight - rect.bottom - MENU_GAP_PX - WINDOW_MARGIN_PX;
-        const roomAbove = rect.top - MENU_GAP_PX - WINDOW_MARGIN_PX;
-        const preferAbove = placement === 'above';
-        const fitsPreferred = preferAbove ? roomAbove >= menuHeight : roomBelow >= menuHeight;
-        const fitsOther = preferAbove ? roomBelow >= menuHeight : roomAbove >= menuHeight;
-        const openAbove = fitsPreferred ? preferAbove : (fitsOther ? !preferAbove : roomAbove > roomBelow);
-        const top = openAbove ? Math.max(WINDOW_MARGIN_PX, rect.top - MENU_GAP_PX - menuHeight) : rect.bottom + MENU_GAP_PX;
-        const maxLeft = Math.max(WINDOW_MARGIN_PX, window.innerWidth - menuWidth - WINDOW_MARGIN_PX);
-        const left = Math.min(Math.max(WINDOW_MARGIN_PX, rect.left), maxLeft);
-        setPosition({ left, top, buttonWidth: rect.width });
-    }, [placement]);
-
-    // Measure and place the menu before the browser paints it, so it never flashes in the wrong spot.
-    useLayoutEffect(() => {
-        if (isOpen) updatePosition();
-        else setPosition(null);
-    }, [isOpen, updatePosition]);
-
-    // While open: follow the button on scroll or resize, and close on a press outside the button and menu.
-    useEffect(() => {
-        if (!isOpen) return;
-        const handlePress = (event: MouseEvent) => {
-            const target = event.target as Node;
-            if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) close();
-        };
-        document.addEventListener('mousedown', handlePress);
-        window.addEventListener('resize', updatePosition);
-        window.addEventListener('scroll', updatePosition, true);
-        return () => {
-            document.removeEventListener('mousedown', handlePress);
-            window.removeEventListener('resize', updatePosition);
-            window.removeEventListener('scroll', updatePosition, true);
-        };
-    }, [isOpen, close, updatePosition]);
+    const position = useAnchoredMenu(isOpen, triggerRef, menuRef, placement, close);
 
     const menu = isOpen && (
         <div
@@ -144,7 +91,7 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
             style={{
                 left: position?.left ?? 0,
                 top: position?.top ?? 0,
-                width: fill && position ? position.buttonWidth : undefined,
+                width: fill && position ? position.anchorWidth : undefined,
                 visibility: position ? 'visible' : 'hidden',
             }}
             onKeyDown={(event) => {

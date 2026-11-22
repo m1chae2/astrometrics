@@ -2,7 +2,7 @@
 
 A stacked FITS file holds linear data: pixel values proportional to the
 light collected. Most of the sky is far too dark in that form to see
-anything. Up to six steps turn it into a picture.
+anything. Up to seven steps turn it into a picture.
 
 1. GraXpert, if it is configured, removes the sky's brightness gradient.
    Its AI model learns what the smooth background looks like and subtracts
@@ -36,6 +36,13 @@ anything. Up to six steps turn it into a picture.
    brightness. The toning brings back some of their real range. It acts on
    the stretched picture and leaves the background and nebulae alone. The
    setting ``preview_star_tone_enabled`` turns it off.
+
+7. The masked stretch (see `masked_stretch`) protects a small bright smooth
+   object, such as the ring of M 57. The normal stretch pushes such an object
+   to flat white. For a nebula or galaxy target with a smooth bright region,
+   a second stretch, set by the region's own brightness, replaces the picture
+   inside the region and fades out around it. The rest of the picture is left
+   as the earlier steps made it.
 
 A stack of a bright extended object, such as the Moon, takes a different
 route. The normal stretch would push the whole object to white (see
@@ -93,17 +100,30 @@ from astrometricslib.pipelines.shared.image_scaling import (
 from astrometricslib.pipelines.shared.registration_record import read_registration_record
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
+    background_model_path_for,
     is_preview_path,
     is_processed_fits_path,
     preview_path_for,
     preview_settings_path_for,
     processed_fits_path_for,
 )
+from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+    BackgroundGradientOutcome,
+    measure_background_model_file,
+    not_measured_outcome,
+    write_binned_model,
+)
 from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     BrightObjectStretch,
     choose_bright_object_stretch_for_file,
 )
 from astrometricslib.pipelines.stacking.post_processing.colour_calibration import calibrate_colours_in_file
+from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
+    MaskedStretchPlan,
+    TargetAnchor,
+    apply_masked_stretch_in_file,
+    plan_masked_stretch_for_file,
+)
 from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
 from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
@@ -563,12 +583,33 @@ def run_preview_script(directory: str, commands: list[str], siril_executable: st
     return completed.returncode == 0
 
 
+def graxpert_background_model_path(output_stem: str) -> str:
+    """Name the file where GraXpert saves its background model.
+
+    Parameters
+    ----------
+    output_stem : `str`
+        The output stem given to `flatten_background`.
+
+    Returns
+    -------
+    model_path : `str`
+        The stem with ``_background.fits`` added, as GraXpert names it when
+        run with ``-bg``.
+    """
+    return f"{output_stem}_background.fits"
+
+
 def flatten_background(graxpert_executable: str, input_path: str, output_stem: str) -> bool:
     """Remove the sky gradient from an image with GraXpert's AI model.
 
     Waits for a free slot first, as `run_preview_script` does. GraXpert uses
     the graphics card when it can and the processor otherwise, so a machine
-    without CUDA still works.
+    without CUDA still works. The ``-bg`` option makes it also save the
+    background model it subtracted, at `graxpert_background_model_path`. It
+    adds no run time (measured on the M 52 stack, 6.8 s with and without),
+    and the model is the stack's own sky gradient, which
+    `background_gradient` measures.
 
     Parameters
     ----------
@@ -578,7 +619,7 @@ def flatten_background(graxpert_executable: str, input_path: str, output_stem: s
         The FITS image to flatten. It is not changed.
     output_stem : `str`
         Where to write the result, without an extension. GraXpert adds
-        ``.fits``.
+        ``.fits``, and ``_background.fits`` for the model.
 
     Returns
     -------
@@ -596,6 +637,7 @@ def flatten_background(graxpert_executable: str, input_path: str, output_stem: s
         "Subtraction",
         "-smoothing",
         "0.0",
+        "-bg",
         "-output",
         output_stem,
         input_path,
@@ -936,6 +978,9 @@ def _picture_script(
     steps_log: list[str] | None = None,
     settings_used: dict[str, Any] | None = None,
     skipped_steps: list[SkippedPreviewStep] | None = None,
+    background_outcomes: list[BackgroundGradientOutcome] | None = None,
+    object_category: str | None = None,
+    target_anchor: TargetAnchor | None = None,
 ) -> list[str] | None:
     """Run the cleanup steps on the scratch copy and choose the final script.
 
@@ -966,10 +1011,24 @@ def _picture_script(
         where a step was skipped (a bright object skips the denoise and the
         star toning). The keys are ``denoise``, ``denoise_strength``
         (`None` when the denoise did not run), ``star_toning``, ``starnet``
-        and ``bright_object``.
+        and ``bright_object``, and ``masked_stretch``: whether the masked
+        stretch was used, the number and area of its regions, its white
+        point and, when it was not used, the reason.
     skipped_steps : `list` [`SkippedPreviewStep`], optional
         If given, each cleanup step that failed and was skipped is added to
         it.
+    background_outcomes : `list` [`BackgroundGradientOutcome`], optional
+        If given, the measurement of GraXpert's background model is added to
+        it: the numbers, or the reason there are none (GraXpert not
+        configured, skipped for a bright object, failed, or no model).
+        GraXpert's full-size model file is deleted either way.
+    object_category : `str` or `None`, optional
+        The target's kind (`Target.object_category`). Only a nebula or a
+        galaxy can get the masked stretch (see `masked_stretch`). `None`,
+        the default, means unknown and never gets it.
+    target_anchor : `TargetAnchor` or `None`, optional
+        The target's catalog position and size, so the masked stretch is
+        kept to the region at the target (see `masked_stretch`).
 
     Returns
     -------
@@ -987,11 +1046,22 @@ def _picture_script(
             "using a stretch scaled to the object, without GraXpert or the denoise.",
             100 * bright_object.white_fraction,
         )
+        if background_outcomes is not None:
+            background_outcomes.append(
+                not_measured_outcome("the preview of a bright object skips GraXpert, so there is no model")
+            )
         if steps_log is not None:
             steps_log.append("Bright object: its own stretch, without GraXpert or the denoise")
         if settings_used is not None:
             settings_used.update(
-                denoise=False, denoise_strength=None, star_toning=False, starnet=False, bright_object=True
+                denoise=False,
+                denoise_strength=None,
+                star_toning=False,
+                starnet=False,
+                bright_object=True,
+                masked_stretch=MaskedStretchPlan(
+                    used=False, reason="the bright-object stretch was used", category=object_category
+                ).record(),
             )
         return build_bright_object_script(name, "preview", bright_object)
     steps: list[str] = []
@@ -1006,15 +1076,43 @@ def _picture_script(
             succeeded : `bool`
                 Whether GraXpert succeeded.
             """
-            return flatten_background(graxpert_executable, input_path, os.path.splitext(output_path)[0])
+            output_stem = os.path.splitext(output_path)[0]
+            model_path = graxpert_background_model_path(output_stem)
+            succeeded = flatten_background(graxpert_executable, input_path, output_stem)
+            try:
+                if background_outcomes is not None and succeeded:
+                    measured_outcomes.append(measure_background_model_file(model_path, input_path))
+            finally:
+                # The full-size model is about as big as the stack: only the
+                # small binned map is kept.
+                if os.path.isfile(model_path):
+                    os.remove(model_path)
+            return succeeded
 
+        measured_outcomes: list[BackgroundGradientOutcome] = []
         flattened_name = _next_source(
             "GraXpert", name, "flat.fits", scratch, flatten, check_result=True, skipped_steps=skipped_steps
         )
+        if background_outcomes is not None:
+            if flattened_name != name:
+                background_outcomes.extend(
+                    measured_outcomes or [not_measured_outcome("GraXpert wrote no background model")]
+                )
+            else:
+                background_outcomes.append(
+                    not_measured_outcome(
+                        "GraXpert failed, so there is no model"
+                        + (f" ({skipped_steps[-1].reason})" if skipped_steps else "")
+                    )
+                )
         steps.append("GraXpert " + ("done" if flattened_name != name else "skipped after a failure"))
         name = flattened_name
     else:
         steps.append("GraXpert not configured")
+        if background_outcomes is not None:
+            background_outcomes.append(
+                not_measured_outcome("GraXpert is not configured, so there is no model")
+            )
     colour = is_colour_image(os.path.join(scratch, name))
     if colour and configuration.get_preview_colour_calibration_enabled():
         calibrated_name, method = name, ""
@@ -1071,6 +1169,7 @@ def _picture_script(
     remove_green = configuration.get_preview_remove_green_noise_enabled() and colour
     steps.append("Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used")
     stretched_by_starnet = False
+    linear_name = name
     if settings.starnet:
         starnet_name = _stretch_with_starnet(
             scratch, name, siril_executable, remove_green, linked, settings, skipped_steps
@@ -1082,6 +1181,15 @@ def _picture_script(
             steps.append("StarNet failed: the normal stretch is used")
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
+    if stretched_by_starnet:
+        masked = MaskedStretchPlan(
+            used=False, reason="StarNet stretched the picture", category=object_category
+        )
+    else:
+        masked = plan_masked_stretch_for_file(
+            os.path.join(scratch, linear_name), object_category, choice.sky_level, target_anchor
+        )
+    logger.info("Masked stretch: %s.", masked.step_sentence())
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
     denoise_note = "Cosmic Clarity not configured"
     if not denoise_executable and configuration.get_cosmic_clarity_denoise_path():
@@ -1115,8 +1223,9 @@ def _picture_script(
             star_toning=bool(tone_stars),
             starnet=stretched_by_starnet,
             bright_object=False,
+            masked_stretch=masked.record(),
         )
-    if not stretched_by_starnet and not denoise_executable and not tone_stars:
+    if not stretched_by_starnet and not denoise_executable and not tone_stars and not masked.used:
         steps.extend(["Siril stretch done in the final script", denoise_note, "Star toning off"])
         logger.info("Preview steps: %s.", "; ".join(steps))
         if steps_log is not None:
@@ -1182,6 +1291,26 @@ def _picture_script(
         name = toned_name
     else:
         steps.append("Star toning off")
+    if masked.used:
+        linear_path = os.path.join(scratch, linear_name)
+
+        def blend_masked_stretch(input_path: str, output_path: str) -> bool:
+            """Blend the second stretch into the picture.
+
+            Returns
+            -------
+            succeeded : `bool`
+                Whether the blended picture was written.
+            """
+            return apply_masked_stretch_in_file(linear_path, input_path, output_path, masked)
+
+        masked_name = _next_source(
+            "Masked stretch", name, "masked.fits", scratch, blend_masked_stretch, skipped_steps=skipped_steps
+        )
+        steps.append(
+            masked.step_sentence() if masked_name != name else "Masked stretch skipped after a failure"
+        )
+        name = masked_name
     logger.info("Preview steps: %s.", "; ".join(steps))
     if steps_log is not None:
         steps_log.extend(steps)
@@ -1400,6 +1529,9 @@ def write_stack_preview(
     settings: PreviewSettings | None = None,
     steps_log: list[str] | None = None,
     skipped_steps: list[SkippedPreviewStep] | None = None,
+    background_outcomes: list[BackgroundGradientOutcome] | None = None,
+    object_category: str | None = None,
+    target_anchor: TargetAnchor | None = None,
 ) -> str | None:
     """Save a cleaned-up, stretched JPEG and FITS of a stack beside it.
 
@@ -1421,6 +1553,17 @@ def write_stack_preview(
         If given, each cleanup step that failed and was skipped is added to
         it, so the caller can record that the picture differs from its
         settings (see `preview_notices`).
+    background_outcomes : `list` [`BackgroundGradientOutcome`], optional
+        If given, GraXpert's background model is measured and the result is
+        added to it (see `background_gradient`), and the 64 by 64 map is saved
+        beside the picture (`background_model_path_for`). Left out, the model
+        is deleted unmeasured. A preview that was not made adds nothing.
+    object_category : `str` or `None`, optional
+        The target's kind (`Target.object_category`), for the masked stretch
+        (see `masked_stretch`). Left out, the stack is of an unknown kind and
+        the step is not used. Pass `None` for a spectral stack.
+    target_anchor : `TargetAnchor` or `None`, optional
+        The target's catalog position and size (see `anchor_for_target`).
 
     Returns
     -------
@@ -1430,7 +1573,13 @@ def write_stack_preview(
     """
     preview_path = preview_path_for(stacked_path)
     processed_path = processed_fits_path_for(stacked_path)
-    for old_picture in (preview_path, processed_path, preview_settings_path_for(stacked_path)):
+    background_model_path = background_model_path_for(stacked_path)
+    for old_picture in (
+        preview_path,
+        processed_path,
+        preview_settings_path_for(stacked_path),
+        background_model_path,
+    ):
         if os.path.exists(old_picture):
             os.remove(old_picture)
     if not os.path.isfile(stacked_path):
@@ -1460,7 +1609,15 @@ def write_stack_preview(
         settings_used: dict[str, Any] = {}
         steps_taken: list[str] = []
         commands = _picture_script(
-            scratch, siril_executable, settings, steps_taken, settings_used, skipped_steps
+            scratch,
+            siril_executable,
+            settings,
+            steps_taken,
+            settings_used,
+            skipped_steps,
+            background_outcomes,
+            object_category,
+            target_anchor,
         )
         if steps_log is not None:
             steps_log.extend(steps_taken)
@@ -1479,6 +1636,8 @@ def write_stack_preview(
             # (the shifted reference pixel and the crop cards).
             _copy_observation_header(scratch_stack, processed_path)
         write_preview_settings(stacked_path, settings or PreviewSettings(), settings_used, steps_taken)
+        for background_outcome in background_outcomes or []:
+            write_binned_model(background_outcome, background_model_path)
     except (OSError, subprocess.SubprocessError) as error:
         logger.warning("No preview made for '%s': %s.", stacked_path, error)
         return None

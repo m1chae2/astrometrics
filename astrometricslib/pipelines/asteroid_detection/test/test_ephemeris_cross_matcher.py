@@ -10,7 +10,6 @@ from collections.abc import Callable
 import astropy.units as u
 import pytest
 from astropy.table import QTable
-from pytest_mock import MockerFixture
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import MovingObjectConfig
@@ -168,7 +167,6 @@ def _matcher(client: FakeSkybot, radius_arcsec: float = 10.0) -> EphemerisCrossM
     return EphemerisCrossMatcher(
         MovingObjectConfig(ephemeris_cross_match_radius_arcsec=radius_arcsec),
         skybot_client=client,
-        min_seconds_between_queries=0.0,
     )
 
 
@@ -309,20 +307,6 @@ def test_identical_questions_are_answered_from_memory() -> None:
     assert matcher.queries_attempted == 1
 
 
-def test_queries_are_spaced_out_in_time(mocker: MockerFixture) -> None:
-    """The matcher sleeps between two real questions when asked to."""
-    sleep = mocker.patch("astrometricslib.pipelines.asteroid_detection.ephemeris.time.sleep")
-    matcher = EphemerisCrossMatcher(
-        MovingObjectConfig(), skybot_client=FakeSkybot(), min_seconds_between_queries=5.0
-    )
-
-    matcher.query_field(150.0, 30.0, _START_UNIX, 0.01)
-    matcher.query_field(151.0, 30.0, _START_UNIX, 0.01)
-
-    sleep.assert_called_once()
-    assert 0.0 < sleep.call_args.args[0] <= 5.0
-
-
 def test_query_field_returns_none_on_query_failure_and_counts_it() -> None:
     """Test that the program doesn't crash if the database is offline."""
     client = FakeSkybot(error=RuntimeError("network error"))
@@ -375,9 +359,7 @@ def _separate_candidates(count: int) -> list[AsteroidDetectionCandidate]:
 def test_question_limit_leaves_later_movers_unchecked_and_warns(caplog: pytest.LogCaptureFixture) -> None:
     """Past the limit a mover is skipped whole, keeps its stage, is listed."""
     client = FakeSkybot(lambda epoch_unix: _asteroid_table(150.0, 30.0))
-    matcher = EphemerisCrossMatcher(
-        MovingObjectConfig(), skybot_client=client, min_seconds_between_queries=0.0, max_queries=5
-    )
+    matcher = EphemerisCrossMatcher(MovingObjectConfig(), skybot_client=client, max_queries=5)
     candidates = _separate_candidates(4)
 
     with caplog.at_level("WARNING"):
@@ -397,9 +379,7 @@ def test_question_limit_leaves_later_movers_unchecked_and_warns(caplog: pytest.L
 def test_question_limit_is_not_reached_when_answers_come_from_memory() -> None:
     """Movers that share their questions all fit within a small limit."""
     client = FakeSkybot()
-    matcher = EphemerisCrossMatcher(
-        MovingObjectConfig(), skybot_client=client, min_seconds_between_queries=0.0, max_queries=2
-    )
+    matcher = EphemerisCrossMatcher(MovingObjectConfig(), skybot_client=client, max_queries=2)
     candidates = [_make_candidate(CascadeStage.RATE_LINEARITY_CONFIRMED, frame_count=3) for _ in range(5)]
 
     matcher.cross_match_candidates(candidates)

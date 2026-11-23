@@ -95,6 +95,8 @@ The first term is the star's own shot noise (the random scatter of a count). The
 
 The error does not change the flux. `measure_aperture_photometry` returns both, and `_measure_aperture_flux` keeps returning only the flux and the saturation flag.
 
+**Faint stars.** The net flux is the measured value, and it can be zero or below. A star near the noise measures a little below zero in about half its frames, because the sky level is itself an estimate. The code does not clamp it to zero: a clamp would raise the star's mean and hide the frames where it was lost in the noise. The error stays above zero (the shot noise term uses the flux or zero, whichever is larger). A star too near the frame edge is the one case with no measurement: its flux and error are both 0, and the comparison step reads the error of 0 as "not measured".
+
 `detector_noise.py` picks the gain (electrons per ADU) and read noise (electrons):
 
 1. The camera's profile: the `sensor_noise` entry in `models/camera_profile.py` for the frame's own gain setting, offset and binning. The setting comes from the header (`ISOSPEED` or `GAIN`, `OFFSET` or `BLKLEVEL`, `XBINNING` and `YBINNING`) or is passed in from a frame record. Each value carries its source (datasheet, measured or assumed). An exact match counts. When the caller passes `clipped_at_zero=False`, an entry of the same gain and binning at another offset may stand in (see `models/README.md`); by default no caller does, so a frame at any other setting gets nothing from the profile, and `DetectorNoise.profile_gap_reason` says why. A profile still holding the old single gain and read noise is treated the same way until it is migrated (`scripts/migrate_camera_profiles.py`).

@@ -32,7 +32,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers import build_pixel_query, pixel_source_id_range, require_online
+from astrometricslib.drivers import build_pixel_query, get_gaia_archive, pixel_source_id_range, require_online
 from astrometricslib.exceptions import AstrometricsError, ExternalServiceError, InvalidArgumentError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -196,7 +196,7 @@ def _run_query(gaia: Any, query: str, timeout_seconds: float) -> Any:
     Parameters
     ----------
     gaia : `Any`
-        The archive connection (``astroquery.gaia.Gaia``).
+        The archive connection (`get_gaia_archive`).
     query : `str`
         The ADQL text to send.
     timeout_seconds : `float`
@@ -378,7 +378,7 @@ def build_deep_star_catalog(
         ``stars``, ``error``, ``pixels_done`` (finished so far, including
         earlier runs), ``pixels_total``, and ``stars_total``.
     gaia : `Any`, optional
-        The archive connection; ``astroquery.gaia.Gaia`` when omitted.
+        The archive connection; the gateway's ESA Gaia archive when omitted.
     sleep : `Callable`, optional
         Function used to pause; replaced in tests.
     pixels : `iterable` [`int`], optional
@@ -406,9 +406,7 @@ def build_deep_star_catalog(
         magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
 
     if gaia is None:
-        from astroquery.gaia import Gaia
-
-        gaia = Gaia
+        gaia = get_gaia_archive()
 
     sky_pixel_count = 12 * 4**healpix_level
     if pixels is None:
@@ -514,7 +512,7 @@ def estimate_catalog_size(
     request_delay_seconds : `float`, optional
         Seconds to pause between requests.
     gaia : `Any`, optional
-        The archive connection; ``astroquery.gaia.Gaia`` when omitted.
+        The archive connection; the gateway's ESA Gaia archive when omitted.
     sleep : `Callable`, optional
         Function used to pause; replaced in tests.
 
@@ -534,9 +532,7 @@ def estimate_catalog_size(
         magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
 
     if gaia is None:
-        from astroquery.gaia import Gaia
-
-        gaia = Gaia
+        gaia = get_gaia_archive()
 
     pixels_total = 12 * 4**healpix_level
     sample_count = min(sample_count, pixels_total)

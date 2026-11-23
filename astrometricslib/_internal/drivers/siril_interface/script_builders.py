@@ -32,6 +32,21 @@ logger = logging.getLogger(__name__)
 # added for fields with many stars (the comment it came with mentions 99-125
 # stars per frame), and that case has not been re-tested here; that is why it
 # is kept as a fallback (see `stack_frames`) instead of removed.
+# The resampling options of `seqapplyreg` for imaging light frames. Lanczos
+# (`la`) without clamping (`-noclamp`). Siril's default here is Lanczos with
+# clamping, which cuts the negative lobes of the filter and so blurs the
+# stars a little. On 44 frames of 120 s on M 52 (validation register STK-25)
+# the stack's star width was 2.434 px with the default, 2.393 px with cubic
+# and clamping, 2.232 px with cubic and no clamping and 2.195 px with
+# Lanczos and no clamping, where the width predicted from the frames is
+# 2.173 px. Sky scatter did not change and no pixel went negative. The
+# unclamped filter can overshoot (a dark ring) around a very bright star;
+# that is not yet checked on a bright field. The spectral path registers
+# with `register -transf=shift` and is left as it was.
+# Change this together with `STACKING_ALGORITHM_VERSION` in
+# ``stack_inputs.py``, which makes existing stacks restack once.
+IMAGING_REGISTRATION_INTERPOLATION_OPTIONS = ("-interp=la", "-noclamp")
+
 SPECTRAL_STAR_DETECTION_COMMANDS = {
     "standard": "setfindstar -relax=on",
     "relaxed": "setfindstar -relax=on -roundness=0.15 -radius=3",
@@ -741,7 +756,8 @@ def build_light_script(target_folder: str, settings: LightScriptSettings) -> Lig
             # whose intermediates measured 65GB, a 90% wfwhm
             # setting is ~24 frames of resample-and-write
             # avoided.
-            register_commands.append(" ".join([f"seqapplyreg {seq}", *frame_filter_options]))
+            apply_options = [*IMAGING_REGISTRATION_INTERPOLATION_OPTIONS, *frame_filter_options]
+            register_commands.append(" ".join([f"seqapplyreg {seq}", *apply_options]))
             registered_seq = f"r_{seq}"
             # Deliberately empty: seqapplyreg already dropped
             # those frames, and passing the same filters again

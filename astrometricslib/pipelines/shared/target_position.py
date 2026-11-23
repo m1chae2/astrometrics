@@ -33,6 +33,12 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.simbad_object_types import (
+    index_rows_by_name,
+    name_variants,
+    normalize_name,
+    quote_adql,
+)
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from astrometricslib.utilities.target_classification import classify_target_name
@@ -328,6 +334,61 @@ def resolve_catalog_position(
         return None
 
 
+# The SIMBAD columns a one-request lookup of several names can return: the
+# position, the object type and the size, which all sit in SIMBAD's ``basic``
+# table. A lookup that asks for other columns goes name by name.
+_ONE_REQUEST_FIELDS = frozenset({"otype", "galdim_majaxis", "ra", "dec"})
+
+
+def resolve_catalog_positions_in_one_request(
+    names: Sequence[str], simbad: SimbadDriver
+) -> dict[str, CatalogPosition]:
+    """Look several names up in SIMBAD with one request.
+
+    One question about all the names (each in the spellings SIMBAD may store
+    it under) takes one request through the outside-service gateway, where a
+    loop of `resolve_catalog_position` calls takes one request for each name.
+    A name SIMBAD's identifier table does not hold is simply missing from the
+    answer; the caller asks for it by name.
+
+    Parameters
+    ----------
+    names : `list` [`str`]
+        The names to look up.
+    simbad : `SimbadDriver`
+        The SIMBAD driver to ask.
+
+    Returns
+    -------
+    positions : `dict` [`str`, `CatalogPosition`]
+        The position of each name SIMBAD knows, under the name as given. The
+        nearest-listed row is not chosen: the first row of the name is used,
+        as `resolve_catalog_position` does.
+    """
+    id_list = ", ".join(quote_adql(variant) for name in names for variant in name_variants(name))
+    # ADQL for a web service, not SQL for a database of ours; every name is
+    # passed through `quote_adql`.
+    query = (
+        "SELECT ident.id AS queried_id, basic.ra AS ra, basic.dec AS dec, "  # ruff: ignore[hardcoded-sql-expression] -- ADQL, quoted
+        "basic.otype AS otype, basic.galdim_majaxis AS galdim_majaxis "
+        "FROM ident JOIN basic ON basic.oid = ident.oidref "
+        f"WHERE ident.id IN ({id_list})"
+    )
+    answer = simbad.query_tap(query)
+    rows = index_rows_by_name(answer)
+    positions: dict[str, CatalogPosition] = {}
+    for name in names:
+        matches = rows.get(normalize_name(name))
+        if not matches:
+            continue
+        single = answer[[matches[0].index]]
+        coordinate = SkyCoord(
+            ra=float(single["ra"][0]) * u.deg, dec=float(single["dec"][0]) * u.deg, frame="icrs"
+        )
+        positions[name] = CatalogPosition(coordinate, _read_major_axis(single), read_object_type(single))
+    return positions
+
+
 def resolve_names(
     names: Sequence[str], simbad: SimbadDriver, votable_fields: tuple[str, ...] = ()
 ) -> NameResolution:
@@ -353,8 +414,21 @@ def resolve_names(
         The first name's answer when the names agree or only one resolves.
     """
     answers: list[tuple[str, CatalogPosition]] = []
-    for name in dict.fromkeys(str(n).strip() for n in names if n and str(n).strip()):
-        position = resolve_catalog_position(name, simbad, votable_fields)
+    unique_names = list(dict.fromkeys(str(n).strip() for n in names if n and str(n).strip()))
+    one_request: dict[str, CatalogPosition] = {}
+    if (
+        len(unique_names) > 1
+        and set(votable_fields) <= _ONE_REQUEST_FIELDS
+        and callable(getattr(simbad, "query_tap", None))
+    ):
+        try:
+            one_request = resolve_catalog_positions_in_one_request(unique_names, simbad)
+        except (ExternalServiceError, NotImplementedError, *ONLINE_QUERY_ERRORS, *DATA_ERRORS) as batch_error:
+            # Each name is then asked for by itself, below, and its own
+            # failure is logged there.
+            logger.debug("The one-request SIMBAD lookup of %s failed: %s", unique_names, batch_error)
+    for name in unique_names:
+        position = one_request.get(name) or resolve_catalog_position(name, simbad, votable_fields)
         if position is not None:
             answers.append((name, position))
     if not answers:

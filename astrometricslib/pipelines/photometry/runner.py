@@ -749,6 +749,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             ExcludedFrame(path=frame.path, reason=f"skipped, set aside by the frame quarantine: {reason}")
             for frame, reason in payload.get("quarantine_skipped_frames", [])
         ]
+        rejected_frames += [
+            ExcludedFrame(path=frame.path, reason=reason)
+            for frame, reason in request.options.get("frames_left_out", [])
+        ]
 
         star_photometry = [star.photometry for star in result.stellar_objects if star.photometry is not None]
         noise_model = fit_noise_model(*_noise_model_inputs(star_photometry))

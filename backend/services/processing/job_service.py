@@ -114,6 +114,24 @@ class JobService:
         job.updated_at = datetime.now().isoformat()
         self.repository.upsert_job(job)
 
+    def record_input_metrics(self, job_id: str, updates: dict[str, Any]) -> None:
+        """Add keys to a job's input metrics, keeping the keys already there.
+
+        The job list shows the steps a job ran (``steps``) and the kinds of
+        stack it made (``stackKinds``) from these metrics.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job to change. An unknown job is ignored.
+        updates : `dict` [`str`, `Any`]
+            The keys to set.
+        """
+        job = self.repository.get_job(job_id)
+        if not job:
+            return
+        self.update_job(job_id, input_metrics={**(job.input_metrics or {}), **updates})
+
     def get_job(self, job_id: str) -> ProcessingJob | None:
         """Get details for a specific job.
 

@@ -177,7 +177,7 @@ A quality gate is an automatic test on a run. It passes, fails, or is "not check
 | `source_detection` | run gate | `post_processing/record_quality.py` | Fails when no star was detected. |
 | `astrometric_residual` | run gate | `post_processing/record_quality.py` | Fails when the solution misses its stars by more than `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` of the FWHM (Eq. 5). Not checked when the residual (position error), pixel scale (sky angle per pixel) or FWHM is missing. |
 | `catalog_matches` | run gate | `post_processing/record_quality.py` | Fails when fewer than `MINIMUM_MATCHED_STARS` stars were matched to a catalog. Not checked when the image was not solved. |
-| `catalog_lookup` | run gate | `post_processing/record_quality.py` | Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries after repeated failures) tripped during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
+| `catalog_lookup` | run gate | `post_processing/record_quality.py` | Fails when the outside-service gateway paused a catalog (it pauses a host that keeps failing or answers too busy, and a paused catalog is answered from stored results) during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
 
 ## 5. Tuned calibration parameters
 
@@ -208,7 +208,7 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 2. **Too few detections (fewer than 4).** No solve is tried. A celestial WCS already in the image header is used instead. Without one, `plate_solve` fails.
 3. **Solver failure.** A tried solve that finds no solution, locally or online, raises `PlateSolveFailedError`. The adapter does not catch it, so the error reaches the caller: `validate_output` never runs, and no quality summary or gate is saved for that run.
 4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept. Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch 2016.0 with a flag.
-5. **Catalog outages.** Repeated failures trip a process-wide circuit breaker: a shared switch that stops further online catalog queries. Unnamed stars keep position-based names, and `catalog_lookup` reports the outage.
+5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers too busy, and the pause is shared by every process. A paused catalog is answered from stored results, with a warning. Unnamed stars keep position-based names, and `catalog_lookup` reports the outage.
 
 ## 7. Quality summary data models
 

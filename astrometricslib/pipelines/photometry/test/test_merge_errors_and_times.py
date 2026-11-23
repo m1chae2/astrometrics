@@ -199,3 +199,16 @@ def test_the_field_position_falls_back_to_the_plate_solution_then_to_none() -> N
     assert _field_position_deg(placeholder, solved) == pytest.approx((83.8, -5.4))
     assert _field_position_deg(placeholder, None) is None
     assert _field_position_deg(None, None) is None
+
+
+def test_merging_sessions_keeps_the_not_judged_reasons() -> None:
+    """A reason from either session, or both once each, survives the merge."""
+    first = _night(FIRST_NIGHT, 3).model_copy(update={"not_judged_reason": "saturated in most frames"})
+    second = _night(SECOND_NIGHT, 3)
+    assert _merge_light_curves(first, second).not_judged_reason == "saturated in most frames"
+    assert _merge_light_curves(second, first).not_judged_reason == "saturated in most frames"
+    other = _night(SECOND_NIGHT, 3).model_copy(update={"not_judged_reason": "near the edge"})
+    merged = _merge_light_curves(first, other)
+    assert merged.not_judged_reason == "saturated in most frames; near the edge"
+    assert _merge_light_curves(first, first).not_judged_reason == "saturated in most frames"
+    assert _merge_light_curves(second, second).not_judged_reason is None

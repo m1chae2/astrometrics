@@ -186,6 +186,20 @@ def synthetic_test_library(test_directories: SimpleNamespace, isolate_config_sin
 
 
 @pytest.fixture(autouse=True)
+def isolated_outside_services(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Give each test its own outside-service state and stop it sleeping.
+
+    The gateway keeps request times and pauses in a file shared by every
+    process. A test must neither read the pauses another test left nor wait
+    for a rate limit, so it gets a private file and a wait that does nothing.
+    """
+    from astrometricslib._internal.drivers.outside_services import gateway, host_state
+
+    monkeypatch.setattr(host_state, "outside_state_path", lambda: tmp_path / "outside_services.db")
+    monkeypatch.setattr(gateway, "_sleep", lambda seconds: None)
+
+
+@pytest.fixture(autouse=True)
 def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stop tests from plate-solving a stack that has no coordinate solution.
 

@@ -239,8 +239,8 @@ def run_stack(
             job_type="stacking",
             target_id=target.id,
             log_file=siril.log_file,
-            completed_message=f"[{target.id}] Stacking completed successfully.",
-            failed_message=f"[{target.id}] Stacking failed.",
+            completed_message=f"[{target.id}] Stacking completed",
+            failed_message=f"[{target.id}] Stacking failed",
         ) as job,
     ):
         stacked_path = stacking_stage.stack_frames(
@@ -262,7 +262,11 @@ def run_stack(
         )
         # Stacking can finish without raising and still make no image, so
         # the outcome is decided here, not left to "no exception means done".
-        job.mark("completed" if stacked_path else "failed", 100)
+        job.mark(
+            "completed" if stacked_path else "failed",
+            100,
+            message="Stacking completed" if stacked_path else "Stacking failed",
+        )
     if not stacked_path:
         raise ProcessingError(
             f"Stacking {target.id!r} finished without making a stack. See the job log.",

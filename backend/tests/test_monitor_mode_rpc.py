@@ -127,6 +127,7 @@ READ_ONLY_METHODS = frozenset({
     "observatory:safety_status",
     "plan:get",
     "processing:stack_summary",
+    "processing:list_bright_objects",
     # Reads frames and calibration choices as a background job; stacks, moves
     # and stores nothing.
     "processing:check_stack",
@@ -241,6 +242,7 @@ LOCAL_WRITE_METHODS = frozenset({
     "processing:delete_job",
     "processing:measure_noise",
     "processing:remake_preview",
+    "processing:set_bright_object",
     "quality:measure_stack",
     "quality:record_frame_measurements",
     "processing:siril_open",

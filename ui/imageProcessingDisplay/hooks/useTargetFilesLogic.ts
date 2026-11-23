@@ -8,6 +8,7 @@ import { FileItem } from '../fileBrowser/FileBrowser';
 import { putBackFrames } from '../../common/services/imaging/frameReviewService';
 import { useStarShapeReview } from './useStarShapeReview';
 import { useFrameStatuses } from './useFrameStatuses';
+import type { StackConfigurationRef } from '../../common/types/backendTypes';
 import { buildOpticOptions, chooseDefaultOptic, filterFilesByCamera, filterFilesByOptic } from '../utils/opticSelection';
 
 /**
@@ -44,6 +45,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [stackedImage, setStackedImage] = useState<string | null>(null);
     const [stackedSpectralTarget, setStackedSpectralTarget] = useState<string | null>(null);
+    const [stackConfiguration, setStackConfiguration] = useState<StackConfigurationRef | null>(null);
     const [totalExposure, setTotalExposure] = useState<number>(0);
 
     // The optic the user picked: null means "not picked yet, use the default",
@@ -81,12 +83,14 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             setExposureCounts(res.exposureCounts || {});
             setStackedImage(res.stackedImage ?? null);
             setStackedSpectralTarget(res.stackedSpectralTarget ?? null);
+            setStackConfiguration(res.stackConfiguration ?? null);
             setTotalExposure(res.totalExposure ?? 0);
         }).catch(err => {
             console.error("Failed to load target files", err);
             setAllFiles([]);
             setStackedImage(null);
             setStackedSpectralTarget(null);
+            setStackConfiguration(null);
             setTotalExposure(0);
             setExposureCounts({});
         }).finally(() => {
@@ -105,6 +109,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         setFilesOwnerTarget(selectedTarget);
         setStackedImage(null);
         setStackedSpectralTarget(null);
+        setStackConfiguration(null);
         setSelectedFile(null);
         setAllFiles([]);
         setExposureCounts({});
@@ -247,6 +252,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         toggleAllFiles,
         stackedImage,
         stackedSpectralTarget,
+        stackConfiguration,
         totalExposure,
         starShapeReview,
         frameStatuses: frameReview.statuses,

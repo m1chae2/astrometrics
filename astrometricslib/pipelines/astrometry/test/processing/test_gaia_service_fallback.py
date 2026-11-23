@@ -5,12 +5,11 @@ G < 18 query for M 13 while VizieR returned the same stars in 10 s, and every
 remote lookup of 22 of 23 targets had failed. Each Gaia sky tile is now asked
 of the ESA archive first, VizieR second, and VizieR again at brighter limits
 (`star_identifier.make_gaia_tile_fetcher`). These tests check that order,
-that the depth actually fetched is the one reported, how the circuit breaker
-counts, and that VizieR's columns are mapped to the archive's. They use fake
-services, so no network is needed.
+that the depth actually fetched is the one reported, how a run counts
+failures and notes a gateway pause, and that VizieR's columns are mapped to
+the archive's. They use fake services, so no network is needed.
 """
 
-import socket
 import sys
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -18,13 +17,13 @@ from typing import Any
 
 import numpy as np
 import pytest
-import requests
 from astropy.table import Table
 
 from astrometricslib._internal.drivers import gaia_cone_driver
 from astrometricslib._internal.drivers.gaia_cone_driver import (
     query_gaia_cone_vizier as real_query_gaia_cone_vizier,
 )
+from astrometricslib._internal.drivers.outside_services import ServicePausedError
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 
@@ -165,76 +164,19 @@ def test_vizier_answers_when_the_archive_fails_and_no_failure_counts(services: d
     assert not statistics["circuit_breaker_tripped"]
 
 
-def test_a_connection_failure_rules_out_the_brighter_limits(services: dict[str, Any]) -> None:
-    """A connection failure at G < 18 rules out G < 17 and G < 16."""
+def test_a_failure_at_full_depth_asks_for_the_brighter_limit(services: dict[str, Any]) -> None:
+    """After ESA and VizieR fail at G < 18, VizieR is asked again at G < 17.
+
+    The gateway pauses a host that keeps failing, so the repeat costs no wait
+    once that happens.
+    """
     services["answers"]["vizier", 17.0] = _stars()
-
-    table = _fetch()
-
-    assert table is None
-    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
-
-
-def test_a_read_timeout_keeps_the_brighter_limits(
-    services: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A slow VizieR (reached, no answer in time) is asked again at G < 17."""
-    services["answers"]["vizier", 17.0] = _stars()
-    real_runner = star_identifier_module._run_with_daemon_thread_timeout
-    slow_calls: list[float] = []
-
-    def slow_at_full_depth(query: Any, timeout_seconds: float) -> Any:
-        """Time out the first VizieR call, run the rest normally.
-
-        Parameters
-        ----------
-        query : `Callable`
-            The query to run.
-        timeout_seconds : `float`
-            The deadline, ignored here.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            The query's answer.
-
-        Raises
-        ------
-        ExternalServiceError
-            For the first VizieR call.
-        """
-        if timeout_seconds > star_identifier_module.GAIA_ESA_TIMEOUT_SECONDS and not slow_calls:
-            slow_calls.append(timeout_seconds)
-            services["calls"].append(("vizier", 18.0))
-            raise ExternalServiceError("Timed out")
-        return real_runner(query, timeout_seconds)
-
-    monkeypatch.setattr(star_identifier_module, "_run_with_daemon_thread_timeout", slow_at_full_depth)
 
     table = _fetch()
 
     assert table is not None
-    assert services["calls"][0] == ("esa", 18.0)
-    assert ("vizier", 18.0) in services["calls"]
-    assert ("vizier", 17.0) in services["calls"]
+    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0), ("vizier", 17.0)]
     assert table.complete_to_g == pytest.approx(17.0)
-    assert table.service == "VizieR"
-
-
-def test_a_requests_read_timeout_is_not_a_connection_failure() -> None:
-    """Read timeouts keep the service; connect and DNS failures do not."""
-    is_failure = star_identifier_module._is_connection_failure
-
-    assert not is_failure(requests.exceptions.ReadTimeout("slow"))
-    assert not is_failure(TimeoutError("slow"))
-    assert not is_failure(ValueError("bad reply"))
-    assert is_failure(requests.exceptions.ConnectTimeout("no connect"))
-    assert is_failure(requests.exceptions.ConnectionError("refused"))
-    assert is_failure(ConnectionRefusedError("refused"))
-    assert is_failure(socket.gaierror("no such name"))
-    wrapped = OSError("wrapped")
-    wrapped.__cause__ = socket.gaierror("no such name")
-    assert is_failure(wrapped)
 
 
 def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> None:
@@ -242,58 +184,35 @@ def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> N
     table = _fetch()
 
     assert table is None
-    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
+    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0), ("vizier", 17.0), ("vizier", 16.0)]
     statistics = star_identifier_module.get_gaia_query_statistics()
     assert statistics["attempted"] == 1
     assert statistics["failed"] == 1
 
 
-def test_later_fetches_in_the_same_run_skip_the_failed_services(
-    services: dict[str, Any], caplog: pytest.LogCaptureFixture
-) -> None:
-    """A second fetch makes no remote call, and each service is logged once."""
-    with caplog.at_level("INFO"):
-        _fetch()
-        services["calls"].clear()
-        assert _fetch() is None
+def test_a_gateway_pause_is_noted_for_the_run(services: dict[str, Any]) -> None:
+    """A tile that fails because Gaia is paused sets the run's flag, once."""
+    paused = ServicePausedError("ESA Gaia archive is paused")
+    failure = ExternalServiceError("Gaia tile 1 failed on every service")
+    failure.__cause__ = paused
 
-    assert services["calls"] == []
-    failure_lines = [record for record in caplog.records if "Gaia tile download from" in record.getMessage()]
-    assert len(failure_lines) == 2
+    star_identifier_module._record_gaia_failure(failure)
 
-
-def test_a_new_run_tries_the_services_again(services: dict[str, Any]) -> None:
-    """Resetting the run's statistics clears the unreachable services."""
-    _fetch()
-    services["calls"].clear()
-    services["answers"]["vizier", 18.0] = _stars()
-
-    star_identifier_module.reset_gaia_query_statistics()
-    table = _fetch()
-
-    assert table is not None
-    assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
+    statistics = star_identifier_module.get_gaia_query_statistics()
+    assert statistics["circuit_breaker_tripped"]
+    assert statistics["failed"] == 1
+    fetch, reason = star_identifier_module.make_gaia_tile_fetcher()
+    assert fetch is None
+    assert "paused" in reason
 
 
-def test_a_working_network_asks_the_same_questions_as_before(services: dict[str, Any]) -> None:
-    """With the archive up, a new run asks it first again and nothing else."""
-    services["answers"]["vizier", 18.0] = _stars()
-    _fetch()
-    services["calls"].clear()
-    star_identifier_module.reset_gaia_query_statistics()
-    services["answers"]["esa", 18.0] = _stars()
-    _fetch()
+def test_an_ordinary_failure_does_not_set_the_pause_flag(services: dict[str, Any]) -> None:
+    """A failure that is not a gateway pause only counts as a failure."""
+    star_identifier_module._record_gaia_failure(ExternalServiceError("esa is down"))
 
-    assert services["calls"] == [("esa", 18.0)]
-
-
-def test_an_open_breaker_refuses_every_later_tile(services: dict[str, Any]) -> None:
-    """After the breaker opens, no fetcher is given and nothing is sent."""
-    for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
-        star_identifier_module._record_gaia_failure("test")
-
-    assert _fetch() is None
-    assert services["calls"] == []
+    statistics = star_identifier_module.get_gaia_query_statistics()
+    assert statistics["failed"] == 1
+    assert not statistics["circuit_breaker_tripped"]
 
 
 def test_vizier_columns_are_mapped_to_the_archive_names(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,7 +1,8 @@
 /**
  * @fileoverview Decides which files an "Analyze" click sends to the backend.
  *
- * A master stack of the needed kind is always used when it exists. With no such stack, the file
+ * The main click analyzes both master stacks when both exist. A master stack of the needed kind is
+ * always used when it exists. With no such stack, the file
  * selected in the file browser (the previewed file) is used.
  *
  * Spectroscopy measures the master stacked spectral image, which has the best signal-to-noise
@@ -20,6 +21,8 @@ export interface AnalysisSelection {
     paths: string[];
     /** Filter type to tell the backend, or undefined to let it decide. */
     filterType?: string;
+    /** Stages to run by name. Left out to let the backend choose from the files. */
+    stages?: AnalysisStage[];
 }
 
 /** Everything the choice depends on. */
@@ -181,18 +184,31 @@ export function chooseStageSelection(input: AnalysisSelectionInput, stage: Analy
     return path ? { paths: [path], filterType } : null;
 }
 
+/** The tooltip of the main Analyze Target button when it has something to analyze. */
+export const ANALYZE_TARGET_TOOLTIP =
+    'Analyze Target: measures the stars of the imaging stack and, when there is one, the spectra of the spectral stack';
+
 /**
- * Chooses the file for the main "Analyze Target" click.
+ * Chooses the files for the main "Analyze Target" click.
  *
- * With a spectral filter in view, the click analyzes spectra; otherwise it measures stars (photometry).
- * Either way the master stack of that kind is always used when it exists, whatever is ticked or
- * previewed. With no such stack, the selected file is used. With neither, nothing is returned and
- * the action is off. The backend reports a stage it had to skip (for example, no astrometry) in the job message.
+ * When the target has both an imaging stack and a spectral stack, the click runs photometry on the
+ * imaging stack and spectroscopy on the spectral stack in one job, whatever filter is in view.
+ * With only one of the two stacks, that stack is analyzed by its own stage (stars or spectra),
+ * following the filter in view. With neither, the selected file is used. With no file either,
+ * nothing is returned and the action is off. The backend reports a stage it had to skip in the job
+ * message.
  *
  * @param input The current selection state.
- * @returns The files and filter type to analyze, or null when there is nothing to analyze.
+ * @returns The files, filter type and stages to analyze, or null when there is nothing to analyze.
  */
 export function chooseAnalysisSelection(input: AnalysisSelectionInput): AnalysisSelection | null {
+    if (input.stackedImage && input.stackedSpectralTarget) {
+        return {
+            paths: [input.stackedImage, input.stackedSpectralTarget],
+            filterType: isSpectralFilter(input.filterType) ? undefined : input.filterType || undefined,
+            stages: ['photometry', 'spectroscopy'],
+        };
+    }
     if (isSpectralFilter(input.filterType)) {
         const path = chooseSourceFile(input, 'spectral');
         return path ? { paths: [path], filterType: 'SPEC' } : null;

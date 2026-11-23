@@ -310,3 +310,15 @@ def test_catalog_variables_and_flagged_stars_are_left_out_of_the_factor() -> Non
     assert records[1].factor == pytest.approx(0.5, rel=0.02)
     # Positions 50 to 64 keep a ratio of 1 and stay in with the first 25 stars.
     assert records[1].tie_star_count <= 40
+
+
+def test_a_tied_session_logs_its_factor_stars_and_spread(caplog: pytest.LogCaptureFixture) -> None:
+    """A tied session logs one INFO line: factor, shared stars, spread."""
+    with caplog.at_level(logging.INFO):
+        _merge([[1.0] * _STAR_COUNT, [_FIELD_FACTOR] * _STAR_COUNT])
+
+    lines = [message for message in caplog.messages if "tied to" in message and "factor" in message]
+    assert len(lines) == 1
+    assert "factor 0.509" in lines[0]
+    assert f"from {_STAR_COUNT} shared stars" in lines[0]
+    assert "spread" in lines[0]

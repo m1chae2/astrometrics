@@ -1,14 +1,23 @@
-r"""Look up each stored star in VSX and Gaia DR3 for a variability listing.
+r"""Look up each stored star in VSX for a variability listing.
 
 SIMBAD's object types say whether a star is listed as variable. Two more
 places may list it: the AAVSO Variable Star Index (VSX), which also lists
 stars checked and found constant, and Gaia DR3, whose ``phot_variable_flag``
-marks stars Gaia's own analysis found variable. This script asks both, through
-CDS XMatch, and stores the answers on each star (``vsx_variability_type`` and
-``gaia_variable_flag``). Together with SIMBAD they let the library say
+marks stars Gaia's own analysis found variable. This script asks VSX through
+VizieR (the Harvard mirror or Strasbourg, as the setting
+``[Catalogs] vizier_preferred_server`` says), one request for each field of
+sky, and stores the answer on each star (``vsx_variability_type``). It asks
+Gaia DR3's variability classification (``I/358/vclassre``) the same way and
+matches by Gaia source number, for the stars that have one; the class is stored
+as ``VARIABLE:<class>`` in ``gaia_variable_flag`` (see
+`pipelines/shared/variable_star_catalogs.py`). Together with SIMBAD they let
+the library say
 "not listed as variable in SIMBAD, Gaia DR3 or VSX", and pick out stars a
-catalog positively calls constant. For a star VSX lists as a typed variable it
-also stores the brightness range and period VSX gives
+catalog positively calls constant. When neither VizieR server answers, the
+star is left unchanged and stays "unverified".
+
+For a star VSX lists as a typed variable it also stores the brightness range
+and period VSX gives
 (``vsx_bright_magnitude``, ``vsx_faint_magnitude``, ``vsx_amplitude_mag``,
 ``vsx_period_days`` and ``vsx_magnitude_band``), which the photometry run reads
 as the catalog amplitude of its target. Stars saved before these were kept
@@ -28,7 +37,7 @@ Check first, then apply::
 
 ``--apply`` copies the catalog database to a timestamped ``.bak`` file before
 writing anything, then saves after every request, so an interrupted run keeps
-what it had done. A star that already has both answers is skipped. Only the
+what it had done. A star that already has its VSX answer is skipped. Only the
 catalog-flag and VSX-range fields of each star are changed.
 """
 
@@ -41,6 +50,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from astropy.table import Table, vstack
+
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.foundation.errors import ExternalServiceError
@@ -50,21 +61,29 @@ from astrometricslib.models.known_variability import (
     is_confirmed_constant,
 )
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.shared.star_kinds import StarKind, kind_of_star_id, stored_position_degrees
 from astrometricslib.pipelines.shared.variable_star_catalogs import (
-    GAIA_CATALOG,
-    VSX_CATALOG,
     VsxEntry,
-    XMatchQuery,
     build_position_table,
-    gaia_flags_from_matches,
-    run_crossmatch,
+    gaia_flags_from_classes,
+    group_into_fields,
+    look_up_gaia_classes,
+    look_up_vsx,
     vsx_entries_from_matches,
     vsx_types_from_matches,
 )
 
-# How many stars go in one cross-match request. XMatch takes far more; this
-# keeps each request to a size that finishes in well under a minute.
+# A function that takes the position table of one field and returns the VSX
+# match table (`look_up_vsx`), or `None` when nothing matches.
+VsxLookup = Callable[[Table], Table | None]
+
+# A function that takes the position table of one field and returns the Gaia
+# DR3 variability class of each source in it (`look_up_gaia_classes`).
+GaiaLookup = Callable[[Table], dict[int, str]]
+
+# How many stars are looked up before the results are saved. Each batch is
+# split into fields, one VizieR request each.
 BATCH_SIZE = 2000
 
 # Stop after this many requests in a row fail.
@@ -84,7 +103,7 @@ class FlagReport:
     vsx : `collections.Counter`
         How many stars got each VSX answer, as a `KnownVariability`.
     gaia_flags : `collections.Counter`
-        How many stars got each Gaia flag.
+        How many stars got each Gaia flag (``VARIABLE`` or `NO_GAIA_MATCH`).
     vsx_types : `collections.Counter`
         The VSX types found on variables.
     confirmed_constant : `int`
@@ -126,15 +145,16 @@ def needs_lookup(star: StellarObject, include_position_only: bool, refresh_vsx_r
     -------
     needed : `bool`
         True if the star has a usable position, is lookable by the options,
-        and is missing either answer (or, with `refresh_vsx_ranges`, its
-        VSX range).
+        and is missing its VSX answer, or its Gaia answer when it has a Gaia
+        number (or, with `refresh_vsx_ranges`, its VSX range).
     """
     lacks_range = (
         refresh_vsx_ranges
         and classify_vsx_type(star.vsx_variability_type) is KnownVariability.KNOWN_VARIABLE
         and not star.vsx_range_checked
     )
-    if star.gaia_variable_flag and star.vsx_variability_type and not lacks_range:
+    lacks_gaia = not star.gaia_variable_flag and gaia_dr3_source_id_of(star) is not None
+    if star.vsx_variability_type and not lacks_range and not lacks_gaia:
         return False
     if stored_position_degrees(star) is None:
         return False
@@ -143,38 +163,36 @@ def needs_lookup(star: StellarObject, include_position_only: bool, refresh_vsx_r
     return include_position_only or kind_of_star_id(star.id) is not StarKind.SKIPPED
 
 
-def star_magnitude(star: StellarObject) -> float | None:
-    """Read a star's magnitude as a number.
-
-    Returns
-    -------
-    magnitude : `float` or `None`
-        The magnitude, or `None` if it is not a usable number.
-    """
-    try:
-        magnitude = float(star.magnitude)
-    except TypeError, ValueError:
-        return None
-    return magnitude if magnitude == magnitude else None
-
-
 def look_up_stars(
-    xmatch_query: XMatchQuery, stars: Sequence[StellarObject]
-) -> tuple[dict[str, str], dict[str, str], dict[str, VsxEntry | None]]:
-    """Ask VSX and Gaia about a batch of stars.
+    stars: Sequence[StellarObject],
+    vsx_lookup: VsxLookup = look_up_vsx,
+    gaia_lookup: GaiaLookup = look_up_gaia_classes,
+) -> tuple[dict[str, str], dict[str, VsxEntry | None], dict[str, str]]:
+    """Ask VSX and Gaia DR3 about a batch of stars.
 
     Parameters
     ----------
-    xmatch_query : `Callable`
-        `astroquery.xmatch.XMatch.query`, or a stand-in.
     stars : `Sequence` [`StellarObject`]
         The stars; each must have a stored position.
+    vsx_lookup : `Callable`, optional
+        Takes the position table of one field and returns the VSX match
+        table (`look_up_vsx`), or a stand-in.
+    gaia_lookup : `Callable`, optional
+        Takes the position table of one field and returns the Gaia variable
+        classes by source number (`look_up_gaia_classes`), or a stand-in.
 
     Returns
     -------
-    vsx_types, gaia_flags, vsx_entries : `tuple` [`dict`, `dict`, `dict`]
-        Each star's VSX type, Gaia flag and VSX brightness range and period
-        (`None` when VSX lists no typed variable there), by id.
+    vsx_types, vsx_entries, gaia_flags : `tuple` [`dict`, `dict`, `dict`]
+        Each star's VSX type, VSX brightness range and period (`None` when
+        VSX lists no typed variable there), and Gaia flag, by id. A star with
+        no Gaia number has no Gaia flag.
+
+    Notes
+    -----
+    If a field cannot be asked of either VizieR server, the error reaches the
+    caller and nothing is returned for the batch, so no star gets a false
+    "not in VSX".
     """
     positions = []
     for star in stars:
@@ -183,12 +201,16 @@ def look_up_stars(
             positions.append((star.id, position[0], position[1]))
     table = build_position_table(positions)
     ids = [row[0] for row in positions]
-    vsx_matches = run_crossmatch(xmatch_query, table, VSX_CATALOG)
-    vsx = vsx_types_from_matches(ids, vsx_matches)
-    vsx_entries = vsx_entries_from_matches(ids, vsx_matches)
-    magnitudes = {star.id: star_magnitude(star) for star in stars}
-    gaia = gaia_flags_from_matches(ids, run_crossmatch(xmatch_query, table, GAIA_CATALOG), magnitudes)
-    return vsx, gaia, vsx_entries
+    matched = []
+    classes: dict[int, str] = {}
+    for group in group_into_fields(table):
+        matches = vsx_lookup(table[group])
+        if matches is not None:
+            matched.append(matches)
+        classes.update(gaia_lookup(table[group]))
+    vsx_matches = vstack(matched) if matched else None
+    gaia_flags = gaia_flags_from_classes({star.id: gaia_dr3_source_id_of(star) for star in stars}, classes)
+    return vsx_types_from_matches(ids, vsx_matches), vsx_entries_from_matches(ids, vsx_matches), gaia_flags
 
 
 def copy_flags(existing: StellarObject | None, updated: StellarObject) -> StellarObject:
@@ -215,13 +237,15 @@ def copy_flags(existing: StellarObject | None, updated: StellarObject) -> Stella
     existing.vsx_period_days = updated.vsx_period_days
     existing.vsx_magnitude_band = updated.vsx_magnitude_band
     existing.vsx_range_checked = updated.vsx_range_checked
-    existing.gaia_variable_flag = updated.gaia_variable_flag
+    if updated.gaia_variable_flag:
+        existing.gaia_variable_flag = updated.gaia_variable_flag
     return existing
 
 
 def run_backfill(
     catalog_access: Any,
-    xmatch_query: XMatchQuery,
+    vsx_lookup: VsxLookup = look_up_vsx,
+    gaia_lookup: GaiaLookup = look_up_gaia_classes,
     *,
     target_id: str | None = None,
     limit: int | None = None,
@@ -239,8 +263,12 @@ def run_backfill(
     ----------
     catalog_access : `CatalogAccess`
         Lists, loads and saves the catalog's stars.
-    xmatch_query : `Callable`
-        `astroquery.xmatch.XMatch.query`, or a stand-in.
+    vsx_lookup : `Callable`, optional
+        Takes the position table of one field and returns the VSX match
+        table (`look_up_vsx`), or a stand-in.
+    gaia_lookup : `Callable`, optional
+        Takes the position table of one field and returns the Gaia variable
+        classes by source number (`look_up_gaia_classes`), or a stand-in.
     target_id : `str`, optional
         Only the stars of this target.
     limit : `int`, optional
@@ -310,9 +338,12 @@ def run_backfill(
             del pending[:BATCH_SIZE]
             report.candidates += len(batch)
             try:
-                vsx, gaia, vsx_entries = look_up_stars(xmatch_query, batch)
+                vsx, vsx_entries, gaia = look_up_stars(batch, vsx_lookup, gaia_lookup)
             except ExternalServiceError, OSError, ValueError, RuntimeError:
-                logging.getLogger(__name__).exception("Cross-match request failed")
+                logging.getLogger(__name__).warning(
+                    "VSX could not be asked of either VizieR server; these stars stay unverified.",
+                    exc_info=True,
+                )
                 report.failed_requests += 1
                 consecutive_failures += 1
                 log(f"  request failed; {len(batch)} star(s) left for a later run.")
@@ -331,9 +362,10 @@ def run_backfill(
                 star.vsx_period_days = None if entry is None else entry.period_days
                 star.vsx_magnitude_band = "" if entry is None else entry.band
                 star.vsx_range_checked = True
-                star.gaia_variable_flag = gaia[star.id]
+                if star.id in gaia:
+                    star.gaia_variable_flag = gaia[star.id]
+                    report.gaia_flags[gaia[star.id].split(":")[0]] += 1
                 report.vsx[classify_vsx_type(star.vsx_variability_type)] += 1
-                report.gaia_flags[star.gaia_variable_flag] += 1
                 if classify_vsx_type(star.vsx_variability_type) is KnownVariability.KNOWN_VARIABLE:
                     report.vsx_types[star.vsx_variability_type] += 1
                 if is_confirmed_constant(
@@ -394,8 +426,7 @@ def format_report(report: FlagReport, apply: bool) -> str:
         lines.append(f"Most common VSX types: {common}")
     if report.gaia_flags:
         lines.append(
-            "Gaia DR3 flag: "
-            + ", ".join(f"{name} {count}" for name, count in report.gaia_flags.most_common())
+            "Gaia DR3: " + ", ".join(f"{name} {count}" for name, count in report.gaia_flags.most_common())
         )
     lines.append(
         f"Stars a catalog positively calls constant (none lists them variable): {report.confirmed_constant}"
@@ -466,15 +497,12 @@ def main(argv: list[str] | None = None) -> int:
         ``0`` on success, ``1`` if `--apply` was requested but the safety
         backup could not be made, ``2`` if a service could not be reached.
     """
-    from astroquery.xmatch import XMatch
-
     arguments = _build_argument_parser().parse_args(argv)
     configure_logging("backfill_variable_star_flags", level=logging.INFO, log_dir="")
     astrometrics = Astrometrics()
     try:
         report = run_backfill(
             astrometrics._catalog_access,
-            XMatch.query,
             target_id=arguments.target,
             limit=arguments.limit,
             include_position_only=arguments.include_position_only,

@@ -58,6 +58,27 @@
       "interim_block": "",
       "note": "Built 2026-10-03. The AI may ingest the guide and Ekos logs: adds or updates records, never deletes. Since 2026-11-21 the astrometrics-backend server serves it through telescope:sync_logs, the app's own log sync, recorded as a remote_sync job named logs."
     },
+    "processing_analyze": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-22 from gap report #5. Starts the Analyze Target button's own analysis job through analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the raw spectrum frames). Writes the analysis results; raw frames are never written."
+    },
+    "processing_cancel": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-22. Cancels a target's running or waiting stacking or analysis job as the app's Cancel button does, through processing:cancel or analysis:cancel. It reads the active jobs through jobs:query to pick the kind (or the job given by job_id) and refuses when two kinds run and none was named. A picture remake has no Cancel in the app, so it is reported, not cancelled. Changes app jobs only; nothing is deleted."
+    },
+    "processing_enhance": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-22. Reads or saves the Final Stack's Enhance choice (target, nothing, or an object in the frame) through processing:list_bright_objects and processing:set_bright_object, as the app's menu does. Without a choice it lists the saved choice and the objects in the frame, or why there are none. The choice is used at the next stack or Post Process Target; no picture is made. Writes only the target's saved choice."
+    },
     "processing_identify_stack": {
       "tool_class": "process",
       "category": "image-processing",

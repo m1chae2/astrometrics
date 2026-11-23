@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ProcessingJob } from '../../common/types/backendTypes';
 import { Button } from '../../common/components/Button';
 import { Skeleton } from '../../common/components/Skeleton';
+import { jobCardText } from '../utils/jobSubtitle';
 import { useOnValueChange } from '../hooks/useOnValueChange';
 import { fetchJobs } from '../../common/services/imaging/processingService';
 import {
@@ -32,7 +33,7 @@ interface JobHistoryListProps {
 }
 
 /**
- * Draws one job row: type, status chip, Console button, date and message.
+ * Draws one job row: type, status chip, Console button, date and subtitle (the steps or stack kind when the job recorded them, else its message).
  *
  * @param {object} props - Component props.
  * @param {ProcessingJob} props.job - The job to draw.
@@ -87,9 +88,7 @@ const JobRow: React.FC<{
                 {job.createdAt ? new Date(job.createdAt).toLocaleString() : 'Unknown date'}
             </span>
         </div>
-        {job.message && (
-            <div className="job-history-item__message">{job.message}</div>
-        )}
+        {jobCardText(job) && <div className="job-history-item__message">{jobCardText(job)}</div>}
     </div>
 );
 

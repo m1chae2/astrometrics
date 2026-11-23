@@ -26,7 +26,9 @@ the flagged set. This module adds three things.
    reduced chi-square, its Stetson J and its excess scatter all exceed a
    threshold and its false discovery q-value (`benjamini_hochberg`, from the
    chi-square false alarm probability, `false_alarm_probability`) is below
-   `FALSE_DISCOVERY_LEVEL`. The thresholds on chi-square and J are
+   `FALSE_DISCOVERY_LEVEL`. A star with a `not_judged_reason` (see
+   `instrumental_artifacts`) keeps its indices but is never a candidate.
+   The thresholds on chi-square and J are
    calibrated from the field. The one on excess scatter is fixed. The
    chi-square and J use the propagated error of each point, raised to the
    noise-model level when the propagated errors are smaller than the scatter
@@ -507,18 +509,20 @@ class LightCurveSeries:
     Attributes
     ----------
     values : `numpy.ndarray`
-        The detrended (else normalized) brightness, positive and finite.
+        The detrended (else normalized) brightness, finite. A faint star in
+        a noisy frame can measure at or below zero; that value stays.
     errors : `numpy.ndarray` or `None`
         The 1-sigma error of each value, or `None` when the star has none.
     instrumental_magnitude : `float` or `None`
         ``-2.5 log10`` of the star's mean raw flux in ADU per second, or
-        `None` when the star has no positive raw flux.
+        `None` when that mean is not above zero (no magnitude exists).
     rms_mag : `float`
         The scatter of the values, ``1.0857 * std / mean`` (the sample
         standard deviation), in magnitudes.
     error_mag : `float` or `None`
         The median propagated error, ``1.0857 * sigma / x``, in magnitudes,
-        or `None` without errors.
+        over the points above zero (a point at or below zero has no
+        magnitude), or `None` without errors or without such points.
     """
 
     values: np.ndarray
@@ -533,9 +537,11 @@ def extract_series(star: StellarObject) -> LightCurveSeries | None:
 
     The values are ``fluxes_detrended`` when present and
     ``fluxes_normalized`` otherwise, the same series the CV uses. Points
-    that are not finite and above zero are dropped, together with their
-    errors. Errors are used only when there is one per value and every
-    kept one is finite and above zero.
+    that are not finite are dropped, together with their errors. A point at
+    or below zero is kept: dropping it would bias a faint star's mean
+    upward. Errors are used only when there is one per value and every
+    kept one is finite and above zero. The series is `None` when its mean is
+    not above zero, because the scatter is a fraction of the mean.
 
     Parameters
     ----------
@@ -546,7 +552,7 @@ def extract_series(star: StellarObject) -> LightCurveSeries | None:
     -------
     series : `LightCurveSeries` or `None`
         The series, or `None` when fewer than `MINIMUM_POINTS_FOR_INDICES`
-        usable points remain.
+        finite points remain or their mean is not above zero.
     """
     minimum_points_for_indices = resolve(MINIMUM_POINTS_FOR_INDICES).value
     photometry = star.photometry
@@ -557,8 +563,8 @@ def extract_series(star: StellarObject) -> LightCurveSeries | None:
     else:
         raw_values, raw_errors = photometry.fluxes_normalized, photometry.fluxes_normalized_errors
     values = np.asarray(raw_values, dtype=float)
-    keep = np.isfinite(values) & (values > 0.0)
-    if int(keep.sum()) < minimum_points_for_indices:
+    keep = np.isfinite(values)
+    if int(keep.sum()) < minimum_points_for_indices or float(np.mean(values[keep])) <= 0.0:
         return None
     errors: np.ndarray | None = None
     if len(raw_errors) == values.size:
@@ -568,10 +574,13 @@ def extract_series(star: StellarObject) -> LightCurveSeries | None:
     values = values[keep]
     mean = float(np.mean(values))
     rms_mag = MAGNITUDES_PER_FRACTION * float(np.std(values, ddof=1)) / mean
-    error_mag = None if errors is None else float(np.median(MAGNITUDES_PER_FRACTION * errors / values))
+    error_mag = None
+    if errors is not None and np.any(values > 0.0):
+        error_mag = float(np.median(MAGNITUDES_PER_FRACTION * errors[values > 0.0] / values[values > 0.0]))
     raw_fluxes = np.asarray(photometry.fluxes, dtype=float)
-    raw_fluxes = raw_fluxes[np.isfinite(raw_fluxes) & (raw_fluxes > 0.0)]
-    magnitude = None if raw_fluxes.size == 0 else float(-2.5 * math.log10(float(np.mean(raw_fluxes))))
+    raw_fluxes = raw_fluxes[np.isfinite(raw_fluxes)]
+    mean_raw_flux = float(np.mean(raw_fluxes)) if raw_fluxes.size else 0.0
+    magnitude = float(-2.5 * math.log10(mean_raw_flux)) if mean_raw_flux > 0.0 else None
     return LightCurveSeries(values, errors, magnitude, rms_mag, error_mag)
 
 
@@ -684,7 +693,8 @@ def assess_variability(stars: Sequence[StellarObject]) -> FieldAssessment:
     4. Compute the reduced chi-square and Stetson J of each star against its
        scaled errors (`scaled_errors`).
     5. Calibrate the chi-square and J thresholds from the field.
-    6. Set each star's score and mark the candidates.
+    6. Set each star's score and mark the candidates. A star whose
+       ``not_judged_reason`` is set gets its score but is not marked.
 
     Each star's ``instrumental_mag``, ``rms_mag``, ``excess_scatter``,
     ``reduced_chi_square``, ``stetson_j`` and ``variability_score`` are
@@ -743,6 +753,6 @@ def assess_variability(stars: Sequence[StellarObject]) -> FieldAssessment:
         photometry.reduced_chi_square = chi_square
         photometry.stetson_j = j_index
         photometry.variability_score = score
-        if score > 1.0 and q_values[index] < false_discovery_level:
+        if score > 1.0 and q_values[index] < false_discovery_level and not photometry.not_judged_reason:
             candidates.append(stars[index])
     return FieldAssessment(model, thresholds, candidates)

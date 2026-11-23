@@ -259,8 +259,8 @@ def _group_match(
 def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
     """Group the light frames and say which calibration the stacker would use.
 
-    The lights are grouped by camera, filter, gain, offset and exposure. For
-    each group, the calibration library runs the same dark, flat and bias
+    The lights are grouped by camera, optic, filter, gain, offset and exposure.
+    For each group, the calibration library runs the same dark, flat and bias
     selection that the stacking stage runs, so a match here is a match when
     stacking. A group says why when nothing matches (for example "no bias
     frames at gain 100, offset 10, binning 1x1").
@@ -278,14 +278,15 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
     -------
     grouped_stats : `list` of `dict`
         One dictionary per group: ``filter``, ``iso``, ``offset``,
-        ``exposure``, ``count``, ``camera``, ``binning``, ``darks`` (the dark
+        ``exposure``, ``count``, ``camera``, ``focalLengthMm`` (the optic in
+        whole millimeters, or ``None``), ``binning``, ``darks`` (the dark
         count as text, or ``"Missing"``) and the ``darkMatch``, ``flatMatch``
         and ``biasMatch`` records.
     """
     if not target:
         return []
 
-    groups: dict[tuple[str, str, str, str, float], list[Any]] = {}
+    groups: dict[tuple[str, str, str, str, float, int | None], list[Any]] = {}
 
     for frame in target.frames:
         if frame.role != "LIGHT":
@@ -302,12 +303,14 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
         except ValueError, TypeError:
             exp_float = 1.0
 
-        key = (frame.camera, filter_str, str(frame.iso), str(frame.offset), exp_float)
+        focal_length = getattr(frame, "focal_length_mm", None)
+        optic = None if focal_length is None else round(float(focal_length))
+        key = (frame.camera, filter_str, str(frame.iso), str(frame.offset), exp_float, optic)
         groups.setdefault(key, []).append(frame)
 
     results = []
-    for key in sorted(groups, key=lambda item: (item[1], item[2], item[3], item[4])):
-        cam, filter_str, iso, offset, exposure = key
+    for key in sorted(groups, key=lambda item: (item[1], item[2], item[3], item[4], item[5] or 0)):
+        cam, filter_str, iso, offset, exposure, optic = key
         frames = groups[key]
         matches = _group_match(calibration, frames, cam or camera or "Unknown", exposure)
         dark_count = matches["darkMatch"]["count"]
@@ -319,6 +322,7 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
             "count": len(frames),
             "darks": f"{dark_count}" if dark_count else "Missing",
             "camera": cam or camera or "Unknown",
+            "focalLengthMm": optic,
             **matches,
         })
 

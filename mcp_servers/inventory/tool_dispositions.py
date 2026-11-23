@@ -162,6 +162,18 @@ DECISIONS = {
         "Needs Python objects, so it cannot be called through MCP. Consider making it a stage "
         "of pipeline_run.",
     ),
+    "processing_list_preview_bright_objects": ToolDecision(
+        "withhold",
+        "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves "
+        "the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, "
+        "which the astrometrics-backend server serves; this library tool stays withheld.",
+    ),
+    "processing_set_preview_bright_object": ToolDecision(
+        "withhold",
+        "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. "
+        "The AI reaches it through processing_enhance, which the astrometrics-backend server serves; "
+        "this library tool stays withheld.",
+    ),
     # ---- Drop ----
     "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
     "star_dataset_version": ToolDecision(
@@ -277,6 +289,33 @@ DECISIONS = {
         "keep",
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
+    ),
+    "processing_analyze": ToolDecision(
+        "keep",
+        "Built 2026-11-22 from gap report #5. Starts the Analyze Target button's own analysis job through "
+        "analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no "
+        "stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's "
+        "stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the "
+        "raw spectrum frames). Writes the analysis results; raw frames are never written.",
+        "process",
+    ),
+    "processing_cancel": ToolDecision(
+        "keep",
+        "Built 2026-11-22. Cancels a target's running or waiting stacking or analysis job as the app's "
+        "Cancel button does, through processing:cancel or analysis:cancel. It reads the active jobs "
+        "through jobs:query to pick the kind (or the job given by job_id) and refuses when two kinds run "
+        "and none was named. A picture remake has no Cancel in the app, so it is reported, not "
+        "cancelled. Changes app jobs only; nothing is deleted.",
+        "process",
+    ),
+    "processing_enhance": ToolDecision(
+        "keep",
+        "Built 2026-11-22. Reads or saves the Final Stack's Enhance choice (target, nothing, or an object "
+        "in the frame) through processing:list_bright_objects and processing:set_bright_object, as the "
+        "app's menu does. Without a choice it lists the saved choice and the objects in the frame, or why "
+        "there are none. The choice is used at the next stack or Post Process Target; no picture is made. "
+        "Writes only the target's saved choice.",
+        "process",
     ),
     "processing_remake_preview": ToolDecision(
         "keep",

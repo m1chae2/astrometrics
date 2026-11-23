@@ -213,7 +213,7 @@ if summary is not None:
   - On M 81 the corner displacement was 0.9 px with the usual 1.5 px reach and 1.3 to 1.6 px with a reach of 3 to 4 px; an independent fit on 800 bright stars gave about 0.6 px. The wide first-pass box was pulled off by neighbors or the galaxy by several pixels on some M 81 stars; the median shift ignored them.
   - Before the gate judged the corner displacement, `registration_drift` failed M 13 on a 95th-percentile per-star offset of 1.13 px (limit 1). A replay on the frames showed centroid noise on faint and crowded stars, not rotation. M 13 now passes.
 - **Verdict:** Not judged.
-- **Limits:** Three fields and one camera. The 1 pixel and 20% limits are design estimates set with these values in view, not from a false-positive rate. The 0.6 px independent fit was done by hand.
+- **Limits:** Three fields and one camera. The 1 pixel and 20% limits are design estimates set with these values in view, not from a false-positive rate. The 0.6 px independent fit was done by hand. The share of fallbacks counts every refusal alike, including a star whose centroid box holds a saturated pixel. On M 52 (2026-10-03, replayed on 5 frames and 2,000 stars) 4.8 percent of the star measurements fell back for a saturated pixel, 1.9 percent for a move over 1.5 px and 0.3 percent at the frame edge. A fallback for a saturated pixel left the aperture within 0.1 px of the star's own centroid, so the gate's fallback share overstates the stars that were truly mis-centered ([PHO-20](#pho-20)).
 - **To tune for your setup:** If your steady nights show a corner displacement near 1 pixel, the scale term between the two centroid methods may dominate; check it on a night with no rotation before raising `MAXIMUM_CORNER_DISPLACEMENT_PX`. For larger star images (FWHM above about 4 px), the 11 px re-centering box is too small; widen `CENTROID_BOX_HALF_WIDTH_PX` and re-run this procedure.
 - **Regenerate with:** No script; measured by hand on 2026-10-11. Each run now also stores the 95th-percentile corner displacement and the fallback share (worst session) as `photometry.corner_displacement_p95_worst_px` and `photometry.centroid_fallback_worst_fraction`.
 - **Guarded by tests:** The gate logic is pinned by `astrometricslib/pipelines/photometry/test/post_processing/test_record_quality.py` and `astrometricslib/pipelines/photometry/test/pre_processing/test_centroid_shift_summary.py`.
@@ -438,7 +438,7 @@ print(format_report(result, "M 13"))
 - **What to look at:** The completeness (share of injected stars flagged) by depth and brightness quarter; the depth at which it reaches 50%; the false-positive rate (the share of untouched stars flagged), with its 68% interval.
 - **Our result:** M 13, 2026-10-11, 80 draws, seed 1, 408 stars able to host a signal. Brightest quarter: flagged half the time at about 0.04 mag (85% of sinusoids and 84% of transits at 0.04 mag). Faintest quarter: flagged that often only at 0.16 mag (82% of sinusoids, 69% of transits). Nothing found below 0.02 mag at any brightness. 0 of 29,760 untouched stars flagged. Most cataloged variables in a field like this vary by less than 0.04 mag, which accounts for finding 5 of 37 in [PHO-08](#pho-08). The counts were saved outside the repository (`~/astrometrics_db_backups/20261010_validation_step0/photometry_injection_m13.json`).
 - **Verdict:** Not judged.
-- **Limits:** The injection is made on the light curves, so it tests the candidate rule and the noise of the photometry, not the aperture photometry or the comparison-star normalization. The ensemble does not respond to an injected signal, as it would to a real variable among the comparison stars. Hosts are the field's unflagged stars, and the injected stars shift the field's noise model and thresholds slightly. Depths are peak to peak for the sinusoid and the drop for the transit. One field.
+- **Limits:** The injection is made on the light curves, so it tests the candidate rule and the noise of the photometry, not the aperture photometry or the comparison-star normalization. The ensemble does not respond to an injected signal, as it would to a real variable among the comparison stars. Hosts are the field's unflagged stars, and the injected stars shift the field's noise model and thresholds slightly. Depths are peak to peak for the sinusoid and the drop for the transit. One field. The injection leaves out what an instrument does to a real light curve. On M 52 the rule flagged 12 unlisted stars out of 19; five were stars that were saturated in many frames or whose brightness changed across the field's registration steps, and the checks of [PHO-20](#pho-20) now mark them not judged.
 - **To tune for your setup:** Run the script on your own targets. If the 50% depth is well above the variables you care about, improve the photometry (gain, flats, aperture) before moving the thresholds; then re-run. If untouched stars start to be flagged after a change, it went too far.
 - **Regenerate with:** `astrometricslib/scripts/validate_photometry_injection.py` (`python -m astrometricslib.scripts.validate_photometry_injection --target "M 13"`; options `--realizations`, `--seed`, `--minimum-points`, `--json`).
 - **Guarded by tests:** `astrometricslib/scripts/test/test_validate_photometry_injection.py`.
@@ -868,6 +868,101 @@ for metric in (
 - **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_target_amplitude.py`, `astrometricslib/pipelines/photometry/test/post_processing/test_record_science_outcomes.py`, `astrometricslib/pipelines/shared/test/test_variable_star_catalogs.py` and `astrometricslib/scripts/test/test_backfill_variable_star_flags.py`.
 - **Raw record:** None kept.
 
+### PHO-20
+
+**Stars not judged for variability: step-aligned changes, saturation and the frame edge (M 52)**
+
+- **Claim:** On M 52, 12 of the 19 stars the candidate rule flagged are not listed as variable in SIMBAD, Gaia DR3 or VSX. Four of the 12 dim by 4 to 8 percent in their raw flux exactly across the frames where the field's shift jumps (frames 28 to 37), and no other star of the 390 does. The aperture sits on the star in every frame (within 0.13 px), so the dips are not an aperture-placement error. A step check, a saturation-coverage check and a frame-edge check keep these stars out of the candidates, mark them "not judged" with the reason, and keep all seven cataloged variables.
+- **Settings it supports:**
+  - `STEP_SHIFT_JITTER_SIGMAS` = 6 <!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.STEP_SHIFT_JITTER_SIGMAS -->, `STEP_MINIMUM_SHIFT_PX` = 1 <!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.STEP_MINIMUM_SHIFT_PX -->, `STEP_MINIMUM_SIGNIFICANCE` = 5 <!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.STEP_MINIMUM_SIGNIFICANCE --> and `STEP_MINIMUM_BLOCK_VARIANCE_FRACTION` = 0.5 <!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.STEP_MINIMUM_BLOCK_VARIANCE_FRACTION --> in `astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py`. Relation: confirmed by this entry, on one field.
+  - `MINIMUM_UNSATURATED_FRACTION` = 0.9 <!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.MINIMUM_UNSATURATED_FRACTION --> in the same file. Relation: confirmed by this entry, on one field.
+  - The frame-edge distance (the outer sky radius plus one pixel plus the largest shift of the field; 13 px on the reference setup with no shift). Relation: derived from the aperture geometry, not from the data; no star of M 52 was caught by it.
+- **Status:** Partly measured. One field (42 frames of 120 s, 2026-10-03); the frame shifts are not stored with the light curves, so no other target could be re-checked without re-measuring its frames.
+- **Data you need:** A photometry run with at least 30 frames in which the field shifts by more than 1.5 px at a few frames (dither or re-centering), stored catalog answers ([PHO-08](#pho-08), step 1), and the frames themselves for step 3.
+- **Procedure:**
+  1. Run the photometry stage and list the stars flagged as variable that no catalog lists. Read each star's `notJudgedReason` in its light curve.
+  2. Compute the check for one light curve from Python (internal functions, not part of the public API; may change). `values` is the star's detrended light curve, `shifts` the shift of the field at each of its points, in time order.
+
+```python
+from astrometricslib.pipelines.photometry.processing.instrumental_artifacts import (
+    registration_step_threshold_px,
+    step_artifact_reason,
+)
+
+shifts = [(0.0, 0.0)] * 10 + [(3.0, 0.0)] * 10  # one step of 3 px
+values = [1.0, 1.01, 0.99, 1.0, 1.01, 0.99, 1.0, 1.01, 0.99, 1.0] + [
+    0.93,
+    0.94,
+    0.92,
+    0.93,
+    0.94,
+    0.92,
+    0.93,
+    0.94,
+    0.92,
+    0.93,
+]
+threshold = registration_step_threshold_px(shifts)
+print(step_artifact_reason(values, shifts, threshold))
+```
+<!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.step_artifact_reason --> <!-- impl: astrometricslib.pipelines.photometry.processing.instrumental_artifacts.registration_step_threshold_px -->
+  1. To see whether the aperture follows the star, read the frames, fit each frame's alignment with `calculate_frame_alignment`, re-center the star with `refine_star_centroid` and compare the result with a centroid fitted independently on the same pixels. To test a flat-field cause, divide the frames by a master flat before measuring and compare the dips. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.calculate_frame_alignment --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid -->
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** For the unlisted stars flagged before the checks: how many are marked not judged, and which check marked them. For the cataloged variables flagged before the checks: that none is marked. The offset between the aperture and the star's own centroid in every frame.
+- **Our result:** M 52, 2026-10-03, 42 frames of 120 s with the ZWO ASI533MM Pro. Before the checks: 19 flagged, 7 cataloged variables and 12 unlisted. Frame shifts jump by 2.0, 2.3, 3.0 and 3.8 px at frames 8, 18, 28 and 38; the typical change between frames is 0.29 px (robust spread 0.20 px). Re-measured on the frames, nine of the unlisted stars were followed in every frame to within 0.13 px of their own centroid (some fell back to the aligned position because of saturated pixels, and sat within 0.1 px of the centroid), and their flux with the aperture put on the independent centroid had the same dips (for example 7.6 percent for BSD 19-1123 either way). Dividing the frames by a master flat from the same night changed no dip by more than 0.3 percent. Enlarging the aperture radius from 4 to 8 px changed the spread between groups of frames by 1.1 percentage points at most (BSD 19-1123: 9.0 to 7.9 percent). Of 386 unsaturated stars only three dip by more than 2.5 percent in frames 28 to 37 (median change 0.18 percent). The check marks four stars as step-aligned (jumps of 8.5 to 15.9 errors, between-group variance share 0.81 to 0.91); the largest jump of a cataloged variable is 3.8 errors. The coverage check marks three stars (saturated in 17, 41 and 52 percent of frames); every cataloged variable is unsaturated. Together: 5 of the 12 unlisted stars are marked, 0 of the 7 cataloged variables, so 14 of 19 stay flagged and the share of unlisted stars among them falls from 63 to 50 percent. This count was made on the stored light curves and the measured frame shifts, not on a new run. The cause of the dips is not found: they are not an aperture or flat-field effect.
+- **Verdict:** Not judged.
+- **Limits:** One field. The step check cannot tell a real change that begins and ends at the steps from an artifact; chance puts that at a few in a thousand stars. The seven remaining unlisted stars (partial dips, early-frame dips, and light curves whose lag-1 autocorrelation of 0.4 to 0.8 makes the false-alarm probability overconfident) are not addressed here. The frame-edge distance caught no star. The thresholds are not set against a false-positive rate on other fields.
+- **To tune for your setup:** Run it on your own dithered or re-centered nights. If a known variable is marked, raise `STEP_MINIMUM_SIGNIFICANCE`; if step-aligned stars are flagged, lower it. A mount that never steps needs no change: no step is found and no star is marked.
+- **Regenerate with:** The procedure above; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_instrumental_artifacts.py`.
+- **Raw record:** None kept.
+
+### PHO-21
+
+**Comparison pool by signal-to-noise, with faint fluxes kept (NGC 7331, M 31, M 57, M 52)**
+
+- **Claim:** A comparison candidate needs a median signal-to-noise of at least 50 and a flux with an error in at least 95 percent of the usable frames. The old rule asked for a positive flux in every usable frame, and the measurement clamped a flux below zero to zero, so a faint star lost to noise in one frame left the pool. With the clamp gone and the new rule, the pool and the comparison set are larger on the two faint fields (NGC 7331, M 57), equal on M 52 and four stars smaller on M 31. The ensemble's noise does not rise except by 0.015 percentage points on M 31.
+- **Settings it supports:**
+  - `MINIMUM_COMPARISON_SIGNAL_TO_NOISE` = 50 <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_COMPARISON_SIGNAL_TO_NOISE --> in `astrometricslib/pipelines/photometry/processing/comparison_ensemble.py`. Relation: derived from the noise a single star adds (1 over the signal-to-noise, 2 percent at 50) and confirmed by this entry.
+  - `MINIMUM_MEASURED_FRAME_SHARE` = 0.95 <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_MEASURED_FRAME_SHARE --> in the same file. Relation: confirmed by this entry (the missing shares below leave a gap above 5 percent), not tested against other values.
+- **Status:** Measured. Four fields, one camera (ZWO ASI533MM Pro, gain 0.783 e per ADU, read noise 3.8 e), the real frame worker run on every frame with no write. Crowding flags were not part of the run, so the counts after "not crowded" are not shown.
+- **Data you need:** The library frames of a target and its stored stars (read only).
+- **Procedure:**
+  1. Run the per-frame worker on every frame (`_process_single_frame_worker` with the camera's `DetectorNoise`) and keep each star's flux, error and saturation flag.
+  2. Build the flux table with `build_flux_table` and choose the set with `select_comparison_set`. For the old rule, clamp each flux to zero first and use the code before this change.
+  3. Read `describe_comparison_pool` for the count after each rule, and build the signal with `build_ensemble_signal` for the ensemble's fractional error.
+
+```python
+from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
+    build_flux_table,
+    describe_comparison_pool,
+    median_signal_to_noise,
+    select_comparison_set,
+)
+
+table = build_flux_table(stars)  # stars with light curves from the worker
+selection = select_comparison_set(table)
+print(describe_comparison_pool(table, selection))
+print(median_signal_to_noise(table)[:10])
+```
+<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.build_flux_table --> <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.select_comparison_set --> <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.describe_comparison_pool --> <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.median_signal_to_noise -->
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The pool (stars that pass the measured, signal-to-noise and saturation rules), the final set, the ensemble's median fractional error over the usable frames, and the members' scatter against the ensemble of the others (1.4826 times the median absolute deviation, in mmag).
+- **Our result:** 2026-11-22, all frames of the camera folder.
+  - NGC 7331 (135 frames, 102 usable, 914 stars): pool of stars never saturated 1 before and 7 after; set 1 before and 5 after. Only 9 of 903 measured stars reach signal-to-noise 50 (median over stars 1.0); 910 of 914 have a flux at or below zero in some usable frame. The 5 members have a median signal-to-noise of 78, an ensemble error of 0.62 percent, and a scatter against the others of 680 mmag, so the field still gives a poor ensemble: its frames differ in transparency and the 5 stars do not follow each other. The old set of 1 star had no ensemble to measure.
+  - M 31 (121 frames, 88 usable, 1,022 stars): never-saturated pool 411 before and 387 after (456 reach signal-to-noise 50 before the saturation rule); set 20 before and 16 after (constancy vetting dropped 79 and 84 of 100). Ensemble error 0.113 percent before and 0.128 percent after; member scatter 8.6 and 8.5 mmag.
+  - M 57 (80 frames usable, 495 stars): pool 6 before and 17 after; set 5 and 5. Ensemble error 1.14 percent before and 0.23 percent after; member scatter 755 and 213 mmag (median member signal-to-noise 11 before, 95 after).
+  - M 52 (56 frames, 48 usable, 443 stars): pool 339 before and 345 after; set 20 and 20. Ensemble error 0.063 percent and the same scatter (5.1 mmag) both ways.
+  - Missing shares: 11, 10, 2 and 0 stars of the four fields lack a flux in 5 percent of the usable frames.
+- **Verdict:** Not judged.
+- **Limits:** One camera and four fields. Crowding and the scintillation term were not part of the run (the errors are the CCD equation alone). NGC 7331 and M 57 are faint fields: their sets stay at 5 stars and the NGC 7331 members do not agree with each other, so the signal-to-noise rule makes a pool possible there but does not make the ensemble good. M 31 loses 4 members to the stricter rule while its noise is the same within 0.02 percent. The 95 percent share was not tested against other values.
+- **To tune for your setup:** Run the procedure on a faint field of yours. If the pool is empty with signal-to-noise 50, check the gain (an assumed gain of 1 makes the errors too large) before lowering it; a candidate at signal-to-noise S adds 1 / S of noise to the signal.
+- **Regenerate with:** The procedure above; the run used throw-away scripts that are not in the repository.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_negative_flux_and_signal_to_noise_pool.py` and `astrometricslib/pipelines/photometry/test/processing/test_half_empty_frames.py`.
+- **Raw record:** None kept outside the scratch folder of the run.
+
 ## Design estimates
 
 These tuned values have not been measured. They are reasoned choices.
@@ -880,7 +975,7 @@ These tuned values have not been measured. They are reasoned choices.
 | PHO-D04 | Anchor spread for a rotation fit; fewest anchors for a shift and for a rotation fit; clipping of the fit | 7% of the corner distance; 5; 10; 3 scaled MADs, 3 passes | `MINIMUM_ANCHOR_SPREAD_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MINIMUM_ANCHOR_SPREAD_FRACTION -->, `MINIMUM_ANCHORS_FOR_SHIFT` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MINIMUM_ANCHORS_FOR_SHIFT -->, `MINIMUM_ANCHORS_FOR_SIMILARITY` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MINIMUM_ANCHORS_FOR_SIMILARITY -->, `ALIGNMENT_CLIP_SIGMAS` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_CLIP_SIGMAS -->, `ALIGNMENT_CLIP_PASSES` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_CLIP_PASSES --> in `pre_processing/frame_photometry.py` | A rotation fit from too few or too close anchors. | Compare the corner displacement of [PHO-04](#pho-04) with and without the fit on a cluster-core field. |
 | PHO-D05 | Comparison band; vetted candidates | brightest 2% skipped, band to 30%, widened to at least 10 candidates; at most 100 | `BRIGHTEST_SKIPPED_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION -->, `FAINTEST_BAND_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION -->, `MINIMUM_VETTING_CANDIDATES` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_VETTING_CANDIDATES -->, `MAXIMUM_VETTING_CANDIDATES` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES --> in `processing/comparison_ensemble.py` | A noisier comparison ensemble. | Run [PHO-02](#pho-02) with several band edges and keep the smallest ensemble scatter over predicted. |
 | PHO-D06 | Minimum and cap of comparison stars | 5 and 20 | `MINIMUM_COMPARISON_STARS`, `DEFAULT_MAXIMUM_COMPARISON_STARS` in `comparison_ensemble.py` | A noisy ensemble, or no gain from extra stars. | Re-run [PHO-02](#pho-02) with `VariabilityAnalyzer(maximum_comparison_stars=...)` and watch the ensemble error stop falling. |
-| PHO-D07 | Vetting consistency limit; usable-frame share; fewest frames to vet | 3σ; one half; 4 frames | `EXCESS_SCATTER_SIGMA` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA -->, `MINIMUM_USABLE_FRAME_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION -->, `_MINIMUM_FRAMES_FOR_VETTING` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble._MINIMUM_FRAMES_FOR_VETTING --> in `processing/comparison_ensemble.py` | Variable stars kept as comparison stars, or good ones dropped. | Plant a known variable among the comparison candidates of a real session, as [PHO-01](#pho-01) does on synthetic ones. |
+| PHO-D07 | Vetting consistency limit; usable-frame share; fewest frames to vet | 3σ; nine tenths; 4 frames | `EXCESS_SCATTER_SIGMA` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA -->, `MINIMUM_USABLE_FRAME_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION -->, `_MINIMUM_FRAMES_FOR_VETTING` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble._MINIMUM_FRAMES_FOR_VETTING --> in `processing/comparison_ensemble.py` | Variable stars kept as comparison stars, or good ones dropped. | Plant a known variable among the comparison candidates of a real session, as [PHO-01](#pho-01) does on synthetic ones. The usable-frame share was set from a real run of the frame worker on every frame (2026-11-22; Design estimate): the frame shares have no gap (M 31 0.68 to 1.05, NGC 7331 0.81 to 1.29), and the pool of stars positive in every frame grows from 5 to 411 for M 31 as the share goes from 0.5 to 0.9. The count of stars in a frame uses a positive flux, as before the faint-flux change. Frames below the share stay in the light curves. The candidate rules (signal-to-noise and measured share) are in [PHO-21](#pho-21). |
 | PHO-D08 | Frame outlier clip; per-star outlier clip | 3σ (at least 5 frames); 5σ; a run of 2 points is kept as real | `VariabilityAnalyzer._reject_outlier_frames`, `_reject_outlier_measurements_for_star`; `MINIMUM_FRAMES_FOR_OUTLIER_REJECTION` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_FRAMES_FOR_OUTLIER_REJECTION -->, `MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE --> in `processing/variability_analyzer.py` | Good points clipped, or bad points kept. | Count clipped points on constant stars against the share a normal distribution predicts. |
 | PHO-D09 | Share of frames rejected before the run is flagged | 25% (and at least 5 frames) | `MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG`, `MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG` in `record_quality.py` | Bad nights pass, or good nights are flagged. | Run `report_gate_limits.py` over the library and set the limit above the rejection share of known-good nights. |
 | PHO-D10 | Noise model sizes; fewest points per star | 20 stars; 10 per bin; 10 bins; 5 points | `MINIMUM_STARS_FOR_NOISE_MODEL` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL -->, `MINIMUM_STARS_PER_NOISE_BIN` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN -->, `MAXIMUM_NOISE_BINS` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS -->, `MINIMUM_POINTS_FOR_INDICES` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_POINTS_FOR_INDICES --> in `processing/variability_indices.py` | A poor noise model on small fields. | Vary them in [PHO-06](#pho-06) with a field size like yours and watch the AUC. |

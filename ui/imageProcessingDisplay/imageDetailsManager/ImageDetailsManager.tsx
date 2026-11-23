@@ -3,6 +3,7 @@ import '../imageProcessingDisplay.css';
 import { Button } from '../../common/components/Button';
 import { SplitButton, type SplitButtonOption } from '../../common/components/SplitButton';
 import {
+  ANALYZE_TARGET_TOOLTIP,
   describeStageAvailability,
   type AnalysisSelectionInput,
   type AnalysisStage,
@@ -189,7 +190,7 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
               <SplitButton
                 label="Analyze Target"
                 menuLabel="Choose an analysis stage"
-                title={analyzeDisabledReason ?? 'Analyze Target'}
+                title={analyzeDisabledReason ?? ANALYZE_TARGET_TOOLTIP}
                 fill
                 disabled={hasNoFiles || isProcessing || Boolean(analyzeDisabledReason)}
                 onClick={() => {

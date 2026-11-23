@@ -339,7 +339,8 @@ def _measure_star_fluxes(plane: np.ndarray, usable: np.ndarray, stars: np.ndarra
             cutout_radius=reach + 1,
             saturation_threshold_adu=math.inf,
         )
-        fluxes[index] = measurement.net_flux_adu
+        # The gain fit uses a flux of zero for anything below the sky.
+        fluxes[index] = max(0.0, measurement.net_flux_adu)
     return fluxes
 
 
@@ -355,10 +356,10 @@ def _measure_empty_aperture_noise(
     structure and faint stars that both groups show cancel, and what is left is
     the noise that is not shared, which is what makes a star's ratio uncertain.
     The flux of an empty aperture is noise with a mean of zero (the ring's
-    median is subtracted), but `measure_aperture_photometry` reports negative
-    fluxes as 0, so the spread is read from the 84.13th percentile of the
-    fluxes, which is one standard deviation above the mean of a bell curve and
-    is not touched by the zeros.
+    median is subtracted), and `_measure_star_fluxes` sets a negative flux
+    to 0, so the spread is read from the 84.13th percentile of the fluxes,
+    which is one standard deviation above the mean of a bell curve and does
+    not depend on the values below the mean.
 
     Parameters
     ----------

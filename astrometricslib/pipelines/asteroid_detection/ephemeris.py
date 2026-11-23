@@ -12,7 +12,6 @@ counts as a match only if it is close to the dot at both moments.
 """
 
 import logging
-import time
 from typing import Any
 
 import astropy.units as u
@@ -20,7 +19,9 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
-from astrometricslib.foundation.offline import OfflineModeError, require_online
+from astrometricslib._internal.drivers import outside_services
+from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.offline import OfflineModeError
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -35,10 +36,6 @@ logger = logging.getLogger(__name__)
 # SkyBoT leaves out an asteroid whose predicted position is uncertain by
 # more than this much.
 _SKYBOT_POSITION_ERROR = 120 * u.arcsec
-
-# Be polite to the public service: wait at least this long between two
-# questions that really go out over the network.
-_DEFAULT_SECONDS_BETWEEN_QUERIES = 0.5
 
 # The most questions one run may send to SkyBoT. Each confirmed mover needs
 # two (first and last detection), so 200 covers 100 movers. At the polite
@@ -60,10 +57,8 @@ class EphemerisCrossMatcher:
     skybot_client : `Any`, optional
         Anything with the same ``cone_search`` method as
         ``astroquery.imcce.Skybot``. Tests pass a fake one. When omitted,
-        the real ``Skybot`` is used.
-    min_seconds_between_queries : `float`, optional
-        The shortest wait between two questions sent to the service. Use
-        ``0.0`` to turn the wait off.
+        the real ``Skybot`` is used. Questions go through the outside-service
+        gateway, which spaces them out and pauses SkyBoT after trouble.
     max_queries : `int`, optional
         The most questions this matcher may send in one run. A mover that
         would need more than the questions left is not checked at all, and
@@ -75,14 +70,11 @@ class EphemerisCrossMatcher:
         self,
         config: MovingObjectConfig,
         skybot_client: Any | None = None,
-        min_seconds_between_queries: float = _DEFAULT_SECONDS_BETWEEN_QUERIES,
         max_queries: int = _DEFAULT_MAX_QUERIES_PER_RUN,
     ) -> None:
         self.config = config
         self._skybot_client = skybot_client
-        self._min_seconds_between_queries = min_seconds_between_queries
         self.max_queries = max_queries
-        self._last_query_time: float | None = None
         # Answers already received, so asking again for the same spot and
         # moment (for example two movers that share a first detection) does
         # not use the network. A failed question is not stored.
@@ -125,32 +117,24 @@ class EphemerisCrossMatcher:
         if cache_key in self._answers:
             return self._answers[cache_key]
 
-        if self._skybot_client is None:
-            try:
-                require_online("SkyBoT")
-            except OfflineModeError as offline_error:
-                # Nothing is asked, so it is neither an attempt nor a failure.
-                logger.debug("%s", offline_error)
-                return None
-            from astroquery.imcce import Skybot
-
-            client: Any = Skybot
-        else:
-            client = self._skybot_client
-
-        self._wait_for_turn()
         coordinate = SkyCoord(center_right_ascension_deg * u.deg, center_declination_deg * u.deg)
         epoch = Time(epoch_unix, format="unix")
         self.queries_attempted += 1
         try:
-            field_table = client.cone_search(
+            field_table = outside_services.skybot_cone_search(
                 coordinate,
                 radius_deg * u.deg,
                 epoch,
                 location=self.config.mpc_observatory_code,
                 position_error=_SKYBOT_POSITION_ERROR,
+                client=self._skybot_client,
             )
-        except (RuntimeError, *ONLINE_QUERY_ERRORS) as query_error:
+        except OfflineModeError as offline_error:
+            # Nothing is asked, so it is neither an attempt nor a failure.
+            logger.debug("%s", offline_error)
+            self.queries_attempted -= 1
+            return None
+        except (RuntimeError, ExternalServiceError, *ONLINE_QUERY_ERRORS) as query_error:
             # astroquery raises RuntimeError when the service reports an error.
             logger.warning("SkyBoT cone-search query failed: %s", query_error)
             self.queries_failed += 1
@@ -160,16 +144,6 @@ class EphemerisCrossMatcher:
             field_table = None
         self._answers[cache_key] = field_table
         return field_table
-
-    def _wait_for_turn(self) -> None:
-        """Sleep, if needed, so questions are spaced out in time."""
-        now = time.monotonic()
-        if self._last_query_time is not None and self._min_seconds_between_queries > 0.0:
-            remaining = self._min_seconds_between_queries - (now - self._last_query_time)
-            if remaining > 0.0:
-                time.sleep(remaining)
-                now = time.monotonic()
-        self._last_query_time = now
 
     def _separations_by_name(self, detection: FrameDetection, field_table: Table | None) -> dict[str, float]:
         """Measure how far each listed asteroid is from one detection.

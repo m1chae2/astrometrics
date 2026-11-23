@@ -257,7 +257,7 @@ class ImageProcessingService(BaseBackgroundService):
                 # A job of this process is marked cancelled even if its
                 # thread cannot be interrupted, so the list stops showing it.
                 self._job_service.update_job(
-                    job.id, status="cancelled", progress=0, status_message="Cancelled by user."
+                    job.id, status="cancelled", progress=0, status_message="Cancelled by user"
                 )
                 cancelled = True
             else:
@@ -539,6 +539,27 @@ def _log_what_the_saved_record_names(
     logger.info("The saved record for %s names the stack. Processed image: %s.", target_id, picture or "none")
 
 
+def _record_stack_kind(job_repository: Any, job_id: str, kind: str) -> None:
+    """Save the kind of stack a job makes, so the job list can name it.
+
+    Parameters
+    ----------
+    job_repository : `Any`
+        The database that keeps the jobs. Without one nothing is saved.
+    job_id : `str`
+        The stacking job.
+    kind : `str`
+        ``"imaging"`` or ``"spectral"``.
+    """
+    if job_repository is None:
+        return
+    job = job_repository.get_job(job_id)
+    if job is None:
+        return
+    job.input_metrics = {**(job.input_metrics or {}), "stackKinds": [kind]}
+    job_repository.upsert_job(job)
+
+
 def start_siril_processing_task(
     job_id: str,
     target_id: str,
@@ -623,6 +644,7 @@ def start_siril_processing_task(
                 if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
                 else "imaging"
             )
+        _record_stack_kind(job_repository, job_id, kind)
         try:
             # `running_as_job` makes this job row the current job, so the
             # stack's stage progress ("Stage 2 of 7") moves the job's bar.

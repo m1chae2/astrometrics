@@ -560,3 +560,18 @@ def test_a_cancelled_run_stops_before_the_next_stage(
             pipelines.process_target(target, stages=["photometry"], register_job=False)
 
     assert recorder.stages == ["astrometry"]
+
+
+def test_naming_the_targets_own_spectral_stack_does_not_make_spectroscopy_stale(tmp_path: Path) -> None:
+    """Verify the stack passed as the image counts as no other image.
+
+    The app always sends the spectral stack's path with the spectroscopy
+    options, so a current result must stay current.
+    """
+    target = _spectral_variation_target(tmp_path, _NOW + timedelta(hours=1))
+    stack_path = target.spectral_stacking.stacked_image
+
+    assert tasks.stage_staleness_reason(target, "spectroscopy", stack_path) is None
+    assert tasks.stage_staleness_reason(target, "spectroscopy", str(tmp_path / "other.fits")) == (
+        "an image was named, so the saved result may not match it"
+    )

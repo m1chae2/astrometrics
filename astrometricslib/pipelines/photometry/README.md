@@ -9,7 +9,7 @@ Terms are defined in the [glossary](../../../documentation/Glossary.md). This do
 - **Frame.** One camera exposure file.
 - **Session.** In this pipeline, a *session* is the frames of the target taken on one observing night (noon to noon, local time) with the same camera gain setting and offset. The offset is the camera's constant added to every pixel so that noise below zero is still recorded. A change of filter or exposure time does not start a new session (`pipelines/shared/target_sessions.py`).
 - **Differential photometry.** *Photometry* is the measurement of a star's brightness. A single star's measured brightness changes from frame to frame for reasons that have nothing to do with the star: thin cloud, haze, small tracking errors. Those changes hit every star in the frame at once. *Differential photometry* divides each star's brightness by the brightness of other stars in the same frame, so the shared changes cancel and the star's own changes remain.
-- **The comparison ensemble.** The stars used for that division form the *comparison ensemble* (or comparison set): up to 20 steady, well-measured stars per session. Their combined, weighted brightness is the yardstick for every other star.
+- **The comparison ensemble.** The stars used for that division form the *comparison ensemble* (or comparison set): up to 20 steady, well-measured stars per session. A star that SIMBAD, VSX or Gaia DR3 lists as variable is left out. The answers are read from the library's stored catalog answers before the choice, so a catalog outage does not let a known variable in, and the log gives the number left out by catalog. Their combined, weighted brightness is the yardstick for every other star.
 - **The light curve.** A *light curve* is one star's brightness listed against time, one point per frame. Each point carries an error bar (its 1σ uncertainty, the size of the random scatter expected from one measurement to the next).
 - **Variability indices.** A *variability index* is one number that summarizes how much a light curve wanders, compared with what noise alone would give. The pipeline uses three of them and flags a star only when all three agree.
 - **Period search.** A *period search* looks for a pattern that repeats at a fixed interval, such as a pulsating star or the regular dip of an eclipse.
@@ -73,6 +73,15 @@ A camera's noise has a few known sources: the random arrival of light (photon or
 
 `F` is the star's net counts, `S` the sky counts per pixel, `RN` the read noise, `D` the dark current per pixel (signal the sensor makes by itself from heat), `n_pix` the number of pixels in the circle, and `n_sky` the number of pixels in the sky ring. All of these are in electrons except the pixel counts. The code converts the result back to ADU with the camera's gain (electrons per ADU) and divides by the exposure time, the same way it stores the flux. The code takes the dark current as zero, and the equation assumes the frame has had its bias level (the fixed offset the camera adds) removed.
 
+### Faint stars
+
+A star near the noise can measure at or below zero in a frame. The pipeline keeps that value, with its error, in every list and step:
+
+- The raw `fluxes` and `fluxErrors` hold the measured number, which can be negative. The normalized and detrended fluxes are the same number divided by the comparison level, so they can be negative too.
+- The mean, the coefficient of variation, the indices, the period and dip searches, the session merge and the plots use every finite point. A point at or below zero is never dropped. A star whose mean is not above zero has no coefficient of variation or indices, because both are fractions of the mean; that is a recorded absence, not a lost point.
+- A magnitude is `-2.5 log10` of a flux, so it exists only for a flux above zero. The instrumental magnitude of a star comes from its mean raw flux, and is empty when that mean is not above zero. The magnitude error uses only the points above zero. The amplitude of a folded light curve leaves out the points at or below zero and reports how many usable points remained (see [target amplitude](processing/README.md#noise-model-schedule-and-target-amplitude)).
+- A star near the frame edge has no measurement. Its flux and error are 0, and the comparison step treats it as missing, not as a measured zero.
+
 ### Gain and read noise
 
 **Where the numbers come from.** The gain and read noise come from the camera's profile, then from the frame's `EGAIN` and `RDNOISE` header cards. The profile keeps one entry for each camera setting (gain setting, offset and binning) in its `sensor_noise` list (`models/camera_profile.py`), and a frame uses the entry for its own setting only. A frame whose setting has no entry gets nothing from the profile, never the value of a nearby setting, and the result records why (`DetectorNoise.profile_gap_reason`). The code never uses the `GAIN` card, because many cameras write a gain setting there and not electrons per ADU.
@@ -124,7 +133,7 @@ Within a session, a star's normalized flux is its flux divided by a weighted mea
 
 **The tie to the field.** Before the sessions are joined, each session is put on the scale of one reference session (`session_tie.py`, called from `_match_and_merge_across_sessions` in `batch.py`). The reference session is the one with the most measured stars; when several tie, the earliest. For every other session the pipeline pairs its stars with the reference session's stars by sky position. A pair is a *tie star* when:
 
-- both sessions have at least 3 positive normalized points for it (the same minimum the change search uses);
+- both sessions have at least 3 normalized points for it and a median above zero (the same minimum the change search uses);
 - no saturated point was removed from it in either session;
 - no catalog lists it as variable;
 - neither session flagged it as a possible variable.
@@ -150,7 +159,7 @@ The merge also records one `sessionSummaries` entry per session on the light cur
 | Field | Meaning |
 | --- | --- |
 | `sessionId` | The session the entry describes |
-| `pointCount` | Usable (positive) normalized points in the session |
+| `pointCount` | Usable (finite) normalized points in the session; a point at or below zero counts |
 | `medianNormalizedFlux` | The star's median normalized flux in the session (no units) |
 | `normalizedFluxScatter` | 1.4826 times the MAD of the star's normalized flux in the session (no units) |
 | `comparisonStarCount` | The number of comparison stars per frame (the same for every frame) |
@@ -180,6 +189,8 @@ Each variable candidate carries `knownVariability` and a one-sentence `knownVari
 ## What the variable-star flag can see
 
 The flag picks candidates with the noise model and the three indices described in [Deciding which stars are variable](processing/README.md#deciding-which-stars-are-variable). The score is checked on synthetic fields with known variables (partly measured; see [PHO-06](../../../documentation/library_design/validation/photometry.md#pho-06)) and on one real field (partly measured; see [PHO-08](../../../documentation/library_design/validation/photometry.md#pho-08)). The `variability_discrimination` gate fails a run whose AUC against catalog labels is below 0.7. No AUC against catalog labels for the score on the whole library is measured.
+
+A star that changes brightness with the field's registration steps, that was saturated in more than 10% of its frames, or that lies near the frame edge is not judged. It keeps its light curve and indices, is never a candidate, and carries a `notJudgedReason` (see [Stars that are not judged](processing/README.md#stars-that-are-not-judged); partly measured, see [PHO-20](../../../documentation/library_design/validation/photometry.md#pho-20)).
 
 Each light curve carries the indices as `instrumentalMag`, `rmsMag`, `excessScatter`, `reducedChiSquare`, `stetsonJ`, `variabilityScore`, `falseAlarmProbability` and `falseDiscoveryQValue`, and each variable candidate carries the last six.
 
@@ -230,7 +241,8 @@ A cycle or dip search reports a verdict (`detected`, `possible`, `not_detected`,
   - the brightness band for comparison candidates (ranked by brightness, the brightest 2% are skipped and the band reaches down to the brightest 30%);
   - the minimum of 5 and the cap of 20 comparison stars;
   - the 3σ consistency limit;
-  - the rule that a usable frame has at least half the typical number of measured stars.
+  - the rule that a frame takes part in choosing the comparison set when it has at least nine tenths of the typical number of measured stars (`MINIMUM_USABLE_FRAME_FRACTION`); a frame below it is listed in a warning, is still normalized with the comparison stars measured in it, and stays in the light curves.
+- **Comparison pool.** A comparison candidate needs a median signal-to-noise of at least 50 and a flux in at least 95% of the usable frames (measured; see [PHO-21](../../../documentation/library_design/validation/photometry.md#pho-21)). A flux below zero is kept, not set to zero (see [Faint stars](#faint-stars)).
 - **Where they are set.** The cap and the optional ensemble airmass correction are arguments of `VariabilityAnalyzer`; no configuration file sets them.
 - **Camera numbers.** The gain and read noise come from the camera profile or the frame header (see [Gain and read noise](#gain-and-read-noise)).
 - **Observatory location.** `latitude`, `longitude` and `elevation` in `[Observatory.Location]` set the observer for BJD_TDB (see [Times](#times)).

@@ -11,6 +11,12 @@ import { clamp, overlayTransformBetween } from '../utils/transformUtils';
 /** The share of the window the fitted picture covers, which leaves a small margin. */
 export const FIT_MARGIN = 0.95;
 
+/** The largest zoom. */
+const MAX_ZOOM = 50;
+
+/** The smallest zoom while the container or picture has no size, so there is no fit to use. */
+const FALLBACK_MIN_ZOOM = 0.1;
+
 /**
  * Gives the zoom that fits a whole picture in a window.
  *
@@ -70,6 +76,9 @@ export const useCanvasInteraction = (
     // True once the user zooms or pans by hand. Until then the view stays
     // fitted to the container as the container changes size.
     const userAdjustedViewRef = useRef(false);
+
+    // True while the view is at the smallest allowed zoom (the fit), so a zoom-out control can be disabled.
+    const [atMinimumZoom, setAtMinimumZoom] = useState(false);
 
     // The view the overlays were last drawn for (the last rendered React state).
     const drawnViewRef = useRef({ panX: 0, panY: 0, zoom: 1 });
@@ -147,6 +156,27 @@ export const useCanvasInteraction = (
         if (stateFrameRef.current !== null) cancelAnimationFrame(stateFrameRef.current);
     }, []);
 
+    /**
+     * Gives the smallest zoom the person may reach: the zoom that fits the whole picture in the
+     * container. It is read fresh each time, so it follows the container's size and the picture.
+     *
+     * @returns The fit zoom, or the old fixed floor while the container or picture has no size.
+     */
+    const minimumZoom = useCallback((): number => {
+        const container = containerRef.current;
+        const fit = container
+            ? fitScaleFor(container.clientWidth, container.clientHeight, drawnSize.w, drawnSize.h)
+            : 0;
+        return fit > 0 ? Math.min(fit, MAX_ZOOM) : FALLBACK_MIN_ZOOM;
+    }, [containerRef, drawnSize.w, drawnSize.h]);
+
+    /**
+     * Keeps the "at the smallest zoom" flag in step with the live zoom and the container's size.
+     */
+    const syncMinimumFlag = useCallback(() => {
+        setAtMinimumZoom(zoomRef.current <= minimumZoom() * (1 + 1e-6));
+    }, [minimumZoom]);
+
     const clampPan = useCallback(() => {
         const container = containerRef.current;
         if (!container) return;
@@ -162,9 +192,9 @@ export const useCanvasInteraction = (
         let minX, maxX, minY, maxY;
 
         if (imgW <= cW) {
-            // Allow dragging within the container
-            minX = 0;
-            maxX = cW - imgW;
+            // A picture narrower than the container stays centered.
+            minX = (cW - imgW) / 2;
+            maxX = minX;
         } else {
             minX = cW - imgW;
             maxX = 0;
@@ -201,7 +231,7 @@ export const useCanvasInteraction = (
         const delta = -e.deltaY;
         const factor = delta > 0 ? 1.1 : 0.9;
 
-        const newZoom = Math.max(0.1, Math.min(50, zoomRef.current * factor));
+        const newZoom = Math.max(minimumZoom(), Math.min(MAX_ZOOM, zoomRef.current * factor));
 
         // Zoom towards mouse
         // logical pos before zoom
@@ -221,7 +251,7 @@ export const useCanvasInteraction = (
         // The image and overlays already moved by CSS; React state catches up once per frame.
         scheduleStateSync();
 
-    }, [containerRef, clampPan, scheduleTransformWrite, scheduleStateSync]);
+    }, [containerRef, clampPan, minimumZoom, scheduleTransformWrite, scheduleStateSync]);
 
 
     // Setup event listeners on container
@@ -285,7 +315,7 @@ export const useCanvasInteraction = (
         const cy = cH / 2;
 
         const currentZoom = zoomRef.current;
-        const newZoom = Math.max(0.1, Math.min(50, currentZoom * factor));
+        const newZoom = Math.max(minimumZoom(), Math.min(MAX_ZOOM, currentZoom * factor));
 
         const lx = (cx - panRef.current.x) / currentZoom;
         const ly = (cy - panRef.current.y) / currentZoom;
@@ -304,9 +334,11 @@ export const useCanvasInteraction = (
     /**
      * Sets the viewport scale to an absolute scale factor centered on the container.
      *
-     * @param newScale Absolute scale value (e.g. 1.0 for 1:1 pixel mapping).
+     * @param requestedScale Absolute scale value (e.g. 1.0 for 1:1 pixel mapping), raised to the fit if smaller.
      */
-    const zoomToScale = (newScale: number) => {
+    const zoomToScale = (requestedScale: number) => {
+        // The picture never gets smaller than the fit.
+        const newScale = Math.max(minimumZoom(), Math.min(MAX_ZOOM, requestedScale));
         const container = containerRef.current;
         if (!container) return;
         userAdjustedViewRef.current = true;
@@ -457,11 +489,24 @@ export const useCanvasInteraction = (
             const shouldRefit = !userAdjustedViewRef.current;
             if (!isZeroSize && shouldRefit && drawnSize.w > 0 && drawnSize.h > 0) {
                 resetView();
+            } else if (!isZeroSize && drawnSize.w > 0 && drawnSize.h > 0) {
+                // The fit changed with the container; a hand-set view may not be smaller than it.
+                const smallest = minimumZoom();
+                if (zoomRef.current < smallest) zoomRef.current = smallest;
+                clampPan();
+                scheduleTransformWrite();
+                flushState();
             }
+            syncMinimumFlag();
         });
         observer.observe(containerElement);
         return () => observer.disconnect();
-    }, [containerRef, drawnSize.w, drawnSize.h, resetView]);
+    }, [containerRef, drawnSize.w, drawnSize.h, resetView, minimumZoom, clampPan, scheduleTransformWrite, flushState, syncMinimumFlag]);
+
+    // After every zoom or picture change, tell whether the view sits at the smallest zoom.
+    useEffect(() => {
+        syncMinimumFlag();
+    }, [zoom, syncMinimumFlag]);
 
     /**
      * Tells which point of the picture is at the center of the view now.
@@ -493,15 +538,16 @@ export const useCanvasInteraction = (
         if (options?.force) userAdjustedViewRef.current = true;
         if (!userAdjustedViewRef.current) return;
         if (options?.scale !== undefined && options.scale > 0) {
-            zoomRef.current = options.scale;
-            setZoom(options.scale);
+            const scale = Math.max(minimumZoom(), options.scale);
+            zoomRef.current = scale;
+            setZoom(scale);
         }
         panRef.current.x = container.clientWidth / 2 - fraction.x * drawnSize.w * zoomRef.current;
         panRef.current.y = container.clientHeight / 2 - fraction.y * drawnSize.h * zoomRef.current;
         clampPan();
         scheduleTransformWrite();
         flushState();
-    }, [containerRef, drawnSize.w, drawnSize.h, clampPan, scheduleTransformWrite, flushState]);
+    }, [containerRef, drawnSize.w, drawnSize.h, clampPan, minimumZoom, scheduleTransformWrite, flushState]);
 
     return {
         getCenterFraction,
@@ -509,6 +555,7 @@ export const useCanvasInteraction = (
         zoom,
         panX,
         panY,
+        atMinimumZoom,
         resetView,
         zoomBy,
         zoomToFit,

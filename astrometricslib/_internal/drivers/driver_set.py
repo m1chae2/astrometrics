@@ -104,13 +104,15 @@ class Drivers:
         Returns
         -------
         simbad : `SimbadDriver`
-            The chosen driver, or a new `AstroquerySimbadDriver`.
+            The chosen driver, or a `CachedSimbadDriver` around a new
+            `AstroquerySimbadDriver` (answers are stored and reused).
         """
         if self.simbad is not None:
             return self.simbad
         from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+        from astrometricslib._internal.drivers.cached_simbad_driver import CachedSimbadDriver
 
-        return AstroquerySimbadDriver()
+        return CachedSimbadDriver(AstroquerySimbadDriver())
 
     def gaia_xp_or_default(self) -> GaiaXpDriver:
         """Give the chosen Gaia XP driver, or build the built-in one.

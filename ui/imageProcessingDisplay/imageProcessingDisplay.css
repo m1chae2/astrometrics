@@ -435,8 +435,24 @@
 }
 
 .star-shape-chart {
+  position: relative;
   height: var(--star-shape-chart-height);
   width: 100%;
+}
+
+/* The label for the hovered frame: just above the bar, never over it, no arrow, and it ignores the pointer. */
+.star-shape-chart__tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - var(--space-1)));
+  padding: 3px 8px;
+  border-radius: var(--radius-md);
+  background: var(--surface-menu);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: var(--small-font-size);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
 }
 
 /* The Status cell holds one or two chips and, for a set-aside frame, the Put back button. */
@@ -1232,17 +1248,35 @@
   gap: var(--space-2);
 }
 
-.depth-goal-row__info {
-  cursor: help;
-  color: var(--text-dim);
-}
-
 .depth-goal-row__message,
 .depth-goal-row--muted {
   color: var(--text-muted);
 }
 
 .depth-goal-row--error {
+  color: var(--danger-red);
+}
+
+.bright-object-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 6px var(--space-3);
+  border-top: 1px solid var(--grey-medium, var(--text-darkest));
+  font-size: var(--compact-font-size);
+}
+
+.bright-object-row__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bright-object-row__note {
+  color: var(--text-muted);
+}
+
+.bright-object-row--error {
   color: var(--danger-red);
 }
 
@@ -1348,6 +1382,12 @@
 .calibration-report__subheading {
   margin: 0;
   color: var(--text-muted);
+}
+
+.calibration-report__scope {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
 }
 
 .calibration-report__list {

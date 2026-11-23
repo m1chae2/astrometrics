@@ -1529,8 +1529,10 @@ class ApertureMeasurement:
     Attributes
     ----------
     net_flux_adu : `float`
-        The sky-subtracted sum of the aperture, in ADU. It is never
-        negative and is not divided by the exposure time.
+        The sky-subtracted sum of the aperture, in ADU. It can be below zero
+        for a faint star in a noisy frame (the sky estimate is a little too
+        high); its error says how far below zero is expected. It is not
+        divided by the exposure time.
     flux_error_adu : `float`
         The 1-sigma uncertainty of `net_flux_adu`, in ADU. It is 0.0 when
         the star was too close to the frame edge to measure.
@@ -1723,7 +1725,11 @@ def measure_aperture_photometry(
         ]
         background_level = np.median(local_cutout)
 
-    net_flux = max(0.0, float(star_flux_sum - aperture.area * background_level))
+    # The measured value is kept even when it is below zero. Faint stars in a
+    # noisy frame measure a little below zero about half the time, and
+    # clamping them to zero would bias their mean upward and hide the frames
+    # from every later step. The error below already allows for it.
+    net_flux = float(star_flux_sum - aperture.area * background_level)
     saturated_fraction = compute_saturated_pixel_fraction(star_raw_values, saturation_threshold_adu)
     is_saturated = is_saturation_significant(saturated_fraction)
     flux_error = aperture_flux_error_adu(

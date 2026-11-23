@@ -571,3 +571,18 @@ def test_running_as_job_makes_an_existing_row_current_and_reports_progress(isola
     assert (stored.status, stored.progress_current) == ("running", 30)
     assert len(store.get_jobs_by_target("Vega")) == 1
     assert not handle.reached_terminal_status
+
+
+def test_a_job_of_any_new_kind_stores_its_log_rows_under_its_id(isolated_logs: str) -> None:
+    """Verify an unknown job type still writes log rows readable by id."""
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    package_logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.test_new_kind")
+    with registered_job(enabled=True, job_type="brand_new_kind", target_id="M 31") as job:
+        package_logger.info("first step of a new kind of job")
+        package_logger.info("second step of a new kind of job")
+        job_id = job.job_id
+
+    messages = [row["message"] for row in JobStore(str(isolated_logs)).get_log_entries_for_job(job_id)]
+    assert any("first step" in message for message in messages)
+    assert any("second step" in message for message in messages)

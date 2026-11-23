@@ -10,10 +10,9 @@ Nothing in these tests uses the network.
 
 import socket
 from pathlib import Path
+from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
-from astropy.table import Table
 
 from astrometricslib.drivers import LaunchIdentity
 from astrometricslib.exceptions import ExternalServiceError
@@ -67,7 +66,9 @@ def test_simbad_refuses_every_query_without_pausing() -> None:
         driver.query_region(object(), "0.5d")
     with pytest.raises(ExternalServiceError):
         driver.query_tap("SELECT 1")
-    assert not simbad._paused_until  # no cooldown: nothing was tried
+    from astrometricslib._internal.drivers.outside_services import SIMBAD, host_state
+
+    assert all(host_state.pause_remaining(host) == 0 for host in SIMBAD.hosts)  # no pause: nothing was tried
 
 
 def test_gaia_tile_clients_refuse() -> None:
@@ -117,7 +118,9 @@ def test_gaia_xp_download_refuses_without_pausing_downloads(tmp_path: Path) -> N
 
     with pytest.raises(GaiaXpDownloadError, match="Gaia archive"):
         driver.sampled_spectrum(4472832130942575872)
-    assert not driver._skip_downloads_until
+    from astrometricslib._internal.drivers.outside_services import GAIA_XP, host_state
+
+    assert all(host_state.pause_remaining(host) == 0 for host in GAIA_XP.hosts)  # no pause: nothing was tried
 
 
 def test_the_online_plate_solver_is_not_asked() -> None:
@@ -125,6 +128,7 @@ def test_the_online_plate_solver_is_not_asked() -> None:
     from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
 
     driver = AstrometryNetPlateSolveDriver(api_key="a-key")
+    driver.astrometry_net = MagicMock()
 
     assert driver._solve_online_sources([{"x_centroid": 1.0, "y_centroid": 2.0}], 100, 100) is None
     assert driver._solve_online_image("/does/not/exist.fits") is None
@@ -137,23 +141,23 @@ def test_skybot_is_not_asked_and_counts_no_attempt() -> None:
     from astrometricslib.models.moving_object_config import MovingObjectConfig
     from astrometricslib.pipelines.asteroid_detection.ephemeris import EphemerisCrossMatcher
 
-    matcher = EphemerisCrossMatcher(MovingObjectConfig(), min_seconds_between_queries=0.0)
+    matcher = EphemerisCrossMatcher(MovingObjectConfig())
 
     assert matcher.query_field(10.0, 20.0, 1.7e9, 0.5) is None
     assert matcher.queries_attempted == 0
     assert matcher.queries_failed == 0
 
 
-def test_the_variable_star_cross_match_refuses() -> None:
-    """The CDS cross-match raises before it calls the service."""
-    from astrometricslib.pipelines.shared.variable_star_catalogs import run_crossmatch
+def test_the_variable_star_field_query_refuses() -> None:
+    """The VizieR field query cannot ask and has nothing stored."""
+    from astrometricslib.pipelines.shared.variable_star_catalogs import (
+        VSX_CATALOG,
+        VSX_COLUMNS,
+        query_vizier_field,
+    )
 
-    calls: list[object] = []
-    positions = Table({"ra": np.array([1.0]), "dec": np.array([2.0])})
-
-    with pytest.raises(ConnectionError, match="cross-match"):
-        run_crossmatch(lambda **kwargs: calls.append(kwargs), positions, "vsx")
-    assert calls == []
+    with pytest.raises(ExternalServiceError, match="VizieR"):
+        query_vizier_field(VSX_CATALOG, list(VSX_COLUMNS), 1.0, 2.0, 0.5)
 
 
 def test_the_drive_scripts_refuse(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

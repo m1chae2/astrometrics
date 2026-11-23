@@ -16,20 +16,36 @@ inside it.
    target's `object_category`). A cluster, a star, a solar system object or an
    unknown kind never does. The kind decides first because a cluster of
    bright stars also makes bright regions, and the measure in step 2 cannot
-   tell those apart (M 13 reads 0.26, a galaxy 0.2 to 0.3).
+   tell those apart (M 13 reads 0.26, a galaxy 0.2 to 0.3). The user may
+   override this per target (`Target.preview_bright_object`): "off" never
+   uses the step, and a chosen object (such as a nebula in the field of a
+   cluster) replaces the target as the anchor and skips the kind check. Steps
+   2 to 4 still apply to a chosen object, so a choice with no smooth bright
+   region at its place does nothing.
 2. *Is there a smooth bright region?* The stack is smoothed with a median
    filter, which removes stars. Where the smoothed image is well above the
    sky and the area is large enough, there is a region. The share of the
    region's light that sits in point-like peaks above the smoothed image must
    be small, or the region is a pile of stars and is dropped.
-3. *The second stretch.* Black is the sky level. White is a high percentile
-   of the region's smoothed pixels, so a star on top of it cannot set it. The
-   curve puts the region's median at a mid grey, as the bright-object stretch
-   does for the Moon.
-4. *The mask.* The second stretch replaces the normal picture inside the
-   region. Outside, the weight falls to zero over a few star widths, so the
-   sky, the faint stars and the edges stay exactly as the normal picture
-   made them.
+3. *The second stretch.* It is one highlight-compression curve of the
+   linear value, not a new picture. The normal picture's brightness at the
+   knee (`MASKED_STRETCH_KNEE`, 0.4) is
+   traced back to a linear level, read from pixels outside the region. At
+   and below that level the picture is left as it is. Above it, a log curve
+   takes the picture from the knee to 1 at a white point that is a high
+   percentile of the region's smoothed pixels, so a star on top of it cannot
+   set it. The curve starts with the slope the normal picture has at the
+   knee, so there is no bend. Values the normal stretch crushed together near
+   white are spread out again. Because it is one rising function of the
+   linear value, a brighter pixel is never darker than a dimmer one.
+4. *Where the curve applies.* The region of step 2 is grown to every
+   connected pixel of the smoothed image above the knee level, so the curve
+   cuts through no bright area and no above-knee pixel of the object is left
+   with the old stretch. Outside that area every pixel is below the knee,
+   where the curve equals the picture, so there is no edge to feather. Star
+   peaks inside the area follow the same curve; stars outside it are not
+   touched. The curve is used only if the normal picture crushes the region:
+   more than half of its pixels above 0.85. Size does not matter.
 
 The step runs last, after the denoise and the star toning, on the picture
 and on the linear stack the picture came from. The record of the plan says
@@ -57,13 +73,9 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.image_scaling import measure_sky_background, midtones_balance_for
-from astrometricslib.pipelines.stacking.post_processing.bright_object import (
-    BRIGHT_OBJECT_BRIGHTNESS,
-    WHITE_POINT_PERCENTILE,
-)
+from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
+from astrometricslib.pipelines.stacking.post_processing.bright_object import WHITE_POINT_PERCENTILE
 from astrometricslib.pipelines.stacking.post_processing.stack_image import celestial_wcs, pixel_scale_arcsec
-from astrometricslib.pipelines.stacking.post_processing.star_tone import soft_highlights
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +280,86 @@ _NOISE_CLIP_ROUNDS = 4
 # division).
 _MINIMUM_VALUE = 1e-6
 
+# The picture brightness at which the compression starts. Below it the picture
+# is left as it is. A lower knee gives the curve more of the range to spread
+# the crushed highlights over, and dims the bulge or halo around the object
+# more. Real preview runs on copies of 2026-11-22 (knees 0.65, 0.5, 0.4 and
+# 0.3): the M 57 ring minus hole read 0.048 in the normal picture and 0.123,
+# 0.144, 0.159 and 0.175; the spread of M 31's region 0.048 and 0.094, 0.118,
+# 0.135 and 0.150; the halo around M 31 dimmed from 0.830 to 0.801, 0.747,
+# 0.710 and 0.675, and the halo around M 81 from 0.744 to 0.740, 0.694, 0.662
+# and 0.631. 0.4 gains 3.3 times the ring contrast and 2.8 times the spread
+# for a halo no more than 0.12 dimmer; 0.3 dims the halo a further 0.03 to 0.04
+# for a gain of 0.015. Chosen by eye on the contact sheet; not validated
+# beyond these four targets. The star toning's own knee is 0.65 and does not
+# limit this one.
+MASKED_STRETCH_KNEE = TunedParameter(
+    name="stacking.masked_stretch_knee",
+    default=0.4,
+    unit="fraction",
+    description="Picture brightness at which the masked stretch's highlight compression starts.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D75",
+)
+
+# The compression is used only when the normal picture crushes the region:
+# more than this share of the region's pixels must lie above 0.85. Real
+# preview runs on copies of 2026-11-22 (GraXpert, Cosmic Clarity and star
+# toning, no extra stretch) gave 0.97 for M 31, 0.82 for M 81, 0.88 for
+# M 57 and 1.00 for NGC 7331, and the compression roughly doubled the
+# picture's spread inside the region for each (10th to 90th percentile 0.05
+# to 0.11, 0.05 to 0.12). Half sits below the lowest of those and above a
+# region the normal picture already shows in full. Size is not the rule: M 31
+# (0.29% of the frame) and M 81 (0.01%) both gained. Design estimate.
+MASKED_STRETCH_CRUSHED_SHARE = TunedParameter(
+    name="stacking.masked_stretch_crushed_share",
+    default=0.5,
+    unit="fraction",
+    description="Share of a region's pixels the normal picture must put above the crushed level.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D75",
+)
+
+# The picture brightness above which a pixel counts as crushed toward white.
+# The star toning's tanh bends everything above its 0.65 knee to under 0.92,
+# so 0.85 is where values are within about 0.07 of that ceiling. Design
+# estimate.
+_CRUSHED_LEVEL = 0.85
+
+# The number of pixels outside the mask whose brightness is nearest a target
+# brightness. Their medians give the picture's brightness and the linear
+# level there, so a stack whose picture has no pixel exactly at the knee (a
+# sharp-edged synthetic ring) still gets one. 2,000 pixels hold the median to
+# about 2% of the spread of the pixels (1.25 over the square root of 2,000),
+# and the copies of 2026-11-22 had tens of thousands within 0.02 of the knee.
+# Design estimate.
+_KNEE_PIXELS = 2000
+
+# A pixel is extended, not a star, when it is within this share of the
+# smoothed (star-free) value. A star peak stands many times above it, and the
+# noise of a pixel at the knee level is a few percent of its value on the
+# library's stacks (design estimate, not measured separately).
+_EXTENDED_TOLERANCE = 0.05
+
+# The picture's slope at the knee is read between the knee and this much
+# darker, where the star toning has not yet bent the picture. 0.10 is a third
+# of the way from the sky level (about 0.13) to the knee (0.65) at the lower
+# end of the curve and keeps the two sets of pixels far enough apart for
+# their medians to differ. Design estimate.
+_SLOPE_SPAN = 0.10
+
+# The largest curvature constant the log curve may take, so a bisection on a
+# very steep slope ends. At 1e12 the curve is flat to the eye at 1 a pixel
+# past the knee, which no real stack reaches.
+_LARGEST_CURVATURE = 1e12
+
 # Reasons given when the step does not act.
 REASON_NOT_APPLICABLE_KIND = "the target is not a nebula or a galaxy"
+REASON_TURNED_OFF = "turned off for this target"
 REASON_NO_REGION = "no smooth bright region was found"
 REASON_NO_TARGET_REGION = "no bright region at the target"
 REASON_TARGET_OUTSIDE = "the target is outside the frame"
@@ -284,25 +374,37 @@ REASON_UNREADABLE = "the stack could not be read"
 
 @dataclass(frozen=True)
 class TargetAnchor:
-    """Where the target is on the sky and how big the catalog says it is.
+    """Where the protected object is on the sky, and its catalog size.
 
     Attributes
     ----------
     ra_deg : `float` or `None`
-        The target's right ascension in degrees, or `None` if not known.
+        The object's right ascension in degrees, or `None` if not known.
     dec_deg : `float` or `None`
-        The target's declination in degrees, or `None` if not known.
+        The object's declination in degrees, or `None` if not known.
     major_axis_arcmin : `float` or `None`
         The catalog major axis in arcminutes, or `None` if not known.
+    mode : `str`
+        ``"auto"`` (the anchor is the target and its kind must qualify),
+        ``"off"`` (the step is not used) or ``"object"`` (the anchor is an
+        object the user chose, and the target's kind is not checked).
+    object_id : `str` or `None`
+        SIMBAD's name of the chosen object, with mode ``"object"``.
     """
 
     ra_deg: float | None = None
     dec_deg: float | None = None
     major_axis_arcmin: float | None = None
+    mode: str = "auto"
+    object_id: str | None = None
 
 
 def anchor_for_target(target: Any) -> TargetAnchor:
-    """Read a target's catalog position and size.
+    """Read where the masked stretch should look, from a target.
+
+    The target's own catalog position and size are used, unless the user
+    turned the step off or chose another object
+    (`Target.preview_bright_object`).
 
     Parameters
     ----------
@@ -313,7 +415,24 @@ def anchor_for_target(target: Any) -> TargetAnchor:
     -------
     anchor : `TargetAnchor`
         The position and size. A position that cannot be read is `None`.
+        A choice of "object" without a usable position counts as "auto".
     """
+    choice = getattr(target, "preview_bright_object", None)
+    if choice is not None and choice.mode == "off":
+        return TargetAnchor(mode="off")
+    if (
+        choice is not None
+        and choice.mode == "object"
+        and choice.ra_deg is not None
+        and choice.dec_deg is not None
+    ):
+        return TargetAnchor(
+            float(choice.ra_deg),
+            float(choice.dec_deg),
+            float(choice.major_axis_arcmin) if choice.major_axis_arcmin else None,
+            mode="object",
+            object_id=choice.simbad_id,
+        )
     try:
         ra_deg, dec_deg = float(target.ra_deg), float(target.dec_deg)
     except ValueError, TypeError, AttributeError, InvalidArgumentError:
@@ -342,18 +461,23 @@ class MaskedStretchPlan:
         The sky level, in the stack's own units, that comes out black.
     white_point : `float` or `None`
         The brightness, in the stack's own units, that comes out white.
-    midtones : `float` or `None`
-        The midtones balance of the second curve.
-    floor : `float`
-        The brightness the sky level comes out at (the normal picture's sky).
     weights : `numpy.ndarray` or `None`
-        The mask, from 0 to 1, as large as the picture. `None` when unused.
+        The region found in step 2, as 1 inside and a fall to 0 outside over a
+        few star widths, as large as the picture. `None` when unused.
+    smoothed : `numpy.ndarray` or `None`
+        The stack with the stars removed, as large as the picture, which the
+        region is grown on. `None` when unused.
     position_source : `str` or `None`
         How the target's place in the picture was found: the plate solution
         or the image center. `None` if the step stopped before that.
     size_ratio : `float` or `None`
         The region's equivalent diameter over the catalog major axis, or
         `None` when the size could not be checked.
+    mode : `str`
+        The user's choice for this target: ``"auto"``, ``"off"`` or
+        ``"object"``.
+    object_id : `str` or `None`
+        SIMBAD's name of the chosen object, with mode ``"object"``.
     """
 
     used: bool
@@ -363,11 +487,12 @@ class MaskedStretchPlan:
     region_pixels: int = 0
     black_point: float | None = None
     white_point: float | None = None
-    midtones: float | None = None
-    floor: float = 0.0
     weights: np.ndarray | None = None
+    smoothed: np.ndarray | None = None
     position_source: str | None = None
     size_ratio: float | None = None
+    mode: str = "auto"
+    object_id: str | None = None
 
     def record(self) -> dict[str, Any]:
         """Describe the plan for the preview settings record.
@@ -376,7 +501,8 @@ class MaskedStretchPlan:
         -------
         record : `dict` [`str`, `Any`]
             JSON-ready fields: whether it was used, why not, the target kind,
-            the region count and area, and the white point.
+            the region count and area, the white point, the user's choice
+            (``mode``) and the chosen object's name (``object``).
         """
         return {
             "used": self.used,
@@ -387,6 +513,8 @@ class MaskedStretchPlan:
             "white_point": self.white_point,
             "position_source": self.position_source,
             "size_ratio": self.size_ratio,
+            "mode": self.mode,
+            "object": self.object_id,
         }
 
     def step_sentence(self) -> str:
@@ -407,7 +535,9 @@ class MaskedStretchPlan:
         )
 
 
-def _unused(reason: str, category: str | None, position_source: str | None = None) -> MaskedStretchPlan:
+def _unused(
+    reason: str, category: str | None, position_source: str | None = None, anchor: TargetAnchor | None = None
+) -> MaskedStretchPlan:
     """Build the plan for a stack the step leaves alone.
 
     Parameters
@@ -418,13 +548,22 @@ def _unused(reason: str, category: str | None, position_source: str | None = Non
         The target's kind.
     position_source : `str` or `None`, optional
         How the target's place was found, if the step got that far.
+    anchor : `TargetAnchor`, optional
+        The anchor in use, so the plan records the user's choice.
 
     Returns
     -------
     plan : `MaskedStretchPlan`
         A plan with ``used`` false.
     """
-    return MaskedStretchPlan(used=False, reason=reason, category=category, position_source=position_source)
+    return MaskedStretchPlan(
+        used=False,
+        reason=reason,
+        category=category,
+        position_source=position_source,
+        mode=anchor.mode if anchor else "auto",
+        object_id=anchor.object_id if anchor else None,
+    )
 
 
 def _locate_target(
@@ -519,34 +658,9 @@ def _smoothed_sky_noise(smoothed: np.ndarray) -> float:
     return spread
 
 
-def _midtones_curve(values: np.ndarray, midtones: float) -> np.ndarray:
-    """Apply the midtones transfer function Siril's ``mtf`` command uses.
-
-    Parameters
-    ----------
-    values : `numpy.ndarray`
-        Brightness from 0 to 1.
-    midtones : `float`
-        The balance, strictly between 0 and 1: the input that maps to 0.5.
-
-    Returns
-    -------
-    curved : `numpy.ndarray`
-        The values after the curve, still from 0 to 1.
-    """
-    return np.where(
-        values <= 0.0,
-        0.0,
-        np.where(
-            values >= 1.0, 1.0, ((midtones - 1.0) * values) / ((2.0 * midtones - 1.0) * values - midtones)
-        ),
-    )
-
-
 def plan_masked_stretch(
     data: np.ndarray,
     category: str | None,
-    sky_brightness: float,
     anchor: TargetAnchor | None = None,
     header: fits.Header | None = None,
 ) -> MaskedStretchPlan:
@@ -558,11 +672,8 @@ def plan_masked_stretch(
         The linear stack. A colour stack is averaged across its channels.
     category : `str` or `None`
         The target's kind (`Target.object_category`). Only ``"nebula"`` and
-        ``"galaxy"`` qualify.
-    sky_brightness : `float`
-        The brightness, from 0 to 1, the normal picture gives the empty sky.
-        The second stretch gives the sky level the same brightness, so there
-        is no dark moat where the two meet.
+        ``"galaxy"`` qualify, unless the anchor holds an object the user
+        chose (then the kind is not checked).
     anchor : `TargetAnchor`, optional
         The target's catalog position and size. Only the smooth region that
         holds the target's place, and fits its catalog size, is used. Without
@@ -583,14 +694,18 @@ def plan_masked_stretch(
         is not brighter than the sky.
     """
     anchor = anchor or TargetAnchor()
-    if category not in MASKED_STRETCH_CATEGORIES:
-        return _unused(REASON_NOT_APPLICABLE_KIND + f" (kind: {category or 'unknown'})", category)
+    if anchor.mode == "off":
+        return _unused(REASON_TURNED_OFF, category, anchor=anchor)
+    if anchor.mode != "object" and category not in MASKED_STRETCH_CATEGORIES:
+        return _unused(
+            REASON_NOT_APPLICABLE_KIND + f" (kind: {category or 'unknown'})", category, anchor=anchor
+        )
     stack = _luminance(data)
     if stack is None:
-        return _unused(REASON_UNREADABLE, category)
+        return _unused(REASON_UNREADABLE, category, anchor=anchor)
     sky = measure_sky_background(stack.astype(np.float64))
     if sky is None:
-        return _unused(REASON_NO_SKY, category)
+        return _unused(REASON_NO_SKY, category, anchor=anchor)
     sky_level, pixel_noise = sky
     box = max(3, round(resolve(_STAR_REMOVAL_BOX_PIXELS).value))
     smoothed = ndimage.median_filter(stack, size=box, mode="nearest")
@@ -601,7 +716,7 @@ def plan_masked_stretch(
     )
     labels, count = ndimage.label(smoothed > threshold)
     if count == 0:
-        return _unused(REASON_NO_REGION, category)
+        return _unused(REASON_NO_REGION, category, anchor=anchor)
     indices = np.arange(1, count + 1)
     areas = ndimage.sum(np.ones_like(stack), labels, indices)
     light = np.clip(stack - sky_level, 0.0, None)
@@ -620,10 +735,10 @@ def plan_masked_stretch(
         if area >= minimum_area and flux > 0.0 and peaks / flux < largest_share
     ]
     if not kept:
-        return _unused(REASON_NO_REGION, category)
+        return _unused(REASON_NO_REGION, category, anchor=anchor)
     located = _locate_target(stack.shape, header, anchor)
     if isinstance(located, str):
-        return _unused(located, category)
+        return _unused(located, category, anchor=anchor)
     target_column, target_row, source, tolerance, plate_scale = located
     # Only the region that holds the target's place is protected: the nearest
     # one within the tolerance. Its holes are filled, so a ring counts as one.
@@ -641,7 +756,7 @@ def plan_masked_stretch(
         if gap <= tolerance and (found is None or gap < found[0]):
             found = (gap, window, filled)
     if found is None:
-        return _unused(REASON_NO_TARGET_REGION, category, source)
+        return _unused(REASON_NO_TARGET_REGION, category, source, anchor)
     _, window, filled_region = found
     region_pixels = int(filled_region.sum())
     size_ratio: float | None = None
@@ -655,6 +770,8 @@ def plan_masked_stretch(
                 category=category,
                 position_source=source,
                 size_ratio=size_ratio,
+                mode=anchor.mode,
+                object_id=anchor.object_id,
             )
     inside = np.zeros(stack.shape, dtype=bool)
     inside[window] = filled_region
@@ -665,13 +782,7 @@ def plan_masked_stretch(
     inside_values = ndimage.grey_opening(stack, size=(opening, opening))[inside]
     white_point = float(np.percentile(inside_values, resolve(WHITE_POINT_PERCENTILE).value))
     if not white_point > sky_level:
-        return _unused(REASON_NO_WHITE_POINT, category)
-    typical = (float(np.median(inside_values)) - sky_level) / (white_point - sky_level)
-    floor = min(max(sky_brightness, 0.0), 0.5)
-    # The curve runs from `floor` to 1, so the object's median lands where
-    # the bright-object stretch puts it once the floor is added.
-    target = (resolve(BRIGHT_OBJECT_BRIGHTNESS).value - floor) / (1.0 - floor)
-    midtones = midtones_balance_for(min(0.99, max(0.01, typical)), target)
+        return _unused(REASON_NO_WHITE_POINT, category, anchor=anchor)
     distance = ndimage.distance_transform_edt(~inside)
     fade = np.clip(1.0 - distance / max(resolve(_FEATHER_PIXELS).value, 1.0), 0.0, 1.0)
     weights = (fade * fade * (3.0 - 2.0 * fade)).astype(np.float32)
@@ -683,16 +794,17 @@ def plan_masked_stretch(
         region_pixels=int(inside.sum()),
         black_point=float(sky_level),
         white_point=white_point,
-        midtones=float(midtones),
-        floor=floor,
         weights=weights,
+        smoothed=smoothed.astype(np.float32),
         position_source=source,
         size_ratio=size_ratio,
+        mode=anchor.mode,
+        object_id=anchor.object_id,
     )
 
 
 def plan_masked_stretch_for_file(
-    path: str, category: str | None, sky_brightness: float, anchor: TargetAnchor | None = None
+    path: str, category: str | None, anchor: TargetAnchor | None = None
 ) -> MaskedStretchPlan:
     """Plan the masked stretch for a FITS stack on disk.
 
@@ -702,9 +814,6 @@ def plan_masked_stretch_for_file(
         Path of the linear stack the picture is made from.
     category : `str` or `None`
         The target's kind (see `plan_masked_stretch`).
-    sky_brightness : `float`
-        The brightness the normal picture gives the empty sky (see
-        `plan_masked_stretch`).
     anchor : `TargetAnchor`, optional
         The target's catalog position and size (see `plan_masked_stretch`).
 
@@ -715,24 +824,136 @@ def plan_masked_stretch_for_file(
         the file. A file that cannot be read gives an unused plan, with the
         reason logged at debug level.
     """
-    if category not in MASKED_STRETCH_CATEGORIES:
-        return _unused(REASON_NOT_APPLICABLE_KIND + f" (kind: {category or 'unknown'})", category)
+    if anchor is not None and anchor.mode == "off":
+        return _unused(REASON_TURNED_OFF, category, anchor=anchor)
+    if (anchor is None or anchor.mode != "object") and category not in MASKED_STRETCH_CATEGORIES:
+        return _unused(
+            REASON_NOT_APPLICABLE_KIND + f" (kind: {category or 'unknown'})", category, anchor=anchor
+        )
     try:
         data = AstrometricsImage(path).data
     except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
         logger.debug("Could not read '%s' to plan a masked stretch: %s", path, error)
-        return _unused(REASON_UNREADABLE, category)
+        return _unused(REASON_UNREADABLE, category, anchor=anchor)
     try:
         header = read_header(path)
     except OSError, ValueError, KeyError:
         header = None
-    return plan_masked_stretch(data, category, sky_brightness, anchor, header)
+    return plan_masked_stretch(data, category, anchor, header)
+
+
+def _level_near(
+    stack: np.ndarray, brightness: np.ndarray, outside: np.ndarray, target: float
+) -> tuple[float, float] | None:
+    """Find the picture brightness and the linear level nearest a brightness.
+
+    Parameters
+    ----------
+    stack : `numpy.ndarray`
+        The linear stack, 2-D.
+    brightness : `numpy.ndarray`
+        The normal picture's brightness, 2-D, from 0 to 1.
+    outside : `numpy.ndarray`
+        Flat indices of the pixels that may be read: the extended ones (see
+        `_extended_pixels`), where the picture is a plain function of the
+        stack.
+    target : `float`
+        The picture brightness to look for.
+
+    Returns
+    -------
+    point : `tuple` [`float`, `float`] or `None`
+        The medians, over the `_KNEE_PIXELS` readable pixels whose picture
+        brightness is nearest `target`, of that brightness and of the linear
+        value. `None` if fewer pixels are readable.
+    """
+    if outside.size < _KNEE_PIXELS:
+        return None
+    distance = np.abs(brightness.ravel()[outside] - target)
+    nearest = outside[np.argpartition(distance, _KNEE_PIXELS - 1)[:_KNEE_PIXELS]]
+    return float(np.median(brightness.ravel()[nearest])), float(np.median(stack.ravel()[nearest]))
+
+
+def _extended_pixels(stack: np.ndarray, smoothed: np.ndarray) -> np.ndarray:
+    """List the pixels that are not stars or noise spikes.
+
+    Parameters
+    ----------
+    stack : `numpy.ndarray`
+        The linear stack, 2-D.
+    smoothed : `numpy.ndarray`
+        The stack with the stars removed.
+
+    Returns
+    -------
+    indices : `numpy.ndarray`
+        Flat indices of the pixels whose stack value is within
+        `_EXTENDED_TOLERANCE` of the smoothed value. The picture is not
+        changed by this function, so these pixels can be read anywhere,
+        inside the region too.
+    """
+    close = np.abs(stack - smoothed) <= _EXTENDED_TOLERANCE * np.abs(smoothed)
+    return np.flatnonzero(close.ravel())
+
+
+def _log_curve(fraction: np.ndarray, slope: float) -> np.ndarray:
+    """Apply the log curve that starts with a given slope and ends at 1.
+
+    Parameters
+    ----------
+    fraction : `numpy.ndarray`
+        Position from 0 (the knee level) to 1 (the white point).
+    slope : `float`
+        The curve's slope at 0, as a multiple of the straight line's (1).
+
+    Returns
+    -------
+    curved : `numpy.ndarray`
+        ``log(1 + a * x) / log(1 + a)``, with ``a`` set so that the slope at
+        0 is `slope`. A slope of 1 or less gives the straight line. The curve
+        is 0 at 0, 1 at 1, rises with `fraction` and bends down.
+    """
+    if slope <= 1.0 + 1e-9:
+        return fraction
+    low, high = 1e-9, _LARGEST_CURVATURE
+    for _ in range(200):
+        middle = np.sqrt(low * high)
+        if middle / np.log1p(middle) < slope:
+            low = middle
+        else:
+            high = middle
+    curvature = np.sqrt(low * high)
+    return np.log1p(curvature * fraction) / np.log1p(curvature)
+
+
+def _grown_region(smoothed: np.ndarray, core: np.ndarray, knee_level: float) -> np.ndarray:
+    """Grow the region to every connected pixel above the knee level.
+
+    Parameters
+    ----------
+    smoothed : `numpy.ndarray`
+        The stack with the stars removed.
+    core : `numpy.ndarray`
+        Boolean mask of the region found in step 2.
+    knee_level : `float`
+        The linear level the normal picture shows at the knee.
+
+    Returns
+    -------
+    grown : `numpy.ndarray`
+        Boolean mask: the core, and every pixel of the smoothed image above
+        the knee level that is connected to it, with its holes filled.
+    """
+    labels, _ = ndimage.label(smoothed > knee_level)
+    touching = np.unique(labels[core])
+    grown = np.isin(labels, touching[touching > 0]) | core
+    return ndimage.binary_fill_holes(grown)
 
 
 def apply_masked_stretch(
     picture: np.ndarray, linear: np.ndarray, plan: MaskedStretchPlan
 ) -> np.ndarray | None:
-    """Blend the second stretch into a finished picture.
+    """Compress the highlights of a finished picture where the object is.
 
     Parameters
     ----------
@@ -746,20 +967,23 @@ def apply_masked_stretch(
 
     Returns
     -------
-    blended : `numpy.ndarray` or `None`
-        The picture where the mask is 0 is returned unchanged. Where the mask
-        is 1 the brightness is the second stretch of the linear stack, with
-        the highlights softened as the star toning does. A colour pixel is
-        scaled by one factor, so its colour does not change. `None` when the
-        plan is unused or the sizes differ.
+    result : `numpy.ndarray` or `None`
+        The picture, with the pixels in the grown region (see
+        `_grown_region`) that lie above the knee level given the curve:
+        from the knee at that level to 1 at the white point, with the slope
+        the picture has at the knee. Every other pixel is unchanged. The
+        curve is a rising function of the stack, so a brighter pixel is never
+        darker than a dimmer one inside the region. A colour pixel is scaled
+        by one factor, so its colour does not change. `None` when the plan is
+        unused, the sizes differ, or too few extended pixels exist to find the
+        knee.
     """
     stack = _luminance(linear)
     if (
         not plan.used
         or plan.weights is None
-        or plan.black_point is None
+        or plan.smoothed is None
         or plan.white_point is None
-        or plan.midtones is None
         or stack is None
         or stack.shape != plan.weights.shape
     ):
@@ -768,11 +992,28 @@ def apply_masked_stretch(
     brightness = clipped.mean(axis=0) if clipped.ndim == 3 else clipped
     if brightness.shape != stack.shape:
         return None
-    scaled = (stack.astype(np.float64) - plan.black_point) / (plan.white_point - plan.black_point)
-    curve = _midtones_curve(np.clip(scaled, 0.0, 1.0), plan.midtones)
-    second = soft_highlights(plan.floor + (1.0 - plan.floor) * curve)
-    weights = plan.weights.astype(np.float64)
-    mixed = (1.0 - weights) * brightness + weights * second
+    stack = stack.astype(np.float64)
+    region = plan.weights >= 1.0
+    if float(np.mean(brightness[region] > _CRUSHED_LEVEL)) <= resolve(MASKED_STRETCH_CRUSHED_SHARE).value:
+        # The normal picture already shows the region: nothing to spread out.
+        return clipped.astype(np.float32)
+    outside = _extended_pixels(stack, plan.smoothed.astype(np.float64))
+    knee_target = resolve(MASKED_STRETCH_KNEE).value
+    knee_point = _level_near(stack, brightness, outside, knee_target)
+    lower_point = _level_near(stack, brightness, outside, knee_target - _SLOPE_SPAN)
+    if knee_point is None or lower_point is None:
+        return None
+    knee, knee_level = knee_point
+    lower, lower_level = lower_point
+    if plan.white_point <= knee_level or knee_level <= lower_level or knee <= lower:
+        # The region never rises above the knee: nothing to compress.
+        return clipped.astype(np.float32)
+    slope = (knee - lower) / (knee_level - lower_level) * (plan.white_point - knee_level) / (1.0 - knee)
+    grown = _grown_region(plan.smoothed.astype(np.float64), region, knee_level)
+    fraction = np.clip((stack - knee_level) / (plan.white_point - knee_level), 0.0, 1.0)
+    curve = knee + (1.0 - knee) * _log_curve(fraction, slope)
+    applies = grown & (stack > knee_level)
+    mixed = np.where(applies, curve, brightness)
     if clipped.ndim == 3:
         factor = np.divide(mixed, brightness, out=np.ones_like(brightness), where=brightness > _MINIMUM_VALUE)
         # A dark pixel that must get brighter has no colour to keep: it

@@ -324,3 +324,27 @@ def test_a_bias_at_the_wrong_offset_is_a_fallback_with_the_reason(tmp_path: Path
     assert bias["fallbacks"]
     assert groups[0]["flatMatch"]["count"] == 0
     assert "no flat frames" in groups[0]["flatMatch"]["problem"]
+
+
+def test_grouped_stats_split_by_optic_and_report_it(tmp_path: Path) -> None:
+    """One camera through two optics gives two groups, one per optic."""
+    library = _library(tmp_path)
+    kwargs = {
+        "filter": "Luminance",
+        "role": "LIGHT",
+        "camera": "Cam",
+        "iso": "100",
+        "offset": "10",
+        "exposure": "30.0",
+    }
+    target = Target(
+        id="TwoOptics",
+        frames=[
+            FrameRecord(path="a.fits", focalLengthMm=405.2, **kwargs),
+            FrameRecord(path="b.fits", focalLengthMm=300.0, **kwargs),
+        ],
+    )
+
+    groups = frame_statistics.get_frame_stats_grouped(target, library)
+
+    assert sorted(group["focalLengthMm"] for group in groups) == [300, 405]

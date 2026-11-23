@@ -57,6 +57,8 @@ export const TargetViewerManager: React.FC<Props> = ({
   const rendererRef = useRef<FitsRendererHandle | null>(null);
   // True while the picture shows a marker at every star the astrometry run's star finder detects.
   const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+  // True while the picture is at its smallest zoom (the fit), so the zoom-out button is off.
+  const [viewAtMinimumZoom, setViewAtMinimumZoom] = useState(false);
 
   /** Finds the FITS file of the target's picture, so the backend measures the file on screen. */
   const resolveMeasurePath = useCallback(
@@ -73,7 +75,7 @@ export const TargetViewerManager: React.FC<Props> = ({
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
             <Button size="small" onClick={() => rendererRef.current?.zoomIn()} title="Zoom In">+</Button>
-            <Button size="small" onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
+            <Button size="small" disabled={viewAtMinimumZoom} onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
             <Button size="small" onClick={() => rendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
             <Button size="small" onClick={() => rendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</Button>
             <SwitchDisplayButton targetDisplay="Image Processing" selectedTarget={selectedTarget} />
@@ -82,6 +84,7 @@ export const TargetViewerManager: React.FC<Props> = ({
       >
         <FitsViewerManager
           ref={rendererRef}
+          onMinimumZoomChange={setViewAtMinimumZoom}
           imageUrl={imageUrl}
           imageBlob={imageBlob}
           previewBlob={previewBlob}

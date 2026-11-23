@@ -92,9 +92,12 @@ const StatusChipDetails: React.FC<{ chip: React.ReactNode; children: React.React
     const [isFocused, setIsFocused] = useState(false);
     const isShown = isHovered || isFocused;
     const triggerRef = useRef<HTMLSpanElement>(null);
-    const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+    const popoverRef = useRef<HTMLDivElement>(null);
+    const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
 
-    // Place the popover under the chip, left edges lined up, and follow the chip on scroll or resize.
+    // Place the popover under the chip, left edges lined up. It shifts left to stay inside the window,
+    // flips above the chip when there is more room there, and scrolls when it is taller than the room.
+    // It follows the chip on scroll or resize.
     useLayoutEffect(() => {
         if (!isShown) {
             setPosition(null);
@@ -103,7 +106,18 @@ const StatusChipDetails: React.FC<{ chip: React.ReactNode; children: React.React
         const place = () => {
             const rect = triggerRef.current?.getBoundingClientRect();
             if (!rect) return;
-            setPosition({ top: rect.bottom + DETAILS_GAP_PX, left: Math.max(DETAILS_EDGE_MARGIN_PX, rect.left) });
+            const popover = popoverRef.current;
+            const width = popover?.offsetWidth ?? 0;
+            const height = popover?.scrollHeight ?? 0;
+            const roomBelow = window.innerHeight - rect.bottom - DETAILS_GAP_PX - DETAILS_EDGE_MARGIN_PX;
+            const roomAbove = rect.top - DETAILS_GAP_PX - DETAILS_EDGE_MARGIN_PX;
+            const isAbove = height > roomBelow && roomAbove > roomBelow;
+            const maxHeight = Math.max(0, isAbove ? roomAbove : roomBelow);
+            const shownHeight = Math.min(height, maxHeight);
+            const top = isAbove ? rect.top - DETAILS_GAP_PX - shownHeight : rect.bottom + DETAILS_GAP_PX;
+            const maxLeft = Math.max(DETAILS_EDGE_MARGIN_PX, window.innerWidth - width - DETAILS_EDGE_MARGIN_PX);
+            const left = Math.min(Math.max(DETAILS_EDGE_MARGIN_PX, rect.left), maxLeft);
+            setPosition({ top, left, maxHeight });
         };
         place();
         window.addEventListener('scroll', place, true);
@@ -135,9 +149,10 @@ const StatusChipDetails: React.FC<{ chip: React.ReactNode; children: React.React
             {isShown && createPortal(
                 <div
                     id={detailsId}
+                    ref={popoverRef}
                     role="tooltip"
                     className="status-chip__details"
-                    style={position ?? { visibility: 'hidden' }}
+                    style={position ?? { visibility: 'hidden', top: 0, left: 0 }}
                 >
                     {children}
                 </div>,

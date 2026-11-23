@@ -27,6 +27,8 @@ from astrometricslib.models.quality.quality_summary import StackQualitySummary
 from astrometricslib.models.target import TargetQualitySummaries
 
 __all__ = [
+    "BrightObjectChoice",
+    "BrightObjectChoices",
     "PredictedCalibration",
     "PredictedFrame",
     "PredictedGroup",
@@ -77,6 +79,40 @@ class StackResult(BaseModel):
         if self.quality_summary is None:
             return None
         return self.quality_summary.provenance_activity_id
+
+
+class BrightObjectChoice(BaseModel):
+    """One nebula or galaxy SIMBAD lists inside a stack's field.
+
+    The user may pick it as the object the preview's masked stretch protects.
+    """
+
+    # SIMBAD's main name for the object.
+    simbad_id: str
+    # SIMBAD's main type code (such as "HII" or "G").
+    object_type: str
+    # The broad kind the type maps to: "nebula" or "galaxy".
+    category: str
+    ra_deg: float
+    dec_deg: float
+    # SIMBAD's major axis in arcminutes, or None when it lists none.
+    major_axis_arcmin: float | None = None
+
+
+class BrightObjectChoices(BaseModel):
+    """The objects a target's stack could protect with the masked stretch.
+
+    ``objects`` is empty when the list could not be made, and ``message``
+    then says why in plain words. A list read from the saved copy beside the
+    stack has ``from_cache`` set.
+    """
+
+    target_id: str
+    objects: list[BrightObjectChoice] = Field(default_factory=list)
+    # Why there are no objects (no plate solution, no stack, SIMBAD not
+    # reached), or None when the list was made.
+    message: str | None = None
+    from_cache: bool = False
 
 
 class PreviewSettingsUsed(BaseModel):

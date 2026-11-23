@@ -203,3 +203,35 @@ def test_resolve_reads_a_setups_values_through_the_context() -> None:
     assert context.notices == [
         "stacking.missing_value: no equipment profile value; using the default 3.0 units"
     ]
+
+
+def test_a_worker_binds_the_equipment_of_the_run() -> None:
+    """A worker rebuilds the equipment from the current context's key."""
+    import contextvars
+
+    from astrometricslib.foundation.parameter_context import (
+        _equipment_parameter_context,
+        bind_equipment_key,
+        current_equipment_key,
+        current_parameter_context,
+    )
+
+    assert current_equipment_key() is None
+    with _equipment_parameter_context("Some Camera", None, 250.0, "L"):
+        key = current_equipment_key()
+    assert key == ("Some Camera", None, 250.0, "L")
+
+    def in_fresh_process() -> object:
+        """Bind the key in a fresh context, as a spawned worker does.
+
+        Returns
+        -------
+        key : `object`
+            The key the context then reports.
+        """
+        bind_equipment_key(key)
+        return current_equipment_key()
+
+    assert contextvars.Context().run(in_fresh_process) == key
+    assert current_parameter_context() is None
+    bind_equipment_key(None)

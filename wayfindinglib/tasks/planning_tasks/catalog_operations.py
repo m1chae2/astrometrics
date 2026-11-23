@@ -18,8 +18,8 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 
 from astrometricslib import Astrometrics, StellarObject, Target
-from astrometricslib.drivers import network_is_offline
-from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
+from astrometricslib.drivers import get_simbad_driver, network_is_offline
+from astrometricslib.exceptions import AstrometricsError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib._internal.errors import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
@@ -377,22 +377,12 @@ def global_catalog(
         logger.debug("The SIMBAD region search was skipped: this launch sends nothing off the computer.")
         return results
 
-    try:
-        from astroquery.simbad import Simbad
-    except ImportError:
-        logger.exception("astroquery is not installed. Cannot query global catalog.")
-        return results
-
-    custom_simbad = Simbad()
-    custom_simbad.TIMEOUT = 10
-    # No V-magnitude column: requesting it hides objects without one,
-    # such as clusters and nebulae.
-    custom_simbad.add_votable_fields("otype", "sp")
-
     center = SkyCoord(ra=ra_deg, dec=dec_deg, unit=(u.deg, u.deg), frame="icrs")
 
     try:
-        table = custom_simbad.query_region(center, radius=radius_deg * u.deg)
+        # No V-magnitude column: requesting it hides objects without one,
+        # such as clusters and nebulae.
+        table = get_simbad_driver().query_region(center, f"{radius_deg}d", votable_fields=("otype", "sp"))
         if table is None or len(table) == 0:
             return results
 
@@ -429,7 +419,7 @@ def global_catalog(
                 ra_text, dec_text = format_target_coordinates(ra_degrees_value, dec_degrees_value)
                 results.append(Target(id=main_id, commonName=main_id, ra=ra_text, dec=dec_text))
 
-    except (*ONLINE_QUERY_ERRORS, *DATA_ERRORS) as query_error:
+    except (*ONLINE_QUERY_ERRORS, ExternalServiceError, *DATA_ERRORS) as query_error:
         logger.warning("SIMBAD online query failed or timed out (offline mode): %s", query_error)
 
     return results

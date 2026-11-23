@@ -216,6 +216,8 @@ export interface FitsRendererProps {
   restoreView?: RestoreView | null;
   /** Called after the view changes (zoom or pan) once a picture is drawn, with where the view is now. */
   onViewChange?: (view: SavedViewport) => void;
+  /** Called with true when the view is at the smallest zoom (the fit), and with false otherwise. */
+  onMinimumZoomChange?: (atMinimum: boolean) => void;
 }
 
 /** A view to put back, with a key that changes for each request. */
@@ -269,6 +271,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     focusStar = null,
     restoreView = null,
     onViewChange,
+    onMinimumZoomChange,
   } = props;
 
   // Local State
@@ -297,7 +300,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const keepViewOnResizeRef = useRef(false);
 
   const {
-    zoom, panX, panY,
+    zoom, panX, panY, atMinimumZoom,
     resetView, zoomBy, zoomToFit, zoomToScale, getCenterFraction, placeCenter,
     onPointerDown, onPointerMove, onPointerUp
   } = useCanvasInteraction(containerRef, drawnSize, undefined, keepViewOnResizeRef);
@@ -503,6 +506,13 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   useEffect(() => {
     if (!hasPinRef.current) closeStarProfile();
   }, [currentKey, closeStarProfile]);
+
+  // Tell the caller whether the view is at the smallest zoom, so it can disable its zoom-out control.
+  const onMinimumZoomChangeRef = useRef(onMinimumZoomChange);
+  onMinimumZoomChangeRef.current = onMinimumZoomChange;
+  useEffect(() => {
+    onMinimumZoomChangeRef.current?.(atMinimumZoom);
+  }, [atMinimumZoom]);
 
   // Expose methods via REF
   useImperativeHandle(ref, () => ({

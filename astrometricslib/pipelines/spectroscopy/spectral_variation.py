@@ -66,7 +66,8 @@ def run_spectral_variation_analysis(
         frame for frame in (frames if frames is not None else target.frames or []) if frame_is_spectral(frame)
     ]
     if len(spectral_frames) < 2:
-        return _skipped(target, "the target has fewer than 2 raw spectral frames")
+        left_out = [(frame.path, reason) for frame, reason in kwargs.get("frames_left_out", [])]
+        return _skipped(target, "the target has fewer than 2 raw spectral frames", left_out)
 
     raise_if_abandoned()
     summary, session_results = process_spectroscopy_frames_by_session(
@@ -80,6 +81,10 @@ def run_spectral_variation_analysis(
         follow_only=True,
     )
     skipped_frames = list(summary.skipped)
+    # Frames of another camera or optic than the spectral stack were left out
+    # before this stage ran. They stay on the stage's skipped list, so the
+    # run can list every warning it detected.
+    skipped_frames += [(frame.path, reason) for frame, reason in kwargs.get("frames_left_out", [])]
     followed = dict(summary.notes.get("followed_stars") or {})
     for skipped_path, reason in skipped_frames:
         logger.warning("[%s] Spectral variation skipped %s: %s", target.id, skipped_path, reason)

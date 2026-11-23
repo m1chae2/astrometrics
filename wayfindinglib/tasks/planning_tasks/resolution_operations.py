@@ -7,7 +7,7 @@ SIMBAD, and retrieves objects within a sky region for `SkyEngine`.
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import StellarObject, Target
-from astrometricslib.drivers import require_online
+from astrometricslib.drivers import get_simbad_driver, require_online
 from astrometricslib.exceptions import ExternalServiceError, NotFoundError, OfflineModeError, ProcessingError
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
@@ -74,20 +74,13 @@ def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | Ste
         raise ExternalServiceError(
             f"Cannot resolve '{target_name}' via SIMBAD: {offline_error}"
         ) from offline_error
-    try:
-        from astroquery.simbad import Simbad
-    except ImportError as e:
-        raise ExternalServiceError(f"Cannot resolve '{target_name}': astroquery not installed.") from e
-
     # Ask only for the object-type and spectral-type columns. Adding the V
     # magnitude here would make SIMBAD return only objects that have one,
     # which drops clusters and nebulae such as M 52.
-    custom_simbad = Simbad()
-    custom_simbad.TIMEOUT = 5
-    custom_simbad.add_votable_fields("otype", "sp")
+    simbad = get_simbad_driver()
 
     try:
-        table = custom_simbad.query_object(target_name)
+        table = simbad.query_object(target_name, votable_fields=("otype", "sp"))
         if table is not None and len(table) > 0:
             row = table[0]
             main_id = str(read_simbad_field(row, "main_id"))
@@ -300,16 +293,11 @@ def _query_visual_magnitude(object_name: str) -> float | None:
     """
     try:
         require_online("SIMBAD")
-        from astroquery.simbad import Simbad
-
-        magnitude_client = Simbad()
-        magnitude_client.TIMEOUT = 5
-        magnitude_client.add_votable_fields("V")
-        table = magnitude_client.query_object(object_name)
+        table = get_simbad_driver().query_object(object_name, votable_fields=("V",))
         if table is None or len(table) == 0:
             return None
         value = read_simbad_field(table[0], "V")
         return None if value is None else float(value)
-    except (*ONLINE_QUERY_ERRORS, KeyError, TypeError):
+    except (*ONLINE_QUERY_ERRORS, ExternalServiceError, KeyError, TypeError):
         # The magnitude is optional; without a reply it is left unknown.
         return None

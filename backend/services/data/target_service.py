@@ -348,7 +348,9 @@ class TargetService:
         -------
         result : `dict`
             Dictionary with ``files``, ``stackedImage``,
-            ``stackedSpectralTarget``, and ``totalExposure`` keys.
+            ``stackedSpectralTarget``, ``totalExposure`` and
+            ``stackConfiguration`` (the camera and optic of the target's
+            current stack, or `None`) keys.
         """
         target = self.get_targets(target_id)
         if not target:
@@ -373,6 +375,35 @@ class TargetService:
             "stackedImage": self._existing_stack_path(target.stacking.stacked_image),
             "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
             "totalExposure": target.exposure_sec,
+            "stackConfiguration": self._current_stack_configuration(target),
+        }
+
+    @staticmethod
+    def _current_stack_configuration(target: Any) -> dict | None:
+        """Name the camera and optic of the target's current stack.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+
+        Returns
+        -------
+        configuration : `dict` or `None`
+            ``camera`` and ``focalLengthMm`` (whole millimeters or `None`) of
+            the preferred stack, or of the only stack. `None` when the target
+            has no stack by configuration, or several and none preferred.
+        """
+        configurations = list(target.stacking.stacks_by_configuration.values())
+        chosen = [item for item in configurations if item.is_preferred]
+        if not chosen and len(configurations) == 1:
+            chosen = configurations
+        if not chosen:
+            return None
+        focal_length = chosen[0].focal_length_mm
+        return {
+            "camera": chosen[0].camera,
+            "focalLengthMm": None if focal_length is None else round(float(focal_length)),
         }
 
     def get_frame_statuses(self, target_id: str) -> dict:

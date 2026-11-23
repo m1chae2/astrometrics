@@ -24,6 +24,21 @@ JOB_TOOL_SPECS: list[tuple[str, str, dict[str, Any], ToolFunction]] = []
 """The job tools: name, description, argument schema and function.
 `mcp_servers.backend.definition.build_registry` registers them."""
 
+ANALYSIS_STAGES = ["astrometry", "photometry", "spectroscopy", "spectral_variation"]
+"""The stages the Analyze Target menu can run by name. The backend's
+``SELECTABLE_ANALYSIS_STAGES`` is the same list."""
+
+SPECTRAL_FILTER_NAMES = ("SPEC", "Spectroscopy", "Star Analyzer 200")
+"""Filter names that mean spectrum frames, as in the UI's
+``analysisSelection.ts``."""
+
+CANCELLABLE_JOB_TYPES = ["stacking", "analysis"]
+"""The kinds of job the app's Cancel buttons stop. A picture remake
+(``preview``) has no Cancel in the app."""
+
+ACTIVE_JOB_STATUSES = ("started", "running")
+"""Job statuses that mean the job has not ended."""
+
 STACK_KINDS = ["imaging", "spectral"]
 """The two kinds of stack. Imaging and spectrum frames are never mixed."""
 
@@ -245,6 +260,405 @@ async def tool_processing_identify_stack(target: str, stack_path: str | None = N
             )
     reply = await execute_rpc("analysis:identify_stack", {"target_id": target, "stack_path": stack_path})
     return _with_hint(reply, FOLLOW_A_JOB + " The names are in processing_get_stack_identification.")
+
+
+def _first_text(*values: Any) -> str | None:
+    """Return the first value that is a non-empty string.
+
+    Parameters
+    ----------
+    *values : `Any`
+        The candidates, in order.
+
+    Returns
+    -------
+    text : `str` or `None`
+        The first non-empty string, or `None`.
+    """
+    return next((value for value in values if isinstance(value, str) and value), None)
+
+
+@tool(
+    "processing_analyze",
+    (
+        "Analyze a target in the app, as its Analyze Target button does. The app runs it as an analysis "
+        "job: it shows in the target's job list with its progress and log, and the person can cancel it "
+        "there. Leave stages out to do what the button does: photometry on the imaging stack and "
+        "spectroscopy on the spectral stack when the target has both, or the one stack's own stage. Or "
+        "choose stages from astrometry, photometry, spectroscopy and spectral_variation; astrometry runs "
+        "first when a stage needs it. Stack the target first: a stage with no stack to work on is refused. "
+        "If an analysis of the target is already running, no second one starts. Read the results with "
+        "star_query and processing_get_stack_identification. Needs the app's backend to be running."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": 'The target id, such as "M 13".'},
+            "stages": {
+                "type": "array",
+                "items": {"type": "string", "enum": ANALYSIS_STAGES},
+                "description": "The stages to run. Default: the Analyze Target button's choice.",
+            },
+        },
+        "required": ["target"],
+    },
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_analyze(target: str, stages: list[str] | None = None) -> Any:
+    """Start the job the Analyze Target button starts.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    stages : `list` [`str`], optional
+        The stages to run. When omitted, photometry and spectroscopy for a
+        target with both stacks, or the stage of the one stack it has.
+
+    Returns
+    -------
+    reply : `Any`
+        The backend's ``analysis:analyze_image`` answer (``status``
+        ``started`` or ``already_running``, ``jobId`` and ``logFile``) with
+        ``stages`` and ``paths`` as sent, and how to follow it.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a stage is not one the app can run, or the list is empty.
+    NotFoundError
+        If a stage has nothing to work on (no stack, or no raw spectrum
+        frames for spectral_variation).
+    """
+    if stages is not None:
+        unknown = sorted({str(stage) for stage in stages} - set(ANALYSIS_STAGES))
+        if unknown or not stages:
+            raise InvalidArgumentError(
+                f"Unknown or missing analysis stage(s): {', '.join(unknown) or 'none given'}. "
+                f"Choose from: {', '.join(ANALYSIS_STAGES)}.",
+                details={"stages": stages},
+            )
+    files = await execute_rpc("target:get_files", {"target_id": target})
+    files = files if isinstance(files, dict) else {}
+    imaging_stack = _first_text(files.get("stackedImage"), files.get("stacked_image"))
+    spectral_stack = _first_text(files.get("stackedSpectralTarget"), files.get("stacked_spectral_target"))
+    if stages is None:
+        if imaging_stack and spectral_stack:
+            chosen = ["photometry", "spectroscopy"]
+        elif imaging_stack:
+            chosen = ["photometry"]
+        elif spectral_stack:
+            chosen = ["spectroscopy"]
+        else:
+            raise NotFoundError(
+                f"Target {target!r} has no stack to analyze. Stack it first with processing_stack.",
+                details={"target": target},
+            )
+    else:
+        chosen = [stage for stage in ANALYSIS_STAGES if stage in stages]
+
+    paths: list[str] = []
+    for stage in chosen:
+        if stage in ("astrometry", "photometry"):
+            needed = [imaging_stack] if imaging_stack else []
+        elif stage == "spectroscopy":
+            needed = [spectral_stack] if spectral_stack else []
+        else:
+            needed = [
+                frame["path"]
+                for frame in files.get("files") or []
+                if frame.get("filter") in SPECTRAL_FILTER_NAMES and frame.get("path")
+            ]
+        if not needed:
+            raise NotFoundError(
+                f"Target {target!r} has nothing for the {stage} stage to work on. Stack the "
+                f"{'imaging' if stage in ('astrometry', 'photometry') else 'spectral'} frames first.",
+                details={"target": target, "stage": stage},
+            )
+        paths.extend(path for path in needed if path not in paths)
+
+    only_spectral = all(stage in ("spectroscopy", "spectral_variation") for stage in chosen)
+    reply = await execute_rpc(
+        "analysis:analyze_image",
+        _without_empty({
+            "target_id": target,
+            "image_files": paths,
+            "filter_name": "SPEC" if only_spectral else None,
+            "stages": chosen,
+        }),
+    )
+    reply = _with_hint(
+        reply, FOLLOW_A_JOB + " Read the results with star_query and processing_get_stack_identification."
+    )
+    if isinstance(reply, dict):
+        reply = {**reply, "stages": chosen, "paths": paths}
+    return reply
+
+
+@tool(
+    "processing_cancel",
+    (
+        "Cancel a running or waiting stacking or analysis job of a target, as the app's Cancel button "
+        "does. Name the target. With job_type (stacking or analysis) only that kind is cancelled; with "
+        "job_id that one job is looked up and cancelled; with neither, the target's one running job is "
+        "cancelled, and the call is refused if two kinds run (name one). A picture remake (preview) "
+        "cannot be cancelled in the app, so it is not cancelled here: wait for it to end. Nothing is "
+        "deleted; a cancelled stack leaves the earlier stack as it was. The reply says what was "
+        "cancelled, or why nothing was. Needs the app's backend to be running."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": 'The target id, such as "M 13".'},
+            "job_type": {
+                "type": "string",
+                "enum": CANCELLABLE_JOB_TYPES,
+                "description": "Cancel only this kind of job. Default: the target's one running job.",
+            },
+            "job_id": {
+                "type": "string",
+                "description": "Cancel this job. It must belong to the target.",
+            },
+        },
+        "required": ["target"],
+    },
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_cancel(target: str, job_type: str | None = None, job_id: str | None = None) -> Any:
+    """Cancel a target's running stacking or analysis job.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    job_type : `str`, optional
+        ``"stacking"`` or ``"analysis"``. When omitted, the kind of the one
+        job that is running.
+    job_id : `str`, optional
+        One job to cancel. Its type is read from the job list.
+
+    Returns
+    -------
+    reply : `dict`
+        ``cancelled`` (`bool`), ``job_type``, ``job_ids`` (the active jobs
+        of that kind when the call was made), ``reason`` (why not, else
+        `None`) and ``backend`` (the answer of the app's cancel call).
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the job type is unknown, the job belongs to another target, or
+        two kinds of job run and none was chosen.
+    NotFoundError
+        If ``job_id`` is not a job.
+    """
+    if job_type is not None and job_type not in [*CANCELLABLE_JOB_TYPES, "preview"]:
+        raise InvalidArgumentError(
+            f"Unknown job type {job_type!r}. Choose from: {', '.join(CANCELLABLE_JOB_TYPES)}.",
+            details={"job_type": job_type},
+        )
+    if job_id:
+        answer = await execute_rpc("jobs:query", {"job_id": job_id})
+        job = answer.get("job") if isinstance(answer, dict) else None
+        if not isinstance(job, dict):
+            raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
+        if job.get("target_id") != target:
+            raise InvalidArgumentError(
+                f"Job {job_id!r} belongs to {job.get('target_id')!r}, not {target!r}.",
+                details={"job_id": job_id, "target": target},
+            )
+        found_type = job.get("job_type")
+        if job_type is not None and job_type != found_type:
+            raise InvalidArgumentError(
+                f"Job {job_id!r} is a {found_type!r} job, not {job_type!r}.",
+                details={"job_id": job_id, "job_type": job_type},
+            )
+        active = [job] if job.get("status") in ACTIVE_JOB_STATUSES else []
+        chosen_type = found_type
+        if not active:
+            return _not_cancelled(
+                chosen_type, [], f"Job {job_id} is not running (status {job.get('status')!r})."
+            )
+    else:
+        answer = await execute_rpc("jobs:query", {"target_id": target, "active_only": True, "limit": 50})
+        jobs = [
+            job
+            for job in (answer.get("jobs") if isinstance(answer, dict) else None) or []
+            if job.get("status") in ACTIVE_JOB_STATUSES
+        ]
+        if job_type is not None:
+            jobs = [job for job in jobs if job.get("job_type") == job_type]
+        kinds = sorted({str(job.get("job_type")) for job in jobs})
+        if not jobs:
+            return _not_cancelled(job_type, [], f"No job is running for {target!r}.")
+        if len(kinds) > 1:
+            raise InvalidArgumentError(
+                f"More than one kind of job runs for {target!r} ({', '.join(kinds)}). Name the job_type "
+                "or the job_id.",
+                details={"target": target, "job_types": kinds},
+            )
+        active, chosen_type = jobs, kinds[0]
+
+    job_ids = [str(job.get("id")) for job in active]
+    if chosen_type == "stacking":
+        method = "processing:cancel"
+    elif chosen_type == "analysis":
+        method = "analysis:cancel"
+    elif chosen_type == "preview":
+        return _not_cancelled(
+            chosen_type,
+            job_ids,
+            "The app cannot cancel a picture remake (a preview job). Wait for it to end.",
+        )
+    else:
+        return _not_cancelled(
+            chosen_type, job_ids, f"The app has no Cancel for a {chosen_type!r} job, so none is sent."
+        )
+    outcome = await execute_rpc(method, {"target_id": target})
+    outcome = outcome if isinstance(outcome, dict) else {}
+    cancelled = outcome.get("status") == "cancelled" or outcome.get("cancelled") is True
+    reason = None if cancelled else _first_text(outcome.get("message"), outcome.get("reason"))
+    return {
+        "cancelled": cancelled,
+        "job_type": chosen_type,
+        "job_ids": job_ids,
+        "reason": reason if not cancelled else None,
+        "backend": outcome,
+    }
+
+
+def _not_cancelled(job_type: str | None, job_ids: list[str], reason: str) -> dict[str, Any]:
+    """Build the reply for a call that cancelled nothing.
+
+    Parameters
+    ----------
+    job_type : `str`, optional
+        The kind of job concerned, when known.
+    job_ids : `list` [`str`]
+        The active jobs of that kind.
+    reason : `str`
+        Why nothing was cancelled.
+
+    Returns
+    -------
+    reply : `dict`
+        The reply, in the shape of a cancelled one.
+    """
+    return {"cancelled": False, "job_type": job_type, "job_ids": job_ids, "reason": reason, "backend": None}
+
+
+ENHANCE_APPLIES = (
+    "The choice is saved on the target. It is used at the next stack or Post Process Target; no picture "
+    "is made now."
+)
+"""What the reply says about when a saved Enhance choice takes effect."""
+
+ENHANCE_MODES = {"target": "auto", "auto": "auto", "nothing": "off", "off": "off"}
+"""The words for the two fixed Enhance choices -> the backend's mode."""
+
+
+def _fold_name(name: str) -> str:
+    """Make an object name comparable: lower case, spaces removed.
+
+    Parameters
+    ----------
+    name : `str`
+        A SIMBAD name such as ``"NAME Cocoon Nebula"`` or ``"NGC 7635"``.
+
+    Returns
+    -------
+    folded : `str`
+        The name without spaces, in lower case.
+    """
+    return "".join(name.split()).lower()
+
+
+@tool(
+    "processing_enhance",
+    (
+        "Read or set the Enhance choice of a target's Final Stack: what the picture's masked stretch "
+        "protects. Without choice it returns the saved choice and the nebulae and galaxies in the "
+        "stack's frame (or why none can be listed, such as: run Astrometry first). With choice it saves "
+        "it: target (the target itself, when it is a nebula or a galaxy), nothing (never give an object "
+        "its own stretch) or the id or name of an object from the list, such as NGC 7635. The choice "
+        "is used at the next stack or Post Process Target; no picture is made now. Needs the app's "
+        "backend to be running."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": 'The target id, such as "M 52".'},
+            "choice": {
+                "type": "string",
+                "description": (
+                    'Leave out to read. "target", "nothing", or an object name from the list '
+                    '(for example "NGC 7635").'
+                ),
+            },
+        },
+        "required": ["target"],
+    },
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_enhance(target: str, choice: str | None = None) -> Any:
+    """Read or save a target's Enhance choice.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    choice : `str`, optional
+        ``"target"``, ``"nothing"`` or the name of an object in the stack's
+        frame. When omitted, nothing is changed.
+
+    Returns
+    -------
+    reply : `dict`
+        Without a choice: ``current`` (the saved choice), ``objects`` and
+        ``message`` (why there are none, else `None`). With one: ``saved``
+        (the backend's record) and ``applies``.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the choice is neither of the two words nor an object in the
+        frame.
+    """
+    listing = await execute_rpc("processing:list_bright_objects", {"target": target})
+    listing = listing if isinstance(listing, dict) else {}
+    objects = [item for item in listing.get("objects") or [] if isinstance(item, dict)]
+    message = listing.get("message")
+    if choice is None:
+        record = await execute_rpc("target:get", {"target_id": target, "detail": "summary"})
+        record = record if isinstance(record, dict) else {}
+        saved = record.get("preview_bright_object") or record.get("previewBrightObject") or {}
+        mode = saved.get("mode", "auto")
+        named = saved.get("simbad_id") or saved.get("simbadId")
+        current = {"auto": "target", "off": "nothing"}.get(mode, named)
+        return {"current": current, "objects": objects, "message": message}
+    mode = ENHANCE_MODES.get(choice.strip().lower())
+    if mode is not None:
+        saved = await execute_rpc("processing:set_bright_object", {"target": target, "mode": mode})
+        return {"saved": saved, "applies": ENHANCE_APPLIES}
+    wanted = _fold_name(choice)
+    match = next((item for item in objects if _fold_name(str(item.get("simbad_id", ""))) == wanted), None)
+    if match is None:
+        names = ", ".join(str(item.get("simbad_id")) for item in objects) or "none"
+        raise InvalidArgumentError(
+            f"{choice!r} is not target, nothing or an object in {target!r}'s frame. Objects in the frame: "
+            f"{names}." + (f" {message}" if message else ""),
+            details={"target": target, "choice": choice},
+        )
+    payload = {
+        "target": target,
+        "mode": "object",
+        "simbad_id": match["simbad_id"],
+        "ra_deg": match["ra_deg"],
+        "dec_deg": match["dec_deg"],
+        "major_axis_arcmin": match.get("major_axis_arcmin"),
+    }
+    saved = await execute_rpc("processing:set_bright_object", _without_empty(payload))
+    return {"saved": saved, "applies": ENHANCE_APPLIES}
 
 
 @tool(

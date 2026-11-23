@@ -18,7 +18,6 @@ carries no statistics.
 
 import contextlib
 import contextvars
-import http.client
 import logging
 import os
 import shutil
@@ -34,9 +33,9 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
-from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
@@ -66,9 +65,7 @@ logger = logging.getLogger(__name__)
 # impossible images.
 _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
     ConnectionError,
-    http.client.BadStatusLine,
-    http.client.IncompleteRead,
-    http.client.RemoteDisconnected,
+    *outside_services.DROPPED_CONNECTION_ERRORS,
     socket.gaierror,
 )
 
@@ -80,7 +77,7 @@ _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
 # missing a field.
 _ONLINE_SOLVE_ERRORS: tuple[type[Exception], ...] = (
     OSError,
-    http.client.HTTPException,
+    *outside_services.HTTP_PROTOCOL_ERRORS,
     RuntimeError,
     ValueError,
     KeyError,
@@ -329,9 +326,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         """
         self.config = config or get_configuration()
         self.api_key = api_key
-        self.astrometry_net = AstrometryNet()
-        if api_key:
-            self.astrometry_net.api_key = api_key
+        self.astrometry_net = outside_services.AstrometryNetSolver(api_key)
 
     def solve(
         self,

@@ -281,3 +281,57 @@ def test_runner_fills_missing_type_of_confirmed_target() -> None:
         target, SimpleNamespace(wcs=None), SimpleNamespace(simbad_or_default=lambda: simbad)
     )
     assert target.simbad_object_type == "PN"
+
+
+class FakeTapSimbad(FakeSimbad):
+    """A SIMBAD stand-in that also answers one ADQL question about names."""
+
+    def __init__(self) -> None:
+        """Remember how many ADQL questions were asked."""
+        super().__init__({})
+        self.queries: list[str] = []
+
+    def query_tap(self, adql_query: str) -> Table:
+        """Answer for the two names the test asks about.
+
+        Parameters
+        ----------
+        adql_query : `str`
+            The ADQL question.
+
+        Returns
+        -------
+        table : `astropy.table.Table`
+            A row for "M  57" and one for "NAME Ring Nebula".
+        """
+        self.queries.append(adql_query)
+        return Table({
+            "queried_id": ["M  57", "NAME Ring Nebula"],
+            "ra": [RING_RA_DEG, RING_RA_DEG + 0.001],
+            "dec": [RING_DEC_DEG, RING_DEC_DEG],
+            "otype": ["PN", "PN"],
+            "galdim_majaxis": [1.4, 1.4],
+        })
+
+
+def test_two_names_are_looked_up_with_one_request() -> None:
+    """The id and the common name of a target cost one SIMBAD request."""
+    simbad = FakeTapSimbad()
+
+    resolution = target_position.resolve_names(["M 57", "Ring Nebula"], simbad)
+
+    assert resolution.position is not None
+    assert len(simbad.queries) == 1
+    assert simbad.asked == []  # no lookup by name was needed
+    assert resolution.position.object_type == "PN"
+    assert resolution.position.major_axis_arcmin == pytest.approx(1.4)
+
+
+def test_a_name_missing_from_the_one_request_is_asked_by_itself() -> None:
+    """A name the identifier table lacks still gets its own lookup."""
+    simbad = FakeTapSimbad()
+    simbad.answers = {"Messier 57": (RING_RA_DEG, RING_DEC_DEG)}
+
+    target_position.resolve_names(["M 57", "Messier 57"], simbad)
+
+    assert simbad.asked == ["Messier 57"]

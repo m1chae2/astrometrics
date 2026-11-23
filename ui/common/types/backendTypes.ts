@@ -165,6 +165,14 @@ export interface TelescopeStatus {
 }
 
 /**
+ * The camera and optic of a target's current stack.
+ */
+export interface StackConfigurationRef {
+  camera?: string;
+  focalLengthMm?: number | null;
+}
+
+/**
  * The final stacked image for a specific telescope/camera setup.
  *
  * If a target was shot with two different telescopes, it will produce
@@ -219,6 +227,34 @@ export interface TargetQualitySummaries {
 }
 
 /**
+ * Which object the preview's masked stretch protects, as the user chose.
+ *
+ * Attributes
+ * ----------
+ * mode : `str`
+ * ``"auto"`` (the default) lets the stretch use the target's own
+ * catalog position and kind. ``"off"`` never uses the masked stretch.
+ * ``"object"`` protects the object named below, whatever the target's
+ * kind.
+ * simbad_id : `str` or `None`
+ * SIMBAD's main name of the chosen object (mode ``"object"``).
+ * ra_deg : `float` or `None`
+ * The chosen object's right ascension in degrees (ICRS, J2000).
+ * dec_deg : `float` or `None`
+ * The chosen object's declination in degrees.
+ * major_axis_arcmin : `float` or `None`
+ * SIMBAD's major axis of the chosen object in arcminutes, or `None`
+ * when SIMBAD gives none (then only its position is checked).
+ */
+export interface PreviewBrightObject {
+  mode?: string;
+  simbadId?: string | null;
+  raDeg?: number | null;
+  decDeg?: number | null;
+  majorAxisArcmin?: number | null;
+}
+
+/**
  * The main record for an astronomical target (like a galaxy or nebula).
  *
  * This class only stores data. If stacking images or analyzing
@@ -233,6 +269,7 @@ export interface TargetObject {
   positionUnverified?: boolean;
   simbadObjectType?: string | null;
   majorAxisArcmin?: number | null;
+  previewBrightObject?: PreviewBrightObject;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;
@@ -272,6 +309,7 @@ export interface TargetFilesResponse {
   stackedSpectralTarget?: string | null;
   totalExposure?: number;
   exposureCounts?: Record<string, number>;
+  stackConfiguration?: StackConfigurationRef | null;
 }
 
 /**
@@ -298,6 +336,7 @@ export interface GroupedFrameStat {
   count: number;
   darks?: string | null;
   camera?: string | null;
+  focalLengthMm?: number | null;
   offset?: string | null;
   binning?: string | null;
   darkMatch?: CalibrationGroupMatch | null;
@@ -971,6 +1010,7 @@ export interface PhotometryResult {
   isSaturated?: boolean[];
   saturatedPointsRemoved?: number;
   lightCurveWithheldReason?: string | null;
+  notJudgedReason?: string | null;
   fluxErrors?: number[];
   fluxesNormalizedErrors?: number[];
   fluxesDetrendedErrors?: number[];
@@ -4511,6 +4551,34 @@ export interface PreviewRemakeResult {
 }
 
 /**
+ * One nebula or galaxy SIMBAD lists inside a stack's field.
+ *
+ * The user may pick it as the object the preview's masked stretch protects.
+ */
+export interface BrightObjectChoice {
+  simbad_id: string;
+  object_type: string;
+  category: string;
+  ra_deg: number;
+  dec_deg: number;
+  major_axis_arcmin?: number | null;
+}
+
+/**
+ * The objects a target's stack could protect with the masked stretch.
+ *
+ * ``objects`` is empty when the list could not be made, and ``message``
+ * then says why in plain words. A list read from the saved copy beside the
+ * stack has ``from_cache`` set.
+ */
+export interface BrightObjectChoices {
+  target_id: string;
+  objects?: BrightObjectChoice[];
+  message?: string | null;
+  from_cache?: boolean;
+}
+
+/**
  * What a stack would do with its frames, made without stacking.
  *
  * The frame checks and the calibration choice are the ones the stack runs
@@ -6577,6 +6645,8 @@ export const RPC_METHODS = [
   "processing:job_log_tail",
   "processing:stack_summary",
   "processing:remake_preview",
+  "processing:list_bright_objects",
+  "processing:set_bright_object",
   "processing:check_stack",
   "quality:set_aside_frames",
   "quality:choose_blink_pair",

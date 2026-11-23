@@ -3,7 +3,7 @@
  * @description Hook for managing variability analysis jobs and results.
  */
 import { useState, useEffect, useRef } from 'react';
-import { analyzeTarget, cancelAnalysis, fetchAnalysisResults, streamJobLog, type AnalysisStageName } from '../../common/services/imaging/processingService';
+import { analyzeTarget, cancelAnalysis, fetchAnalysisResults, type AnalysisStageName } from '../../common/services/imaging/processingService';
 import { reportError } from '../../common/utils/reportError';
 import { emitToast } from '../../common/utils/emitToast';
 import { AnalysisResult } from '../../common/types/backendTypes';
@@ -171,25 +171,7 @@ export function useAnalysisJob(
         });
     });
 
-    // Log Streaming - mirrors the mechanism useStackingJob uses for its own
-    // job log panel: poll the DB-backed job log tail for the active job.
-    useEffect(() => {
-        let cancelStream: (() => void) | undefined;
-        let cancelled = false;
-        if (analyzingTargetId && activeAnalysisJobId) {
-            streamJobLog(activeAnalysisJobId, (line) => onLogRef.current?.(line)).then((cancel) => {
-                if (cancelled) {
-                    cancel();
-                } else {
-                    cancelStream = cancel;
-                }
-            });
-        }
-        return () => {
-            cancelled = true;
-            if (cancelStream) cancelStream();
-        };
-    }, [analyzingTargetId, activeAnalysisJobId]);
+    // The job log panel follows the job's log itself (see useJobLog), whatever kind of job it is.
 
     const startAnalysis = async (imageFiles?: string[], filterType?: string, stages?: AnalysisStageName[]) => {
         if (!selectedTarget) return;

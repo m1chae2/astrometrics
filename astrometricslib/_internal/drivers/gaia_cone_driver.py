@@ -26,20 +26,17 @@ complete, so the cache can record it.
 
 import logging
 import math
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.sky_tiles import build_pixel_query, pixel_source_id_range
-from astrometricslib.foundation.config import VIZIER_SERVER_CHOICES, get_configuration
 from astrometricslib.foundation.errors import ExternalServiceError
-from astrometricslib.foundation.offline import require_online
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -47,19 +44,8 @@ logger = logging.getLogger(__name__)
 # The VizieR copy of Gaia DR3's main source table.
 GAIA_DR3_VIZIER_CATALOG = "I/355/gaiadr3"
 
-# The two VizieR servers: Strasbourg (CDS) and its Harvard mirror. They hold
-# the same catalogs. The setting `[Catalogs] vizier_preferred_server` picks
-# which one is asked first; the list lives in `foundation/config.py` so the
-# setting can check against it.
-VIZIER_SERVERS = VIZIER_SERVER_CHOICES
-
-# The VizieR server that last answered, or None before the first answer, and
-# the preferred server that was set at that time. When the setting changes, the
-# remembered answer is dropped so the new preference takes effect. Only read or
-# written with `_VIZIER_SERVER_LOCK` held.
-_last_answered_vizier_server: str | None = None
-_vizier_preference_when_remembered: str | None = None
-_VIZIER_SERVER_LOCK = threading.Lock()
+# The VizieR servers, as the gateway lists them (see `outside_services`).
+VIZIER_SERVERS = outside_services.VIZIER.hosts
 
 # The columns every result has, in this order.
 GAIA_CONE_COLUMNS = ("source_id", "ra", "dec", "phot_g_mean_mag", "designation", "pmra", "pmdec")
@@ -79,85 +65,6 @@ def _as_float_column(column: Any) -> np.ndarray:
         The values as 64-bit floats.
     """
     return np.ma.filled(np.ma.asarray(column, dtype=float), np.nan)
-
-
-def _is_connection_failure(error: BaseException) -> bool:
-    """Say whether an error means a server could not be reached at all.
-
-    A refused or lost connection and a timeout all do. A reply that arrives
-    but cannot be read does not: the server is up, and the other server holds
-    the same data, so asking it would fail the same way. The error is followed
-    through its causes, because astroquery can wrap the `requests` error.
-
-    Parameters
-    ----------
-    error : `BaseException`
-        The error a query raised.
-
-    Returns
-    -------
-    is_connection_failure : `bool`
-        True when the error or one of its causes is a connection error or a
-        timeout.
-    """
-    import requests
-
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if (
-            isinstance(
-                current,
-                (
-                    requests.exceptions.ConnectionError,
-                    requests.exceptions.Timeout,
-                    ConnectionError,
-                    TimeoutError,
-                ),
-            )
-            or type(current).__name__ == "TimeoutError"
-        ):
-            return True
-        current = current.__cause__ or current.__context__
-    return False
-
-
-def _vizier_servers_in_order() -> list[str]:
-    """List the VizieR servers in the order to ask them.
-
-    The server that last answered goes first, unless the setting has changed
-    since then. Otherwise the preferred server goes first.
-
-    Returns
-    -------
-    servers : `list` [`str`]
-        Every server in `VIZIER_SERVERS`, the one to ask first at the front.
-    """
-    global _last_answered_vizier_server, _vizier_preference_when_remembered
-    preferred_server = get_configuration().get_vizier_preferred_server()
-    with _VIZIER_SERVER_LOCK:
-        if _vizier_preference_when_remembered != preferred_server:
-            _last_answered_vizier_server = None
-        servers = [preferred_server, *(server for server in VIZIER_SERVERS if server != preferred_server)]
-        if _last_answered_vizier_server in servers:
-            servers.remove(_last_answered_vizier_server)
-            servers.insert(0, _last_answered_vizier_server)
-    return servers
-
-
-def _remember_vizier_server(server: str) -> None:
-    """Record the VizieR server that answered, so later calls ask it first.
-
-    Parameters
-    ----------
-    server : `str`
-        The server that answered.
-    """
-    global _last_answered_vizier_server, _vizier_preference_when_remembered
-    with _VIZIER_SERVER_LOCK:
-        _last_answered_vizier_server = server
-        _vizier_preference_when_remembered = get_configuration().get_vizier_preferred_server()
 
 
 def query_gaia_cone_vizier(
@@ -191,43 +98,22 @@ def query_gaia_cone_vizier(
         The stars, in the column layout of `GAIA_CONE_COLUMNS`. Empty when
         the circle holds no star brighter than `max_magnitude`.
 
-    VizieR has two servers holding the same catalogs (`VIZIER_SERVERS`). The
-    `[Catalogs] vizier_preferred_server` setting names the one asked first.
-    When it cannot be reached (a refused connection or a timeout), the next
-    server is asked, and the one that answered is asked first on later calls.
+    The question goes through the outside-service gateway: the preferred
+    VizieR server (`[Catalogs] vizier_preferred_server`) first, the other when
+    it cannot be reached, a rate limit and a pause after repeated trouble.
     Each server gets the full `timeout_seconds`, so a caller with a deadline
     allows it once per server (`fetch_gaia_tile` does). Network and service
-    errors are not caught here; the last one reaches the caller as astroquery
-    raised it.
+    errors are not caught here.
     """
-    require_online("VizieR")
-    from astroquery.vizier import Vizier
-
-    servers = _vizier_servers_in_order()
-    results: Any = None
-    for attempt, server in enumerate(servers):
-        vizier = Vizier(
-            columns=["Source", "RA_ICRS", "DE_ICRS", "+Gmag", "pmRA", "pmDE"],
-            column_filters={"Gmag": magnitude_filter or f"<{max_magnitude}"},
-            row_limit=int(row_limit),
-            timeout=timeout_seconds,
-            vizier_server=server,
-        )
-        try:
-            results = vizier.query_region(
-                SkyCoord(ra_center, dec_center, unit="deg"),
-                radius=radius_deg * u.deg,
-                catalog=GAIA_DR3_VIZIER_CATALOG,
-            )
-        except Exception as query_error:  # re-raised unless the server was unreachable
-            if attempt == len(servers) - 1 or not _is_connection_failure(query_error):
-                raise
-            logger.warning(
-                "VizieR server %s could not be reached; trying the other one: %s", server, query_error
-            )
-            continue
-        _remember_vizier_server(server)
-        break
+    results = outside_services.vizier_query_region(
+        SkyCoord(ra_center, dec_center, unit="deg"),
+        radius_deg,
+        catalog=GAIA_DR3_VIZIER_CATALOG,
+        columns=["Source", "RA_ICRS", "DE_ICRS", "+Gmag", "pmRA", "pmDE"],
+        column_filters={"Gmag": magnitude_filter or f"<{max_magnitude}"},
+        row_limit=int(row_limit),
+        timeout_seconds=timeout_seconds,
+    )
     if len(results) == 0:
         return Table(names=GAIA_CONE_COLUMNS, dtype=(str, float, float, float, str, float, float))
     found = results[0]
@@ -407,9 +293,6 @@ def query_gaia_tile_esa(
 
     Network and service errors are not caught here.
     """
-    require_online("the ESA Gaia archive")
-    from astroquery.gaia import Gaia
-
     low, high = pixel_source_id_range(healpix_level, tile)
     # A synchronous job, not an async one: on 2026-11-22 the archive's async
     # queue failed every job with HTTP 500 after about 65 s, while the same
@@ -423,7 +306,7 @@ def query_gaia_tile_esa(
         1,
     )
     query += f" AND phot_g_mean_mag >= {float(have_magnitude)!r} ORDER BY phot_g_mean_mag ASC"
-    found = Gaia.launch_job(query, dump_to_file=False).get_results()
+    found = outside_services.gaia_archive_query(query)
     return Table(
         [
             [str(value) for value in found["source_id"]],
@@ -563,7 +446,6 @@ def fetch_gaia_tile(
     run_with_deadline: Callable[[Callable[[], Any], float], Any] = _run_directly,
     vizier_query: Callable[..., Table] = query_gaia_tile_vizier,
     esa_query: Callable[..., Table] = query_gaia_tile_esa,
-    skip_service: Callable[[str], bool] | None = None,
     on_error: Callable[[str, BaseException], None] | None = None,
 ) -> TileFetch:
     """Download the missing depth of one sky tile, trying each service in turn.
@@ -589,8 +471,8 @@ def fetch_gaia_tile(
     vizier_timeout_seconds, esa_timeout_seconds : `float`
         The deadline for each service. VizieR gets it once per server,
         plus 5 s for the runner. An ESA failure is not final: the tile is
-        then asked of VizieR, and only a failure of both counts against
-        the caller's circuit breaker.
+        then asked of VizieR. A service the gateway has paused fails at once
+        with no network use.
     depth_step_magnitudes : `float`
         How much brighter each repeat VizieR query is.
     depth_steps_down : `int`
@@ -600,9 +482,6 @@ def fetch_gaia_tile(
         the pipeline passes its daemon-thread runner. Tests pass a plain call.
     vizier_query, esa_query : `Callable`, optional
         The service queries, replaceable so tests need no network.
-    skip_service : `Callable`, optional
-        Given a service name, True if it failed earlier in this run and
-        should be skipped.
     on_error : `Callable`, optional
         Called with the service name and the error for each failed attempt.
 
@@ -653,8 +532,6 @@ def fetch_gaia_tile(
 
     last_error: BaseException | None = None
     for service, magnitude, query, deadline in attempts:
-        if skip_service is not None and skip_service(service):
-            continue
         try:
             table = run_with_deadline(query, deadline)
         except (ExternalServiceError, *ONLINE_QUERY_ERRORS) as error:
@@ -672,4 +549,4 @@ def fetch_gaia_tile(
         elif limit_reached:
             reached = min(magnitude, float(np.nanmax(np.asarray(table["phot_g_mean_mag"], dtype=float))))
         return TileFetch(table, reached, service, limit_reached)
-    raise ExternalServiceError(f"Gaia tile {tile} failed on every service: {last_error}")
+    raise ExternalServiceError(f"Gaia tile {tile} failed on every service: {last_error}") from last_error

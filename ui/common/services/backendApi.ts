@@ -371,6 +371,10 @@ export interface ActionRegistry {
     "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
     "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
+    // The nebulae and galaxies SIMBAD lists inside the target's stack (`message` says why there are none).
+    "processing:list_bright_objects": { payload: { target: string; refresh?: boolean }; response: import('../types/backendTypes').BrightObjectChoices };
+    // Saves which object the preview's masked stretch protects (used the next time the target is stacked or post-processed).
+    "processing:set_bright_object": { payload: { target: string; mode: 'auto' | 'off' | 'object'; simbad_id?: string; ra_deg?: number; dec_deg?: number; major_axis_arcmin?: number }; response: import('../types/backendTypes').PreviewBrightObject };
     // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
     "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
     // What a stack would do with its frames (a background job that stacks nothing): the answer is the
@@ -622,6 +626,8 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:stars_by_spectral_class',
     'images:last',
     'telescope:slew_target',
+    // Asks SIMBAD the first time for a stack.
+    'processing:list_bright_objects',
 ]);
 
 /**

@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import (
     AstrometricsError,
     ConflictError,
@@ -48,7 +49,11 @@ from astrometricslib.foundation.errors import (
     ProcessingError,
 )
 from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
-from astrometricslib.foundation.parameter_context import frames_parameter_context, record_basis
+from astrometricslib.foundation.parameter_context import (
+    equipment_parameter_context,
+    frames_parameter_context,
+    record_basis,
+)
 from astrometricslib.foundation.run_abandonment import (
     RunAbandonedError,
     RunAbandonment,
@@ -63,6 +68,11 @@ from astrometricslib.models.tuned_parameter import RunBasis
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
+from astrometricslib.pipelines.shared.analysis_configuration import (
+    analysis_frames_and_configuration,
+    context_filter_name,
+    report_left_out,
+)
 from astrometricslib.pipelines.shared.camera_passes import ProcessingFrameSelection
 from astrometricslib.pipelines.shared.frame_grouping import (
     frame_is_spectral,
@@ -75,6 +85,8 @@ from astrometricslib.pipelines.spectroscopy.spectral_variation import run_spectr
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
@@ -163,8 +175,8 @@ def _stack_with_job_tracking(
         enabled=True,
         job_type="stacking",
         target_id=target.id,
-        completed_message=f"[{target.id}] Stacking completed successfully.",
-        failed_message=f"[{target.id}] Stacking failed.",
+        completed_message=f"[{target.id}] Stacking completed",
+        failed_message=f"[{target.id}] Stacking failed",
     ) as job:
         job.info(f"[{target.id}] Stacking job started (Job: {job.job_id}).")
 
@@ -180,7 +192,11 @@ def _stack_with_job_tracking(
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
-        job.mark("completed" if stacked_path else "failed", 100)
+        job.mark(
+            "completed" if stacked_path else "failed",
+            100,
+            message="Stacking completed" if stacked_path else "Stacking failed",
+        )
         return stacked_path
 
 
@@ -486,9 +502,28 @@ def analyze_target(
         # such as a caller's batch job. With neither, the rows have no job.
         kwargs["job_id"] = job.job_id or kwargs.get("job_id") or current_job_id()
         kwargs["measured_at"] = measured_at
-        # Parameters are read for the setup and filter of the frames analyzed
-        # (the target's own frames when none are given).
-        with frames_parameter_context(frames or target.frames or []):
+        # Parameters are read for the camera and optic of the image analyzed:
+        # the stack's own header for a stack-based stage, the stack's camera
+        # and optic for a frame-based one. Frames of another camera or optic
+        # are never mixed in: a frame-based stage keeps only the frames of
+        # the analyzed configuration and reports the rest.
+        analysis_camera, kept_frames, left_out = analysis_frames_and_configuration(
+            target, pipeline_type, frames, path, get_configuration()
+        )
+        if kept_frames is not None:
+            frames = kept_frames
+        if left_out and analysis_camera is not None:
+            report_left_out(target.id, left_out, analysis_camera, job)
+            kwargs["frames_left_out"] = left_out
+        if analysis_camera is not None:
+            context_manager = equipment_parameter_context(
+                analysis_camera.camera,
+                analysis_camera.focal_length_mm,
+                context_filter_name(pipeline_type, frames or target.frames or [], analysis_camera),
+            )
+        else:
+            context_manager = frames_parameter_context(frames or target.frames or [])
+        with context_manager:
             _record_target_size(target)
             return _run_analysis_pipeline_match(
                 target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
@@ -699,6 +734,25 @@ def stage_staleness_reason(target: Target, stage: str, image_path: str | None = 
     return None
 
 
+def _is_same_file(first: str | None, second: str | None) -> bool:
+    """Say whether two paths name the same file.
+
+    A caller that passes the target's own stack as the image has named no
+    other image, so the saved result still matches it.
+
+    Parameters
+    ----------
+    first, second : `str` or `None`
+        The paths.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when both are given and name the same file.
+    """
+    return bool(first and second and os.path.realpath(first) == os.path.realpath(second))
+
+
 def _spectroscopy_staleness_reason(target: Target, image_path: str | None) -> str | None:
     """Say why the saved spectroscopy result cannot be used, or `None`.
 
@@ -707,7 +761,8 @@ def _spectroscopy_staleness_reason(target: Target, image_path: str | None) -> st
     (its quality summary's time, or the file's modification time when it has
     none). A summary built from raw frames (an older run that followed the
     frames only) is not a stack result, so it is out of date. An image the
-    caller names is never current.
+    caller names is never current, unless it is the target's own spectral
+    stack, which the app always sends with the spectroscopy options.
 
     Parameters
     ----------
@@ -721,7 +776,7 @@ def _spectroscopy_staleness_reason(target: Target, image_path: str | None) -> st
     reason : `str` or `None`
         A short phrase, or `None` when the saved result is current.
     """
-    if image_path:
+    if image_path and not _is_same_file(image_path, target.spectral_stacking.stacked_image):
         return "an image was named, so the saved result may not match it"
     summary = target.quality.spectroscopy
     if summary is None:
@@ -885,6 +940,7 @@ def run_target_stages(
     frame_selection: ProcessingFrameSelection | None = None,
     measured_at: datetime | None = None,
     run_prerequisites: bool = True,
+    on_stages_planned: Callable[[tuple[str, ...], tuple[str, ...]], None] | None = None,
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
@@ -932,6 +988,11 @@ def run_target_stages(
         Whether to add the prerequisite stages that are missing or out of
         date. Pass `False` only when astrometry has just been run for this
         stack, or when a stage is meant to run alone.
+    on_stages_planned : `Callable`, optional
+        Called once before the first stage runs, as ``(requested, added)``:
+        the stages asked for and the prerequisites that will be added, both
+        in running order. A caller uses it to show the plan while the run is
+        under way.
 
     Returns
     -------
@@ -960,6 +1021,8 @@ def run_target_stages(
     added = (
         _stages_to_add(target, requested, skipped_for_no_input, stage_options) if run_prerequisites else ()
     )
+    if on_stages_planned is not None:
+        on_stages_planned(requested, added)
     # The reason each prerequisite that cannot run gives, by stage.
     blocked: dict[str, str] = {}
     for stage in ANALYSIS_STAGES:

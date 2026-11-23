@@ -1187,7 +1187,7 @@ def _picture_script(
         )
     else:
         masked = plan_masked_stretch_for_file(
-            os.path.join(scratch, linear_name), object_category, choice.sky_level, target_anchor
+            os.path.join(scratch, linear_name), object_category, target_anchor
         )
     logger.info("Masked stretch: %s.", masked.step_sentence())
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()

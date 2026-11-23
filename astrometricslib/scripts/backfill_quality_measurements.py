@@ -1318,7 +1318,9 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # register STK-58).
 # The star-shape rows of a stack (`stacking.star_*`) are measured from the
 # stack image itself, which a stored summary does not hold, and the crop
-# notice (see above) is a notice row.
+# notice (see above) is a notice row. The nine background rows
+# (`stacking.background_*`: the model level, the plane and radial fits, the
+# tilt and the spread) are measured from the stack image too.
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.abandoned_after_s",
     "stacking.notice_frames_moved_to_excluded",
@@ -1343,6 +1345,15 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.empty_aperture_noise_stack_unit",
     "stacking.noise_reference_flux_stack_unit",
     "stacking.empty_aperture_noise_normalized",
+    "stacking.background_model_level_stack_unit",
+    "stacking.background_plane_fit_rms_fraction",
+    "stacking.background_radial_fit_rms_fraction",
+    "stacking.background_radial_fraction",
+    "stacking.background_range_fraction",
+    "stacking.background_spread_fraction",
+    "stacking.background_tilt_angle_deg",
+    "stacking.background_tilt_fraction",
+    "stacking.background_tilt_position_angle_deg",
     "stacking.effective_frame_count",
     "stacking.effective_time_s",
     "stacking.frame_weight",

@@ -214,6 +214,27 @@ def scale_session_stars(stellar_objects: Sequence[Any], factor: float) -> None:
             photometry.mean_flux = photometry.mean_flux * factor
 
 
+def log_tied_session(record: SessionTieRecord, target_id: str) -> None:
+    """Log one INFO line for a session that was tied to the field.
+
+    Parameters
+    ----------
+    record : `SessionTieRecord`
+        The tied session's record, with its factor and spread.
+    target_id : `str`
+        The target, named in the line.
+    """
+    logger.info(
+        "[%s] Session %s tied to %s: factor %.3f from %d shared stars, spread %.2f%%.",
+        target_id,
+        record.session_id,
+        record.reference_session_id,
+        record.factor,
+        record.tie_star_count,
+        100.0 * (record.spread or 0.0),
+    )
+
+
 def warn_about_untied_session(record: SessionTieRecord, target_id: str) -> None:
     """Log one warning for a session that could not be tied to the field.
 

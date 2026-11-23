@@ -83,7 +83,7 @@ def test_a_candidate_with_no_saved_row_is_unknown_not_unlisted() -> None:
     label_known_variability([candidate], FakeCatalog([]))
 
     assert candidate.known_variability == KnownVariability.UNKNOWN.value
-    assert "nothing is known" in candidate.known_variability_note
+    assert candidate.known_variability_note.startswith("Unverified")
 
 
 def test_a_saved_row_with_no_catalog_answers_is_unknown() -> None:

@@ -204,10 +204,48 @@ def _run_variability_analysis_for_session(
         target_position_deg=_field_position_deg(target, identify_result),
         observer_site=get_configuration().get_observatory_site(),
     )
+    _fill_catalog_variability(analyzer.stellar_objects, getattr(star_identifier, "simbad", None))
     analyzer.normalize_light_curves()
     analyzer.detrend_light_curves_airmass()
     candidates = analyzer.identify_variable_stars()
     return analyzer, candidates, identify_result
+
+
+def _fill_catalog_variability(stellar_objects: list[Any], simbad: Any) -> None:
+    """Fill blank catalog answers before comparison stars are chosen.
+
+    A star that SIMBAD, VSX or Gaia DR3 lists as variable is kept out of the
+    comparison set. The answers come from the library's stored catalog answers
+    (see `pipelines/shared/stored_variability.py`), so a catalog that is down
+    does not let a known variable through. The log says how many stars each
+    catalog lists.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The session's stars; changed in memory only.
+    simbad : `SimbadDriver` or `None`
+        The SIMBAD driver whose stored answers are read.
+    """
+    from astrometricslib.pipelines.shared.stored_variability import (
+        count_listed_by_source,
+        fill_known_variability,
+    )
+
+    try:
+        report = fill_known_variability(stellar_objects, simbad)
+    except (AstrometricsError, *DATA_ERRORS) as fill_error:
+        logger.warning("Catalog variability answers could not be read: %s", fill_error)
+        return
+    counts = count_listed_by_source(stellar_objects)
+    logger.info(
+        "  Listed as variable: SIMBAD %s, VSX %s, Gaia DR3 %s (%s stars in all; answers added: %s).",
+        counts["SIMBAD"],
+        counts["VSX"],
+        counts["Gaia DR3"],
+        counts["any"],
+        dict(report.filled) or "none",
+    )
 
 
 def _solve_session_wcs(session: Any, target: Target, drivers: Drivers | None = None) -> Any | None:
@@ -354,7 +392,8 @@ def _summarize_session_for_star(
     from astrometricslib.models.stellar_source import SessionPhotometrySummary
 
     normalized = np.array(light_curve.fluxes_normalized, dtype=float)
-    normalized = normalized[normalized > 0]
+    # A faint star's point at or below zero is a real measurement and stays.
+    normalized = normalized[np.isfinite(normalized)]
     median_level = float(np.median(normalized)) if normalized.size else None
     scatter = None
     if normalized.size >= 2:
@@ -427,6 +466,24 @@ def _merged_crowding(canonical: Any, new: Any) -> dict[str, Any]:
         "nearest_neighbor_flux_ratio": None if closest is None else closest.nearest_neighbor_flux_ratio,
         "masked_sky_fraction": max(masked) if masked else None,
     }
+
+
+def _joined_reasons(first: str | None, second: str | None) -> str | None:
+    """Join two "not judged" reasons, keeping each once.
+
+    Parameters
+    ----------
+    first, second : `str` or `None`
+        The reason each session's light curve gave, or `None`.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        Both reasons separated by a semicolon, one reason when only one
+        session gave one or both are the same, or `None` when neither did.
+    """
+    reasons = [reason for reason in (first, second) if reason]
+    return "; ".join(dict.fromkeys(reasons)) or None
 
 
 def _merge_light_curves(canonical: Any, new: Any) -> Any:
@@ -547,6 +604,7 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
         light_curve_withheld_reason=None
         if combined_timestamps
         else (canonical.light_curve_withheld_reason or new.light_curve_withheld_reason),
+        not_judged_reason=_joined_reasons(canonical.not_judged_reason, new.not_judged_reason),
         flux_errors=merged_flux_errors,
         fluxes_normalized_errors=merged_normalized_errors,
         fluxes_detrended_errors=merged_detrended_errors,
@@ -650,14 +708,15 @@ def _tie_level(star: Any, minimum_points: int) -> float | None:
     star : `StellarObject`
         The star as one session measured it.
     minimum_points : `int`
-        The fewest positive normalized points the median needs.
+        The fewest normalized points the median needs.
 
     Returns
     -------
     level : `float` or `None`
-        The median of the star's positive normalized fluxes (no units).
-        `None` when the star has too few points, lost a saturated point, or
-        a catalog lists it as variable (it cannot be assumed constant).
+        The median of the star's normalized fluxes (no units). `None` when
+        the median is not above zero, the star has too few points, lost a
+        saturated point, or a catalog lists it as variable (it cannot be
+        assumed constant).
     """
     import numpy as np
 
@@ -669,10 +728,11 @@ def _tie_level(star: Any, minimum_points: int) -> float | None:
     if photometry is None or photometry.saturated_points_removed > 0 or is_listed_as_variable(star):
         return None
     values = np.asarray(photometry.fluxes_normalized, dtype=float)
-    values = values[np.isfinite(values) & (values > 0)]
+    values = values[np.isfinite(values)]
     if values.size < minimum_points:
         return None
-    return float(np.median(values))
+    level = float(np.median(values))
+    return level if level > 0 else None
 
 
 def _tie_sessions_to_the_field(
@@ -731,6 +791,7 @@ def _tie_sessions_to_the_field(
     from astrometricslib.pipelines.photometry.session_tie import (
         TIE_STATUS_REFERENCE,
         TIE_STATUS_UNTIED,
+        log_tied_session,
         measure_session_tie,
         scale_session_stars,
         warn_about_untied_session,
@@ -805,6 +866,7 @@ def _tie_sessions_to_the_field(
         record = measure_session_tie(session.id, reference_id, reference_levels, session_levels)
         if record.factor is not None:
             scale_session_stars(per_session_results[index][0].stellar_objects, record.factor)
+            log_tied_session(record, target_id)
         else:
             warn_about_untied_session(record, target_id)
         records.append(record)

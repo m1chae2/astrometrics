@@ -135,6 +135,57 @@ def _identification_payload(identification: Any) -> dict[str, Any]:
     }
 
 
+STAGE_DISPLAY_NAMES = {
+    "astrometry": "Astrometry",
+    "photometry": "Photometry",
+    "spectroscopy": "Spectroscopy",
+    "spectral_variation": "Spectral Variation",
+    "asteroids": "Asteroids",
+}
+"""The words shown for each stage, the same as in the app's job subtitle."""
+
+MAXIMUM_SKIP_REASON_LENGTH = 24
+"""The longest first clause of a skip reason kept in a message."""
+
+
+def stage_display_name(stage: str) -> str:
+    """Give a stage the name the app shows.
+
+    Parameters
+    ----------
+    stage : `str`
+        The stage name, such as ``spectral_variation``.
+
+    Returns
+    -------
+    name : `str`
+        The name shown, such as ``Spectral Variation``.
+    """
+    return STAGE_DISPLAY_NAMES.get(stage, stage)
+
+
+def skipped_stage_text(stage: str, reason: str) -> str:
+    """Write a skipped stage with a short note, as the app's subtitle does.
+
+    Parameters
+    ----------
+    stage : `str`
+        The skipped stage.
+    reason : `str`
+        The reason the library gave.
+
+    Returns
+    -------
+    text : `str`
+        For example ``Photometry (skipped: needs astrometry)``. The reason
+        is kept only when its first clause is short.
+    """
+    short_reason = reason.split(":")[0].strip()
+    if short_reason and len(short_reason) <= MAXIMUM_SKIP_REASON_LENGTH:
+        return f"{stage_display_name(stage)} (skipped: {short_reason})"
+    return f"{stage_display_name(stage)} (skipped)"
+
+
 class AnalysisOrchestrator(BaseBackgroundService):
     """Service for managing background scientific analysis tasks.
 
@@ -361,7 +412,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                     outcome = {"cancelled": True, "own_process": True, "reason": None}
                 if outcome["cancelled"]:
                     self._job_service.update_job(
-                        active[0].id, status="cancelled", progress=0, status_message="Cancelled by user."
+                        active[0].id, status="cancelled", progress=0, status_message="Cancelled by user"
                     )
                 return outcome
         return {
@@ -854,6 +905,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             ]
 
         self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
+        self._record_steps(job_id, requested=list(stages))
         with self.astrometrics.processing.acquire_job_slot():
             outcome = self.astrometrics.processing.process_target(
                 target,
@@ -866,8 +918,23 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 # This job is already tracked (job_id), so the stages
                 # register none of their own.
                 register_job=False,
+                on_stages_planned=lambda requested, added: self._record_steps(
+                    job_id, requested=list(requested), prerequisites=list(added)
+                ),
             )
         self._update_job_progress(job_id, target_id, 2, 2, filter_name=filter_name)
+        skipped = dict(outcome.stages_skipped)
+        for stage, stage_result in outcome.results.items():
+            if isinstance(stage_result, dict) and stage_result.get("status") == "skipped":
+                skipped.setdefault(stage, str(stage_result.get("reason") or ""))
+        self._record_steps(
+            job_id,
+            requested=list(stages),
+            prerequisites=list(outcome.prerequisites_run),
+            run=[stage for stage in outcome.stages_run if stage not in skipped],
+            skipped=skipped,
+            finished=True,
+        )
 
         message = self._chosen_stages_message(stages, outcome)
         if self._job_service:
@@ -895,6 +962,32 @@ class AnalysisOrchestrator(BaseBackgroundService):
             },
         }
 
+    def _record_steps(self, job_id: str, **steps: Any) -> None:
+        """Save the steps of a chosen-stages run on the job record.
+
+        The Recent Jobs list names a job's steps from this record. Each call
+        adds to the record already saved: ``requested`` (the stages asked
+        for), ``prerequisites`` (stages added because a result was missing or
+        old), ``run`` (stages that ran), ``skipped`` (stage to reason) and
+        ``finished`` (`True` once the run is over). Failing to save is logged,
+        not raised: the analysis itself does not depend on it.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The analysis job.
+        **steps : `Any`
+            The parts of the record to set.
+        """
+        if not self._job_service:
+            return
+        try:
+            job = self._job_service.get_job(job_id)
+            saved = dict((job.input_metrics or {}).get("steps") or {}) if job else {}
+            self._job_service.record_input_metrics(job_id, {"steps": {**saved, **steps}})
+        except sqlite3.Error, TypeError, ValueError:
+            logger.warning("Could not save the steps of analysis job %s.", job_id, exc_info=True)
+
     @staticmethod
     def _chosen_stages_message(stages: list[str], outcome: Any) -> str:
         """Write the job's closing message for a run of chosen stages.
@@ -909,30 +1002,28 @@ class AnalysisOrchestrator(BaseBackgroundService):
         Returns
         -------
         message : `str`
-            For example ``Ran astrometry, photometry (astrometry added
-            because its result was missing or older than the stack).`` and,
-            when a stage was skipped, ``Skipped photometry (needs astrometry:
-            the target has no imaging stack to solve and no image was
-            given).``
+            The same short step text as the Recent Jobs subtitle, with no
+            closing punctuation: the stages added first, an arrow, then the
+            stages that ran, for example ``Spectroscopy → Spectral Variation``.
+            A skipped stage is written ``Photometry (skipped: needs
+            astrometry)``, and a run with no stage ``No stage run``.
         """
-        parts = []
-        ran = list(outcome.stages_run)
-        if ran:
-            parts.append(f"Ran {', '.join(ran)}")
-        else:
-            parts.append("Ran no stage")
-        if outcome.prerequisites_run:
-            parts[0] += (
-                f" ({', '.join(outcome.prerequisites_run)} added because its result was missing"
-                " or older than the stack)"
-            )
-        parts[0] += "."
-        for stage, reason in outcome.stages_skipped.items():
-            parts.append(f"Skipped {stage} ({reason}).")
         variation = outcome.results.get("spectral_variation")
-        if isinstance(variation, dict) and variation.get("status") == "skipped":
-            parts.append(f"Skipped spectral_variation ({variation.get('reason')}).")
-        return " ".join(parts)
+        variation_skipped = isinstance(variation, dict) and variation.get("status") == "skipped"
+        ran = [
+            stage for stage in outcome.stages_run if not (variation_skipped and stage == "spectral_variation")
+        ]
+        added = [stage for stage in outcome.prerequisites_run if stage in ran]
+        chosen = [stage_display_name(stage) for stage in ran if stage not in added]
+        for stage, reason in outcome.stages_skipped.items():
+            chosen.append(skipped_stage_text(stage, reason))
+        if variation_skipped and "spectral_variation" not in outcome.stages_skipped:
+            chosen.append(skipped_stage_text("spectral_variation", str(variation.get("reason") or "")))
+        chosen_text = " + ".join(chosen)
+        added_text = " + ".join(stage_display_name(stage) for stage in added)
+        if added_text and chosen_text:
+            return f"{added_text} \u2192 {chosen_text}"
+        return added_text or chosen_text or "No stage run"
 
     def _update_job_progress(
         self, job_id: str, target_id: str, current: int, total: int, filter_name: str | None = None
@@ -1004,7 +1095,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 log.warning("[%s] Photometry was skipped: %s", target_id, res.get("reason"))
                 if self._job_service:
                     self._job_service.update_job(
-                        job_id, status_message=f"Skipped photometry ({res.get('reason')})."
+                        job_id, status_message=skipped_stage_text("photometry", str(res.get("reason") or ""))
                     )
                 return res
 

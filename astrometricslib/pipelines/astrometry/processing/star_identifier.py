@@ -15,17 +15,13 @@ the database, replacing temporary labels so duplicates are not saved.
 import contextvars
 import logging
 import math
-import queue
-import socket
 import sqlite3
 import threading
 import warnings
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-import requests
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.nddata import block_reduce
@@ -34,6 +30,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from erfa import ErfaWarning
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
 from astrometricslib._internal.drivers.gaia_cone_driver import TileFetch
@@ -82,7 +79,10 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
     gaia_dr3_source_id_from_names,
     order_names_by_familiarity,
 )
-from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
+from astrometricslib.pipelines.shared.simbad_object_types import (
+    STAR_REGION_VOTABLE_FIELDS,
+    read_simbad_object_types,
+)
 from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
 from astrometricslib.utilities.exceptions import DATA_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.solar_system_targets import is_solar_system_target
@@ -221,17 +221,14 @@ _COLOR_DETECTION_BIN_FACTOR = TunedParameter(
 # driver, rather than here: they describe how to talk to astroquery, not
 # how this pipeline identifies a star.
 
-# --- Gaia Connection Safety Switch ------------------------------------------
+# --- Gaia connection health -------------------------------------------------
 #
-# This acts like a circuit breaker to protect the program if the Gaia database
-# servers go offline. Normally, waiting for a dead server to time out over and
-# over causes massive delays.
-#
-# If the server fails 3 times in a row, the breaker trips and we stop trying
-# to connect for the rest of the run. We still check our local offline cache,
-# but we skip the internet request to save time. Setting the limit to 3 allows
-# for a few normal internet hiccups before giving up.
-GAIA_CONSECUTIVE_FAILURE_LIMIT = 3
+# When a Gaia service keeps failing, the outside-service gateway pauses its
+# host (see `_internal/drivers/outside_services`), and every later tile
+# request fails at once with no network use. The pause is shared by every
+# process and ends on its own. This run only records that it happened (see
+# `_GaiaRunState.circuit_open`), so the quality summary can say so. Locally
+# cached Gaia data is still used; SIMBAD identification is unaffected.
 
 # The maximum number of stars to send to the plate solver (which figures out
 # where the telescope is pointing). The solver only needs the brightest stars
@@ -365,38 +362,26 @@ class _GaiaRunState:
     """The Gaia connection health of one run.
 
     Each run keeps its own copy, so two runs in one process (the backend runs
-    jobs on threads) do not trip or reopen each other's safety switch or mix
-    their query counts.
+    jobs on threads) do not mix their query counts or their pause flags.
 
     Attributes
     ----------
     lock : `threading.Lock`
         Guards every other field, because a run's worker threads share it.
-    consecutive_failures : `int`
-        Failed queries in a row. Any success sets it back to zero.
     circuit_open : `bool`
-        True once `GAIA_CONSECUTIVE_FAILURE_LIMIT` queries failed in a row.
+        True once a tile could not be asked because the gateway had paused
+        the Gaia services after repeated trouble. The name is kept because
+        the quality metrics already record it as ``circuit_breaker_tripped``.
     queries_attempted, queries_failed : `int`
-        Tallies for the whole run (not reset by a success). They let a
-        quality summary say whether the catalog service was healthy: without
-        them, a run where every query failed looks the same as one where the
-        fields held no catalog stars.
-    unreachable_services : `set` [`str`]
-        The services (`"VizieR"`, `"ESA Gaia archive"`) that could not be
-        reached during the run: the name did not resolve, the connection was
-        refused, or the connection attempt timed out. Such a service stays
-        dead for the rest of the run, because asking it again at a brighter
-        limit only repeats the wait. A service that was reached but answered
-        too slowly is NOT added: the brighter limits ask for fewer stars and
-        may finish in time. This is a design choice, not a measured limit.
+        Tallies for the whole run. They let a quality summary say whether the
+        catalog service was healthy: without them, a run where every query
+        failed looks the same as one where the fields held no catalog stars.
     """
 
     lock: threading.Lock = field(default_factory=threading.Lock)
-    consecutive_failures: int = 0
     circuit_open: bool = False
     queries_attempted: int = 0
     queries_failed: int = 0
-    unreachable_services: set[str] = field(default_factory=set)
 
 
 # The state used outside any run (scripts, tests), so existing callers work.
@@ -422,99 +407,50 @@ def _gaia_state() -> _GaiaRunState:
     return _current_gaia_state.get() or _process_default_gaia_state
 
 
-def _record_gaia_failure(context: str) -> None:
-    """Log a failure to connect to Gaia, possibly triggering the safety switch.
+def _record_gaia_failure(error: BaseException) -> None:
+    """Count a failed tile request, and note when the gateway had paused Gaia.
 
     Parameters
     ----------
-    context : `str`
-        What was being attempted when it failed.
+    error : `BaseException`
+        What the tile request raised.
     """
     state = _gaia_state()
     with state.lock:
         state.queries_attempted += 1
         state.queries_failed += 1
-        state.consecutive_failures += 1
-        if not state.circuit_open and state.consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
+        if not state.circuit_open and _paused_by_gateway(error):
             state.circuit_open = True
             logger.warning(
-                "Gaia remote queries disabled for the rest of this run after %s consecutive "
-                "failures (last: %s). Locally cached Gaia data is still used; SIMBAD "
-                "identification is unaffected.",
-                state.consecutive_failures,
-                context,
+                "Gaia remote queries are paused by the outside-service gateway (last: %s). "
+                "Locally cached Gaia data is still used; SIMBAD identification is unaffected.",
+                error,
             )
 
 
-def _record_gaia_success() -> None:
-    """Reset the failure counter back to zero after a successful connection."""
-    state = _gaia_state()
-    with state.lock:
-        state.queries_attempted += 1
-        state.consecutive_failures = 0
-
-
-def _is_connection_failure(error: BaseException) -> bool:
-    """Check whether an error means the server could not be reached at all.
-
-    A connection failure is a name that does not resolve, a refused or reset
-    connection, or a connection attempt that timed out. A read timeout (the
-    server was reached but was slow) and an error reply are not connection
-    failures. The error's causes are checked too, because the web libraries
-    wrap the low-level error.
-
-    Parameters
-    ----------
-    error : `BaseException`
-        The error a Gaia query raised.
+def _paused_by_gateway(error: BaseException) -> bool:
+    """Say whether an error, or one of its causes, is a gateway pause.
 
     Returns
     -------
-    is_connection_failure : `bool`
-        True if the error, or one of its causes, is a connection failure.
+    paused : `bool`
+        `True` when a `ServicePausedError` is in the chain.
     """
     seen: set[int] = set()
     current: BaseException | None = error
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, requests.exceptions.ReadTimeout):
-            return False
-        if isinstance(current, requests.exceptions.ConnectionError | ConnectionError | socket.gaierror):
+        if isinstance(current, outside_services.ServicePausedError):
             return True
         current = current.__cause__ or current.__context__
     return False
 
 
-def _mark_gaia_service_unreachable(service: str) -> None:
-    """Remember that a Gaia service cannot be reached, so this run skips it.
-
-    Parameters
-    ----------
-    service : `str`
-        The service's name, as `make_gaia_tile_fetcher` names it.
-    """
+def _record_gaia_success() -> None:
+    """Count a tile request that was answered."""
     state = _gaia_state()
     with state.lock:
-        state.unreachable_services.add(service)
-
-
-def _is_gaia_service_unreachable(service: str) -> bool:
-    """Check whether a Gaia service has already failed in this run.
-
-    Parameters
-    ----------
-    service : `str`
-        The service's name, as `make_gaia_tile_fetcher` names it.
-
-    Returns
-    -------
-    unreachable : `bool`
-        True if the service timed out or refused a connection since the run
-        started.
-    """
-    state = _gaia_state()
-    with state.lock:
-        return service in state.unreachable_services
+        state.queries_attempted += 1
 
 
 def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
@@ -522,11 +458,10 @@ def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
 
     Each tile tries VizieR, then the ESA Gaia archive, both at the depth
     wanted; then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits
-    (see `gaia_cone_driver.fetch_gaia_tile`). A service that cannot be reached
-    (a connection failure) is skipped for the rest of the run (see
-    `_GaiaRunState.unreachable_services`). Each tile counts as one success or
-    one failure for the circuit breaker. Once the breaker is open, every
-    later tile is refused at once.
+    (see `gaia_cone_driver.fetch_gaia_tile`). A service that keeps failing is
+    paused by the outside-service gateway, so later tiles skip it with no
+    network use. Each tile counts as one success or one failure in the run's
+    tallies, and the run notes when the gateway had paused Gaia.
 
     Returns
     -------
@@ -540,14 +475,11 @@ def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
     if network_is_offline():
         return None, "this launch sends nothing off the computer"
     if _gaia_remote_queries_disabled():
-        logger.warning(
-            "Gaia downloads are skipped: they failed %s times in a row earlier in this run.",
-            GAIA_CONSECUTIVE_FAILURE_LIMIT,
-        )
-        return None, "Gaia downloads stopped after repeated failures earlier in this run"
+        logger.warning("Gaia downloads are skipped: the gateway paused them earlier in this run.")
+        return None, "Gaia downloads paused after repeated failures earlier in this run"
 
     def on_error(service: str, error: BaseException) -> None:
-        """Log one failed attempt; stop asking a service that is unreachable.
+        """Log one failed attempt.
 
         Parameters
         ----------
@@ -556,8 +488,6 @@ def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
         error : `BaseException`
             What went wrong.
         """
-        if _is_connection_failure(error):
-            _mark_gaia_service_unreachable(service)
         logger.info("A Gaia tile download from %s failed: %s", service, error)
 
     def fetch(level: int, tile: int, have_magnitude: float, want_magnitude: float) -> TileFetch:
@@ -578,10 +508,8 @@ def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
         Raises
         ------
         ExternalServiceError
-            When every service failed, or the circuit breaker is open.
+            When every service failed or is paused.
         """
-        if _gaia_remote_queries_disabled():
-            raise ExternalServiceError("not tried: Gaia downloads stopped after repeated failures")
         try:
             answer = gaia_cone_driver.fetch_gaia_tile(
                 level,
@@ -593,14 +521,13 @@ def make_gaia_tile_fetcher() -> tuple[TileFetcher | None, str]:
                 esa_timeout_seconds=GAIA_ESA_TIMEOUT_SECONDS,
                 depth_step_magnitudes=float(resolve(GAIA_DEPTH_STEP_MAGNITUDES).value),
                 depth_steps_down=int(resolve(GAIA_DEPTH_STEPS_DOWN).value),
-                run_with_deadline=_run_with_daemon_thread_timeout,
-                skip_service=_is_gaia_service_unreachable,
+                run_with_deadline=outside_services.run_with_deadline,
                 on_error=on_error,
                 vizier_query=gaia_cone_driver.query_gaia_tile_vizier,
                 esa_query=gaia_cone_driver.query_gaia_tile_esa,
             )
-        except ExternalServiceError:
-            _record_gaia_failure(f"Gaia tile {tile}")
+        except ExternalServiceError as tile_error:
+            _record_gaia_failure(tile_error)
             raise
         _record_gaia_success()
         return answer
@@ -647,11 +574,9 @@ def reset_gaia_circuit_breaker() -> None:
     """
     state = _gaia_state()
     with state.lock:
-        state.consecutive_failures = 0
         state.circuit_open = False
         state.queries_attempted = 0
         state.queries_failed = 0
-        state.unreachable_services.clear()
 
 
 def reset_gaia_query_statistics() -> None:
@@ -662,58 +587,6 @@ def reset_gaia_query_statistics() -> None:
     begins with each service tried once more.
     """
     _current_gaia_state.set(_GaiaRunState())
-
-
-def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_seconds: float) -> Any:
-    """Run a background task and strictly enforce a time limit.
-
-    Normally, if a network connection stalls forever, the program won't
-    be allowed to close until that connection finishes. By running it this
-    way, a stuck connection can be abandoned while still shutting down cleanly.
-
-    Parameters
-    ----------
-    query_function : `Callable`
-        The function to run.
-    timeout_seconds : `float`
-        How many seconds to wait before giving up.
-
-    Returns
-    -------
-    result : `Any`
-        Whatever the function returned.
-
-    Raises
-    ------
-    ExternalServiceError
-        If the function has not finished within `timeout_seconds`.
-    """
-    result_queue: queue.Queue = queue.Queue(maxsize=1)
-
-    def _run_and_report() -> None:
-        try:
-            result_queue.put((True, query_function()))
-        except BaseException as query_error:
-            # Caught broadly and re-raised on the caller's thread below via
-            # `raise payload` -- nothing here is swallowed. The traceback is
-            # also kept at debug level, in case the caller has given up
-            # waiting and never raises it.
-            logger.debug("The background query raised an error.", exc_info=True)
-            result_queue.put((False, query_error))
-
-    # A new thread does not inherit context variables, so the query runs
-    # inside a copy of this run's context to see the run's Gaia state.
-    run_context = contextvars.copy_context()
-    threading.Thread(target=run_context.run, args=(_run_and_report,), daemon=True).start()
-
-    try:
-        succeeded, payload = result_queue.get(timeout=timeout_seconds)
-    except queue.Empty:
-        raise ExternalServiceError(f"Timed out after {timeout_seconds}s") from None
-
-    if succeeded:
-        return payload
-    raise payload
 
 
 def _block_average(data: np.ndarray, factor: int) -> np.ndarray:
@@ -1781,20 +1654,11 @@ class StarIdentifier:
                 # "ids" carries the common names used to label a star.
                 # "alltypes" lists every object type, not just the main one:
                 # the main type of the eclipsing binary Algol is "SB*".
-                votable_fields=(
-                    "flux(V)",
-                    "flux(B)",
-                    "sp_type",
-                    "ids",
-                    "ra(d)",
-                    "dec(d)",
-                    "otype",
-                    "alltypes",
-                ),
+                votable_fields=STAR_REGION_VOTABLE_FIELDS,
                 row_limit=5000,  # Prevent massive result sets
             )
-        except ExternalServiceError, ValueError:
-            logger.exception("SIMBAD query failed")
+        except (ExternalServiceError, ValueError) as simbad_error:
+            logger.warning("%s", simbad_error)
             return None, None
 
         if result_table is None or len(result_table) == 0:

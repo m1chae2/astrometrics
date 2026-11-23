@@ -307,10 +307,7 @@ class TestChosenStages:
         assert keywords["run_prerequisites"] is True
         assert keywords["register_job"] is False
         assert result["prerequisitesRun"] == ["astrometry"]
-        assert result["message"] == (
-            "Ran astrometry, spectroscopy (astrometry added because its result was missing"
-            " or older than the stack)."
-        )
+        assert result["message"] == ("Astrometry \u2192 Spectroscopy")
         orchestrator._job_service.update_job.assert_any_call("job1", status_message=result["message"])
 
     def test_a_target_without_stacks_uses_the_sent_files(self) -> None:
@@ -351,7 +348,7 @@ class TestChosenStages:
         result = orchestrator._run_chosen_stages("job1", "SkippedTarget", [], "L", ["photometry"])
 
         assert result["stagesSkipped"] == {"photometry": reason}
-        assert result["message"] == f"Ran no stage. Skipped photometry ({reason})."
+        assert result["message"] == "Photometry (skipped: needs astrometry)"
         assert result["results"] == {"photometry": "skipped"}
 
     def test_spectral_variation_follows_the_sent_raw_spectral_frames(self) -> None:
@@ -391,9 +388,7 @@ class TestChosenStages:
             "job1", "FewFramesTarget", [], "SPEC", ["spectral_variation"]
         )
 
-        assert (
-            "Skipped spectral_variation (no session has 2 or more raw spectral frames)." in result["message"]
-        )
+        assert result["message"] == "Spectral Variation (skipped)"
 
     def test_the_worker_routes_chosen_stages_to_the_library_call(self) -> None:
         """Verify `_start_analysis_task` takes the `stages` path when given."""
@@ -405,6 +400,79 @@ class TestChosenStages:
 
         process_target.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
+
+
+class TestRecordedSteps:
+    """Verify a chosen-stages run records its steps on the job."""
+
+    def test_an_added_prerequisite_is_recorded_while_running_and_after(self, tmp_path: Path) -> None:
+        """Save the plan before the stages run, then the outcome."""
+        job_service = JobService(JobStore(str(tmp_path / "jobs.db")))
+        job = job_service.create_job(target_id="M 31", job_type="analysis", log_file=None)
+        seen_while_running: list[dict] = []
+
+        def process_target(target: object, **keywords: object) -> SimpleNamespace:
+            """Stand in for the library, noting the record after the plan.
+
+            Returns
+            -------
+            outcome : `SimpleNamespace`
+                An answer where astrometry was added and both stages ran.
+            """
+            keywords["on_stages_planned"](("photometry",), ("astrometry",))
+            seen_while_running.append(job_service.get_job(job.id).input_metrics["steps"])
+            return SimpleNamespace(
+                stages_run=["astrometry", "photometry"],
+                prerequisites_run=["astrometry"],
+                stages_skipped={},
+                results={},
+            )
+
+        astrometrics = SimpleNamespace(
+            processing=SimpleNamespace(
+                process_target=process_target, acquire_job_slot=lambda: contextlib.nullcontext()
+            )
+        )
+        orchestrator = _make_orchestrator(astrometrics=astrometrics)
+        orchestrator._job_service = job_service
+        orchestrator._target_service.get_targets.return_value = Target(id="M 31")
+
+        orchestrator._run_chosen_stages(job.id, "M 31", [], "L", ["photometry"])
+
+        assert seen_while_running[0]["requested"] == ["photometry"]
+        assert seen_while_running[0]["prerequisites"] == ["astrometry"]
+        assert "finished" not in seen_while_running[0]
+        final = job_service.get_job(job.id).input_metrics["steps"]
+        assert final["run"] == ["astrometry", "photometry"]
+        assert final["prerequisites"] == ["astrometry"]
+        assert final["skipped"] == {}
+        assert final["finished"] is True
+
+    def test_a_skipped_stage_is_recorded_with_its_reason(self, tmp_path: Path) -> None:
+        """List a skipped stage as skipped, not as run."""
+        job_service = JobService(JobStore(str(tmp_path / "jobs.db")))
+        job = job_service.create_job(target_id="M 31", job_type="analysis", log_file=None)
+        outcome = SimpleNamespace(
+            stages_run=[],
+            prerequisites_run=[],
+            stages_skipped={"photometry": "needs astrometry: no stack"},
+            results={"photometry": {"status": "skipped", "reason": "needs astrometry: no stack"}},
+        )
+        astrometrics = SimpleNamespace(
+            processing=SimpleNamespace(
+                process_target=MagicMock(return_value=outcome),
+                acquire_job_slot=lambda: contextlib.nullcontext(),
+            )
+        )
+        orchestrator = _make_orchestrator(astrometrics=astrometrics)
+        orchestrator._job_service = job_service
+        orchestrator._target_service.get_targets.return_value = Target(id="M 31")
+
+        orchestrator._run_chosen_stages(job.id, "M 31", [], "L", ["photometry"])
+
+        final = job_service.get_job(job.id).input_metrics["steps"]
+        assert final["run"] == []
+        assert final["skipped"] == {"photometry": "needs astrometry: no stack"}
 
 
 class TestCancelAnalysis:
@@ -461,5 +529,5 @@ class TestCancelAnalysis:
         record = orchestrator._job_service.get_job(job_id)
         assert answer["cancelled"] is True
         assert record.status == "cancelled"
-        assert record.message == "Cancelled by user."
+        assert record.message == "Cancelled by user"
         assert job_id not in orchestrator._analysis_abandonments

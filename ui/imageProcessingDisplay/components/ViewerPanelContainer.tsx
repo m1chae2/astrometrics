@@ -97,6 +97,8 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame
 }) => {
+  // True while the picture is at its smallest zoom (the fit), so the zoom-out button is off.
+  const [viewAtMinimumZoom, setViewAtMinimumZoom] = useState(false);
   // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
   const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:imageProcessing:browserCollapsed', false);
 
@@ -158,7 +160,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
               </>
             )}
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</Button>
-            <Button size="small" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
+            <Button size="small" disabled={viewAtMinimumZoom} onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</Button>
             <SwitchDisplayButton targetDisplay="Image Viewer" selectedTarget={selectedTarget} />
@@ -167,6 +169,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
       >
         <FitsViewerManager
           ref={fitsRendererRef}
+          onMinimumZoomChange={setViewAtMinimumZoom}
           imageUrl={imageUrl}
           imageBlob={imageBlob}
           frameInfo={imageFrameInfo}

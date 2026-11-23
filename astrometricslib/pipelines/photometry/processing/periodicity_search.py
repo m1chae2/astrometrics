@@ -1006,6 +1006,12 @@ def box_search(
     events_for_possible = resolve(_EVENTS_FOR_POSSIBLE).value
     time_days = np.asarray(time_days, dtype=float)
     flux = np.asarray(flux, dtype=float)
+    if not np.median(flux) > 0:
+        # Depths are fractions of the median brightness, so a median at or
+        # below zero (a faint star lost in the noise) has no depth to give.
+        return TransitCandidate(
+            verdict=VERDICT_INSUFFICIENT_DATA, note="the median brightness is not above zero"
+        )
     normalized = flux / np.median(flux)
     grid = build_search_grid(time_days)
     if grid is None:

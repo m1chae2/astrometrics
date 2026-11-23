@@ -16,6 +16,8 @@ import numpy as np
 import pytest
 from astropy.table import Column, MaskedColumn, Table
 
+from astrometricslib._internal.drivers.outside_services import ServicePausedError
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier, _block_average
@@ -251,12 +253,25 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
     assert any("no stellar-type simbad entries" in record.message.lower() for record in caplog.records)
 
 
-class TestGaiaCircuitBreaker:
-    """Unit tests for the Gaia remote-query circuit breaker.
+def _paused_failure() -> ExternalServiceError:
+    """Make the error of a tile that failed because Gaia is paused.
 
-    If the remote Gaia database is unresponsive, trying is stopped after
-    a few consecutive failures to save time. This should not affect
-    local cache lookups.
+    Returns
+    -------
+    error : `ExternalServiceError`
+        An error whose cause is a gateway pause.
+    """
+    error = ExternalServiceError("Gaia tile 1 failed on every service")
+    error.__cause__ = ServicePausedError("paused")
+    return error
+
+
+class TestGaiaCircuitBreaker:
+    """Unit tests for the run's note that the gateway paused Gaia.
+
+    If the remote Gaia database is unresponsive, the outside-service gateway
+    pauses it and the run stops asking. This should not affect local cache
+    lookups.
     """
 
     def setup_method(self) -> None:
@@ -271,34 +286,28 @@ class TestGaiaCircuitBreaker:
         """A fresh process attempts remote Gaia queries."""
         assert star_identifier_module._gaia_remote_queries_disabled() is False
 
-    def test_trips_only_at_the_configured_limit(self) -> None:
-        """Failures below the limit must not disable Gaia."""
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
-            star_identifier_module._record_gaia_failure("test")
-        assert star_identifier_module._gaia_remote_queries_disabled() is False
-
-        star_identifier_module._record_gaia_failure("test")
-        assert star_identifier_module._gaia_remote_queries_disabled() is True
-
-    def test_success_resets_the_failure_run(self) -> None:
-        """Intermittent failures never accumulate into a trip."""
+    def test_an_ordinary_failure_does_not_disable_gaia(self) -> None:
+        """Failures only count; the gateway decides when a service pauses."""
         for _ in range(10):
-            for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
-                star_identifier_module._record_gaia_failure("test")
-            star_identifier_module._record_gaia_success()
+            star_identifier_module._record_gaia_failure(ExternalServiceError("down"))
 
         assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+    def test_a_gateway_pause_disables_the_run_s_downloads(self) -> None:
+        """A tile that fails because the gateway paused Gaia sets the flag."""
+        star_identifier_module._record_gaia_failure(_paused_failure())
+
+        assert star_identifier_module._gaia_remote_queries_disabled() is True
 
     def test_open_breaker_gives_no_tile_fetcher_and_says_so(self, caplog: pytest.LogCaptureFixture) -> None:
         """An open breaker downloads nothing, and a warning says why."""
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
-            star_identifier_module._record_gaia_failure("test")
+        star_identifier_module._record_gaia_failure(_paused_failure())
 
         with caplog.at_level(logging.WARNING):
             fetch, reason = star_identifier_module.make_gaia_tile_fetcher()
 
         assert fetch is None
-        assert "repeated failures" in reason
+        assert "paused" in reason
         assert any("Gaia downloads are skipped" in record.message for record in caplog.records)
 
     def test_open_breaker_still_serves_locally_cached_gaia_tiles(self, tmp_path: Path) -> None:
@@ -322,8 +331,7 @@ class TestGaiaCircuitBreaker:
             [(str(number), 10.0, 20.0, 12.0, f"Gaia DR3 {number}") for number in source_ids],
             "test",
         )
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
-            star_identifier_module._record_gaia_failure("test")
+        star_identifier_module._record_gaia_failure(_paused_failure())
         fetch, _ = star_identifier_module.make_gaia_tile_fetcher()
 
         field = load_field_gaia_stars(None, [tile], 18.0, fetch)

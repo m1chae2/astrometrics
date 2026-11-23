@@ -14,7 +14,8 @@ import { StarShapesSummary } from './StarShapesSummary';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
-import { FrameStatusReport, GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
+import { chooseCalibrationScope } from '../utils/calibrationLine';
+import { FrameStatusReport, GroupedFrameStat, StackConfigurationRef, StarShapeReview } from '../../common/types/backendTypes';
 import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
 import { chooseAnalysisSelection, chooseStageSelection, NO_SOURCE_TO_ANALYZE_REASON, type AnalysisStage } from '../utils/analysisSelection';
@@ -27,6 +28,12 @@ interface FrameAnalysisPanelProps {
   stackedImage: string | null;
   stackedSpectralTarget: string | null;
   handleSelectFile: (path: string | null) => void;
+  /** The camera and optic of the target's current stack, if it has one. */
+  stackConfiguration?: StackConfigurationRef | null;
+  /** The File Browser's camera, or "All". */
+  fileBrowserCamera?: string;
+  /** The File Browser's optic in whole millimeters as text, or "". */
+  fileBrowserOptic?: string;
 
   // Control Props
   handleAddImages: () => void;
@@ -53,7 +60,7 @@ interface FrameAnalysisPanelProps {
  */
 export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget,
-  handleSelectFile,
+  handleSelectFile, stackConfiguration = null, fileBrowserCamera = 'All', fileBrowserOptic = '',
   handleAddImages, setIsAddModalOpen,
   selectedFile, onShowHeader, starShapeReview = null, frameReport = null, frameStatuses,
   analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
@@ -70,6 +77,18 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       jobHistory, loadingHistory, onSelectJob, targetActiveJobs, activeJobId,
       openSiril, requestJobHistory
     } = useImageProcessingContext();
+
+  // The exposure of each frame in seconds: the File Browser's list, then the set-aside frames' records.
+  const exposureSeconds = useMemo(() => {
+    const seconds = new Map<string, number>();
+    const add = (path: string, text: string | undefined) => {
+      const value = Number.parseFloat(text ?? '');
+      if (Number.isFinite(value) && value > 0) seconds.set(path, value);
+    };
+    for (const file of allFiles ?? []) add(file.path, file.exposure);
+    for (const frame of frameReport?.frames ?? []) if (!seconds.has(frame.path)) add(frame.path, frame.exposure);
+    return seconds;
+  }, [allFiles, frameReport]);
 
   // The selected job's own record decides the log panel's header; a running job is looked up live first.
   const selectedJobStatus = useMemo(() => {
@@ -95,6 +114,12 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       .then(setLightStats)
       .catch(err => console.error("Failed to fetch grouped stats", err));
   }, [selectedTarget, reloadKey]);
+
+  // Calibration follows the one camera and optic a stack or analysis uses.
+  const calibrationScope = useMemo(
+    () => chooseCalibrationScope(fileBrowserCamera, fileBrowserOptic, stackConfiguration),
+    [fileBrowserCamera, fileBrowserOptic, stackConfiguration],
+  );
 
   const multiCameraStatus = useMemo(() => {
     const filesToConsider = checkedFiles.size > 0
@@ -231,10 +256,11 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     review={starShapeReview}
                     frameReport={frameReport}
                     frameStatuses={frameStatuses}
+                    exposureSeconds={exposureSeconds}
                     selectedPath={selectedFile}
                     onSelectFrame={handleSelectFile}
                   />
-                  <CalibrationLine lightFrames={lightStats} />
+                  <CalibrationLine lightFrames={lightStats} scope={calibrationScope} />
                 </>
               )
             }
@@ -280,7 +306,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           hasMultipleFilters={filterStatus.hasMultiple}
           selectedFilters={filterStatus.filters}
           onAnalyze={() => {
-            if (analysisSelection) startAnalysis(analysisSelection.paths, analysisSelection.filterType);
+            if (analysisSelection) startAnalysis(analysisSelection.paths, analysisSelection.filterType, analysisSelection.stages);
           }}
           analyzeDisabledReason={analysisSelection ? undefined : NO_SOURCE_TO_ANALYZE_REASON}
           analysisSelectionInput={selectionInput}

@@ -28,13 +28,13 @@ import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- runs msiexec to unpack a checked download
 import tempfile
-import urllib.request
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.offline import require_online
@@ -327,7 +327,7 @@ def _download(release: ProgramRelease, report: Callable[[int, str], None]) -> Pa
     received = 0
     try:
         with (
-            urllib.request.urlopen(release.url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response,  # ruff: ignore[suspicious-url-open-usage] -- https only, checked above
+            outside_services.open_download(release.url, timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS) as response,
             archive.open("wb") as target,
         ):
             while chunk := response.read(DOWNLOAD_CHUNK_BYTES):

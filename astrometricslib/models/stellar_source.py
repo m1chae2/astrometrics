@@ -57,6 +57,7 @@ __all__ = [
     "PhotometryResult",
     "PlotData",
     "SpectralExtractionDiagnostics",
+    "StackConfigurationRef",
     "StellarObject",
     "StellarSessionMatch",
     "TargetFilesResponse",
@@ -586,6 +587,13 @@ class PhotometryResult(BaseModel):
     # when the star has a light curve, or when it was saved before this was
     # recorded.
     light_curve_withheld_reason: str | None = Field(default=None, alias="lightCurveWithheldReason")
+    # Why this star's variability was not judged although it has a light
+    # curve, in plain words (for example, that it changes brightness exactly
+    # when the field moved between frames, or that it was saturated in too
+    # many frames). The light curve and its indices are kept; the star is
+    # only never a candidate. `None` when the star was judged, and for a
+    # light curve saved before this was recorded.
+    not_judged_reason: str | None = Field(default=None, alias="notJudgedReason")
     # The 1-sigma uncertainty of each entry of `fluxes`, in ADU per second
     # (the same units), from the CCD equation (see
     # `pre_processing.frame_photometry.aperture_flux_error_adu`). Empty, or
@@ -1568,6 +1576,8 @@ class GroupedFrameStat(BaseModel):
     # camera sensor's own background noise.
     darks: str | None = Field(default=None, alias="darks")
     camera: str | None = Field(default=None, alias="camera")
+    # The optic of the group: its focal length in whole millimeters.
+    focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
     # The camera offset and binning of the group, as the stacker matches them.
     offset: str | None = Field(default=None, alias="offset")
     binning: str | None = Field(default=None, alias="binning")
@@ -1575,6 +1585,15 @@ class GroupedFrameStat(BaseModel):
     dark_match: CalibrationGroupMatch | None = Field(default=None, alias="darkMatch")
     flat_match: CalibrationGroupMatch | None = Field(default=None, alias="flatMatch")
     bias_match: CalibrationGroupMatch | None = Field(default=None, alias="biasMatch")
+
+
+class StackConfigurationRef(BaseModel):
+    """The camera and optic of a target's current stack."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    camera: str = Field(default="", alias="camera")
+    focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
 
 
 class TargetFilesResponse(BaseModel):
@@ -1587,3 +1606,4 @@ class TargetFilesResponse(BaseModel):
     stacked_spectral_target: str | None = Field(None, alias="stackedSpectralTarget")
     total_exposure: float = Field(default=0.0, alias="totalExposure", ge=0.0)
     exposure_counts: dict[str, int] = Field(default_factory=dict, alias="exposureCounts")
+    stack_configuration: StackConfigurationRef | None = Field(default=None, alias="stackConfiguration")

@@ -152,6 +152,10 @@ def _record_siril_lock_wait(wait_seconds: float) -> None:
     add_to_bound_tally(_bound_lock_wait, wait_seconds)
 
 
+# Seconds a run waits for a Siril slot before it logs that it is queued.
+_SIRIL_WAIT_ANNOUNCE_SECONDS = 1.0
+
+
 @contextlib.contextmanager
 def siril_process_lock(
     job_logger: logging.Logger | None = None,
@@ -221,9 +225,18 @@ def siril_process_lock(
     waiting_message = (
         f"Waiting for a free Siril slot ({slot_count} allowed concurrently) before starting this run..."
     )
-    logger.info(waiting_message)
-    if job_logger:
-        job_logger.info(waiting_message)
+
+    def _announce_wait() -> None:
+        """Log that the run is queued, after the wait lasted long enough."""
+        logger.info(waiting_message)
+        if job_logger:
+            job_logger.info(waiting_message)
+
+    # A free slot is taken at once, so the message only appears when the
+    # wait lasts past a second. Otherwise every run would read as queued.
+    wait_announcer = threading.Timer(_SIRIL_WAIT_ANNOUNCE_SECONDS, _announce_wait)
+    wait_announcer.daemon = True
+    wait_announcer.start()
 
     wait_started_at = time.monotonic()
     # A stack's timeout reads this tally from another thread while this one
@@ -240,6 +253,7 @@ def siril_process_lock(
             # to protect the CPU must not convert into a cascade of
             # timeouts for the targets waiting their turn.
             # A run given up on while it waited gives the slot back at once.
+            wait_announcer.cancel()
             raise_if_abandoned()
             waited_seconds = time.monotonic() - wait_started_at
             _record_siril_lock_wait(waited_seconds)
@@ -252,6 +266,7 @@ def siril_process_lock(
                     job_logger.info(acquired_message)
             yield
     finally:
+        wait_announcer.cancel()
         if stop_open_wait is not None:
             stop_open_wait()
 

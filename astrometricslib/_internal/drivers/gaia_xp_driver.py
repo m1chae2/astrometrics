@@ -20,27 +20,26 @@ A source with no XP spectrum gives `None`. A failed download (no network, a
 server error, a reply that cannot be read, or no answer inside
 `DOWNLOAD_TIMEOUT_SECONDS`) raises `GaiaXpDownloadError`, so the caller can
 tell it from a missing spectrum. A failed download is logged once per driver.
-It is not cached, but the driver then skips downloads for
-`RETRY_AFTER_FAILURE_SECONDS` and raises at once during that pause, so a run
-with the network down does not wait for a timeout on every star of every
-frame.
+It is not cached. Repeated failures make the outside-service gateway pause
+the Gaia archive (``outside_services``), and the driver then raises at once
+during that pause, so a run with the network down does not wait for a timeout
+on every star of every frame.
 """
 
-import contextvars
 import logging
 import os
 import tempfile
 import threading
-import time
 import zipfile
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import catalog_cache_directory
@@ -65,12 +64,6 @@ CACHE_FOLDER_NAME = "gaia_xp"
 # answers or the connection drops.
 DOWNLOAD_TIMEOUT_SECONDS = 60.0
 
-# After a failed download, skip further downloads for this many seconds. A
-# designed value: long enough that a run with the network down pays for one
-# timeout, short enough that a run started while the archive is back is not
-# kept waiting for long.
-RETRY_AFTER_FAILURE_SECONDS = 600.0
-
 # Gaia's sampled XP spectra are in nanometres; the library works in Angstroms.
 ANGSTROM_PER_NANOMETRE = 10.0
 
@@ -90,7 +83,14 @@ MINIMUM_SAMPLE_COUNT = TunedParameter(
 # The errors a download can raise: the online-query errors, a reply that is
 # not a valid zip file, and astroquery's own RuntimeError, KeyError and
 # IndexError for a reply with no usable table.
-_DOWNLOAD_ERRORS = (*ONLINE_QUERY_ERRORS, zipfile.BadZipFile, RuntimeError, KeyError, IndexError)
+_DOWNLOAD_ERRORS = (
+    ExternalServiceError,
+    *ONLINE_QUERY_ERRORS,
+    zipfile.BadZipFile,
+    RuntimeError,
+    KeyError,
+    IndexError,
+)
 
 
 def gaia_xp_cache_path(config: AppConfiguration) -> Path:
@@ -142,7 +142,6 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
         # working directory, named from the clock, so two at once could clash.
         self._download_lock = threading.Lock()
         self._failure_logged = False
-        self._skip_downloads_until = 0.0
 
     def cache_file(self, source_id: int) -> Path:
         """Give the path of one source's cache file.
@@ -211,8 +210,6 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
         except OfflineModeError as offline_error:
             # Not a failed download: nothing was tried, so no pause starts.
             raise GaiaXpDownloadError(str(offline_error)) from offline_error
-        if time.monotonic() < self._skip_downloads_until:
-            raise GaiaXpDownloadError("Gaia XP downloads are paused after an earlier failure")
         with self._download_lock:
             # A second caller waited on the lock: the first may have cached it.
             cached = self._read_cache(source_id)
@@ -291,7 +288,7 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
             logger.warning("Could not cache the Gaia XP spectrum of %s: %s", source_id, write_error)
 
     def _note_failure(self, source_id: int, download_error: Exception) -> None:
-        """Record a failed download: log it once and pause further downloads.
+        """Record a failed download: log it once.
 
         Parameters
         ----------
@@ -300,14 +297,12 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
         download_error : `Exception`
             What went wrong.
         """
-        self._skip_downloads_until = time.monotonic() + RETRY_AFTER_FAILURE_SECONDS
         if not self._failure_logged:
             self._failure_logged = True
             logger.warning(
-                "Gaia XP download failed for source %s (%s); skipping Gaia XP downloads for %.0f s.",
+                "Gaia XP download failed for source %s (%s); repeated failures pause the Gaia archive.",
                 source_id,
                 download_error,
-                RETRY_AFTER_FAILURE_SECONDS,
             )
 
     def _download(self, source_id: int) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
@@ -324,39 +319,22 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
             The wavelengths in Angstroms, the flux and its error, or `None`
             when the archive answered that the source has no XP spectrum.
 
-        Raises
-        ------
-        RuntimeError
-            If the archive did not answer within `DOWNLOAD_TIMEOUT_SECONDS`.
-            Other errors come straight from astroquery.
+        Notes
+        -----
+        A `ServiceTimeoutError` comes if the archive does not answer within
+        `DOWNLOAD_TIMEOUT_SECONDS`. Other errors come straight from astroquery.
         """
-        answer: dict[str, Any] = {}
-
-        def fetch() -> None:
-            """Ask the archive and keep the answer or the error."""
-            try:
-                from astroquery.gaia import Gaia
-
-                answer["files"] = Gaia.load_data(
-                    ids=[source_id],
-                    data_release="Gaia DR3",
-                    retrieval_type="XP_SAMPLED",
-                    data_structure="DATAMODEL_STANDARD",
-                    format="csv",
-                )
-            except _DOWNLOAD_ERRORS as fetch_error:
-                answer["error"] = fetch_error
-
-        worker = threading.Thread(
-            target=contextvars.copy_context().run, args=(fetch,), name=f"gaia-xp-{source_id}", daemon=True
+        files = outside_services.run_with_deadline(
+            lambda: outside_services.gaia_archive_load_data(
+                ids=[source_id],
+                data_release="Gaia DR3",
+                retrieval_type="XP_SAMPLED",
+                data_structure="DATAMODEL_STANDARD",
+                format="csv",
+            ),
+            DOWNLOAD_TIMEOUT_SECONDS,
         )
-        worker.start()
-        worker.join(DOWNLOAD_TIMEOUT_SECONDS)
-        if worker.is_alive():
-            raise RuntimeError(f"no answer from the Gaia archive in {DOWNLOAD_TIMEOUT_SECONDS:g} s")
-        if "error" in answer:
-            raise answer["error"]
-        return _spectrum_from_files(answer.get("files"))
+        return _spectrum_from_files(files)
 
 
 def _spectrum_from_files(files: object) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:

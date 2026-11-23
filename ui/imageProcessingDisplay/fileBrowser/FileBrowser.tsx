@@ -317,14 +317,12 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     const isRejected = (path: string) => rejectedFiles.includes(path);
 
     const listRef = useRef<HTMLDivElement>(null);
-    // True when the last change of the selected file came from an arrow key, so only then is the row scrolled into view.
-    const keyMovedRef = useRef(false);
     const rowId = (path: string) => `file-browser-row-${path.replace(/[^A-Za-z0-9_-]/g, '_')}`;
     const selectedInList = selectedFile !== null && sortedFiles.some(file => file.path === selectedFile);
 
     useEffect(() => {
-        if (!keyMovedRef.current || selectedFile === null) return;
-        keyMovedRef.current = false;
+        // Any change of the selected file (arrow key, row click or a mark clicked in the timeline) brings its row into view.
+        if (selectedFile === null) return;
         document.getElementById(rowId(selectedFile))?.scrollIntoView?.({ block: 'nearest' });
     }, [selectedFile]);
 
@@ -338,7 +336,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         event.preventDefault();
         const next = current + (event.key === 'ArrowDown' ? 1 : -1);
         if (next < 0 || next >= sortedFiles.length) return;
-        keyMovedRef.current = true;
         onSelectFile(sortedFiles[next].path);
     };
 

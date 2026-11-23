@@ -247,7 +247,7 @@ def test_no_filter_options_when_none_configured(captured_siril_script: Callable[
     """An unfiltered run passes bare commands, not empty option strings."""
     commands = captured_siril_script(is_spectral=False, filter_wfwhm=None, filter_round=None)
 
-    assert _find_command(commands, "seqapplyreg") == "seqapplyreg pp_light_source"
+    assert _find_command(commands, "seqapplyreg") == "seqapplyreg pp_light_source -interp=la -noclamp"
     assert "-filter-" not in _find_command(commands, "stack r_")
 
 

@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { InfoButton } from '../../common/components/InfoButton';
 import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { callBackend } from '../../common/services/backendApi';
 import { useTargetListQuery } from '../../common/queries/useTargetListQuery';
@@ -95,7 +96,7 @@ export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey
             <div className="depth-goal-row__choice">
                 <span className="stacked-image-panel__label">Integration Goal:</span>
                 {detail && (
-                    <span className="depth-goal-row__info" title={detail} aria-label={detail} role="img">ⓘ</span>
+                    <InfoButton text={detail} label="About the integration goal" />
                 )}
                 <PopoverSelect
                     label="Integration Goal"

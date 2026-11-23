@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchTargetFrameHeader } from '../../common/services/targetService';
 import { DepthGoalRow } from './DepthGoalRow';
 import { StackSummaryPanel } from './StackSummaryPanel';
+import { BrightObjectRow } from './BrightObjectRow';
 import { Button } from '../../common/components/Button';
 import {
     formatPlateScale, formatRotation, headerEntriesToCards, measurePlateGeometry,
@@ -201,6 +202,7 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
             {path ? renderExposure(finalHeader.exposure, 'final-exposure') : null}
             {path ? renderPlateRows(finalHeader.geometry, 'final') : null}
             {path ? <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} /> : null}
+            {path ? <BrightObjectRow targetId={targetId} stackPath={path} /> : null}
             {renderItem(spectralPath || "", "Spectral Stack")}
             {spectralPath ? renderExposure(spectralHeader.exposure, 'spectral-exposure') : null}
             {spectralPath ? renderPlateRows(spectralHeader.geometry, 'spectral') : null}

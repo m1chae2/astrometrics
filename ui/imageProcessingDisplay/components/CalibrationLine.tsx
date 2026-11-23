@@ -11,13 +11,17 @@ import type { GroupedFrameStat } from '../../common/types/backendTypes';
 import { StatusChip } from '../../common/components/StatusChip';
 import {
     buildCalibrationReport,
+    filterGroupsByScope,
     type CalibrationGroupReport,
+    type CalibrationScope,
     type CalibrationPart,
 } from '../utils/calibrationLine';
 
 interface CalibrationLineProps {
     /** The target's light-frame groups, each with the stacker's calibration match. */
     lightFrames: GroupedFrameStat[];
+    /** The camera and optic the section covers; other cameras' groups are left out. Null shows all. */
+    scope?: CalibrationScope | null;
 }
 
 /** Joins words as "darks", "darks and flats" or "darks, flats and bias". */
@@ -72,8 +76,8 @@ const AllGroupsTable: React.FC<{ groups: CalibrationGroupReport[] }> = ({ groups
 /**
  * Shows the calibration status of the target, or nothing when there are no frames.
  */
-export const CalibrationLine: React.FC<CalibrationLineProps> = ({ lightFrames }) => {
-    const report = buildCalibrationReport(lightFrames);
+export const CalibrationLine: React.FC<CalibrationLineProps> = ({ lightFrames, scope = null }) => {
+    const report = buildCalibrationReport(filterGroupsByScope(lightFrames, scope));
     if (!report) return null;
     const { groups, missing, nearMatches } = report;
     const isComplete = missing.length === 0;
@@ -97,6 +101,9 @@ export const CalibrationLine: React.FC<CalibrationLineProps> = ({ lightFrames })
                     />
                 )}
             </div>
+            {scope && (
+                <p className="calibration-report__scope" data-testid="calibration-scope">{scope.label}</p>
+            )}
             {missing.length > 0 && (
                 <ul className="calibration-report__list" data-testid="calibration-missing">
                     {missing.map((group) => {

@@ -1,17 +1,33 @@
-"""Tests for reading VSX and Gaia DR3 cross-match results.
+"""Tests for asking VizieR about VSX and for reading VSX and Gaia DR3 matches.
 
-The tables below copy the shape of what the live CDS XMatch service returned
-on 2026-10-09, including the cases that shaped the rules: VSX listing a star
+The match tables below copy the shape of what the CDS XMatch service returned
+on 2026-10-09 (the VizieR path builds the same columns), including the
+cases that shaped the rules: VSX listing a star
 as constant (Vega, Sirius), a blended companion (Mira and VZ Cet), a faint
 neighbour near a bright star (Sirius), and bright stars that Gaia DR3 does not
 list (Algol, Vega, Sirius).
 """
 
-import astropy.units as u
+import sys
+import types
+from pathlib import Path
+
+import numpy as np
 import pytest
+import requests
 from astropy.table import MaskedColumn, Table
 
-from astrometricslib.models.known_variability import NO_GAIA_MATCH, NOT_IN_VSX, VSX_LISTED_WITHOUT_TYPE
+from astrometricslib._internal.drivers import gaia_cone_driver
+from astrometricslib._internal.drivers.catalog_answer_store import catalog_answers_path
+from astrometricslib._internal.drivers.catalog_cache import CatalogUnavailableError
+from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.models.known_variability import (
+    NO_GAIA_MATCH,
+    NOT_IN_VSX,
+    VSX_LISTED_WITHOUT_TYPE,
+    KnownVariability,
+    classify_gaia_variable_flag,
+)
 from astrometricslib.pipelines.shared import variable_star_catalogs as catalogs
 
 
@@ -68,76 +84,218 @@ def test_no_matches_at_all_means_not_in_vsx() -> None:
     assert catalogs.vsx_types_from_matches(["A", "B"], None) == {"A": NOT_IN_VSX, "B": NOT_IN_VSX}
 
 
-def gaia_matches() -> Table:
-    """Build a Gaia DR3 cross-match result.
+def test_gaia_flags_are_matched_by_source_number() -> None:
+    """A listed source keeps its class; an unlisted one has no match."""
+    flags = catalogs.gaia_flags_from_classes(
+        {"RR Lyr": 111, "Quiet": 222, "Algol": None}, {111: "RR", 333: "ECL"}
+    )
+
+    assert flags == {"RR Lyr": "VARIABLE:RR", "Quiet": NO_GAIA_MATCH}
+    assert classify_gaia_variable_flag(flags["RR Lyr"]) is KnownVariability.KNOWN_VARIABLE
+    assert classify_gaia_variable_flag(flags["Quiet"]) is KnownVariability.NOT_LISTED
+
+
+def test_a_gaia_class_that_is_blank_is_still_a_variable() -> None:
+    """The source is in the variability table, so it is a listed variable."""
+    assert catalogs.gaia_flags_from_classes({"S": 5}, {5: ""}) == {"S": "VARIABLE:UNCLASSIFIED"}
+
+
+def test_gaia_classes_are_read_from_one_field_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One request answers for the field: source number to class."""
+    rows = Table({
+        "Source": [111, 333],
+        "Class": ["RR", "ECL"],
+        "RA_ICRS": [10.0, 10.1],
+        "DE_ICRS": [20.0, 20.1],
+    })
+    asked = install_fake_vizier(monkeypatch, {HARVARD_VIZIER: rows, CDS_VIZIER: rows})
+
+    classes = catalogs.look_up_gaia_classes(catalogs.build_position_table([("A", 10.0, 20.0)]))
+
+    assert classes == {111: "RR", 333: "ECL"}
+    assert asked == [HARVARD_VIZIER]
+
+
+def test_gaia_classes_fall_back_and_fail_like_vsx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strasbourg answers when Harvard is down; both down raises."""
+    rows = Table({"Source": [111], "Class": ["RR"], "RA_ICRS": [10.0], "DE_ICRS": [20.0]})
+    positions = catalogs.build_position_table([("A", 10.0, 20.0)])
+    asked = install_fake_vizier(monkeypatch, {HARVARD_VIZIER: ConnectionError("down"), CDS_VIZIER: rows})
+    assert catalogs.look_up_gaia_classes(positions) == {111: "RR"}
+    assert asked == [HARVARD_VIZIER, CDS_VIZIER]
+    forget_stored_answers()
+    install_fake_vizier(monkeypatch, {HARVARD_VIZIER: ConnectionError("a"), CDS_VIZIER: ConnectionError("b")})
+    with pytest.raises(CatalogUnavailableError, match="no stored results"):
+        catalogs.look_up_gaia_classes(positions)
+
+
+@pytest.fixture(autouse=True)
+def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each test its own stored catalog answers.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The test's folder.
+    monkeypatch : `pytest.MonkeyPatch`
+        Sets the environment.
+    """
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+
+def forget_stored_answers() -> None:
+    """Delete the stored catalog answers so the next question goes out."""
+    catalog_answers_path().unlink(missing_ok=True)
+
+
+CDS_VIZIER = "vizier.cds.unistra.fr"
+HARVARD_VIZIER = "vizier.cfa.harvard.edu"
+
+
+def vsx_field_rows() -> Table:
+    """Build the rows VizieR would return for a field around (10, 20).
 
     Returns
     -------
-    matches : `astropy.table.Table`
-        RR Lyr and Mira (variable), a quiet star (constant), and a faint
-        neighbour matched near a bright star.
+    rows : `astropy.table.Table`
+        An Algol-like variable 1 arcsecond from star A, a constant 2
+        arcseconds from star B, and a variable 10 arcseconds from star B.
     """
     return Table({
-        "id": ["RR Lyr", "Mira", "Quiet", "Sirius", "Sirius", "NoFlag"],
-        "angDist": [0.4, 0.3, 0.2, 2.8, 1.0, 0.1],
-        "VarFlag": ["VARIABLE", "VARIABLE", "CONSTANT", "CONSTANT", "NOT_AVAILABLE", ""],
-        "Gmag": [7.6, 3.6, 12.1, 10.9, 16.0, 11.0],
+        "Name": ["Near", "Quiet", "Far"],
+        "RAJ2000": [10.0, 10.0 + 2.0 / 3600.0, 10.0],
+        "DEJ2000": [20.0 + 1.0 / 3600.0, 21.0, 21.0 + 10.0 / 3600.0],
+        "Type": ["EA", "CST", "RRAB"],
     })
 
 
-def test_gaia_flags_come_from_the_nearest_source() -> None:
-    """The nearest source's flag is used, and an absent star has no match."""
-    flags = catalogs.gaia_flags_from_matches(["RR Lyr", "Mira", "Quiet", "Algol"], gaia_matches())
+def install_fake_vizier(
+    monkeypatch: pytest.MonkeyPatch, outcomes: dict[str, object], preferred: str = HARVARD_VIZIER
+) -> list[str]:
+    """Replace astroquery's `Vizier` with one that answers per server.
 
-    assert flags == {
-        "RR Lyr": "VARIABLE",
-        "Mira": "VARIABLE",
-        "Quiet": "CONSTANT",
-        "Algol": NO_GAIA_MATCH,
-    }
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Undoes the replacement.
+    outcomes : `dict` [`str`, `object`]
+        For each server, an exception to raise or the rows to return.
+    preferred : `str`, optional
+        The server the setting names.
+
+    Returns
+    -------
+    asked : `list` [`str`]
+        Filled in as the code runs: each server asked, in order.
+    """
+    asked: list[str] = []
+
+    class FakeVizier:
+        """A VizieR client that answers from `outcomes`."""
+
+        def __init__(self, **options: object) -> None:
+            self.server = str(options["vizier_server"])
+
+        def query_region(self, *args: object, **kwargs: object) -> list[Table]:
+            """Raise or return what `outcomes` says for this server.
+
+            Returns
+            -------
+            result : `list` [`astropy.table.Table`]
+                The configured rows as a one-table list.
+            """
+            asked.append(self.server)
+            outcome = outcomes[self.server]
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return [outcome]  # type: ignore[list-item]
+
+    configuration = types.SimpleNamespace(get_vizier_preferred_server=lambda: preferred)
+    monkeypatch.setitem(sys.modules, "astroquery.vizier", types.SimpleNamespace(Vizier=FakeVizier))
+    monkeypatch.setattr(gaia_cone_driver, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(gaia_cone_driver, "_last_answered_vizier_server", None)
+    monkeypatch.setattr(gaia_cone_driver, "_vizier_preference_when_remembered", None)
+    return asked
 
 
-def test_a_faint_gaia_neighbour_is_not_taken_for_a_bright_star() -> None:
-    """Sirius (V = -1.46) cannot be a G = 16 source; that is another object."""
-    flags = catalogs.gaia_flags_from_matches(["Sirius"], gaia_matches(), {"Sirius": -1.46})
+def test_the_field_is_asked_of_harvard_first_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The preferred server answers and the other is not asked."""
+    asked = install_fake_vizier(monkeypatch, {HARVARD_VIZIER: vsx_field_rows(), CDS_VIZIER: vsx_field_rows()})
+    positions = catalogs.build_position_table([("A", 10.0, 20.0)])
 
-    assert flags["Sirius"] == NO_GAIA_MATCH
+    matches = catalogs.look_up_vsx(positions)
 
-
-def test_a_star_without_a_magnitude_takes_the_nearest_source() -> None:
-    """With no magnitude to check, the nearest source is used."""
-    assert catalogs.gaia_flags_from_matches(["Sirius"], gaia_matches())["Sirius"] == "NOT_AVAILABLE"
-
-
-def test_a_source_with_no_flag_text_counts_as_no_match() -> None:
-    """A blank flag is stored as no match, never as a flag."""
-    assert catalogs.gaia_flags_from_matches(["NoFlag"], gaia_matches())["NoFlag"] == NO_GAIA_MATCH
+    assert asked == [HARVARD_VIZIER]
+    assert list(matches["id"]) == ["A"]
 
 
-def test_the_crossmatch_is_called_with_the_radius_and_the_position_columns() -> None:
-    """The positions go out in one request with the matching radius."""
-    seen = {}
+def test_the_field_falls_back_to_strasbourg_when_harvard_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refused connection or a 504 hands the field to the other server."""
+    for failure in (
+        ConnectionError("down"),
+        requests.exceptions.HTTPError(response=types.SimpleNamespace(status_code=504)),
+    ):
+        forget_stored_answers()
+        asked = install_fake_vizier(monkeypatch, {HARVARD_VIZIER: failure, CDS_VIZIER: vsx_field_rows()})
 
-    def fake_query(**arguments: object) -> None:
-        seen.update(arguments)
+        matches = catalogs.look_up_vsx(catalogs.build_position_table([("A", 10.0, 20.0)]))
 
-    table = catalogs.build_position_table([("A", 10.0, 20.0), ("B", 11.0, 21.0)])
-    catalogs.run_crossmatch(fake_query, table, catalogs.VSX_CATALOG)
-
-    assert seen["cat2"] == "vizier:B/vsx/vsx"
-    assert seen["max_distance"].to_value(u.arcsec) == pytest.approx(3.0)
-    assert (seen["colRA1"], seen["colDec1"]) == ("ra", "dec")
-    assert len(seen["cat1"]) == 2
+        assert asked == [HARVARD_VIZIER, CDS_VIZIER]
+        assert list(matches["id"]) == ["A"]
 
 
-def test_an_empty_table_makes_no_request() -> None:
-    """Nothing to match, nothing to ask."""
-    calls = []
+def test_when_both_servers_fail_the_error_reaches_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No answer is invented; with nothing stored the star stays unverified."""
+    asked = install_fake_vizier(
+        monkeypatch, {HARVARD_VIZIER: ConnectionError("first"), CDS_VIZIER: TimeoutError("second")}
+    )
 
-    result = catalogs.run_crossmatch(lambda **kw: calls.append(kw), catalogs.build_position_table([]), "x")
+    with pytest.raises(CatalogUnavailableError, match="second"):
+        catalogs.look_up_vsx(catalogs.build_position_table([("A", 10.0, 20.0)]))
 
-    assert result is None
-    assert calls == []
+    assert len(asked) == 2
+
+
+def test_an_answer_that_hit_the_row_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A full table may be cut off, so it is not trusted."""
+    monkeypatch.setattr(catalogs, "FIELD_ROW_LIMIT", 3)
+    install_fake_vizier(monkeypatch, {HARVARD_VIZIER: vsx_field_rows(), CDS_VIZIER: vsx_field_rows()})
+
+    with pytest.raises(ExternalServiceError):
+        catalogs.look_up_vsx(catalogs.build_position_table([("A", 10.0, 20.0)]))
+
+
+def test_stars_match_the_field_rows_only_within_the_match_radius() -> None:
+    """An entry 1 arcsec away matches; one 10 arcsec away does not."""
+    positions = catalogs.build_position_table([("A", 10.0, 20.0), ("B", 10.0, 21.0)])
+
+    matches = catalogs.match_to_catalog_rows(positions, vsx_field_rows(), "RAJ2000", "DEJ2000")
+
+    assert sorted(zip(matches["id"], matches["Name"], strict=True)) == [("A", "Near"), ("B", "Quiet")]
+    assert matches["angDist"][list(matches["id"]).index("A")] == pytest.approx(1.0, abs=0.01)
+    types_found = catalogs.vsx_types_from_matches(["A", "B"], matches)
+    assert types_found == {"A": "EA", "B": "CST"}
+
+
+def test_a_field_with_no_rows_matches_nothing() -> None:
+    """An empty answer gives no match table: every star is not in VSX."""
+    positions = catalogs.build_position_table([("A", 10.0, 20.0)])
+
+    matches = catalogs.match_to_catalog_rows(positions, vsx_field_rows()[:0], "RAJ2000", "DEJ2000")
+
+    assert matches is None
+    assert catalogs.vsx_types_from_matches(["A"], matches) == {"A": NOT_IN_VSX}
+
+
+def test_distant_stars_are_split_into_separate_fields() -> None:
+    """Near stars share a request; far ones get their own."""
+    positions = catalogs.build_position_table([("A", 10.0, 20.0), ("B", 10.5, 20.0), ("C", 200.0, -30.0)])
+
+    groups = catalogs.group_into_fields(positions)
+
+    assert [list(group) for group in groups] == [[0, 1], [2]]
+    assert np.concatenate(groups).tolist() == [0, 1, 2]
+    assert catalogs.group_into_fields(catalogs.build_position_table([])) == []
 
 
 def vsx_range_matches() -> Table:

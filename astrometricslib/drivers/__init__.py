@@ -19,12 +19,19 @@ variable name `OFFLINE_VARIABLE`), the folders a settings file names
 and `stop_process_group`, which ends a program and the helpers it started,
 and the HEALPix sky-tile helpers (`tile_of_source_id`, `tiles_for_cone`,
 `tiles_for_footprint`, `pixels_near_circles`, `healpix_pixels_of_points`,
-`pixel_source_id_range`, `build_pixel_query`).
+`pixel_source_id_range`, `build_pixel_query`), and `get_simbad_driver`, the
+SIMBAD driver every caller shares: it answers from the library's stored
+answers first and asks SIMBAD only when it must, and `get_gaia_archive`, the
+ESA Gaia archive connection (``launch_job`` and ``launch_job_async``). Both
+send every request through the outside-service gateway, which applies one rate
+limit and one pause rule to each service host.
 The private driver code (Siril, catalog
 access, camera profiles) lives in `astrometricslib._internal.drivers`.
 Each name here is imported from the module where its code lives today.
 """
 
+from astrometricslib._internal.drivers.cached_simbad_driver import get_simbad_driver
+from astrometricslib._internal.drivers.outside_services import get_gaia_archive
 from astrometricslib._internal.drivers.sky_tiles import (
     build_pixel_query,
     healpix_pixels_of_points,
@@ -88,7 +95,9 @@ __all__ = [
     "file_lock",
     "get_camera_data_versions",
     "get_frame_metric_signs",
+    "get_gaia_archive",
     "get_library_data_version",
+    "get_simbad_driver",
     "get_stack_quality_data_version",
     "get_target_camera_names",
     "get_target_data_version",

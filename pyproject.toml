@@ -390,8 +390,8 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "mcp_servers/inventory/tool_inventory.py" = ["print"]
 
 [tool.importlinter]
-root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers", "simulator"]
-include_external_packages = false
+root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers", "simulator", "requests", "httpx", "astroquery", "pyvo"]
+include_external_packages = true
 # Imports used only for type hints (inside `if TYPE_CHECKING:`) are not
 # counted: they never run, so they create no dependency when the code runs.
 exclude_type_checking_imports = true
@@ -477,6 +477,42 @@ unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "simulator.** -> backend.public_interface",
 ]
+
+[[tool.importlinter.contracts]]
+name = "only the outside-service gateway imports network clients"
+type = "forbidden"
+# Every request to SIMBAD, VizieR, the Gaia archive or another outside service
+# goes through the gateway, which applies one rate limit, one pause rule and the
+# stored answers (see `astrometricslib/_internal/drivers/README.md`). Only the
+# gateway may import a client that can send one. Importing only an error class
+# (`requests.exceptions`, `astroquery.exceptions`, `pyvo.dal.exceptions`) is
+# allowed. `test_outside_services_enforcement.py` makes the same check by
+# reading the source, and also covers `urllib.request` and `http.client`, which
+# this tool cannot see.
+source_modules = ["astrometricslib", "wayfindinglib", "backend"]
+forbidden_modules = ["requests", "httpx", "astroquery", "pyvo"]
+allow_indirect_imports = true
+ignore_imports = [
+    "astrometricslib._internal.drivers.outside_services.** -> requests.**",
+    "astrometricslib._internal.drivers.outside_services.** -> requests",
+    "astrometricslib._internal.drivers.outside_services.** -> astroquery.**",
+    "astrometricslib._internal.drivers.outside_services.** -> astroquery",
+    "astrometricslib._internal.drivers.outside_services.** -> pyvo.**",
+    "astrometricslib._internal.drivers.outside_services.** -> pyvo",
+    "astrometricslib._internal.drivers.outside_services.** -> httpx.**",
+    "astrometricslib._internal.drivers.outside_services.** -> httpx",
+    "astrometricslib.** -> requests.exceptions",
+    "astrometricslib.** -> astroquery.exceptions",
+    "astrometricslib.** -> pyvo.dal.exceptions",
+    "wayfindinglib.** -> pyvo.dal.exceptions",
+    # Tests and test setup may build a stand-in or inspect a client.
+    "astrometricslib.**.test.** -> **",
+    "astrometricslib.conftest -> **",
+    "wayfindinglib.**.test.** -> **",
+    "wayfindinglib.conftest -> **",
+    "backend.tests.** -> **",
+]
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "a library script never imports another script"

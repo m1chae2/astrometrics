@@ -8,7 +8,7 @@
  * answer one question first: am I missing calibration frames? The full library sentence of each near
  * match stays in the `reason` of its part, shown as the tooltip of its cell in the all-groups table.
  */
-import type { CalibrationGroupMatch, GroupedFrameStat } from '../../common/types/backendTypes';
+import type { CalibrationGroupMatch, GroupedFrameStat, StackConfigurationRef } from '../../common/types/backendTypes';
 import { formatExposureSeconds } from './stackFormatting';
 
 /** How well one kind of calibration frame fits one group. */
@@ -113,4 +113,62 @@ export const buildCalibrationReport = (groups: GroupedFrameStat[]): CalibrationR
         missing: reports.filter((report) => hasStatus(report, 'missing')),
         nearMatches: reports.filter((report) => !hasStatus(report, 'missing') && hasStatus(report, 'near')),
     };
+};
+
+/** The camera and optic the Calibration section covers. */
+export interface CalibrationScope {
+    /** The camera name. */
+    camera: string;
+    /** The optic's focal length in whole millimeters, or null when the scope has no optic. */
+    focalLengthMm: number | null;
+    /** The scope in words, such as "ZWO ASI 533MM Pro@405mm". */
+    label: string;
+}
+
+/**
+ * Chooses the camera and optic the calibration section follows. A stack or an analysis uses one
+ * camera and one optic, so the section covers the same ones: the File Browser's camera and optic when
+ * it is filtered to a camera, otherwise the target's current stack configuration.
+ * @param browserCamera The File Browser's camera, or "All".
+ * @param browserOptic The File Browser's optic as text of whole millimeters, or "" for none.
+ * @param stackConfiguration The camera and optic of the target's current stack, if it has one.
+ * @return The scope, or null when nothing narrows it (then every group is shown).
+ */
+export const chooseCalibrationScope = (
+    browserCamera: string,
+    browserOptic: string,
+    stackConfiguration: StackConfigurationRef | null | undefined,
+): CalibrationScope | null => {
+    let camera = '';
+    let focalLengthMm: number | null = null;
+    if (browserCamera && browserCamera !== 'All') {
+        camera = browserCamera;
+        const optic = Number(browserOptic);
+        focalLengthMm = browserOptic && Number.isFinite(optic) ? Math.round(optic) : null;
+    } else if (stackConfiguration?.camera) {
+        camera = stackConfiguration.camera;
+        focalLengthMm = stackConfiguration.focalLengthMm ?? null;
+    }
+    if (!camera) return null;
+    return { camera, focalLengthMm, label: focalLengthMm === null ? camera : `${camera}@${focalLengthMm}mm` };
+};
+
+/**
+ * Keeps the groups of the scope's camera and optic. Groups from other cameras and optics are left out.
+ * A group with no optic recorded is kept when the camera matches.
+ * @param groups The target's light-frame groups.
+ * @param scope The camera and optic to keep, or null to keep every group.
+ * @return The groups in the scope.
+ */
+export const filterGroupsByScope = (
+    groups: GroupedFrameStat[],
+    scope: CalibrationScope | null,
+): GroupedFrameStat[] => {
+    if (!scope) return groups;
+    return groups.filter((group) =>
+        group.camera === scope.camera
+        && (scope.focalLengthMm === null
+            || group.focalLengthMm === null
+            || group.focalLengthMm === undefined
+            || group.focalLengthMm === scope.focalLengthMm));
 };

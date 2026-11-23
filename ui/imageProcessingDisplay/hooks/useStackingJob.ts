@@ -3,7 +3,7 @@
  * @description Hook for managing image stacking jobs and frame summaries.
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, openSiril } from '../../common/services/imaging/processingService';
+import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, openSiril } from '../../common/services/imaging/processingService';
 import {
     GroupedFrameStat,
     ProcessStatus,
@@ -15,6 +15,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
+import { useJobLog } from './useJobLog';
 import { useJobEndWatcher } from './useJobEndWatcher';
 import { announceFinishedStack } from '../utils/announceFinishedStack';
 
@@ -60,7 +61,6 @@ export function useStackingJob(
     const { framesReloadKey, invalidate } = useTargetContext();
     const { activeJobs } = useAstrometrics();
     const [lightFrames, setLightFrames] = useState<LightFrameRow[]>([]);
-    const [logLines, setLogLines] = useState<string[]>([]);
     const [isProcessing, setIsProcessing] = useState<boolean>(false);
     const [processingError, setProcessingError] = useState<string | null>(null);
     /** The job this hook started and is watching to its end. */
@@ -68,12 +68,35 @@ export function useStackingJob(
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [jobHistory, setJobHistory] = useState<ProcessingJob[]>([]);
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+    // The app-wide active-jobs feed (AstrometricsContext `activeJobs`) is the
+    // one signal that a job started or finished. Jobs of any type for this
+    // target that are running right now are shown at the top of the list.
+    const targetActiveJobs = useMemo(
+        () => activeJobs.filter((job) => job.targetId === selectedTarget),
+        [activeJobs, selectedTarget]
+    );
+    const targetActiveJobIds = useMemo(
+        () => targetActiveJobs.map((job) => job.id).sort().join(','),
+        [targetActiveJobs]
+    );
+    // A job is running when the app-wide feed lists it or its record says it started. This
+    // looks at the job record only, never at the kind of job.
+    const followedJobIsRunning = activeJobId !== null && (
+        targetActiveJobs.some((job) => job.id === activeJobId)
+        || jobHistory.some((job) => job.id === activeJobId && job.status === 'started')
+        || isProcessing
+    );
+    /** Shows the log of the job on screen: live while it runs, whole when it is over. */
+    const jobLog = useJobLog(activeJobId, followedJobIsRunning);
+    const setLogLines = (lines: string[]) => { if (lines.length === 0) jobLog.clear(); };
     const prevIsProcessing = useRef<boolean>(false);
     /** The id of the stacking job the running-jobs feed showed last, to announce it when it ends. */
     const lastFeedJobId = useRef<string | null>(null);
     const isProcessingRef = useRef<boolean>(false);
     /** The running-job ids seen last time, to notice when one starts or finishes. */
     const previousActiveJobIds = useRef<string>('');
+    /** Ids of running jobs already seen for this target, so each new one is followed once. */
+    const followedStartedJobIds = useRef<Set<string>>(new Set());
 
     /** The target whose job history and log were already read, so a refresh keeps the shown log. */
     const historyLoadedForTarget = useRef<string | null>(null);
@@ -88,6 +111,7 @@ export function useStackingJob(
         prevIsProcessing.current = false;
         lastFeedJobId.current = null;
         previousActiveJobIds.current = '';
+        followedStartedJobIds.current = new Set();
         historyLoadedForTarget.current = null;
     });
 
@@ -115,11 +139,6 @@ export function useStackingJob(
             if (latestJob) {
                 setIsProcessing(latestJob.status === 'started');
                 setActiveJobId(latestJob.id);
-                fetchJobLogTail(latestJob.id, 5000).then(lines => {
-                    if (mounted && lines.length > 0) {
-                        setLogLines(lines);
-                    }
-                });
             } else {
                 setActiveJobId(null);
             }
@@ -207,21 +226,20 @@ export function useStackingJob(
 
         if (activeJob) {
             setActiveJobId(activeJob.id);
+        } else {
+            // A job of another kind (preview, check-stack, analysis) that has just started is
+            // followed too, once, so its log shows live without a click.
+            const started = activeJobs.find(
+                (j) => j.targetId === selectedTarget && !followedStartedJobIds.current.has(j.id)
+            );
+            if (started) setActiveJobId(started.id);
+        }
+        for (const job of activeJobs) {
+            if (job.targetId === selectedTarget) followedStartedJobIds.current.add(job.id);
         }
     }, [selectedTarget, invalidate, activeJobs]);
 
 
-    // The app-wide active-jobs feed (AstrometricsContext `activeJobs`) is the
-    // one signal that a job started or finished. Jobs of any type for this
-    // target that are running right now are shown at the top of the list.
-    const targetActiveJobs = useMemo(
-        () => activeJobs.filter((job) => job.targetId === selectedTarget),
-        [activeJobs, selectedTarget]
-    );
-    const targetActiveJobIds = useMemo(
-        () => targetActiveJobs.map((job) => job.id).sort().join(','),
-        [targetActiveJobs]
-    );
     // Reload the history whenever the set of running jobs changes: a new id
     // means a job started, a missing id means one finished. The first value
     // after a target change is skipped because the target-change effect
@@ -240,35 +258,6 @@ export function useStackingJob(
         }).catch(() => { /* Ignore */ });
         return () => { mounted = false; };
     }, [selectedTarget, targetActiveJobIds, historyWanted]);
-
-    // Log Streaming
-    useEffect(() => {
-        let cancelStream: (() => void) | undefined;
-        let cancelled = false;
-        if (isProcessing && activeJobId) {
-            // A new stream replays the job's whole log, so start from an
-            // empty panel to avoid showing lines twice or from another job.
-            setLogLines([]);
-            streamJobLog(activeJobId, (line) => {
-                // Ignore late lines from a stream that was already cancelled.
-                if (cancelled) return;
-                setLogLines((prev) => {
-                    if (prev.length > 0 && prev[prev.length - 1] === line) return prev;
-                    return [...prev, line];
-                });
-            }).then((cancel) => {
-                if (cancelled) {
-                    cancel();
-                } else {
-                    cancelStream = cancel;
-                }
-            });
-        }
-        return () => {
-            cancelled = true;
-            if (cancelStream) cancelStream();
-        };
-    }, [isProcessing, activeJobId]);
 
     useEffect(() => {
         isProcessingRef.current = isProcessing;
@@ -326,20 +315,18 @@ export function useStackingJob(
     return {
         lightFrames,
         isLoadingFrames,
-        logLines,
+        logLines: jobLog.lines,
         isProcessing,
         processingError,
         startProcessing,
         cancelProcessingJob,
         clearLogs: () => setLogLines([]),
-        appendLog: (line: string) => setLogLines(prev => [...prev, line]),
+        appendLog: jobLog.appendLocal,
         refreshFrames: () => invalidate('frames'),
         jobHistory,
         loadingHistory,
         onSelectJob: (job: ProcessingJob) => {
             setActiveJobId(job.id);
-            setLogLines([]);
-            fetchJobLogTail(job.id, 5000).then(setLogLines);
         },
         activeJobId,
         setActiveJobId,

@@ -29,6 +29,7 @@ from astrometricslib._internal.drivers.gaia_xp_driver import (
     gaia_xp_cache_path,
 )
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
+from astrometricslib._internal.drivers.outside_services import host_state
 
 SOURCE_ID = 3225773709225508736
 
@@ -187,23 +188,25 @@ def test_a_failed_download_raises_is_not_cached_and_is_logged_once(
     assert not list(tmp_path.glob("*.npz"))
 
 
-def test_after_a_failure_downloads_are_paused_until_the_retry_time(
+def test_repeated_failures_pause_the_archive_until_the_pause_ends(
     tmp_path: Path, archive: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A run with the network down pays for one failure, not one per star."""
-    archive.error = OSError("network is down")
+    """A run with the network down pays for two failures, not one per star."""
+    archive.error = ConnectionError("network is down")
     driver = AstroqueryGaiaXpDriver(cache_directory=tmp_path)
-    with pytest.raises(GaiaXpDownloadError):
-        driver.sampled_spectrum(SOURCE_ID)
+    for offset in range(2):
+        with pytest.raises(GaiaXpDownloadError):
+            driver.sampled_spectrum(SOURCE_ID + offset)
     with pytest.raises(GaiaXpDownloadError, match="paused"):
-        driver.sampled_spectrum(SOURCE_ID + 1)
-    assert archive.calls == [SOURCE_ID]
+        driver.sampled_spectrum(SOURCE_ID + 2)
+    assert archive.calls == [SOURCE_ID, SOURCE_ID + 1]
 
     # Time passes, and the network comes back.
-    monkeypatch.setattr(driver_module.time, "monotonic", lambda: 1e9)
+    real_clock = host_state._clock
+    monkeypatch.setattr(host_state, "_clock", lambda: real_clock() + 1e6)
     archive.error = None
-    assert driver.sampled_spectrum(SOURCE_ID + 1) is not None
-    assert archive.calls == [SOURCE_ID, SOURCE_ID + 1]
+    assert driver.sampled_spectrum(SOURCE_ID + 2) is not None
+    assert archive.calls == [SOURCE_ID, SOURCE_ID + 1, SOURCE_ID + 2]
 
 
 def test_a_reply_that_cannot_be_read_raises(tmp_path: Path, archive: SimpleNamespace) -> None:

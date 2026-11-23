@@ -166,6 +166,10 @@ class ParameterContext:
     notices : `list` [`str`]
         One line for each parameter whose default stood in, in the order
         first seen.
+    equipment_key : `tuple` or `None`
+        The camera, optic, focal length and filter the equipment values were
+        built from, so a worker process can build the same context
+        (`bind_equipment_key`). `None` when there is no equipment.
     """
 
     configuration: Any = None
@@ -174,6 +178,7 @@ class ParameterContext:
     setup_bases: Any = None
     bases: dict[RunBasis, float] = field(default_factory=dict)
     notices: list[str] = field(default_factory=list)
+    equipment_key: tuple[str | None, str | None, float | None, str | None] | None = None
 
     def basis_value(self, basis: RunBasis) -> float | None:
         """Return a basis: the run's measurement, else the setup's value.
@@ -246,6 +251,7 @@ _CURRENT_CONTEXT: contextvars.ContextVar[ParameterContext | None] = contextvars.
     "astrometrics_parameter_context", default=None
 )
 _default_cache: tuple[float, ParameterContext] | None = None
+_worker_context_managers: list[Any] = []
 
 
 def current_parameter_context() -> ParameterContext | None:
@@ -390,25 +396,136 @@ def frames_parameter_context(frames: Sequence[Any]) -> Generator[ParameterContex
     context : `ParameterContext`
         The context; its ``notices`` list the defaults that stood in.
     """
+    first = frames[0] if frames else None
+    with _equipment_parameter_context(
+        None if first is None else str(getattr(first, "camera", "")),
+        None if first is None else str(getattr(first, "telescope", "")),
+        None if first is None else getattr(first, "focal_length_mm", None),
+        None if first is None else _filter_section_name(first),
+    ) as context:
+        yield context
+
+
+@contextmanager
+def equipment_parameter_context(
+    camera_name: str | None, focal_length_mm: float | None, filter_name: str | None
+) -> Generator[ParameterContext]:
+    """Read parameters for the camera and optic that took one image.
+
+    A stack's header gives its camera and focal length, so this builds the
+    context from those, not from the first frame of the target (which can
+    come from another camera).
+
+    Parameters
+    ----------
+    camera_name : `str` or `None`
+        The camera, in any spelling or alias. `None` gives a context with
+        no equipment values.
+    focal_length_mm : `float` or `None`
+        The optic's focal length, in millimeters.
+    filter_name : `str` or `None`
+        The filter or grating section name, such as ``L`` or ``SPEC``.
+
+    Yields
+    ------
+    context : `ParameterContext`
+        The context; its ``notices`` list the defaults that stood in.
+    """
+    with _equipment_parameter_context(camera_name, None, focal_length_mm, filter_name) as context:
+        yield context
+
+
+@contextmanager
+def _equipment_parameter_context(
+    camera_name: str | None,
+    optic_name: str | None,
+    focal_length_mm: float | None,
+    filter_name: str | None,
+) -> Generator[ParameterContext]:
+    """Build the context for a camera, an optic and a filter.
+
+    Parameters
+    ----------
+    camera_name : `str` or `None`
+        The camera, in any spelling or alias.
+    optic_name : `str` or `None`
+        The optic's name, when known. The focal length is the fallback.
+    focal_length_mm : `float` or `None`
+        The optic's focal length, in millimeters, when known.
+    filter_name : `str` or `None`
+        The filter or grating section name.
+
+    Yields
+    ------
+    context : `ParameterContext`
+        The context.
+    """
+    from astrometricslib._internal.drivers.camera_profile_store import camera_identity
     from astrometricslib.foundation.config import get_configuration
 
     configuration = get_configuration()
     equipment = None
     tuned = None
     setup_bases = None
-    if frames:
-        first = frames[0]
-        setup = configuration.get_observatory_setups().setup_for(
-            str(getattr(first, "camera", "")), str(getattr(first, "telescope", ""))
-        )
+    if camera_name:
+
+        def camera_key(name: str) -> str:
+            """Give the same text for every spelling of a camera.
+
+            Returns
+            -------
+            identity : `str`
+                The camera's profile name, reduced to letters and digits.
+            """
+            return camera_identity(name, configuration)
+
+        setups = configuration.get_observatory_setups()
+        setup = setups.setup_for(camera_name, optic_name or "", camera_key) if optic_name else None
+        if setup is None and focal_length_mm:
+            setup = setups.setup_for_focal_length(camera_name, float(focal_length_mm), camera_key)
         if setup is not None:
-            filter_name = _filter_section_name(first)
             equipment = SetupEquipmentValues(configuration, setup, filter_name)
             tuned = _tuned_values(configuration, setup, filter_name)
             setup_bases = _setup_bases(configuration, setup)
     with parameter_context(configuration=configuration, equipment=equipment, tuned=tuned) as context:
         context.setup_bases = setup_bases
+        if camera_name:
+            context.equipment_key = (camera_name, optic_name, focal_length_mm, filter_name)
         yield context
+
+
+def current_equipment_key() -> tuple[str | None, str | None, float | None, str | None] | None:
+    """Give the equipment the running code reads its parameters for.
+
+    Returns
+    -------
+    key : `tuple` or `None`
+        The camera, optic, focal length and filter of the current context,
+        or `None` when there is none. It can be sent to a worker process.
+    """
+    context = _CURRENT_CONTEXT.get()
+    return None if context is None else context.equipment_key
+
+
+def bind_equipment_key(key: tuple[str | None, str | None, float | None, str | None] | None) -> None:
+    """Read parameters for the given equipment from now on, in this process.
+
+    A worker process starts with no context, because a context lives in the
+    process that made it. A pool calls this once in each worker, as its
+    initializer, with the key from `current_equipment_key`, so the worker
+    reads the same equipment values as the run that started it.
+
+    Parameters
+    ----------
+    key : `tuple` or `None`
+        The key from `current_equipment_key`. `None` changes nothing.
+    """
+    if key is None:
+        return
+    manager = _equipment_parameter_context(*key)
+    manager.__enter__()
+    # Keep the manager alive: closing it would end the context.
+    _worker_context_managers.append(manager)
 
 
 def _filter_section_name(frame: Any) -> str | None:
@@ -503,8 +620,11 @@ def equipment_values_to_write(
 __all__ = [
     "ParameterContext",
     "SetupEquipmentValues",
+    "bind_equipment_key",
+    "current_equipment_key",
     "current_parameter_context",
     "default_parameter_context",
+    "equipment_parameter_context",
     "equipment_values_to_write",
     "frames_parameter_context",
     "parameter_context",

@@ -24,7 +24,22 @@ const baseInput: AnalysisSelectionInput = {
 };
 
 describe('chooseAnalysisSelection', () => {
-    it('analyzes the master spectral stack, even when raw frames are ticked or previewed', () => {
+    it('runs photometry and spectroscopy on both stacks, whichever filter is in view', () => {
+        for (const filterType of ['SPEC', 'L']) {
+            const selection = chooseAnalysisSelection({
+                ...baseInput,
+                filterType,
+                stackedImage: '/lights/Vega/Vega_L_Stacked.fits',
+            });
+            expect(selection).toEqual({
+                paths: ['/lights/Vega/Vega_L_Stacked.fits', '/lights/Vega/Vega_SPEC_Stacked.fits'],
+                filterType: filterType === 'L' ? 'L' : undefined,
+                stages: ['photometry', 'spectroscopy'],
+            });
+        }
+    });
+
+    it('analyzes the master spectral stack alone, even when raw frames are ticked or previewed', () => {
         const selection = chooseAnalysisSelection({
             ...baseInput,
             checkedFiles: new Set(['/lights/Vega/raw_001.fits']),
@@ -39,6 +54,7 @@ describe('chooseAnalysisSelection', () => {
             ...baseInput,
             filterType: 'L',
             stackedImage: '/lights/Vega/Vega_L_Stacked.fits',
+            stackedSpectralTarget: null,
             checkedFiles: new Set(['/lights/Vega/raw_001.fits']),
             selectedFile: '/lights/Vega/raw_002.fits',
             selectedFileFilter: 'L',

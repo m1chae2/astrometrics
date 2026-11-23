@@ -39,6 +39,7 @@ from astrometricslib.models.calibration_ingest import (
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.processing_results import (
+    BrightObjectChoices,
     PreviewRemakeResult,
     ProcessTargetResult,
     StackPrediction,
@@ -56,7 +57,7 @@ from astrometricslib.models.quality.subset_stacks import (
     OddEvenDifferenceNoiseResult,
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
-from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.target import FrameRecord, PreviewBrightObject, Target
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
@@ -1887,6 +1888,113 @@ class ProcessingPipelines:
             self._targets.save()
         return result
 
+    def list_preview_bright_objects(
+        self, target: str | Target, *, refresh: bool = False
+    ) -> BrightObjectChoices:
+        """List the nebulae and galaxies in a target's stack.
+
+        The preview's masked stretch protects one small bright smooth object
+        (see ``set_preview_bright_object``). This asks SIMBAD for the objects
+        of those kinds inside the footprint of the target's imaging stack,
+        using the stack's plate solution, and returns them nearest the center
+        first with their position and size. SIMBAD's answer is stored in
+        the library, so a second call is quick; ``refresh`` asks SIMBAD
+        again. A stack with no plate solution gives no objects and the
+        message "Run Astrometry first to list objects in the frame". SIMBAD
+        being out of reach, with nothing stored, also gives no objects and a
+        message, not an error. Nothing is written except the stored answer.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target whose imaging stack to list.
+        refresh : `bool`, optional
+            Ask SIMBAD again even when a list is saved for this stack file.
+
+        Returns
+        -------
+        choices : `BrightObjectChoices`
+            The objects, or no objects and the reason.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.bright_object_choices import (
+            list_bright_object_choices,
+        )
+
+        resolved = self._resolve(target)
+        return list_bright_object_choices(
+            resolved.id,
+            resolved.stacking.stacked_image,
+            self._drivers.simbad_or_default(),
+            use_cache=not refresh,
+        )
+
+    def set_preview_bright_object(
+        self,
+        target: str | Target,
+        mode: Literal["auto", "off", "object"] = "auto",
+        simbad_id: str | None = None,
+        ra_deg: float | None = None,
+        dec_deg: float | None = None,
+        major_axis_arcmin: float | None = None,
+    ) -> PreviewBrightObject:
+        """Choose which object the preview's masked stretch protects.
+
+        The choice is saved on the target and read the next time its preview
+        is made, by a stack or by ``remake_preview``. Saving it makes no
+        preview. ``"auto"`` is the default rule: the target itself, when it
+        is a nebula or a galaxy. ``"off"`` never uses the masked stretch.
+        ``"object"`` protects the object given, whatever the target's kind;
+        the checks on the region's smoothness and size still apply.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target to save the choice on.
+        mode : `str`, optional
+            ``"auto"`` (default), ``"off"`` or ``"object"``.
+        simbad_id : `str`, optional
+            With ``"object"``, SIMBAD's name of the object (an entry of
+            ``list_preview_bright_objects``).
+        ra_deg : `float`, optional
+            With ``"object"``, its right ascension in degrees.
+        dec_deg : `float`, optional
+            With ``"object"``, its declination in degrees.
+        major_axis_arcmin : `float`, optional
+            With ``"object"``, its major axis in arcminutes, if known.
+
+        Returns
+        -------
+        choice : `PreviewBrightObject`
+            The choice as saved.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``mode`` is unknown, or ``"object"`` lacks a name or a
+            position inside the sky.
+        """
+        check_choice("mode", mode, ("auto", "off", "object"))
+        if mode == "object":
+            if not simbad_id or ra_deg is None or dec_deg is None:
+                raise InvalidArgumentError("Mode 'object' needs simbad_id, ra_deg and dec_deg.")
+            if not (0.0 <= ra_deg < 360.0 and -90.0 <= dec_deg <= 90.0):
+                raise InvalidArgumentError("The position of the object is outside the sky.")
+            if major_axis_arcmin is not None and not major_axis_arcmin > 0.0:
+                raise InvalidArgumentError("major_axis_arcmin must be positive.")
+            choice = PreviewBrightObject(
+                mode="object",
+                simbad_id=simbad_id,
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+                major_axis_arcmin=major_axis_arcmin,
+            )
+        else:
+            choice = PreviewBrightObject(mode=mode)
+        resolved = self._resolve(target)
+        resolved.preview_bright_object = choice
+        self._targets.add(resolved)
+        return choice
+
     # -- Analysis stages ----------------------------------------------------
 
     @background_job("process_target", grace_period_seconds=8.0)
@@ -1904,6 +2012,7 @@ class ProcessingPipelines:
         register_job: bool = True,
         run_prerequisites: bool = True,
         spectral_variation: dict[str, Any] | None = None,
+        on_stages_planned: Callable[[tuple[str, ...], tuple[str, ...]], None] | None = None,
     ) -> ProcessTargetResult | BatchRunSummary:
         """Run the analysis stages for one target, or the pipeline for many.
 
@@ -1949,8 +2058,8 @@ class ProcessingPipelines:
 
         - one target: ``stages``, ``astrometry``, ``photometry``,
           ``spectroscopy``, ``spectral_variation``, ``asteroids``,
-          ``run_prerequisites``, and optionally ``camera_id`` and
-          ``focal_length_mm``.
+          ``run_prerequisites``, ``on_stages_planned``, and optionally
+          ``camera_id`` and ``focal_length_mm``.
         - several targets: ``camera_id`` (needed), ``focal_length_mm``,
           ``on_item_complete``. The full pipeline always runs astrometry
           before photometry, so ``run_prerequisites=False`` is refused.
@@ -2007,6 +2116,10 @@ class ProcessingPipelines:
             Options for the spectral variation stage: ``frames`` (the raw
             spectral frames to follow; the selected camera's by default) and
             ``max_workers``.
+        on_stages_planned : `Callable`, optional
+            For one target, called once before the first stage runs, as
+            ``(requested, added)``: the stages asked for and the
+            prerequisites that will be added, in running order.
 
         Returns
         -------
@@ -2039,6 +2152,7 @@ class ProcessingPipelines:
                     "asteroids": asteroids is not None,
                     "spectral_variation": spectral_variation is not None,
                     "run_prerequisites": not run_prerequisites,
+                    "on_stages_planned": on_stages_planned is not None,
                 },
             )
             if not camera_id:
@@ -2105,6 +2219,7 @@ class ProcessingPipelines:
             frame_selection=frame_selection,
             measured_at=datetime.now(UTC),
             run_prerequisites=run_prerequisites,
+            on_stages_planned=on_stages_planned,
         )
 
     def run_spectroscopy_by_session(

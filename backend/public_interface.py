@@ -193,6 +193,12 @@ RPC_METHODS: tuple[str, ...] = (
     # Makes a stack's preview picture again without restacking (a background
     # job; writes the pictures and the target's processed-image pointer).
     "processing:remake_preview",
+    # The nebulae and galaxies SIMBAD lists inside a target's stack (a read;
+    # asks SIMBAD once per stack file and keeps the list beside the stack).
+    "processing:list_bright_objects",
+    # Saves which object the preview's masked stretch protects on the target
+    # (a write; used the next time the stack or its preview is made).
+    "processing:set_bright_object",
     # What a stack would do with its frames: the frames it would set aside and
     # why, and the darks, flats and bias each exposure group would use (a read;
     # a background job, because it reads every frame).

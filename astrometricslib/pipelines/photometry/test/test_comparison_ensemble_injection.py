@@ -33,6 +33,7 @@ from astropy.io import fits
 
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.batch import _summarize_session_for_star
+from astrometricslib.pipelines.photometry.processing import comparison_ensemble
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
     DEFAULT_MAXIMUM_COMPARISON_STARS,
     MINIMUM_COMPARISON_STARS,
@@ -63,6 +64,21 @@ BACKGROUND_VARIANCE_ADU2 = 2000.0
 DIP_STAR = 3
 
 RELATIVE_DEPTH_TOLERANCE = 0.10
+
+
+def _accept_any_signal_to_noise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let noisy-looking stars into the pool when errors are inflated.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The fixture that undoes the change after the test.
+    """
+    monkeypatch.setattr(
+        comparison_ensemble,
+        "MINIMUM_COMPARISON_SIGNAL_TO_NOISE",
+        comparison_ensemble.MINIMUM_COMPARISON_SIGNAL_TO_NOISE.model_copy(update={"default": 1.0}),
+    )
 
 
 @dataclass
@@ -140,7 +156,8 @@ def simulate_session(
     saturated_in_frame : `dict` [`int`, `int`], optional
         Star index to the one frame in which the star is flagged saturated.
     missing_in_frame : `dict` [`int`, `int`], optional
-        Star index to the one frame in which the star has zero flux.
+        Star index to the one frame in which the star was not measured (zero
+        flux and zero error).
     equal_stars : `bool`, optional
         Give every star the same true flux.
     noise_scale : `float`, optional
@@ -180,8 +197,11 @@ def simulate_session(
         flags = [False] * FRAME_COUNT
         if saturated_in_frame and index in saturated_in_frame:
             flags[saturated_in_frame[index]] = True
+        error = (error_scale * sigma).copy()
         if missing_in_frame and index in missing_in_frame:
+            # Not measured, as at the frame edge: flux 0 and error 0.
             flux[missing_in_frame[index]] = 0.0
+            error[missing_in_frame[index]] = 0.0
         star = StellarObject(id=f"Star_{index}")
         star.flux = float(true_flux)
         if index in listed_variable:
@@ -189,7 +209,7 @@ def simulate_session(
         star.photometry = PhotometryResult(
             timestamps=list(timestamps),
             fluxes=flux.tolist(),
-            flux_errors=(error_scale * sigma).tolist() if with_errors else [],
+            flux_errors=error.tolist() if with_errors else [],
             is_saturated=flags,
             airmasses=airmass.tolist(),
         )
@@ -332,7 +352,9 @@ def test_the_dip_star_is_turned_away_as_a_comparison_star() -> None:
     assert f"Star_{DIP_STAR}" in analyzer.comparison_set.rejected_ids
 
 
-def test_a_dip_in_a_comparison_star_is_not_hidden_by_its_own_ensemble() -> None:
+def test_a_dip_in_a_comparison_star_is_not_hidden_by_its_own_ensemble(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A member is divided by the other members, so its own dip stays whole.
 
     The light curves have no noise, but their errors claim 5 percent, so the
@@ -341,6 +363,7 @@ def test_a_dip_in_a_comparison_star_is_not_hidden_by_its_own_ensemble() -> None:
     contains it, its own share of the weights (about one in twelve) would
     move part of the dip into the divisor and hide it.
     """
+    _accept_any_signal_to_noise(monkeypatch)
     session = simulate_session(
         star_count=40, dips={DIP_STAR: DIP_DEPTH}, noise_scale=0.0, error_scale=50.0, seed=5
     )
@@ -722,7 +745,9 @@ def test_detrending_equals_normalizing_unless_the_ensemble_option_is_on() -> Non
         assert star.photometry.fluxes_detrended_errors == star.photometry.fluxes_normalized_errors
 
 
-def test_the_ensemble_option_removes_the_airmass_slope_the_comparison_stars_share() -> None:
+def test_the_ensemble_option_removes_the_airmass_slope_the_comparison_stars_share(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Most comparison stars share a colour term; the target has it too.
 
     Twelve of the 17 candidates fade by 2 percent per airmass more than the
@@ -734,6 +759,7 @@ def test_the_ensemble_option_removes_the_airmass_slope_the_comparison_stars_shar
     median slope of the comparison stars. The target's own slope is never
     fitted.
     """
+    _accept_any_signal_to_noise(monkeypatch)
     target = 30
     slopes = {index: (0.02 if index % 4 else -0.03) for index in range(1, 18)}
     slopes[target] = 0.02

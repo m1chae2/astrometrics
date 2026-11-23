@@ -16,6 +16,10 @@ export interface BasePlotProps {
     layout?: Record<string, any>;
     config?: Record<string, any>;
     onClick?: (event: any) => void;
+    /** Called with Plotly's event when the pointer moves onto a mark. */
+    onHover?: (event: any) => void;
+    /** Called when the pointer leaves the mark it was on. */
+    onUnhover?: (event: any) => void;
     style?: React.CSSProperties;
     className?: string;
     'data-testid'?: string;
@@ -32,6 +36,8 @@ export const BasePlot: React.FC<BasePlotProps> = ({
     layout = {},
     config = {},
     onClick,
+    onHover,
+    onUnhover,
     style = { width: '100%', height: '100%' },
     className = '',
     'data-testid': testId
@@ -39,10 +45,10 @@ export const BasePlot: React.FC<BasePlotProps> = ({
     const plotRef = useRef<HTMLDivElement>(null);
     const plotlyRef = useRef<PlotlyStatic | null>(null);
     const clickHandlerRef = useRef<{ current: ((e: unknown) => void) | null }>({ current: null });
-    const latestPropsRef = useRef({ data, layout, config, onClick });
+    const latestPropsRef = useRef({ data, layout, config, onClick, onHover, onUnhover });
 
     useEffect(() => {
-        latestPropsRef.current = { data, layout, config, onClick };
+        latestPropsRef.current = { data, layout, config, onClick, onHover, onUnhover };
     });
 
     // Every Plotly call on this graph (create, update, purge) goes through this
@@ -92,6 +98,10 @@ export const BasePlot: React.FC<BasePlotProps> = ({
             if (initial.onClick) {
                 attachClickHandler(node, initial.onClick, clickHandler);
             }
+            // The hover handlers read the newest props, so they are attached once.
+            const plotNode = node as unknown as { on?: (name: string, handler: (event: unknown) => void) => void };
+            plotNode.on?.('plotly_hover', (event) => latestPropsRef.current.onHover?.(event));
+            plotNode.on?.('plotly_unhover', (event) => latestPropsRef.current.onUnhover?.(event));
         });
 
         return () => {

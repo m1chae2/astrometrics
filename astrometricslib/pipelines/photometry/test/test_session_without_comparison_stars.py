@@ -48,8 +48,8 @@ from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result
 DRIVER_LOGGER = logging.getLogger("astrometricslib._internal.drivers.test_catalog_driver")
 
 
-def test_a_session_where_every_star_misses_a_frame_says_why_it_was_not_normalized() -> None:
-    """Every star lacks a flux in one frame, so none can be compared."""
+def test_a_session_where_every_star_misses_a_frame_is_still_normalized() -> None:
+    """One missing frame in 36 is inside the 95% share, so the set is built."""
     star_count = 60
     session = simulate_session(
         star_count=star_count, missing_in_frame={index: index % FRAME_COUNT for index in range(star_count)}
@@ -58,15 +58,8 @@ def test_a_session_where_every_star_misses_a_frame_says_why_it_was_not_normalize
     analyzer = analyze(session)
 
     assert analyzer.comparison_set is not None
-    assert analyzer.comparison_set.star_ids == ()
-    reason = analyzer.normalization_failure_reason
-    assert reason is not None
-    assert reason.startswith(
-        f"0 of {star_count} stars have a positive flux in all {FRAME_COUNT} usable frames"
-    )
-    assert "lacks" in reason
-    star = session.stars[0]
-    assert star.photometry.fluxes_normalized == star.photometry.fluxes
+    assert len(analyzer.comparison_set.star_ids) >= 5
+    assert analyzer.normalization_failure_reason is None
 
 
 def test_a_normalized_session_has_no_failure_reason() -> None:

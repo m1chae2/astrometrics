@@ -50,6 +50,14 @@ describe('ImageDetailsManager Analyze Target split button', () => {
         expect(onAnalyzeStage).not.toHaveBeenCalled();
     });
 
+    /** The main button's tooltip says it covers both stacks. */
+    it('describes both analyses in the main button tooltip', () => {
+        setup();
+        const title = screen.getByRole('button', { name: 'Analyze Target' }).getAttribute('title');
+        expect(title).toContain('stars');
+        expect(title).toContain('spectra');
+    });
+
     /** The menu lists the four stages and reports the picked one. */
     it('reports the picked stage', async () => {
         const user = userEvent.setup();

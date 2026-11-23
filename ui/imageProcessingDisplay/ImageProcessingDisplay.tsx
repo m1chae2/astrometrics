@@ -106,7 +106,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
-    stackedImage, stackedSpectralTarget,
+    stackedImage, stackedSpectralTarget, stackConfiguration,
     starShapeReview, frameStatuses, frameReport, setAsideFiles, putBackFrame
   } = files;
 
@@ -523,10 +523,12 @@ const ImageProcessingDisplayInner: React.FC = () => {
     // If no files, nothing to do
     if (filteredFiles.length === 0) return;
 
-    // Keep a selection that is in the current list or is a stack
+    // Keep a selection that is in the current list, is any frame of the target (the timeline shows every camera and the set-aside frames) or is a stack
     if (
       selectedFile &&
       (filteredFiles.some(f => f.path === selectedFile) ||
+        setAsideFiles.some(f => f.path === selectedFile) ||
+        allFiles.some(f => f.path === selectedFile) ||
         selectedFile === stackedImage ||
         selectedFile === stackedSpectralTarget)
     ) {
@@ -538,7 +540,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (bestFile) {
       setSelectedFile(bestFile.path);
     }
-  }, [isLoadingFiles, filteredFiles, selectedFile, setSelectedFile, preferredStack, stackedImage, stackedSpectralTarget]);
+  }, [isLoadingFiles, filteredFiles, selectedFile, setSelectedFile, preferredStack, stackedImage, stackedSpectralTarget, setAsideFiles, allFiles]);
 
 
 
@@ -694,6 +696,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
       checkedFiles={checkedFiles}
       stackedImage={stackedImage}
       stackedSpectralTarget={stackedSpectralTarget}
+      stackConfiguration={stackConfiguration}
+      fileBrowserCamera={fileBrowserCamera}
+      fileBrowserOptic={selectedOptic}
       handleSelectFile={pickFile}
       handleAddImages={handleAddImages}
       setIsAddModalOpen={setIsAddModalOpen}

@@ -6,7 +6,6 @@ SIMBAD names its columns in lower case, and requesting the V magnitude
 makes SIMBAD return only objects that have one.
 """
 
-import sys
 import types
 from typing import Any, ClassVar
 
@@ -18,25 +17,23 @@ from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     format_target_coordinates,
     read_simbad_field,
 )
-from wayfindinglib.tasks.planning_tasks import resolution_operations
+from wayfindinglib.tasks.planning_tasks import catalog_operations, resolution_operations
 
 
 class _FakeSimbadClient:
-    """A SIMBAD client that behaves like astroquery 0.4.x."""
+    """A SIMBAD driver that behaves like astroquery 0.4.x."""
 
     requested_fields: ClassVar[list[tuple[str, ...]]] = []
 
-    def __init__(self) -> None:
-        """Start with no extra columns requested."""
-        self._fields: tuple[str, ...] = ()
-
-    def add_votable_fields(self, *fields: str) -> None:
-        """Record the extra columns, as astroquery does."""
-        self._fields = fields
-        _FakeSimbadClient.requested_fields.append(fields)
-
-    def query_object(self, name: str) -> Table | None:
+    def query_object(self, name: str, *, votable_fields: tuple[str, ...] = ()) -> Table | None:
         """Return the row for a known name.
+
+        Parameters
+        ----------
+        name : `str`
+            The name to look up.
+        votable_fields : `tuple` [`str`], optional
+            The extra columns asked for; they are recorded.
 
         Returns
         -------
@@ -44,6 +41,7 @@ class _FakeSimbadClient:
             A one-row table, or an empty one when `V` was requested for an
             object with no V magnitude, as the real service does.
         """
+        _FakeSimbadClient.requested_fields.append(votable_fields)
         known = {
             "M 52": ("M  52", 351.2, 61.59, "OpC", "", None),
             "Vega": ("* alf Lyr", 279.23, 38.78, "Star", "A0Va", 0.03),
@@ -52,7 +50,7 @@ class _FakeSimbadClient:
         if name not in known:
             return None
         main_id, ra, dec, otype, sp_type, magnitude = known[name]
-        if "V" in self._fields and magnitude is None:
+        if "V" in votable_fields and magnitude is None:
             return Table(
                 names=["main_id", "ra", "dec", "otype", "sp_type", "V"],
                 dtype=[str, float, float, str, str, float],
@@ -64,18 +62,61 @@ class _FakeSimbadClient:
             "otype": [otype],
             "sp_type": [sp_type],
         }
-        if "V" in self._fields:
+        if "V" in votable_fields:
             columns["V"] = [magnitude]
         return Table(columns)
 
 
 @pytest.fixture
 def fake_simbad(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace astroquery's SIMBAD client with the fake."""
+    """Replace the shared SIMBAD driver with the fake."""
     _FakeSimbadClient.requested_fields = []
-    module = types.ModuleType("astroquery.simbad")
-    module.Simbad = _FakeSimbadClient
-    monkeypatch.setitem(sys.modules, "astroquery.simbad", module)
+    monkeypatch.setattr(resolution_operations, "get_simbad_driver", _FakeSimbadClient)
+
+
+def test_every_simbad_question_goes_through_the_shared_cached_driver() -> None:
+    """Planning asks SIMBAD through the library's cached driver."""
+    from astrometricslib._internal.drivers.cached_simbad_driver import CachedSimbadDriver
+    from astrometricslib.drivers import get_simbad_driver
+
+    assert isinstance(get_simbad_driver(), CachedSimbadDriver)
+    assert resolution_operations.get_simbad_driver is get_simbad_driver
+    assert catalog_operations.get_simbad_driver is get_simbad_driver
+
+
+def test_a_region_search_uses_the_shared_driver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The region search asks the shared driver and maps its rows."""
+    asked: list[Any] = []
+
+    class _Driver:
+        """A driver that answers one region question."""
+
+        def query_region(
+            self, coordinates: Any, radius: str, *, votable_fields: tuple[str, ...] = ()
+        ) -> Table:
+            """Record the question and give one nebula row.
+
+            Returns
+            -------
+            table : `astropy.table.Table`
+                One row.
+            """
+            asked.append((radius, votable_fields))
+            return Table({
+                "main_id": ["M  52"],
+                "ra": [351.2],
+                "dec": [61.59],
+                "otype": ["OpC"],
+                "sp_type": [""],
+            })
+
+    monkeypatch.setattr(catalog_operations, "get_simbad_driver", _Driver)
+    monkeypatch.setattr(catalog_operations, "network_is_offline", lambda: False)
+
+    found = catalog_operations.global_catalog(None, 351.2, 61.59, 0.5)  # type: ignore[arg-type]
+
+    assert [item.id for item in found] == ["M  52"]
+    assert asked == [("0.5d", ("otype", "sp"))]
 
 
 def _sky_with_empty_library() -> Any:

@@ -73,3 +73,19 @@ describe('File Browser arrow keys', () => {
         expect(onSelectFile).not.toHaveBeenCalled();
     });
 });
+
+describe('File Browser selection from outside', () => {
+    it('scrolls the row into view when the selected file changes without a key press', () => {
+        const scroll = vi.fn();
+        (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scroll;
+        const files = [item('c.fits'), item('a.fits'), item('b.fits')];
+        const props = {
+            files, rejectedFiles: [], onSelectFile: () => {}, searchTerm: '', onSearchChange: () => {},
+            checkedFiles: new Set<string>(), onToggleFile: () => {}, onToggleAll: () => {}, selectedCamera: 'All',
+        };
+        const { rerender } = render(<FileBrowser {...props} selectedFile="/lib/a.fits" />);
+        scroll.mockClear();
+        rerender(<FileBrowser {...props} selectedFile="/lib/b.fits" />);
+        expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    });
+});

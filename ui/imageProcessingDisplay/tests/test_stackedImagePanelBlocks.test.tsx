@@ -12,6 +12,7 @@ const headerMock = vi.fn();
 vi.mock('../../common/services/targetService', () => ({
     fetchTargetFrameHeader: (...args: unknown[]) => headerMock(...args),
 }));
+vi.mock('../components/BrightObjectRow', () => ({ BrightObjectRow: () => <div data-testid="bright-object" /> }));
 vi.mock('../components/DepthGoalRow', () => ({ DepthGoalRow: () => <div data-testid="depth-goal" /> }));
 vi.mock('../components/StackSummaryPanel', () => ({
     StackSummaryPanel: ({ kind }: { kind: string }) => <div data-testid={`summary-${kind}`} />,

@@ -79,6 +79,13 @@
       "interim_block": "",
       "note": "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution it came from. Writes nothing."
     },
+    "processing_list_preview_bright_objects": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, which the astrometrics-backend server serves; this library tool stays withheld."
+    },
     "processing_measure_noise": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -127,6 +134,13 @@
       "disposition": "fix",
       "interim_block": "",
       "note": "Needs Python objects, so it cannot be called through MCP. Consider making it a stage of pipeline_run."
+    },
+    "processing_set_preview_bright_object": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. The AI reaches it through processing_enhance, which the astrometrics-backend server serves; this library tool stays withheld."
     },
     "processing_stack_summary": {
       "tool_class": "observe",

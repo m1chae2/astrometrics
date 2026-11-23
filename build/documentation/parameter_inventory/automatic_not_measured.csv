@@ -151,8 +151,10 @@ photometry.minimum_signal_to_noise,PHO-15,exclusion criteria,Partly measured
 photometry.minimum_stars_for_scatter_population,PHO-D13,judgment,Design estimate
 photometry.minimum_stars_for_zero_point,PHO-15,exclusion criteria,Partly measured
 photometry.minimum_stars_per_noise_bin,PHO-06,judgment,Partly measured
+photometry.minimum_tie_stars,PHO-D37,exclusion criteria,Design estimate
 photometry.minimum_training_points,PHO-D34,judgment,Design estimate
 photometry.minimum_unlisted_stars,PHO-D14,judgment,Design estimate
+photometry.minimum_unsaturated_fraction,PHO-20,exclusion criteria,Partly measured
 photometry.minimum_usable_frame_fraction,PHO-D07,exclusion criteria,Design estimate
 photometry.minimum_vetting_candidates,PHO-D05,exclusion criteria,Design estimate
 photometry.neighbor_profile_width_px,PHO-D35,measurement,Design estimate
@@ -164,11 +166,21 @@ photometry.points_in_dip_for_possible,PHO-D33,judgment,Design estimate
 photometry.reference_detection_kernel_widths_px,PHO-D03,measurement,Design estimate
 photometry.reference_detection_thresholds_sigma,PHO-D03,measurement,Design estimate
 photometry.rival_alias_power_share,PHO-D19,judgment,Design estimate
+photometry.scintillation_clip_sigma,PHO-D38,exclusion criteria,Design estimate
+photometry.scintillation_maximum_coefficient,PHO-D38,exclusion criteria,Design estimate
+photometry.scintillation_minimum_coefficient,PHO-D38,exclusion criteria,Design estimate
+photometry.scintillation_minimum_frames,PHO-D38,exclusion criteria,Design estimate
+photometry.scintillation_minimum_members,PHO-D38,exclusion criteria,Design estimate
 photometry.session_star_frame_share,PHO-15,exclusion criteria,Partly measured
 photometry.shuffle_count,PHO-12,measurement,Partly measured
 photometry.significant_window_peak_share,PHO-D19,judgment,Design estimate
 photometry.sky_annulus_inner_radius_px,PHO-D01,measurement,Design estimate
 photometry.sky_annulus_outer_radius_px,PHO-D01,measurement,Design estimate
+photometry.step_minimum_block_variance_fraction,PHO-20,exclusion criteria,Partly measured
+photometry.step_minimum_shift_px,PHO-20,exclusion criteria,Partly measured
+photometry.step_minimum_significance,PHO-20,exclusion criteria,Partly measured
+photometry.step_shift_jitter_sigmas,PHO-20,exclusion criteria,Partly measured
+photometry.tie_clip_sigma,PHO-D37,exclusion criteria,Design estimate
 photometry.unstable_tracking_drift_px,PHO-D16,judgment,Design estimate
 photometry.window_peaks_tried,PHO-D19,judgment,Design estimate
 shared.background_block_pixels,STK-D38,exclusion criteria,Design estimate
@@ -177,6 +189,13 @@ shared.block_range_pixel_step,STK-D44,measurement,Design estimate
 shared.catalog_match_radius_arcsec,AST-D07,exclusion criteria,Design estimate
 shared.centroid_half_box_pixels,STK-D38,exclusion criteria,Design estimate
 shared.clip_ceiling_tolerance_fraction,STK-D42,exclusion criteria,Design estimate
+shared.dark_defect_edge_streak_minimum_fraction,STK-D77,measurement,Design estimate
+shared.dark_defect_group_bridge_px,STK-D77,measurement,Design estimate
+shared.dark_defect_long_track_px,STK-D77,measurement,Design estimate
+shared.dark_defect_minimum_set_frames,STK-D77,measurement,Design estimate
+shared.dark_defect_outlier_noise_widths,STK-D77,measurement,Design estimate
+shared.dark_defect_reference_frames,STK-D77,measurement,Design estimate
+shared.dark_defect_whole_frame_fraction,STK-D77,measurement,Design estimate
 shared.default_saturation_flag_threshold,STK-D04,judgment,Design estimate
 shared.detection_sigma,STK-D38,exclusion criteria,Design estimate
 shared.extent_tolerance_factor,AST-20,judgment,Partly measured
@@ -185,7 +204,6 @@ shared.field_region_cells_per_side,AST-18,measurement,Design estimate
 shared.focal_length_tolerance_fraction,STK-D71,measurement,Design estimate
 shared.low_star_fraction,STK-34,exclusion criteria,Partly measured
 shared.match_radius_arcsec,AST-12,exclusion criteria,Partly measured
-shared.maximum_magnitude_difference,AST-12,exclusion criteria,Partly measured
 shared.maximum_stars_measured,STK-D38,exclusion criteria,Design estimate
 shared.min_catalog_match_fraction_for_reused_wcs,AST-D19,judgment,Design estimate
 shared.min_stars_to_verify_reused_wcs,AST-D19,judgment,Design estimate
@@ -471,6 +489,8 @@ stacking.cross_axis_start,STK-D58,measurement,Design estimate
 stacking.dark_current_allowance_adu_per_second,STK-54,judgment,Partly measured
 stacking.dark_current_minimum_exposures,STK-54,judgment,Partly measured
 stacking.dark_exposure_match_seconds,STK-D07,exclusion criteria,Design estimate
+stacking.dark_outlier_count_mad_multiple,STK-D77,exclusion criteria,Design estimate
+stacking.dark_outlier_count_minimum_fraction,STK-D77,exclusion criteria,Design estimate
 stacking.darkest_sky_level,STK-29,measurement,Partly measured
 stacking.default_fwhm_degradation_ratio,STK-25,judgment,Partly measured
 stacking.default_gap_ratio_threshold,STK-04,exclusion criteria,Partly measured
@@ -508,7 +528,9 @@ stacking.gain_source_sigmas,STK-D10,measurement,Design estimate
 stacking.highlight_knee,STK-32,measurement,Partly measured
 stacking.lightest_sky_level,STK-29,measurement,Partly measured
 stacking.masked_stretch_center_tolerance_fraction,STK-D75,judgment,Design estimate
+stacking.masked_stretch_crushed_share,STK-D75,judgment,Design estimate
 stacking.masked_stretch_feather_pixels,STK-D75,measurement,Design estimate
+stacking.masked_stretch_knee,STK-D75,judgment,Design estimate
 stacking.masked_stretch_maximum_size_ratio,STK-D75,judgment,Design estimate
 stacking.masked_stretch_minimum_region_pixels,STK-D75,judgment,Design estimate
 stacking.masked_stretch_minimum_size_ratio,STK-D75,judgment,Design estimate

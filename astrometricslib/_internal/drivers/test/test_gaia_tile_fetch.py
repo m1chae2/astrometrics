@@ -9,6 +9,7 @@ and the depth recorded when an answer hits the row limit.
 
 import sys
 import types
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -23,6 +24,7 @@ from astrometricslib._internal.drivers.gaia_cone_driver import (
     tile_circle,
     tile_outline_points,
 )
+from astrometricslib._internal.drivers.outside_services import gateway
 from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points, pixel_source_id_range
 from astrometricslib.foundation.errors import ExternalServiceError
 
@@ -124,7 +126,6 @@ def test_the_esa_query_asks_for_the_missing_depth_only(monkeypatch: pytest.Monke
     module = types.ModuleType("astroquery.gaia")
     module.Gaia = _Gaia  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "astroquery.gaia", module)
-    monkeypatch.setattr(gaia_cone_driver, "require_online", lambda service: None)
 
     gaia_cone_driver.query_gaia_tile_esa(LEVEL, 42, 18.0, 20.0, 5000)
 
@@ -256,11 +257,9 @@ def _install_fake_vizier(
             return outcome
 
     monkeypatch.setitem(sys.modules, "astroquery.vizier", types.SimpleNamespace(Vizier=FakeVizier))
-    monkeypatch.setattr(
-        gaia_cone_driver, "get_configuration", lambda: _FakeVizierConfiguration(preferred_server)
-    )
-    monkeypatch.setattr(gaia_cone_driver, "_last_answered_vizier_server", None)
-    monkeypatch.setattr(gaia_cone_driver, "_vizier_preference_when_remembered", None)
+    monkeypatch.setattr(gateway, "get_configuration", lambda: _FakeVizierConfiguration(preferred_server))
+    monkeypatch.setattr(gateway, "_last_answered", {})
+    monkeypatch.setattr(gateway, "_preference_when_remembered", {})
     return asked
 
 
@@ -315,9 +314,7 @@ def test_a_strasbourg_preference_and_a_changed_preference_for_vizier(monkeypatch
     )
     _cone()
     assert [server for server, _ in asked] == [CDS_VIZIER]
-    monkeypatch.setattr(
-        gaia_cone_driver, "get_configuration", lambda: _FakeVizierConfiguration(HARVARD_VIZIER)
-    )
+    monkeypatch.setattr(gateway, "get_configuration", lambda: _FakeVizierConfiguration(HARVARD_VIZIER))
     asked.clear()
     _cone()
     assert [server for server, _ in asked] == [HARVARD_VIZIER]
@@ -491,27 +488,39 @@ def test_vizier_follows_esa_then_vizier_goes_shallower() -> None:
     assert errors == ["ESA Gaia archive", "VizieR", "VizieR"]
 
 
-def test_every_failure_raises_and_skipped_services_are_not_called() -> None:
-    """All attempts failing raises; skipped services are not called."""
+def test_every_failure_raises_after_trying_each_service() -> None:
+    """All attempts failing raises, and each service was asked."""
     calls: list[str] = []
 
-    def esa(*arguments: object) -> Table:
-        """Fail like a busy archive.
+    def failing(service: str) -> Callable[..., Table]:
+        """Make a service query that fails like a busy service.
 
-        Parameters
-        ----------
-        *arguments : `object`
-            The query arguments.
-
-        Raises
-        ------
-        OSError
-            Always.
+        Returns
+        -------
+        query : `Callable`
+            A function that records its service and raises.
         """
-        calls.append("esa")
-        raise OSError("busy")
 
-    with pytest.raises(ExternalServiceError):
-        _fetch(esa_query=esa, skip_service=lambda service: service == "VizieR")
+        def query(*arguments: object) -> Table:
+            """Fail like a busy service.
 
-    assert calls == ["esa"]
+            Parameters
+            ----------
+            *arguments : `object`
+                The query arguments.
+
+            Raises
+            ------
+            OSError
+                Always.
+            """
+            calls.append(service)
+            raise OSError("busy")
+
+        return query
+
+    with pytest.raises(ExternalServiceError, match="every service"):
+        _fetch(esa_query=failing("esa"), vizier_query=failing("vizier"))
+
+    assert calls[0] == "esa"
+    assert "vizier" in calls

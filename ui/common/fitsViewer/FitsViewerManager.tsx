@@ -70,6 +70,8 @@ interface Props {
   restoreView?: RestoreView | null;
   /** Called when the zoom or the point at the center changes; see `FitsRenderer`. */
   onViewChange?: (view: SavedViewport) => void;
+  /** Called with true when the view is at the smallest zoom (the fit); see `FitsRenderer`. */
+  onMinimumZoomChange?: (atMinimum: boolean) => void;
 }
 
 /**
@@ -101,7 +103,8 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   stackOrientation,
   focusStar,
   restoreView,
-  onViewChange
+  onViewChange,
+  onMinimumZoomChange
 }, ref) => {
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
   if (imageUrl || imageBlob || previewBlob) {
@@ -133,6 +136,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         focusStar={focusStar}
         restoreView={restoreView}
         onViewChange={onViewChange}
+        onMinimumZoomChange={onMinimumZoomChange}
       />
     );
   }

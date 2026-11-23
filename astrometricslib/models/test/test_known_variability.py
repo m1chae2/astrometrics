@@ -110,7 +110,8 @@ def test_the_description_names_the_catalogs_that_were_consulted() -> None:
     assert all_three == "Not listed as variable in SIMBAD, Gaia DR3 or VSX."
 
     assert "SIMBAD or VSX" in describe_known_variability(KnownVariability.KNOWN_VARIABLE, ["SIMBAD", "VSX"])
-    assert "nothing is known" in describe_known_variability(KnownVariability.UNKNOWN, [])
+    unverified = describe_known_variability(KnownVariability.UNKNOWN, [])
+    assert unverified.startswith("Unverified") and "SIMBAD, Gaia DR3 or VSX" in unverified
 
 
 def test_a_star_with_no_recorded_types_is_unknown() -> None:

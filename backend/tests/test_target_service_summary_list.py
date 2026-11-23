@@ -134,3 +134,23 @@ def test_file_list_reports_only_stacks_that_exist(tmp_path: Path) -> None:
 
     assert result["stackedImage"] is None
     assert result["stackedSpectralTarget"] == str(moved)
+
+
+def test_file_list_names_the_preferred_stack_configuration() -> None:
+    """The file list names the camera and optic of the current stack."""
+    target = _target("M 31")
+    target.stacking = target.stacking.model_validate({
+        "stacksByConfiguration": {
+            "nikon": {"configurationKey": "nikon", "camera": "Nikon D5300", "focalLengthMm": 300.0},
+            "asi": {
+                "configurationKey": "asi",
+                "camera": "ZWO ASI 533MM Pro",
+                "focalLengthMm": 405.2,
+                "isPreferred": True,
+            },
+        },
+    })
+
+    result = _service_with(target).get_file_list("M 31")
+
+    assert result["stackConfiguration"] == {"camera": "ZWO ASI 533MM Pro", "focalLengthMm": 405}

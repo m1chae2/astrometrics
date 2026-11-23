@@ -31,7 +31,7 @@ The rules:
 
 ### `planning.py`
 
-`ObservationPlanning` (`wayfinder.planning`) decides what to observe and when. It looks up coordinates, lists sources and catalogs, works out visibility and mosaic panels, gives advice for tonight and for calibration frames, and builds and edits observation packages (a package is a target with its planned exposures) and session queues. Every edit is its own call with its own revision, and `expected_revision` on each call makes the library refuse an edit made from an old copy.
+`ObservationPlanning` (`wayfinder.planning`) decides what to observe and when. It looks up coordinates, lists sources and catalogs, works out visibility and mosaic panels, gives advice for tonight and for calibration frames, and builds and edits observation packages (a package is a target with its planned exposures) and session queues. A name lookup, a magnitude lookup and the online region search ask SIMBAD through `astrometricslib.drivers.get_simbad_driver`, the same driver the image pipelines use. A fresh stored answer is used with no network call, and when SIMBAD cannot be reached, or the outside-service gateway has paused it after repeated trouble or a 429 or 503 reply, the last stored answer is used with a warning that gives its age. The gateway also limits SIMBAD to 4 requests per second per server. The deep star catalog builder asks the ESA Gaia archive through `astrometricslib.drivers.get_gaia_archive`, under the same rules. Every edit is its own call with its own revision, and `expected_revision` on each call makes the library refuse an edit made from an old copy.
 
 ### `execution.py`
 

@@ -5,17 +5,17 @@
  * and that clicking a mark picks that frame.
  */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StarShapesSummary, NOT_MEASURED_NOTE } from '../components/StarShapesSummary';
-import { buildStarShapeChart, describeFrameCounts } from '../components/StarShapeChart';
+import { buildStarShapeChart, describeFrameCounts, zoomXRange, panXRange, FULL_X_RANGE } from '../components/StarShapeChart';
 import type { FrameStatus, FrameStatusReport, StarShapeReview } from '../../common/types/backendTypes';
 import { describeFrameStatus } from '../utils/frameStatus';
 
 // Plotly cannot draw in the test environment, so the base plot is a stand-in that shows what it was given.
-const plotProps: { current: { data: any[]; layout: any; onClick?: (event: any) => void } | null } = { current: null };
+const plotProps: { current: { data: any[]; layout: any; onClick?: (event: any) => void; onHover?: (event: any) => void; onUnhover?: () => void } | null } = { current: null };
 vi.mock('../../common/components/plotting/BasePlot', () => ({
-    BasePlot: (props: { data: any[]; layout: any; onClick?: (event: any) => void }) => {
+    BasePlot: (props: { data: any[]; layout: any; onClick?: (event: any) => void; onHover?: (event: any) => void; onUnhover?: () => void }) => {
         plotProps.current = props;
         return <div data-testid="base-plot" />;
     },
@@ -77,10 +77,26 @@ describe('StarShapesSummary', () => {
     });
 });
 
+describe('hover label', () => {
+    it('sits above the hovered bar, without an arrow, and goes away when the pointer leaves', () => {
+        const frames = report().frames!;
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(frames)} selectedPath={null} onSelectFrame={() => {}} />);
+        act(() => plotProps.current!.onHover!({ points: [{ text: 'a.fits<br>when', bbox: { x0: 100, x1: 140, y0: 50 } }] }));
+        const tip = screen.getByTestId('star-shape-tip');
+        expect(tip.textContent).toBe('a.fitswhen');
+        expect(tip.style.left).toBe('120px');
+        expect(tip.style.top).toBe('50px');
+        expect(tip.querySelector('svg, path')).toBeNull();
+        expect(plotProps.current!.data.every((trace: { hoverinfo: string }) => trace.hoverinfo === 'none')).toBe(true);
+        act(() => plotProps.current!.onUnhover!());
+        expect(screen.queryByTestId('star-shape-tip')).toBeNull();
+    });
+});
+
 describe('buildStarShapeChart', () => {
     const frames = report().frames!;
     const build = (selected: string | null = null) => buildStarShapeChart(review().series!, new Set(['/lib/c.fits']), selected, frames, statusesOf(frames));
-    type Points = { x: number[]; y: number[]; customdata: string[]; text: string[] };
+    type Points = { base: number[]; x: number[]; y: number[]; customdata: string[]; text: string[] };
 
     it('makes lanes only for the statuses present, in order', () => {
         const chart = build();
@@ -92,25 +108,28 @@ describe('buildStarShapeChart', () => {
         const chart = build();
         const flagged = chart.traces[2] as unknown as Points;
         expect(flagged.customdata).toEqual(['/lib/c.fits']);
-        expect(flagged.x[0]).toBeGreaterThanOrEqual(0);
-        expect(flagged.x[0]).toBeLessThanOrEqual(1);
+        expect(flagged.base[0]).toBeGreaterThanOrEqual(0);
+        expect(flagged.base[0]).toBeLessThanOrEqual(1);
         expect(flagged.y).toEqual([1]);
         expect((chart.traces[3] as unknown as Points).customdata).toEqual(['/lib/a.fits', '/lib/b.fits']);
         expect(chart.drawnCount).toBe(5);
     });
 
-    it('puts the file name, status and reason in the hover text', () => {
+    it('puts the file name and time, not the status or reason, in the hover text', () => {
         const cloud = build().traces[0] as unknown as Points;
         expect(cloud.text[0]).toMatch(/d\.fits/);
-        expect(cloud.text[0]).toMatch(/Set aside: cloud/);
-        expect(cloud.text[0]).toMatch(/clouded reason/);
+        expect(cloud.text[0].split('<br>')).toHaveLength(2);
+        expect(cloud.text[0]).not.toMatch(/Set aside|reason/);
     });
 
-    it('rings the picked frame', () => {
+    it('rings the picked frame from its own bar and row', () => {
         const chart = build('/lib/d.fits');
-        const ring = chart.traces[chart.traces.length - 1];
-        expect(ring.name).toBe('Selected');
-        expect((ring as unknown as Points).customdata).toEqual(['/lib/d.fits']);
+        expect(chart.traces.some((trace) => trace.name === 'Selected')).toBe(false);
+        const lane = chart.traces.find((trace) => (trace as unknown as Points).customdata.includes('/lib/d.fits')) as unknown as Points;
+        const index = lane.customdata.indexOf('/lib/d.fits');
+        expect(chart.selection).toEqual({ x0: lane.base[index], x1: lane.base[index] + lane.x[index], y: lane.y[index] });
+        expect(build('/lib/a.fits').selection).not.toEqual(chart.selection);
+        expect(build(null).selection).toBeNull();
     });
 
     it('gives every frame its own place, one section per night, with a break between', () => {
@@ -121,20 +140,20 @@ describe('buildStarShapeChart', () => {
         const chart = buildStarShapeChart(series, new Set(), null);
         expect(chart.drawnCount).toBe(71);
         const included = chart.traces[0] as unknown as Points;
-        expect(included.x.length).toBe(71);
-        expect(new Set(included.x).size).toBe(71);
+        expect(included.base.length).toBe(71);
+        expect(new Set(included.base).size).toBe(71);
         expect(chart.nights.map((item) => item.count)).toEqual([10, 61]);
         expect(chart.nights[0].end).toBeLessThan(chart.nights[1].start);
         expect(chart.nightBreaks.length).toBe(1);
-        expect(included.x.slice(0, 10).every((x) => x >= chart.nights[0].start && x <= chart.nights[0].end)).toBe(true);
-        expect(included.x.slice(10).every((x) => x >= chart.nights[1].start && x <= chart.nights[1].end)).toBe(true);
+        expect(included.base.slice(0, 10).every((x) => x >= chart.nights[0].start && x <= chart.nights[0].end)).toBe(true);
+        expect(included.base.slice(10).every((x) => x >= chart.nights[1].start && x <= chart.nights[1].end)).toBe(true);
     });
 
     it('draws a single night as one section with no break', () => {
         const chart = buildStarShapeChart(review().series!, new Set(), null);
         expect(chart.nights.length).toBe(1);
         expect(chart.nightBreaks).toEqual([]);
-        expect(new Set((chart.traces[0] as unknown as Points).x).size).toBe(3);
+        expect(new Set((chart.traces[0] as unknown as Points).base).size).toBe(3);
     });
 
     it('keeps a one-frame night visible next to a long one', () => {
@@ -153,5 +172,136 @@ describe('describeFrameCounts', () => {
     it('writes the count line', () => {
         expect(describeFrameCounts({ Included: 117, 'Set aside: trailed': 5, Flagged: 10 }))
             .toBe('132 frames: 117 included, 5 set aside (5 trailed), 10 flagged');
+    });
+});
+
+describe('frame status timeline zoom', () => {
+    const rangeNow = () => plotProps.current!.layout.xaxis.range as [number, number];
+
+    it('zooms in around the pointer, never past the full range, and resets on double-click', () => {
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(report().frames!)} selectedPath={null} onSelectFrame={() => {}} />);
+        const chart = screen.getByTestId('star-shape-chart');
+        // Zooming out at the full range is left to the page.
+        expect(fireEvent.wheel(chart, { deltaY: 200 })).toBe(true);
+        expect(rangeNow()).toEqual([FULL_X_RANGE[0], FULL_X_RANGE[1]]);
+        // Zooming in is handled (the page does not scroll).
+        expect(fireEvent.wheel(chart, { deltaY: -300 })).toBe(false);
+        const zoomed = rangeNow();
+        expect(zoomed[1] - zoomed[0]).toBeLessThan(1.02);
+        fireEvent.wheel(chart, { deltaY: 5000 });
+        expect(rangeNow()[1] - rangeNow()[0]).toBeCloseTo(FULL_X_RANGE[1] - FULL_X_RANGE[0]);
+        fireEvent.wheel(chart, { deltaY: -300 });
+        fireEvent.doubleClick(chart);
+        expect(rangeNow()).toEqual([FULL_X_RANGE[0], FULL_X_RANGE[1]]);
+    });
+
+    it('keeps the zoomed range inside the full range and keeps the point under the pointer', () => {
+        const [start, end] = zoomXRange([-0.01, 1.01], 1, -500);
+        expect(end).toBeCloseTo(1.01);
+        expect(start).toBeGreaterThan(-0.01);
+        expect(zoomXRange([0.4, 0.6], 0.5, -100)[0]).toBeGreaterThan(0.4);
+    });
+});
+
+describe('frame status timeline hover and click', () => {
+    it('picks the nearest mark in x and y, so a set-aside mark is its own frame', () => {
+        const onSelectFrame = vi.fn();
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(report().frames!)} selectedPath={null} onSelectFrame={onSelectFrame} />);
+        const layout = plotProps.current!.layout;
+        expect(layout.hovermode).toBe('closest');
+        expect(layout.hoverdistance).toBeLessThanOrEqual(10);
+        const traces = plotProps.current!.data as unknown as Array<{ name: string; x: number[]; y: number[]; customdata: string[] }>;
+        const cloud = traces.find((trace) => trace.name === 'Set aside: cloud')!;
+        const included = traces.find((trace) => trace.name === 'Included')!;
+        expect(cloud.y[0]).not.toBe(included.y[0]);
+        plotProps.current!.onClick!({ points: [{ customdata: cloud.customdata[0] }] });
+        expect(onSelectFrame).toHaveBeenCalledWith('/lib/d.fits');
+    });
+});
+
+describe('frame status timeline outline', () => {
+    const outline = () => (plotProps.current!.layout.shapes as Array<{ type: string; x0: number; x1: number; y0: number; y1: number }>).filter((shape) => shape.type === 'rect');
+
+    it('stays on the bar through the click, the viewer load, a re-read of the statuses, hover and unhover', () => {
+        const props = () => ({ review: review(), frameReport: report(), frameStatuses: statusesOf(report().frames!), onSelectFrame: () => {} });
+        const view = render(<StarShapesSummary {...props()} selectedPath={null} />);
+        expect(outline()).toHaveLength(0);
+        // The click sets the selection; the viewer then loads the file and the screen re-reads everything.
+        view.rerender(<StarShapesSummary {...props()} selectedPath="/lib/d.fits" />);
+        const first = outline()[0];
+        expect(first).toBeDefined();
+        view.rerender(<StarShapesSummary {...props()} selectedPath="/lib/d.fits" />);
+        act(() => { plotProps.current!.onHover!({ points: [{ text: 'd', bbox: { x0: 0, x1: 4, y0: 0 } }] }); });
+        act(() => { plotProps.current!.onUnhover!(); });
+        expect(outline()).toEqual([first]);
+        // The same frame written with backslashes or inside _excluded still gets the outline; another frame moves it.
+        view.rerender(<StarShapesSummary {...props()} selectedPath={"\\lib\\d.fits"} />);
+        expect(outline()).toEqual([first]);
+        view.rerender(<StarShapesSummary {...props()} selectedPath="/lib/a.fits" />);
+        expect(outline()[0]).not.toEqual(first);
+    });
+});
+
+describe('frame status timeline pan', () => {
+    it('clamps a pan to the full range', () => {
+        expect(panXRange([0.2, 0.4], -5)[0]).toBeCloseTo(FULL_X_RANGE[0]);
+        const right = panXRange([0.2, 0.4], 5);
+        expect(right[1]).toBeCloseTo(FULL_X_RANGE[1]);
+        expect(right[1] - right[0]).toBeCloseTo(0.2);
+    });
+
+    it('stops zooming at the minimum span', () => {
+        const [start, end] = zoomXRange([0.4, 0.6], 0.5, -100000, 0.1);
+        expect(end - start).toBeCloseTo(0.1);
+    });
+
+    it('drags to pan, ignores the click that ends a drag, and still picks on a plain click', () => {
+        const onSelectFrame = vi.fn();
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(report().frames!)} selectedPath={null} onSelectFrame={onSelectFrame} />);
+        const chart = screen.getByTestId('star-shape-chart');
+        const rangeNow = () => plotProps.current!.layout.xaxis.range as [number, number];
+        fireEvent.wheel(chart, { deltaY: -400 });
+        const zoomed = rangeNow();
+        const click = () => plotProps.current!.onClick!({ points: [{ customdata: '/lib/d.fits' }] });
+        // A press with no movement is a click.
+        fireEvent.mouseDown(chart, { clientX: 100, button: 0 });
+        fireEvent.mouseUp(window, { clientX: 100 });
+        click();
+        expect(onSelectFrame).toHaveBeenCalledTimes(1);
+        // A drag moves the range (width is 0 in jsdom, so it only has to be flagged as a drag) and picks nothing.
+        fireEvent.mouseDown(chart, { clientX: 100, button: 0 });
+        fireEvent.mouseMove(window, { clientX: 140 });
+        fireEvent.mouseUp(window, { clientX: 140 });
+        click();
+        expect(onSelectFrame).toHaveBeenCalledTimes(1);
+        expect(rangeNow()[1] - rangeNow()[0]).toBeCloseTo(zoomed[1] - zoomed[0]);
+    });
+});
+
+describe('frame status timeline bars', () => {
+    it('draws no text on the plot; the file name and time are only in the hover tooltip', () => {
+        const chart = buildStarShapeChart(review().series ?? [], new Set(), '/lib/a.fits', report().frames, statusesOf(report().frames!));
+        expect(chart.traces.length).toBeGreaterThan(0);
+        for (const trace of chart.traces) {
+            expect((trace as { textposition?: string }).textposition).toBe('none');
+            expect((trace as { hoverinfo?: string }).hoverinfo).toBe('none');
+        }
+    });
+
+    it('draws back-to-back frames as bars that meet, with a minimum width for short ones', () => {
+        const start = 1_000_000;
+        const series = [
+            { path: '/lib/a.fits', timestamp: start, elongation: 1 },
+            { path: '/lib/b.fits', timestamp: start + 60, elongation: 1 },
+            { path: '/lib/c.fits', timestamp: start + 600, elongation: 1 },
+        ];
+        const exposures = new Map([['/lib/a.fits', 60], ['/lib/b.fits', 60], ['/lib/c.fits', 60]]);
+        const bars = buildStarShapeChart(series, new Set(), null, null, new Map(), { exposureSeconds: exposures })
+            .traces[0] as unknown as { base: number[]; x: number[] };
+        expect(bars.base[0] + bars.x[0]).toBeCloseTo(bars.base[1], 9);
+        expect(bars.base[1] + bars.x[1]).toBeLessThan(bars.base[2]);
+        const thin = buildStarShapeChart(series, new Set(), null, null, new Map(), { minWidth: 0.05 })
+            .traces[0] as unknown as { x: number[] };
+        expect(thin.x.every((width) => width >= 0.05)).toBe(true);
     });
 });

@@ -165,8 +165,9 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "the residual (position error), pixel scale (sky angle per pixel) or FWHM is missing."
     ),
     "catalog_lookup": (
-        "Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries "
-        "after repeated failures) tripped during the run, or when at least "
+        "Fails when the outside-service gateway paused a catalog (it pauses a host that keeps "
+        "failing or answers too busy, and a paused catalog is answered from stored results) "
+        "during the run, or when at least "
         "`MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made."
     ),
     # Photometry run gates
@@ -1736,9 +1737,10 @@ The gate detail names the one used.
 4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept.
    Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch
    2016.0 with a flag.
-5. **Catalog outages.** Repeated failures trip a process-wide circuit breaker: a shared switch
-   that stops further online catalog queries. Unnamed stars keep position-based names, and
-   `catalog_lookup` reports the outage.
+5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers
+   too busy, and the pause is shared by every process. A paused catalog is answered from stored
+   results, with a warning. Unnamed stars keep position-based names, and `catalog_lookup`
+   reports the outage.
 
 <<quality_section>>"""
     values["analysis_note"] = ANALYSIS_STAGES_NOTE

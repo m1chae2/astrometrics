@@ -1078,7 +1078,7 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         background_outcomes=background_outcomes,
         # The masked stretch is for imaging stacks of a nebula or a galaxy.
         object_category=None if run.has_spectral else run.target.object_category,
-        target_anchor=anchor_for_target(run.target),
+        target_anchor=None if run.has_spectral else anchor_for_target(run.target),
     )
     # A skipped step is a warning of this job, not only a line in the log.
     record_preview_step_notices(

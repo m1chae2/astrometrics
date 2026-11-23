@@ -186,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
                 else write_stack_preview(
                     stacked_path,
                     object_category=None if is_spectral else target.object_category,
-                    target_anchor=anchor_for_target(target),
+                    target_anchor=None if is_spectral else anchor_for_target(target),
                 )
             )
             if not preview:

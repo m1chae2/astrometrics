@@ -162,6 +162,15 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # and the target's processed-image pointer), so the AI's read-only
     # profile withholds it.
     "processing:remake_preview": ("stack_review_service", "start_preview_remake"),
+    # The nebulae and galaxies SIMBAD lists inside the target's stack, from
+    # its plate solution. A read: the answer is kept beside the stack, so
+    # only the first call per stack file asks SIMBAD. SIMBAD out of reach or
+    # a stack with no plate solution is a message in the answer, not an error.
+    "processing:list_bright_objects": ("astrometrics.processing", "list_preview_bright_objects"),
+    # Saves the user's choice of the object the masked stretch protects on
+    # the target. It makes no picture: the choice is read the next time the
+    # target is stacked or its preview is made.
+    "processing:set_bright_object": ("astrometrics.processing", "set_preview_bright_object"),
     # What a stack would do with its frames: which it would set aside and why,
     # and which darks, flats and bias each exposure group would use. It reads
     # every frame, so the service runs it as a background job. Nothing is

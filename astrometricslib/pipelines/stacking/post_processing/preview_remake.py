@@ -188,7 +188,7 @@ def remake_stack_preview(
         background_outcomes,
         # The masked stretch is for imaging stacks of a nebula or a galaxy.
         object_category=None if spectral else target.object_category,
-        target_anchor=anchor_for_target(target),
+        target_anchor=None if spectral else anchor_for_target(target),
     )
     record_preview_step_notices(
         skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration

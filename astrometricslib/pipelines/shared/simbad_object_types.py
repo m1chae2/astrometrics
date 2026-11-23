@@ -20,6 +20,22 @@ ALL_TYPES_COLUMNS = ("alltypes.otypes", "ALLTYPES.OTYPES", "otypes")
 # The votable fields to ask SIMBAD for so a row carries what this module reads.
 OBJECT_TYPE_VOTABLE_FIELDS = ("otype", "alltypes")
 
+# The columns the star identifier asks for in its field-wide SIMBAD question.
+# "ids" carries the common names used to label a star. "alltypes" lists every
+# object type, not just the main one: the main type of the eclipsing binary
+# Algol is "SB*". The stored answers are keyed on these columns, so every
+# reader of the stored field uses this one tuple.
+STAR_REGION_VOTABLE_FIELDS = (
+    "flux(V)",
+    "flux(B)",
+    "sp_type",
+    "ids",
+    "ra(d)",
+    "dec(d)",
+    "otype",
+    "alltypes",
+)
+
 
 def read_simbad_object_types(match: Any) -> str:
     """Read every object type SIMBAD lists for a matched star.

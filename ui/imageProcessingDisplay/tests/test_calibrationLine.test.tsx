@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { buildCalibrationReport } from '../utils/calibrationLine';
+import { buildCalibrationReport, chooseCalibrationScope, filterGroupsByScope } from '../utils/calibrationLine';
 import { CalibrationLine } from '../components/CalibrationLine';
 import type { CalibrationGroupMatch, GroupedFrameStat } from '../../common/types/backendTypes';
 
@@ -123,5 +123,38 @@ describe('CalibrationLine', () => {
         expect(table.querySelector(`[title="${sentence}"]`)).not.toBeNull();
         fireEvent.keyDown(trigger, { key: 'Escape' });
         expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
+    });
+});
+
+describe('calibration scope (M 31-like target with two cameras)', () => {
+    const asi = (exposure: string, darks: CalibrationGroupMatch): GroupedFrameStat => ({
+        ...group('L', exposure, darks, found(3), found(2)), camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405,
+    });
+    const nikon = (exposure: string): GroupedFrameStat => ({
+        ...group('', exposure, missing('no darks'), found(3), found(2)), camera: 'Nikon D5300', focalLengthMm: 300,
+    });
+    const groups = [asi('20', missing('no darks')), asi('120', found(5)), nikon('10'), nikon('20')];
+
+    it('follows the stack configuration and leaves other cameras out', () => {
+        const scope = chooseCalibrationScope('All', '', { camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405 });
+        expect(scope?.label).toBe('ZWO ASI 533MM Pro@405mm');
+        render(<CalibrationLine lightFrames={groups} scope={scope} />);
+        expect(screen.getByTestId('calibration-scope').textContent).toBe('ZWO ASI 533MM Pro@405mm');
+        expect(screen.getByTestId('calibration-line').textContent).toContain('Missing calibration (1)');
+        const rows = screen.getByTestId('calibration-missing').querySelectorAll('li');
+        expect(rows).toHaveLength(1);
+        expect(rows[0].textContent).toContain('L 20 s');
+        fireEvent.mouseEnter(screen.getByTestId('calibration-line').querySelector('[tabindex="0"]') as HTMLElement);
+        expect(screen.getByTestId('calibration-all-groups').querySelectorAll('tbody tr')).toHaveLength(2);
+    });
+
+    it('follows the File Browser when it is filtered to a camera', () => {
+        const scope = chooseCalibrationScope('Nikon D5300', '300', { camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405 });
+        expect(filterGroupsByScope(groups, scope).map((g) => g.camera)).toEqual(['Nikon D5300', 'Nikon D5300']);
+    });
+
+    it('shows every group when nothing narrows the scope', () => {
+        expect(chooseCalibrationScope('All', '', null)).toBeNull();
+        expect(filterGroupsByScope(groups, null)).toHaveLength(4);
     });
 });

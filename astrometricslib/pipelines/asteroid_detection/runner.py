@@ -130,7 +130,7 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
         )
         light_frames = [
             (frame.path, frame.timestamp)
-            for frame in target.frames
+            for frame in (request.frames if request.frames is not None else target.frames)
             if frame.role == "LIGHT" and frame.timestamp is not None
         ]
         all_candidates = pipeline.process(target.id, target.stacking.stacked_image, light_frames)
@@ -170,7 +170,11 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
         target = request.target
         metrics = result.payload["metrics"]
 
-        light_frames = [frame for frame in target.frames if frame.role == "LIGHT"]
+        light_frames = [
+            frame
+            for frame in (request.frames if request.frames is not None else target.frames)
+            if frame.role == "LIGHT"
+        ]
         asteroid_detection_sessions = derive_target_sessions(target.id, light_frames)
         # Per-session frame-exclusion identity isn't tracked by the
         # pipeline today (only the aggregate
@@ -246,7 +250,7 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
 
 def run_asteroid_detection_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
-    frames: Any,  # unused; asteroid detection reads target.frames itself
+    frames: Any,  # the frames of the stack's camera and optic; `None` means every frame of the target
     filter_type: Any,  # unused; asteroid detection has no filter concept
     catalog_access: Any,  # unused; candidates record on the target record, not via the catalog_access
     path: Any,  # unused; asteroid detection reads target.frames itself
@@ -264,8 +268,9 @@ def run_asteroid_detection_analysis(
     target : `Target`
         The target to search. Its `asteroid_detection.candidates` and
         `asteroid_detection.quality_summary` are set by this call.
-    frames : `Any`
-        Unused. Present so every pipeline runner shares one call signature.
+    frames : `list` [`FrameRecord`] or `None`
+        The frames to search. `None` means every frame of the target. The
+        analysis run passes only the frames of the stack's camera and optic.
     filter_type : `Any`
         Unused. Present so every pipeline runner shares one call signature.
     catalog_access : `Any`

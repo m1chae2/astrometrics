@@ -166,6 +166,130 @@ async def test_identify_stack_refuses_a_target_with_no_stack(monkeypatch: pytest
     assert [request["method"] for request in requests] == ["target:get"]
 
 
+BOTH_STACKS = {
+    "files": [
+        {"path": "/raw/L_1.fits", "filter": "L"},
+        {"path": "/raw/S_1.fits", "filter": "SPEC"},
+        {"path": "/raw/S_2.fits", "filter": "SPEC"},
+    ],
+    "stackedImage": "/stacks/M_13_L.fits",
+    "stackedSpectralTarget": "/stacks/M_13_SPEC.fits",
+}
+"""A target's file list: an imaging stack, a spectral stack, raw spectrum
+frames."""
+
+STARTED = {"status": "started", "jobId": "job-12", "logFile": "/logs/analysis.log"}
+"""The backend's answer when the analysis job starts."""
+
+
+@pytest.mark.anyio
+async def test_analyze_with_both_stacks_runs_photometry_and_spectroscopy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No stages and two stacks send both stacks, as the button does."""
+    requests = fake_backend(monkeypatch, {"target:get_files": BOTH_STACKS, "analysis:analyze_image": STARTED})
+
+    reply = await app_jobs.tool_processing_analyze("M 13")
+
+    assert [request["method"] for request in requests] == ["target:get_files", "analysis:analyze_image"]
+    assert requests[1]["params"] == {
+        "target_id": "M 13",
+        "image_files": ["/stacks/M_13_L.fits", "/stacks/M_13_SPEC.fits"],
+        "stages": ["photometry", "spectroscopy"],
+    }
+    assert reply["jobId"] == "job-12"
+    assert reply["stages"] == ["photometry", "spectroscopy"]
+    assert reply["paths"] == ["/stacks/M_13_L.fits", "/stacks/M_13_SPEC.fits"]
+    assert "jobs_query" in reply["follow"]
+
+
+@pytest.mark.anyio
+async def test_analyze_with_one_stack_runs_that_stacks_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a spectral stack gets spectroscopy, with the spectral filter."""
+    only_spectral = {"files": [], "stackedImage": None, "stackedSpectralTarget": "/stacks/M_13_SPEC.fits"}
+    requests = fake_backend(
+        monkeypatch, {"target:get_files": only_spectral, "analysis:analyze_image": STARTED}
+    )
+
+    await app_jobs.tool_processing_analyze("M 13")
+
+    assert requests[1]["params"] == {
+        "target_id": "M 13",
+        "image_files": ["/stacks/M_13_SPEC.fits"],
+        "filter_name": "SPEC",
+        "stages": ["spectroscopy"],
+    }
+
+
+@pytest.mark.anyio
+async def test_analyze_with_no_stack_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No stages and no stack is a clear error, and no job starts."""
+    requests = fake_backend(
+        monkeypatch, {"target:get_files": {"files": [], "stackedImage": None, "stackedSpectralTarget": None}}
+    )
+
+    with pytest.raises(NotFoundError, match="no stack to analyze"):
+        await app_jobs.tool_processing_analyze("M 13")
+
+    assert [request["method"] for request in requests] == ["target:get_files"]
+
+
+@pytest.mark.anyio
+async def test_analyze_with_stages_sends_each_stages_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Named stages send their own stacks; variation sends raw frames."""
+    requests = fake_backend(monkeypatch, {"target:get_files": BOTH_STACKS, "analysis:analyze_image": STARTED})
+
+    await app_jobs.tool_processing_analyze("M 13", stages=["astrometry"])
+    await app_jobs.tool_processing_analyze("M 13", stages=["spectral_variation"])
+
+    assert requests[1]["params"] == {
+        "target_id": "M 13",
+        "image_files": ["/stacks/M_13_L.fits"],
+        "stages": ["astrometry"],
+    }
+    assert requests[3]["params"] == {
+        "target_id": "M 13",
+        "image_files": ["/raw/S_1.fits", "/raw/S_2.fits"],
+        "filter_name": "SPEC",
+        "stages": ["spectral_variation"],
+    }
+
+
+@pytest.mark.anyio
+async def test_analyze_refuses_an_unknown_stage_before_any_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stage the app cannot run is refused and the backend is not called."""
+    requests = fake_backend(monkeypatch, {})
+
+    with pytest.raises(InvalidArgumentError, match="bogus"):
+        await app_jobs.tool_processing_analyze("M 13", stages=["photometry", "bogus"])
+    with pytest.raises(InvalidArgumentError, match="none given"):
+        await app_jobs.tool_processing_analyze("M 13", stages=[])
+
+    assert requests == []
+
+
+@pytest.mark.anyio
+async def test_analyze_refuses_a_stage_with_nothing_to_work_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spectroscopy on a target with no spectral stack is refused."""
+    only_imaging = {"files": [], "stackedImage": "/stacks/M_13_L.fits", "stackedSpectralTarget": None}
+    fake_backend(monkeypatch, {"target:get_files": only_imaging})
+
+    with pytest.raises(NotFoundError, match="spectroscopy"):
+        await app_jobs.tool_processing_analyze("M 13", stages=["spectroscopy"])
+
+
+@pytest.mark.anyio
+async def test_analyze_passes_an_already_running_answer_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The already_running answer reaches the caller with the job's id."""
+    running = {"status": "already_running", "jobId": "job-3", "logFile": "/logs/analysis.log"}
+    fake_backend(monkeypatch, {"target:get_files": BOTH_STACKS, "analysis:analyze_image": running})
+
+    reply = await app_jobs.tool_processing_analyze("M 13")
+
+    assert reply["status"] == "already_running"
+    assert reply["jobId"] == "job-3"
+
+
 @pytest.mark.anyio
 async def test_remake_preview_starts_the_apps_preview_job(monkeypatch: pytest.MonkeyPatch) -> None:
     """The run's overrides go to ``processing:remake_preview`` unchanged."""
@@ -236,3 +360,230 @@ async def test_a_job_tool_fails_clearly_when_the_backend_is_not_running(
 
     with pytest.raises(ExternalServiceError, match="Could not connect to the backend"):
         await app_jobs.tool_processing_stack("M 13")
+
+
+def active_job(job_id: str, job_type: str, target: str = "M 13", status: str = "running") -> dict:
+    """Build one job summary as ``jobs:query`` returns it.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The job id.
+    job_type : `str`
+        The job type.
+    target : `str`, optional
+        The target id.
+    status : `str`, optional
+        The job status.
+
+    Returns
+    -------
+    job : `dict`
+        The summary.
+    """
+    return {"id": job_id, "job_type": job_type, "target_id": target, "status": status}
+
+
+@pytest.mark.anyio
+async def test_cancel_stops_the_running_stacking_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The one running job is a stack: ``processing:cancel`` runs."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "jobs:query": {"jobs": [active_job("job-1", "stacking")]},
+            "processing:cancel": {"status": "cancelled", "message": None},
+        },
+    )
+
+    reply = await app_jobs.tool_processing_cancel("M 13")
+
+    assert [request["method"] for request in requests] == ["jobs:query", "processing:cancel"]
+    assert requests[1]["params"] == {"target_id": "M 13"}
+    assert reply["cancelled"] is True
+    assert reply["job_type"] == "stacking"
+    assert reply["job_ids"] == ["job-1"]
+
+
+@pytest.mark.anyio
+async def test_cancel_stops_a_waiting_analysis_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A waiting analysis job goes to ``analysis:cancel``."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "jobs:query": {"jobs": [active_job("job-2", "analysis", status="started")]},
+            "analysis:cancel": {"cancelled": True, "own_process": True, "reason": None},
+        },
+    )
+
+    reply = await app_jobs.tool_processing_cancel("M 13", job_type="analysis")
+
+    assert requests[1]["method"] == "analysis:cancel"
+    assert reply["cancelled"] is True
+    assert reply["job_type"] == "analysis"
+
+
+@pytest.mark.anyio
+async def test_cancel_by_job_id_reads_the_jobs_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A job id is looked up, and its own type picks the cancel call."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "jobs:query": {"job": active_job("job-3", "analysis")},
+            "analysis:cancel": {"cancelled": True, "own_process": True, "reason": None},
+        },
+    )
+
+    reply = await app_jobs.tool_processing_cancel("M 13", job_id="job-3")
+
+    assert requests[0]["params"] == {"job_id": "job-3"}
+    assert requests[1]["method"] == "analysis:cancel"
+    assert reply["job_ids"] == ["job-3"]
+
+
+@pytest.mark.anyio
+async def test_cancel_by_job_id_refuses_another_targets_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A job of another target is not cancelled."""
+    fake_backend(monkeypatch, {"jobs:query": {"job": active_job("job-4", "stacking", target="M 57")}})
+
+    with pytest.raises(InvalidArgumentError, match="belongs to"):
+        await app_jobs.tool_processing_cancel("M 13", job_id="job-4")
+
+
+@pytest.mark.anyio
+async def test_cancel_says_so_when_nothing_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No active job: nothing is cancelled and no cancel call is sent."""
+    requests = fake_backend(monkeypatch, {"jobs:query": {"jobs": []}})
+
+    reply = await app_jobs.tool_processing_cancel("M 13")
+
+    assert [request["method"] for request in requests] == ["jobs:query"]
+    assert reply["cancelled"] is False
+    assert "No job is running" in reply["reason"]
+
+
+@pytest.mark.anyio
+async def test_cancel_refuses_when_two_kinds_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two kinds of job run and none was named: the call is refused."""
+    fake_backend(
+        monkeypatch,
+        {"jobs:query": {"jobs": [active_job("job-1", "stacking"), active_job("job-2", "analysis")]}},
+    )
+
+    with pytest.raises(InvalidArgumentError, match="More than one kind"):
+        await app_jobs.tool_processing_cancel("M 13")
+
+
+@pytest.mark.anyio
+async def test_cancel_does_not_cancel_a_preview_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A picture remake has no Cancel in the app, so none is sent."""
+    requests = fake_backend(monkeypatch, {"jobs:query": {"jobs": [active_job("job-5", "preview")]}})
+
+    reply = await app_jobs.tool_processing_cancel("M 13")
+
+    assert [request["method"] for request in requests] == ["jobs:query"]
+    assert reply["cancelled"] is False
+    assert "picture remake" in reply["reason"]
+
+
+NEBULA = {
+    "simbad_id": "NGC 7635",
+    "object_type": "HII",
+    "category": "nebula",
+    "ra_deg": 350.2,
+    "dec_deg": 61.2,
+    "major_axis_arcmin": 15.0,
+}
+"""One object in the frame, as ``processing:list_bright_objects`` lists it."""
+
+
+@pytest.mark.anyio
+async def test_enhance_without_a_choice_lists_the_saved_choice_and_objects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading changes nothing and returns the choice with the objects."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "processing:list_bright_objects": {"objects": [NEBULA], "message": None},
+            "target:get": {"preview_bright_object": {"mode": "off"}},
+        },
+    )
+
+    reply = await app_jobs.tool_processing_enhance("M 52")
+
+    assert reply == {"current": "nothing", "objects": [NEBULA], "message": None}
+    assert "processing:set_bright_object" not in [request["method"] for request in requests]
+
+
+@pytest.mark.anyio
+async def test_enhance_without_objects_gives_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stack with no plate solution lists no objects and says why."""
+    fake_backend(
+        monkeypatch,
+        {
+            "processing:list_bright_objects": {"objects": [], "message": "Run Astrometry first."},
+            "target:get": {"previewBrightObject": {"mode": "auto"}},
+        },
+    )
+
+    reply = await app_jobs.tool_processing_enhance("M 52")
+
+    assert reply["current"] == "target"
+    assert reply["objects"] == []
+    assert reply["message"] == "Run Astrometry first."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("choice", "mode"), [("target", "auto"), ("Nothing", "off")])
+async def test_enhance_saves_the_two_fixed_choices(
+    monkeypatch: pytest.MonkeyPatch, choice: str, mode: str
+) -> None:
+    """Target and nothing are the backend's auto and off modes."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "processing:list_bright_objects": {"objects": [], "message": "Run Astrometry first."},
+            "processing:set_bright_object": {"mode": mode},
+        },
+    )
+
+    reply = await app_jobs.tool_processing_enhance("M 52", choice)
+
+    assert requests[-1]["params"] == {"target": "M 52", "mode": mode}
+    assert "next stack" in reply["applies"]
+
+
+@pytest.mark.anyio
+async def test_enhance_saves_an_object_from_the_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An object name, in any case or spacing, sends its listed position."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "processing:list_bright_objects": {"objects": [NEBULA], "message": None},
+            "processing:set_bright_object": {"mode": "object", "simbad_id": "NGC 7635"},
+        },
+    )
+
+    await app_jobs.tool_processing_enhance("M 52", "ngc7635")
+
+    assert requests[-1]["params"] == {
+        "target": "M 52",
+        "mode": "object",
+        "simbad_id": "NGC 7635",
+        "ra_deg": 350.2,
+        "dec_deg": 61.2,
+        "major_axis_arcmin": 15.0,
+    }
+
+
+@pytest.mark.anyio
+async def test_enhance_refuses_an_object_not_in_the_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown name is refused with the list, and nothing is saved."""
+    requests = fake_backend(
+        monkeypatch, {"processing:list_bright_objects": {"objects": [NEBULA], "message": None}}
+    )
+
+    with pytest.raises(InvalidArgumentError, match="NGC 7635"):
+        await app_jobs.tool_processing_enhance("M 52", "M 31")
+
+    assert [request["method"] for request in requests] == ["processing:list_bright_objects"]

@@ -232,8 +232,9 @@ def run_stack(
 
     from astrometricslib.pipelines.stacking import stage as stacking_stage
 
+    # The job is recorded first, so a stack waiting for a slot shows in the
+    # job list and returns its job id.
     with (
-        stacking_slot(),
         registered_job(
             enabled=register_job,
             job_type="stacking",
@@ -242,6 +243,7 @@ def run_stack(
             completed_message=f"[{target.id}] Stacking completed",
             failed_message=f"[{target.id}] Stacking failed",
         ) as job,
+        job.holding_slot(stacking_slot()),
     ):
         stacked_path = stacking_stage.stack_frames(
             target,

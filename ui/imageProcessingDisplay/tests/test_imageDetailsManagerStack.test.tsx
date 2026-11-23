@@ -21,7 +21,11 @@ vi.mock('../../common/services/backendApi', () => ({
         return callBackendMock(...args);
     },
 }));
-vi.mock('../../common/services/imaging/processingService', () => ({ fetchJobs: vi.fn().mockResolvedValue([]) }));
+const cancelProcessingMock = vi.fn().mockResolvedValue({ status: 'cancelled', message: null });
+vi.mock('../../common/services/imaging/processingService', () => ({
+    fetchJobs: vi.fn().mockResolvedValue([]),
+    cancelProcessing: (...args: unknown[]) => cancelProcessingMock(...args),
+}));
 
 const bothStacks: AnalysisSelectionInput = {
     filterType: 'L',
@@ -157,19 +161,22 @@ describe('ImageDetailsManager Stack Frames split button', () => {
         expect(callBackendMock).not.toHaveBeenCalled();
     });
 
-    /** While a remake runs, the button shows busy and cannot be used; it returns when the job ends. */
-    it('shows a busy button without Cancel while the picture is remade', async () => {
+    /** While a remake runs, the busy button cannot be used, Cancel stops the job, and the button returns. */
+    it('shows a busy button and a Cancel button while the picture is remade, and Cancel stops it', async () => {
         const user = userEvent.setup();
         let finish: (value: unknown) => void = () => undefined;
         callBackendMock.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+        cancelProcessingMock.mockClear();
         setup({ analysisSelectionInput: { ...bothStacks, stackedSpectralTarget: null }, onCancel: vi.fn() });
         await openMenu(user);
         await user.click(screen.getByRole('menuitem', { name: /Post Process Target/ }));
         const busy = await screen.findByRole('button', { name: /Post Processing/ });
         expect((busy as HTMLButtonElement).disabled).toBe(true);
-        expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
-        finish(finished('/t/L_stack.fits'));
+        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(cancelProcessingMock).toHaveBeenCalledWith('M 57');
+        finish({ status: 'cancelled', job_id: null, result: null });
         expect(await screen.findByText('Stack Frames')).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
     });
 
     /** A failed remake shows its message and stops the queue. */

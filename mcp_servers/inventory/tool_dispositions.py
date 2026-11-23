@@ -301,11 +301,11 @@ DECISIONS = {
     ),
     "processing_cancel": ToolDecision(
         "keep",
-        "Built 2026-11-22. Cancels a target's running or waiting stacking or analysis job as the app's "
-        "Cancel button does, through processing:cancel or analysis:cancel. It reads the active jobs "
-        "through jobs:query to pick the kind (or the job given by job_id) and refuses when two kinds run "
-        "and none was named. A picture remake has no Cancel in the app, so it is reported, not "
-        "cancelled. Changes app jobs only; nothing is deleted.",
+        "Built 2026-11-22. Cancels a target's running or waiting stacking, analysis or picture remake "
+        "(preview) job as the app's Cancel button does, through processing:cancel or analysis:cancel. "
+        "It reads the active jobs through jobs:query to pick the kind (or the job given by job_id) and "
+        "refuses when two kinds run and none was named. A cancelled picture remake puts the old pictures "
+        "back. Changes app jobs only; nothing is deleted.",
         "process",
     ),
     "processing_enhance": ToolDecision(

@@ -9,8 +9,9 @@ from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import run_as_background_job
+from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment, run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
+from backend.services.processing.stack_review_service import abandon_preview_job, is_preview_job_running
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,37 @@ CALIBRATION_MEASUREMENT_GRACE_SECONDS = 3.0
 # The kinds of calibration frame that are measured after they arrive. Flats
 # are measured when the library rescans them, so they are not listed.
 MEASURED_CALIBRATION_KINDS = ("dark", "bias")
+
+
+# The running stacking jobs of this process, by job id, so a cancel can stop
+# the job's slot wait and its next stage. A job is listed from the moment its
+# task starts until the task ends.
+_stack_abandonments: dict[str, RunAbandonment] = {}
+_stack_abandonments_lock = threading.Lock()
+
+
+def abandon_stacking_job(job_id: str) -> bool:
+    """Give up on a running stacking job of this process.
+
+    The job stops waiting for a heavy-work slot, starts no further stage and
+    stops the programs it started.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The stacking job to give up on.
+
+    Returns
+    -------
+    abandoned : `bool`
+        `True` if the job's task is running in this process.
+    """
+    with _stack_abandonments_lock:
+        abandonment = _stack_abandonments.get(job_id)
+    if abandonment is None:
+        return False
+    abandonment.abandon()
+    return True
 
 
 class ImageProcessingService(BaseBackgroundService):
@@ -230,7 +262,7 @@ class ImageProcessingService(BaseBackgroundService):
         return {"processing": len(active) > 0}
 
     def cancel_processing_jobs(self, target_id: str) -> dict:
-        """Cancel active stacking jobs for a target.
+        """Cancel active stacking jobs and picture remakes for a target.
 
         A job that runs in another process is left alone and reported, since
         this process cannot stop it.
@@ -245,17 +277,35 @@ class ImageProcessingService(BaseBackgroundService):
         """
         if not self._job_service:
             return {"status": "none", "message": "No jobs are tracked."}
-        active = self._job_service.get_jobs_for_target(target_id, job_type="stacking", status="started")
-        if not active:
-            active = self._job_service.get_jobs_for_target(target_id, job_type="stacking", status="running")
+        active = []
+        for job_type in ("stacking", "preview"):
+            for status in ("started", "running"):
+                active.extend(
+                    self._job_service.get_jobs_for_target(target_id, job_type=job_type, status=status)
+                )
 
         cancelled = False
         reasons: list[str] = []
         for job in active:
+            if job.job_type == "preview":
+                # A picture remake of this process: the cancel is final in the
+                # job list first, so the late end of the work cannot change it,
+                # then the work gives up and puts the old pictures back.
+                if is_preview_job_running(job.id):
+                    self._job_service.update_job(
+                        job.id, status="cancelled", progress=0, status_message="Cancelled by user"
+                    )
+                    abandon_preview_job(job.id)
+                    logger.info("Cancelled the picture remake of %s.", target_id)
+                    cancelled = True
+                    continue
             outcome = self.cancel_processing(job.id)
             if outcome["cancelled"] or outcome["own_process"]:
                 # A job of this process is marked cancelled even if its
                 # thread cannot be interrupted, so the list stops showing it.
+                # Giving up on the run stops its wait for a slot and its next
+                # stage; the store keeps the cancelled status final.
+                abandon_stacking_job(job.id)
                 self._job_service.update_job(
                     job.id, status="cancelled", progress=0, status_message="Cancelled by user"
                 )
@@ -267,7 +317,10 @@ class ImageProcessingService(BaseBackgroundService):
             return {"status": "cancelled", "message": None}
         if reasons:
             return {"status": "other_process", "message": reasons[0]}
-        return {"status": "none", "message": "There is no active stacking job for this target."}
+        return {
+            "status": "none",
+            "message": "There is no active stacking job or picture remake for this target.",
+        }
 
     def fetch_job_log_tail(self, job_id: str, lines: int = 100) -> list:
         """Fetch the tail of DB-recorded log entries for a job.
@@ -466,10 +519,8 @@ class ImageProcessingService(BaseBackgroundService):
         log_file = os.path.join(LOG_DIR, f"process_{safe_target_id}_{int(time.time())}.log")
 
         if self._job_service:
-            active_jobs = self._job_service.get_jobs_for_target(
-                target_id, job_type="stacking", status="started"
-            )
-            for job in active_jobs:
+            # Rows left by a program that ended do not count as running.
+            for job in self.get_live_jobs_for_target(target_id, "stacking"):
                 return {
                     "status": "already_running",
                     "jobId": job.id,
@@ -645,11 +696,20 @@ def start_siril_processing_task(
                 else "imaging"
             )
         _record_stack_kind(job_repository, job_id, kind)
+        abandonment = RunAbandonment()
+        with _stack_abandonments_lock:
+            _stack_abandonments[job_id] = abandonment
         try:
+            # A cancel that came before the run was registered has marked the
+            # job but could not reach it, so check the record once here.
+            stored_job = job_repository.get_job(job_id) if job_repository is not None else None
+            if stored_job is not None and stored_job.status == "cancelled":
+                abandonment.abandon()
             # `running_as_job` makes this job row the current job, so the
             # stack's stage progress ("Stage 2 of 7") moves the job's bar.
             # This service still marks the job finished.
             with (
+                bind_abandonment(abandonment),
                 log_context(job_id=job_id),
                 running_as_job(
                     job_id,
@@ -668,9 +728,17 @@ def start_siril_processing_task(
                     **(stack_options or {}),
                 )
             final_path = stack_result.stacked_path
+        except RunAbandonedError:
+            # The user cancelled the job. It never ran its stages if it was
+            # still waiting for a slot, and its status stays "cancelled".
+            logger.info("Stacking %s was cancelled.", target_id)
+            return None
         except ProcessingError:
             logger.exception("Stacking %s made no stack", target_id)
             final_path = None
+        finally:
+            with _stack_abandonments_lock:
+                _stack_abandonments.pop(job_id, None)
 
         if notification_service:
             if final_path:

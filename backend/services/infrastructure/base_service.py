@@ -1,5 +1,6 @@
 """Base class for services that run background jobs on a thread pool."""
 
+import logging
 import os
 import threading
 import uuid
@@ -7,9 +8,13 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.jobs import current_process_identity, process_is_alive
+
 if TYPE_CHECKING:
     from backend.services.infrastructure.astrometrics_service import AstrometricsService
     from backend.services.processing.job_service import JobService
+
+logger = logging.getLogger(__name__)
 
 
 class BaseBackgroundService:
@@ -215,6 +220,63 @@ class BaseBackgroundService:
                 })
         return job_list
 
+    def _job_has_live_owner(self, job: Any) -> bool:
+        """Say whether something still runs this job.
+
+        A job is alive when this program has a task for it, or when another
+        program that is still running recorded itself as its owner. A job
+        whose owner program ended, or that has no recorded owner and no task
+        here (a row from before owners were kept), has nothing running it.
+
+        Parameters
+        ----------
+        job : `ProcessingJob`
+            The job row.
+
+        Returns
+        -------
+        alive : `bool`
+            `True` if the job may still be running.
+        """
+        if self.is_processing(job.id):
+            return True
+        if job.owner_pid is None or job.owner_started_at is None:
+            return False
+        own_process_id, _ = current_process_identity()
+        if job.owner_pid == own_process_id:
+            # This program owns it, but it has no task for it: a row left by
+            # an earlier run that this program's number does not tell apart.
+            return False
+        return process_is_alive(job.owner_pid, job.owner_started_at)
+
+    def get_live_jobs_for_target(self, target_id: str, job_type: str) -> list[Any]:
+        """List the open jobs of one kind that something still runs.
+
+        Both "started" and "running" count as open. A row whose owner
+        program ended is left out, so a job that died with an old backend
+        does not block a new one.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target (or "global") the jobs belong to.
+        job_type : `str`
+            The job kind, such as "stacking".
+
+        Returns
+        -------
+        jobs : `list` [`ProcessingJob`]
+            The open jobs that have a live owner.
+        """
+        if not self._job_service:
+            return []
+        open_jobs = []
+        for status in ("started", "running"):
+            open_jobs.extend(
+                self._job_service.get_jobs_for_target(target_id, job_type=job_type, status=status)
+            )
+        return [job for job in open_jobs if self._job_has_live_owner(job)]
+
     def cancel_processing(self, job_id: str) -> dict[str, Any]:
         """Cancel a running job, or say why it cannot be cancelled here.
 
@@ -222,7 +284,9 @@ class BaseBackgroundService:
         shared, so it can also hold a job that runs in another program (an
         MCP server, a console script or a second backend). The store keeps
         no stop flag for those jobs, so this reports where the job runs
-        instead of failing without a word.
+        instead of failing without a word. A row that nothing runs is closed
+        as cancelled: its recorded owner program has ended, or it has no
+        recorded owner and this program has no task for it.
 
         Returns
         -------
@@ -253,6 +317,21 @@ class BaseBackgroundService:
             return {"cancelled": False, "own_process": False, "reason": "No job with this id was found."}
         if record.status in ("completed", "failed", "cancelled"):
             return {"cancelled": False, "own_process": False, "reason": "This job has already finished."}
+        if not self._job_has_live_owner(record):
+            # Nothing runs this job: its owner program ended, or it is a row
+            # without an owner that this program has no task for. Close it,
+            # so it does not stay open forever. This is a status, not an error.
+            logger.info(
+                "Closed %s job %s as cancelled: no live program runs it (owner process %s).",
+                record.job_type,
+                job_id,
+                record.owner_pid,
+            )
+            if self._job_service:
+                self._job_service.update_job(
+                    job_id, status="cancelled", progress=0, status_message="Cancelled by user"
+                )
+            return {"cancelled": True, "own_process": False, "reason": None}
         owner = f" (process {record.owner_pid})" if record.owner_pid is not None else ""
         return {
             "cancelled": False,

@@ -21,6 +21,7 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.quality.gate_result import GateResult, unchecked_gate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress, stage_window
@@ -529,6 +530,11 @@ def record_frame_quality(
     quality_recording : `FrameQualityRecording` or `None`
         The configuration and calibration library to store with. Nothing is
         stored when it is `None`.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled. Any other failure is logged, not raised.
     """
     from astrometricslib.pipelines.stacking.frame_measurement_run import record_stage_frame_quality
 
@@ -549,6 +555,9 @@ def record_frame_quality(
             measured_at,
             actions_by_path=quarantine_report.actions_by_path(),
         )
+    except RunAbandonedError:
+        # A cancel is not a failure of the measurements.
+        raise
     except Exception:  # frame quality is a by-product: no failure here may fail the stack
         logger.exception("Frame quality measurements of target '%s' were not stored", target.id)
         return

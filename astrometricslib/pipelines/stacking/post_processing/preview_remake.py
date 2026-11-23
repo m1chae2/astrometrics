@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.processing_results import PreviewRemakeResult, PreviewSettingsRecord
 from astrometricslib.pipelines.shared.stack_preview_path import (
     background_model_path_for,
@@ -163,6 +164,8 @@ def remake_stack_preview(
         If the target has no such stack, or its file is missing.
     ProcessingError
         If no preview was made. The old pictures are put back first.
+    RunAbandonedError
+        If the job was cancelled. The old pictures are put back first.
     """
     stacking = target.spectral_stacking if spectral else target.stacking
     stacked_path = stacking.stacked_image
@@ -180,16 +183,22 @@ def remake_stack_preview(
     skipped_steps: list[SkippedPreviewStep] = []
     # A spectral stack has no sky gradient worth measuring.
     background_outcomes: list[BackgroundGradientOutcome] | None = None if spectral else []
-    preview_path = write_stack_preview(
-        stacked_path,
-        settings,
-        steps,
-        skipped_steps,
-        background_outcomes,
-        # The masked stretch is for imaging stacks of a nebula or a galaxy.
-        object_category=None if spectral else target.object_category,
-        target_anchor=None if spectral else anchor_for_target(target),
-    )
+    try:
+        preview_path = write_stack_preview(
+            stacked_path,
+            settings,
+            steps,
+            skipped_steps,
+            background_outcomes,
+            # The masked stretch is for imaging stacks of a nebula or a galaxy.
+            object_category=None if spectral else target.object_category,
+            target_anchor=None if spectral else anchor_for_target(target),
+        )
+    except RunAbandonedError:
+        # The user cancelled the remake: the old picture goes back.
+        if kept:
+            _put_old_pictures_back(stacked_path, kept)
+        raise
     record_preview_step_notices(
         skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
     )

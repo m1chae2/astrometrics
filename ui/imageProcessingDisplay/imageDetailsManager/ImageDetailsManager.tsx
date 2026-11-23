@@ -241,7 +241,7 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
                 }}
               />
             )}
-            {/* The picture remake has no cancel path (processing:cancel only stops stacking jobs), so it shows a busy button. */}
+            {/* The picture remake shows a busy button and a Cancel button (processing:cancel stops it). */}
             {onProcess && postProcess.busy && (
               <SplitButton
                 label="Post Processing..."
@@ -253,6 +253,11 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
                 options={stackOptions}
                 onSelect={() => undefined}
               />
+            )}
+            {onProcess && postProcess.busy && (
+              <Button variant="danger" onClick={postProcess.cancel}>
+                Cancel
+              </Button>
             )}
             {jobError && (
               <div className="stack-summary--error" role="alert">

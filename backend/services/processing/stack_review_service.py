@@ -17,13 +17,20 @@ message.
 """
 
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import run_as_background_job
+from astrometricslib.jobs import (
+    RunAbandonedError,
+    RunAbandonment,
+    bind_abandonment,
+    report_started_jobs,
+    run_as_background_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +41,63 @@ logger = logging.getLogger(__name__)
 DEFAULT_WAIT_SECONDS = 2.0
 
 
+# The running picture remakes of this process, by job id, so a cancel can stop
+# the job's slot wait and its next step. A job is listed from the moment it is
+# recorded until its work ends.
+_preview_abandonments: dict[str, RunAbandonment] = {}
+_preview_abandonments_lock = threading.Lock()
+
+
+def is_preview_job_running(job_id: str) -> bool:
+    """Say whether a picture remake of this process is running.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The remake job to look for.
+
+    Returns
+    -------
+    running : `bool`
+        `True` if the job's work is running in this process.
+    """
+    with _preview_abandonments_lock:
+        return job_id in _preview_abandonments
+
+
+def abandon_preview_job(job_id: str) -> bool:
+    """Give up on a running picture remake of this process.
+
+    The remake stops waiting for a heavy-work slot, starts no further step,
+    stops the programs it started and puts the old pictures back.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The remake job to give up on.
+
+    Returns
+    -------
+    abandoned : `bool`
+        `True` if the job's work is running in this process.
+    """
+    with _preview_abandonments_lock:
+        abandonment = _preview_abandonments.get(job_id)
+    if abandonment is None:
+        return False
+    abandonment.abandon()
+    return True
+
+
 class StackReviewStart(BaseModel):
     """The answer to starting a slow stack review.
 
     Attributes
     ----------
     status : `str`
-        ``"completed"`` when the work finished within the short wait, or
-        ``"running"`` when it is still going.
+        ``"completed"`` when the work finished within the short wait,
+        ``"running"`` when it is still going, or ``"cancelled"`` when the
+        user cancelled it within the short wait.
     job_id : `str` or `None`
         The job to follow with ``processing:get_job``. `None` when the work
         has not recorded a job yet, for example because it waits for another
@@ -51,7 +107,7 @@ class StackReviewStart(BaseModel):
         ``"completed"``.
     """
 
-    status: Literal["completed", "running"]
+    status: Literal["completed", "running", "cancelled"]
     job_id: str | None = None
     result: dict[str, Any] | None = None
 
@@ -100,7 +156,12 @@ class StackReviewService:
         reply : `StackReviewStart`
             The finished result, or the job to follow.
         """
-        outcome = run_as_background_job(work, grace_period_seconds=self._wait_seconds)
+        try:
+            outcome = run_as_background_job(work, grace_period_seconds=self._wait_seconds)
+        except RunAbandonedError:
+            # The user cancelled the job. This is a status, not an error.
+            logger.info("The job was cancelled.")
+            return StackReviewStart(status="cancelled")
         if "result" in outcome:
             return StackReviewStart(
                 status="completed", job_id=outcome["jobId"], result=_plain(outcome["result"])
@@ -151,19 +212,47 @@ class StackReviewService:
             The result, when finished, is a `PreviewRemakeResult` as a dict.
         """
         processing = self._astrometrics.processing
-        return self._start(
-            lambda: processing.remake_preview(
-                target_id,
-                kind=kind,
-                denoise=denoise,
-                denoise_strength=denoise_strength,
-                star_toning=star_toning,
-                starnet=starnet,
-                star_strength=star_strength,
-                star_stretch=star_stretch,
-                register_job=True,
-            )
-        )
+
+        def remake() -> Any:
+            """Run the remake so that a cancel can reach it.
+
+            A cancelled job raises `RunAbandonedError`, with the old pictures
+            put back.
+
+            Returns
+            -------
+            result : `Any`
+                The library's result.
+            """
+            abandonment = RunAbandonment()
+            recorded_job_ids: list[str] = []
+
+            def remember_job(handle: Any) -> None:
+                """List the abandonment under the job the library records."""
+                if handle.job_id:
+                    with _preview_abandonments_lock:
+                        _preview_abandonments[handle.job_id] = abandonment
+                    recorded_job_ids.append(handle.job_id)
+
+            try:
+                with bind_abandonment(abandonment), report_started_jobs(remember_job):
+                    return processing.remake_preview(
+                        target_id,
+                        kind=kind,
+                        denoise=denoise,
+                        denoise_strength=denoise_strength,
+                        star_toning=star_toning,
+                        starnet=starnet,
+                        star_strength=star_strength,
+                        star_stretch=star_stretch,
+                        register_job=True,
+                    )
+            finally:
+                with _preview_abandonments_lock:
+                    for job_id in recorded_job_ids:
+                        _preview_abandonments.pop(job_id, None)
+
+        return self._start(remake)
 
     def start_stack_comparison(self, target_id: str, kind: str = "imaging") -> StackReviewStart:
         """Compare a target's stack with the previous one, as a job.

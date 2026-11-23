@@ -14,7 +14,8 @@ stuck one. This module gives the stacking stage three things:
   bar moves.
 - `LoopProgress`, for loops over frames. It writes ``Checked 10 of 40
   frames...`` every 10 frames or every 30 seconds, whichever comes first, and
-  moves the job's progress inside the stage that is running.
+  moves the job's progress inside the stage that is running. A cancelled job
+  stops at the next `tick`, and `begin_stage` stops it before each stage.
 
 Progress goes through the job handle's `mark` method, the same way as every
 other job (see `foundation/jobs/runner.py`). When the stack does not run as a
@@ -31,6 +32,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from astrometricslib.foundation.jobs.runner import JobHandle, get_current_job
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +287,13 @@ def begin_stage(key: str, text: str) -> None:
         The stage (one of the ``*_STAGE`` constants).
     text : `str`
         What the stage does, in lower case.
+
+    Notes
+    -----
+    `RunAbandonedError` is raised if the job was cancelled.
     """
+    # A cancelled job starts no further stage.
+    raise_if_abandoned()
     tracker = _active_tracker.get()
     if tracker is not None:
         tracker.begin(key, text)
@@ -387,7 +395,14 @@ class LoopProgress:
         self.last_logged_time = self.clock()
 
     def tick(self) -> None:
-        """Count one more frame, and write a line when one is due."""
+        """Count one more frame, and write a line when one is due.
+
+        Notes
+        -----
+        `RunAbandonedError` is raised if the job was cancelled, so every loop
+        that reports progress stops between two frames.
+        """
+        raise_if_abandoned()
         self.done += 1
         now = self.clock()
         due = (

@@ -256,10 +256,7 @@ class IngestionService(BaseBackgroundService):
         """
         target_name = payload.get("targetName") or "unknown"
         if self._job_service:
-            active_jobs = self._job_service.get_jobs_for_target(
-                target_name, job_type="ingestion", status="started"
-            )
-            for job in active_jobs:
+            for job in self.get_live_jobs_for_target(target_name, "ingestion"):
                 return job.id
 
         # Isolated log file per job

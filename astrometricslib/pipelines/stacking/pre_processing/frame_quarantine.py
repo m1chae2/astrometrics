@@ -56,6 +56,12 @@ from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import (
+    RunAbandonedError,
+    completed_unless_abandoned,
+    raise_if_abandoned,
+    stopping_on_abandonment,
+)
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrame
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.measurement import SubjectLevel
@@ -1349,11 +1355,21 @@ def _measure_frames(
         One entry per readable frame, in the order given.
     unreadable : `list` [`str`]
         Paths that raised an error.
+
+    Notes
+    -----
+    `RunAbandonedError` is raised if the job was cancelled. No further frame
+    is started.
     """
 
     def safe_measure(frame: Any) -> dict[str, Any] | None:
+        # A frame that has not started when the job is cancelled is not
+        # measured. The error must not be taken for an unreadable frame.
+        raise_if_abandoned()
         try:
             measurement = measure(frame.path)
+        except RunAbandonedError:
+            raise
         except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as error:
             logger.debug("Cannot measure '%s' for the quarantine check: %s", frame.path, error)
             return None
@@ -1375,12 +1391,17 @@ def _measure_frames(
         """
         return caller_context.copy().run(safe_measure, frame)
 
-    with ThreadPoolExecutor(max_workers=MEASUREMENT_THREADS) as pool:
-        results = []
-        for result in pool.map(measure_in_job_context, frames):
-            results.append(result)
+    # A cancel is looked for while waiting (`completed_unless_abandoned`), so
+    # it is seen within half a second even while every worker is busy. It
+    # cancels the frames not yet started and does not wait for the frames in
+    # progress, so the job stops after at most one frame per worker has been
+    # read, and those results are dropped.
+    with stopping_on_abandonment(ThreadPoolExecutor(max_workers=MEASUREMENT_THREADS)) as pool:
+        futures = [pool.submit(measure_in_job_context, frame) for frame in frames]
+        for _finished in completed_unless_abandoned(futures):
             if progress is not None:
                 progress.tick()
+    results = [future.result() for future in futures]
     unreadable = [frame.path for frame, result in zip(frames, results, strict=True) if result is None]
     if unreadable:
         # One line, not one per frame: a folder of missing frames would

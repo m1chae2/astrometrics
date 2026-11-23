@@ -31,7 +31,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Generator
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
@@ -48,6 +48,9 @@ from astrometricslib.foundation.logging import (
 )
 
 logger = logging.getLogger(__name__)
+
+WAITING_FOR_SLOT_MESSAGE = "Waiting for a free job slot"
+"""The message of a job that waits for a slot (`JobHandle.holding_slot`)."""
 
 # Statuses that mean the job is over. Once the work sets one of these, the
 # context manager stops second-guessing it -- see `registered_job`.
@@ -94,6 +97,9 @@ def report_started_jobs(callback: Callable[[JobHandle], None]) -> Generator[None
     A caller that runs work in a thread cannot see the job the work records
     inside it. This gives the caller the handle as soon as the job exists.
 
+    A listener that is already active (the one `run_as_background_job` sets)
+    is told first, so nesting this never hides a job from it.
+
     Parameters
     ----------
     callback : `Callable`
@@ -104,7 +110,15 @@ def report_started_jobs(callback: Callable[[JobHandle], None]) -> Generator[None
     None
         The enclosed work runs while the callback is active.
     """
-    token = _job_started_listener.set(callback)
+    outer_listener = _job_started_listener.get()
+
+    def _tell_both(handle: JobHandle) -> None:
+        """Tell the enclosing listener, if any, and then this one."""
+        if outer_listener is not None:
+            outer_listener(handle)
+        callback(handle)
+
+    token = _job_started_listener.set(_tell_both)
     try:
         yield
     finally:
@@ -219,6 +233,39 @@ class JobHandle:
         if not self.reached_terminal_status:
             self.mark("running", done, progress_total=total, message=message)
 
+    @contextmanager
+    def holding_slot(
+        self, slot: AbstractContextManager, *, working_message: str = "Starting"
+    ) -> Generator[None]:
+        """Wait for a job slot as this job, then hold it while the work runs.
+
+        Call this inside `registered_job`, not around it. The job is then
+        in the job list while it waits, with the message "Waiting for a free
+        job slot", and its job id is known at once. A run given up on stops
+        waiting (the slot raises `RunAbandonedError`) and its job is
+        marked failed by `registered_job` like any other error.
+
+        Parameters
+        ----------
+        slot : `contextlib.AbstractContextManager`
+            The slot to take, such as the result of
+            ``ProcessingPipelines.acquire_job_slot()``.
+        working_message : `str`, optional
+            The job's message once the slot is won. The work's own stage
+            reports replace it.
+
+        Yields
+        ------
+        None
+            The caller's work runs while the slot is held.
+        """
+        if not self.reached_terminal_status:
+            self.mark("running", 0, message=WAITING_FOR_SLOT_MESSAGE)
+        with slot:
+            if not self.reached_terminal_status:
+                self.mark("running", 0, message=working_message)
+            yield
+
     def info(self, message: str) -> None:
         """Write an informational line to this job's log.
 
@@ -297,6 +344,8 @@ class JobHandle:
                 if output_metrics is not None:
                     stored_job.output_metrics = output_metrics
                 stored_job.updated_at = datetime.now().isoformat()
+                if status in _TERMINAL_STATUSES and stored_job.completed_at is None:
+                    stored_job.completed_at = stored_job.updated_at
                 self._job_store.upsert_job(stored_job)
         except sqlite3.Error as update_error:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)

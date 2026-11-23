@@ -243,12 +243,11 @@ export async function addTargetData(
 
 /**
  * Sends the target's JPEG picture to the user's phone. The backend uses
- * GSConnect to send it straight to a connected phone, or opens LocalSend
- * with the picture queued when no phone is connected. The backend reports a
- * missing picture or phone link as an error toast.
+ * GSConnect to send it straight to a connected phone. The backend reports a
+ * missing picture or no connected phone as an error toast.
  *
  * @param targetId Unique identifier of the target.
- * @return How it was sent, with the phone's name for GSConnect.
+ * @return How it was sent, with the phone's name.
  */
 export async function sendTargetToPhone(
     targetId: string

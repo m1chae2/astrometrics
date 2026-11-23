@@ -1871,9 +1871,11 @@ class ProcessingPipelines:
             star_strength=star_strength,
             star_stretch=star_stretch,
         )
+        # The job is recorded first, so a remake waiting for a slot shows in
+        # the job list and returns its job id.
         with (
-            self.acquire_job_slot(),
-            registered_job(enabled=register_job, job_type="preview", target_id=resolved.id),
+            registered_job(enabled=register_job, job_type="preview", target_id=resolved.id) as job,
+            job.holding_slot(self.acquire_job_slot(), working_message="Making the preview"),
         ):
             result = remake_stack_preview(
                 resolved,
@@ -1884,6 +1886,10 @@ class ProcessingPipelines:
                 measured_at=datetime.now(UTC),
                 configuration=self._config,
             )
+            # Not a final status: `registered_job` completes the job on the
+            # way out and keeps this message, so the list stops saying
+            # "Making the preview" for a job that is over.
+            job.mark("running", 100, message="Preview made")
         if result.shown_in_viewer:
             self._targets.save()
         return result

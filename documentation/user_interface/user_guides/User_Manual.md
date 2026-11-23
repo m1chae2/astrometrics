@@ -134,7 +134,7 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 | 1:1 | Shows the image at actual size |
 | Image Processing button | Opens the same target in the Image Processing view |
 | Information panel, right | Shows Catalog ID, Common Name, Coordinates, Exposure Time, the camera and telescope, and the frame count for each filter and exposure length. Catalog ID and Common Name can be edited |
-| Send to Phone | Opens LocalSend with the target's JPEG image ready to send |
+| Send to Phone | Sends the target's JPEG image to your phone through GSConnect. Your phone must be paired and connected in KDE Connect |
 | Save Target | Saves your edits to the target's Catalog ID and Common Name |
 | Delete Target | Deletes the target after you confirm in the Delete Target dialog |
 

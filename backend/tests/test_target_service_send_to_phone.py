@@ -61,7 +61,7 @@ def test_send_to_phone_sends_a_processed_jpeg_as_it_is(
     """A hand-attached JPEG is the processed image and is sent unchanged."""
     picture = tmp_path / "mine.jpeg"
     picture.write_bytes(b"jpeg")
-    sent = MagicMock(return_value={"method": "localsend"})
+    sent = MagicMock(return_value={"method": "gsconnect", "device": "Pixel 9"})
     monkeypatch.setattr(target_service, "send_file_to_phone", sent)
 
     _service_with(str(picture), None).send_to_phone("M 57")

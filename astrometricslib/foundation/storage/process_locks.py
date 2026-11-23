@@ -303,7 +303,10 @@ def acquire_resource_slot(
         module's logger.
 
     Waiting has no time limit, except that a run given up on stops waiting
-    (`RunAbandonedError`, see `run_abandonment`). Every
+    (`RunAbandonedError`, see `run_abandonment`). The run is checked before
+    the first try, after every sweep, and again once a slot is won, so a
+    cancelled run never starts its work, even if the slot frees at the same
+    moment. The check waits at most `poll_interval_seconds`. Every
     `HOLDER_REPORT_INTERVAL_SECONDS` a waiter logs which holders it is
     behind and for how long. The holder record is information only; the
     operating system lock alone decides who holds a slot, and a failure to
@@ -332,6 +335,9 @@ def acquire_resource_slot(
         yield
         return
 
+    # A run given up on before it asked never takes a slot.
+    raise_if_abandoned()
+
     work_name = work_name or threading.current_thread().name
     wait_started_at = time.monotonic()
     next_report_at = wait_started_at + HOLDER_REPORT_INTERVAL_SECONDS
@@ -340,6 +346,9 @@ def acquire_resource_slot(
             lock_path = os.path.join(lock_folder, f"{resource_name}_slot_{slot_index}.lock")
             try:
                 with file_lock(lock_path):
+                    # The slot may have freed just as the run was given up
+                    # on. Leaving here gives the lock back, and no work runs.
+                    raise_if_abandoned()
                     holder_path = _write_holder_file(lock_path, work_name)
                     held_token = _held_resource_names.set((*_held_resource_names.get(), resource_name))
                     try:

@@ -210,3 +210,67 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     assert calls == [
         {"target": "M 81", "kind": "spectral", "include": [], "compare_to": "previous", "register_job": True}
     ]
+
+
+def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_back(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancel stops a running remake by its job id and restores the picture."""
+    from astrometricslib.foundation import config as config_loader
+    from astrometricslib.foundation.config import AppConfiguration
+    from astrometricslib.foundation.jobs.store import JobStore
+    from astrometricslib.jobs import raise_if_abandoned, registered_job
+    from backend.services.processing.stack_review_service import abandon_preview_job
+
+    logs_path = tmp_path / "logs"
+    logs_path.mkdir()
+    (tmp_path / "library").mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(tmp_path / "library")}})
+    monkeypatch.setattr(configuration, "get_logs_path", lambda: logs_path)
+    monkeypatch.setattr(config_loader, "get_configuration", lambda: configuration)
+    picture = tmp_path / "M_81_Stacked_preview.jpg"
+    picture.write_text("old picture")
+    working = threading.Event()
+    seen: dict[str, Any] = {}
+
+    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+        """Replace the picture, then wait for a cancel, as the library does.
+
+        Returns
+        -------
+        result : `PreviewRemakeResult`
+            Never returns: the cancel stops it.
+        """
+        with registered_job(enabled=True, job_type="preview", target_id=target) as job:
+            seen["job_id"] = job.job_id
+            picture.write_text("half-made picture")
+            working.set()
+            try:
+                for _ in range(400):
+                    raise_if_abandoned()
+                    threading.Event().wait(0.05)
+            except BaseException:
+                picture.write_text("old picture")
+                raise
+        return _result()
+
+    service = StackReviewService(
+        SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)), wait_seconds=0.05
+    )
+
+    reply = service.start_preview_remake("M 81")
+    assert reply.status == "running"
+    assert reply.job_id == seen["job_id"]
+    assert working.wait(timeout=10)
+    store = JobStore(configuration.get_logs_db_path())
+    store.upsert_job(store.get_job(reply.job_id).model_copy(update={"status": "cancelled"}))
+    assert abandon_preview_job(reply.job_id) is True
+    for _ in range(200):
+        if not abandon_preview_job(reply.job_id):
+            break
+        threading.Event().wait(0.05)
+
+    assert abandon_preview_job(reply.job_id) is False
+    assert picture.read_text() == "old picture"
+    assert store.get_job(reply.job_id).status == "cancelled"

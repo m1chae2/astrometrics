@@ -305,3 +305,72 @@ def test_worker_stage_progress_reaches_the_backend_job() -> None:
     repository.get_job.assert_any_call("job-progress")
     assert stored_job.progress_current == 30
     assert stored_job.status == "running"
+
+
+def test_a_stacking_job_cancelled_while_waiting_for_a_slot_never_runs_and_stays_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancel in the slot wait: no stage runs, the job stays cancelled."""
+    import threading
+
+    from astrometricslib.foundation.jobs.models import ProcessingJob
+    from astrometricslib.foundation.jobs.store import JobStore
+    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
+    from backend.services.processing.image_processing_service import abandon_stacking_job
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    job_store = JobStore(str(tmp_path / "log.db"))
+    job_store.upsert_job(ProcessingJob(id="job-1", target_id="M 42", job_type="stacking", status="started"))
+    target = _target_with_frames("M 42", ["/lights/M_42/lum_001.fits"])
+    target_service = _target_service(target)
+    notification_service = MagicMock()
+    stages_run: list[str] = []
+    holder_has_slot = threading.Event()
+    release_holder = threading.Event()
+    outcome: list[Any] = []
+
+    def holder() -> None:
+        """Hold the only job slot, as another stack would."""
+        with acquire_resource_slot(None, "job", 1, work_name="other stack"):
+            holder_has_slot.set()
+            release_holder.wait(timeout=20)
+
+    def stack_that_waits_for_the_slot(*_args: Any, **_kwargs: Any) -> Any:
+        """Wait for the job slot like the real stack, then run a stage."""
+        with acquire_resource_slot(None, "job", 1, poll_interval_seconds=0.05):
+            stages_run.append("stage 1")
+
+    target_service.astrometrics.processing.stack = stack_that_waits_for_the_slot
+    holder_thread = threading.Thread(target=holder, daemon=True)
+    holder_thread.start()
+    assert holder_has_slot.wait(timeout=20)
+
+    def worker() -> None:
+        """Run the stacking task and keep what it returns."""
+        outcome.append(
+            start_siril_processing_task(
+                "job-1",
+                "M 42",
+                ["/lights/M_42/lum_001.fits"],
+                target_service=target_service,
+                job_repository=job_store,
+                notification_service=notification_service,
+            )
+        )
+
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
+    for _ in range(200):
+        if abandon_stacking_job("job-1"):
+            break
+        threading.Event().wait(0.05)
+    job_store.upsert_job(job_store.get_job("job-1").model_copy(update={"status": "cancelled"}))
+    worker_thread.join(timeout=20)
+    release_holder.set()
+    holder_thread.join(timeout=20)
+
+    assert not worker_thread.is_alive()
+    assert outcome == [None]
+    assert stages_run == []
+    assert job_store.get_job("job-1").status == "cancelled"
+    notification_service.notify.assert_not_called()

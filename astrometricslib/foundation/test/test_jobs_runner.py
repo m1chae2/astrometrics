@@ -8,6 +8,7 @@ the runner never changes logging setup, which only a program may do.
 """
 
 import logging
+import threading
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -614,3 +615,45 @@ def test_a_job_of_any_new_kind_stores_its_log_rows_under_its_id(isolated_logs: s
     messages = [row["message"] for row in JobStore(str(isolated_logs)).get_log_entries_for_job(job_id)]
     assert any("first step" in message for message in messages)
     assert any("second step" in message for message in messages)
+
+
+def test_a_job_waiting_for_a_slot_is_listed_with_a_waiting_message(isolated_logs: str) -> None:
+    """Verify the job row and its message exist while the slot is held."""
+    from contextlib import contextmanager
+
+    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    slot_is_free = threading.Event()
+    job_is_listed = threading.Event()
+    seen: dict[str, object] = {}
+
+    @contextmanager
+    def busy_slot() -> Generator[None]:
+        """Stand in for a slot that frees only when the test says so."""
+        assert slot_is_free.wait(timeout=20.0)
+        yield
+
+    def run_job() -> None:
+        """Record a job and wait for the busy slot inside it."""
+        with registered_job(enabled=True, job_type="preview", target_id="NGC 2244") as job:
+            seen["job_id"] = job.job_id
+            with job.holding_slot(busy_slot(), working_message="Making the preview"):
+                seen["working_status"] = JobStore(isolated_logs).get_job(job.job_id).message
+
+    thread = threading.Thread(target=run_job, daemon=True)
+    thread.start()
+    store = JobStore(isolated_logs)
+    for _ in range(200):
+        jobs = store.get_jobs_by_target("NGC 2244")
+        if jobs and jobs[0].message == WAITING_FOR_SLOT_MESSAGE:
+            job_is_listed.set()
+            break
+        time.sleep(0.05)
+    assert job_is_listed.is_set()
+    assert jobs[0].status == "running"
+
+    slot_is_free.set()
+    thread.join(timeout=20.0)
+    assert seen["working_status"] == "Making the preview"
+    assert store.get_job(seen["job_id"]).status == "completed"

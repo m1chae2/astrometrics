@@ -101,3 +101,26 @@ def test_stores_opened_together_on_a_new_database_all_succeed(tmp_path: Path, st
 
         assert errors == []
         assert len(JobStore(database_path).get_recent_jobs()) == store_count
+
+
+def test_a_cancelled_job_cannot_be_moved_back_to_running(tmp_path: Path) -> None:
+    """A late stage report or end-of-task write does not undo a cancel."""
+    from astrometricslib.foundation.jobs.models import ProcessingJob
+
+    store = JobStore(str(tmp_path / "log.db"))
+    store.upsert_job(ProcessingJob(id="job-1", target_id="Albireo", job_type="stacking", status="started"))
+    cancelled_job = store.get_job("job-1")
+    cancelled_job.status = "cancelled"
+    cancelled_job.completed_at = "2026-11-21T23:33:10"
+    store.upsert_job(cancelled_job)
+
+    for late_status in ("running", "started", "completed", "failed"):
+        late_job = store.get_job("job-1")
+        late_job.status = late_status
+        late_job.progress_current = 2
+        store.upsert_job(late_job)
+
+    stored_job = store.get_job("job-1")
+    assert stored_job.status == "cancelled"
+    assert stored_job.progress_current == 0
+    assert stored_job.completed_at == "2026-11-21T23:33:10"

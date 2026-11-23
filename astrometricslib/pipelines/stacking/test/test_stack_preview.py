@@ -1417,6 +1417,10 @@ def test_a_preview_writes_a_record_of_the_settings_it_used(
     masked = record["settings_used"].pop("masked_stretch")
     assert masked["used"] is False
     assert "not a nebula or a galaxy" in masked["reason"]
+    assert record["settings_used"].pop("background")["method"] == "none"
+    assert record["settings_used"].pop("object_category")["category"] is None
+    # The test's stack file holds no pixels, so no stretch measurement is made.
+    assert record["settings_used"].pop("stretch_sky") == {}
     assert record["settings_used"] == {
         "denoise": True,
         "denoise_strength": 0.8,
@@ -1464,6 +1468,7 @@ def test_a_preview_records_the_picture_settings_in_force(
         "colour_calibration_method": "stars",
         "remove_green_noise": True,
         "star_toning": True,
+        "background_plane_limit": 0.03,
     }
     assert preview_is_out_of_date(str(stack)) is None
 
@@ -1689,3 +1694,148 @@ def test_a_failed_masked_stretch_keeps_the_normal_picture_and_is_reported(
     assert picture is not None
     assert "Masked stretch skipped after a failure" in steps
     assert [step.step_name for step in skipped] == ["Masked stretch"]
+
+
+def _write_tilted_stack(path: Path, tilt_fraction: float) -> None:
+    """Write a 256 by 256 stack with a tilted sky and a central blob.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        The file to write.
+    tilt_fraction : `float`
+        The change of the sky from the left to the right edge, as a fraction
+        of the sky level (0.05).
+    """
+    rows, columns = np.mgrid[0:256, 0:256]
+    sky = 0.05 * (1.0 + tilt_fraction * (columns / 255.0 - 0.5))
+    blob = 0.05 * np.exp(-((rows - 128) ** 2 + (columns - 128) ** 2) / (2 * 15.0**2))
+    noise = np.random.default_rng(3).normal(0.0, 0.0002, (256, 256))
+    fits.writeto(path, (sky + blob + noise).astype(np.float32), overwrite=True)
+
+
+def test_a_flat_sky_gets_a_plane_and_graxpert_does_not_run(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stack below the gradient limit skips GraXpert and records why."""
+    _write_tilted_stack(stack, 0.01)
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+    background_outcomes: list = []
+
+    assert write_stack_preview(str(stack), steps_log=steps, background_outcomes=background_outcomes)
+
+    assert programs.flatten_calls == []
+    assert steps[0].startswith("Background: plane fit (gradient 1.0%, limit 3.0%)")
+    assert 'load "stack.fits"' not in programs.siril_calls[-1][1]
+    assert 'load "flat.fits"' in programs.siril_calls[-1][1]
+    background = read_preview_settings(str(stack))["settings_used"]["background"]
+    assert background["method"] == "plane"
+    assert background["gradient_fraction"] == pytest.approx(0.01, abs=0.003)
+    assert background["limit_fraction"] == pytest.approx(0.03)
+    assert background["radial_used"] is False
+    assert background["radial_fraction"] is None or abs(background["radial_fraction"]) < 0.002
+    assert background["radial_reason"]
+    assert len(background_outcomes) == 1 and background_outcomes[0].gradient is None
+    assert "plane fit" in background_outcomes[0].reason
+
+
+def test_a_strong_gradient_still_runs_graxpert(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stack above the gradient limit takes the GraXpert path as before."""
+    _write_tilted_stack(stack, 0.10)
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+
+    assert write_stack_preview(str(stack), steps_log=steps)
+
+    assert len(programs.flatten_calls) == 1
+    assert steps[0] == "GraXpert done"
+    background = read_preview_settings(str(stack))["settings_used"]["background"]
+    assert background["method"] == "graxpert"
+    assert background["gradient_fraction"] == pytest.approx(0.10, abs=0.01)
+    assert background["limit_fraction"] == pytest.approx(0.03)
+
+
+def test_a_plane_that_cannot_be_written_falls_back_to_graxpert(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the plane step fails, GraXpert runs and the record says so."""
+    _write_tilted_stack(stack, 0.01)
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    programs = _Programs()
+    programs.install(monkeypatch)
+    monkeypatch.setattr(stack_preview, "subtract_sky_plane_in_file", lambda *arguments: False)
+    steps: list[str] = []
+    skipped: list = []
+
+    assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped)
+
+    assert len(programs.flatten_calls) == 1
+    assert steps[0] == "GraXpert done"
+    assert [step.step_name for step in skipped] == ["Background plane fit"]
+    background = read_preview_settings(str(stack))["settings_used"]["background"]
+    assert background["method"] == "graxpert"
+    assert "plane could not be subtracted" in background["reason"]
+
+
+def test_a_picture_made_before_the_plane_gate_is_made_again(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record without the limit differs from the settings now."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    _Programs().install(monkeypatch)
+    assert write_stack_preview(str(stack)) is not None
+    assert preview_is_out_of_date(str(stack)) is None
+    record_path = preview_settings_path_for(str(stack))
+    record = json.loads(Path(record_path).read_text(encoding="utf-8"))
+    del record["configuration"]["background_plane_limit"]
+    Path(record_path).write_text(json.dumps(record), encoding="utf-8")
+
+    reason = preview_is_out_of_date(str(stack))
+
+    assert reason is not None and "background plane limit" in reason
+
+
+def test_a_cluster_inside_a_nebula_reaches_the_masked_stretch_as_a_nebula(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The masked stretch gets the refined kind, and the record shows it."""
+    from astrometricslib.pipelines.stacking.post_processing.cluster_nebula import CategoryVerdict
+    from astrometricslib.pipelines.stacking.post_processing.masked_stretch import MaskedStretchPlan
+
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        stack_preview,
+        "refine_object_category",
+        lambda category, anchor, path: CategoryVerdict("nebula", category, "Rosette Nebula", "inside it"),
+    )
+
+    def plan(path: str, category: str | None, anchor: object) -> MaskedStretchPlan:
+        """Remember the kind the masked stretch was given.
+
+        Returns
+        -------
+        plan : `MaskedStretchPlan`
+            A plan that is not used.
+        """
+        asked.append(category)
+        return MaskedStretchPlan(used=False, reason="test", category=category)
+
+    monkeypatch.setattr(stack_preview, "plan_masked_stretch_for_file", plan)
+
+    assert write_stack_preview(str(stack), object_category="cluster")
+
+    assert asked == ["nebula"]
+    recorded = read_preview_settings(str(stack))["settings_used"]
+    assert recorded["object_category"]["category"] == "nebula"
+    assert recorded["object_category"]["catalog_category"] == "cluster"
+    assert recorded["object_category"]["nebula"] == "Rosette Nebula"
+    assert recorded["masked_stretch"]["category"] == "nebula"

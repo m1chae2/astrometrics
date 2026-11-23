@@ -232,7 +232,7 @@ Both noises, $\sigma_{\text{star}}$ and $\sigma_{\text{box}}$, come from Equatio
 
 #### 3.4.4 Sky background gradient
 
-The preview's background model is measured: its level, spread, a fitted tilt and a fitted round term, each as a fraction of the level. A tilt suggests a sky gradient, and a round term (brighter or dimmer corners) a flat-field error. No limit is set.<!-- impl: astrometricslib.pipelines.stacking.post_processing.background_gradient.measure_background_model -->
+The background is measured as a tilt and a round term, as fractions of sky level. A tilt suggests a sky gradient, a round term a flat-field error. A small tilt gets a plane, which cannot ring a nebula; a larger one, an AI model.<!-- impl: astrometricslib.pipelines.stacking.post_processing.background_gradient.measure_background_model --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_plane.choose_background_method -->
 
 ---
 

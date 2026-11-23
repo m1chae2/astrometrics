@@ -272,10 +272,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         with self._analyze_submit_lock:
             if self._job_service:
-                active_jobs = self._job_service.get_jobs_for_target(
-                    target_id, job_type="analysis", status="started"
-                )
-                for job in active_jobs:
+                for job in self.get_live_jobs_for_target(target_id, "analysis"):
                     if job.log_file_path and f"analysis_{safe_target}" in job.log_file_path:
                         return {"status": "already_running", "jobId": job.id, "logFile": job.log_file_path}
 
@@ -399,6 +396,11 @@ class AnalysisOrchestrator(BaseBackgroundService):
         """
         if self._job_service:
             active = self._job_service.get_jobs_for_target(target_id, job_type="analysis", status="started")
+            if not active:
+                # A job that reported a stage is "running", not "started".
+                active = self._job_service.get_jobs_for_target(
+                    target_id, job_type="analysis", status="running"
+                )
             if active:
                 stop = self._identification_stops.get(active[0].id)
                 if stop is not None:

@@ -35,6 +35,7 @@ from astrometricslib.pipelines.stacking.post_processing.background_gradient impo
     write_binned_model,
 )
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import STACK_COMPANION_SUFFIXES
+from astrometricslib.pipelines.stacking.post_processing.sky_plane import BackgroundDecision
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     flatten_background,
     write_stack_preview,
@@ -512,9 +513,19 @@ class _Programs:
         return True
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Put the stand-ins in place of the real runners."""
+        """Put the stand-ins in place of the real runners.
+
+        These tests are about GraXpert's model, so the stack's sky is treated
+        as one that needs GraXpert (the plane path has its own tests in
+        `test_stack_preview` and `test_sky_plane`).
+        """
         monkeypatch.setattr(stack_preview, "flatten_background", self.flatten)
         monkeypatch.setattr(stack_preview, "run_preview_script", self.siril)
+        monkeypatch.setattr(
+            stack_preview,
+            "choose_background_method_for_file",
+            lambda path: BackgroundDecision("graxpert", 0.1, 0.03, 100, "test", []),
+        )
 
 
 def test_graxpert_is_asked_to_save_its_background_model(monkeypatch: pytest.MonkeyPatch) -> None:

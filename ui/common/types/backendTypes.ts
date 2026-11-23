@@ -4722,8 +4722,9 @@ export interface BlinkPair {
  * Attributes
  * ----------
  * status : `str`
- * ``"completed"`` when the work finished within the short wait, or
- * ``"running"`` when it is still going.
+ * ``"completed"`` when the work finished within the short wait,
+ * ``"running"`` when it is still going, or ``"cancelled"`` when the
+ * user cancelled it within the short wait.
  * job_id : `str` or `None`
  * The job to follow with ``processing:get_job``. `None` when the work
  * has not recorded a job yet, for example because it waits for another

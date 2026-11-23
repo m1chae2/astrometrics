@@ -215,7 +215,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
     };
   }, [selectedTarget, updateTargetState]);
 
-  /** Opens LocalSend with this target's JPEG picture ready to send. */
+  /** Sends this target's JPEG picture to the connected phone. */
   const handleSendToPhone = async (): Promise<void> => {
     if (!selectedTarget) return;
     try {

@@ -14,14 +14,14 @@ import type { ProcessingJob, StackReviewStart } from '../../common/types/backend
 export const JOB_POLL_INTERVAL_MS = 2000;
 
 /** Where a check stands. */
-export type ReviewJobPhase = 'idle' | 'starting' | 'running' | 'done' | 'failed';
+export type ReviewJobPhase = 'idle' | 'starting' | 'running' | 'done' | 'failed' | 'cancelled';
 
 /** What the hook reports about one check. */
 export interface ReviewJobState<T> {
     phase: ReviewJobPhase;
     /** The result, once the phase is `done`. */
     result: T | null;
-    /** Why the check failed, once the phase is `failed`. */
+    /** Why the check failed, once the phase is `failed`. A cancelled check has no message. */
     message: string | null;
 }
 
@@ -85,6 +85,11 @@ export function useReviewJob<T>(options: ReviewJobOptions<T>) {
                 setWatch(null);
                 return;
             }
+            if (job && job.status === 'cancelled') {
+                setState({ phase: 'cancelled', result: null, message: null });
+                setWatch(null);
+                return;
+            }
             if (job && job.status === 'failed') {
                 setState({ phase: 'failed', result: null, message: job.message ?? 'The job failed.' });
                 setWatch(null);
@@ -105,7 +110,9 @@ export function useReviewJob<T>(options: ReviewJobOptions<T>) {
         const startedAt = Date.now();
         try {
             const reply = await starter();
-            if (reply.status === 'completed') {
+            if (reply.status === 'cancelled') {
+                setState({ phase: 'cancelled', result: null, message: null });
+            } else if (reply.status === 'completed') {
                 setState({ phase: 'done', result: (reply.result ?? null) as T | null, message: null });
             } else {
                 setState({ phase: 'running', result: null, message: null });

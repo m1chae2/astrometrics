@@ -178,7 +178,9 @@ class JobStore:
         ----------
         job : `ProcessingJob`
             Job record to insert (if `job.id` is new) or update (if
-            `job.id` already exists in the processing_jobs table).
+            `job.id` already exists in the processing_jobs table). A job
+            stored as "cancelled" is final: a write that gives it any
+            other status is ignored.
 
         Raises
         ------
@@ -191,8 +193,16 @@ class JobStore:
             cursor = conn.cursor()
 
             # Check if exists
-            cursor.execute("SELECT id FROM processing_jobs WHERE id = ?", (job.id,))
+            cursor.execute("SELECT id, status FROM processing_jobs WHERE id = ?", (job.id,))
             exists = cursor.fetchone()
+
+            # A cancelled job is final: a late write from work that has not
+            # noticed the cancel yet (a stage report, a progress line, the
+            # end of the task) must not turn it back into a running job.
+            if exists and exists[1] == "cancelled" and job.status != "cancelled":
+                logger.debug("Ignored a '%s' write to cancelled job %s", job.status, job.id)
+                conn.close()
+                return
 
             now = datetime.now().isoformat()
 

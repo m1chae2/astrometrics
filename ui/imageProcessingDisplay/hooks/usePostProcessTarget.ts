@@ -13,6 +13,7 @@ import {
     startPreviewRemake,
     type StackKind,
 } from '../../common/services/imaging/stackReviewService';
+import { cancelProcessing } from '../../common/services/imaging/processingService';
 import type { PreviewRemakeResult } from '../../common/types/backendTypes';
 import { useOnValueChange } from './useOnValueChange';
 import { useReviewJob, type ReviewJobState } from './useReviewJob';
@@ -64,6 +65,8 @@ export interface PostProcessTarget {
     errorMessage: string | null;
     /** Remakes the pictures of the given stacks, in order. */
     start: (kinds: StackKind[]) => void;
+    /** Cancels the running remake and drops the ones still waiting. */
+    cancel: () => void;
 }
 
 /**
@@ -95,7 +98,10 @@ export function usePostProcessTarget(
     const headMessage = queue.length > 0 ? runners[queue[0]].state.message : null;
     useEffect(() => {
         if (queue.length === 0) return;
-        if (headPhase === 'failed') {
+        if (headPhase === 'cancelled') {
+            // The user cancelled: stop quietly, without an error and without the next picture.
+            setQueue([]);
+        } else if (headPhase === 'failed') {
             setErrorMessage(headMessage ?? 'The picture could not be made.');
             setQueue([]);
         } else if (headPhase === 'done') {
@@ -116,5 +122,11 @@ export function usePostProcessTarget(
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [imaging.start, spectral.start]);
 
-    return { busy: queue.length > 0, errorMessage, start };
+    const cancel = useCallback(() => {
+        // Drop the waiting kinds at once, so a cancelled remake does not start the next one.
+        setQueue((current) => current.slice(0, 1));
+        void cancelProcessing(id);
+    }, [id]);
+
+    return { busy: queue.length > 0, errorMessage, start, cancel };
 }

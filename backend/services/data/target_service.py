@@ -251,8 +251,8 @@ class TargetService:
         Returns
         -------
         result : `dict`
-            ``path`` (the file sent), ``method`` (``"gsconnect"`` or
-            ``"localsend"``) and, for GSConnect, the phone's ``device`` name.
+            ``path`` (the file sent), ``method`` (always ``"gsconnect"``)
+            and the phone's ``device`` name.
 
         Raises
         ------

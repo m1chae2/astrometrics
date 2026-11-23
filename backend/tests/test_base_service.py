@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.exceptions import ProcessingError
+from backend.services.infrastructure import base_service as base_service_module
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 
@@ -70,10 +71,11 @@ def test_task_that_returns_nothing_is_failed() -> None:
     job_service.update_job.assert_called_with("job1", status="failed", progress=100.0)
 
 
-def test_cancel_of_a_job_in_another_process_gives_a_reason() -> None:
+def test_cancel_of_a_job_in_another_process_gives_a_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     """A job only in the shared store is not stopped; the reason says why."""
+    monkeypatch.setattr(base_service_module, "process_is_alive", lambda process_id, started_at: True)
     service, job_service = _service_with_job_table()
-    job_service.get_job.return_value = MagicMock(status="started", owner_pid=4242)
+    job_service.get_job.return_value = MagicMock(status="started", owner_pid=4242, owner_started_at="1.00")
 
     result = service.cancel_processing("elsewhere")
 

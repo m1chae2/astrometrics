@@ -78,7 +78,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Generator, Mapping, Sequence
-from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -92,6 +92,11 @@ from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.jobs.runner import JobHandle, get_current_job
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import (
+    RunAbandonedError,
+    completed_unless_abandoned,
+    stopping_on_abandonment,
+)
 from astrometricslib.models.camera_profile import UNMIGRATED_NOISE_REASON, CameraProfile
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
@@ -1094,6 +1099,12 @@ def _measure_target_frames(
     -------
     summary : `FrameMeasurementSummary`
         The counts and notes of the run.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled. The frames not yet started are not
+        measured, and the stamps of the frames done are saved.
     """
     started = time.monotonic()
     chosen = list(target.frames if frames is None else frames)
@@ -1187,9 +1198,11 @@ def _measure_target_frames(
     # parent job writes progress lines for the parent's stage instead.
     nested_progress = LoopProgress("Measured", len(pending)) if progress_job is None else None
     try:
-        with pool:
+        # A cancel is seen while waiting, cancels the frames not yet started
+        # and does not wait for the ones in progress.
+        with stopping_on_abandonment(pool):
             futures = {submit(item): item for item in pending}
-            for done_count, future in enumerate(as_completed(futures), start=1):
+            for done_count, future in enumerate(completed_unless_abandoned(futures), start=1):
                 frame, file_state, _capture_setting_id = futures[future]
                 failure: str | None = None
                 cut_short = False
@@ -1200,6 +1213,9 @@ def _measure_target_frames(
                     else:
                         summary.rows_written += session.record(measurements_to_store(measurements))
                         cut_short = frame_was_cut_short(measurements)
+                except RunAbandonedError:
+                    # A cancel is not one frame's failure.
+                    raise
                 except Exception as error:  # one frame's failure, whatever its cause, must not end the run
                     # The image libraries (photutils, SciPy) can raise errors
                     # outside the named read and data errors, such as a

@@ -9,7 +9,7 @@ from typing import Any
 
 from astrometricslib.drivers import is_path_inside
 from astrometricslib.exceptions import ConflictError, NotFoundError
-from astrometricslib.jobs import JobStore, ProcessingJob
+from astrometricslib.jobs import JobStore, ProcessingJob, current_process_identity
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +59,16 @@ class JobService:
     ) -> ProcessingJob:
         """Create a new job and record it to the database.
 
+        The job records this program (the backend) as its owner, the same way
+        a job run by the library does, so a job the backend leaves open when
+        it ends can be recognized and closed.
+
         Returns
         -------
         job : `ProcessingJob`
             The newly created job record.
         """
+        owner_pid, owner_started_at = current_process_identity()
         job = ProcessingJob(
             id=str(uuid.uuid4()),
             target_id=target_id,
@@ -76,6 +81,8 @@ class JobService:
             updated_at=datetime.now().isoformat(),
             input_metrics=input_metrics or {},
             output_metrics={},
+            owner_pid=owner_pid,
+            owner_started_at=owner_started_at,
         )
         self.repository.upsert_job(job)
         return job

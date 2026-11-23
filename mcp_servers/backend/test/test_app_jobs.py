@@ -474,15 +474,21 @@ async def test_cancel_refuses_when_two_kinds_run(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.anyio
-async def test_cancel_does_not_cancel_a_preview_job(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A picture remake has no Cancel in the app, so none is sent."""
-    requests = fake_backend(monkeypatch, {"jobs:query": {"jobs": [active_job("job-5", "preview")]}})
+async def test_cancel_sends_a_preview_job_to_the_apps_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A picture remake is cancelled through ``processing:cancel``."""
+    requests = fake_backend(
+        monkeypatch,
+        {
+            "jobs:query": {"jobs": [active_job("job-5", "preview")]},
+            "processing:cancel": {"status": "cancelled", "message": None},
+        },
+    )
 
     reply = await app_jobs.tool_processing_cancel("M 13")
 
-    assert [request["method"] for request in requests] == ["jobs:query"]
-    assert reply["cancelled"] is False
-    assert "picture remake" in reply["reason"]
+    assert [request["method"] for request in requests] == ["jobs:query", "processing:cancel"]
+    assert reply["cancelled"] is True
+    assert reply["job_type"] == "preview"
 
 
 NEBULA = {

@@ -32,9 +32,8 @@ SPECTRAL_FILTER_NAMES = ("SPEC", "Spectroscopy", "Star Analyzer 200")
 """Filter names that mean spectrum frames, as in the UI's
 ``analysisSelection.ts``."""
 
-CANCELLABLE_JOB_TYPES = ["stacking", "analysis"]
-"""The kinds of job the app's Cancel buttons stop. A picture remake
-(``preview``) has no Cancel in the app."""
+CANCELLABLE_JOB_TYPES = ["stacking", "analysis", "preview"]
+"""The kinds of job the app's Cancel buttons stop."""
 
 ACTIVE_JOB_STATUSES = ("started", "running")
 """Job statuses that mean the job has not ended."""
@@ -398,12 +397,13 @@ async def tool_processing_analyze(target: str, stages: list[str] | None = None) 
 @tool(
     "processing_cancel",
     (
-        "Cancel a running or waiting stacking or analysis job of a target, as the app's Cancel button "
-        "does. Name the target. With job_type (stacking or analysis) only that kind is cancelled; with "
+        "Cancel a running or waiting stacking, analysis or picture remake (preview) job of a target, as "
+        "the app's Cancel button does. Name the target. With job_type (stacking, analysis or preview) only "
+        "that kind is cancelled; with "
         "job_id that one job is looked up and cancelled; with neither, the target's one running job is "
-        "cancelled, and the call is refused if two kinds run (name one). A picture remake (preview) "
-        "cannot be cancelled in the app, so it is not cancelled here: wait for it to end. Nothing is "
-        "deleted; a cancelled stack leaves the earlier stack as it was. The reply says what was "
+        "cancelled, and the call is refused if two kinds run (name one). Nothing is deleted; a "
+        "cancelled stack leaves the earlier stack as it was, and a cancelled picture remake puts the "
+        "old pictures back. The reply says what was "
         "cancelled, or why nothing was. Needs the app's backend to be running."
     ),
     {
@@ -425,15 +425,15 @@ async def tool_processing_analyze(target: str, stages: list[str] | None = None) 
     specs=JOB_TOOL_SPECS,
 )
 async def tool_processing_cancel(target: str, job_type: str | None = None, job_id: str | None = None) -> Any:
-    """Cancel a target's running stacking or analysis job.
+    """Cancel a target's running stacking, analysis or picture remake job.
 
     Parameters
     ----------
     target : `str`
         The target id.
     job_type : `str`, optional
-        ``"stacking"`` or ``"analysis"``. When omitted, the kind of the one
-        job that is running.
+        ``"stacking"``, ``"analysis"`` or ``"preview"``. When omitted, the
+        kind of the one job that is running.
     job_id : `str`, optional
         One job to cancel. Its type is read from the job list.
 
@@ -452,7 +452,7 @@ async def tool_processing_cancel(target: str, job_type: str | None = None, job_i
     NotFoundError
         If ``job_id`` is not a job.
     """
-    if job_type is not None and job_type not in [*CANCELLABLE_JOB_TYPES, "preview"]:
+    if job_type is not None and job_type not in CANCELLABLE_JOB_TYPES:
         raise InvalidArgumentError(
             f"Unknown job type {job_type!r}. Choose from: {', '.join(CANCELLABLE_JOB_TYPES)}.",
             details={"job_type": job_type},
@@ -500,16 +500,10 @@ async def tool_processing_cancel(target: str, job_type: str | None = None, job_i
         active, chosen_type = jobs, kinds[0]
 
     job_ids = [str(job.get("id")) for job in active]
-    if chosen_type == "stacking":
+    if chosen_type in ("stacking", "preview"):
         method = "processing:cancel"
     elif chosen_type == "analysis":
         method = "analysis:cancel"
-    elif chosen_type == "preview":
-        return _not_cancelled(
-            chosen_type,
-            job_ids,
-            "The app cannot cancel a picture remake (a preview job). Wait for it to end.",
-        )
     else:
         return _not_cancelled(
             chosen_type, job_ids, f"The app has no Cancel for a {chosen_type!r} job, so none is sent."

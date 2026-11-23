@@ -244,6 +244,7 @@ def _stack_frames_guarded(
         _run_stacking_engine(run)  # run.stacked_path, diagnostics
         begin_stage(SUMMARIZE_STAGE, "trimming the stack edges and summarizing the stack")
         _trim_stack_edges(run)  # run.crop_offset, excluded_frames
+        raise_if_abandoned()
         summary = _summarize_stack(run)
         if run.stacked_path:
             _finish_made_stack(run, run.stacked_path, summary)
@@ -644,6 +645,9 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     summary : `StackQualitySummary`
         The stack's quality summary.
     """
+    # A cancelled job stops between steps. The inputs record is saved last,
+    # so a stack cut short here is stacked again by the next run.
+    raise_if_abandoned()
     _point_target_at_stack(run, stacked_path)
     _record_provenance(run, stacked_path, summary)
     _save_registration_record(run, stacked_path, summary)
@@ -652,10 +656,13 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
         "measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)",
     )
     _store_stack_quality(run, stacked_path, summary)
+    raise_if_abandoned()
     _record_stack_star_shapes(run, stacked_path)
+    raise_if_abandoned()
     # Before the preview, so the new stretched FITS the preview writes copies
     # the solution from the stack's header.
     _save_stack_plate_solution(run, stacked_path)
+    raise_if_abandoned()
     # The quality rows above are measured on the stack as Siril registered it.
     _turn_stack_north_up(run, stacked_path)
     begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")

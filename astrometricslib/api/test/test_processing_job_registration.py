@@ -6,7 +6,7 @@ job is recorded and closed out correctly on the success, no-output and error
 paths.
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -125,3 +125,68 @@ def test_a_stacking_error_records_a_failed_job_and_still_raises(
     jobs = _read_jobs(isolated_job_logging, "StackErrorTarget")
     assert len(jobs) == 1
     assert jobs[0].status == "failed"
+
+
+def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a remake shows a job row, with its id, before a slot frees."""
+    import threading
+    import time
+    from contextlib import contextmanager
+
+    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE, run_as_background_job
+    from astrometricslib.pipelines.stacking.post_processing import preview_remake
+
+    slot_is_free = threading.Event()
+
+    @contextmanager
+    def busy_slot() -> Generator[None]:
+        """Stand in for a job slot that stays held until the test frees it."""
+        assert slot_is_free.wait(timeout=20.0)
+        yield
+
+    remade = MagicMock(shown_in_viewer=False)
+    monkeypatch.setattr(preview_remake, "remake_stack_preview", lambda *args, **kwargs: remade)
+    pipelines = _pipelines()
+    monkeypatch.setattr(pipelines, "acquire_job_slot", busy_slot)
+    monkeypatch.setattr(pipelines, "_resolve", lambda target: _target("PreviewWaitTarget"))
+
+    outcome = run_as_background_job(
+        lambda: pipelines.remake_preview("PreviewWaitTarget"), grace_period_seconds=0.3
+    )
+
+    assert outcome["status"] == "running"
+    assert outcome["jobId"] is not None
+    jobs = _read_jobs(isolated_job_logging, "PreviewWaitTarget")
+    assert [job.job_type for job in jobs] == ["preview"]
+    assert jobs[0].message == WAITING_FOR_SLOT_MESSAGE
+
+    slot_is_free.set()
+    for _ in range(200):
+        if _read_jobs(isolated_job_logging, "PreviewWaitTarget")[0].status == "completed":
+            break
+        time.sleep(0.05)
+    assert _read_jobs(isolated_job_logging, "PreviewWaitTarget")[0].status == "completed"
+
+
+def test_a_finished_preview_remake_has_a_final_message_and_a_completion_time(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finished remake has a final message and a completion time."""
+    from contextlib import nullcontext
+
+    from astrometricslib.pipelines.stacking.post_processing import preview_remake
+
+    remade = MagicMock(shown_in_viewer=False)
+    monkeypatch.setattr(preview_remake, "remake_stack_preview", lambda *args, **kwargs: remade)
+    pipelines = _pipelines()
+    monkeypatch.setattr(pipelines, "acquire_job_slot", nullcontext)
+    monkeypatch.setattr(pipelines, "_resolve", lambda target: _target("PreviewDoneTarget"))
+
+    pipelines.remake_preview("PreviewDoneTarget")
+
+    job = _read_jobs(isolated_job_logging, "PreviewDoneTarget")[0]
+    assert job.status == "completed"
+    assert job.message == "Preview made"
+    assert job.completed_at is not None

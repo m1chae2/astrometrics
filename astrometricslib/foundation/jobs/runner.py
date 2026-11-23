@@ -53,6 +53,13 @@ logger = logging.getLogger(__name__)
 # context manager stops second-guessing it -- see `registered_job`.
 _TERMINAL_STATUSES = frozenset({"completed", "failed"})
 
+# How long `run_as_background_job` keeps waiting for the work to record its
+# job after the grace period has passed. Writing the job row and its log file
+# can take a second or more on a slow disk (Windows in particular), so a
+# caller that gave up at the grace period could be told "no job to poll" when
+# the job appears moments later. This is a safety margin, not a tuned value.
+_JOB_RECORD_WAIT_SECONDS = 3.0
+
 
 _current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
 """The job being run, set by `registered_job`."""
@@ -789,6 +796,7 @@ def run_as_background_job(
         `grace_period_seconds`, its exception is raised here again.
     """
     job_finished = threading.Event()
+    job_recorded = threading.Event()
     started_jobs: list[JobHandle] = []
     outcome: dict[str, Any] = {}
 
@@ -796,6 +804,7 @@ def run_as_background_job(
         """Keep the first job the work records, the outermost one."""
         if not started_jobs:
             started_jobs.append(handle)
+        job_recorded.set()
 
     def _run() -> None:
         listener_token = _job_started_listener.set(_remember_first_job)
@@ -818,6 +827,7 @@ def run_as_background_job(
                 100,
                 output_metrics={"result": _to_plain(outcome["result"])},
             )
+        job_recorded.set()
         job_finished.set()
 
     thread = threading.Thread(target=_run, daemon=True)
@@ -829,6 +839,9 @@ def run_as_background_job(
         job_id = started_jobs[0].job_id if started_jobs else None
         return {"jobId": job_id, "result": outcome["result"]}
 
+    # The grace period is over, but the job row may still be being written.
+    # Wait a little longer for it (or for work that records no job to end).
+    job_recorded.wait(timeout=_JOB_RECORD_WAIT_SECONDS)
     job = started_jobs[0] if started_jobs else None
     return {
         "status": "running",

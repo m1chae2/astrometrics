@@ -369,6 +369,34 @@ class TestRunAsBackgroundJob:
         assert stored is not None and stored.status == "completed", "background work should keep running"
         assert stored.output_metrics["result"] == {"stackedImage": "Vega_Stacked.fits"}
 
+    def test_job_recorded_after_the_grace_period_still_gets_its_id(self, isolated_logs: str) -> None:
+        """A job that is recorded late (slow disk) is still handed back.
+
+        The work takes longer than the grace period just to start its job,
+        as a slow job-row write does on Windows. The caller must still get
+        the job id to poll, not "no job".
+        """
+        from astrometricslib.foundation.jobs.runner import run_as_background_job
+
+        def slow_to_record() -> dict:
+            """Wait past the grace period, then record a job and finish.
+
+            Returns
+            -------
+            result : `dict`
+                A small result.
+            """
+            time.sleep(0.4)
+            with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+                time.sleep(0.2)
+                return {"ok": True}
+
+        outcome = run_as_background_job(slow_to_record, grace_period_seconds=0.1)
+
+        assert outcome["status"] == "running"
+        assert outcome["jobId"] is not None
+        assert outcome["logFilePath"] is not None
+
     def test_failing_work_reports_the_error(self, isolated_logs: str) -> None:
         """A quick failure is raised to the caller, not swallowed."""
         from astrometricslib.foundation.jobs.runner import run_as_background_job

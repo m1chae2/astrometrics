@@ -113,14 +113,22 @@ def _advance(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
 # --- Rate limit -------------------------------------------------------------
 
 
-def test_the_rate_limit_spaces_requests_to_one_host(fresh_gateway: list[float]) -> None:
-    """Five requests in a burst wait one interval each, after the first."""
+def test_the_rate_limit_spaces_requests_to_one_host(
+    fresh_gateway: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Five requests in a burst wait one interval each, after the first.
+
+    The clock is frozen. The test replaces the wait function, so no real time
+    passes between calls, but on a slow disk (Windows) the file work between
+    calls takes real time and would shorten each recorded wait.
+    """
+    monkeypatch.setattr(host_state, "_clock", lambda: 1000.0)
     for _ in range(5):
         call_service(SIMBAD, lambda host: "ok")
 
     interval = 1.0 / SIMBAD.requests_per_second
     assert len(fresh_gateway) == 4
-    assert fresh_gateway[-1] == pytest.approx(4 * interval, abs=0.1)
+    assert fresh_gateway[-1] == pytest.approx(4 * interval)
 
 
 def test_each_host_has_its_own_rate_limit(fresh_gateway: list[float]) -> None:
@@ -145,9 +153,27 @@ def _reserve_in_process(path: str, count: int, rate: float, queue: Any) -> None:
         Receives the time each slot starts.
     """
     host_state.outside_state_path = lambda: Path(path)
+    real_clock = host_state._clock
+    reads: list[float] = []
+
+    def recording_clock() -> float:
+        """Read the clock and keep the reading the slot is measured from.
+
+        Returns
+        -------
+        now : `float`
+            The clock reading.
+        """
+        reads.append(real_clock())
+        return reads[-1]
+
+    host_state._clock = recording_clock
     for _ in range(count):
         wait = host_state.reserve_slot("shared.example", rate)
-        queue.put(time.time() + wait)
+        # The slot is the moment the lock saw plus the wait. Reading the
+        # clock again here would add the time the commit took, which differs
+        # per process and is long on Windows.
+        queue.put(reads[-1] + wait)
 
 
 def test_the_rate_limit_holds_across_two_processes(tmp_path: Path) -> None:

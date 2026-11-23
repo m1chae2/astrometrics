@@ -176,6 +176,7 @@ photometry.shuffle_count,PHO-12,measurement,Partly measured
 photometry.significant_window_peak_share,PHO-D19,judgment,Design estimate
 photometry.sky_annulus_inner_radius_px,PHO-D01,measurement,Design estimate
 photometry.sky_annulus_outer_radius_px,PHO-D01,measurement,Design estimate
+photometry.step_field_minimum_spreads,PHO-20,exclusion criteria,Partly measured
 photometry.step_minimum_block_variance_fraction,PHO-20,exclusion criteria,Partly measured
 photometry.step_minimum_shift_px,PHO-20,exclusion criteria,Partly measured
 photometry.step_minimum_significance,PHO-20,exclusion criteria,Partly measured

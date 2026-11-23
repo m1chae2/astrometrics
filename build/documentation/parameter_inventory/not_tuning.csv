@@ -213,6 +213,7 @@ astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_FRAME
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_MEDIAN_STANDARD_ERROR_FACTOR,unit or physical constant
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_MINIMUM_FRAMES_PER_GROUP,Method choice: fewest frames that give a group's scatter
+astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_STEP_FIELD_MINIMUM_STARS,Method choice: fewest stars that give a field median and spread
 astrometricslib/pipelines/photometry/processing/noise_budget.py,scintillation_relative_noise.site_elevation_m,0 means sea level; the caller passes the site value
 astrometricslib/pipelines/photometry/processing/observing_window.py,MINIMUM_NIGHTS_FOR_ALIASES,A single night cannot have a daily echo
 astrometricslib/pipelines/photometry/processing/period_checks.py,holdout_cycle.seed,Random seed; reproducibility only

@@ -230,6 +230,12 @@ def format_public_module_markdown(module_name: str) -> str:
         if callable(value) and not isinstance(value, type):
             try:
                 signature = str(inspect.signature(value))
+                if "_internal" in signature:
+                    # A private class in the return type is not public: show
+                    # the parameters only, so no private path is printed.
+                    signature = str(
+                        inspect.signature(value).replace(return_annotation=inspect.Signature.empty)
+                    )
             except ValueError, TypeError, NameError:
                 signature = "(...)"
         lines.append(f"- **`{name}{signature}`**: {summary}")

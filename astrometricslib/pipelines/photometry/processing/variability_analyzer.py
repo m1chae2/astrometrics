@@ -118,6 +118,7 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
 from astrometricslib.pipelines.photometry.processing.instrumental_artifacts import (
     coverage_reason,
     edge_reason,
+    field_step_summary,
     registration_step_threshold_px,
     step_artifact_reason,
 )
@@ -2136,6 +2137,39 @@ class VariabilityAnalyzer:
         step_threshold_px = registration_step_threshold_px(ordered_shifts)
         largest_shift_px = max((math.hypot(*shift) for shift in ordered_shifts), default=0.0)
         counts = {"saturation": 0, "edge": 0, "step": 0}
+        # The field's own jump at each step, so that a star is judged against
+        # the field and not against zero (see `field_step_summary`).
+        ordered_curves = []
+        for star in self.stellar_objects:
+            photometry = star.photometry
+            if photometry is None:
+                continue
+            values = photometry.fluxes_detrended or photometry.fluxes_normalized
+            if (
+                values
+                and len(values) == len(photometry.timestamps)
+                and all(timestamp in shifts_by_time for timestamp in photometry.timestamps)
+            ):
+                order = sorted(range(len(values)), key=lambda index: photometry.timestamps[index])
+                ordered_curves.append((
+                    [values[index] for index in order],
+                    [photometry.timestamps[index] for index in order],
+                    [shifts_by_time[photometry.timestamps[index]] for index in order],
+                ))
+        field_steps = field_step_summary(ordered_curves, step_threshold_px)
+        field_effects = [
+            (timestamp, median)
+            for timestamp, (median, spread) in field_steps.items()
+            if abs(median) >= spread
+        ]
+        if field_effects:
+            logger.warning(
+                "  Variability: the whole field changes brightness at %s registration step(s), by up to "
+                "%.1f%% (the median jump of all stars is larger than their spread). This is a field effect; "
+                "each star is judged for steps against it, and the light curves are not corrected.",
+                len(field_effects),
+                100.0 * max(abs(median) for _, median in field_effects),
+            )
         for star in self.stellar_objects:
             photometry = star.photometry
             if photometry is None:
@@ -2171,6 +2205,8 @@ class VariabilityAnalyzer:
                     [values[index] for index in order],
                     [shifts_by_time[photometry.timestamps[index]] for index in order],
                     step_threshold_px,
+                    timestamps=[photometry.timestamps[index] for index in order],
+                    field_steps=field_steps,
                 )
                 if reason:
                     reasons.append(("step", reason))

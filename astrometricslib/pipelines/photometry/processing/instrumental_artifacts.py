@@ -16,7 +16,9 @@ its light curve and its numbers, and is marked "not judged" with the reason
   exactly across those jumps, and not one of the other 386 stars did. A real
   star does not know when the mount moved. A star whose light curve is mostly
   a set of flat levels, one per group of frames, with jumps at the shifts, is
-  treated as an instrument effect (see `step_artifact_reason`).
+  treated as an instrument effect (see `step_artifact_reason`). A step
+  that moves the whole field is taken out first: a star is judged against
+  the field's own jump (see `field_step_summary`), not against zero.
 * **Coverage.** A star that saturates in many frames loses those points
   (see `VariabilityAnalyzer._remove_saturated_points`), and the frames that
   stay still have a peak that is nearly clipped, so their flux is too low in
@@ -31,7 +33,7 @@ the analyzer still holds them, which is during the photometry run.
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Hashable, Mapping, Sequence
 
 import numpy as np
 
@@ -48,12 +50,14 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
 
 __all__ = [
     "MINIMUM_UNSATURATED_FRACTION",
+    "STEP_FIELD_MINIMUM_SPREADS",
     "STEP_MINIMUM_BLOCK_VARIANCE_FRACTION",
     "STEP_MINIMUM_SHIFT_PX",
     "STEP_MINIMUM_SIGNIFICANCE",
     "STEP_SHIFT_JITTER_SIGMAS",
     "coverage_reason",
     "edge_reason",
+    "field_step_summary",
     "registration_step_threshold_px",
     "step_artifact_reason",
 ]
@@ -146,6 +150,34 @@ STEP_MINIMUM_BLOCK_VARIANCE_FRACTION = TunedParameter(
     register_entry="PHO-20",
 )
 
+# How many robust spreads a star's jump across a step must differ from the
+# field's own jump there. A step in the field moves many stars at once (a
+# flat-field or position effect), and a star that only follows the field is
+# not a variable star. The field's jump at a step is the median of the
+# jumps of all stars, and its spread is 1.4826 times their median absolute
+# deviation. On M 31 (2026-11-04/05, 114 frames, very precise stars) the
+# field-wide jump alone put 399 of about 497 stars above five errors, so the
+# star's own error cannot be the only yardstick. Five spreads is the same
+# distance used for the field-noise cutoff of the variability rule, and is
+# far enough above chance that no star of a field of a few hundred passes by
+# noise. A statistics choice. Partly measured (PHO-20): checked against the
+# M 52 stars; the M 31 shifts are not stored.
+STEP_FIELD_MINIMUM_SPREADS = TunedParameter(
+    name="photometry.step_field_minimum_spreads",
+    default=5.0,
+    unit="sigma",
+    description="Robust spreads a star's step jump must differ from the field's jump.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-20",
+)
+
+# The fewest stars that give the field's jump at a step. A median and a
+# spread of fewer than ten values move with one star, so a smaller field is
+# judged on the star's own error alone (the earlier rule). A method choice.
+_STEP_FIELD_MINIMUM_STARS = 10
+
 # How many frames either side of a step make the jump, and the fewest frames a
 # group needs to give its scatter. Three frames give a median that one bad
 # frame cannot move. These are method choices.
@@ -192,6 +224,29 @@ def registration_step_threshold_px(frame_shifts_px: Sequence[tuple[float, float]
     return float(max(minimum_px, median + sigmas * spread))
 
 
+def _jump_size(values: np.ndarray, index: int) -> float:
+    """Measure the jump of the median of three points across one index.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        The light curve, in time order.
+    index : `int`
+        The first point after the jump.
+
+    Returns
+    -------
+    jump : `float`
+        The median of the points after minus the median of those before, in
+        the units of the values. 0 when either side has fewer than two points.
+    """
+    before = values[max(0, index - _FRAMES_EACH_SIDE_OF_STEP) : index]
+    after = values[index : index + _FRAMES_EACH_SIDE_OF_STEP]
+    if before.size < 2 or after.size < 2:
+        return 0.0
+    return float(np.median(after) - np.median(before))
+
+
 def _jump_significance(values: np.ndarray, index: int, scatter: float) -> float:
     """Measure the jump of a light curve across one index.
 
@@ -219,10 +274,105 @@ def _jump_significance(values: np.ndarray, index: int, scatter: float) -> float:
     return abs(float(np.median(after)) - float(np.median(before))) / error
 
 
+def _relative_step_jumps(
+    values: Sequence[float],
+    timestamps: Sequence[Hashable],
+    frame_shifts_px: Sequence[tuple[float, float]],
+    step_threshold_px: float,
+) -> dict[Hashable, float]:
+    """Measure one star's relative jump at each registration step.
+
+    Parameters
+    ----------
+    values : `Sequence` [`float`]
+        The star's light curve, in time order.
+    timestamps : `Sequence` [`Hashable`]
+        The time of each point, in the same order.
+    frame_shifts_px : `Sequence` [`tuple` [`float`, `float`]]
+        The shift of the field at each point, in pixels.
+    step_threshold_px : `float`
+        The change of the shift that counts as a step.
+
+    Returns
+    -------
+    jumps : `dict` [`Hashable`, `float`]
+        For each step with at least two points on each side, the time of the
+        first point after the step and the change of the median of three
+        points, as a fraction of the star's median level.
+    """
+    levels = np.asarray(values, dtype=float)
+    shifts = np.asarray(frame_shifts_px, dtype=float)
+    if (
+        levels.size != len(shifts)
+        or levels.size != len(timestamps)
+        or levels.size < 2 * _MINIMUM_FRAMES_PER_GROUP
+    ):
+        return {}
+    keep = np.isfinite(levels)
+    levels, shifts = levels[keep], shifts[keep]
+    kept_times = [timestamp for timestamp, kept in zip(timestamps, keep, strict=True) if kept]
+    median_level = float(np.median(levels)) if levels.size else 0.0
+    if median_level <= 0.0:
+        return {}
+    levels = levels / median_level
+    changes = np.r_[0.0, np.hypot(np.diff(shifts[:, 0]), np.diff(shifts[:, 1]))]
+    jumps: dict[Hashable, float] = {}
+    for index in np.where(changes >= step_threshold_px)[0]:
+        before = levels[max(0, index - _FRAMES_EACH_SIDE_OF_STEP) : index]
+        after = levels[index : index + _FRAMES_EACH_SIDE_OF_STEP]
+        if before.size >= 2 and after.size >= 2:
+            jumps[kept_times[int(index)]] = float(np.median(after) - np.median(before))
+    return jumps
+
+
+def field_step_summary(
+    light_curves: Sequence[tuple[Sequence[float], Sequence[Hashable], Sequence[tuple[float, float]]]],
+    step_threshold_px: float,
+) -> dict[Hashable, tuple[float, float]]:
+    """Find how the whole field jumps at each registration step.
+
+    A step can move most stars together (a flat-field or position effect).
+    That common jump is a property of the field, not of any one star. Each
+    star's relative jump at a step is measured (see `step_artifact_reason`
+    for the jump) and the field's jump is the median over the stars. The
+    spread is 1.4826 times the median absolute deviation of the star jumps
+    around that median.
+
+    Parameters
+    ----------
+    light_curves : `Sequence` [`tuple`]
+        One ``(values, timestamps, frame_shifts_px)`` per star, each in time
+        order and of equal length.
+    step_threshold_px : `float`
+        The change of the shift that counts as a step.
+
+    Returns
+    -------
+    steps : `dict` [`Hashable`, `tuple` [`float`, `float`]]
+        For each step time, the field's median jump and its robust spread, as
+        fractions of a star's level. A step measured on fewer than
+        `_STEP_FIELD_MINIMUM_STARS` stars is left out.
+    """
+    jumps_by_time: dict[Hashable, list[float]] = {}
+    for values, timestamps, shifts in light_curves:
+        for timestamp, jump in _relative_step_jumps(values, timestamps, shifts, step_threshold_px).items():
+            jumps_by_time.setdefault(timestamp, []).append(jump)
+    summary: dict[Hashable, tuple[float, float]] = {}
+    for timestamp, jumps in jumps_by_time.items():
+        if len(jumps) < _STEP_FIELD_MINIMUM_STARS:
+            continue
+        median = float(np.median(jumps))
+        spread = _MAD_TO_SIGMA * float(np.median(np.abs(np.asarray(jumps) - median)))
+        summary[timestamp] = (median, spread)
+    return summary
+
+
 def step_artifact_reason(
     values: Sequence[float],
     frame_shifts_px: Sequence[tuple[float, float]],
     step_threshold_px: float,
+    timestamps: Sequence[Hashable] | None = None,
+    field_steps: Mapping[Hashable, tuple[float, float]] | None = None,
 ) -> str | None:
     """Say whether a light curve changes with the registration steps.
 
@@ -243,6 +393,13 @@ def step_artifact_reason(
        has jumps elsewhere that are as large, and is left to the other
        tests.
 
+    When ``field_steps`` is given (see `field_step_summary`), the star is
+    judged against the field. The field's own jump is taken out of the
+    star's light curve at each step before tests 2 to 4, and the star's
+    remaining jump must also be at least `STEP_FIELD_MINIMUM_SPREADS` robust
+    spreads of the field's jumps. A star that only follows the field is then
+    not put down to the steps.
+
     Parameters
     ----------
     values : `Sequence` [`float`]
@@ -253,6 +410,12 @@ def step_artifact_reason(
     step_threshold_px : `float`
         The change of the shift that counts as a step (see
         `registration_step_threshold_px`).
+    timestamps : `Sequence` [`Hashable`], optional
+        The time of each point, in the same order. Needed with
+        ``field_steps``.
+    field_steps : `Mapping` [`Hashable`, `tuple` [`float`, `float`]], optional
+        The field's median jump and robust spread at each step time. When
+        `None` or empty, the star is judged on its own error alone.
 
     Returns
     -------
@@ -266,6 +429,11 @@ def step_artifact_reason(
         return None
     keep = np.isfinite(levels)
     levels, shifts = levels[keep], shifts[keep]
+    kept_times = (
+        [timestamp for timestamp, kept in zip(timestamps, keep, strict=True) if kept]
+        if timestamps is not None and len(timestamps) == keep.size
+        else None
+    )
     median_level = float(np.median(levels))
     if median_level <= 0.0:
         return None
@@ -274,6 +442,17 @@ def step_artifact_reason(
     is_step = changes >= step_threshold_px
     if not is_step.any():
         return None
+    # Take the field's own jump out of the light curve at each step, and
+    # note the spread the star's remaining jump must beat there.
+    required_jump = np.zeros(levels.size)
+    if field_steps and kept_times is not None:
+        correction = 0.0
+        for index in range(levels.size):
+            field_step = field_steps.get(kept_times[index]) if is_step[index] else None
+            if field_step is not None:
+                correction += field_step[0]
+                required_jump[index] = resolve(STEP_FIELD_MINIMUM_SPREADS).value * max(field_step[1], 1.0e-6)
+            levels[index] -= correction
     group = np.cumsum(is_step)
     residuals = [
         levels[group == label] - np.median(levels[group == label])
@@ -291,7 +470,14 @@ def step_artifact_reason(
         for label in np.unique(group)
     )
     between_fraction = between / total
-    step_jumps = [_jump_significance(levels, int(index), scatter) for index in np.where(is_step)[0]]
+    # A step counts only when what is left of the star's jump (the field's
+    # own jump is already out) is also large against the field's spread.
+    step_jumps = [
+        _jump_significance(levels, int(index), scatter)
+        if abs(_jump_size(levels, int(index))) >= required_jump[index]
+        else 0.0
+        for index in np.where(is_step)[0]
+    ]
     other_jumps = [
         _jump_significance(levels, index, scatter)
         for index in range(_FRAMES_EACH_SIDE_OF_STEP, levels.size - _FRAMES_EACH_SIDE_OF_STEP)

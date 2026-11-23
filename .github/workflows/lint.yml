@@ -101,8 +101,11 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Install import-linter
-        run: pip install import-linter==2.15
+      - name: Install import-linter and the network clients it checks
+        # The "only the outside-service gateway imports network clients"
+        # contract lists these packages as root packages, so they must be
+        # installed for import-linter to find them.
+        run: pip install import-linter==2.15 requests httpx astroquery pyvo
 
       - name: Check import layers
         run: lint-imports

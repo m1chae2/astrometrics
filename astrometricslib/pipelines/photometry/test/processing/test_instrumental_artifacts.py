@@ -14,6 +14,7 @@ from astrometricslib.models.stellar_source import PhotometryResult, StellarObjec
 from astrometricslib.pipelines.photometry.processing.instrumental_artifacts import (
     coverage_reason,
     edge_reason,
+    field_step_summary,
     registration_step_threshold_px,
     step_artifact_reason,
 )
@@ -215,3 +216,58 @@ def test_a_star_that_is_not_judged_is_never_a_candidate() -> None:
     varying.photometry.not_judged_reason = "Not judged for variability: test"
     flagged, _ = flag_variable_stars([*stars, varying], 5.0)
     assert varying not in flagged
+
+
+def field_with_common_step(deviant_dip: float = 0.0, star_count: int = 60) -> tuple[list, list, list, dict]:
+    """Build a field whose every star drops 2 percent at the frame-28 step.
+
+    Parameters
+    ----------
+    deviant_dip : `float`, optional
+        Extra dip of star 0 between frames 28 and 38, as a fraction.
+    star_count : `int`, optional
+        Number of stars.
+
+    Returns
+    -------
+    curves, times, shifts, field_steps : `tuple`
+        The light curves, the frame times (frame numbers), the shifts and the
+        field's summary of each step.
+    """
+    shifts = stepping_shifts()
+    times = list(range(FRAME_COUNT))
+    curves = []
+    for seed in range(star_count):
+        values = noisy_curve(100 + seed, 0.002)
+        values[28:] -= 0.02
+        if seed == 0:
+            values[28:38] -= deviant_dip
+        curves.append(values)
+    threshold = registration_step_threshold_px(shifts)
+    summary = field_step_summary([(c, times, shifts) for c in curves], threshold)
+    return curves, times, shifts, summary
+
+
+def test_a_field_wide_step_does_not_veto_the_stars_that_follow_it() -> None:
+    """Every precise star drops 2 percent at the step, so nobody is vetoed."""
+    curves, times, shifts, summary = field_with_common_step()
+    threshold = registration_step_threshold_px(shifts)
+    assert summary[28][0] == pytest.approx(-0.02, abs=0.003)
+    own_error_only = [step_artifact_reason(c, shifts, threshold) for c in curves]
+    assert sum(reason is not None for reason in own_error_only) > 30
+    relative = [step_artifact_reason(c, shifts, threshold, times, summary) for c in curves]
+    assert all(reason is None for reason in relative)
+
+
+def test_one_star_that_differs_from_the_field_at_the_step_is_vetoed() -> None:
+    """A star with an extra 6 percent dip across the steps still fails."""
+    curves, times, shifts, summary = field_with_common_step(deviant_dip=0.06)
+    threshold = registration_step_threshold_px(shifts)
+    assert step_artifact_reason(curves[0], shifts, threshold, times, summary) is not None
+    assert all(step_artifact_reason(c, shifts, threshold, times, summary) is None for c in curves[1:])
+
+
+def test_a_small_field_is_judged_on_the_star_alone() -> None:
+    """Fewer than ten stars give no field summary; the star stands alone."""
+    _, _, _, summary = field_with_common_step(star_count=5)
+    assert summary == {}

@@ -103,7 +103,7 @@ Read-only. Checks that no raw frame on Drive has gone missing or changed.
 - **What it records.** It lists every file under `drive:Library` with `rclone lsjson` (size, MD5 checksum, modification time). It saves the list as a gzipped manifest in `~/.cache/astrometrics/integrity` (newest 10 kept) and compares it with the previous one. The first run records a baseline.
 - **Serious problems.** A raw frame under `lights/`, `darks/`, `biases/` or `flats/` that is missing, or has a different checksum or size, gives exit code 2, plus a `notify-send` desktop notice unless `--no-notify`.
 - **Moves.** A file whose checksum and size reappear at a new path (such as a frame moved into `_excluded`) is reported as moved, not missing.
-- **Information only.** Derived files (stacks, rejection maps, processed images, JPEGs, `.seq` files, `stacks/` folders) are listed but never count as problems. The `_backup` folder (old database snapshots from before backups became local) is skipped.
+- **Information only.** Derived files (stacks, rejection maps, processed images, JPEGs, `.seq` files, the frame-quarantine record `excluded_frames.json`, `stacks/` folders) are listed but never count as problems. The `_backup` folder (old database snapshots from before backups became local) is skipped.
 - **Other exit codes and output.** Exit code 1 means `rclone` failed. `--json` prints a machine-readable summary.
 
 ## Empirical validation and analysis

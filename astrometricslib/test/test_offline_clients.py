@@ -91,7 +91,7 @@ def test_the_star_identifier_skips_gaia_quietly(caplog: pytest.LogCaptureFixture
     assert fetch is None
     assert "nothing off the computer" in reason
     assert not [record for record in caplog.records if record.levelname in ("WARNING", "ERROR")]
-    assert not star_identifier._is_gaia_service_unreachable("VizieR")
+    assert not star_identifier._gaia_remote_queries_disabled()
 
 
 def test_gaia_reddening_refuses_as_an_external_service_error() -> None:

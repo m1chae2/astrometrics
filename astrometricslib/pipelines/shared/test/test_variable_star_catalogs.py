@@ -17,9 +17,9 @@ import pytest
 import requests
 from astropy.table import MaskedColumn, Table
 
-from astrometricslib._internal.drivers import gaia_cone_driver
 from astrometricslib._internal.drivers.catalog_answer_store import catalog_answers_path
 from astrometricslib._internal.drivers.catalog_cache import CatalogUnavailableError
+from astrometricslib._internal.drivers.outside_services import gateway
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.known_variability import (
     NO_GAIA_MATCH,
@@ -212,9 +212,11 @@ def install_fake_vizier(
 
     configuration = types.SimpleNamespace(get_vizier_preferred_server=lambda: preferred)
     monkeypatch.setitem(sys.modules, "astroquery.vizier", types.SimpleNamespace(Vizier=FakeVizier))
-    monkeypatch.setattr(gaia_cone_driver, "get_configuration", lambda: configuration)
-    monkeypatch.setattr(gaia_cone_driver, "_last_answered_vizier_server", None)
-    monkeypatch.setattr(gaia_cone_driver, "_vizier_preference_when_remembered", None)
+    # The gateway now owns the settings lookup and the memory of which
+    # server answered last.
+    monkeypatch.setattr(gateway, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(gateway, "_last_answered", {})
+    monkeypatch.setattr(gateway, "_preference_when_remembered", {})
     return asked
 
 

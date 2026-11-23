@@ -153,17 +153,20 @@ def _reserve_in_process(path: str, count: int, rate: float, queue: Any) -> None:
 def test_the_rate_limit_holds_across_two_processes(tmp_path: Path) -> None:
     """Two processes taking slots together never start two in one interval."""
     path = str(tmp_path / "shared.db")
-    queue: Any = multiprocessing.get_context("fork").Queue()
+    # "spawn" is the one start method every platform offers (Windows has no
+    # "fork"). A spawned child starts fresh, so it gets the state file path
+    # as an argument and sets it itself in `_reserve_in_process`.
+    context = multiprocessing.get_context("spawn")
+    queue: Any = context.Queue()
     rate = 20.0
-    processes = [
-        multiprocessing.get_context("fork").Process(target=_reserve_in_process, args=(path, 6, rate, queue))
-        for _ in range(2)
-    ]
+    processes = [context.Process(target=_reserve_in_process, args=(path, 6, rate, queue)) for _ in range(2)]
     for process in processes:
         process.start()
-    starts = sorted(queue.get(timeout=10) for _ in range(12))
+    # A spawned child must import this module and the library first, which
+    # is slow on a busy runner, so allow a generous wait.
+    starts = sorted(queue.get(timeout=120) for _ in range(12))
     for process in processes:
-        process.join(timeout=10)
+        process.join(timeout=30)
 
     gaps = [later - earlier for earlier, later in itertools.pairwise(starts)]
     assert min(gaps) >= 1.0 / rate - 0.005

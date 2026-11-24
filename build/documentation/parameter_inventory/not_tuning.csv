@@ -726,3 +726,4 @@ astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RING_SKY
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_OUTER_RING_RANGES,Definition of the two outer rings of the 64 by 64 grid in r squared (0.64 to 1 and 1 to 2); geometry of the frame.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_QUARTER_SKY_BINS,Sample-size guard: sky bins needed in a quarter of the frame (of 1024) to check the sign of the falloff. Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,QUARTER_RISE_TOLERANCE,Allowance for bin noise when a quarter of the frame is checked for brightening toward its corner (the 13 stacks read -1.24% to +0.06%). Not tuned. Partly measured STK-61.
+astrometricslib/pipelines/stacking/post_processing/stack_noise.py,_RECENT_STACK_SOLVES_KEPT,Cache size: how many recent plate solves are kept in memory; affects only run time

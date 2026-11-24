@@ -27,9 +27,9 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
 from astrometricslib.pipelines.stacking.processing.group_gains import (
-    CLIPPED_FRAME_ZERO_FRACTION,
     DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
     SATURATION_FRACTION_OF_FULL_SCALE,
     GroupGainMeasurement,

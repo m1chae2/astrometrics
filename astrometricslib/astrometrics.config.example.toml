@@ -236,9 +236,11 @@ photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source =
 # Optional. Detector noise terms, used for the photometric error budget (the
 # CCD equation), recorded for each camera setting they were measured at: the
 # gain setting, the offset and the binning. A frame uses the entry for its own
-# setting only. A frame whose setting has no entry gets no gain or read noise
-# from this profile (the pipeline then tries the image header, then assumes 1
-# e-/ADU and no read noise, and says so). It never borrows a nearby setting.
+# setting. A frame whose setting has no entry gets no gain or read noise from
+# this profile (the pipeline then tries the image header, then assumes 1
+# e-/ADU and no read noise, and says so), except that a frame not clipped at
+# zero may use the entry at another offset (see "offset" below). It never
+# borrows any other nearby setting.
 # Each entry is one inline table:
 #   gain_setting   the camera's gain setting (or the ISO of a DSLR), as the
 #                  header's GAIN card writes it; 0.0 and 0 are the same

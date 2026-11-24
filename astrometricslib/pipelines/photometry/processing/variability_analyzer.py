@@ -134,6 +134,7 @@ from astrometricslib.pipelines.photometry.processing.variability_indices import 
     assess_variability,
 )
 from astrometricslib.pipelines.photometry.run_warnings import SESSION_NOTICE_LOG_EXTRA
+from astrometricslib.pipelines.shared.quality.clipped_frames import frame_is_clipped_at_zero
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -1038,7 +1039,18 @@ class VariabilityAnalyzer:
         # frame's own gain, offset and binning. Every later frame is
         # assumed to come from the same camera at the same settings, like
         # the saturation threshold above.
-        self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
+        # A frame with almost no exact zeros is not cut off at zero, so the
+        # profile's entry from another offset may stand in (the offset
+        # changes neither gain nor read noise).
+        self.detector_noise = resolve_detector_noise(
+            camera_profile,
+            reference_header,
+            clipped_at_zero=frame_is_clipped_at_zero(reference_raw_data),
+        )
+        if self.detector_noise.offset_fallback_note:
+            logger.info(
+                "The reference frame's gain and read noise: %s.", self.detector_noise.offset_fallback_note
+            )
         if self.detector_noise.profile_gap_reason:
             logger.warning(
                 "The camera profile gave no gain or read noise for the reference frame: %s.",

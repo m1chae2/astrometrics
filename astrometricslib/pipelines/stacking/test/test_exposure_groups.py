@@ -21,6 +21,7 @@ from astropy.io import fits
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.saturation import SATURATION_MASK_FRACTION_OF_CEILING
 from astrometricslib.pipelines.stacking.frame_screening import (
     EXPOSURE_NOT_FOLDABLE_REASON_PREFIX,
@@ -49,7 +50,6 @@ from astrometricslib.pipelines.stacking.processing.group_file_merging import (
     merge_rejection_maps,
 )
 from astrometricslib.pipelines.stacking.processing.group_gains import (
-    CLIPPED_FRAME_ZERO_FRACTION,
     PLAUSIBLE_GAIN_RANGE,
     SATURATION_FRACTION_OF_FULL_SCALE,
     describe_group_clipping,

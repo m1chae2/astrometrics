@@ -17,6 +17,7 @@ from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, StackingPipelineQualityMetrics
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.post_processing import assess_output_quality as aoq
 from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
     RAW_FRAME_CLIPPING_GATE_NAME,
@@ -39,7 +40,6 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import 
     find_dominant_gain_subset,
     gain_homogeneity_gate,
 )
-from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.test.test_flat_calibration import write_flat
 
 

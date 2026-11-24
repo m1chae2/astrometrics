@@ -24,6 +24,7 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
     FrameSaturation,
@@ -33,7 +34,6 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
 )
 from astrometricslib.pipelines.stacking.processing.group_combination import FRAMES_SAMPLED_PER_GROUP
 from astrometricslib.pipelines.stacking.processing.group_gains import (
-    CLIPPED_FRAME_ZERO_FRACTION,
     GroupGainMeasurement,
 )
 

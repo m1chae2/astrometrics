@@ -1258,12 +1258,12 @@ def _describe_groups(
     summaries : `list` [`dict`]
         One summary per group, stacked groups first.
     """
+    from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
         measure_group_saturation,
         write_group_manifest,
     )
-    from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 
     clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
 

@@ -28,6 +28,7 @@ from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     frame_subject_id,
     measure_clipped_mean_adu,
@@ -74,7 +75,6 @@ from astrometricslib.pipelines.shared.quality.time_budget import (
     FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
     Stopwatch,
 )
-from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.test.golden import measurements as golden_measurements
 
 # The camera setting of the synthetic frames, and the numbers the profile holds

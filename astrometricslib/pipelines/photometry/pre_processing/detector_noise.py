@@ -16,9 +16,14 @@ This module picks both numbers in this order:
 1. The camera's profile (`astrometricslib.models.camera_profile`), which
    records where each number came from. A profile keeps one gain and read
    noise for each camera setting (gain setting, offset and binning), and a
-   frame uses the entry for its own setting only. A frame whose setting has
-   no entry gets nothing from the profile, never the value of a nearby
-   setting.
+   frame uses the entry for its own setting. One exception: the offset is a
+   constant the camera adds to every pixel, and it changes neither the gain
+   nor the read noise. So a frame that is not cut off at zero (the caller
+   says so with ``clipped_at_zero=False``, see `frame_is_clipped_at_zero`) may
+   use the entry of the same gain setting and binning at the nearest other
+   offset, and the result says it did (`DetectorNoise.offset_fallback_note`).
+   Any other frame whose setting has no entry gets nothing from the profile,
+   never the value of a nearby setting.
 2. The FITS header: ``EGAIN`` for the gain (electrons per ADU) and
    ``RDNOISE`` for the read noise (electrons). The ``GAIN`` card is never
    used as electrons per ADU. Cameras such as the ZWO ASI533 write a gain
@@ -39,6 +44,7 @@ from typing import Any
 
 from astrometricslib._internal.drivers.calibration_library import header_binning
 from astrometricslib.models.camera_profile import CameraProfile, SensorSettingNoise
+from astrometricslib.utilities.camera_setting_text import canonical_offset_setting
 from astrometricslib.utilities.iso_text import iso_or_gain_text
 
 
@@ -63,6 +69,10 @@ class DetectorNoise:
         both (for example, it has no entry for the frame's setting). `None`
         when the profile supplied both. A header value may still have filled
         the gap; the ``*_is_assumed`` flags say whether anything was assumed.
+    offset_fallback_note : `str` or `None`
+        A sentence saying the profile's entry was measured at another offset
+        and used here, or `None` when the entry matched the frame's offset
+        (or the profile gave nothing).
     """
 
     gain_e_per_adu: float = 1.0
@@ -70,6 +80,7 @@ class DetectorNoise:
     gain_is_assumed: bool = True
     read_noise_is_assumed: bool = True
     profile_gap_reason: str | None = None
+    offset_fallback_note: str | None = None
 
 
 def _positive_number(value: Any, allow_zero: bool = False) -> float | None:
@@ -196,10 +207,18 @@ def resolve_detector_noise(
     if read_noise is None and header is not None:
         read_noise = _positive_number(header.get("RDNOISE"), allow_zero=True)
 
+    offset_fallback_note = None
+    if entry is not None and entry.offset != canonical_offset_setting(offset):
+        offset_fallback_note = (
+            f"offset fallback: the profile's gain and read noise were measured at offset {entry.offset} "
+            f"and used at offset {canonical_offset_setting(offset)}, because the frame is not cut off at zero"
+        )
+
     return DetectorNoise(
         gain_e_per_adu=gain if gain is not None else 1.0,
         read_noise_e=read_noise if read_noise is not None else 0.0,
         gain_is_assumed=gain is None,
         read_noise_is_assumed=read_noise is None,
         profile_gap_reason=profile_gap_reason,
+        offset_fallback_note=offset_fallback_note,
     )

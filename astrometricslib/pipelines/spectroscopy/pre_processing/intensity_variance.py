@@ -64,6 +64,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import resolve_detector_noise
+from astrometricslib.pipelines.shared.quality.clipped_frames import frame_is_clipped_at_zero
 from astrometricslib.pipelines.shared.quality.saturation import is_normalised_stack_scale
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
     ExtinctionCorrection,
@@ -283,6 +284,10 @@ class PixelNoiseModel:
         Why the camera profile gave no gain or read noise for this frame's
         setting, or `None` when it gave both (see
         `DetectorNoise.profile_gap_reason`).
+    offset_fallback_note : `str` or `None`
+        A sentence saying the profile's entry was measured at another offset
+        and used for this frame, or `None` when the entry matched (see
+        `DetectorNoise.offset_fallback_note`).
     """
 
     gain_e_per_adu: float = 1.0
@@ -295,6 +300,7 @@ class PixelNoiseModel:
     rejection_map_used: bool = False
     variance_scale: np.ndarray | None = field(default=None, compare=False, repr=False)
     profile_gap_reason: str | None = None
+    offset_fallback_note: str | None = None
 
     @property
     def poisson_coefficient(self) -> float:
@@ -365,7 +371,8 @@ class PixelNoiseModel:
             ``gain_e_per_adu``, ``read_noise_e``, ``gain_is_assumed``,
             ``read_noise_is_assumed``, ``adu_per_stored_unit``,
             ``frames_averaged``, ``frames_are_assumed``,
-            ``rejection_map_used`` and ``profile_gap_reason``.
+            ``rejection_map_used``, ``profile_gap_reason`` and
+            ``offset_fallback_note``.
         """
         return {
             "gain_e_per_adu": float(self.gain_e_per_adu),
@@ -377,6 +384,7 @@ class PixelNoiseModel:
             "frames_are_assumed": bool(self.frames_are_assumed),
             "rejection_map_used": bool(self.rejection_map_used),
             "profile_gap_reason": self.profile_gap_reason,
+            "offset_fallback_note": self.offset_fallback_note,
         }
 
 
@@ -415,7 +423,10 @@ def build_pixel_noise_model(
     model : `PixelNoiseModel`
         The model, with a flag for each assumption.
     """
-    noise = resolve_detector_noise(profile, header)
+    # A frame with almost no exact zeros is not cut off at zero, so the
+    # profile's entry from another offset may stand in (the offset changes
+    # neither gain nor read noise).
+    noise = resolve_detector_noise(profile, header, clipped_at_zero=frame_is_clipped_at_zero(data))
     adu_per_unit = 1.0
     frames = 1
     frames_assumed = False
@@ -441,6 +452,7 @@ def build_pixel_noise_model(
         gain_is_assumed=noise.gain_is_assumed,
         read_noise_is_assumed=noise.read_noise_is_assumed,
         profile_gap_reason=noise.profile_gap_reason,
+        offset_fallback_note=noise.offset_fallback_note,
         adu_per_stored_unit=adu_per_unit,
         frames_averaged=frames,
         frames_are_assumed=frames_assumed,

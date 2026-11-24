@@ -30,6 +30,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     find_saturation_plateau_ceiling,
@@ -37,26 +38,6 @@ from astrometricslib.pipelines.shared.quality.saturation import (
 
 logger = logging.getLogger(__name__)
 
-
-# A raw frame with more than this fraction of its pixels at exactly zero is
-# treated as clipped: the camera's offset sits below the read noise, so the
-# frame cannot show negative noise and its measured noise is too low. On the
-# Vega session (ASI533MM Pro, gain 0) the zero fraction was 71% at 0.5 s, 31%
-# at 1 s, 1% at 2 s, 0.2% at 3 s and 0.02% at 5 s, and the measured noise was
-# 0 counts, 4.2 counts and 8.4 counts (2, 3 and 5 s all gave 8.4), so the
-# clipped frames read low by up to a half or more. 0.2 sits between the 1 s
-# group (clipped) and the 2 s group (not). Unvalidated on other cameras or
-# offsets.
-CLIPPED_FRAME_ZERO_FRACTION = TunedParameter(
-    name="stacking.clipped_frame_zero_fraction",
-    default=0.2,
-    unit="fraction",
-    description="Share of pixels at exactly zero above which a raw frame is treated as clipped.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="STK-22",
-)
 
 # A stacked image with less than this fraction of its pixels holding data
 # (finite and not exactly zero) is treated as blank and discarded (see

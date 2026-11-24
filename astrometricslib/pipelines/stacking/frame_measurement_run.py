@@ -108,6 +108,7 @@ from astrometricslib.models.quality.measurement import (
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_scanning import file_state_matches
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     UNREADABLE_FRAME_REASON_PREFIX,
     frame_metric_set_fingerprint,
@@ -128,7 +129,6 @@ from astrometricslib.pipelines.stacking.metrics import (
     FRAME_QUARANTINE_SKY_MEDIAN,
     FRAME_SKY_UNEVENNESS,
 )
-from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,

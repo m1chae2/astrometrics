@@ -617,7 +617,10 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     """Skip and count noise, weights, run-data gates and notice rows."""
     database = make_database(tmp_path, {TARGET: full_document()})
     report = backfill.run_backfill(database, log=lambda _: None)
-    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8 + 1 + 9
+    # The last term is the notice that an exposure group's brightness scale
+    # was not judged (`stacking.notice_exposure_group_not_judged`): a notice
+    # row, which a stored summary never holds, so it is counted, not written.
+    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8 + 1 + 9 + 1
     assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1 + 1
     assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1

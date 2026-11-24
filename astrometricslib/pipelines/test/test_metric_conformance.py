@@ -231,7 +231,16 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
                     framesStacked=0,
                     darkApplied=False,
                     leftOutReason="was left out for a test",
-                )
+                ),
+                # A second group that was stacked but whose brightness scale
+                # could not be checked: raises the "not judged" notice.
+                ExposureGroupSummary(
+                    exposureSeconds=60.0,
+                    framesSubmitted=2,
+                    framesStacked=1,
+                    darkApplied=True,
+                    gainNotJudgedReason="the bright end was saturated",
+                ),
             ],
             framesAccepted=1,
             framesQuarantined=2,

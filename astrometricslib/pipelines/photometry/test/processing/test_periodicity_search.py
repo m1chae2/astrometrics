@@ -352,7 +352,12 @@ def test_the_two_stage_peak_matches_the_full_grid_when_the_grid_is_thinned() -> 
 
 
 def test_the_noise_only_versions_use_the_same_two_stage_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the real data and every shuffle go through `_strongest_peak`."""
+    """Verify the real data and every shuffle go through `_strongest_peak`.
+
+    The early stop is turned off (`stop_above=None`): with it on, how many
+    shuffles run depends on how many come out strong, which can differ by a
+    last-digit rounding change from one platform to another.
+    """
     times = _long_baseline_times(nights=8, spacing_days=2.0, cadence_minutes=15.0)
     flux = _long_baseline_flux(times, seed=6)
     calls: list[int] = []
@@ -371,7 +376,7 @@ def test_the_noise_only_versions_use_the_same_two_stage_search(monkeypatch: pyte
 
     monkeypatch.setattr(search_module, "_strongest_peak", counting_peak)
 
-    lomb_scargle_search(times, flux, shuffle_count=7)
+    lomb_scargle_search(times, flux, shuffle_count=7, stop_above=None)
 
     assert len(calls) == 1 + 7
 

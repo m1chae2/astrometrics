@@ -654,6 +654,7 @@ stacking.star_match_radius_arcsec,STK-D34,judgment,Design estimate
 stacking.star_neighbour_fraction,STK-D60,measurement,Design estimate
 stacking.star_scale_percentile,STK-D56,measurement,Design estimate
 stacking.star_sigma,STK-D58,measurement,Design estimate
+stacking.stretch_clipped_share_limit,STK-D78,measurement,Design estimate
 stacking.strip_pixels,STK-23,measurement,Partly measured
 stacking.surface_brightness_box_arcsec,STK-D34,judgment,Design estimate
 stacking.surface_brightness_sigma,STK-D34,judgment,Design estimate

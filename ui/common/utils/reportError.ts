@@ -27,15 +27,28 @@
  */
 
 import { emitToast } from './emitToast';
+import { BackendError } from '../services/backendError';
 
 /**
  * Reports an error: logs the full error object to the console for debugging,
  * then notifies the user via {@link emitToast} (in-app toast, plus a native
  * OS notification when the window is hidden or unfocused).
+ *
+ * A refused request (a backend `invalid_argument` error, which the user can fix) is not a
+ * fault of the app: it is logged with `console.warn`, not `console.error`, and it is not
+ * toasted again, because `callBackend` has already shown its message as a warning.
  * @param err The error object or message to report.
  * @param source Optional string identifying the origin of the error.
  */
 export function reportError(err: unknown, source?: string): void {
+  if (err instanceof BackendError && err.code === 'invalid_argument') {
+    try {
+      console.warn(source ? `${source}:` : 'Refused:', err.message);
+    } catch {
+      // Ignore console failures.
+    }
+    return;
+  }
   try {
     // Keep developer-visible console output for debugging, with the full
     // error object (and its stack) rather than just the message emitToast logs.

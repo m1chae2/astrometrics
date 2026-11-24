@@ -186,3 +186,25 @@ def test_exact_frames_are_stacked_as_given(library: tuple) -> None:
     target = make_target()
     pipelines.stack(target, frames=target.frames[:2], register_job=False)
     assert record.stacked_with == [frame.path for frame in target.frames[:2]]
+
+
+def test_a_frame_list_that_mixes_imaging_and_spectral_frames_is_refused_with_counts(library: tuple) -> None:
+    """A mixed list is refused before stacking, with counts of both kinds."""
+    pipelines, record = library
+    target = make_target()
+    mixed = [*target.frames[:3], target.frames[4]]
+    with pytest.raises(InvalidArgumentError, match=r"3 imaging, 1 spectral") as raised:
+        pipelines.stack(target, frames=mixed, register_job=False)
+    assert raised.value.details == {"imaging_frames": 3, "spectral_frames": 1}
+    assert record.stacked_with is None
+    assert record.saved == 0
+
+
+def test_a_frame_list_of_one_kind_is_not_refused(library: tuple) -> None:
+    """An all-imaging list and an all-spectral list both pass."""
+    pipelines, record = library
+    target = make_target()
+    pipelines.stack(target, frames=target.frames[:3], register_job=False)
+    assert record.stacked_with == [frame.path for frame in target.frames[:3]]
+    pipelines.stack(target, frames=[target.frames[4]], kind="spectral", register_job=False)
+    assert record.stacked_with == [target.frames[4].path]

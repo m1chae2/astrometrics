@@ -340,7 +340,9 @@ class StackReviewService:
         Notes
         -----
         A target that is not in the library, or a listed frame that is not
-        one of its frames, raises `NotFoundError` before the job starts.
+        one of its frames, raises `NotFoundError` before the job starts. Frames
+        that mix imaging and spectral frames, or come from more than one
+        camera or optic, raise `InvalidArgumentError` before the job starts.
         """
         choices = (kind, filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
         frames = None
@@ -352,6 +354,11 @@ class StackReviewService:
                 )
             frames = self._frames_from_list(target_id, image_files)
         processing = self._astrometrics.processing
+        if frames:
+            # A plan with the frame list runs the library's frame-list checks
+            # (for example a mix of imaging and spectral frames) and stacks
+            # nothing, so a bad list is refused before a job starts.
+            processing.stack(target_id, frames=frames, plan_only=True, register_job=False)
         return self._start(
             lambda: processing.predict_stack(
                 target_id,

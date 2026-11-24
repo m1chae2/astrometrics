@@ -92,6 +92,7 @@ from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment im
     summarize_checks,
 )
 from astrometricslib.pipelines.stacking.sensor_noise_run import measure_sensor_noise_from_library
+from astrometricslib.utilities.frame_identity import frame_is_spectral
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
@@ -1330,8 +1331,10 @@ class ProcessingPipelines:
         ------
         InvalidArgumentError
             If ``kind`` or ``denoise_strength`` is out of range, a time
-            cannot be read, ``frames`` is combined with a frame choice, or
-            the frames come from more than one camera or optic.
+            cannot be read, ``frames`` is combined with a frame choice, the
+            frames come from more than one camera or optic, or ``frames``
+            mixes imaging and spectral frames (the message gives the counts;
+            nothing is stacked).
         """
         from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
@@ -1433,8 +1436,9 @@ class ProcessingPipelines:
         Raises
         ------
         InvalidArgumentError
-            If ``frames`` is combined with a choice or is empty, or the
-            frames come from more than one camera or optic.
+            If ``frames`` is combined with a choice or is empty, the
+            frames come from more than one camera or optic, or they mix
+            imaging and spectral frames. The message gives the counts.
         """
         from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
         from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
@@ -1451,6 +1455,19 @@ class ProcessingPipelines:
                 raise InvalidArgumentError("frames is empty: there is nothing to stack.")
             ensure_single_camera(frames, target_id=target.id)
             ensure_single_optic(frames, target_id=target.id)
+            spectral_count = sum(1 for frame in frames if frame_is_spectral(frame))
+            if 0 < spectral_count < len(frames):
+                # The request itself is wrong (the caller can fix it by
+                # picking one kind), so this is a refusal of the argument,
+                # not a conflict with the library's state.
+                raise InvalidArgumentError(
+                    f"These frames mix imaging and spectral frames ({len(frames) - spectral_count} imaging, "
+                    f"{spectral_count} spectral). Select only one kind and stack again.",
+                    details={
+                        "imaging_frames": len(frames) - spectral_count,
+                        "spectral_frames": spectral_count,
+                    },
+                )
             return list(frames)
         selection = make_frame_selection(filter_name, first_file, last_file, since, until, kind == "spectral")
         return choose_frames_to_stack(target, kind, selection, camera_id, focal_length_mm)

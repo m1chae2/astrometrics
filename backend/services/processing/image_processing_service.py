@@ -374,6 +374,39 @@ class ImageProcessingService(BaseBackgroundService):
             logger.exception("Failed to launch Siril for %s", target_id)
             return False
 
+    def _refuse_unusable_frame_list(self, target_id: str, image_files: list | None) -> None:
+        """Refuse a frame list the library will not stack, before a job starts.
+
+        The library checks an exact frame list when it chooses the frames
+        (one camera, one optic, and not a mix of imaging and spectral
+        frames). Asking for a plan runs that check without stacking or
+        writing anything, so a bad list is refused here as an error to the
+        caller, not as a job that fails.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        image_files : `list` or `None`
+            The listed frames, as paths or frame dictionaries with a
+            ``path`` key.
+
+        Notes
+        -----
+        The library's `InvalidArgumentError` passes through when the frames
+        mix imaging and spectral frames, or come from more than one camera
+        or optic.
+        """
+        if not image_files or not self._processing_api or not self._target_service:
+            return
+        target = self._target_service.get_targets(target_id)
+        if target is None:
+            return
+        wanted = {item if isinstance(item, str) else item.get("path") for item in image_files}
+        frames = [frame for frame in target.frames if frame.path in wanted]
+        if frames:
+            self._processing_api.stack(target_id, frames=frames, plan_only=True, register_job=False)
+
     def process_target(
         self,
         target_id: str,
@@ -491,6 +524,9 @@ class ImageProcessingService(BaseBackgroundService):
                 "Pass image_files, or choose the frames with kind, filter_name, first_file, last_file, "
                 "since, until, camera_id and focal_length_mm, not both."
             )
+        if not choose_here:
+            self._refuse_unusable_frame_list(target_id, image_files)
+
         # Rehydrate metadata if image_files is a flat list
         if image_files and isinstance(image_files, list) and self._target_service:
             try:

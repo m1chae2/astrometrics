@@ -35,6 +35,7 @@ def make_service(calls: list[dict[str, Any]]) -> StackReviewService:
         The service under test.
     """
     frames = [SimpleNamespace(path=f"/lights/L_{number}.fits") for number in (1, 2, 3)]
+    frames.append(SimpleNamespace(path="/lights/SPEC_1.fits", is_spectral=True))
 
     def predict_stack(target: str, **options: Any) -> StackPrediction:
         """Record the call and give a small prediction.
@@ -47,8 +48,23 @@ def make_service(calls: list[dict[str, Any]]) -> StackReviewService:
         calls.append({"target": target, **options})
         return StackPrediction(target_id=target, kind="imaging", frames_selected=3, frames_kept=3)
 
+    def stack(target: str, frames: list, **_options: Any) -> None:
+        """Refuse a mixed imaging and spectral list, as the library does.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the frames mix the two kinds.
+        """
+        spectral = sum(1 for frame in frames if getattr(frame, "is_spectral", False))
+        if 0 < spectral < len(frames):
+            raise InvalidArgumentError(
+                f"These frames mix imaging and spectral frames ({len(frames) - spectral} imaging, "
+                f"{spectral} spectral). Select only one kind and stack again."
+            )
+
     astrometrics = SimpleNamespace(
-        processing=SimpleNamespace(predict_stack=predict_stack),
+        processing=SimpleNamespace(predict_stack=predict_stack, stack=stack),
         targets=SimpleNamespace(get=lambda target_id: SimpleNamespace(frames=frames) if target_id else None),
     )
     return StackReviewService(astrometrics)
@@ -103,3 +119,15 @@ def test_a_frame_the_target_does_not_have_is_refused() -> None:
     service = make_service([])
     with pytest.raises(NotFoundError, match="not frames of"):
         service.start_stack_check("M 57", image_files=["/lights/other.fits"])
+
+
+def test_a_mixed_frame_list_is_refused_before_any_check_job_starts() -> None:
+    """A mixed list is refused and the check is never started."""
+    calls: list[dict[str, Any]] = []
+    service = make_service(calls)
+    with pytest.raises(InvalidArgumentError, match=r"3 imaging, 1 spectral"):
+        service.start_stack_check(
+            "M 57",
+            image_files=["/lights/L_1.fits", "/lights/L_2.fits", "/lights/L_3.fits", "/lights/SPEC_1.fits"],
+        )
+    assert calls == []

@@ -137,6 +137,20 @@ def test_a_frame_list_and_a_frame_choice_are_refused_together(tmp_path: Path) ->
     assert job_service.get_recent_jobs() == []
 
 
+def test_a_mixed_frame_list_is_refused_and_starts_no_job(tmp_path: Path) -> None:
+    """A refused mix of imaging and spectral frames makes no job."""
+    service, processing, job_service = _stacking_service(tmp_path)
+    frames = [SimpleNamespace(path="/lights/a.fits"), SimpleNamespace(path="/lights/b.fits")]
+    service._target_service.get_targets.return_value = SimpleNamespace(frames=frames)
+    processing.stack.side_effect = InvalidArgumentError(
+        "These frames mix imaging and spectral frames (1 imaging, 1 spectral). "
+        "Select only one kind and stack again."
+    )
+    with pytest.raises(InvalidArgumentError, match="mix imaging and spectral"):
+        service.process_target("M 57", image_files=["/lights/a.fits", "/lights/b.fits"])
+    assert job_service.get_recent_jobs() == []
+
+
 def test_the_apps_cancel_reaches_a_stack_the_ai_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

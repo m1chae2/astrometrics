@@ -209,7 +209,7 @@ def test_stored_frame_widths_reads_current_measured_rows_only(tmp_path: Path) ->
         """
         fields: dict = {
             "metric": FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
-            "definition_version": 1,
+            "definition_version": 2,
             "subject": QualitySubject(
                 level=SubjectLevel.FRAME, subject_id=f"M 31/Scope/Camera/{name}.fits", target_id="M 31"
             ),

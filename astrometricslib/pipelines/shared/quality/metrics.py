@@ -274,7 +274,9 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
-        definition_version=1,
+        # Version 2: saturated stars no longer use up the candidates, so a
+        # crowded frame whose brightest stars are all saturated gets a width.
+        definition_version=2,
         unit="px",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,

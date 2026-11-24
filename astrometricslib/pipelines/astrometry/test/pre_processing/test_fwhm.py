@@ -152,3 +152,35 @@ def test_a_mask_that_covers_every_star_gives_no_width() -> None:
     data, _ = _field_with_wide_bright_stars_and_narrow_faint_ones()
 
     assert measure_fwhm_from_data(data, excluded_mask=np.ones(data.shape, dtype=bool)) is None
+
+
+def test_saturated_stars_do_not_use_up_the_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A frame whose brightest stars all saturate still gets a width.
+
+    Twelve saturated stars sit above six unsaturated ones. With only five
+    candidates allowed, counting the saturated stars would leave none to fit.
+    """
+    from astrometricslib.pipelines.astrometry.pre_processing import fwhm as fwhm_module
+
+    monkeypatch.setattr(
+        fwhm_module,
+        "FWHM_MEASUREMENT_CANDIDATE_COUNT",
+        fwhm_module.FWHM_MEASUREMENT_CANDIDATE_COUNT.model_copy(update={"default": 5}),
+    )
+    rows, columns = 200, 400
+    yy, xx = np.mgrid[0:rows, 0:columns]
+    rng = np.random.default_rng(1)
+    image = rng.normal(100.0, 3.0, (rows, columns))
+    sigma = 1.5
+    for index in range(12):
+        column = 20 + index * 30
+        image += 50000.0 * np.exp(-((xx - column) ** 2 + (yy - 50) ** 2) / (2 * sigma**2))
+    for index in range(6):
+        column = 30 + index * 60
+        image += 3000.0 * np.exp(-((xx - column) ** 2 + (yy - 150) ** 2) / (2 * sigma**2))
+    image = np.minimum(image, 16383.0)
+
+    width = fwhm_module.measure_fwhm_from_data(image)
+
+    assert width is not None
+    assert width == pytest.approx(sigma * 2.3548, rel=0.15)

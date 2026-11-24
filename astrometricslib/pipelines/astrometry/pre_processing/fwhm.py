@@ -129,7 +129,7 @@ FWHM_MEASUREMENT_CANDIDATE_COUNT = TunedParameter(
     name="astrometry.fwhm_measurement_candidate_count",
     default=400,
     unit="candidates",
-    description="How many candidate stars are looked at to find the stars to measure.",
+    description="How many unsaturated candidate stars are looked at to find the stars to measure.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -403,13 +403,25 @@ def measure_fwhm_from_data(
     )
 
     fwhms: list[float] = []
-    for source in candidates[:candidate_count]:
-        if len(fwhms) >= n_stars:
+    # A saturated star is passed over before it counts as a candidate: in a
+    # crowded field on a long exposure the brightest several hundred stars can
+    # all be saturated (NGC 6888, Nikon D5300, 180 s at ISO 800: the first
+    # unsaturated star was the 717th brightest), and counting them would use
+    # up the candidates before one star could be fitted.
+    saturation_cut = None if saturation_level is None else settings.saturation_fraction * saturation_level
+    candidates_tried = 0
+    for source in candidates:
+        if len(fwhms) >= n_stars or candidates_tried >= candidate_count:
             break
         x = source.get("x_centroid", source.get("xcentroid"))
         y = source.get("y_centroid", source.get("ycentroid"))
         if x is None or y is None:
             continue
+        if saturation_cut is not None:
+            core = _cutout(data, round(x), round(y), settings.box_radius_px)
+            if core is not None and core.max() >= saturation_cut:
+                continue
+        candidates_tried += 1
         if excluded_mask is not None and _touches_mask(
             excluded_mask, round(x), round(y), excluded_core_radius_px
         ):

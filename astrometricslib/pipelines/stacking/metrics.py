@@ -248,6 +248,7 @@ STACKING_NOTICE_SINGLE_FRAME_STACK = "stacking.notice_single_frame_stack"
 STACKING_NOTICE_STACK_CROPPED = "stacking.notice_stack_cropped"
 STACKING_NOTICE_STACK_TURNED = "stacking.notice_stack_turned"
 STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT = "stacking.notice_exposure_group_left_out"
+STACKING_NOTICE_EXPOSURE_GROUP_NOT_JUDGED = "stacking.notice_exposure_group_not_judged"
 STACKING_NOTICE_FLAT_CALIBRATION_NOTE = "stacking.notice_flat_calibration_note"
 STACKING_BACKGROUND_MODEL_LEVEL_STACK_UNIT = "stacking.background_model_level_stack_unit"
 STACKING_BACKGROUND_SPREAD_FRACTION = "stacking.background_spread_fraction"
@@ -1704,7 +1705,7 @@ _GATE_METRICS: tuple[MetricSpec, ...] = (
         "Whether the exposure groups of a stack agreed on one brightness scale.",
         "The largest brightness-ratio disagreement among the compared groups.",
         f"{_GROUP_GATES}.exposure_group_linearity_gate",
-        "A group whose faint and bright stars scale differently is nonlinear or clipped and is left out.",
+        "A group whose ratio to the reference changes with star brightness is left out.",
         register_entry="STK-20",
     ),
     _gate_metric(
@@ -3152,6 +3153,17 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
         "The number of frames the left-out group held.",
         _NOTICE_COMPUTED_BY,
         "A group left out of the combined image does not add its frames, so the stack has less depth.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_EXPOSURE_GROUP_NOT_JUDGED,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "count",
+        "Whether the brightness check could not judge an exposure group because the reference is clipped.",
+        "The number of frames the group held. The group is kept.",
+        _NOTICE_COMPUTED_BY,
+        "A clipped reference reads too low at its bright end, so the check cannot say whether the group "
+        "is one scale factor of it, and a person should know it went unchecked.",
     ),
     notice_spec(
         STACKING_NOTICE_FLAT_CALIBRATION_NOTE,

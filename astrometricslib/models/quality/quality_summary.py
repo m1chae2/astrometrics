@@ -85,6 +85,11 @@ class ExposureGroupSummary(BaseModel):
     # (`exposure_group_gain_tolerance`). The group is then left out of the
     # combined image and `left_out_reason` names both ratios.
     gain_nonlinear: bool = Field(default=False, alias="gainNonlinear")
+    # Set when the brightness check could not judge the group because the
+    # reference group's bright end is clipped (the group reads higher than its
+    # scale factor there): "not judged: the reference group's bright end is
+    # clipped (N near-clip pixels vs M)". The group is kept. `None` otherwise.
+    gain_not_judged_reason: str | None = Field(default=None, alias="gainNotJudgedReason")
     # Why the group is not in the combined image, or `None` if it is.
     left_out_reason: str | None = Field(default=None, alias="leftOutReason")
     # How close the brightest star is to the camera's ceiling at this exposure

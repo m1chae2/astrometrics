@@ -31,6 +31,7 @@ from astrometricslib.pipelines.stacking.processing.group_combination import meas
 from astrometricslib.pipelines.stacking.processing.group_gains import (
     DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
     GroupGainMeasurement,
+    describe_nonlinear_group,
     measure_group_gains,
 )
 
@@ -204,6 +205,141 @@ def test_too_few_shared_pixels_give_no_comparison() -> None:
     assert measurement.bright_end_ratio is None
     assert measurement.disagreement is None
     assert not measurement.nonlinear
+
+
+def measure_custom_pair(group_a: np.ndarray, group_b: np.ndarray) -> GroupGainMeasurement:
+    """Measure group B against group A, which is the reference (more frames).
+
+    Returns
+    -------
+    measurement : `GroupGainMeasurement`
+        The measurement for group B.
+    """
+    _, measurements = measure_exposure_group_gains(
+        [group_a, group_b], [1.0, 1.0], frame_counts=[2, 1], frame_noises=[1.0, 1.0]
+    )
+    return measurements[1]
+
+
+def test_a_clipped_reference_does_not_reject_a_clean_group() -> None:
+    """A reference that compresses at the top does not reject a clean group.
+
+    The reference is the scene with its bright end compressed, as a long
+    exposure of a bright star is. The group is the same scene at half the
+    brightness and stays under the clip level, so it reads higher than its
+    gain at the bright end only because the reference reads too low there.
+    """
+    scene = make_group_a()
+    clipped_reference = np.where(scene < KNEE, scene, KNEE + 0.2 * (scene - KNEE))
+    clean_group = make_linear_group_b(scene)
+
+    measurement = measure_custom_pair(clipped_reference, clean_group)
+
+    assert measurement.gain == pytest.approx(TRUE_GAIN, rel=0.01)
+    assert measurement.bright_end_ratio is not None
+    assert measurement.bright_end_ratio > measurement.gain * (1 + DEFAULT_GAIN_DISAGREEMENT_TOLERANCE.default)
+    assert measurement.reference_clipped
+    assert not measurement.nonlinear
+    assert measurement.disagreement is None
+
+
+def test_a_group_not_judged_is_reported_in_its_summary_gate_and_notice() -> None:
+    """The not-judged reason reaches the summary, the gate and a notice row."""
+    from astrometricslib.models.quality.quality_summary import (
+        ExposureGroupSummary,
+        StackingPipelineQualityMetrics,
+        StackQualitySummary,
+    )
+    from astrometricslib.pipelines.shared.quality.test.test_notices import _context
+    from astrometricslib.pipelines.stacking.metrics import STACKING_NOTICE_EXPOSURE_GROUP_NOT_JUDGED
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+        stacking_notice_measurements,
+    )
+
+    scene = make_group_a()
+    clipped_reference = np.where(scene < KNEE, scene, KNEE + 0.2 * (scene - KNEE))
+    measurement = measure_custom_pair(clipped_reference, make_linear_group_b(scene))
+    assert measurement.not_judged_reason is not None
+    assert measurement.not_judged_reason.startswith(
+        "not judged: the reference group's bright end is clipped ("
+    )
+    assert "near-clip pixels vs" in measurement.not_judged_reason
+
+    summary = build_group_summary(0.5, [], {}, [], gain_measurement=measurement)
+    assert summary["gain_not_judged_reason"] == measurement.not_judged_reason
+    gate = exposure_group_linearity_gate([summary], 0.05)
+    assert gate.status is GateStatus.NOT_CHECKED
+    assert "not judged: the reference group's bright end is clipped" in gate.detail
+
+    stack = StackQualitySummary(
+        targetId="M 27",
+        stackingMetrics=StackingPipelineQualityMetrics(isSpectral=True, framesSubmitted=1, framesStacked=1),
+    )
+    stack.stacking_metrics.exposure_groups = [
+        ExposureGroupSummary(
+            exposureSeconds=30.0,
+            framesSubmitted=22,
+            framesStacked=22,
+            darkApplied=True,
+            gainNotJudgedReason=measurement.not_judged_reason,
+        )
+    ]
+    rows = stacking_notice_measurements(stack, _context("stacking"), "M27_Stacked.fits")
+    not_judged = [row for row in rows if row.metric == STACKING_NOTICE_EXPOSURE_GROUP_NOT_JUDGED]
+    assert len(not_judged) == 1
+    assert "the 30 s exposure group not judged" in not_judged[0].reason
+
+
+def test_a_compressed_group_is_still_rejected_and_said_to_be_possibly_clipped() -> None:
+    """A group that reads low at its bright end is left out, maybe clipped."""
+    measurement = measure_pair(make_compressed_group_b(make_group_a()))
+
+    assert measurement.nonlinear
+    assert not measurement.reference_clipped
+    assert measurement.clipping_seen is True
+    reason = describe_nonlinear_group(measurement, 1.0, 0.05)
+    assert "does not describe it" in reason
+    assert "may be clipped" in reason
+    assert "limit 5%" in reason
+
+
+def test_an_unclipped_brightness_dependent_ratio_is_not_called_clipped() -> None:
+    """With no pixel at the clip level, the reason names the drift only."""
+    scene = 0.5 * make_group_a()
+    group = 0.5 * make_compressed_group_b(make_group_a())
+
+    measurement = measure_custom_pair(scene, group)
+
+    assert measurement.nonlinear
+    assert measurement.clipping_seen is False
+    reason = describe_nonlinear_group(measurement, 1.0, 0.05)
+    assert "changes with pixel brightness" in reason
+    assert "clipped" not in reason
+    assert "no pixel of either stack reaches the clip level" in reason
+
+
+def test_the_star_wording_gives_the_ratios_and_does_not_blame_clipping() -> None:
+    """The M 51 case: the star ratios drift and no star measured is clipped."""
+    measurement = GroupGainMeasurement(
+        gain=2.040,
+        bright_end_ratio=1.887,
+        faint_ratio=2.087,
+        disagreement=0.0753,
+        nonlinear=True,
+        method="stars",
+        stars_used=226,
+        clipping_seen=False,
+    )
+
+    reason = describe_nonlinear_group(measurement, 180.0, 0.05)
+
+    assert "2.087" in reason
+    assert "1.887" in reason
+    assert "2.040" in reason
+    assert "changes with star brightness" in reason
+    assert "7.5%" in reason
+    assert "limit 5%" in reason
+    assert "clipped" not in reason
 
 
 def test_the_gate_fails_and_names_both_ratios_for_a_nonlinear_group() -> None:

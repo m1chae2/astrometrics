@@ -1094,7 +1094,8 @@ def _align_and_screen_groups(
     if len(used) > 1:
         # A group whose brightness is not one scale factor of the reference
         # (its bright stars' flux ratio disagrees with its faint stars') is
-        # nonlinear or clipped at the bright end. Rescaling it would change
+        # marked nonlinear, whether its bright end is clipped or not (the
+        # reason says which). Rescaling it would change
         # its faint stars by the wrong amount, so it is left out and the
         # others are combined, the same fallback as for a group that cannot
         # be lined up. So is a group whose sky is far brighter than the
@@ -1117,7 +1118,11 @@ def _align_and_screen_groups(
                 continue
             reference_exposure = used[reference_in_used].exposure
             reason = (
-                describe_nonlinear_group(gain_measurement, reference_exposure)
+                describe_nonlinear_group(
+                    gain_measurement,
+                    reference_exposure,
+                    get_configuration().get_exposure_group_gain_tolerance(),
+                )
                 if gain_measurement.nonlinear
                 else describe_bright_sky_group(gain_measurement, reference_exposure)
             )

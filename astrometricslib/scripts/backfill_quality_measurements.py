@@ -1335,6 +1335,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.star_width_corner_xlow_yhigh_px",
     "stacking.star_width_corner_xhigh_yhigh_px",
     "stacking.notice_exposure_group_left_out",
+    "stacking.notice_exposure_group_not_judged",
     "stacking.notice_flat_calibration_note",
     "stacking.notice_preview_step_skipped",
     "stacking.notice_camera_without_profile",

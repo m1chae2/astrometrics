@@ -205,6 +205,26 @@ def _prepare_group_inputs(
     return per_second, weights, usable_masks, trusted_masks, star_masks
 
 
+def _near_clip_masks(images: list[np.ndarray], clip_ceiling_adu: float | None) -> list[np.ndarray]:
+    """Mark each group's pixels at or above the clip level of its stack.
+
+    Parameters
+    ----------
+    images : `list` [`numpy.ndarray`]
+        The stacked image of each group.
+    clip_ceiling_adu : `float`, optional
+        The camera's clip ceiling in ADU (see `star_clip_level`).
+
+    Returns
+    -------
+    masks : `list` [`numpy.ndarray`]
+        `True` where a pixel is at or above `star_clip_level`, the level the
+        star method already treats as too close to clipping to measure.
+    """
+    level = star_clip_level(clip_ceiling_adu)
+    return [np.asarray(image) >= level for image in images]
+
+
 def measure_exposure_group_gains(
     images: list[np.ndarray],
     exposures_seconds: list[float],
@@ -283,10 +303,13 @@ def measure_exposure_group_gains(
         clip_ceiling_adu,
     )
     reference_index = int(np.argmax(weights))
+    near_clip_masks = _near_clip_masks(images, clip_ceiling_adu)
     if not use_star_fluxes:
-        return reference_index, measure_group_gains(per_second, trusted_masks, reference_index, tolerance)
+        return reference_index, measure_group_gains(
+            per_second, trusted_masks, reference_index, tolerance, near_clip_masks=near_clip_masks
+        )
     return reference_index, measure_group_gains_with_stars(
-        per_second, star_masks, trusted_masks, reference_index, tolerance
+        per_second, star_masks, trusted_masks, reference_index, tolerance, near_clip_masks=near_clip_masks
     )
 
 
@@ -436,10 +459,15 @@ def combine_exposure_group_images(
     # stack's signal and its noise alike, so a gain removes the same factor
     # from both and the signal-to-noise of each group is unchanged.
     reference_index = int(np.argmax(weights))
+    near_clip_masks = _near_clip_masks(images, clip_ceiling_adu)
     if use_star_fluxes:
-        measurements = measure_group_gains_with_stars(per_second, star_masks, trusted_masks, reference_index)
+        measurements = measure_group_gains_with_stars(
+            per_second, star_masks, trusted_masks, reference_index, near_clip_masks=near_clip_masks
+        )
     else:
-        measurements = measure_group_gains(per_second, trusted_masks, reference_index)
+        measurements = measure_group_gains(
+            per_second, trusted_masks, reference_index, near_clip_masks=near_clip_masks
+        )
     gains = [measurement.gain for measurement in measurements]
     logger.info(
         "Exposure groups combined with brightness gains %s (bright-star or bright-end ratios %s; "

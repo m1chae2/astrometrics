@@ -127,6 +127,7 @@ UNUSED_DECISION_METRICS = {
     ),
     "stacking.notice_flat_calibration_note": _NOTICE_ROW_REASON,
     "stacking.notice_exposure_group_left_out": _NOTICE_ROW_REASON,
+    "stacking.notice_exposure_group_not_judged": _NOTICE_ROW_REASON,
     "stacking.notice_preview_step_skipped": _NOTICE_ROW_REASON,
     "stacking.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,

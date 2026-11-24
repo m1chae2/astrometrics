@@ -1958,6 +1958,7 @@ export interface ExposureGroupSummary {
   gainDisagreement?: number | null;
   gainApplied?: number | null;
   gainNonlinear?: boolean;
+  gainNotJudgedReason?: string | null;
   leftOutReason?: string | null;
   brightestStarPeakFraction?: number | null;
   brightestStarPeakAboveSkyAdu?: number | null;

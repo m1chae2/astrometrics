@@ -94,6 +94,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
     STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
     STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT,
+    STACKING_NOTICE_EXPOSURE_GROUP_NOT_JUDGED,
     STACKING_NOTICE_FLAT_CALIBRATION_NOTE,
     STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED,
     STACKING_NOTICE_SINGLE_FRAME_STACK,
@@ -109,6 +110,7 @@ from astrometricslib.pipelines.stacking.metrics import (
 )
 from astrometricslib.pipelines.stacking.notice_reasons import (
     exposure_group_left_out_reason,
+    exposure_group_not_judged_reason,
     flat_calibration_issue_reason,
     frames_moved_to_excluded_reason,
     single_frame_stack_reason,
@@ -566,6 +568,18 @@ def stacking_notice_measurements(
                     exposure_group_subject(context, stack_file_name, group, index),
                     exposure_group_left_out_reason(group.exposure_seconds, group.left_out_reason),
                     action_taken="exposure group left out of the combined stack",
+                )
+            )
+    for index, group in enumerate(summary.stacking_metrics.exposure_groups):
+        if group.gain_not_judged_reason:
+            rows.append(
+                notice_measurement(
+                    _SPEC_BY_NAME[STACKING_NOTICE_EXPOSURE_GROUP_NOT_JUDGED],
+                    float(group.frames_submitted),
+                    context,
+                    exposure_group_subject(context, stack_file_name, group, index),
+                    exposure_group_not_judged_reason(group.exposure_seconds, group.gain_not_judged_reason),
+                    action_taken="exposure group kept without a brightness check",
                 )
             )
     flat_issues = uncovered_flat_calibration_issues(summary.stacking_metrics.flat_calibration_issues)

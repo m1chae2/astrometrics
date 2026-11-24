@@ -490,6 +490,7 @@ def measure_group_gains_with_stars(
     trusted_masks: list[np.ndarray],
     reference_index: int,
     tolerance: float | None = None,
+    near_clip_masks: list[np.ndarray] | None = None,
 ) -> list[GroupGainMeasurement]:
     """Measure each group's brightness scale from its stars, else its pixels.
 
@@ -520,6 +521,13 @@ def measure_group_gains_with_stars(
     tolerance : `float`, optional
         How far the faint-star or bright-star ratio may be from the gain, as
         a fraction of the gain.
+    near_clip_masks : `list` [`numpy.ndarray`], optional
+        For each group, `True` where its stack is at or above
+        `star_clip_level`. They go to the pixel fallback. When they are
+        given, a group measured with stars gets
+        `GroupGainMeasurement.clipping_seen` set to `False`, because a star
+        with a pixel at or above that level is never measured (`star_masks`),
+        so no measured star is clipped.
 
     Returns
     -------
@@ -544,6 +552,7 @@ def measure_group_gains_with_stars(
             tolerance,
             only=fallback_indices,
             sky_levels=sky_levels,
+            near_clip_masks=near_clip_masks,
         )
     else:
         measurements = [GroupGainMeasurement(sky_level=sky_level) for sky_level in sky_levels]
@@ -586,6 +595,7 @@ def measure_group_gains_with_stars(
             method="stars",
             stars_used=ratios.stars_used,
             faint_ratio=ratios.faint_ratio,
+            clipping_seen=None if near_clip_masks is None else False,
         )
     record_sky_ratios(measurements, reference_index)
     return measurements

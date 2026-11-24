@@ -551,6 +551,27 @@ class GroupGainMeasurement:
     sky_too_bright : `bool`
         `True` when `sky_ratio` is above `SKY_RATIO_LIMIT`. The group should
         not be combined with the reference.
+    clipping_seen : `bool` or `None`
+        For the pixel method, `True` when the group's stack or the reference's
+        holds a pixel at or above the clip level (see `star_clip_level`) and
+        `False` when neither does. For the star method, `False`: a star with
+        such a pixel is never measured. `None` when the caller did not pass
+        the clip masks. It decides the wording of the reason a `nonlinear`
+        group is left out: only a group with clipping seen is said to be
+        possibly clipped.
+    reference_clipped : `bool`
+        `True` when the bright-end ratio of the pixel method read higher than
+        the gain by more than the tolerance and the reference holds more
+        pixels at or above the clip level than this group does. A clipped
+        reference reads too low at its bright end, so the difference belongs
+        to the reference and not to this group: `nonlinear` stays `False` and
+        `disagreement` is `None`.
+    not_judged_reason : `str` or `None`
+        The sentence that says so when `reference_clipped` is set ("not
+        judged: the reference group's bright end is clipped (N near-clip
+        pixels vs M)", N for the reference and M for this group), else
+        `None`. It reaches the group's summary, the gate and the stack's
+        warnings, so the choice is never silent.
     """
 
     gain: float = 1.0
@@ -564,6 +585,9 @@ class GroupGainMeasurement:
     faint_ratio: float | None = None
     sky_ratio: float | None = None
     sky_too_bright: bool = False
+    clipping_seen: bool | None = None
+    reference_clipped: bool = False
+    not_judged_reason: str | None = None
 
 
 def estimate_sky_level(image: np.ndarray, mask: np.ndarray) -> float:
@@ -629,6 +653,7 @@ def measure_group_gains(
     tolerance: float | None = None,
     only: set[int] | None = None,
     sky_levels: list[float] | None = None,
+    near_clip_masks: list[np.ndarray] | None = None,
 ) -> list[GroupGainMeasurement]:
     """Measure each group's brightness scale and check that it is a scale.
 
@@ -652,6 +677,20 @@ def measure_group_gains(
     group whose two ratios differ by more than `tolerance` (as a fraction of
     the gain) is marked `nonlinear`: one scale factor does not describe it.
 
+    A clipped group cannot serve as the reference for judging a clean one.
+    The longer exposure of a pair clips first and is usually the reference.
+    A clipped reference reads too low at its bright end, so the group reads
+    higher than the gain there. When `near_clip_masks` is given and the
+    reference holds more pixels at or above the clip level than the group
+    does, a group that reads higher than the gain at the bright end is not
+    marked `nonlinear`: the reference is the compressed one
+    (`reference_clipped`). A group that reads lower than the gain is still
+    marked, because compression in the group itself shows that way. The
+    bright-end ratio keeps every shared pixel: the clip level is half the
+    ceiling, and the knee of a real camera lies above it (the ASI533MM Pro
+    leaves its linear range near 60,000 of 65,532 ADU), so leaving out the
+    pixels above it would hide the nonlinearity the ratio exists to find.
+
     Parameters
     ----------
     per_second_images : `list` [`numpy.ndarray`]
@@ -670,6 +709,10 @@ def measure_group_gains(
         others get an empty entry that carries just their sky level.
     sky_levels : `list` [`float`], optional
         The groups' sky levels when the caller already has them.
+    near_clip_masks : `list` [`numpy.ndarray`], optional
+        For each group, `True` where its stack is at or above the clip level
+        (`star_clip_level`, half the camera's clip ceiling). Without it no
+        clipping is seen and no reference counts as clipped.
 
     Returns
     -------
@@ -714,6 +757,15 @@ def measure_group_gains(
             measurements.append(GroupGainMeasurement(sky_level=sky_level))
             continue
         image = raw_image - sky_level
+        clipping_seen = None
+        reference_more_clipped = False
+        if near_clip_masks is not None:
+            near_clip_counts = (
+                int(np.count_nonzero(near_clip_masks[index])),
+                int(np.count_nonzero(near_clip_masks[reference_index])),
+            )
+            clipping_seen = max(near_clip_counts) > 0
+            reference_more_clipped = near_clip_counts[1] > near_clip_counts[0]
         shared = (
             usable_masks[index]
             & usable_masks[reference_index]
@@ -737,6 +789,28 @@ def measure_group_gains(
             measurements.append(GroupGainMeasurement(bright_end_ratio=bright_end_ratio, sky_level=sky_level))
             continue
         disagreement = None if bright_end_ratio is None else abs(bright_end_ratio - gain) / gain
+        not_judged_reason = None
+        reference_clipped = bool(
+            reference_more_clipped
+            and bright_end_ratio is not None
+            and bright_end_ratio > gain
+            and disagreement is not None
+            and disagreement > tolerance
+        )
+        if reference_clipped:
+            logger.warning(
+                "Exposure group %d reads %.3f against the reference on its brightest pixels but %.3f on "
+                "mid-range pixels, and the reference holds more pixels at the clip level, so the reference's "
+                "bright end is the compressed one; the group is not judged by it.",
+                index,
+                bright_end_ratio,
+                gain,
+            )
+            disagreement = None
+            not_judged_reason = (
+                "not judged: the reference group's bright end is clipped "
+                f"({near_clip_counts[1]} near-clip pixels vs {near_clip_counts[0]})"
+            )
         measurements.append(
             GroupGainMeasurement(
                 gain=gain,
@@ -745,13 +819,26 @@ def measure_group_gains(
                 nonlinear=disagreement is not None and disagreement > tolerance,
                 sky_level=sky_level,
                 measured=True,
+                clipping_seen=clipping_seen,
+                reference_clipped=reference_clipped,
+                not_judged_reason=not_judged_reason,
             )
         )
     return measurements
 
 
-def describe_nonlinear_group(measurement: GroupGainMeasurement, reference_exposure_seconds: float) -> str:
+def describe_nonlinear_group(
+    measurement: GroupGainMeasurement,
+    reference_exposure_seconds: float,
+    tolerance: float | None = None,
+) -> str:
     """Say in one sentence why a group's brightness is not one scale factor.
+
+    The sentence says only what was measured. A group whose stack holds pixels
+    at or above the clip level (`GroupGainMeasurement.clipping_seen`) is said
+    to be possibly clipped. A group with none is not: its ratio to the
+    reference changes with star brightness for a reason the numbers do not
+    name (for example a reference made from several nights).
 
     Parameters
     ----------
@@ -759,28 +846,52 @@ def describe_nonlinear_group(measurement: GroupGainMeasurement, reference_exposu
         A measurement with `nonlinear` set.
     reference_exposure_seconds : `float`
         The exposure length of the group it was compared with.
+    tolerance : `float`, optional
+        The limit the disagreement was judged against. The configured
+        `exposure_group_gain_tolerance` when omitted.
 
     Returns
     -------
     reason : `str`
         A sentence that continues "the N s exposure group ...", naming the
-        ratios that disagree and how far apart they are.
+        ratios that disagree, how far they are from the overall ratio and
+        the limit.
     """
+    if tolerance is None:
+        tolerance = resolve(DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).value
+    reference = f"{reference_exposure_seconds:g} s"
     if measurement.method == "stars":
-        return (
-            f"was left out: its star brightness ratio to the {reference_exposure_seconds:g} s group is "
-            f"{measurement.gain:.3f} over all {measurement.stars_used} stars measured, but "
-            f"{measurement.faint_ratio:.3f} on the faintest quarter of them and "
-            f"{measurement.bright_end_ratio:.3f} on the brightest quarter "
-            f"(up to {measurement.disagreement:.1%} from the overall ratio), "
-            "so its bright stars are nonlinear or clipped and one scale factor does not describe it"
+        measured = (
+            f"{measurement.faint_ratio:.3f} on the faintest quarter of the {measurement.stars_used} stars "
+            f"measured and {measurement.bright_end_ratio:.3f} on the brightest quarter, against "
+            f"{measurement.gain:.3f} overall"
         )
-    return (
-        f"was left out: its brightness ratio to the {reference_exposure_seconds:g} s group is "
-        f"{measurement.gain:.3f} on mid-range pixels but {measurement.bright_end_ratio:.3f} on "
-        f"the brightest pixels ({measurement.disagreement:.1%} apart), so its bright end is "
-        "nonlinear or clipped and one scale factor does not describe it"
+        what = "star brightness"
+        changes = "changes with star brightness"
+    else:
+        measured = (
+            f"{measurement.gain:.3f} on mid-range pixels and {measurement.bright_end_ratio:.3f} on the "
+            "brightest pixels"
+        )
+        what = "brightness"
+        changes = "changes with pixel brightness"
+    limit = f"{measurement.disagreement:.1%} from the overall ratio, limit {tolerance * 100:g}%"
+    if measurement.clipping_seen:
+        ending = (
+            "and pixels at or above the clip level are in this group or the reference, "
+            "so its bright end may be clipped"
+        )
+    elif measurement.clipping_seen is False and measurement.method == "stars":
+        ending = "and no star measured reaches the clip level"
+    elif measurement.clipping_seen is False:
+        ending = "and no pixel of either stack reaches the clip level"
+    else:
+        ending = ""
+    reason = (
+        f"was left out because one scale factor does not describe it: its {what} ratio to the "
+        f"{reference} group {changes} ({measured}; {limit})"
     )
+    return f"{reason}, {ending}" if ending else reason
 
 
 def describe_bright_sky_group(measurement: GroupGainMeasurement, reference_exposure_seconds: float) -> str:

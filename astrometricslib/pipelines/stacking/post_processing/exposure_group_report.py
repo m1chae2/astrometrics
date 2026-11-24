@@ -349,6 +349,7 @@ def build_group_summary(
         "gain_bright_end_ratio": None,
         "gain_disagreement": None,
         "gain_nonlinear": False,
+        "gain_not_judged_reason": None,
     }
     if gain_measurement is not None:
         gain_fields = {
@@ -360,6 +361,7 @@ def build_group_summary(
             if gain_measurement.disagreement is None
             else float(gain_measurement.disagreement),
             "gain_nonlinear": bool(gain_measurement.nonlinear),
+            "gain_not_judged_reason": gain_measurement.not_judged_reason,
         }
     return {
         "exposure_seconds": float(exposure_seconds),
@@ -433,9 +435,14 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
             limit_source=limit_source,
         )
     if not compared:
+        not_judged = [
+            f"the {group['exposure_seconds']:g} s exposure group {group['gain_not_judged_reason']}"
+            for group in groups
+            if group.get("gain_not_judged_reason")
+        ]
         return unchecked_gate(
             EXPOSURE_GROUP_LINEARITY_GATE_NAME,
-            "no exposure group was compared with a reference group",
+            "; ".join(not_judged) or "no exposure group was compared with a reference group",
             limit_source,
         )
     return passed_gate(

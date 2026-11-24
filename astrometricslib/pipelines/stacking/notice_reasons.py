@@ -7,6 +7,7 @@ are the one place that writes them.
 
 __all__ = [
     "exposure_group_left_out_reason",
+    "exposure_group_not_judged_reason",
     "flat_calibration_issue_reason",
     "frames_moved_to_excluded_reason",
     "single_frame_stack_reason",
@@ -59,6 +60,24 @@ def exposure_group_left_out_reason(exposure_seconds: float, left_out_reason: str
         The sentence.
     """
     return f"the {exposure_seconds:g} s exposure group {left_out_reason}"
+
+
+def exposure_group_not_judged_reason(exposure_seconds: float, not_judged_reason: str) -> str:
+    """Write the sentence for a group the brightness check did not judge.
+
+    Parameters
+    ----------
+    exposure_seconds : `float`
+        The exposure length of the group.
+    not_judged_reason : `str`
+        Why it was not judged, as the gain measurement wrote it.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"the {exposure_seconds:g} s exposure group {not_judged_reason}"
 
 
 def flat_calibration_issue_reason(issue: str) -> str:

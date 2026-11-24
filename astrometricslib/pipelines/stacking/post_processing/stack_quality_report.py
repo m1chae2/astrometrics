@@ -217,6 +217,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
                 "gain_disagreement": group.gain_disagreement,
                 "gain_applied": group.gain_applied,
                 "gain_nonlinear": group.gain_nonlinear,
+                "gain_not_judged_reason": group.gain_not_judged_reason,
                 "left_out_reason": group.left_out_reason,
             }
             for group in metrics.exposure_groups

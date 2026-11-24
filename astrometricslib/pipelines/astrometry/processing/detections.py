@@ -65,9 +65,11 @@ logger = logging.getLogger(__name__)
 # detection list, like the other files kept next to a stack.
 DETECTIONS_SIDECAR_SUFFIX = "_detections.json"
 
-# Raise this when the layout of a saved list changes, so an old file is not
-# read as a new one.
-DETECTIONS_FILE_VERSION = 2
+# Raise this when the layout of a saved list changes, or when a fix changes
+# the positions it holds, so an old file is not read as a new one. Version 3:
+# a color stack's single-star positions were scaled back twice, so most of its
+# saved stars sat outside the image.
+DETECTIONS_FILE_VERSION = 3
 
 # The cache folder keeps at most this many lists; the oldest are deleted.
 DETECTIONS_CACHE_LIMIT = 200

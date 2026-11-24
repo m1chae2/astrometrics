@@ -162,6 +162,67 @@ def test_a_solution_off_by_a_pixel_and_a_half_is_brought_back_to_the_truth() -> 
     assert refinement.rms_after_arcsec < 0.4
 
 
+def test_a_solution_whose_reference_pixel_is_far_from_the_center_is_refit() -> None:
+    """A reference pixel off the image center (as on M 13) still refits.
+
+    The solver of M 13 put the reference pixel at (1632, 2077) of a 3004 by
+    3004 image. A fit that started from that sky point stopped in a wrong
+    answer about 8,000 arcseconds away, and the refit was refused. Fitting
+    around the middle of the stars finds the right answer.
+    """
+    shape = (3004, 3004)
+    generator = np.random.default_rng(11)
+    truth = make_wcs(CENTRE_RA_DEG, CENTRE_DEC_DEG)
+    truth.wcs.crpix = [1632.0, 2077.0]
+    truth.sip = None
+    truth.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    true_pixels = generator.uniform(30, shape[0] - 30, (800, 2))
+    sky = truth.all_pix2world(true_pixels, 0)
+    gaia = SkyCoord(sky[:, 0] * u.deg, sky[:, 1] * u.deg)
+    measured = true_pixels + generator.normal(0, 0.1, true_pixels.shape)
+    solver = truth.deepcopy()
+    solver.wcs.crval = [
+        CENTRE_RA_DEG + 2.0 / 3600.0 / np.cos(np.radians(CENTRE_DEC_DEG)),
+        CENTRE_DEC_DEG - 2.0 / 3600.0,
+    ]
+
+    refinement = wcs_refinement.refine_wcs_with_gaia(solver, measured, gaia, shape)
+
+    assert refinement.applied, refinement.reason
+    assert refinement.shift_arcsec < 4.0
+    assert refinement.rms_after_arcsec < 0.3
+
+
+def test_the_refit_fits_around_the_middle_of_the_stars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fit projects about the stars' middle, not the old reference point.
+
+    On the real M 13 stack the off-center reference point sent the fit to a
+    wrong answer. A synthetic field does not always reproduce that, so this
+    test checks the choice itself.
+    """
+    chosen: list[object] = []
+    real_fit = wcs_refinement.fit_wcs_from_points
+
+    def spy(*arguments: object, **keywords: object) -> WCS:
+        """Record the projection point and run the real fit.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS`
+            The fitted solution.
+        """
+        chosen.append(keywords.get("proj_point"))
+        return real_fit(*arguments, **keywords)
+
+    monkeypatch.setattr(wcs_refinement, "fit_wcs_from_points", spy)
+    measured, gaia, _ = make_field()
+
+    wcs_refinement.refine_wcs_with_gaia(alnath_like_solution(), measured, gaia, IMAGE_SHAPE)
+
+    assert chosen
+    assert all(point == "center" for point in chosen)
+
+
 def test_the_refit_reports_the_distance_it_moved_the_field() -> None:
     """The shift is the largest move over the image: about the error."""
     measured, gaia, _ = make_field()

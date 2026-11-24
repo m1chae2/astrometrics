@@ -60,11 +60,13 @@ from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     tiles_under_image,
 )
 from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+    GAIA_DEFAULT_MAGNITUDE_LIMIT,
     StarIdentifier,
     make_gaia_tile_fetcher,
     propagate_gaia_positions,
     read_observation_time,
 )
+from astrometricslib.pipelines.astrometry.processing.wcs_refinement import refine_wcs_with_gaia
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     order_names_by_familiarity,
@@ -542,6 +544,78 @@ def _read_solution(stack_path: str, drivers: Any) -> tuple[WCS, bool, Any]:
     return WCS(header, naxis=2), reused, header
 
 
+def _refit_and_save_solution(
+    stack_path: str,
+    wcs: WCS,
+    header: Any,
+    detections: list[Any],
+    gaia_table: Any,
+    gaia_coords: SkyCoord,
+    depth: float,
+    notes: list[str],
+) -> WCS:
+    """Refit a stack's plate solution to Gaia now that the tiles are filled.
+
+    The stack's own plate solve reads the Gaia cache only, so a field whose
+    tiles are not cached deep enough keeps the solver's solution. This step
+    has just filled the tiles, so it refits and, when the refit is accepted,
+    saves it with the stack (`stage.save_refit_stack_plate_solution`). A stack
+    whose header already says it was refit is left alone, and so is a solution
+    the refit's own limits reject (too few stars, no better fit, or a move
+    that is too large). The refit uses the same stars the analysis run uses:
+    Gaia stars no fainter than the run's refit depth.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The stack.
+    wcs : `astropy.wcs.WCS`
+        The solution the stack carries.
+    header : `astropy.io.fits.Header`
+        The stack's header, read before this step.
+    detections : `list`
+        The stack's detected stars (1-based ``x`` and ``y``).
+    gaia_table : `astropy.table.Table`
+        The Gaia stars of the filled tiles.
+    gaia_coords : `astropy.coordinates.SkyCoord`
+        Their positions at the stack's date, in the table's order.
+    depth : `float`
+        The depth the tiles were filled to.
+    notes : `list` [`str`]
+        The notes of the result; a saved refit adds one.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS`
+        The solution to name stars with: the refit when it was saved, else
+        `wcs`.
+    """
+    from astrometricslib.pipelines.shared.session_identification import header_is_refit_to_gaia
+    from astrometricslib.pipelines.stacking.stage import save_refit_stack_plate_solution
+
+    if header_is_refit_to_gaia(header) or not detections:
+        return wcs
+    refit_depth = min(float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value), float(depth))
+    magnitudes = np.asarray(gaia_table["phot_g_mean_mag"], dtype=float)
+    bright_enough = magnitudes <= refit_depth
+    if int(bright_enough.sum()) == 0:
+        return wcs
+    centroids = np.array([(detection.x - 1.0, detection.y - 1.0) for detection in detections])
+    refinement = refine_wcs_with_gaia(
+        wcs, centroids, gaia_coords[bright_enough], (int(header["NAXIS2"]), int(header["NAXIS1"]))
+    )
+    if not refinement.applied:
+        logger.info("The stack's plate solution was not refit to Gaia: %s.", refinement.reason)
+        return wcs
+    if not save_refit_stack_plate_solution(stack_path, refinement.wcs):
+        return wcs
+    notes.append(
+        f"The stack's plate solution was refit to {refinement.star_count} Gaia stars (RMS "
+        f"{refinement.rms_before_arcsec:.2f} to {refinement.rms_after_arcsec:.2f} arcsec) and saved."
+    )
+    return refinement.wcs
+
+
 def identify_stack_stars(
     stack_path: str,
     *,
@@ -635,6 +709,9 @@ def identify_stack_stars(
                 observation_time,
             )
         gaia_coords = SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
+        wcs = _refit_and_save_solution(
+            stack_path, wcs, header, detections, gaia_table, gaia_coords, depth, notes
+        )
 
     _report(progress, _PROGRESS_TILES_DONE, "Asking SIMBAD for the familiar names")
     simbad_coords, simbad_names, simbad_gaia_ids, simbad_note, simbad_aliases = _simbad_names(

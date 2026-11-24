@@ -1027,6 +1027,10 @@ class StarIdentifier:
         # What the Gaia refit of the plate solution found for the last image
         # (see `_refine_wcs_against_gaia`), or `None` before one was tried.
         self.wcs_refinement: WcsRefinement | None = None
+        # One plain sentence saying what happened to the Gaia refit of the last
+        # image: it was used, it was rejected (and why), it found no cached
+        # Gaia stars, or it was not tried. Empty before any image.
+        self.wcs_refit_note: str = ""
         # The peak over the background noise of each star the final Gaia fit
         # used, and why there is none (see `_record_fit_star_signal`). The
         # expected position error is found from them.
@@ -1373,6 +1377,7 @@ class StarIdentifier:
         self.plate_solve_matched_star_count = None
         self.astrometry_flags = []
         self.wcs_refinement = None
+        self.wcs_refit_note = "not refit: it was not tried"
         self.gaia_fit_peak_over_noise = ()
         self.gaia_fit_signal_reason = "no Gaia fit was made"
         self._detected_on_binned_copy = is_color_frame
@@ -1530,6 +1535,7 @@ class StarIdentifier:
                 tiles = self._prepare_field_gaia_stars(wcs, width, height).tiles
         except DATA_ERRORS:
             logger.exception("Could not place the solved image on the sky; the Gaia refit is skipped.")
+            self.wcs_refit_note = "not refit: the solved image could not be placed on the sky"
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
             return wcs
         # The refit keeps its own depth: bright stars place the field well,
@@ -1544,6 +1550,7 @@ class StarIdentifier:
         gaia_coords = None if refit_stars is None else refit_stars.coords
         if gaia_table is None or gaia_coords is None:
             logger.warning("No Gaia stars for the refit of the solution; the solver's solution is kept.")
+            self.wcs_refit_note = f"not refit: no Gaia stars cached for this field to depth G {refit_depth:g}"
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
             return wcs
         gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
@@ -1558,9 +1565,11 @@ class StarIdentifier:
                 refinement.rms_after_arcsec,
                 refinement.shift_arcsec,
             )
+            self.wcs_refit_note = "refit to Gaia stars"
             self._add_flag(FLAG_WCS_REFINED)
             return refinement.wcs
         logger.warning("The solver's solution was kept: %s.", refinement.reason)
+        self.wcs_refit_note = f"refit rejected: {refinement.reason}"
         self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
         return wcs
 

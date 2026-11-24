@@ -738,6 +738,65 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
     from astrometricslib._internal.drivers.fits_access import read_header
     from astrometricslib.pipelines.shared.session_identification import (
         header_is_plate_solved,
+        header_is_refit_to_gaia,
+        write_wcs_to_fits_header,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+        PLATE_SOLVE_REFIT_WCS_SOURCE,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
+
+    try:
+        stack_header = read_header(stacked_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
+        return None, f"the header could not be read: {error}", False
+    solved_now = False
+    if header_is_plate_solved(stack_header):
+        wcs = WCS(stack_header).celestial
+        refit_to_gaia = header_is_refit_to_gaia(stack_header)
+    else:
+        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
+        if wcs is None:
+            logger.warning(
+                "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
+            )
+            return None, reason, False
+        refit_to_gaia = source == PLATE_SOLVE_REFIT_WCS_SOURCE
+        write_wcs_to_fits_header(stacked_path, wcs, refit_to_gaia=refit_to_gaia)
+        solved_now = True
+        logger.info("Saved the stack's plate solution in its header (%s).", source)
+
+    _save_solution_in_viewer_copy(stacked_path, wcs, replace=False, refit_to_gaia=refit_to_gaia)
+    return wcs, "", solved_now
+
+
+def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool, refit_to_gaia: bool) -> None:
+    """Give the stack's viewer copy the stack's plate solution.
+
+    The copy has the stack's pixel grid, or a crop of it whose place on the
+    stack its header gives (``CROPX0`` and the other crop cards); a crop gets
+    the solution moved by that offset. A copy that is missing, cannot be read
+    or has a grid this function cannot place is left alone.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The imaging stack, whose header already holds the solution.
+    wcs : `astropy.wcs.WCS`
+        The solution on the stack's own grid.
+    replace : `bool`
+        True to write over a solution the copy already has; False to write
+        only when it has none.
+    refit_to_gaia : `bool`
+        Whether the solution was refit to Gaia stars (see
+        `write_wcs_to_fits_header`).
+    """
+    from astropy.wcs import WCS
+
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import (
+        header_is_plate_solved,
         write_wcs_to_fits_header,
     )
     from astrometricslib.pipelines.stacking.post_processing.stack_crop import (
@@ -748,46 +807,27 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
         CropBox,
         shift_header_for_crop,
     )
-    from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
     from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
-
-    try:
-        stack_header = read_header(stacked_path)
-    except (OSError, *DATA_ERRORS) as error:
-        logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
-        return None, f"the header could not be read: {error}", False
-    solved_now = False
-    if header_is_plate_solved(stack_header):
-        wcs = WCS(stack_header).celestial
-    else:
-        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
-        if wcs is None:
-            logger.warning(
-                "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
-            )
-            return None, reason, False
-        write_wcs_to_fits_header(stacked_path, wcs)
-        solved_now = True
-        logger.info("Saved the stack's plate solution in its header (%s).", source)
 
     processed_path = processed_fits_path_for(stacked_path)
     if not os.path.exists(processed_path):
-        return wcs, "", solved_now
+        return
     try:
         processed_header = read_header(processed_path)
+        stack_header = read_header(stacked_path)
     except (OSError, *DATA_ERRORS) as error:
         logger.warning("Could not read %s to add the plate solution: %s", processed_path, error)
-        return wcs, "", solved_now
+        return
     same_grid = (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")) == (
         stack_header.get("NAXIS1"),
         stack_header.get("NAXIS2"),
     )
-    if header_is_plate_solved(processed_header):
-        return wcs, "", solved_now
+    if header_is_plate_solved(processed_header) and not replace:
+        return
     if same_grid:
-        write_wcs_to_fits_header(processed_path, wcs)
+        write_wcs_to_fits_header(processed_path, wcs, refit_to_gaia=refit_to_gaia)
         logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
-        return wcs, "", solved_now
+        return
     # A cropped picture: its header says where it sits on the stack, so the
     # stack's solution is moved by that offset.
     crop = [
@@ -795,12 +835,55 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
         for key in (CROP_X0_KEYWORD, CROP_Y0_KEYWORD, CROP_WIDTH_KEYWORD, CROP_HEIGHT_KEYWORD)
     ]
     if None in crop or (crop[2], crop[3]) != (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")):
-        return wcs, "", solved_now
-    shifted_header = read_header(stacked_path) if solved_now else stack_header.copy()
-    shift_header_for_crop(shifted_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
-    write_wcs_to_fits_header(processed_path, WCS(shifted_header).celestial)
+        return
+    shift_header_for_crop(stack_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
+    write_wcs_to_fits_header(processed_path, WCS(stack_header).celestial, refit_to_gaia=refit_to_gaia)
     logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
-    return wcs, "", solved_now
+
+
+def save_refit_stack_plate_solution(stacked_path: str, refit_wcs: Any) -> bool:
+    """Save a plate solution refit to Gaia in a stack whose own is not.
+
+    The analysis step downloads the Gaia stars of the field and refits the
+    solution. The stack's plate solve cannot do that while it runs (it reads
+    the cache only, and a field the cache holds only to a shallow depth has no
+    refit). This is the one place that saves the later, better solution. It
+    uses the writer the stack's own solve uses (`write_wcs_to_fits_header`),
+    marks the header as refit (``WCSREFIT``) and gives the viewer's copy the
+    same solution. A stack that already holds a refit solution is left alone.
+    The caller must pass only a refit that the refit's own acceptance rules
+    accepted (`wcs_refinement.WcsRefinement.applied`).
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The imaging stack.
+    refit_wcs : `astropy.wcs.WCS`
+        The accepted refit, on the stack's own pixel grid.
+
+    Returns
+    -------
+    saved : `bool`
+        True when the solution was written; False when the stack already
+        had a refit one or its header could not be read.
+    """
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import (
+        header_is_refit_to_gaia,
+        write_wcs_to_fits_header,
+    )
+
+    try:
+        stack_header = read_header(stacked_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read the header of %s to save its refit solution: %s", stacked_path, error)
+        return False
+    if header_is_refit_to_gaia(stack_header):
+        return False
+    write_wcs_to_fits_header(stacked_path, refit_wcs, refit_to_gaia=True)
+    logger.info("Saved the stack's plate solution refit to Gaia stars in its header.")
+    _save_solution_in_viewer_copy(stacked_path, refit_wcs, replace=True, refit_to_gaia=True)
+    return True
 
 
 def _turn_stack_north_up(run: StackRun, stacked_path: str | None) -> bool:

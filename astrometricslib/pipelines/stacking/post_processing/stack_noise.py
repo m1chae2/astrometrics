@@ -798,7 +798,77 @@ def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple
     return enough_stars and matches >= wcs_check_minimum_matches
 
 
+# The last few stack solves, so a stack solved by the noise step is not solved
+# again by the step that saves the solution in its header, a few seconds later
+# in the same job (the second solve took 39 to 59 s on the 2026-11-23 colour
+# stacks). Each answer is kept under the file's path, size and modification
+# time, so a changed file is solved again.
+_RECENT_STACK_SOLVES: dict[tuple[str, int, int, int], tuple[WCS | None, str, str]] = {}
+_RECENT_STACK_SOLVES_KEPT = 4
+
+
+def _stack_solve_key(stack_path: str, drivers: Drivers | None) -> tuple[str, int, int, int] | None:
+    """Name a stack file and its state, for `_RECENT_STACK_SOLVES`.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The finished stack.
+    drivers : `Drivers`, optional
+        The outside services the caller chose; a different plate solver is a
+        different solve.
+
+    Returns
+    -------
+    key : `tuple` or `None`
+        The path, the size, the modification time and the drivers' identity,
+        or `None` when the file cannot be examined.
+    """
+    try:
+        status = os.stat(stack_path)
+    except OSError:
+        return None
+    return (os.path.realpath(stack_path), status.st_size, status.st_mtime_ns, id(drivers))
+
+
 def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str, str]:
+    """Plate-solve the stack itself, or give the answer of a solve just made.
+
+    The same unchanged file is solved once: the noise step and the step that
+    saves the solution in the stack's header both ask, and the second gets
+    the first's answer (see `_solve_stack_wcs`, which does the work).
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The finished stack.
+    drivers : `Drivers`, optional
+        The outside services the caller chose.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution on the stack's own pixel grid, or `None`. A copy, so the
+        caller may change it.
+    reason : `str`
+        Why there is none. Empty when there is one.
+    wcs_source : `str`
+        `PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`.
+    """
+    key = _stack_solve_key(stack_path, drivers)
+    if key is not None and key in _RECENT_STACK_SOLVES:
+        wcs, reason, source = _RECENT_STACK_SOLVES[key]
+        logger.info("Using the plate solution of this stack that was just found.")
+        return (None if wcs is None else wcs.deepcopy()), reason, source
+    wcs, reason, source = _solve_stack_wcs(stack_path, drivers)
+    if key is not None:
+        while len(_RECENT_STACK_SOLVES) >= _RECENT_STACK_SOLVES_KEPT:
+            del _RECENT_STACK_SOLVES[next(iter(_RECENT_STACK_SOLVES))]
+        _RECENT_STACK_SOLVES[key] = (None if wcs is None else wcs.deepcopy(), reason, source)
+    return wcs, reason, source
+
+
+def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str, str]:
     """Plate-solve the stack itself, in memory, as the last source.
 
     This runs only the solving part of the astrometry step
@@ -888,10 +958,13 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
             PLATE_SOLVE_UNREFINED_WCS_SOURCE,
         )
     was_refit = bool(getattr(pipeline, "last_solve_was_refit", False))
+    refit_note = getattr(pipeline, "last_solve_refit_note", "")
+    if not isinstance(refit_note, str) or not refit_note:
+        refit_note = "not refit"
     logger.info(
         "Solved in %.1f s (%s).",
         elapsed,
-        "refit to cached Gaia stars" if was_refit else "not refit: no complete cached Gaia download",
+        "refit to cached Gaia stars" if was_refit else refit_note,
     )
     return celestial, "", PLATE_SOLVE_REFIT_WCS_SOURCE if was_refit else PLATE_SOLVE_UNREFINED_WCS_SOURCE
 

@@ -289,3 +289,37 @@ def test_binning_suppresses_demosaic_false_positives_on_a_real_detector() -> Non
     _, binned_unique = identifier.detect_stars(background, is_color_frame=True)
 
     assert len(binned_unique) < len(unbinned_unique) / 3
+
+
+def test_color_frame_stars_land_once_at_their_true_positions() -> None:
+    """Verify each colour-frame star is rescaled exactly once.
+
+    A star found only once is the same dictionary in the raw and the
+    deduplicated list. Scaling both lists used to scale it twice, which put
+    most stars outside the image (x = 4 * x_binned + 1.5 instead of
+    2 * x_binned + 0.5). This test uses the real detector and stars at known
+    places, and checks that the two lists agree and sit on the true places.
+    """
+    rng = np.random.default_rng(3)
+    height, width = 400, 600
+    rows, columns = np.mgrid[0:height, 0:width]
+    image = rng.normal(500.0, 5.0, size=(height, width))
+    true_positions = [(120.0, 80.0), (300.0, 200.0), (450.0, 330.0), (520.0, 90.0), (60.0, 350.0)]
+    for x_true, y_true in true_positions:
+        image += 4000.0 * np.exp(-((columns - x_true) ** 2 + (rows - y_true) ** 2) / (2 * 2.5**2))
+    identifier = StarIdentifier(config=MagicMock(get_value=MagicMock(return_value=None)))
+
+    sources, unique_sources = identifier.detect_stars(image, is_color_frame=True)
+
+    assert len(unique_sources) >= len(true_positions)
+    for star in unique_sources:
+        assert 0 <= star["x_centroid"] < width
+        assert 0 <= star["y_centroid"] < height
+    for x_true, y_true in true_positions:
+        nearest = min(
+            np.hypot(star["x_centroid"] - x_true, star["y_centroid"] - y_true) for star in unique_sources
+        )
+        assert nearest < 2.0
+    raw_positions = {(star["x_centroid"], star["y_centroid"]) for star in sources}
+    for star in unique_sources:
+        assert (star["x_centroid"], star["y_centroid"]) in raw_positions or star.get("merged_detection_count")

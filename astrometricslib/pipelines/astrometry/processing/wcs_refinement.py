@@ -353,7 +353,6 @@ def refine_wcs_with_gaia(
     if scale_arcsec is None:
         return WcsRefinement(wcs, False, "the solution has no usable pixel scale")
     radius_arcsec = initial_match_radius_pixels * scale_arcsec
-    projection_point = SkyCoord(wcs.wcs.crval[0] * u.deg, wcs.wcs.crval[1] * u.deg)
     current = wcs
     used: np.ndarray | None = None
     fitted: WCS | None = None
@@ -372,7 +371,10 @@ def refine_wcs_with_gaia(
             fitted = fit_wcs_from_points(
                 (positions[star_indices, 0], positions[star_indices, 1]),
                 gaia_coordinates[gaia_indices],
-                proj_point=projection_point,
+                # The middle of the stars, not the old reference point. When
+                # the old reference pixel is far from the image center
+                # (M 13), a fit around it can stop in a wrong answer.
+                proj_point="center",
                 projection="TAN",
                 sip_degree=sip_degree,
             )

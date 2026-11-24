@@ -137,7 +137,7 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
         logger.warning("Could not look up the position of target %s: %s", target.id, lookup_error)
 
 
-def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
+def _write_solved_wcs_to_fits_header(path: str | None, context: Any, refit_applied: bool = False) -> None:
     """Write a solved WCS back into the source FITS file's header.
 
     So the next tool that opens this file (Siril, another astrometry
@@ -146,6 +146,12 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
     and replaces any sky-map keywords from an earlier solve. See
     `write_wcs_to_fits_header` for how.
 
+    A solution refit to Gaia is saved through
+    `stage.save_refit_stack_plate_solution`, which also marks the header and
+    updates the stack's viewer copy, and only when the file does not already
+    hold a refit one. A solution that was not refit never replaces one that
+    was.
+
     Parameters
     ----------
     path : `str` or `None`
@@ -153,9 +159,27 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
     context : `Any`
         The finished pipeline context. Its `wcs` attribute is the solved
         sky map, or `None` when the image was not solved.
+    refit_applied : `bool`, optional
+        True when the Gaia refit of this run was accepted, so `context.wcs`
+        is the refit solution.
     """
     if context.wcs is None or not path:
         return
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import header_is_refit_to_gaia
+    from astrometricslib.pipelines.stacking.stage import save_refit_stack_plate_solution
+
+    if refit_applied:
+        save_refit_stack_plate_solution(path, context.wcs)
+        return
+    try:
+        if header_is_refit_to_gaia(read_header(path)):
+            logger.info(
+                "The file already holds a solution refit to Gaia; this run's solver solution is not saved."
+            )
+            return
+    except (OSError, *DATA_ERRORS):
+        pass
     write_wcs_to_fits_header(path, context.wcs)
 
 
@@ -382,7 +406,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         target_center_deg = resolve_target_center_hint(target)
 
         _fill_target_position(target, context, request.options.get("drivers"))
-        _write_solved_wcs_to_fits_header(path, context)
+        refinement = getattr(getattr(pipeline, "star_identifier", None), "wcs_refinement", None)
+        _write_solved_wcs_to_fits_header(path, context, bool(refinement and refinement.applied))
         # After the header write, so the saved file's stamp is the final one.
         _save_stack_detections(path, getattr(pipeline, "star_identifier", None))
 

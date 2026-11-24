@@ -517,7 +517,8 @@ class SourceDetector:
         Returns
         -------
         unique_stars : `list` [`dict`]
-            The cleaned up list of stars.
+            The cleaned up list of stars. Every entry is a new dictionary, so
+            moving a star here never moves it in ``sources``.
         """
         if not sources:
             return []
@@ -563,7 +564,9 @@ class SourceDetector:
             group = [sources[i] for i in neighbor_indices]
 
             if len(group) == 1:
-                unique_stars.append(group[0])
+                # A copy, so changing a unique star never changes the entry
+                # in the caller's list of everything found.
+                unique_stars.append(group[0].copy())
             else:
                 # The merged star sits where its brightest detection is, not
                 # at the average: an average of two separate stars is a point

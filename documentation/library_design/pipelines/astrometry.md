@@ -99,9 +99,12 @@ Only the local solver reports its fit statistics; an online solve has none (Sect
 
 **Why refit.** The solver fits only the bright stars of its index files, so its solution can be a pixel or more off. The pipeline then refits the solution to the field's Gaia DR3 stars (`wcs_refinement.py`).
 
-**How.** Each detection is matched to the nearest Gaia star within 4 pixels, then 1.5 pixels on later passes. The map is fitted with `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a flat plane touching it at the field center) plus SIP distortion of order 2. SIP (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by the optics. Stars more than 3 robust standard deviations off are dropped, and the fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of spread that a few wild points cannot inflate.
+**How.** Each detection is matched to the nearest Gaia star within 4 pixels, then 1.5 pixels on later passes. The map is fitted with `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a flat plane touching it at the middle of the matched stars) plus SIP distortion of order
+2. SIP (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by the optics. Stars more than 3 robust standard deviations off are dropped, and the fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of spread that a few wild points cannot inflate.
 
 **When it is kept.** The refit needs at least 40 matches. It is kept only when it fits Gaia better than the solver's solution and moves the field by at most 30 arcsec.
+
+**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only when the cache already holds the field. A later analysis step downloads the Gaia stars. When it accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks it), unless the stack already holds a refit one.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -163,7 +166,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 `run_astrometry_analysis` (`runner.py`) runs `AstrometryPipelineAdapter` through `run_pipeline`. `run_pipeline` (`pipeline_base.py`) calls the adapter's four methods in order. It skips `run` only when `process_input` returns a `Result` with `has_work=False`. After `validate_output` it stores the quality summary on the target and records the run's provenance.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has already checked that an image path exists.
-- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
+- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header (never over a solution already refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records `plate_solve`, then `astrometry_run_gates` adds the rest (5 run gates in all). The runner then stores the summary's numbers and the gates as quality measurements (`record_astrometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns `context`, `stellar_objects`, `wcs` and `image_stats`.
 

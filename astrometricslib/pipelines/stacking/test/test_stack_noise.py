@@ -1957,6 +1957,92 @@ def test_the_real_stack_solve_asks_for_a_refit_from_the_cache_only(
     assert wcs_source == PLATE_SOLVE_REFIT_WCS_SOURCE
 
 
+class _CountingPipeline:
+    """A stand-in pipeline that counts its solves and gives a refit note."""
+
+    solves = 0
+    note = ""
+
+    def __init__(self, drivers: object = None) -> None:
+        """Accept the drivers the caller passes."""
+        self.last_solve_was_refit = False
+        self.last_solve_refit_note = type(self).note
+
+    def solve_wcs(self, image: str, *, refit_from_cache: bool = False) -> WCS:
+        """Count the solve.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS`
+            The test solution.
+        """
+        type(self).solves += 1
+        return WCS(_sky_header())
+
+
+def test_the_same_unchanged_stack_is_solved_only_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The noise and header steps share one solve; a changed file is redone."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    _CountingPipeline.solves = 0
+    stack_noise._RECENT_STACK_SOLVES.clear()
+    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", _CountingPipeline)
+    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    stack = tmp_path / "stack.fits"
+    stack.write_bytes(b"first")
+
+    first = real(str(stack))
+    second = real(str(stack))
+
+    assert _CountingPipeline.solves == 1
+    assert first[0] is not None and second[0] is not None
+    assert second[0] is not first[0]
+    assert second[1:] == first[1:]
+    stack.write_bytes(b"a changed stack")
+    real(str(stack))
+    assert _CountingPipeline.solves == 2
+    stack_noise._RECENT_STACK_SOLVES.clear()
+
+
+@pytest.mark.parametrize(
+    ("note", "expected"),
+    [
+        (
+            "not refit: no Gaia stars cached for this field to depth G 14",
+            "not refit: no Gaia stars cached for this field to depth G 14",
+        ),
+        (
+            "refit rejected: the fit moved the field by 99.0 arcsec",
+            "refit rejected: the fit moved the field by 99.0 arcsec",
+        ),
+    ],
+)
+def test_the_solve_log_says_why_the_solution_was_not_refit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    note: str,
+    expected: str,
+) -> None:
+    """Each reason for no refit has its own log text, at the status level."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    _CountingPipeline.note = note
+    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", _CountingPipeline)
+    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+
+    with caplog.at_level("INFO"):
+        real(str(tmp_path / "missing.fits"))
+
+    messages = [record for record in caplog.records if record.getMessage().startswith("Solved in")]
+    assert len(messages) == 1
+    assert expected in messages[0].getMessage()
+    assert messages[0].levelname == "INFO"
+    _CountingPipeline.note = ""
+
+
 def test_robust_sigma_matches_the_median_absolute_deviation_formula() -> None:
     """`robust_sigma` is the scaled median absolute deviation, on any axis."""
     from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA, robust_sigma

@@ -1628,7 +1628,8 @@ a pixel or more off. The pipeline then refits the solution to the field's Gaia D
 **How.** Each detection is matched to the nearest Gaia star within <<refit_r1>> pixels, then
 <<refit_r2>> pixels on later passes. The map is fitted with
 `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a
-flat plane touching it at the field center) plus SIP distortion of order <<refit_sip>>. SIP
+flat plane touching it at the middle of the matched stars) plus SIP distortion of order
+<<refit_sip>>. SIP
 (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by
 the optics. Stars more than <<refit_clip>> robust standard deviations off are dropped, and the
 fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times
@@ -1637,6 +1638,11 @@ the median absolute deviation, a measure of spread that a few wild points cannot
 **When it is kept.** The refit needs at least <<refit_min_stars>> matches. It is kept only when
 it fits Gaia better than the solver's solution and moves the field by at most <<refit_shift>>
 arcsec.
+
+**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only
+when the cache already holds the field. A later analysis step downloads the Gaia stars. When it
+accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks
+it), unless the stack already holds a refit one.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -1703,9 +1709,10 @@ The gate detail names the one used.
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has
   already checked that an image path exists.
 - **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS
-  fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec
-  when they were unset (from its SIMBAD position, with the solved image's center only as a marked,
-  unverified fallback), and saves the stars to the shared catalog.
+  fallback, naming). It writes the solved WCS into the FITS header (never over a solution already
+  refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with
+  the solved image's center only as a marked, unverified fallback), and saves the stars to the
+  shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records
   `plate_solve`, then `astrometry_run_gates` adds the rest (<<gate_count>> in all).
   The runner then stores the summary's numbers and the gates as quality measurements

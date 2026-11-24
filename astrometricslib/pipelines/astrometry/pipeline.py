@@ -50,6 +50,9 @@ class AstrometryPipeline:
         self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
         # Whether the last `solve_wcs` refit its solution to cached Gaia stars.
         self.last_solve_was_refit = False
+        # One sentence saying what happened to that refit (see
+        # `StarIdentifier.wcs_refit_note`).
+        self.last_solve_refit_note = ""
 
     def prepare_image(
         self,
@@ -172,7 +175,7 @@ class AstrometryPipeline:
         (see `process` for the refined one). With `refit_from_cache`, it is
         refit to the Gaia stars of the cache tiles that are already complete,
         using the cache alone; `last_solve_was_refit` then says whether that
-        happened.
+        happened, and `last_solve_refit_note` says why not.
         A field the solver cannot solve raises `PlateSolveFailedError`, as in
         `process`.
 
@@ -207,6 +210,9 @@ class AstrometryPipeline:
         )
         refinement = self.star_identifier.wcs_refinement
         self.last_solve_was_refit = bool(refinement is not None and refinement.applied)
+        self.last_solve_refit_note = (
+            self.star_identifier.wcs_refit_note if refit_from_cache else "not refit: it was not asked for"
+        )
         return wcs
 
     def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:

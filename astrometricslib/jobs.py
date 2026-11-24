@@ -23,7 +23,12 @@ from astrometricslib.foundation.jobs.runner import (
     running_as_job,
 )
 from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
-from astrometricslib.foundation.logging import background_log_context, log_context, new_request_id
+from astrometricslib.foundation.logging import (
+    SkipJobStoredRecords,
+    background_log_context,
+    log_context,
+    new_request_id,
+)
 from astrometricslib.foundation.run_abandonment import (
     RunAbandonedError,
     RunAbandonment,
@@ -38,6 +43,7 @@ __all__ = [
     "ProcessingJob",
     "RunAbandonedError",
     "RunAbandonment",
+    "SkipJobStoredRecords",
     "background_job",
     "background_log_context",
     "bind_abandonment",

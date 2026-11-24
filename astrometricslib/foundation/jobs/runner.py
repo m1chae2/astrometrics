@@ -46,6 +46,7 @@ from astrometricslib.foundation.logging import (
     get_log_context,
     log_context,
 )
+from astrometricslib.foundation.parameter_context import collect_default_notices
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,9 @@ class JobHandle:
                 if message is not None:
                     stored_job.message = message
                 if output_metrics is not None:
-                    stored_job.output_metrics = output_metrics
+                    # Merge, so keys the job already stored (such as the
+                    # parameter defaults) are not lost.
+                    stored_job.output_metrics = {**(stored_job.output_metrics or {}), **output_metrics}
                 stored_job.updated_at = datetime.now().isoformat()
                 if status in _TERMINAL_STATUSES and stored_job.completed_at is None:
                     stored_job.completed_at = stored_job.updated_at
@@ -361,6 +364,42 @@ _open_log_files_lock = threading.Lock()
 #: that wrote them lost the job's log context, such as a worker thread that
 #: was started without copying it.
 JOB_LOG_PACKAGES: tuple[str, ...] = ("astrometricslib", "wayfindinglib")
+
+
+PARAMETER_DEFAULTS_KEY = "parameter_defaults"
+"""The key in a job's ``output_metrics`` that lists the notices of the
+parameters that used their defaults."""
+
+
+def _record_default_notices(job_id: str, job_store: JobStore | None, notices: list[str]) -> None:
+    """Log one line about the defaults a job used and store the full list.
+
+    A parameter with no tuned or equipment value uses its default and adds a
+    notice (see `collect_default_notices`). One log line says how many, so
+    the log is not filled with one warning per parameter. The notices are
+    stored in the job's ``output_metrics`` so the job can list them later.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The job.
+    job_store : `JobStore` or `None`
+        Where the job row is. `None` skips storing.
+    notices : `list` [`str`]
+        The notices the job collected.
+    """
+    if not notices:
+        return
+    logger.info("%d parameters used their defaults (no tuned or equipment value)", len(notices))
+    if job_store is None:
+        return
+    try:
+        stored_job = job_store.get_job(job_id)
+        if stored_job is not None:
+            stored_job.output_metrics = {**(stored_job.output_metrics or {}), PARAMETER_DEFAULTS_KEY: notices}
+            job_store.upsert_job(stored_job)
+    except sqlite3.Error as store_error:
+        logger.debug("Could not store the default notices of job '%s': %s", job_id, store_error)
 
 
 @contextmanager
@@ -431,8 +470,15 @@ def capture_job_logs(
         # The router sends each record that carries this job's id to the sinks.
         # Nothing is attached to a shared logger, so nothing is left behind.
         sink_key = router.register(job_id, sinks, JOB_LOG_PACKAGES)
-        with log_context(job_id=job_id):
-            yield
+        with log_context(job_id=job_id), ExitStack() as notice_scope:
+            # A run nested in the same job adds to the outer run's list.
+            collects_notices = job_id not in active_job_ids()[:-1]
+            notices = notice_scope.enter_context(collect_default_notices()) if collects_notices else []
+            try:
+                yield
+            finally:
+                if collects_notices:
+                    _record_default_notices(job_id, job_store, notices)
     finally:
         if sink_key is not None:
             for handler in router.unregister(sink_key):

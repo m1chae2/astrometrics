@@ -21,6 +21,7 @@ from astrometricslib._internal.drivers.quality_store import QualityStore, qualit
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
+from astrometricslib.foundation.jobs.runner import PARAMETER_DEFAULTS_KEY
 from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.models.job_queries import (
     JobLogLine,
@@ -122,6 +123,24 @@ def _minutes_since(timestamp: str | None) -> float | None:
         return (now - then).total_seconds() / 60.0
     except ValueError:
         return None
+
+
+def _parameter_defaults(job: ProcessingJob) -> list[str]:
+    """List the parameters that used their defaults during a job.
+
+    Parameters
+    ----------
+    job : `ProcessingJob`
+        The stored job.
+
+    Returns
+    -------
+    notices : `list` [`str`]
+        One line for each parameter with no tuned or equipment value. Empty
+        when none did or the job did not record any.
+    """
+    stored = (job.output_metrics or {}).get(PARAMETER_DEFAULTS_KEY, [])
+    return [str(notice) for notice in stored]
 
 
 def _warning_from_row(row: QualityMeasurement) -> JobWarning:
@@ -370,6 +389,7 @@ class Jobs:
         elif detail == "result":
             answer.input_metrics = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
             answer.output_metrics = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
+            answer.parameter_defaults = _parameter_defaults(job)
         return answer
 
     def _warnings(self, job_id: str | None) -> JobQueryResult:
@@ -408,6 +428,7 @@ class Jobs:
             warnings=warnings,
             measurement_count=len(rows),
             checks_not_run_count=sum(1 for row in rows if row.check_outcome == GateStatus.NOT_CHECKED),
+            parameter_defaults=None if job is None else _parameter_defaults(job),
             truncated=len(failed) > MAXIMUM_WARNINGS,
             note=UNTRUSTED_TEXT_NOTE,
         )

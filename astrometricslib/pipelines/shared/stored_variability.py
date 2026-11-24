@@ -146,7 +146,9 @@ def _fill_vsx_and_gaia(stars: Sequence[StellarObject], report: VariabilityFillRe
             report.unreached.append(f"{name} listings could not be read: {unreached}")
             continue
         if name == "VSX":
-            types = vsx_types_from_matches([s.id for s in needing], vstack(matched) if matched else None)
+            types = vsx_types_from_matches(
+                [s.id for s in needing], vstack(matched, metadata_conflicts="silent") if matched else None
+            )
             for star in needing:
                 star.vsx_variability_type = types[star.id]
         else:

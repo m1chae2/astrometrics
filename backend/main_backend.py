@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse
 from astrometricslib import configure_logging, configure_offline_iers, get_configuration
 from astrometricslib.drivers import require_mounted_storage
 from astrometricslib.exceptions import AstrometricsError, ErrorInfo, StorageNotMountedError, to_error_info
-from astrometricslib.jobs import DbLogHandler, close_interrupted_jobs, new_request_id
+from astrometricslib.jobs import DbLogHandler, SkipJobStoredRecords, close_interrupted_jobs, new_request_id
 from backend import startup
 from backend.container import container
 from backend.routers import figures, rpc_router, startup_routes, static_files, websockets
@@ -84,6 +84,10 @@ def attach_log_handlers() -> None:
     db_log_queue: queue.Queue = queue.Queue()
     db_log_queue_handler = QueueHandler(db_log_queue)
     db_log_queue_handler.setLevel(logging.INFO)
+    # A record logged inside a job is stored with its job id by the job's own
+    # handler. Skip it here so it is not stored a second time with no job id.
+    # The filter runs on the logging thread, where the job context is set.
+    db_log_queue_handler.addFilter(SkipJobStoredRecords())
     db_log_listener = QueueListener(db_log_queue, db_log_handler)
 
     root_logger = logging.getLogger()

@@ -109,6 +109,7 @@ EXPECTED_MODULE_NAMES = {
         "ProcessingJob",
         "RunAbandonedError",
         "RunAbandonment",
+        "SkipJobStoredRecords",
         "background_job",
         "background_log_context",
         "bind_abandonment",

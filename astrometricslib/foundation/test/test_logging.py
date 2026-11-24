@@ -278,3 +278,41 @@ def test_there_is_one_router_per_process() -> None:
     assert get_job_log_router() is first
     assert logging.getLogger().handlers.count(first) == 1
     assert shared_logging._router is first
+
+
+def test_a_record_stored_by_a_job_handler_is_skipped_by_the_unscoped_one() -> None:
+    """Store a job record once with its id, and others once with none."""
+    from astrometricslib.foundation.logging import SkipJobStoredRecords
+
+    class _Store(logging.Handler):
+        """Keep the messages it is given."""
+
+        def __init__(self, job_id: str | None) -> None:
+            """Bind the handler to a job id, or `None` for the unscoped one."""
+            super().__init__()
+            self.job_id = job_id
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            """Remember the message."""
+            self.messages.append(record.getMessage())
+
+    router = get_job_log_router()
+    scoped, unscoped = _Store("job-1"), _Store(None)
+    unscoped.addFilter(SkipJobStoredRecords())
+    sink_key = router.register("job-1", [scoped])
+    root = logging.getLogger()
+    root.addHandler(unscoped)
+    logger = logging.getLogger("astrometricslib.dedupe_test")
+    logger.setLevel(logging.INFO)
+    try:
+        with log_context(job_id="job-1"):
+            logger.info("inside the job")
+        logger.info("outside any job")
+        with log_context(job_id="job-without-a-sink"):
+            logger.info("job with no handler")
+    finally:
+        root.removeHandler(unscoped)
+        router.unregister(sink_key)
+    assert "inside the job" in scoped.messages
+    assert unscoped.messages == ["outside any job", "job with no handler"]

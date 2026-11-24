@@ -4332,6 +4332,11 @@ export interface CalibrationMeasurementReport {
  * checks_not_run_count : `int` or `None`
  * ``detail="warnings"``: how many of the job's checks could not run
  * (outcome ``not_checked``). These are not warnings.
+ * parameter_defaults : `list` [`str`] or `None`
+ * ``detail="result"`` and ``detail="warnings"``: one line for each
+ * parameter that used its default because no tuned or equipment value
+ * was set. An empty list means none did, or the job was run before
+ * this was recorded.
  */
 export interface JobQueryResult {
   detail: string;
@@ -4353,6 +4358,7 @@ export interface JobQueryResult {
   warnings?: JobWarning[] | null;
   measurement_count?: number | null;
   checks_not_run_count?: number | null;
+  parameter_defaults?: string[] | null;
 }
 
 /**

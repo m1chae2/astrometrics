@@ -198,7 +198,7 @@ class ParameterContext:
         return self.setup_bases.value(basis) if self.setup_bases is not None else None
 
     def note(self, notice: str) -> None:
-        """Record a notice once.
+        """Record a notice once, here and for every job collecting notices.
 
         Parameters
         ----------
@@ -207,6 +207,9 @@ class ParameterContext:
         """
         if notice not in self.notices:
             self.notices.append(notice)
+        for collected in _JOB_NOTICE_COLLECTORS.get():
+            if notice not in collected:
+                collected.append(notice)
 
 
 def run_basis_value(basis: RunBasis) -> float | None:
@@ -250,8 +253,35 @@ def record_basis(basis: RunBasis, value: float) -> None:
 _CURRENT_CONTEXT: contextvars.ContextVar[ParameterContext | None] = contextvars.ContextVar(
     "astrometrics_parameter_context", default=None
 )
+# The lists of the jobs running now that collect default-value notices, the
+# outermost job first. A job adds its list with `collect_default_notices`.
+_JOB_NOTICE_COLLECTORS: contextvars.ContextVar[tuple[list[str], ...]] = contextvars.ContextVar(
+    "astrometrics_job_notice_collectors", default=()
+)
 _default_cache: tuple[float, ParameterContext] | None = None
 _worker_context_managers: list[Any] = []
+
+
+@contextmanager
+def collect_default_notices() -> Generator[list[str]]:
+    """Collect the notices of parameters that used a default, for one job.
+
+    A job wraps its work in this. Each time a parameter falls back to its
+    default inside the block, whatever parameter context it ran in, the
+    notice is added once to the list. The list is how the job records which
+    defaults stood in, instead of one warning per parameter.
+
+    Yields
+    ------
+    notices : `list` [`str`]
+        The notices so far. It keeps filling while the block runs.
+    """
+    notices: list[str] = []
+    token = _JOB_NOTICE_COLLECTORS.set((*_JOB_NOTICE_COLLECTORS.get(), notices))
+    try:
+        yield notices
+    finally:
+        _JOB_NOTICE_COLLECTORS.reset(token)
 
 
 def current_parameter_context() -> ParameterContext | None:

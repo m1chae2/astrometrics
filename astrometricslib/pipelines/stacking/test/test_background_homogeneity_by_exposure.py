@@ -81,3 +81,37 @@ def test_the_kept_frames_keep_their_original_order() -> None:
 def test_no_frames_gives_empty_results() -> None:
     """An empty list has nothing to keep, exclude or split."""
     assert find_dominant_background_subset_by_exposure([]) == ([], [], [])
+
+
+def test_a_frame_in_no_exposure_group_is_kept_for_the_later_exposure_check() -> None:
+    """A lone 10 s frame beside 60 s frames is not judged or dropped here."""
+    main = frames("60.0", [480.0 + i for i in range(10)])
+    lone = frames("10.0", [90.0])
+
+    kept, excluded, splits = find_dominant_background_subset_by_exposure(main + lone)
+
+    assert len(kept) == 11
+    assert excluded == []
+    assert splits == []
+
+
+def test_a_lone_folded_frame_is_not_judged_against_the_group_it_folds_into() -> None:
+    """A lone 30 s frame among 60 s frames has half the sky and is kept."""
+    main = frames("60.0", [480.0 + i for i in range(30)])
+    lone = frames("30.0", [240.0])
+
+    kept, excluded, splits = find_dominant_background_subset_by_exposure(lone + main)
+
+    assert len(kept) == 31
+    assert excluded == []
+    assert splits == []
+
+
+def test_a_cloud_in_a_five_frame_bucket_is_still_found() -> None:
+    """A cloudy frame inside a bucket with enough frames is excluded."""
+    main = frames("60.0", [480.0 + i for i in range(5)] + [1500.0])
+
+    kept, excluded, _ = find_dominant_background_subset_by_exposure(main)
+
+    assert [frame.name for frame in excluded] == ["60.0_5"]
+    assert len(kept) == 5

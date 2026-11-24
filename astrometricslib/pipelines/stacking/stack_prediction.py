@@ -39,6 +39,7 @@ from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.frame_screening import (
     BACKGROUND_SPLIT_REASON,
     EARLIER_QUARANTINE_REASON,
+    EXPOSURE_NOT_FOLDABLE_REASON_PREFIX,
     MINORITY_GAIN_REASON,
     FrameScreening,
     screen_frames,
@@ -166,6 +167,8 @@ def _predicted_frames(screening: FrameScreening) -> tuple[list[PredictedFrame], 
             kind, reason = decision.kind, decision.reason
         else:
             kind, reason = _KIND_BY_REASON.get(excluded.reason, "other"), excluded.reason
+            if excluded.reason.startswith(EXPOSURE_NOT_FOLDABLE_REASON_PREFIX):
+                kind = "exposure_not_foldable"
         set_aside.append(
             PredictedFrame(path=excluded.path, file=os.path.basename(excluded.path), reason=reason, kind=kind)
         )

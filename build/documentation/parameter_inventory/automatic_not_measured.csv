@@ -542,6 +542,7 @@ stacking.masked_stretch_star_peak_limit,STK-D75,judgment,Design estimate
 stacking.masked_stretch_star_removal_box_pixels,STK-D75,measurement,Design estimate
 stacking.masked_stretch_white_point_opening_pixels,STK-D75,measurement,Design estimate
 stacking.maximum_edge_noise_ratio,STK-23,measurement,Partly measured
+stacking.maximum_exposure_fold_ratio,STK-D79,exclusion criteria,Design estimate
 stacking.maximum_flat_level_fraction,STK-D05,judgment,Design estimate
 stacking.maximum_flat_noise_fraction,STK-05,judgment,Partly measured
 stacking.maximum_frames_averaged,STK-D63,judgment,Design estimate

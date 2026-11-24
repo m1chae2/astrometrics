@@ -38,6 +38,7 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     ExposureGroup,
     exposure_group_holds_folded_frames,
     fold_exposure_lengths,
+    plan_exposure_folding,
     split_frames_by_exposure,
 )
 from astrometricslib.pipelines.stacking.processing.group_combination import combine_exposure_group_images
@@ -540,15 +541,17 @@ def test_the_fold_rule_matches_how_frames_are_split(exposures: list[float]) -> N
         SimpleNamespace(path=f"/f/{index}.fits", exposure=str(exposure))
         for index, exposure in enumerate(exposures)
     ]
-    group_lengths = fold_exposure_lengths([float(frame.exposure) for frame in frames])
+    folding = plan_exposure_folding([float(frame.exposure) for frame in frames])
+    group_lengths = folding.group_lengths
+    kept = [index for index, reason in enumerate(folding.left_out_reasons) if reason is None]
     groups = split_frames_by_exposure(frames)
 
-    assert len(groups) == len(set(group_lengths))
+    # A frame the rule leaves out is in no group.
+    assert sum(len(group.frames) for group in groups) == len(kept)
+    assert len(groups) == len({group_lengths[index] for index in kept})
     for group in groups:
         landed = {
-            group_lengths[index]
-            for index, frame in enumerate(frames)
-            if any(frame is member for member in group.frames)
+            group_lengths[index] for index in kept if any(frames[index] is member for member in group.frames)
         }
         assert len(landed) == 1
     # A group holds folded frames when the rule sent a length there.

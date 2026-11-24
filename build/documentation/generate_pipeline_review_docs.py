@@ -3164,6 +3164,10 @@ def build_stacking_doc() -> str:
             "astrometricslib.pipelines.stacking.processing.exposure_groups",
             "MINIMUM_FRAMES_PER_EXPOSURE_GROUP",
         ),
+        "fold_ratio": require_symbol(
+            "astrometricslib.pipelines.stacking.processing.exposure_groups",
+            "MAXIMUM_EXPOSURE_FOLD_RATIO",
+        ),
         "gap_ratio": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.background_homogeneity",
             "DEFAULT_GAP_RATIO_THRESHOLD",
@@ -3301,7 +3305,16 @@ def build_stacking_doc() -> str:
             f"`{values['group_minimum']}`",
             design_estimate_cell("STK"),
             "Fewest frames an exposure length needs to be stacked on its own; a smaller set joins "
-            "the group with the nearest exposure length." + see_also("STK-11"),
+            "the group with the nearest exposure length, if that is near enough (next row)."
+            + see_also("STK-11"),
+        ],
+        [
+            "`MAXIMUM_EXPOSURE_FOLD_RATIO`",
+            f"`{values['fold_ratio']:g}`",
+            design_estimate_cell("STK"),
+            "Largest exposure ratio over which a small set is folded into a group. A folded frame is "
+            "scaled by the ratio, so its noise grows by it. A set with no group that near is left out "
+            "of the stack and recorded with the reason.",
         ],
         [
             "`DEFAULT_GAP_RATIO_THRESHOLD`",
@@ -3542,6 +3555,13 @@ length also needs darks of its own length. So every stack with more than one exp
 stacked one length at a time. A spectral stack is also split by night, because the zero order
 (the star's undispersed image) sits on a different pixel each night and aligning two nights
 together can lose most frames.
+
+**Short lengths.** A length with too few frames to be stacked alone is folded into the nearest
+group (nearest in exposure ratio), but only when that group is close in exposure. Siril scales a
+folded frame by the exposure ratio, so the frame's noise grows by the same factor, and its star
+profile and sky level lie farther from what the group's calibration covers. A frame with no group
+that close is left out of the stack. The stack records each such frame with the reason, as it does
+for any frame the checks leave out, and the file stays where it is.
 
 **Putting groups on one scale.** Each group's stack is turned into counts per second. That alone
 does not line the groups up, because Siril's normalization leaves each group's stack on the

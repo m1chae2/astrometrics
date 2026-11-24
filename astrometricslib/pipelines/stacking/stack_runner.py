@@ -188,6 +188,14 @@ def run_stack(
     if output_file is None:
         output_file = f"{target_id.replace(' ', '_')}_Stacked.fits"
     groups = split_into_stack_batches(frames, is_spectral)
+    if sum(len(group.frames) for group in groups) < len(frames):
+        # The frame screening records these frames (see `frame_screening`);
+        # a caller that skipped it still must not stack them.
+        logger.warning(
+            "Leaving %d frame(s) out of the stack: their exposure has no group near enough.",
+            len(frames) - sum(len(group.frames) for group in groups),
+        )
+        frames = [frame for group in groups for frame in group.frames]
     if len(groups) > 1:
         stacked_path, diagnostics = _stack_exposure_groups(
             engine,

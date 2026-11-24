@@ -22,8 +22,17 @@ from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
 from astrometricslib.pipelines.shared.quality.saturation import SATURATION_MASK_FRACTION_OF_CEILING
+from astrometricslib.pipelines.stacking.frame_screening import (
+    EXPOSURE_NOT_FOLDABLE_REASON_PREFIX,
+    FrameScreening,
+    _drop_unfoldable_exposures,
+)
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+    MAXIMUM_EXPOSURE_FOLD_RATIO,
     ExposureGroup,
+    find_frames_left_out_of_exposure_groups,
+    fold_exposure_lengths,
+    plan_exposure_folding,
     representative_exposure_frames,
     representative_exposure_seconds,
     split_frames_by_exposure,
@@ -108,15 +117,20 @@ def test_a_bracketed_session_is_split_by_exposure_shortest_first() -> None:
 
 
 def test_the_cameras_shortest_exposures_do_not_divide_by_zero() -> None:
-    """M 13's 32 microsecond and 1320 s stragglers fold into the 30 s group.
+    """M 13's 32 microsecond and 1320 s stragglers have no group near them.
 
     Rounding 0.000032 s to three decimals gave 0.0 and a division by zero
-    when the tiny groups were matched to their nearest large group.
+    when the tiny groups were matched to their nearest large group. They are
+    now left out, because both are far more than twice from the 30 s group.
     """
-    groups = split_frames_by_exposure(_frames(*(["30.0"] * 94 + ["3.2e-05"] * 2 + ["1320.000064"])))
+    frames = _frames(*(["30.0"] * 94 + ["3.2e-05"] * 2 + ["1320.000064"]))
+
+    groups = split_frames_by_exposure(frames)
+    left_out = find_frames_left_out_of_exposure_groups(frames)
 
     assert len(groups) == 1
-    assert len(groups[0].frames) == 97
+    assert len(groups[0].frames) == 94
+    assert [frame.exposure for frame, _ in left_out] == ["3.2e-05", "3.2e-05", "1320.000064"]
 
 
 def test_frames_keep_their_original_order_inside_a_group() -> None:
@@ -167,6 +181,115 @@ def test_one_unreadable_exposure_keeps_everything_in_one_group() -> None:
 
     assert len(groups) == 1
     assert len(groups[0].frames) == 21
+
+
+def test_the_fold_ratio_limit_is_two_by_default() -> None:
+    """The fold ratio limit is a tuned parameter with the value 2."""
+    assert MAXIMUM_EXPOSURE_FOLD_RATIO.default == pytest.approx(2.0)
+    assert MAXIMUM_EXPOSURE_FOLD_RATIO.register_entry == "STK-D79"
+
+
+def test_a_ratio_of_exactly_two_still_folds() -> None:
+    """A 30 s frame and a 120 s frame fold into the 60 s group (2x away)."""
+    exposures = [60.0] * 20 + [30.0, 120.0]
+
+    folding = plan_exposure_folding(exposures)
+
+    assert folding.group_lengths == [60.0] * 22
+    assert folding.left_out_reasons == [None] * 22
+
+
+def test_a_ratio_of_three_is_left_out_with_a_reason() -> None:
+    """A 20 s frame is 3x from the 60 s group: it is left out, and says why."""
+    folding = plan_exposure_folding([60.0] * 20 + [20.0])
+
+    assert folding.left_out_reasons[:20] == [None] * 20
+    assert folding.left_out_reasons[20] == (
+        "exposure 20 s is more than 2x from the nearest group (60 s) "
+        "and has too few frames (1) to stack on its own"
+    )
+
+
+def test_the_m31_case_leaves_out_only_the_20_s_frame() -> None:
+    """M 31: 117 x 60 s plus one each of 20, 30 and 120 s (ASI533MM)."""
+    exposures = [60.0] * 117 + [20.0, 30.0, 120.0]
+    frames = _frames(*exposures)
+
+    folding = plan_exposure_folding(exposures)
+    groups = split_frames_by_exposure(frames)
+    left_out = find_frames_left_out_of_exposure_groups(frames)
+
+    assert [frame.exposure for frame, _ in left_out] == [20.0]
+    assert folding.group_lengths[-2:] == [60.0, 60.0]
+    assert len(groups) == 1
+    assert len(groups[0].frames) == 119
+    assert not any(math.isclose(frame.exposure, 20.0) for frame in groups[0].frames)
+
+
+def test_each_short_length_folds_into_the_nearest_group_within_the_limit() -> None:
+    """M 81: 30 s folds into the 60 s group, 600 s into the 300 s group."""
+    exposures = [60.0] * 10 + [300.0] * 10 + [30.0, 600.0, 600.0]
+
+    folding = plan_exposure_folding(exposures)
+
+    assert folding.group_lengths[-3:] == [60.0, 300.0, 300.0]
+    assert folding.left_out_reasons == [None] * 23
+
+
+def test_a_short_length_is_left_out_when_every_group_is_too_far() -> None:
+    """M 42: a single 300 s frame beside 30 s frames is 10x away."""
+    folding = plan_exposure_folding([30.0] * 40 + [300.0])
+
+    assert folding.left_out_reasons[-1] is not None
+    assert "nearest group (30 s)" in folding.left_out_reasons[-1]
+
+
+def test_a_looser_limit_folds_what_the_default_leaves_out() -> None:
+    """The limit is an argument: at 3 the 20 s frame joins the 60 s group."""
+    exposures = [60.0] * 20 + [20.0]
+
+    assert plan_exposure_folding(exposures, maximum_fold_ratio=3.0).left_out_reasons == [None] * 21
+    assert fold_exposure_lengths(exposures, maximum_fold_ratio=3.0) == [60.0] * 21
+
+
+def test_a_left_out_frame_keeps_its_own_length_in_the_fold_list() -> None:
+    """A left-out frame shows its own length in the plain fold list."""
+    assert fold_exposure_lengths([60.0] * 20 + [20.0]) == [60.0] * 20 + [20.0]
+
+
+def test_no_left_out_frames_when_no_length_is_large_enough_or_one_length() -> None:
+    """All-small and one-length sets are unchanged and leave nothing out."""
+    assert plan_exposure_folding([1.0, 20.0, 300.0]).left_out_reasons == [None] * 3
+    assert plan_exposure_folding([1.0, 20.0, 300.0]).group_lengths == [None] * 3
+    assert plan_exposure_folding([60.0] * 6).left_out_reasons == [None] * 6
+    assert find_frames_left_out_of_exposure_groups(_frames(*(["1.0"] * 10), *(["5.0"] * 10), None)) == []
+
+
+def test_the_screening_step_records_each_left_out_frame_and_keeps_the_rest() -> None:
+    """A left-out frame is dropped from the stack and recorded with why."""
+    frames = [SimpleNamespace(path=f"/lights/frame_{index}.fits", exposure="60.0") for index in range(20)] + [
+        SimpleNamespace(path="/lights/short.fits", exposure="20.0")
+    ]
+    screening = FrameScreening(frames=list(frames))
+
+    _drop_unfoldable_exposures(SimpleNamespace(id="M 31"), screening)
+
+    assert [frame.path for frame in screening.frames] == [frame.path for frame in frames[:20]]
+    assert [excluded.path for excluded in screening.excluded_frames] == ["/lights/short.fits"]
+    reason = screening.excluded_frames[0].reason
+    assert reason.startswith(EXPOSURE_NOT_FOLDABLE_REASON_PREFIX)
+    assert "exposure 20 s is more than 2x from the nearest group (60 s)" in reason
+
+
+def test_the_screening_step_changes_nothing_when_every_frame_has_a_group() -> None:
+    """With every frame in a group, nothing is dropped or recorded."""
+    frames = [SimpleNamespace(path=f"/lights/frame_{index}.fits", exposure="60.0") for index in range(6)]
+    screening = FrameScreening(frames=list(frames))
+
+    _drop_unfoldable_exposures(SimpleNamespace(id="M 31"), screening)
+
+    assert screening.frames == frames
+    assert screening.excluded_frames == []
 
 
 def test_the_noise_estimate_recovers_the_true_noise() -> None:

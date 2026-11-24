@@ -360,3 +360,32 @@ def test_calibration_choice_is_the_one_siril_staging_makes(tmp_path: Path, bias_
     else:
         assert group.flat_bias is None
         assert any("flats" in flag for flag in staged_flags)
+
+
+def test_a_frame_with_no_exposure_group_to_join_is_set_aside_and_recorded(tmp_path: Path) -> None:
+    """A lone 5 s frame among 30 s frames is left out, recorded, not moved."""
+    target = make_target(tmp_path / "lights")
+    short_path = write_fits(tmp_path / "lights" / "frame_14.fits", exposure=5.0)
+    target.frames.append(
+        FrameRecord(
+            path=short_path,
+            role="LIGHT",
+            filter="Luminance",
+            exposure="5.0",
+            timestamp=2000.0,
+            camera=CAMERA,
+            telescope="T",
+            iso="100",
+            offset="0",
+        )
+    )
+
+    prediction = predict_stack(target, list(target.frames), "imaging", make_library(tmp_path / "library"))
+    real = screen_frames(target, list(target.frames), False, None, None)
+
+    left_out = [frame for frame in prediction.set_aside if frame.kind == "exposure_not_foldable"]
+    assert [frame.file for frame in left_out] == ["frame_14.fits"]
+    assert "exposure 5 s is more than 2x from the nearest group (30 s)" in left_out[0].reason
+    recorded = {os.path.basename(frame.path): frame.reason for frame in real.excluded_frames}
+    assert recorded["frame_14.fits"].startswith("left out of every exposure group: ")
+    assert os.path.exists(short_path)

@@ -225,8 +225,15 @@ class StackWeightPrediction(BaseModel):
     mode: str
     # For each frame, the length of the exposure group it would land in, in
     # seconds. Every entry is None when the frames stay in one group because
-    # a length cannot be read or no length has enough frames.
+    # a length cannot be read or no length has enough frames. A frame that is
+    # left out (see `left_out_reasons`) shows its own length.
     folded_exposure_lengths: list[float | None] = Field(default_factory=list)
+    # For each frame, None when the stacker would stack it, or a plain
+    # sentence when it would leave the frame out because its exposure length
+    # has too few frames and no group within the fold ratio limit. Empty when
+    # the prediction was made without this check. A frame left out has weight
+    # 0 in `weights`.
+    left_out_reasons: list[str | None] = Field(default_factory=list)
     # For each frame, the weight it would carry (the star-width weights have
     # mean 1; the others are not scaled). None when they are unknown.
     weights: list[float] | None = None
@@ -243,8 +250,9 @@ class PredictedFrame(BaseModel):
     # Why, in one sentence with the frame's value and the limit.
     reason: str
     # "clouded", "trailed" or "off_field" (the quarantine step), "uneven_sky"
-    # (kept with a warning), "minority_gain", "already_set_aside" or
-    # "background_split".
+    # (kept with a warning), "minority_gain", "already_set_aside",
+    # "background_split" or "exposure_not_foldable" (its exposure length has
+    # too few frames and no group within the fold ratio limit).
     kind: str
 
 

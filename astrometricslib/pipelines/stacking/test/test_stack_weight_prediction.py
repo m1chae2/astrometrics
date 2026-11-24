@@ -28,21 +28,21 @@ def test_equal_exposures_give_equal_weights() -> None:
 
 
 def test_a_short_list_of_other_lengths_folds_and_the_stacker_weights_by_noise() -> None:
-    """Two long frames fold into the 10 s group; noise weights follow."""
-    exposures = [10.0] * 10 + [60.0] * 2
-    variances = [2.0] * 10 + [8.0] * 2
+    """Four 20 s frames fold into the 10 s group (2x); noise weights follow."""
+    exposures = [10.0] * 6 + [20.0] * 4
+    variances = [2.0] * 6 + [8.0] * 4
     prediction = predict_stack_weights(exposures, rate_variance=variances)
     assert prediction.folded_exposure_lengths == fold_exposure_lengths(exposures)
     assert set(prediction.folded_exposure_lengths) == {10.0}
     assert prediction.mode == "noise"
-    assert prediction.weights == [0.5] * 10 + [0.125] * 2
+    assert prediction.weights == [0.5] * 6 + [0.125] * 4
 
 
 def test_noise_weights_are_unknown_without_variances() -> None:
     """Missing or zero variances give no weights and a reason."""
-    exposures = [10.0] * 10 + [60.0] * 2
+    exposures = [10.0] * 6 + [20.0] * 4
     assert predict_stack_weights(exposures).weights is None
-    zero = predict_stack_weights(exposures, rate_variance=[0.0] * 12)
+    zero = predict_stack_weights(exposures, rate_variance=[0.0] * 10)
     assert zero.weights is None
     assert zero.reasons
 
@@ -60,7 +60,7 @@ def test_a_configured_mode_wins_and_star_width_weights_match_the_stacker() -> No
 
 def test_spectral_and_unknown_modes() -> None:
     """A spectral stack keeps its configured weight; unknown modes: none."""
-    exposures = [10.0] * 10 + [60.0] * 2
+    exposures = [10.0] * 10 + [20.0] * 2
     assert predict_stack_weights(exposures, is_spectral=True).mode == "equal"
     other = predict_stack_weights([10.0] * 6, "nbstack")
     assert other.mode == "nbstack"
@@ -118,8 +118,19 @@ def test_the_method_on_processing_pipelines_delegates() -> None:
 
 def test_the_group_minimum_is_forwarded() -> None:
     """A lower minimum lets a short length stand as its own group."""
-    exposures = [10.0] * 6 + [30.0] * 3
+    exposures = [10.0] * 6 + [20.0] * 3
     assert predict_stack_weights(exposures).mode == "noise"
     lowered = predict_stack_weights(exposures, minimum_frames_per_group=2)
     assert lowered.mode == "group"
     assert lowered.folded_exposure_lengths == fold_exposure_lengths(exposures, 2)
+
+
+def test_a_frame_the_stacker_leaves_out_has_weight_zero_and_a_reason() -> None:
+    """A lone 40 s frame, 4x from the only large group, gets weight 0."""
+    exposures = [10.0] * 6 + [20.0] * 4 + [40.0]
+    prediction = predict_stack_weights(exposures, rate_variance=[2.0] * 6 + [8.0] * 4 + [2.0])
+    assert prediction.left_out_reasons[:10] == [None] * 10
+    assert prediction.left_out_reasons[10] is not None
+    assert "nearest group (10 s)" in prediction.left_out_reasons[10]
+    assert prediction.weights == [0.5] * 6 + [0.125] * 4 + [0.0]
+    assert prediction.mode == "noise"

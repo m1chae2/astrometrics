@@ -3,7 +3,9 @@
 Description: A stack is only as good as the frames that go into it. This
 module runs the checks that leave out frames which would harm the stack: a
 minority camera gain setting, frames an earlier run already set aside, clouds
-and trailed stars (the quarantine step), and a different sky background. Each
+and trailed stars (the quarantine step), a different sky background, and
+frames of an exposure length that has too few frames and no group near enough
+to be folded into. Each
 check records which frames it left out and a `GateResult` that says what it
 looked at. The checks run in a fixed order, and `screen_frames` is the one
 entry point the stacking stage calls.
@@ -46,10 +48,15 @@ BACKGROUND_WINDOW = (0.80, 0.20)
 MINORITY_GAIN_REASON = "minority gain setting"
 EARLIER_QUARANTINE_REASON = "set aside by an earlier quarantine"
 BACKGROUND_SPLIT_REASON = "background-homogeneity split"
+# The start of the reason recorded for a frame whose exposure length has no
+# group to join; the rest of the sentence names the length, the nearest group
+# and the frame count (see `plan_exposure_folding`).
+EXPOSURE_NOT_FOLDABLE_REASON_PREFIX = "left out of every exposure group: "
 
 __all__ = [
     "BACKGROUND_SPLIT_REASON",
     "EARLIER_QUARANTINE_REASON",
+    "EXPOSURE_NOT_FOLDABLE_REASON_PREFIX",
     "MINORITY_GAIN_REASON",
     "FrameScreening",
     "record_frame_quality",
@@ -102,7 +109,9 @@ def screen_frames(
     """Run the frame checks in order and give back the frames that pass.
 
     The order is: minority gain, frames already set aside, the quarantine
-    step (clouds and trailed stars), and the sky background. The quarantine
+    step (clouds and trailed stars), the sky background, and last the
+    exposure lengths with no group to join (last, so that the frame counts
+    that decide the groups are the final ones). The quarantine
     step moves files and stores frame quality rows, so the order and timing
     of these steps must not change.
 
@@ -150,6 +159,7 @@ def screen_frames(
             target, screening, has_spectral, measured_at, quality_recording, dry_run
         ),
         lambda: _drop_background_outliers(target, screening, dry_run),
+        lambda: _drop_unfoldable_exposures(target, screening, dry_run),
     )
     for step in steps:
         step()
@@ -453,6 +463,57 @@ def _drop_background_outliers(target: Target, screening: FrameScreening, dry_run
             frames_before_background_check, screening.background_split, background_check_enabled
         )
     )
+
+
+def _drop_unfoldable_exposures(target: Target, screening: FrameScreening, dry_run: bool = False) -> None:
+    """Leave out frames whose exposure length has no group to join.
+
+    A length with too few frames to stack on its own is folded into the
+    nearest group, but only when that group is within the fold ratio limit
+    (`MAXIMUM_EXPOSURE_FOLD_RATIO`), because a folded frame's noise grows by
+    the exposure ratio. A frame with no such group is not stacked. It is only
+    left out of this stack: the file stays where it is, and the frame is
+    recorded with its reason so the warning is not lost.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target being stacked.
+    screening : `FrameScreening`
+        The screening state. Updated in place.
+    dry_run : `bool`, optional
+        Do not raise when no frames are left.
+
+    Raises
+    ------
+    ProcessingError
+        If no frames are left and this is not a dry run. This cannot happen
+        for a real set of frames, because a left-out length is measured
+        against a group that has enough frames, and that group stays.
+    """
+    from astrometricslib.models.quality.quality_summary import ExcludedFrame
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+        find_frames_left_out_of_exposure_groups,
+    )
+
+    left_out = find_frames_left_out_of_exposure_groups(screening.frames)
+    if left_out:
+        left_out_paths = {frame.path for frame, _ in left_out}
+        screening.frames = [frame for frame in screening.frames if frame.path not in left_out_paths]
+        logger.warning(
+            "Leaving %d frame(s) out of the stack for target '%s', exposure with no group near: %s",
+            len(left_out),
+            target.id,
+            sorted({reason for _, reason in left_out}),
+        )
+        screening.excluded_frames.extend(
+            ExcludedFrame(path=frame.path, reason=EXPOSURE_NOT_FOLDABLE_REASON_PREFIX + reason)
+            for frame, reason in left_out
+        )
+    if not screening.frames and not dry_run:
+        raise ProcessingError(
+            "Target has no frames available to stack after leaving out unfoldable exposures."
+        )
 
 
 def refresh_saturated_pixel_fraction(frame: Any) -> bool:

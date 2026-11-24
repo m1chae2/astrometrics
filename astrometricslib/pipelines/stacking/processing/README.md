@@ -105,7 +105,7 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 
 ## Files
 
-- `exposure_groups.py`: splits frames by exposure length and by night. `fold_exposure_lengths` is the one rule that says which group each exposure length lands in (a length with fewer than `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames joins the nearest length), and `split_frames_by_exposure` calls it.
+- `exposure_groups.py`: splits frames by exposure length and by night. `fold_exposure_lengths` is the one rule that says which group each exposure length lands in (a length with fewer than `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames joins the nearest length, when that length is within `MAXIMUM_EXPOSURE_FOLD_RATIO`; otherwise its frames are left out of the stack and the frame screening records each one with the reason). `plan_exposure_folding` returns both the groups and the left-out reasons; `fold_exposure_lengths` returns the groups alone, and `split_frames_by_exposure` calls the plan.
 - `group_gains.py`: measures the group scale factor from mid-range pixels, and holds the background-noise and saturation helpers.
 - `group_star_gains.py`: measures the group scale factor from isolated stars.
 - `group_combination.py`: weights the groups and combines the group stacks. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.

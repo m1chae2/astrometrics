@@ -776,7 +776,12 @@ def session_zero_points(
     )
     frame_count = len(timestamps)
     paths: list[str | None] = list(frame_paths) if len(frame_paths) == frame_count else [None] * frame_count
-    if len(frame_paths) != frame_count:
+    if frame_count == 0 and frame_paths:
+        # No star was measured in this session (for example, its frames have
+        # no plate solution). That is reported where the stars are found, so
+        # it is not a path mismatch to warn about here.
+        logger.info("No star was measured in any of the %s frames; no zero point.", len(frame_paths))
+    elif len(frame_paths) != frame_count:
         logger.warning(
             "The zero point of session %s has %s frames but %s frame paths; no frame can be stored.",
             session_id or "(unnamed)",

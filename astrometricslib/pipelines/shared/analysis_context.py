@@ -13,6 +13,29 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 
 
+@dataclass(frozen=True)
+class KnownTarget:
+    """What the library's own record says about the target of an image.
+
+    It is saved from SIMBAD when the target is first looked up, so it still
+    answers when SIMBAD cannot be reached.
+
+    Attributes
+    ----------
+    object_type : `str`
+        SIMBAD's type code for the object, such as "PN".
+    ra_deg, dec_deg : `float`
+        The object's position in decimal degrees (ICRS, epoch J2000).
+    major_axis_arcmin : `float` or `None`
+        The object's major axis in arcminutes, if the record has one.
+    """
+
+    object_type: str
+    ra_deg: float
+    dec_deg: float
+    major_axis_arcmin: float | None = None
+
+
 @dataclass
 class ExtendedSourceHint:
     """Where a large, non-stellar target (like a nebula) sits in an image.

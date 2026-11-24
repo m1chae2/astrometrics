@@ -57,6 +57,10 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.astrometry.processing.extended_catalog_entry import (
+    is_extended_catalog_entry,
+    is_extended_object_type,
+)
 from astrometricslib.pipelines.astrometry.processing.gaia_depth import (
     GaiaDepthPrediction,
     depth_exceeded,
@@ -1615,6 +1619,46 @@ class StarIdentifier:
             else:
                 self.gaia_fit_signal_reason = "a fitted star had no positive peak from the star finder"
 
+    @staticmethod
+    def _names_an_extended_entry(result_table: Any, target_name: str | None) -> bool:
+        """Tell whether the target's name belongs to an extended SIMBAD entry.
+
+        Parameters
+        ----------
+        result_table : `astropy.table.Table`
+            The SIMBAD rows, before the star filter.
+        target_name : `str` or `None`
+            The target's name, such as ``"M 57"``.
+
+        Returns
+        -------
+        names_extended_entry : `bool`
+            True when an extended row lists the name among its identifiers.
+            Spaces and case are ignored.
+        """
+        if not target_name:
+            return False
+
+        def squash(text: object) -> str:
+            """Remove spaces and capitals so ``M  57`` equals ``m 57``.
+
+            Returns
+            -------
+            squashed : `str`
+                The text without spaces, in upper case.
+            """
+            return str(text).replace(" ", "").replace("_", "").upper()
+
+        wanted = squash(target_name)
+        id_columns = [name for name in ("main_id", "ids") if name in result_table.colnames]
+        for row in range(len(result_table)):
+            if not is_extended_catalog_entry(result_table, row):
+                continue
+            for column in id_columns:
+                if wanted in {squash(part) for part in str(result_table[column][row]).split("|")}:
+                    return True
+        return False
+
     def _query_simbad_region(
         self,
         ra_center: float,
@@ -1623,11 +1667,14 @@ class StarIdentifier:
         width: int,
         height: int,
         radius_deg_override: float | None = None,
+        target_name: str | None = None,
     ) -> tuple[Any, SkyCoord] | tuple[None, None]:
         """Download a chunk of the SIMBAD database for our specific image area.
 
         We filter out galaxies and nebulae because our algorithm only
-        cares about stars.
+        cares about stars. When `target_name` names one of the dropped
+        extended entries, the target is extended and an empty result is
+        expected, so it is logged as information, not as a warning.
 
         Returns
         -------
@@ -1683,12 +1730,16 @@ class StarIdentifier:
         # neighbor matching is done below - otherwise a coincidentally
         # nearby (or arbitrarily first-listed) extended object can be
         # mistaken for the star.
+        target_is_extended = self._names_an_extended_entry(result_table, target_name)
         result_table = self._filter_stellar_rows(result_table)
         if result_table is None or len(result_table) == 0:
-            logger.warning(
+            message = (
                 "No stellar-type SIMBAD entries found in field (only non-stellar catalog objects, "
                 "e.g. galaxies, were nearby); leaving detected star(s) with generic 'Star N' labels."
             )
+            # An extended target (a nebula, cluster or galaxy) has no star of
+            # its own to name, so this is expected, not a problem.
+            (logger.info if target_is_extended else logger.warning)(message)
             return None, None
 
         logger.info("SIMBAD table columns: %s", result_table.colnames)
@@ -2212,7 +2263,9 @@ class StarIdentifier:
             )
             return
 
-        result_table, simbad_coords = self._query_simbad_region(center_ra, center_dec, None, width, height)
+        result_table, simbad_coords = self._query_simbad_region(
+            center_ra, center_dec, None, width, height, target_name=target_name
+        )
         if result_table is None:
             return
 
@@ -2493,6 +2546,11 @@ class StarIdentifier:
         for row in result_table:
             otype_val = row[otype_col]
             otype = "" if _is_masked(otype_val) else str(otype_val).strip().upper()
+            if not _is_masked(otype_val) and is_extended_object_type(str(otype_val).strip()):
+                # An extended object is never the star at the frame centre,
+                # even when SIMBAD gives it a spectral type (M 57 has one).
+                stellar_mask.append(False)
+                continue
 
             spectral_type_val = row[sp_type_col] if sp_type_col else None
             has_spectral_type = not _is_masked(spectral_type_val) and str(spectral_type_val).strip() != ""

@@ -493,10 +493,10 @@ for star in stars:
   | Peak / brightest pixel | zero orders 0.64 to 1.0; noise detections near the center of the Sirius stack (zero order not detected) 0.00003 | 0.10 |
 
 - **Verdict:** Not judged.
-- **Limits:** One night of spectral stacks and one mount. A mount with worse pointing needs a wider radius, and the 12 arcmin SIMBAD region searched on this path caps how far it can go.
+- **Limits:** One night of spectral stacks and one mount. A mount with worse pointing needs a wider radius, and the 12 arcmin SIMBAD region searched on this path caps how far it can go. The rule is for stars. An extended target is a different case: on the M 57 (Ring Nebula) spectral stack of 2026-11-22, the SIMBAD entry for the nebula passed the star filter, which keeps any row that has a spectral type. It was chosen by target name, no detection near the center reached the peak limit, and the run logged that the entry was not applied to any star (4 runs). The star filter now drops every galaxy, nebula and cluster row (by `target_object_category`) before any matching, so such an entry is never put on a star. The nebula's position and size come from the extended-source hint instead.
 - **To tune for your setup:** If your mount's pointing error exceeds about half of 300 arcsec, raise `POINTING_ERROR_SEARCH_RADIUS_ARCSEC`, and raise `CENTRE_STAR_SEARCH_RADIUS_FRACTION` so it covers the same angle in pixels. Re-run the procedure. Tuner `astrometry.pointing_error` sets the search radius and center fraction from the stored pointing errors of spectral stacks; `build/config/tune_parameters.py` runs it.
 - **Regenerate with:** No script; measured by hand on 2026-10-04.
-- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/processing/test_center_star_naming.py` checks the selection rules, not the values.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/processing/test_center_star_naming.py` checks the selection rules, not the values. `test_extended_catalog_entry.py` and `test_extended_source_hint.py` in the same folder check the extended-object test and the hint (including the record that stands in when SIMBAD cannot be reached).
 - **Raw record:** None kept.
 
 ### AST-10

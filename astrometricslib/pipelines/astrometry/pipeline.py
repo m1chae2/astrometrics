@@ -13,8 +13,13 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError, InvalidArgumentError
+from astrometricslib.pipelines.astrometry.processing.extended_catalog_entry import is_extended_object_type
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
+from astrometricslib.pipelines.shared.analysis_context import (
+    AnalysisContext,
+    ExtendedSourceHint,
+    KnownTarget,
+)
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -92,6 +97,7 @@ class AstrometryPipeline:
         target_ra: float | None = None,
         target_dec: float | None = None,
         target_name: str | None = None,
+        known_target: KnownTarget | None = None,
     ) -> AnalysisContext:
         """Run the whole pipeline on an image.
 
@@ -111,6 +117,10 @@ class AstrometryPipeline:
             solved, it names the star at the frame centre, and a planet or
             the Moon is left without a star's name (see
             `StarIdentifier._identify_stars_with_simbad`).
+        known_target : `KnownTarget`, optional
+            What the library's own target record says about the target. It
+            stands in for SIMBAD when SIMBAD cannot be reached (see
+            `check_extended_source`).
 
         Returns
         -------
@@ -134,7 +144,9 @@ class AstrometryPipeline:
         wcs = self._fallback_to_header_wcs(image, wcs)
 
         object_name = self._resolve_object_name(image)
-        extended_source_hint = self._build_extended_source_hint(object_name, wcs, target_ra, target_dec)
+        extended_source_hint = self._build_extended_source_hint(
+            object_name, wcs, target_ra, target_dec, known_target
+        )
 
         field = self.star_identifier.field_gaia_stars
         return AnalysisContext(
@@ -416,7 +428,12 @@ class AstrometryPipeline:
         return extraction_radius_px
 
     def build_extended_source_hint(
-        self, image: AstrometricsImage, wcs: Any, target_ra: float | None, target_dec: float | None
+        self,
+        image: AstrometricsImage,
+        wcs: Any,
+        target_ra: float | None,
+        target_dec: float | None,
+        known_target: KnownTarget | None = None,
     ) -> ExtendedSourceHint | None:
         """Build an image's extended-source hint from a supplied WCS.
 
@@ -451,8 +468,9 @@ class AstrometryPipeline:
         wcs: Any,
         target_ra: float | None,
         target_dec: float | None,
+        known_target: KnownTarget | None = None,
     ) -> ExtendedSourceHint | None:
-        """Build the extended-source hint for a target, if SIMBAD flags one.
+        """Build the extended-source hint for a target, if it is one.
 
         Looks up `object_name` in SIMBAD; if it comes back as an
         extended object (a galaxy, nebula, or cluster rather than a
@@ -470,9 +488,19 @@ class AstrometryPipeline:
         if not object_name:
             return None
 
+        if wcs is None:
+            # A spectral stack has no plate solution when `process` runs. The
+            # spectroscopy runner builds the hint again once it has worked
+            # one out, so this is not a failure.
+            logger.info(
+                "No plate solution yet for '%s', so its extended-source hint is not built now.",
+                object_name,
+            )
+            return None
+
         # 2. Ask the SIMBAD database to figure out what type of object
-        # this is.
-        is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name)
+        # this is (or the library's own record, if SIMBAD cannot say).
+        is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name, known_target)
 
         if not is_extended:
             return None
@@ -507,8 +535,15 @@ class AstrometryPipeline:
         logger.info("Recorded extended-source hint for '%s'.", object_name)
         return extended_source_hint
 
-    def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
+    def check_extended_source(
+        self, object_name: str, known_target: KnownTarget | None = None
+    ) -> tuple[bool, Any | None, str | None, float | None]:
         """Ask the SIMBAD database if this target is an extended object.
+
+        When SIMBAD cannot be reached, or does not know the name, the
+        library's own record of the target (`known_target`) answers instead:
+        its type, position and size were saved from SIMBAD earlier. A target
+        with no usable record is reported as not extended.
 
         An "extended object" is something that looks like a fuzzy shape
         (like a galaxy, nebula, or star cluster) instead of a single dot.
@@ -517,6 +552,8 @@ class AstrometryPipeline:
         ----------
         object_name : `str`
             The name of the object to look up (like "M 13" or "Andromeda").
+        known_target : `KnownTarget`, optional
+            The library's own record of the target.
 
         Returns
         -------
@@ -533,17 +570,6 @@ class AstrometryPipeline:
         """
         if not object_name:
             return False, None, None, None
-
-        extended_otypes = {
-            "GlC",  # Globular Cluster
-            "HII",  # H II region / Emission Nebula
-            "PN",  # Planetary Nebula
-            "Neb",  # General Nebula
-            "G",  # Galaxy
-            "Cl*",  # Cluster of Stars
-            "OpC",  # Open Cluster
-            "Assoc*",  # Association of Stars
-        }
 
         try:
             import warnings
@@ -573,8 +599,46 @@ class AstrometryPipeline:
                         except ValueError, TypeError:
                             pass
 
-                return otype in extended_otypes, coord, otype, majaxis
+                return is_extended_object_type(otype), coord, otype, majaxis
         except (ExternalServiceError, *DATA_ERRORS) as e:
-            logger.warning("SIMBAD query failed for object '%s': %s", object_name, e)
+            # An unreachable SIMBAD is a status, not an error.
+            logger.info("SIMBAD could not answer for object '%s': %s", object_name, e)
 
-        return False, None, None, None
+        return self._extended_source_from_known_target(object_name, known_target)
+
+    @staticmethod
+    def _extended_source_from_known_target(
+        object_name: str, known_target: KnownTarget | None
+    ) -> tuple[bool, Any | None, str | None, float | None]:
+        """Answer `check_extended_source` from the library's own target record.
+
+        Parameters
+        ----------
+        object_name : `str`
+            The target's name, for the log message.
+        known_target : `KnownTarget` or `None`
+            The record, or `None` when the caller has none.
+
+        Returns
+        -------
+        is_extended, coordinates, simbad_object_type, major_axis_arcmin
+            The same four values as `check_extended_source`; not extended
+            and empty when there is no record or it has no type.
+        """
+        if known_target is None or not known_target.object_type:
+            return False, None, None, None
+        from astropy import units as u
+        from astropy.coordinates import SkyCoord
+
+        logger.info(
+            "Using the library's record of '%s' (type %s) instead of SIMBAD.",
+            object_name,
+            known_target.object_type,
+        )
+        coord = SkyCoord(known_target.ra_deg * u.deg, known_target.dec_deg * u.deg)
+        return (
+            is_extended_object_type(known_target.object_type),
+            coord,
+            known_target.object_type,
+            known_target.major_axis_arcmin,
+        )

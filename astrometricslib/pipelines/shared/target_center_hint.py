@@ -22,6 +22,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.pipelines.shared.analysis_context import KnownTarget
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,38 @@ def resolve_target_center_hint(target: Any) -> tuple[float | None, float | None]
         same condition as `center_ra`.
     """
     return resolve_center_hint(target.ra, target.dec)
+
+
+def resolve_known_target(target: Any) -> KnownTarget | None:
+    """Read what a target record says about the object, without SIMBAD.
+
+    The record helps only when it has a SIMBAD type and a position that is
+    the object's own. A position taken from a solved image's centre
+    (`position_unverified`) is where the camera looked, not where the object
+    is, so it is not used.
+
+    Parameters
+    ----------
+    target : `astrometricslib.models.target.Target`
+        The target to read.
+
+    Returns
+    -------
+    known_target : `KnownTarget` or `None`
+        The record's type, position and size, or `None` when the record
+        cannot stand in for SIMBAD.
+    """
+    if not target.simbad_object_type or target.position_unverified:
+        return None
+    center_ra, center_dec = resolve_target_center_hint(target)
+    if center_ra is None or center_dec is None:
+        return None
+    return KnownTarget(
+        object_type=str(target.simbad_object_type).strip(),
+        ra_deg=center_ra,
+        dec_deg=center_dec,
+        major_axis_arcmin=target.major_axis_arcmin,
+    )
 
 
 def _find_matching_solved_stack(target: Any, spectral_stack_path: str) -> tuple[str, Any] | None:

@@ -36,6 +36,7 @@ from astrometricslib.pipelines.pipeline_base import (
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_known_target,
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
@@ -175,7 +176,7 @@ def _recover_extended_source_hint(
         return
     spectral_wcs = shift_wcs_to_frame(reference_wcs, offset)
     context.extended_source_hint = astrometry.build_extended_source_hint(
-        context.image, spectral_wcs, hint_ra, hint_dec
+        context.image, spectral_wcs, hint_ra, hint_dec, resolve_known_target(target)
     )
 
 
@@ -501,6 +502,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             target_ra=hint_ra,
             target_dec=hint_dec,
             target_name=target.id,
+            known_target=resolve_known_target(target),
         )
 
         # The spectral stack has no WCS of its own (see the module

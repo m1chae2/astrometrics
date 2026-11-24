@@ -46,7 +46,10 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
+from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_known_target,
+    resolve_target_center_hint,
+)
 from astrometricslib.pipelines.shared.target_position import (
     fill_target_position,
     has_no_fixed_position,
@@ -384,7 +387,11 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         pipeline = AstrometryPipeline(drivers=request.options.get("drivers"))
         with bind_plate_solve_attempts(plate_solve_attempt_tally):
             context = pipeline.process(
-                path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
+                path,
+                attempt_plate_solving=True,
+                target_ra=target.ra,
+                target_dec=target.dec,
+                known_target=resolve_known_target(target),
             )
 
         context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(

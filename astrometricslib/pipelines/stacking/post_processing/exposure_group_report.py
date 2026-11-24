@@ -353,7 +353,11 @@ def build_group_summary(
     }
     if gain_measurement is not None:
         gain_fields = {
-            "gain_mid_range": float(gain_measurement.gain),
+            "gain_mid_range": float(
+                gain_measurement.gain
+                if gain_measurement.measured_gain is None
+                else gain_measurement.measured_gain
+            ),
             "gain_bright_end_ratio": None
             if gain_measurement.bright_end_ratio is None
             else float(gain_measurement.bright_end_ratio),

@@ -197,7 +197,7 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 | Stack noise plate solution: member frames tried | 5 | Design estimate ([table](validation/stacking.md#design-estimates)) | §3.4 |
 | Normalization scale: fewest unsaturated reference stars; reference exposure match | 5; 1% | Partly measured ([STK-38](validation/stacking.md#stk-38)) | §3.4 |
 | Linearity tolerance between exposure groups | 5% | Partly measured ([STK-20](validation/stacking.md#stk-20)) | §3.2 |
-| Brightest sky allowed for an exposure group | 3 times reference | Partly measured ([STK-21](validation/stacking.md#stk-21)) | §3.2 |
+| Brightest sky per ISO allowed for a group | 3 times reference | Partly measured ([STK-21](validation/stacking.md#stk-21)) | §3.2 |
 | Noise penalty above which frames are noise-weighted | 1.05 | Design estimate ([table](validation/stacking.md#design-estimates)); [STK-07](validation/stacking.md#stk-07) | §3.2 |
 | Share of spectral frames that must register before fallback | 0.9 | Design estimate ([table](validation/stacking.md#design-estimates)); [STK-12](validation/stacking.md#stk-12) | §3.3 |
 | Rejected pixel share that flags a stack | 15% | Partly measured ([STK-24](validation/stacking.md#stk-24)) | §3.4.2 |

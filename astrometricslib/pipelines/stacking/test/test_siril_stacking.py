@@ -95,7 +95,17 @@ class FakeSirilDriver:
         if not outcome.get("ok", True):
             return None
         generator = np.random.default_rng(len(self.calls))
-        image = outcome.get("fill", 0.2) + _shared_star_field() + generator.normal(0.0, 0.002, (64, 64))
+        # A group stack holds counts, so its stars scale with the group's
+        # exposure length (by its square root, to stay inside the believable
+        # gain range); with equal stars the groups differ by an implausible
+        # gain and the stacker leaves one out.
+        exposures = [float(frame["exposure"]) for frame in kwargs["image_files"] if frame.get("exposure")]
+        star_scale = max(0.3, min(1.0, float(np.mean(exposures)) / 300.0) ** 0.5) if exposures else 1.0
+        image = (
+            outcome.get("fill", 0.2)
+            + star_scale * _shared_star_field()
+            + generator.normal(0.0, 0.002, (64, 64))
+        )
         stack_path = self.library / kwargs["output_file"]
         fits.writeto(stack_path, image.astype(np.float32), overwrite=True)
         stem = stack_path.with_suffix("")

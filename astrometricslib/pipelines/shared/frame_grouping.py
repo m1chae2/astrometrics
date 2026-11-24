@@ -286,3 +286,32 @@ def frame_exposure_seconds(frame: Any) -> float | None:
     if not math.isfinite(value) or value <= 0:
         return None
     return value
+
+
+def frame_iso_value(frame: Any) -> float | None:
+    """Read a frame's ISO (or gain setting) as a number.
+
+    Frames that differ in ISO cannot be compared in counts per second, so
+    stacking splits exposure groups by this value (see
+    `astrometricslib.pipelines.stacking.processing.exposure_groups`).
+
+    Parameters
+    ----------
+    frame : `Any`
+        A frame record, or a dictionary of one, with an ``iso`` (a number or
+        text such as ``"800"`` or ``"800.0"``).
+
+    Returns
+    -------
+    iso : `float` or `None`
+        The ISO, or `None` when it is missing, not a number, not finite, or
+        not positive (for example ``"Auto"``).
+    """
+    raw = frame.get("iso") if isinstance(frame, dict) else getattr(frame, "iso", None)
+    try:
+        value = float(str(raw).strip())
+    except TypeError, ValueError:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value

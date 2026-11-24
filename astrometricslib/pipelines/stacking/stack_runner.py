@@ -822,8 +822,13 @@ def _stack_each_group(
     )
     results: list[GroupResult] = []
     failed_groups = []
+    # Groups at one exposure length but different ISOs would share a file
+    # name, so the ISO joins the name whenever the groups' ISOs differ.
+    mixed_isos = len({group.iso for group in groups}) > 1
     for group in groups:
         tag = f"exp{group.exposure_seconds:g}s".replace(".", "p")
+        if mixed_isos and group.iso is not None:
+            tag += f"_iso{group.iso:g}".replace(".", "p")
         if group.night is not None:
             tag += f"_{group.night}"
         path, diagnostics = _stack_one_batch(
@@ -1027,6 +1032,7 @@ def _align_and_screen_groups(
     import numpy as np
 
     from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import exposure_group_iso
     from astrometricslib.pipelines.stacking.processing.group_alignment import (
         SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
         align_images_to_reference,
@@ -1038,6 +1044,8 @@ def _align_and_screen_groups(
     from astrometricslib.pipelines.stacking.processing.group_gains import (
         describe_bright_sky_group,
         describe_nonlinear_group,
+        describe_unbelievable_gain_group,
+        normalize_sky_ratios_by_iso,
     )
 
     # Line the group stacks up with the group that carries the most weight
@@ -1111,21 +1119,33 @@ def _align_and_screen_groups(
             clip_ceiling_adu=measurements.clip_ceiling_adu,
             use_star_fluxes=not is_spectral,
         )
+        # Groups of different ISO have raw skies that differ by the ISO ratio
+        # alone, so the sky is compared per unit ISO.
+        normalize_sky_ratios_by_iso(
+            gain_measurements,
+            [exposure_group_iso(result.group.frames) for result in used],
+            reference_in_used,
+        )
         for result, gain_measurement in zip(used, gain_measurements, strict=True):
             result.gain_measurement = gain_measurement
         for result, gain_measurement in zip(used, gain_measurements, strict=True):
-            if not (gain_measurement.nonlinear or gain_measurement.sky_too_bright):
+            if not (
+                gain_measurement.nonlinear
+                or gain_measurement.sky_too_bright
+                or gain_measurement.gain_rejected
+            ):
                 continue
             reference_exposure = used[reference_in_used].exposure
-            reason = (
-                describe_nonlinear_group(
+            if gain_measurement.nonlinear:
+                reason = describe_nonlinear_group(
                     gain_measurement,
                     reference_exposure,
                     get_configuration().get_exposure_group_gain_tolerance(),
                 )
-                if gain_measurement.nonlinear
-                else describe_bright_sky_group(gain_measurement, reference_exposure)
-            )
+            elif gain_measurement.gain_rejected:
+                reason = describe_unbelievable_gain_group(gain_measurement, reference_exposure)
+            else:
+                reason = describe_bright_sky_group(gain_measurement, reference_exposure)
             result.left_out_reason = reason
             logger.warning("The %g s exposure group of '%s' %s.", result.exposure, target_id, reason)
 

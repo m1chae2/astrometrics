@@ -25,7 +25,7 @@ Terms are defined in the [glossary](../../../documentation/Glossary.md). This do
 
 1. Check that the frames agree. The gain, quarantine and background checks run first, and a frame that disagrees with the others is excluded rather than stacked. See [frame checks](#frame-checks-before-stacking-step-1).
 2. Skip a stack that would come out the same. `stack_inputs.py` compares the stack's inputs with the record saved beside the last stack. See [skipping an unchanged stack](#skipping-an-unchanged-stack-step-2).
-3. Group the frames by exposure length. `stack_runner.py` stacks each group on its own. See [exposure groups](#exposure-groups-step-3).
+3. Group the frames by exposure length and ISO. `stack_runner.py` stacks each group on its own. See [exposure groups](#exposure-groups-step-3).
 4. Run the stacking engine on each group: build the master calibration frames, calibrate, register and combine with pixel rejection. See [the stacking engine](#the-stacking-engine-step-4).
 5. Line up and combine the exposure-group stacks, then trim the noisy edges. See [combining exposure groups](#combining-exposure-groups-step-5).
 6. Judge the result. `stack_quality.py` decides whether the stacked image is good enough to use. See [judging the result](#judging-the-result-step-6).
@@ -127,7 +127,7 @@ Adding luminance frames (imaging frames taken through a clear filter that passes
 
 ## Exposure groups (step 3)
 
-Frames taken with different exposure times cannot be combined directly, since a longer exposure collects more light per pixel. `stack_runner.py` sorts the frames into exposure groups. It stacks each group on its own (step 4), then lines up and combines the group stacks (step 5), so no frame's light is wasted (measured; see [STK-11](../../../documentation/library_design/validation/stacking.md#stk-11)).
+Frames taken with different exposure times cannot be combined directly, since a longer exposure collects more light per pixel. `stack_runner.py` sorts the frames into exposure groups. Frames shot at different ISOs never share a group, because their raw counts differ by the ISO ratio, and a short list of frames is folded only into a group of its own ISO. A group whose ISO is not known is grouped by exposure alone. It stacks each group on its own (step 4), then lines up and combines the group stacks (step 5), so no frame's light is wasted (measured; see [STK-11](../../../documentation/library_design/validation/stacking.md#stk-11)).
 
 ## The stacking engine (step 4)
 
@@ -224,7 +224,7 @@ When a stack has more than one exposure group, `stack_runner.py` lines up the gr
 
 - `group_derotation.py` first turns spectral exposure-group stacks onto one common trail tilt (the angle at which the spectrum trail crosses the frame).
 - `group_alignment.py` aligns each group's stack with the reference group. For images it matches stars, which also removes the small rotation and scale between nights.
-- `group_combination.py` (with `group_gains.py` and `group_star_gains.py`) puts every group on the reference group's brightness scale by dividing it by a group scale factor. It leaves out a group whose brightness one scale factor cannot describe, and combines the rest. The [processing README](processing/README.md) describes how the group scale factor is measured. The combine returns the gain it applied to each group; `stacking.group_gain_applied` stores it, beside the earlier `stacking.group_gain_mid_range` measurement. The stack's header and registration reference come from the heaviest group, the one every other group is lined up with. Each entry of the `exposure_group_weights` diagnostic keeps its own group's frame paths, registration facts, inclusion flags, applied gain, frame count, exposure and frame noise.
+- `group_combination.py` (with `group_gains.py` and `group_star_gains.py`) puts every group on the reference group's brightness scale by dividing it by a group scale factor. It leaves out a group whose brightness one scale factor cannot describe, a group whose measured scale is outside 0.25 to 4, and a group whose sky per unit ISO is far brighter than the reference's, and combines the rest. The [processing README](processing/README.md) describes how the group scale factor is measured. The combine returns the gain it applied to each group; `stacking.group_gain_applied` stores it, beside the earlier `stacking.group_gain_mid_range` measurement. The stack's header and registration reference come from the heaviest group, the one every other group is lined up with. Each entry of the `exposure_group_weights` diagnostic keeps its own group's frame paths, registration facts, inclusion flags, applied gain, frame count, exposure and frame noise.
 
 ### Trimming noisy edges
 

@@ -772,10 +772,10 @@ Every Python example assumes the library is installed and configured with your o
 
 **Leaving out a group with a flooded sky or a failed scale**
 
-- **Claim:** Good groups have a sky brightness per second within a factor of 0.5 to 2 of the reference group; a group with a flooded or foreign sky reads 3.9 or more. A scale factor outside 0.25 to 4 is a failed measurement, not a real scale.
+- **Claim:** Good groups have a sky brightness per second per unit ISO within a factor of 0.5 to 2 of the reference group; a group with a flooded or foreign sky reads far above that. A scale factor outside 0.25 to 4 is a failed measurement, not a real scale, and the group is left out.
 - **Settings it supports:**
   - code constant `SKY_RATIO_LIMIT` = 3.0 <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.SKY_RATIO_LIMIT --> in `pipelines/stacking/processing/group_gains.py` (changing it means editing the code). Relation: derived from this entry.
-  - code constant `PLAUSIBLE_GAIN_RANGE` = (0.25, 4.0) <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.PLAUSIBLE_GAIN_RANGE --> in `pipelines/stacking/processing/group_gains.py` (changing it means editing the code). Relation: sanity check only; it is a warning threshold and blocks nothing.
+  - code constant `PLAUSIBLE_GAIN_RANGE` = (0.25, 4.0) <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.PLAUSIBLE_GAIN_RANGE --> in `pipelines/stacking/processing/group_gains.py` (changing it means editing the code). Relation: sanity check only; a group measured outside it is left out of the combined stack, with its measured value kept in the summary.
 - **Status:** Partly measured. Two bad groups set the sky limit; the scale range is a judgment placed far from two failed measurements.
 - **Data you need:** Imaging targets stacked in exposure groups, including one group shot into twilight or moonlight.
 - **Procedure:** Stack each target and read each group's sky ratio and left-out reason.
@@ -792,9 +792,9 @@ Every Python example assumes the library is installed and configured with your o
   `ProcessingPipelines.stack_summary` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.stack_summary --> reads what the stage saved. The sky ratio itself is on the internal `GroupGainMeasurement.sky_ratio` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GroupGainMeasurement --> (not part of the public API; may change) and is quoted in the left-out reason.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The sky ratio (group sky per second over the reference's; no units) and the scale factor of each group.
-- **Our result:** Good Nikon groups: sky ratio 0.5 to 2.0. Groups with a flooded or foreign sky: 3.9 and 7.6. On Albireo, two short groups clipped at zero measured scale factors of 1.4e-18 and 6e-31. Dates not recorded.
+- **Our result:** Good Nikon groups: sky ratio 0.5 to 2.0. Groups with a flooded or foreign sky: 3.9 and 7.6. On Albireo, two short groups clipped at zero measured scale factors of 1.4e-18 and 6e-31. Dates not recorded. The 3.9 and 7.6 are raw sky ratios of groups shot at 4 times the reference ISO (M 51 300 s at ISO 800 against 180 s at ISO 200, IC 1805 300 s against 360 s), so that evidence was confounded with the ISO. The sky ratio is now divided by the ISO ratio; the ISO-normalized values are not yet re-measured.
 - **Verdict:** Not judged.
-- **Limits:** Two bad groups for the sky limit.
+- **Limits:** Two bad groups for the sky limit, both confounded with ISO.
 - **To tune for your setup:** Place `SKY_RATIO_LIMIT` between your good groups' largest ratio and your bad groups' smallest.
 - **Regenerate with:** No script.
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_exposure_groups.py` and `test_exposure_groups_combined.py`.

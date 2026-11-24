@@ -502,7 +502,9 @@ def measure_group_gains_with_stars(
     the larger distance of the two quarter ratios from the gain. A group with
     too few clean stars is measured with the pixel ratios of
     `measure_group_gains` instead. A gain outside `PLAUSIBLE_GAIN_RANGE` is
-    not believed and the group keeps a gain of 1, as in that function. Every
+    not believed: the group keeps a gain of 1, records the ratio it measured
+    in `measured_gain` and is marked `gain_rejected`, as in that function.
+    Every
     group also gets its sky level relative to the reference's (see
     `SKY_RATIO_LIMIT`).
 
@@ -569,7 +571,7 @@ def measure_group_gains_with_stars(
             continue
         if not is_plausible_gain(ratios.gain):
             logger.warning(
-                "Exposure group %d measured a star-flux gain of %.3g, outside %s; using 1 instead.",
+                "Exposure group %d measured a star-flux gain of %.3g, outside %s; its scale is unknown.",
                 index,
                 ratios.gain,
                 plausible_gain_range,
@@ -580,6 +582,8 @@ def measure_group_gains_with_stars(
                 method="stars",
                 stars_used=ratios.stars_used,
                 faint_ratio=ratios.faint_ratio,
+                measured_gain=ratios.gain,
+                gain_rejected=True,
             )
             continue
         disagreement = (
@@ -595,6 +599,7 @@ def measure_group_gains_with_stars(
             method="stars",
             stars_used=ratios.stars_used,
             faint_ratio=ratios.faint_ratio,
+            measured_gain=ratios.gain,
             clipping_seen=None if near_clip_masks is None else False,
         )
     record_sky_ratios(measurements, reference_index)

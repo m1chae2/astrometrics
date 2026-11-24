@@ -85,7 +85,9 @@ A group that shares fewer than 16 such stars with the reference (`STAR_GAIN_MINI
 
 **Spectral stacks.** A slitless spectrum has no field of stars, and its short groups are clipped at zero, so their sky per second is not a sky brightness. The stack runner passes `use_star_fluxes=False` for spectral stacks, which keeps the pixel method and skips the sky check.
 
-**The sky check.** The stage divides each group's sky level per second by the reference's (`sky_ratio`). It leaves out a group whose sky is more than `SKY_RATIO_LIMIT` (3) times brighter (partly measured; see [STK-21](../../../../documentation/library_design/validation/stacking.md#stk-21)).
+**The sky check.** The stage divides each group's sky level per second by the reference's (`sky_ratio`). The stack runner then divides that ratio by the group's ISO ratio to the reference's (`normalize_sky_ratios_by_iso`), because raw counts scale with ISO and groups at different ISOs are never merged. It leaves out a group whose ISO-normalized sky is more than `SKY_RATIO_LIMIT` (3) times brighter (partly measured; see [STK-21](../../../../documentation/library_design/validation/stacking.md#stk-21)).
+
+**The scale range.** A measured scale factor outside `PLAUSIBLE_GAIN_RANGE` (0.25 to 4), has an unknown scale. The stack runner leaves that group out with a reason that names the measured value (`describe_unbelievable_gain_group`), and the summary keeps the measured value. It does not combine the group at an assumed scale of 1. A group that shares too few stars or pixels to compare at all is still combined as it is (its scale was not measured).
 
 ### The sky background between exposure groups
 

@@ -638,6 +638,9 @@ stacking.single_night_fractions,STK-37,measurement,Design estimate
 stacking.size_radius_multiples,STK-D32,measurement,Design estimate
 stacking.sky_clip_passes,STK-D10,measurement,Design estimate
 stacking.sky_clip_sigmas,STK-D10,measurement,Design estimate
+stacking.sky_match_block_pixels,STK-D10,measurement,Design estimate
+stacking.sky_match_block_valid_fraction,STK-D10,measurement,Design estimate
+stacking.sky_match_minimum_blocks,STK-D10,measurement,Design estimate
 stacking.sky_plane_gradient_limit,STK-61,judgment,Partly measured
 stacking.sky_radial_falloff_limit,STK-61,judgment,Partly measured
 stacking.sky_ratio_limit,STK-21,judgment,Partly measured

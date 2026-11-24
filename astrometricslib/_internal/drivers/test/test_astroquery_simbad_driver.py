@@ -428,9 +428,11 @@ def test_repeated_connection_failures_pause_simbad_without_asking_it(
     """After two rounds of unreachable servers, later calls fail at once.
 
     The stand-in client records every call, so the test can see that the
-    third call never reached it.
+    third call never reached it. The servers refuse the connection: a refused
+    connection needs two failures before the pause, while a timeout pauses
+    the host at once (see the gateway tests).
     """
-    client = _FakeSimbad(result=requests.exceptions.ConnectTimeout("timed out"))
+    client = _FakeSimbad(result=requests.exceptions.ConnectionError("refused"))
     monkeypatch.setattr(simbad_module, "_client", client)
     driver = AstroquerySimbadDriver()
 
@@ -575,8 +577,12 @@ def test_a_bad_reply_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_both_servers_unreachable_twice_starts_the_pause(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The pause starts only after both servers have failed in a row."""
-    client = _TwoServerSimbad({MAIN_SERVER: ConnectionError("down"), MIRROR_SERVER: TimeoutError("down")})
+    """The pause starts only after both servers have refused twice in a row.
+
+    Both servers refuse the connection; a timeout would pause its server at
+    once instead (see the gateway tests).
+    """
+    client = _TwoServerSimbad({MAIN_SERVER: ConnectionError("down"), MIRROR_SERVER: ConnectionError("down")})
     monkeypatch.setattr(simbad_module, "_client", client)
     driver = AstroquerySimbadDriver()
     for query in ("SELECT 1", "SELECT 2"):

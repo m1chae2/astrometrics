@@ -597,6 +597,8 @@ stacking.pattern_neighbour_count,STK-D14,measurement,Design estimate
 stacking.pattern_ratio_tolerance,STK-D14,measurement,Design estimate
 stacking.pattern_refit_passes,STK-D14,measurement,Design estimate
 stacking.pattern_star_count,STK-D14,measurement,Design estimate
+stacking.pattern_star_count_growth,STK-D14,measurement,Design estimate
+stacking.pattern_star_count_maximum,STK-D14,measurement,Design estimate
 stacking.plausible_gain_range,STK-21,judgment,Partly measured
 stacking.point_source_sigma,STK-D34,judgment,Design estimate
 stacking.pointing_field_minimum_frames,STK-D73,exclusion criteria,Design estimate

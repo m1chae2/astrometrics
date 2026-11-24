@@ -21,6 +21,7 @@ Everything here works on arrays and returns arrays; reading and writing files
 is left to the caller.
 """
 
+import logging
 import math
 from dataclasses import dataclass
 
@@ -44,7 +45,10 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.stacking.processing.star_pattern_candidates import (
     candidate_similarity_transforms,
+    pattern_star_counts,
 )
+
+logger = logging.getLogger(__name__)
 
 # Structure wider than this many pixels (background gradients, nebulosity) is
 # removed before the offset is measured, so stars decide it. Stars in these
@@ -1333,7 +1337,12 @@ def find_alignment_from_star_patterns(
     when it is believable: at least `REFINEMENT_MINIMUM_PAIRS` pairs, a scale
     within `REFINEMENT_MAX_SCALE_DEVIATION` of one, and a leftover under
     `PATTERN_MAX_RESIDUAL_PIXELS`. Any rotation is accepted, including the
-    half turn of a mount flip.
+    half turn of a mount flip. The search starts with the brightest
+    `PATTERN_STAR_COUNT` stars of each list and, when it finds nothing
+    believable, retries with more stars (see
+    `star_pattern_candidates.pattern_star_counts`). A long exposure saturates
+    its brightest stars, which are then skipped, so the two lists of stacks
+    with very different exposure times share too few of their brightest stars.
 
     Parameters
     ----------
@@ -1352,16 +1361,52 @@ def find_alignment_from_star_patterns(
         measured), and the shifts given for the image centre; `None` when no
         believable move was found.
     """
-    refinement_minimum_pairs = resolve(REFINEMENT_MINIMUM_PAIRS).value
-    pattern_refit_passes = resolve(PATTERN_REFIT_PASSES).value
-    refinement_match_radius_pixels = resolve(REFINEMENT_MATCH_RADIUS_PIXELS).value
     if reference_stars is None:
         reference_stars = detect_star_centroids(_to_plane(reference))
     if image_stars is None:
         image_stars = detect_star_centroids(_to_plane(image))
-    if min(len(reference_stars), len(image_stars)) < refinement_minimum_pairs:
+    if min(len(reference_stars), len(image_stars)) < resolve(REFINEMENT_MINIMUM_PAIRS).value:
         return None
-    candidates = candidate_similarity_transforms(reference_stars, image_stars)
+    previous_count = 0
+    for star_count in pattern_star_counts():
+        if previous_count >= min(len(reference_stars), len(image_stars)):
+            # Both lists were already used in full at the last count.
+            break
+        result = _find_alignment_at_star_count(image, reference_stars, image_stars, star_count)
+        if result is not None:
+            logger.info(
+                "Star-pattern alignment found with the %d brightest stars of each list (%d pairs).",
+                star_count,
+                result.star_pairs,
+            )
+            return result
+        previous_count = star_count
+    return None
+
+
+def _find_alignment_at_star_count(
+    image: np.ndarray, reference_stars: np.ndarray, image_stars: np.ndarray, star_count: int
+) -> AlignmentResult | None:
+    """Try one star-pattern search with the given number of stars per list.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        The stack to move; only its shape is used.
+    reference_stars, image_stars : `numpy.ndarray`
+        The star centres of the two stacks, brightest first.
+    star_count : `int`
+        How many of the brightest stars of each list build triangles.
+
+    Returns
+    -------
+    result : `AlignmentResult` or `None`
+        The believable move, or `None` when this count finds none.
+    """
+    refinement_minimum_pairs = resolve(REFINEMENT_MINIMUM_PAIRS).value
+    pattern_refit_passes = resolve(PATTERN_REFIT_PASSES).value
+    refinement_match_radius_pixels = resolve(REFINEMENT_MATCH_RADIUS_PIXELS).value
+    candidates = candidate_similarity_transforms(reference_stars, image_stars, star_count)
     if len(candidates) == 0:
         return None
     image_complex = image_stars[:, 1] + 1j * image_stars[:, 0]

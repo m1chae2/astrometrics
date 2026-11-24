@@ -37,11 +37,46 @@ from astrometricslib.models.tuned_parameter import (
 # list misses the overlap. On the Nikon D5300 group pairs of M 106, NGC 7023,
 # M 51 and NGC 6992 (2026-10-13), 60 stars found a correct match for none of
 # the four, while 150 found one for all four (197 to 250 stars lined up).
+# This is the first count tried. When the two lists still share too few stars
+# (a 300 s stack against a 180 s stack, STK-D14), the caller retries with
+# larger counts (`PATTERN_STAR_COUNT_GROWTH`, `PATTERN_STAR_COUNT_MAXIMUM`).
 PATTERN_STAR_COUNT = TunedParameter(
     name="stacking.pattern_star_count",
     default=150,
     unit="stars",
     description="Number of the brightest stars of each list used to build triangles.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D14",
+)
+
+# The star count grows by this factor on each retry. Doubling reaches the
+# maximum below in two steps (150, 300, 600). On the saved NGC 6992 group
+# stacks of 2026-11-23 the 300 s stack saturated the brightest stars of the
+# 180 s stack: 150 and 100 stars failed, 200, 300 and 400 succeeded, so the
+# first count that works is between 1.3 and 2 times the failing one.
+PATTERN_STAR_COUNT_GROWTH = TunedParameter(
+    name="stacking.pattern_star_count_growth",
+    default=2,
+    unit="ratio",
+    description="Factor by which the number of stars used for triangles grows on each retry.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D14",
+)
+
+# The retries stop at this many stars per list. 600 stars give about 17,000
+# triangles per list (28 per star), still a fraction of a second to match, and
+# are 1.5 times the largest count (400) that lined up the NGC 6992 pair.
+# Beyond this the faint stars are noisy and add false triangles faster than
+# true ones.
+PATTERN_STAR_COUNT_MAXIMUM = TunedParameter(
+    name="stacking.pattern_star_count_maximum",
+    default=600,
+    unit="stars",
+    description="Largest number of stars of each list used to build triangles when retrying.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -114,13 +149,35 @@ PATTERN_MAXIMUM_SCALE_DEVIATION = TunedParameter(
 )
 
 
-def _triangle_shapes(stars: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def pattern_star_counts() -> list[int]:
+    """List the star counts to try, from the first count up to the maximum.
+
+    Returns
+    -------
+    counts : `list` of `int`
+        The first count is `PATTERN_STAR_COUNT`. Each next count is the one
+        before times `PATTERN_STAR_COUNT_GROWTH`, and the last is
+        `PATTERN_STAR_COUNT_MAXIMUM` (or the first count, when that is larger).
+    """
+    count = resolve(PATTERN_STAR_COUNT).value
+    maximum = resolve(PATTERN_STAR_COUNT_MAXIMUM).value
+    growth = resolve(PATTERN_STAR_COUNT_GROWTH).value
+    counts = [count]
+    while count < maximum:
+        count = min(int(count * growth), maximum)
+        counts.append(count)
+    return counts
+
+
+def _triangle_shapes(stars: np.ndarray, star_count: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """List the triangles of nearby stars and the shape of each.
 
     Parameters
     ----------
     stars : `numpy.ndarray`
         Star positions, shape ``(n, 2)`` as (row, column), brightest first.
+    star_count : `int`
+        How many of the brightest stars to use.
 
     Returns
     -------
@@ -135,7 +192,7 @@ def _triangle_shapes(stars: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
         The star positions as complex numbers ``column + 1j * row``.
     """
     pattern_minimum_longest_side_pixels = resolve(PATTERN_MINIMUM_LONGEST_SIDE_PIXELS).value
-    used = stars[: resolve(PATTERN_STAR_COUNT).value]
+    used = stars[:star_count]
     positions = used[:, 1] + 1j * used[:, 0]
     neighbour_count = min(resolve(PATTERN_NEIGHBOUR_COUNT).value, len(used) - 1)
     if neighbour_count < 2:
@@ -164,7 +221,9 @@ def _triangle_shapes(stars: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
     return np.array(shapes).reshape(-1, 2), np.array(corners, dtype=int).reshape(-1, 3), positions
 
 
-def candidate_similarity_transforms(reference_stars: np.ndarray, image_stars: np.ndarray) -> np.ndarray:
+def candidate_similarity_transforms(
+    reference_stars: np.ndarray, image_stars: np.ndarray, star_count: int | None = None
+) -> np.ndarray:
     """Propose moves that could put the image's stars onto the reference's.
 
     Parameters
@@ -174,6 +233,9 @@ def candidate_similarity_transforms(reference_stars: np.ndarray, image_stars: np
         brightest first.
     image_stars : `numpy.ndarray`
         The image's star positions, in the same form.
+    star_count : `int`, optional
+        How many of the brightest stars of each list to use. The default is
+        `PATTERN_STAR_COUNT`.
 
     Returns
     -------
@@ -186,8 +248,10 @@ def candidate_similarity_transforms(reference_stars: np.ndarray, image_stars: np
         every one must be checked against the full star lists.
     """
     pattern_maximum_scale_deviation = resolve(PATTERN_MAXIMUM_SCALE_DEVIATION).value
-    reference_shapes, reference_corners, reference_positions = _triangle_shapes(reference_stars)
-    image_shapes, image_corners, image_positions = _triangle_shapes(image_stars)
+    if star_count is None:
+        star_count = resolve(PATTERN_STAR_COUNT).value
+    reference_shapes, reference_corners, reference_positions = _triangle_shapes(reference_stars, star_count)
+    image_shapes, image_corners, image_positions = _triangle_shapes(image_stars, star_count)
     if len(reference_shapes) == 0 or len(image_shapes) == 0:
         return np.empty((0, 2), dtype=complex)
     distances, partners = cKDTree(reference_shapes).query(

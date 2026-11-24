@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, preview_settings_path_for
 from astrometricslib.pipelines.stacking.post_processing import stack_preview
 from astrometricslib.pipelines.stacking.post_processing.bright_object import BrightObjectStretch
@@ -28,9 +29,11 @@ from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     build_preview_script,
     build_stretch_script,
     denoise_with_cosmic_clarity,
+    find_local_gaia_catalog,
     flatten_background,
     has_plate_solution,
     is_colour_image,
+    online_catalog_reachable,
     preview_is_out_of_date,
     read_preview_settings,
     run_preview_script,
@@ -195,7 +198,7 @@ class _Programs:
                 Path(directory) / "starless_stretched.fits", np.full((3, 16, 16), 0.2, dtype=np.float32)
             )
             return True
-        if "pcc -catalog=gaia" in commands:
+        if any(command.startswith("pcc -catalog=") for command in commands):
             if self.pcc_result:
                 image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
                 fits.writeto(Path(directory) / "colour.fits", image)
@@ -1240,6 +1243,12 @@ def test_a_failed_colour_calibration_keeps_the_picture_and_the_separate_stretch(
     assert not any("-linked" in command for command in commands)
 
 
+def _use_online_catalog(monkeypatch: pytest.MonkeyPatch, reachable: bool) -> None:
+    """Make the module see no local Gaia catalog and a set server state."""
+    monkeypatch.setattr(stack_preview, "find_local_gaia_catalog", lambda: None)
+    monkeypatch.setattr(stack_preview, "online_catalog_reachable", lambda: reachable)
+
+
 def test_the_pcc_script_solves_the_field_only_when_it_has_no_solution() -> None:
     """Verify `platesolve` comes before `pcc`, and only when asked for."""
     unsolved = build_pcc_script("a.fits", "colour", solve=True)
@@ -1272,6 +1281,7 @@ def test_pcc_runs_first_and_its_result_feeds_a_shared_stretch(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify Siril PCC calibrates, then the stretch shares channels."""
+    _use_online_catalog(monkeypatch, reachable=True)
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     programs = _Programs()
@@ -1290,6 +1300,7 @@ def test_pcc_does_not_solve_a_field_that_is_already_solved(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a stack with a plate solution goes straight to `pcc`."""
+    _use_online_catalog(monkeypatch, reachable=True)
     _write_colour_stack_with_stars(stack)
     with fits.open(stack, mode="update") as opened:
         opened[0].header["CTYPE1"], opened[0].header["CRVAL1"] = "RA---TAN", 202.4
@@ -1306,7 +1317,8 @@ def test_pcc_does_not_solve_a_field_that_is_already_solved(
 def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Verify no network or no catalogue still gives a calibrated picture."""
+    """Verify no network or no catalog still gives a calibrated picture."""
+    _use_online_catalog(monkeypatch, reachable=True)
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     programs = _Programs(pcc_result=False)
@@ -1322,6 +1334,136 @@ def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
     assert "Colour calibration (from the stars) done" in summary
 
 
+def test_the_pcc_script_reads_a_local_catalog_when_given_one() -> None:
+    """Verify the script sets the catalog path and asks for `localgaia`."""
+    commands = build_pcc_script("a.fits", "colour", solve=True, local_catalog="/data/cat.dat")
+
+    assert commands[1:6] == [
+        "set core.catalogue_gaia_astro=/data/cat.dat",
+        'load "a.fits"',
+        "platesolve -catalog=localgaia",
+        "pcc -catalog=localgaia",
+        'save "colour"',
+    ]
+    assert not any("-catalog=gaia" in command for command in commands)
+
+
+def test_the_local_gaia_catalog_is_found_in_the_first_folder_that_has_it(tmp_path: Path) -> None:
+    """Verify the search order and the answer when nothing is installed."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (second / "siril_cat_healpix8_astro.dat").write_bytes(b"x")
+
+    assert find_local_gaia_catalog([str(first), str(second)]) == str(second / "siril_cat_healpix8_astro.dat")
+    assert find_local_gaia_catalog([str(first)]) is None
+
+
+def _fake_connection(monkeypatch: pytest.MonkeyPatch, error: Exception | None) -> list[str]:
+    """Replace the connection the check opens; record each host it is sent to.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Test patcher.
+    error : `Exception` or `None`
+        What the connection raises, or `None` for a connection that works.
+
+    Returns
+    -------
+    attempts : `list` [`str`]
+        The host of each connection tried.
+    """
+    attempts: list[str] = []
+
+    def connect(address: tuple[str, int], timeout: float) -> nullcontext:
+        """Record the attempt, then fail or hand back a closable stand-in.
+
+        Returns
+        -------
+        connection : `contextlib.nullcontext`
+            A stand-in that closes with nothing to do.
+        """
+        attempts.append(address[0])
+        if error is not None:
+            raise error
+        return nullcontext()
+
+    monkeypatch.setattr(outside_services.clients.socket, "create_connection", connect)
+    return attempts
+
+
+def test_the_catalog_server_check_goes_through_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the check is counted as a live request of its gateway service."""
+    attempts = _fake_connection(monkeypatch, None)
+
+    events: list[outside_services.ServiceEvent] = []
+    with outside_services.record_service_events(events):
+        assert online_catalog_reachable() is True
+
+    assert attempts == ["tapvizier.u-strasbg.fr"]
+    assert any(event.service == "Siril Gaia catalog" and event.kind == "live" for event in events)
+
+
+def test_a_timeout_pauses_the_server_and_the_next_check_makes_no_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify one timeout pauses the host, so the next preview skips."""
+    attempts = _fake_connection(monkeypatch, TimeoutError("timed out"))
+
+    assert online_catalog_reachable() is False
+    assert online_catalog_reachable() is False
+
+    assert attempts == ["tapvizier.u-strasbg.fr"]
+
+
+def test_pcc_uses_the_local_catalog_without_asking_the_network(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an installed catalog is used and the server is not checked."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    monkeypatch.setattr(stack_preview, "find_local_gaia_catalog", lambda: "/data/cat.dat")
+
+    def fail() -> bool:
+        """Fail the test if the network is checked.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("the server must not be checked")
+
+    monkeypatch.setattr(stack_preview, "online_catalog_reachable", fail)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert "pcc -catalog=localgaia" in programs.siril_calls[0][1]
+    assert "set core.catalogue_gaia_astro=/data/cat.dat" in programs.siril_calls[0][1]
+
+
+def test_pcc_is_not_started_when_the_server_does_not_answer(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify an unreachable server costs no Siril run and uses the stars."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    _use_online_catalog(monkeypatch, reachable=False)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    with caplog.at_level("INFO", logger=stack_preview.logger.name):
+        assert write_stack_preview(str(stack)) is not None
+
+    assert not any(any(c.startswith("pcc ") for c in commands) for _, commands in programs.siril_calls)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("Siril PCC could not run (no local Gaia catalog" in m for m in messages)
+    assert any("Colour calibration (from the stars) done" in m for m in messages)
+
+
 def test_the_stars_method_never_starts_pcc(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1333,7 +1475,7 @@ def test_the_stars_method_never_starts_pcc(
 
     write_stack_preview(str(stack))
 
-    assert not any("pcc -catalog=gaia" in commands for _, commands in programs.siril_calls)
+    assert not any(any(c.startswith("pcc ") for c in commands) for _, commands in programs.siril_calls)
 
 
 def test_starnet_splits_the_image_then_stretches_the_pieces_apart(

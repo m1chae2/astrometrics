@@ -16,6 +16,7 @@ and owns its own `SimbadClass`, and holds `SIMBAD_LOCK` while it configures
 the client and queries it, so a second caller never sees a half-set client.
 """
 
+import socket
 import threading
 import urllib.parse
 import urllib.request
@@ -34,6 +35,7 @@ from astrometricslib._internal.drivers.outside_services.services import (
     ESA_GAIA,
     GAIA_XP,
     SIMBAD,
+    SIRIL_GAIA_CATALOG,
     SKYBOT,
     VIZIER,
 )
@@ -540,3 +542,20 @@ def open_download(url: str, *, timeout_seconds: float | None = None) -> Any:
         lambda _host: urllib.request.urlopen(url, timeout=timeout),  # ruff: ignore[suspicious-url-open-usage] -- the caller checks https
         not_found_is_answer=True,
     )
+
+
+def check_siril_gaia_catalog_server() -> None:
+    """Prove that the server Siril asks for Gaia stars answers.
+
+    Opens a TCP connection to the server and closes it at once. A timeout
+    pauses the host for every process, so later calls raise
+    `ServicePausedError` without sending anything. An offline launch raises
+    `OfflineModeError`, and a failed or timed-out connection raises `OSError`.
+    """
+
+    def ask(host: str) -> None:
+        """Connect to one host and close the connection."""
+        with socket.create_connection((host, 80), timeout=SIRIL_GAIA_CATALOG.timeout_seconds):
+            pass
+
+    call_service(SIRIL_GAIA_CATALOG, ask)

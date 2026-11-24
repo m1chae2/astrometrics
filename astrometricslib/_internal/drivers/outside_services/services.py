@@ -22,6 +22,11 @@ Published policies, as far as they are known:
   conservative estimate.
 - SkyBoT (IMCCE), the Astrometry.net web service and file downloads: no figure
   is published; one request per second per host.
+- The CDS TAP server that Siril asks for Gaia stars in a color calibration
+  (``tapvizier.u-strasbg.fr``): the program only opens a connection to it, to
+  learn whether Siril would wait for it, so the default figure applies. It is
+  a separate service from VizieR: it is a different host name from the two
+  VizieR hosts above, and pauses are kept for each host.
 
 The numbers are plain constants, not tuned parameters: they limit how the
 program behaves toward other people's servers, and they never change a result.
@@ -74,6 +79,10 @@ SKYBOT_TIMEOUT_SECONDS = 60.0
 # A solve on Astrometry.net's servers can run for minutes.
 ASTROMETRY_NET_TIMEOUT_SECONDS = 300.0
 DOWNLOAD_TIMEOUT_SECONDS = 60.0
+# Siril waited 2 min 24 s on this server when it did not answer (measured
+# 2026-11-23), and held the one Siril slot meanwhile. A server that answers
+# does so within a second, so a few seconds are enough to call it down.
+SIRIL_GAIA_CATALOG_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -127,9 +136,14 @@ ASTROMETRY_NET = OutsideService(
     "Astrometry.net", ("nova.astrometry.net",), timeout_seconds=ASTROMETRY_NET_TIMEOUT_SECONDS
 )
 DOWNLOADS = OutsideService("Downloads", ("downloads",), timeout_seconds=DOWNLOAD_TIMEOUT_SECONDS)
+SIRIL_GAIA_CATALOG = OutsideService(
+    "Siril Gaia catalog",
+    ("tapvizier.u-strasbg.fr",),
+    timeout_seconds=SIRIL_GAIA_CATALOG_TIMEOUT_SECONDS,
+)
 
 #: Every service by name.
 SERVICES: dict[str, OutsideService] = {
     service.name: service
-    for service in (SIMBAD, VIZIER, ESA_GAIA, GAIA_XP, SKYBOT, ASTROMETRY_NET, DOWNLOADS)
+    for service in (SIMBAD, VIZIER, ESA_GAIA, GAIA_XP, SKYBOT, ASTROMETRY_NET, DOWNLOADS, SIRIL_GAIA_CATALOG)
 }

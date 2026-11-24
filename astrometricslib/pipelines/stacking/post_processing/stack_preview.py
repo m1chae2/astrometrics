@@ -82,11 +82,12 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
-from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.errors import ExternalServiceError, NotFoundError, StorageError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.foundation.run_abandonment import RunAbandonedError, raise_if_abandoned, run_registered
@@ -378,11 +379,71 @@ def has_plate_solution(path: str) -> bool:
     return "CTYPE1" in header and "CRVAL1" in header
 
 
-def build_pcc_script(source_file_name: str, output_stem: str, solve: bool) -> list[str]:
+# Siril's local Gaia catalog file, as its Catalog_Installer script names it.
+_LOCAL_GAIA_CATALOG_NAME = "siril_cat_healpix8_astro.dat"
+
+
+def find_local_gaia_catalog(search_folders: list[str] | None = None) -> str | None:
+    """Find the Gaia star catalog that Siril can read from the disk.
+
+    Siril's own Catalog_Installer script puts it in Siril's data folder. A
+    Flatpak Siril keeps that folder under ``~/.var/app``, a normal install
+    under ``~/.local/share``. Reading the catalog from the disk takes about
+    10 seconds for a whole PCC run and needs no network.
+
+    Parameters
+    ----------
+    search_folders : `list` [`str`], optional
+        Folders to look in, in order. By default, the two places above.
+
+    Returns
+    -------
+    path : `str` or `None`
+        Path of the catalog file, or `None` if it is not installed.
+    """
+    if search_folders is None:
+        search_folders = [
+            os.path.expanduser("~/.local/share/siril"),
+            os.path.expanduser("~/.var/app/org.siril.Siril/data/siril"),
+        ]
+    for folder in search_folders:
+        candidate = os.path.join(folder, _LOCAL_GAIA_CATALOG_NAME)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def online_catalog_reachable() -> bool:
+    """Say whether the server that Siril asks for Gaia stars answers.
+
+    The check goes through the outside-services gateway, so a timeout pauses
+    the server for every process: the next preview gets its answer at once,
+    with no waiting. Without this check, a server that does not answer keeps
+    Siril waiting for about two minutes, and the other stacks wait behind it
+    for the one Siril slot.
+
+    Returns
+    -------
+    reachable : `bool`
+        `True` if a connection to the server was made in time. `False` if it
+        failed, timed out, is paused after earlier trouble, or this launch
+        sends nothing off the computer.
+    """
+    try:
+        outside_services.check_siril_gaia_catalog_server()
+    except (ExternalServiceError, OSError) as error:
+        logger.info("The Gaia catalog server for Siril cannot be used now: %s", error)
+        return False
+    return True
+
+
+def build_pcc_script(
+    source_file_name: str, output_stem: str, solve: bool, local_catalog: str | None = None
+) -> list[str]:
     """Write the Siril commands that calibrate an image's colours with PCC.
 
     Siril's photometric colour calibration matches the stars of a plate-solved
-    image to the Gaia catalogue and scales the channels, after removing each
+    image to the Gaia catalog and scales the channels, after removing each
     channel's background.
 
     Parameters
@@ -397,17 +458,24 @@ def build_pcc_script(source_file_name: str, output_stem: str, solve: bool) -> li
         Whether Siril must first solve the field. It needs the pointing,
         focal length and pixel size in the file's header. Pass `False` for an
         image that already holds a plate solution.
+    local_catalog : `str`, optional
+        Path of Siril's Gaia catalog file on the disk. If given, Siril is
+        told where it is and reads the stars from it. By default Siril asks
+        a server over the network. The path is set in the script because the
+        path saved in Siril's settings may not point to the file.
 
     Returns
     -------
     commands : `list` [`str`]
         The script, one command per entry.
     """
+    catalog_name = "localgaia" if local_catalog else "gaia"
     return [
         f"requires {_PCC_MINIMUM_SIRIL_VERSION}",
+        *([f"set core.catalogue_gaia_astro={local_catalog}"] if local_catalog else []),
         f'load "{source_file_name}"',
-        *(["platesolve -catalog=gaia"] if solve else []),
-        "pcc -catalog=gaia",
+        *([f"platesolve -catalog={catalog_name}"] if solve else []),
+        f"pcc -catalog={catalog_name}",
         f'save "{output_stem}"',
         "close",
     ]
@@ -1292,9 +1360,24 @@ def _picture_script(
                 -------
                 succeeded : `bool`
                     Whether Siril exited without an error.
+
+                Raises
+                ------
+                OSError
+                    If Siril would have to ask a server that does not answer.
                 """
+                local_catalog = find_local_gaia_catalog()
+                if local_catalog is None and not online_catalog_reachable():
+                    # Reported as a skipped step, with the reason; the stars
+                    # of the stack give the colours instead.
+                    raise OSError(
+                        "no local Gaia catalog is installed and the online Gaia server does not answer"
+                    )
                 commands = build_pcc_script(
-                    os.path.basename(input_path), os.path.splitext(os.path.basename(output_path))[0], solve
+                    os.path.basename(input_path),
+                    os.path.splitext(os.path.basename(output_path))[0],
+                    solve,
+                    local_catalog,
                 )
                 return run_preview_script(scratch, commands, siril_executable)
 
@@ -1309,7 +1392,7 @@ def _picture_script(
             )
             method = "Siril PCC"
         if calibrated_name == name:
-            # PCC was not asked for, or failed (no network, no catalogue, no
+            # PCC was not asked for, or failed (no network, no catalog, no
             # solution): measure the stars in the stack itself.
             calibrated_name = _next_source(
                 "Colour calibration from the stars",

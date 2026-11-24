@@ -158,7 +158,14 @@ def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
 
     assert outcome["status"] == "running"
     assert outcome["jobId"] is not None
-    jobs = _read_jobs(isolated_job_logging, "PreviewWaitTarget")
+    # The job is registered before the grace period ends, but its waiting
+    # message is written by the worker thread, which a slow runner may not
+    # have reached yet, so the message is waited for.
+    for _ in range(200):
+        jobs = _read_jobs(isolated_job_logging, "PreviewWaitTarget")
+        if jobs and jobs[0].message == WAITING_FOR_SLOT_MESSAGE:
+            break
+        time.sleep(0.05)
     assert [job.job_type for job in jobs] == ["preview"]
     assert jobs[0].message == WAITING_FOR_SLOT_MESSAGE
 

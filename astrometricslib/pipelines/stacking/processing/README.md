@@ -87,6 +87,12 @@ A group that shares fewer than 16 such stars with the reference (`STAR_GAIN_MINI
 
 **The sky check.** The stage divides each group's sky level per second by the reference's (`sky_ratio`). It leaves out a group whose sky is more than `SKY_RATIO_LIMIT` (3) times brighter (partly measured; see [STK-21](../../../../documentation/library_design/validation/stacking.md#stk-21)).
 
+### The sky background between exposure groups
+
+Each group stack also has its own sky background. It differs from the reference group's in level, in color (each color channel has its own sky) and in tilt across the frame. A single sky number cannot remove all of that, so before the average, `group_sky_matching.py` fits a flat tilted surface (a plane) to the difference between the group and the reference, one plane for each color channel, and takes it off the group. The fit uses the median of 64 by 64 pixel blocks that both groups hold, and drops blocks that stars or the target disturb (the same clipping as the sky level). A group that overlaps the reference in fewer than 12 blocks keeps only its overall sky level, and the log says so. Spectral stacks are not matched, because a slitless spectrum has no sky field to compare.
+
+Without this, a region seen by only one group took that group's background. On NGC 6992 (Nikon D5300, a 180 s group and a 300 s group lined up with a half turn and a shift of 527 pixels), the green channel stepped by 5% where the 300 s group's coverage began (partly measured; see [STK-D10](../../../../documentation/library_design/validation/stacking.md#design-estimates)).
+
 ## Settings
 
 | Setting | Default | Effect |
@@ -114,6 +120,7 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 - `group_gains.py`: measures the group scale factor from mid-range pixels, and holds the background-noise and saturation helpers.
 - `group_star_gains.py`: measures the group scale factor from isolated stars.
 - `group_combination.py`: weights the groups and combines the group stacks. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.
+- `group_sky_matching.py`: fits and removes the sky background difference between a group and the reference group, one plane for each color channel.
 - `group_file_merging.py`: joins the per-group rejection maps and registration sequences into one file each.
 - `group_alignment.py`: lines up the group stacks and finds the zero-order target.
 - `star_pattern_candidates.py`: the star-pattern search that `group_alignment.py` falls back to.

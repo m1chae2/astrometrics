@@ -16,7 +16,13 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, StretchParameters, ViewableImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
-from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
+from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.pipelines.shared.stack_preview_path import (
+    PREVIEW_JPEG_QUALITY,
+    is_preview_path,
+    is_processed_fits_path,
+    preview_path_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,35 @@ def _stretch_used(data: Any, auto_stretched: bool) -> StretchParameters | None:
     return ImageScaler.autostretch_parameters(data) if auto_stretched else None
 
 
+# Paths whose saved picture could not be read, so the warning is logged once
+# per path and not again each time the viewer redraws it.
+_unreadable_preview_paths: set[str] = set()
+
+
+def _find_moved_frame(path: str) -> str:
+    """Find a frame that stacking set aside after its record was made.
+
+    The frame quarantine moves a frame into an ``_excluded`` folder beside it
+    and keeps the original path on the frame's record, so a list built from the
+    records can still ask for the old path.
+
+    Parameters
+    ----------
+    path : `str`
+        The path that was asked for.
+
+    Returns
+    -------
+    found_path : `str`
+        `path` if that file exists, else the same file name inside the
+        ``_excluded`` folder next to it if that file exists, else `path`.
+    """
+    if os.path.exists(path):
+        return path
+    moved_path = os.path.join(os.path.dirname(path), QUARANTINE_FOLDER_NAME, os.path.basename(path))
+    return moved_path if os.path.exists(moved_path) else path
+
+
 def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
     """Read the Siril-stretched JPEG that stacking saved beside a stack.
 
@@ -69,7 +104,13 @@ def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
         The picture as a ``data:image/jpeg;base64,...`` string, or `None` if
         there is no current preview or it cannot be read.
     """
+    if is_processed_fits_path(path) or is_preview_path(path):
+        return None
     preview_path = preview_path_for(path)
+    if not os.path.exists(preview_path):
+        # Only a stack has a saved picture. A single frame, or a stack
+        # saved before previews existed, has none: this is normal.
+        return None
     try:
         if os.path.getmtime(preview_path) < os.path.getmtime(path):
             return None
@@ -85,7 +126,9 @@ def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
                 shrunk.save(buffer, format="JPEG", quality=PREVIEW_JPEG_QUALITY)
                 jpeg_bytes = buffer.getvalue()
     except (OSError, ValueError) as error:
-        logger.warning("Could not use the preview picture for '%s': %s", path, error)
+        if path not in _unreadable_preview_paths:
+            _unreadable_preview_paths.add(path)
+            logger.warning("Could not use the preview picture for '%s': %s", path, error)
         return None
     return f"data:image/jpeg;base64,{base64.b64encode(jpeg_bytes).decode('utf-8')}"
 
@@ -273,6 +316,7 @@ def render_data_url(
     ProcessingError
         If the file cannot be drawn.
     """
+    path = _find_moved_frame(path)
     try:
         preview = _siril_preview_picture(path, max_dimensions) if stretch and center is None else None
         if preview is not None:

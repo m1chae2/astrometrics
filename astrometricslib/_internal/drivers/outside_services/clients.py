@@ -423,7 +423,8 @@ def gaia_archive_load_data(**arguments: Any) -> Any:
 
         return Gaia.load_data(**arguments)
 
-    return call_service(GAIA_XP, ask)
+    # A 404 here means this source has no such product.
+    return call_service(GAIA_XP, ask, not_found_is_answer=True)
 
 
 def skybot_cone_search(
@@ -496,7 +497,9 @@ class AstrometryNetSolver:
             The solution.
         """
         return call_service(
-            ASTROMETRY_NET, lambda host: self._client.solve_from_source_list(x, y, width, height, **kwargs)
+            ASTROMETRY_NET,
+            lambda host: self._client.solve_from_source_list(x, y, width, height, **kwargs),
+            not_found_is_answer=True,
         )
 
     def solve_from_image(self, image_path: str, **kwargs: Any) -> Any:
@@ -507,7 +510,11 @@ class AstrometryNetSolver:
         header : `astropy.io.fits.Header` or `None`
             The solution.
         """
-        return call_service(ASTROMETRY_NET, lambda host: self._client.solve_from_image(image_path, **kwargs))
+        return call_service(
+            ASTROMETRY_NET,
+            lambda host: self._client.solve_from_image(image_path, **kwargs),
+            not_found_is_answer=True,
+        )
 
 
 def open_download(url: str, *, timeout_seconds: float | None = None) -> Any:
@@ -531,4 +538,5 @@ def open_download(url: str, *, timeout_seconds: float | None = None) -> Any:
     return call_service(
         service,
         lambda _host: urllib.request.urlopen(url, timeout=timeout),  # ruff: ignore[suspicious-url-open-usage] -- the caller checks https
+        not_found_is_answer=True,
     )

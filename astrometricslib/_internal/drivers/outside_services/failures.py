@@ -55,6 +55,10 @@ class FailureKind(enum.Enum):
     RATE_LIMITED = "rate limited"  # HTTP 429
     BUSY = "busy"  # HTTP 503, or a TAP "too busy" reply
     SERVER_ERROR = "server error"  # another HTTP 5xx, or a reply cut off
+    # HTTP 404 or 410 from a query endpoint: the host is up but no longer
+    # serves the address. It is a kind of its own, not SERVER_ERROR, because
+    # it does not clear in seconds, so the gateway pauses the host at once.
+    ENDPOINT_MISSING = "endpoint missing"
     TIMEOUT = "timeout"
     CONNECTION = "connection"  # refused, reset, no route, name not found
     OTHER = "other"  # the server answered and the answer was bad
@@ -126,15 +130,42 @@ def _kind_for_status(status: int) -> FailureKind | None:
     Returns
     -------
     kind : `FailureKind` or `None`
-        `None` for a status that is not trouble with the host.
+        `None` for a status that is not trouble with the host. A 404 or 410
+        is mapped here; `treat_missing_as_answer` turns it back into an
+        ordinary reply for calls where it means "no such object".
     """
     if status == 429:
         return FailureKind.RATE_LIMITED
     if status == 503:
         return FailureKind.BUSY
+    if status in (404, 410):
+        return FailureKind.ENDPOINT_MISSING
     if status >= 500:
         return FailureKind.SERVER_ERROR
     return None
+
+
+def treat_missing_as_answer(failure: Failure) -> Failure:
+    """Read a 404 or 410 as a real answer, "there is no such thing".
+
+    Some calls ask for one object or file (a Gaia spectrum for one star, a
+    download). A 404 there is the host answering correctly, so the other host
+    would answer the same and the host must not be paused.
+
+    Parameters
+    ----------
+    failure : `Failure`
+        A classified failure.
+
+    Returns
+    -------
+    failure : `Failure`
+        The same failure, or an `FailureKind.OTHER` one when it was a missing
+        endpoint.
+    """
+    if failure.kind is FailureKind.ENDPOINT_MISSING:
+        return Failure(FailureKind.OTHER, failure.status, failure.retry_after_seconds)
+    return failure
 
 
 def classify_failure(error: BaseException) -> Failure:

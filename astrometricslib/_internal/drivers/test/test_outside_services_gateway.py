@@ -1,10 +1,11 @@
 """Purpose: Tests for the gateway every outside request passes through.
 
 Description: The gateway (``outside_services``) applies one rate limit per
-host across processes, pauses a host after 429, 503 or repeated timeouts,
-honors ``Retry-After``, chooses between a service's servers, serves stored
-answers while a service is paused, and counts what happened for a run. No test
-here uses the network: a fake function stands in for each request.
+host across processes, pauses a host after 429, 503, a timeout or
+repeated refusals, honors ``Retry-After``, chooses between a service's
+servers, serves stored answers while a service is paused, and counts what
+happened for a run. No test here uses the network: a fake function stands in
+for each request.
 """
 
 import itertools
@@ -258,19 +259,76 @@ def test_without_retry_after_the_pause_doubles_up_to_the_cap() -> None:
     assert pauses[4:] == pytest.approx([SIMBAD.backoff_cap_seconds] * 3)
 
 
-def test_one_timeout_starts_no_pause_but_two_do() -> None:
-    """A single timeout may be a hiccup; repeated ones pause the host."""
+def test_one_timeout_pauses_the_host_and_the_pause_doubles() -> None:
+    """A timeout pauses at once; each further one doubles the pause."""
+    pauses = [
+        host_state.record_failure(
+            "slow.example",
+            error_text="timeout",
+            immediate=True,
+            retry_after_seconds=None,
+            failures_before_backoff=VIZIER.failures_before_backoff,
+            backoff_base_seconds=VIZIER.backoff_base_seconds,
+            backoff_cap_seconds=VIZIER.backoff_cap_seconds,
+        )
+        for _ in range(5)
+    ]
+
+    assert pauses == pytest.approx([60.0, 120.0, 240.0, 480.0, 900.0])
+
+
+def test_a_refused_connection_still_needs_two_failures_to_pause() -> None:
+    """A fast failure may be a hiccup; only repeated ones pause the host."""
 
     def ask(host: str) -> str:
-        raise TimeoutError("slow")
+        raise ConnectionError("refused")
 
-    for _ in range(SIMBAD.failures_before_backoff - 1):
-        with pytest.raises(TimeoutError):
+    for _ in range(VIZIER.failures_before_backoff - 1):
+        with pytest.raises(ConnectionError):
             call_service(VIZIER, ask)
     assert all(host_state.pause_remaining(host) == 0 for host in VIZIER.hosts)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(ConnectionError):
         call_service(VIZIER, ask)
     assert all(host_state.pause_remaining(host) > 0 for host in VIZIER.hosts)
+
+
+def _time_out_in_process(path: str, queue: Any) -> None:
+    """Time out on a SIMBAD host in a separate process.
+
+    Parameters
+    ----------
+    path : `str`
+        The state file.
+    queue : `multiprocessing.Queue`
+        Receives ``"timed out"`` when the call has raised.
+    """
+    host_state.outside_state_path = lambda: Path(path)
+    gateway.get_configuration = lambda: _Config()
+    try:
+        call_service(SIMBAD, lambda host: (_ for _ in ()).throw(TimeoutError("slow")))
+    except TimeoutError:
+        queue.put("timed out")
+
+
+def test_a_timeout_in_one_process_makes_another_skip_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second caller fails fast and sends nothing to the paused hosts."""
+    path = str(tmp_path / "shared.db")
+    monkeypatch.setattr(host_state, "outside_state_path", lambda: Path(path))
+    context = multiprocessing.get_context("spawn")
+    queue: Any = context.Queue()
+    process = context.Process(target=_time_out_in_process, args=(path, queue))
+    process.start()
+    # A spawned child imports the library first, slow on a busy runner.
+    assert queue.get(timeout=120) == "timed out"
+    process.join(timeout=30)
+    sent: list[str] = []
+
+    with pytest.raises(ServicePausedError):
+        call_service(SIMBAD, lambda host: sent.append(host) or "ok")
+
+    assert sent == []
 
 
 def test_a_bad_reply_never_pauses() -> None:
@@ -284,8 +342,8 @@ def test_a_bad_reply_never_pauses() -> None:
 
 def test_a_good_answer_clears_the_failures() -> None:
     """One answer resets the count of failures in a row."""
-    with pytest.raises(TimeoutError):
-        call_service(VIZIER, lambda host: (_ for _ in ()).throw(TimeoutError("slow")))
+    with pytest.raises(ConnectionError):
+        call_service(VIZIER, lambda host: (_ for _ in ()).throw(ConnectionError("refused")))
     call_service(VIZIER, lambda host: "ok")
 
     assert host_state.read_host_state(VIZIER.hosts[0]).failures == 0
@@ -325,6 +383,64 @@ def test_a_paused_host_is_skipped_and_the_other_is_used() -> None:
     call_service(SIMBAD, lambda host: asked.append(host) or "ok")
 
     assert asked == [CDS]
+
+
+# --- Missing endpoint -------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_a_missing_endpoint_fails_over_pauses_the_host_and_is_remembered(status: int) -> None:
+    """A 404 or 410 on the first host fails over and pauses that host."""
+    asked: list[str] = []
+
+    def ask(host: str) -> str:
+        asked.append(host)
+        if host == HARVARD:
+            raise _http_error(status)
+        return "rows"
+
+    assert call_service(SIMBAD, ask) == "rows"
+    assert host_state.pause_remaining(HARVARD) > 0  # paused after the first failure
+    assert call_service(SIMBAD, ask) == "rows"
+
+    assert asked == [HARVARD, CDS, CDS]  # the host that answered is asked first next time
+
+
+def test_a_missing_endpoint_on_every_host_raises_the_error_of_an_unreachable_service(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both hosts answering 404 give the error of an unreachable service."""
+    with caplog.at_level("WARNING"), pytest.raises(requests.exceptions.HTTPError):
+        call_service(SIMBAD, lambda host: (_ for _ in ()).throw(_http_error(404)))
+
+    assert all(host_state.pause_remaining(host) > 0 for host in SIMBAD.hosts)
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+    with pytest.raises(ServicePausedError):
+        call_service(SIMBAD, lambda host: "ok")
+
+
+def test_a_not_found_answer_for_one_object_is_not_an_outage() -> None:
+    """A 404 for one object is read as "none": no failover, no pause."""
+    asked: list[str] = []
+
+    def ask(host: str) -> str:
+        asked.append(host)
+        raise _http_error(404)
+
+    for _ in range(3):
+        with pytest.raises(requests.exceptions.HTTPError):
+            call_service(SIMBAD, ask, not_found_is_answer=True)
+
+    assert asked == [HARVARD] * 3
+    assert all(host_state.pause_remaining(host) == 0 for host in SIMBAD.hosts)
+
+
+def test_404_and_410_are_classified_as_a_missing_endpoint() -> None:
+    """The classifier tells a missing endpoint from a bad reply."""
+    assert classify_failure(_http_error(404)).kind is FailureKind.ENDPOINT_MISSING
+    assert classify_failure(_http_error(410)).kind is FailureKind.ENDPOINT_MISSING
+    assert classify_failure(_http_error(404)).host_trouble
+    assert classify_failure(_http_error(400)).kind is FailureKind.OTHER
 
 
 # --- Classification ---------------------------------------------------------

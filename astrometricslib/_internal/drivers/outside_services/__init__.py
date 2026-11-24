@@ -3,9 +3,10 @@
 Description: SIMBAD, VizieR, the ESA Gaia archive (and its XP spectra), SkyBoT,
 Astrometry.net and file downloads are asked only through this package. It
 applies one rate limit per host across processes, backs a host off after 429,
-503 or repeated timeouts, picks and falls back between a service's servers, and
-counts what happened for the run. See ``drivers/README.md`` ("Talking to
-outside services"). No module outside this package may import a network client.
+503, a timeout or repeated refusals, picks and falls back between a
+service's servers, and counts what happened for the run. See
+``drivers/README.md`` ("Talking to outside services"). No module outside
+this package may import a network client.
 """
 
 from astrometricslib._internal.drivers.outside_services.clients import (

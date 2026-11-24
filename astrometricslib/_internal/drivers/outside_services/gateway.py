@@ -16,7 +16,13 @@ this program's own run time:
    asked again after a short wait.
 5. Trouble is recorded for the host: a 429 or 503 pauses it (for the
    ``Retry-After`` time when the host gives one, otherwise for a growing time),
-   as do repeated timeouts or refusals. One good answer clears the pause.
+   as does a 404 or 410 from a query endpoint (the host no longer serves it;
+   the pause starts at once, since that does not clear in seconds), and
+   a timeout (on the first one, since it costs the full time limit and jobs
+   started together would each pay it), and repeated refusals. One good
+   answer clears the pause. A call that asks for one object or file may say
+   a 404 is an ordinary "not found" (``not_found_is_answer``); then nothing
+   fails over and no pause starts.
 
 Everything is also counted as a `ServiceEvent`. A job that opens
 `catalog_use_scope` can then say "12 live, 340 stored, SIMBAD paused 4 min".
@@ -41,6 +47,7 @@ from astrometricslib._internal.drivers.outside_services.failures import (
     ServicePausedError,
     ServiceTimeoutError,
     classify_failure,
+    treat_missing_as_answer,
 )
 from astrometricslib._internal.drivers.outside_services.services import (
     RETRY_AFTER_CAP_SECONDS,
@@ -257,7 +264,22 @@ def _record_failure(service: OutsideService, host: str, error: BaseException, fa
     pause = host_state.record_failure(
         host,
         error_text=str(error),
-        immediate=failure.kind in (FailureKind.RATE_LIMITED, FailureKind.BUSY),
+        # A missing endpoint will not fix itself within seconds, so waiting for
+        # a second failure would only cost the next caller another slow miss.
+        # A timeout also pauses on the first failure: it costs the whole
+        # request time limit (30 to 60 s), and jobs that start together would
+        # each pay it before the host is paused. The pause is kept in the
+        # shared state file, so the others see it at once. Refused connections
+        # and 5xx errors fail fast, so one extra try costs little and they
+        # keep FAILURES_BEFORE_BACKOFF. The pause reuses the service's base
+        # and cap; no new number.
+        immediate=failure.kind
+        in (
+            FailureKind.RATE_LIMITED,
+            FailureKind.BUSY,
+            FailureKind.ENDPOINT_MISSING,
+            FailureKind.TIMEOUT,
+        ),
         retry_after_seconds=(
             None
             if failure.retry_after_seconds is None
@@ -274,7 +296,9 @@ def _record_failure(service: OutsideService, host: str, error: BaseException, fa
         )
 
 
-def call_service[T](service: OutsideService | str, ask: Callable[[str], T]) -> T:
+def call_service[T](
+    service: OutsideService | str, ask: Callable[[str], T], *, not_found_is_answer: bool = False
+) -> T:
     """Ask an outside service one question under the gateway's rules.
 
     Parameters
@@ -284,6 +308,10 @@ def call_service[T](service: OutsideService | str, ask: Callable[[str], T]) -> T
     ask : `Callable` [[`str`], `object`]
         Sends the question to the host whose name it is given and returns the
         answer. It may be called once per host, and again after a busy reply.
+    not_found_is_answer : `bool`, optional
+        `True` when the call asks for one object or file, so an HTTP 404 or 410
+        means "there is none" and not "this endpoint is gone". The error is
+        raised at once, no other host is asked and no pause starts.
 
     Returns
     -------
@@ -324,6 +352,8 @@ def call_service[T](service: OutsideService | str, ask: Callable[[str], T]) -> T
             answer = _ask_host(service, host, ask)
         except _REQUEST_ERRORS as error:
             failure = classify_failure(error)
+            if not_found_is_answer:
+                failure = treat_missing_as_answer(failure)
             _record_failure(service, host, error, failure)
             if position == len(candidates) - 1 or not failure.host_trouble:
                 raise

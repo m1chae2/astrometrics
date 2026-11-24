@@ -521,6 +521,7 @@ stacking.faint_source_smoothing_sigmas_px,STK-36,measurement,Partly measured
 stacking.faint_source_threshold_sigmas,STK-36,measurement,Partly measured
 stacking.fallback_sky_level,STK-29,measurement,Partly measured
 stacking.finder_fwhm_pixels,STK-D17,measurement,Design estimate
+stacking.flat_clipped_share_limit,STK-D18,exclusion criteria,Design estimate
 stacking.frames_sampled_per_group,STK-D26,measurement,Design estimate
 stacking.gain_brightest_fraction,STK-D10,measurement,Design estimate
 stacking.gain_mid_range_percentiles,STK-D10,measurement,Design estimate

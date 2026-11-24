@@ -166,8 +166,22 @@ _SATURATED_FRACTION_OF_FULL_SCALE = TunedParameter(
 # A flat frame is clipped when more than this share of the pixels of any one
 # colour channel (of the whole frame, for a monochrome sensor) are saturated.
 # This is the limit `assess_flats` has always used for a bright flat, now
-# applied to each frame and each channel.
-_CLIPPED_SHARE_LIMIT = 0.001
+# applied to each frame and each channel: one pixel in a thousand at the
+# ceiling. Not measured; on the Nikon D5300 flats of 2024-02-01 the clipped
+# frames have 100% of their green and blue pixels at the ceiling and the kept
+# ones none, so any limit between the two gives the same split.
+_CLIPPED_SHARE_LIMIT = TunedParameter(
+    name="stacking.flat_clipped_share_limit",
+    default=0.001,
+    unit="fraction of pixels",
+    description=(
+        "Largest share of saturated pixels in any one colour channel of a flat frame before it is left out."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D18",
+)
 
 # The names of the Bayer letters, for the sentence that reports clipping.
 _CHANNEL_NAMES = {"R": "red", "G": "green", "B": "blue"}
@@ -337,7 +351,7 @@ def find_clipped_channels(frame: np.ndarray, pattern: str, saturation_level: flo
     """
     if not pattern:
         saturated_share = float(np.mean(frame >= saturation_level))
-        return [""] if saturated_share > _CLIPPED_SHARE_LIMIT else []
+        return [""] if saturated_share > resolve(_CLIPPED_SHARE_LIMIT).value else []
     saturated_count: dict[str, int] = {}
     pixel_count: dict[str, int] = {}
     for position, letter in enumerate(pattern):
@@ -349,7 +363,7 @@ def find_clipped_channels(frame: np.ndarray, pattern: str, saturation_level: flo
     clipped = [
         letter
         for letter in saturated_count
-        if saturated_count[letter] > _CLIPPED_SHARE_LIMIT * pixel_count[letter]
+        if saturated_count[letter] > resolve(_CLIPPED_SHARE_LIMIT).value * pixel_count[letter]
     ]
     return sorted(clipped, key=lambda letter: (_CHANNEL_ORDER.find(letter) % 4, letter))
 
@@ -607,7 +621,8 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
             f"{full_scale_source}), below {minimum_flat_level_fraction:.0%}, so their noise is high"
         )
     saturated = float(np.mean(first >= resolve(_SATURATED_FRACTION_OF_FULL_SCALE).value * full_scale))
-    if level_fraction > resolve(MAXIMUM_FLAT_LEVEL_FRACTION).value or saturated > _CLIPPED_SHARE_LIMIT:
+    clipped_share_limit = resolve(_CLIPPED_SHARE_LIMIT).value
+    if level_fraction > resolve(MAXIMUM_FLAT_LEVEL_FRACTION).value or saturated > clipped_share_limit:
         issues.append(
             f"{BRIGHT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale ({full_scale:g}, "
             f"{full_scale_source}) with {saturated:.2%} of pixels saturated, so the response may "

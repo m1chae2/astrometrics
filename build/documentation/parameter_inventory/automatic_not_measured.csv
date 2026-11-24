@@ -505,6 +505,7 @@ stacking.detection_sigma,STK-D17,measurement,Design estimate
 stacking.elongation_outlier_sigmas,STK-01,exclusion criteria,Partly measured
 stacking.elongation_rise_above_median,STK-01,exclusion criteria,Partly measured
 stacking.elongation_rise_sigmas,STK-01,exclusion criteria,Partly measured
+stacking.expected_fwhm_minimum_weight_share,STK-D80,measurement,Design estimate
 stacking.exposure_group_gain_tolerance,STK-20,exclusion criteria,Partly measured
 stacking.exposure_relative_tolerance,STK-35,exclusion criteria,Partly measured
 stacking.extended_light_brightness,STK-29,measurement,Partly measured

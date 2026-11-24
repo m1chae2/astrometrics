@@ -364,3 +364,49 @@ def test_one_frame_needs_no_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     """One frame is measured in this process."""
     monkeypatch.undo()
     assert fwhm_sampling._fwhm_worker_count(1) == 1
+
+
+def test_no_expected_width_when_too_few_frames_have_a_width() -> None:
+    """With widths for 6 of 10 frames, no expected width is given."""
+    frames = [SimpleNamespace(path=str(index)) for index in range(10)]
+
+    def fake_measure(path: str) -> float | None:
+        """Give a width only to the stack and to frames 0 to 5.
+
+        Returns
+        -------
+        width : `float` or `None`
+            3 pixels for the stack and frames 0 to 5, otherwise `None`.
+        """
+        if path == "stack.fits" or int(path) < 6:
+            return 3.0
+        return None
+
+    summary = make_summary()
+    with patch(MEASURE, side_effect=fake_measure):
+        fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", frames)
+
+    assert summary.stacking_metrics.expected_stack_fwhm_px is None
+    assert summary.stacking_metrics.median_input_fwhm_px == pytest.approx(3.0)
+    assert summary.stacking_metrics.stacked_fwhm_px == pytest.approx(3.0)
+
+
+def test_expected_width_is_given_when_nearly_every_frame_has_a_width() -> None:
+    """With widths for 19 of 20 frames (95%), the expected width is given."""
+    frames = [SimpleNamespace(path=str(index)) for index in range(20)]
+
+    def fake_measure(path: str) -> float | None:
+        """Give every frame but the last a width of 3 pixels.
+
+        Returns
+        -------
+        width : `float` or `None`
+            `None` for frame 19, otherwise 3 pixels.
+        """
+        return None if path == "19" else 3.0
+
+    summary = make_summary()
+    with patch(MEASURE, side_effect=fake_measure):
+        fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", frames)
+
+    assert summary.stacking_metrics.expected_stack_fwhm_px == pytest.approx(3.0)

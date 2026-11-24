@@ -16,9 +16,35 @@ from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# The share of the stack's weight whose frames must have a measured star width
+# before the stack's expected width is given. A colour (CFA) frame with no
+# stored width cannot be measured here, so a night whose frames were never
+# measured drops out of the prediction; on NGC 6888 (Nikon D5300) 67 of 156
+# frames had no width, nearly all from the wider second night, and the
+# prediction fell to 2.9 px against inputs of 4.7 px, so the sharpness gate
+# failed a stack that was not blurred. Below this share the expected width is
+# not given and the gate is not checked. Design estimate.
+EXPECTED_FWHM_MINIMUM_WEIGHT_SHARE = TunedParameter(
+    name="stacking.expected_fwhm_minimum_weight_share",
+    default=0.9,
+    unit="fraction",
+    description="Share of the stack's weight needing a measured frame star width to predict its width.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D80",
+)
 
 __all__ = ["measure_fwhm_degradation", "stored_frame_widths"]
 
@@ -291,18 +317,33 @@ def measure_fwhm_degradation(
 
     input_fwhms: list[float] = []
     input_weights: list[float] = []
+    total_weight = 0.0
     for index, frame in enumerate(frames):
+        frame_weight = 1.0 if weights is None else weights[index]
+        total_weight += frame_weight
         width = known.get(frame.path)
         if width is None:
             continue
         input_fwhms.append(width)
-        input_weights.append(1.0 if weights is None else weights[index])
+        input_weights.append(frame_weight)
     expected = expected_stack_fwhm(input_fwhms, input_weights)
     if input_fwhms:
         import statistics as _statistics
 
         summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
-        summary.stacking_metrics.expected_stack_fwhm_px = expected
+        weight_share = sum(input_weights) / total_weight if total_weight > 0 else 0.0
+        minimum_share = float(resolve(EXPECTED_FWHM_MINIMUM_WEIGHT_SHARE).value)
+        if weight_share >= minimum_share:
+            summary.stacking_metrics.expected_stack_fwhm_px = expected
+        else:
+            logger.info(
+                "Star widths are known for %d of %d stacked frames (%.0f%% of the stack's weight, "
+                "below %.0f%%), so the stack's expected width is not given and its sharpness is not judged.",
+                len(input_fwhms),
+                len(frames),
+                100.0 * weight_share,
+                100.0 * minimum_share,
+            )
 
     if stacked_fwhm is None:
         stacked_fwhm = measure_image_fwhm(stacked_path)

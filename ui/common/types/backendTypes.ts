@@ -132,6 +132,7 @@ export interface FrameRecord {
   focuserTemperatureC?: number | null;
   fileSize?: number | null;
   fileModifiedNs?: number | null;
+  headerFieldsVersion?: number | null;
   qualityMeasuredFileSize?: number | null;
   qualityMeasuredFileModifiedNs?: number | null;
   qualityMeasuredMetricSet?: string | null;

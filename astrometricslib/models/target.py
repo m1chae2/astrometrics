@@ -153,6 +153,12 @@ class FrameRecord(BaseModel):
     # Records saved before these existed have None and are read once.
     file_size: int | None = Field(default=None, alias="fileSize")
     file_modified_ns: int | None = Field(default=None, alias="fileModifiedNs")
+    # Which set of header fields the last header read filled in
+    # (`frame_scanning.HEADER_FIELDS_VERSION`). A record read before a field
+    # was added to that set is read once more even when its file is unchanged,
+    # so the new field is filled in. None for a record saved before this
+    # existed.
+    header_fields_version: int | None = Field(default=None, alias="headerFieldsVersion")
 
     # The file size and last-change time the frame had when its quality
     # measurements were last recorded (`record_frame_measurements`). A frame

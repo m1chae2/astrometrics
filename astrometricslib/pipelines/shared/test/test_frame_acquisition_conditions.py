@@ -141,3 +141,30 @@ def test_refresh_of_a_missing_file_reports_failure(tmp_path: Path) -> None:
     record = FrameRecord(path=str(tmp_path / "gone.fits"), role="LIGHT", exposure="30.0")
 
     assert refresh_acquisition_conditions(record) is False
+
+
+def test_refresh_replaces_the_stand_in_iso_with_the_header_value(tmp_path: Path) -> None:
+    """A stand-in ISO 800 is replaced by the real ISOSPEED on refresh."""
+    from astrometricslib.pipelines.shared.frame_scanning import (
+        HEADER_FIELDS_VERSION,
+        refresh_acquisition_conditions,
+    )
+
+    record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", ISOSPEED=200.0))
+    record.iso = "800"
+    record.header_fields_version = None
+
+    assert refresh_acquisition_conditions(record) is True
+    assert record.iso == "200"
+    assert record.header_fields_version == HEADER_FIELDS_VERSION
+
+
+def test_refresh_keeps_the_stored_iso_when_the_header_has_none(tmp_path: Path) -> None:
+    """A header with no ISO or gain leaves the stored value alone."""
+    from astrometricslib.pipelines.shared.frame_scanning import refresh_acquisition_conditions
+
+    record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits"))
+    record.iso = "400"
+
+    assert refresh_acquisition_conditions(record) is True
+    assert record.iso == "400"

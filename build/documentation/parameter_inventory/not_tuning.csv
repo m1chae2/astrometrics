@@ -46,6 +46,7 @@ astrometricslib/_internal/drivers/outside_services/services.py,FAILURES_BEFORE_B
 astrometricslib/_internal/drivers/outside_services/services.py,GAIA_XP_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
 astrometricslib/_internal/drivers/outside_services/services.py,RETRY_AFTER_CAP_SECONDS,Back-off after trouble with an outside service; affects only failure handling (AST-D27)
 astrometricslib/_internal/drivers/outside_services/services.py,SIMBAD_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
+astrometricslib/_internal/drivers/outside_services/services.py,SIRIL_GAIA_CATALOG_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
 astrometricslib/_internal/drivers/outside_services/services.py,SKYBOT_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
 astrometricslib/_internal/drivers/outside_services/services.py,VIZIER_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
 astrometricslib/_internal/drivers/program_setup.py,DOWNLOAD_CHUNK_BYTES,software plumbing
@@ -108,9 +109,9 @@ astrometricslib/foundation/config.py,[Processing.Siril] flat_match_time_limit_se
 astrometricslib/foundation/config.py,[Processing] prefetch_workers,Plumbing: worker count
 astrometricslib/foundation/errors.py,RPC_CODES,Plumbing or protocol constant
 astrometricslib/foundation/jobs/runner.py,JobHandle.mark.progress_current,Progress value of a finished job; plumbing
+astrometricslib/foundation/jobs/runner.py,_JOB_RECORD_WAIT_SECONDS,Extra wait for a slow job-row write after the grace period; plumbing
 astrometricslib/foundation/jobs/runner.py,background_job.grace_period_seconds,Job wait before returning a handle; plumbing
 astrometricslib/foundation/jobs/runner.py,run_as_background_job.grace_period_seconds,Job wait before returning a handle; plumbing
-astrometricslib/foundation/jobs/runner.py,_JOB_RECORD_WAIT_SECONDS,Extra wait for a slow job-row write after the grace period; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore._connect.timeout,Timeout or wait; affects only failure handling
 astrometricslib/foundation/jobs/store.py,JobStore.get_jobs_by_target.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_jobs.limit,Row or item cap that callers pass; plumbing
@@ -221,11 +222,15 @@ astrometricslib/pipelines/photometry/processing/observing_window.py,MINIMUM_NIGH
 astrometricslib/pipelines/photometry/processing/period_checks.py,holdout_cycle.seed,Random seed; reproducibility only
 astrometricslib/pipelines/photometry/processing/period_checks.py,holdout_transit.shuffle_count,"Speed only; box_search treats 0 as its default, so 1 is the smallest real value"
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_CANDIDATE_PEAK_COUNT,Sampling numerics
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_CYCLE_SEARCH_THREADS,Compute budget
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_DIP_SEARCH_THREADS,Compute budget
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_SEARCH_GRID_POINTS,Compute budget
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_REDUCED_SHUFFLE_COUNT,Compute budget
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_REFINE_HALF_WIDTH_COARSE_STEPS,Sampling numerics
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_SAMPLES_PER_PEAK,Sampling numerics
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_SLOW_SEARCH_WORK_LIMIT,Compute budget
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_THREADED_WORK_LIMIT,Compute budget
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_VERSIONS_PER_THREAD_ROUND,Compute budget
 astrometricslib/pipelines/photometry/processing/scintillation_term.py,_FIT_PASSES,Number of fit-and-clip passes; the fit settles in two or three
 astrometricslib/pipelines/photometry/processing/scintillation_term.py,_MINIMUM_FIT_COEFFICIENT_SQUARED,Numerical floor so the clip and weights stay finite
 astrometricslib/pipelines/photometry/processing/scintillation_term.py,_MINIMUM_MEMBERS_PER_FRAME,Smallest count that forms a leave-one-out mean of more than one star
@@ -237,6 +242,7 @@ astrometricslib/pipelines/photometry/run_warnings.py,_MAXIMUM_KEPT_WARNINGS,Row 
 astrometricslib/pipelines/photometry/session_tie.py,_MAD_TO_SIGMA,Statistical constant 1.4826 (MAD to standard deviation)
 astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety limit on the clipping loop; it settles in two or three rounds
 astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record format version: which header fields a frame record holds; not a measurement
 astrometricslib/pipelines/shared/image_conversions.py,ImageConverter.convert_fits_to_png_with_stats.max_dimensions,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of the frame or layer; 0 means the first
 astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
@@ -440,21 +446,28 @@ astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMU
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MINIMUM_HOMOGRAPHY_SCALE,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SECONDS_PER_HOUR,unit or physical constant
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SLOPE_SAMPLE_SEED,software plumbing
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_MEDIAN_TO_SIGMA,Statistical constant: 1 / 0.6745 turns the median distance of half a Gaussian into a standard deviation.
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,choose_background_method.graxpert.sky_bins,Count of sky bins; zero when no bins were measured.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_QUARTER_SKY_BINS,Sample-size guard: sky bins needed in a quarter of the frame (of 1024) to check the sign of the falloff. Not tuned. Partly measured STK-61.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RADIAL_FALLOFF,Noise floor of the radial fit (the bin medians scatter by 0.1% to 0.3%); a smaller falloff is left out. Not tuned. Partly measured STK-61.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RING_SKY_SHARE,Plain majority guard on the sky share of the two outer rings (the 13 stacks read 0.70 to 1.00). Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_SKY_BIN_SHARE,Plain minority guard that keeps the sky clip from removing nearly every bin. Not tuned. Partly measured STK-61.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,QUARTER_RISE_TOLERANCE,Allowance for bin noise when a quarter of the frame is checked for brightening toward its corner (the 13 stacks read -1.24% to +0.06%). Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,SKY_CLIP_ROUNDS,Cap on the clip rounds; the kept bins stopped changing after 4 to 6 rounds. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,SKY_CLIP_SPREADS,Statistical cut of the sky clip (2 spreads above the plane keeps about 98% of a clean Gaussian sky). Partly measured STK-61.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_MEDIAN_TO_SIGMA,Statistical constant: 1 / 0.6745 turns the median distance of half a Gaussian into a standard deviation.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_OUTER_RING_RANGES,Definition of the two outer rings of the 64 by 64 grid in r squared (0.64 to 1 and 1 to 2); geometry of the frame.
+astrometricslib/pipelines/stacking/post_processing/sky_plane.py,choose_background_method.graxpert.sky_bins,Count of sky bins; zero when no bins were measured.
 astrometricslib/pipelines/stacking/post_processing/stack_blank_tuning.py,PERCENT_PER_FRACTION,Unit conversion
 astrometricslib/pipelines/stacking/post_processing/stack_comparison.py,_sentence.scale,Unit scale; 1 means unchanged
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_SIGMA_ERROR_FACTOR,Statistical constant
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MEDIAN_ERROR_FACTOR,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/stack_noise.py,_RECENT_STACK_SOLVES_KEPT,Cache size: how many recent plate solves are kept in memory; affects only run time
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,_STALE_SCRATCH_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_MINIMUM_ROOM,Divide-by-zero guard.
+astrometricslib/pipelines/stacking/post_processing/stretch_sky.py,_CLIP_CHECK_SAMPLE_COUNT,"Sample size of the clipped-share check, a speed limit and not a threshold. Design estimate STK-D78."
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,EDGE_MARGIN_PX,Display margin so the zoomed view has pixels around the star
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_MINIMUM_FLUX_FRACTION,"Display choice of a reference star, picked by eye; does not act on data"
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_STAR_COUNT,Number of candidate stars offered to the caller for a display; not a detection limit
@@ -720,15 +733,3 @@ wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_SPAN_OBJECTS,Tab
 wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_TIME_STEPS,Table size cap
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_DAY_HOURS,unit or physical constant
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_RATE,unit or physical constant
-astrometricslib/pipelines/stacking/post_processing/stretch_sky.py,_CLIP_CHECK_SAMPLE_COUNT,"Sample size of the clipped-share check, a speed limit and not a threshold. Design estimate STK-D78."
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RADIAL_FALLOFF,Noise floor of the radial fit (the bin medians scatter by 0.1% to 0.3%); a smaller falloff is left out. Not tuned. Partly measured STK-61.
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RING_SKY_SHARE,Plain majority guard on the sky share of the two outer rings (the 13 stacks read 0.70 to 1.00). Not tuned. Partly measured STK-61.
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_OUTER_RING_RANGES,Definition of the two outer rings of the 64 by 64 grid in r squared (0.64 to 1 and 1 to 2); geometry of the frame.
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_QUARTER_SKY_BINS,Sample-size guard: sky bins needed in a quarter of the frame (of 1024) to check the sign of the falloff. Not tuned. Partly measured STK-61.
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,QUARTER_RISE_TOLERANCE,Allowance for bin noise when a quarter of the frame is checked for brightening toward its corner (the 13 stacks read -1.24% to +0.06%). Not tuned. Partly measured STK-61.
-astrometricslib/pipelines/stacking/post_processing/stack_noise.py,_RECENT_STACK_SOLVES_KEPT,Cache size: how many recent plate solves are kept in memory; affects only run time
-astrometricslib/_internal/drivers/outside_services/services.py,SIRIL_GAIA_CATALOG_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
-astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_CYCLE_SEARCH_THREADS,Compute budget
-astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_DIP_SEARCH_THREADS,Compute budget
-astrometricslib/pipelines/photometry/processing/periodicity_search.py,_THREADED_WORK_LIMIT,Compute budget
-astrometricslib/pipelines/photometry/processing/periodicity_search.py,_VERSIONS_PER_THREAD_ROUND,Compute budget

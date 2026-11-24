@@ -35,7 +35,7 @@ def header_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             A bare record.
         """
         reads.append(path)
-        return FrameRecord(path=path)
+        return FrameRecord(path=path, headerFieldsVersion=frame_scanning.HEADER_FIELDS_VERSION)
 
     def fake_refresh(frame: FrameRecord) -> bool:
         """Count the read.
@@ -46,6 +46,7 @@ def header_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             Always `True`.
         """
         reads.append(frame.path)
+        frame.header_fields_version = frame_scanning.HEADER_FIELDS_VERSION
         return True
 
     monkeypatch.setattr(frame_scanning, "create_frame_record_from_fits", fake_create)
@@ -167,3 +168,20 @@ def test_new_fields_survive_a_round_trip() -> None:
     dumped = record.model_dump(by_alias=True)
     assert dumped["fileSize"] == 7
     assert FrameRecord.model_validate(dumped).file_modified_ns == 9
+
+
+def test_a_record_read_before_the_current_header_fields_is_read_again(
+    tmp_path: Path, header_reads: list[str]
+) -> None:
+    """An unchanged file with an older header-fields record is read again."""
+    folder = _make_target_folder(tmp_path)
+    (folder / "a.fits").write_bytes(b"aaaa")
+    target = Target(id="M 1")
+    _scan(target, tmp_path)
+    target.frames[0].header_fields_version = None
+    header_reads.clear()
+    _scan(target, tmp_path)
+    assert header_reads == [str(folder / "a.fits")]
+    header_reads.clear()
+    _scan(target, tmp_path)
+    assert header_reads == []

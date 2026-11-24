@@ -99,7 +99,10 @@ class TargetService:
 
         The library scans each target folder under the frames folder's
         ``lights`` folder, creates a target for a folder that has none, and
-        saves each target as it finishes.
+        saves each target as it finishes. It also reads again the header of
+        each known frame whose file changed, or whose record was made before
+        a header field (such as the ISO) was added. An unchanged, up-to-date
+        frame is not opened.
 
         Parameters
         ----------
@@ -113,7 +116,9 @@ class TargetService:
         report : `ReindexReport`
             Each target's frame count before and after.
         """
-        return self.astrometrics.targets.reindex_frames(prune_missing=prune_missing, on_progress=on_progress)
+        return self.astrometrics.targets.reindex_frames(
+            prune_missing=prune_missing, refresh_headers=True, on_progress=on_progress
+        )
 
     def get_targets(self, target_id: str | None = None, detail: str = "full") -> Any:
         """Unified targets getter.

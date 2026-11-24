@@ -173,10 +173,11 @@ Every Python example assumes the library is installed and configured with your o
 
 **How noisy a master flat may be**
 
-- **Claim:** A master flat whose relative noise is at most 0.5% adds under 3% to the variance of a typical stack's sky noise. A noisier flat leaves a visible fixed pattern, and blurring it removes most of that pattern.
+- **Claim:** A master flat whose relative noise is at most 0.5% adds under 3% to the variance of a typical stack's sky noise. A noisier flat leaves a visible fixed pattern, and blurring it removes most of that pattern. A flat frame that is clipped (more than 0.1% of the pixels of one color channel at the saturation level of STK-D18) has lost the vignette in that channel, so it is left out of the master flat. Averaging it in would flatten the master in the clipped channels only and tint the corners of every calibrated light.
 - **Settings it supports:**
   - code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `pipelines/stacking/pre_processing/flat_calibration.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.MAXIMUM_FLAT_NOISE_FRACTION -->
-- **Status:** Partly measured. The stack noise level and the effect of one bad flat are measured; the 3% variance figure follows from them by arithmetic.
+  - the per-frame clipping rule `find_clipped_channels` in the same file, which uses the saturation level of STK-D18 and the 0.001 share limit `_CLIPPED_SHARE_LIMIT` that the bright-flat check always used. Relation: sanity check only (one flat set, shown below). <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.find_clipped_channels -->
+- **Status:** Partly measured. The stack noise level and the effect of one bad flat are measured; the 3% variance figure follows from them by arithmetic. The per-frame clipping rule is a design estimate: it was written after one set was seen, and no stack has been compared before and after it yet.
 - **Data you need:** A flat set (ideally a single flat and a set of 20 or more), and an undithered stack (frames not moved between exposures) of a faint field calibrated with each.
 - **Procedure:**
   1. Measure the flat set the way the stacker does.
@@ -201,11 +202,13 @@ Every Python example assumes the library is installed and configured with your o
 - **Acceptance criterion:** If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `fine_grain_noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner; it is not the noise number of the target report, which `measure_stack` now reports as `normalized_noise`, see STK-36). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **Our result:** The sky noise of the ZWO ASI533MM Pro stacks of 20 targets was 3% to 6% of the sky level. The master flat of the single-flat library measured 4.5%, and its fixed pattern made up 86% of the fine-scale noise of the undithered M 101 stack. Smoothing that flat halved the stack's noise. Dates not recorded.
-- **Verdict:** Not judged.
-- **Limits:** One bad flat on one stack. A dithered stack hides the pattern, so the same flat would look harmless there.
+
+  Clipping, found 2026-11-23: the 40 flats of the Nikon D5300 with the Apertura 75Q (2024-02-01, RGGB, bias about 600 ADU, clip ceiling 16383). Frames 1 to 20 (0.00025 s) are faint and unclipped. Frames 21 to 40 (0.01 s) have the green and blue pixels at 16383 in every pixel, and red near 8600. The old check read only frame 1, so it never reported them. The master of all 40 had corner to center ratios of red 0.756, green 0.971 and blue 1.000 (the Siril master, which the calibrated lights are divided by). The faint frames alone give about 0.75 in each channel, so dividing by the old master left the corners about 32% too red. A NumPy median master of the library's frames (bias level 600 subtracted, corner and center boxes of 200 pixels per channel) gave red 0.695, green 0.989 and blue 0.987 for all 40 frames, and red 0.737, green 0.723 and blue 0.724 for the 20 kept frames. The check reports "20 of 40 flat frames are clipped (green and blue at the sensor's ceiling) and were left out of the master flat". The kept frames are faint (6.7% of full scale) and the master flat noise is 0.80%, so those two warnings now describe the real master.
+- **Verdict:** Not judged. The clipping rule was fitted to one flat set and has no held-out set.
+- **Limits:** One bad flat on one stack. The clipping rule was seen on one camera and one night of flats, and a set that is clipped in every frame is kept whole, with a warning. A dithered stack hides the pattern, so the same flat would look harmless there.
 - **To tune for your setup:** If your stacks are much less noisy than 3% of the sky (long, dark-site stacks), lower the limit so the flat stays well below the stack noise. Re-run the comparison after each change.
-- **Regenerate with:** No script.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_flat_calibration.py`.
+- **Regenerate with:** No script. To repeat the clipping check, call `assess_flats` on the flat set and read `left_out_paths` and `issues`. Then compare the corner to center ratio of each color channel in the master flat (they should be nearly equal), and the red and green corner to center ratios of the stack's sky.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_flat_calibration.py`, `astrometricslib/_internal/drivers/test/test_flat_master_preparation.py`.
 - **Raw record:** None kept.
 
 ### STK-06

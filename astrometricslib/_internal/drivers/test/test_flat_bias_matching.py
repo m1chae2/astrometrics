@@ -262,7 +262,7 @@ def test_the_flat_cache_key_follows_the_bias(tmp_path: Path) -> None:
 
 def test_the_recipe_is_version_six_and_other_kinds_have_none() -> None:
     """Raising the recipe retires every older flat master."""
-    assert FLAT_MASTER_RECIPE == "flat-recipe-6"
+    assert FLAT_MASTER_RECIPE == "flat-recipe-7"
     assert _master_recipe("flat_bias") == ""
     assert _master_recipe("flat") == FLAT_MASTER_RECIPE
 

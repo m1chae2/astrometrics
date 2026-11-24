@@ -168,3 +168,26 @@ def test_staged_flats_are_judged_against_the_named_cameras_clip_ceiling(tmp_path
     assert any(issue.startswith("flats are faint:") for issue in without_camera.issues)
     assert not any(issue.startswith("flats are faint:") for issue in with_camera.issues)
     assert with_camera.full_scale == pytest.approx(16383.0)
+
+
+def test_clipped_flats_are_taken_out_of_the_staged_folder_only(tmp_path: Path) -> None:
+    """Staging drops the clipped frames' names and keeps the library files."""
+    library = tmp_path / "library"
+    library.mkdir()
+    staged = tmp_path / "run" / "flats"
+    staged.mkdir(parents=True)
+    for index, counts in enumerate([8000, 8000, 16383, 16383]):
+        data = np.full((SIZE, SIZE), counts, dtype=np.uint16)
+        fits.writeto(library / f"flat_{index}.fits", data)
+        stage_file(str(library / f"flat_{index}.fits"), str(staged / f"flat_source_{index:05d}.fits"))
+    before = _calibration_source_fingerprint(str(staged))
+    assessment = make_processor().assess_staged_flats(
+        str(tmp_path / "run"), uses_color_filter_array=False, assess_flats=assess_flats, camera="Nikon D5300"
+    )
+    assert len(assessment.left_out_paths) == 2
+    assert sorted(path.name for path in staged.iterdir()) == [
+        "flat_source_00000.fits",
+        "flat_source_00001.fits",
+    ]
+    assert len(list(library.iterdir())) == 4
+    assert _calibration_source_fingerprint(str(staged)) != before

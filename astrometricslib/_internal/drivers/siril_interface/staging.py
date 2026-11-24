@@ -130,14 +130,17 @@ _CALIBRATION_MASTER_KINDS = (
 # the master flat is built or blurred does not reuse one built the old way.
 # Increase it whenever that changes what the master flat contains, including
 # a change to how the stacking pipeline's flat assessment picks the blur
-# width. Version 4 subtracts the bias from a lone flat too. Version 5 is
+# width or which flat frames it leaves out. Version 4 subtracts the bias from
+# a lone flat too. Version 5 is
 # saved as 32-bit floating point (the script sets ``set32bits``), not as the
 # 16-bit integers of Siril's default preference. Version 6 subtracts a bias
 # taken at the flats' own gain and offset, and the key also holds that bias's
 # fingerprint (see `_master_recipe`). Earlier versions subtracted the lights'
 # bias, which left a pedestal in the flat when the offsets differed, and
-# shared one cached master between runs that used different biases.
-FLAT_MASTER_RECIPE = "flat-recipe-6"
+# shared one cached master between runs that used different biases. Version
+# 7 leaves clipped flat frames out of the master (see `assess_staged_flats`),
+# so a master built from a set with clipped frames is built again.
+FLAT_MASTER_RECIPE = "flat-recipe-7"
 
 # Written into the key of the stored master darks, like the flat recipe
 # above. Version 2 combines the darks with the median, so that one cosmic-ray
@@ -406,6 +409,13 @@ class SirilStaging(SirilSession):
         applies the blur (its ``gauss`` command) to the master flat it
         builds.
 
+        Flat frames the assessment finds clipped are left out of the master
+        flat here, and only here: their staged names are removed from the
+        run's ``flats`` folder. The frames in the library are not touched,
+        because a staged name is only a link to them. The count and the
+        fingerprint of the folder, and so the master flat's cache key, then
+        describe the frames that are used.
+
         A colour (Bayer) sensor's flat is measured but never smoothed,
         because blurring the mosaic would mix its colours.
 
@@ -446,6 +456,13 @@ class SirilStaging(SirilSession):
         assessment = assess_flats(flat_paths, camera)
         for issue in assessment.issues:
             (job_logger or logger).warning("Flat calibration: %s", issue)
+        for left_out_path in assessment.left_out_paths:
+            try:
+                os.unlink(left_out_path)
+            except OSError as unlink_error:
+                (job_logger or logger).warning(
+                    "Flat calibration: could not leave out clipped flat %s: %s", left_out_path, unlink_error
+                )
         if assessment.needs_smoothing and uses_color_filter_array:
             note = "not smoothed: blurring a colour sensor's flat would mix its colours"
             (job_logger or logger).warning("Flat calibration: %s", note)

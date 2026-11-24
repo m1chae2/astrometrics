@@ -77,7 +77,9 @@ __all__ = [
 # Raised to 5 when imaging registration began to use Lanczos interpolation
 # without clamping (`-interp=la -noclamp`), which narrows the stars of every
 # stack (2026-11-22).
-STACKING_ALGORITHM_VERSION = 5
+# Raised to 6 when flat frames clipped in a colour channel began to be left
+# out of the master flat (same flat frames, different master).
+STACKING_ALGORITHM_VERSION = 6
 
 # What follows a stack's own name (without .fits) in the name of its record.
 STACK_INPUTS_SUFFIX = "_inputs.json"

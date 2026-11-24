@@ -151,7 +151,7 @@ def image_parity_text(stack_path: str) -> str:
         header = read_header(stack_path)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FITSFixedWarning)
-            wcs = WCS(fits.Header(header))
+            wcs = WCS(fits.Header(header), naxis=2)
         if not wcs.has_celestial:
             return PARITY_UNKNOWN
         determinant = float(np.linalg.det(np.asarray(wcs.celestial.pixel_scale_matrix, dtype=float)))

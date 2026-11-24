@@ -753,7 +753,7 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
         return None, f"the header could not be read: {error}", False
     solved_now = False
     if header_is_plate_solved(stack_header):
-        wcs = WCS(stack_header).celestial
+        wcs = WCS(stack_header, naxis=2).celestial
         refit_to_gaia = header_is_refit_to_gaia(stack_header)
     else:
         wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
@@ -837,7 +837,8 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
     if None in crop or (crop[2], crop[3]) != (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")):
         return
     shift_header_for_crop(stack_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
-    write_wcs_to_fits_header(processed_path, WCS(stack_header).celestial, refit_to_gaia=refit_to_gaia)
+    shifted_wcs = WCS(stack_header, naxis=2).celestial
+    write_wcs_to_fits_header(processed_path, shifted_wcs, refit_to_gaia=refit_to_gaia)
     logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
 
 

@@ -157,7 +157,7 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
         height = int(header["NAXIS2"])
     reason = None
     try:
-        candidate = WCS(header)
+        candidate = WCS(header, naxis=2)
         if candidate.is_celestial and header_is_plate_solved(header):
             wcs = candidate
         elif candidate.is_celestial:

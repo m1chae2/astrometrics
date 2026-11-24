@@ -380,7 +380,7 @@ def celestial_wcs(header: fits.Header) -> WCS | None:
         The two sky axes, or `None` when the header has no usable solution.
     """
     try:
-        wcs = WCS(header)
+        wcs = WCS(header, naxis=2)
     except ValueError, KeyError:
         return None
     if not wcs.has_celestial:

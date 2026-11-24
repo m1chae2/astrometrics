@@ -318,7 +318,7 @@ def _sky_position_angle(
         Why it is `None`; empty otherwise.
     """
     try:
-        wcs = WCS(header)
+        wcs = WCS(header, naxis=2)
         if not wcs.has_celestial:
             return None, "the stack's header has no sky coordinates (WCS)"
         center_column, center_row = (shape[1] - 1) / 2.0, (shape[0] - 1) / 2.0

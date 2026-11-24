@@ -728,3 +728,7 @@ astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_QUARTER_
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,QUARTER_RISE_TOLERANCE,Allowance for bin noise when a quarter of the frame is checked for brightening toward its corner (the 13 stacks read -1.24% to +0.06%). Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/stack_noise.py,_RECENT_STACK_SOLVES_KEPT,Cache size: how many recent plate solves are kept in memory; affects only run time
 astrometricslib/_internal/drivers/outside_services/services.py,SIRIL_GAIA_CATALOG_TIMEOUT_SECONDS,Network timeout; affects only failure handling (AST-D27)
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_CYCLE_SEARCH_THREADS,Compute budget
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_DIP_SEARCH_THREADS,Compute budget
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_THREADED_WORK_LIMIT,Compute budget
+astrometricslib/pipelines/photometry/processing/periodicity_search.py,_VERSIONS_PER_THREAD_ROUND,Compute budget

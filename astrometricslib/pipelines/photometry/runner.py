@@ -16,6 +16,7 @@ from typing import Any
 
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.quality.quality_summary import PHOTOMETRY_PIPELINE_VERSION, NoiseModelPoint
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
@@ -417,6 +418,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             raw (pre-merge) list of stars flagged as variable in their
             own session. Everything `validate_output` and
             `to_result_dict` need is in `payload`.
+
+        Raises
+        ------
+        RunAbandonedError
+            If the job was cancelled during the period searches.
         """
         target = request.target
         catalog_access = request.catalog_access
@@ -652,6 +658,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # that a failure here can never cost a photometry result.
         try:
             search_periods_and_save(all_stellar_objects, target, catalog_access)
+        except RunAbandonedError:
+            raise
         except (AstrometricsError, sqlite3.Error, *DATA_ERRORS) as search_error:
             logger.warning("[%s] Period search step failed: %s", target.id, search_error)
 

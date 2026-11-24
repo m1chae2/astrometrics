@@ -27,7 +27,9 @@ from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, raise_if_abandoned
 from astrometricslib.foundation.run_bases import RunBasis, factor_for
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
@@ -1313,24 +1315,76 @@ def _repeat_and_correct_family(
         The target, for the log.
     all_results : `Callable`
         Collects the run's current results.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled; the step stops at the next star.
     """
     from astrometricslib.pipelines.photometry.processing.family_wise_correction import (
         apply_family_wise_correction,
         needs_repeat,
         shuffles_needed,
+        single_search_limit,
     )
 
     shuffles = shuffles_needed(family_size)
-    for star in searched:
+    # A repeated search whose probability is certain to end above this limit
+    # can only be "not detected" once it is judged on the family, so it stops
+    # there instead of searching every one of its many versions.
+    stop_above = single_search_limit(family_size)
+    to_repeat = [
+        star
+        for star in searched
+        if needs_repeat(star.photometry.periodogram, family_size)
+        or needs_repeat(star.photometry.transit_candidate, family_size)
+    ]
+    for position, star in enumerate(to_repeat, start=1):
+        _report_search_progress(
+            target_id,
+            position - 1,
+            len(to_repeat),
+            f"Repeating the strongest searches (star {position} of {len(to_repeat)})",
+        )
         try:
             if needs_repeat(star.photometry.periodogram, family_size):
-                analyzer.run_lomb_scargle_periodogram(star, shuffle_count=shuffles)
+                analyzer.run_lomb_scargle_periodogram(star, shuffle_count=shuffles, stop_above=stop_above)
             if needs_repeat(star.photometry.transit_candidate, family_size):
-                analyzer.run_bls_transit_search(star, shuffle_count=shuffles)
+                analyzer.run_bls_transit_search(star, shuffle_count=shuffles, stop_above=stop_above)
+        except RunAbandonedError:
+            raise
         except (AstrometricsError, *DATA_ERRORS) as search_error:
             logger.warning("[%s] Repeating the search for %s failed: %s", target_id, star.id, search_error)
     apply_family_wise_correction(all_results(), family_size)
     logger.info("[%s] Judged %s period searches together.", target_id, family_size)
+
+
+def _report_search_progress(target_id: str, done: int, total: int, message: str) -> None:
+    """Tell the log and the running job how far the period searches are.
+
+    A search takes seconds to minutes per star, so the job would otherwise
+    say nothing for the whole step. The job's progress shows the counts
+    (``done`` of ``total``); the log gets the message. Also stops the step
+    if the job was cancelled.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target, for the log.
+    done : `int`
+        How many stars are finished.
+    total : `int`
+        How many stars the step has.
+    message : `str`
+        What the step is doing now.
+    """
+    raise_if_abandoned()
+    text = f"[{target_id}] {message}."
+    job = get_current_job()
+    if job is None:
+        logger.info(text)
+    else:
+        job.report_count(done, total, text)
 
 
 def search_periods_and_save(
@@ -1360,6 +1414,11 @@ def search_periods_and_save(
     -------
     searched_count : `int`
         How many stars had a search result saved.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled; the step stops at the next star.
     """
     if limit is None:
         limit = resolve(MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH).value
@@ -1372,10 +1431,18 @@ def search_periods_and_save(
 
     analyzer = VariabilityAnalyzer()
     searched: list[StellarObject] = []
-    for star in chosen:
+    for position, star in enumerate(chosen, start=1):
+        _report_search_progress(
+            target.id,
+            position - 1,
+            len(chosen),
+            f"Searching star {position} of {len(chosen)} for repeating patterns ({star.id})",
+        )
         try:
             periodogram = analyzer.run_lomb_scargle_periodogram(star)
             transit_candidate = analyzer.run_bls_transit_search(star)
+        except RunAbandonedError:
+            raise
         except (AstrometricsError, *DATA_ERRORS) as search_error:
             logger.warning("[%s] Period search failed for %s: %s", target.id, star.id, search_error)
             continue
@@ -1386,5 +1453,7 @@ def search_periods_and_save(
 
     if searched:
         catalog_access.merge_and_record("stellar_catalog", searched, _add_period_results_to_saved_star)
-    logger.info("[%s] Searched %s star(s) for repeating patterns.", target.id, len(searched))
+    _report_search_progress(
+        target.id, len(chosen), len(chosen), f"Searched {len(searched)} star(s) for repeating patterns"
+    )
     return len(searched)

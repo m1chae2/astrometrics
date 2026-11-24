@@ -507,7 +507,7 @@ def test_the_errors_reach_lomb_scargle_and_each_shuffle_keeps_its_own_error(
     star = _sinusoid_star()
     star.photometry.fluxes_detrended_errors = list(np.linspace(0.008, 0.02, 60))
 
-    VariabilityAnalyzer().run_lomb_scargle_periodogram(star, shuffle_count=5)
+    VariabilityAnalyzer().run_lomb_scargle_periodogram(star, shuffle_count=5, stop_above=None)
 
     seen = LOMB_SCARGLE_ERRORS_SEEN
     assert len(seen) == 1 + 5
@@ -522,7 +522,9 @@ def test_without_errors_lomb_scargle_is_given_no_dy(monkeypatch: pytest.MonkeyPa
     LOMB_SCARGLE_ERRORS_SEEN.clear()
     monkeypatch.setattr(periodicity_search, "LombScargle", _RecordingLombScargle)
 
-    VariabilityAnalyzer().run_lomb_scargle_periodogram(_sinusoid_star(with_errors=False), shuffle_count=3)
+    VariabilityAnalyzer().run_lomb_scargle_periodogram(
+        _sinusoid_star(with_errors=False), shuffle_count=3, stop_above=None
+    )
 
     assert LOMB_SCARGLE_ERRORS_SEEN
     assert all(errors is None for errors in LOMB_SCARGLE_ERRORS_SEEN)
@@ -565,7 +567,7 @@ def test_the_errors_reach_the_box_search_scaled_by_the_median_flux(
     star.photometry.fluxes_detrended = [100.0 * value for value in star.photometry.fluxes_detrended]
     star.photometry.fluxes_detrended_errors = [1.0] * 60
 
-    VariabilityAnalyzer().run_bls_transit_search(star, shuffle_count=3)
+    VariabilityAnalyzer().run_bls_transit_search(star, shuffle_count=3, stop_above=None)
 
     assert len(seen) == 1 + 3
     assert seen[0] == pytest.approx(np.full(60, 1.0) / np.median(star.photometry.fluxes_detrended))
@@ -602,7 +604,7 @@ def test_a_box_search_with_unusable_errors_uses_the_neighbour_scatter(
     star = _sinusoid_star()
     star.photometry.fluxes_detrended_errors = [0.0] * 60
 
-    VariabilityAnalyzer().run_bls_transit_search(star, shuffle_count=1)
+    VariabilityAnalyzer().run_bls_transit_search(star, shuffle_count=1, stop_above=None)
 
     # One constant value for all points: the scatter estimated from neighbours.
     assert np.ptp(seen[0]) == pytest.approx(0.0, abs=1e-15)

@@ -27,6 +27,7 @@ from collections.abc import Iterable, Sequence
 from astrometricslib.models.stellar_source import PeriodogramResult, TransitCandidate
 from astrometricslib.pipelines.photometry.processing.periodicity_search import (
     FALSE_ALARM_FOR_DETECTION,
+    FALSE_ALARM_FOR_POSSIBLE,
     VERDICT_DETECTED,
     VERDICT_INSUFFICIENT_DATA,
     VERDICT_POSSIBLE,
@@ -59,6 +60,29 @@ def family_wise_false_alarm(false_alarm: float, family_size: int) -> float:
     size = max(1, int(family_size))
     probability = min(max(float(false_alarm), 0.0), 1.0)
     return float(-math.expm1(size * math.log1p(-probability))) if probability < 1.0 else 1.0
+
+
+def single_search_limit(family_size: int) -> float:
+    """Give the one-search probability above which a result cannot pass.
+
+    A result is "possible" or better only when its family-wise probability is
+    at most `FALSE_ALARM_FOR_POSSIBLE`. Inverting `family_wise_false_alarm`,
+    that holds only when the one-search probability is at most
+    ``1 - (1 - FALSE_ALARM_FOR_POSSIBLE)^(1 / family_size)``. A repeated
+    search that is certain to end above this can stop at once.
+
+    Parameters
+    ----------
+    family_size : `int`
+        How many searches were made in all (at least 1).
+
+    Returns
+    -------
+    limit : `float`
+        The largest one-search false-alarm probability that can still pass.
+    """
+    size = max(1, int(family_size))
+    return float(-math.expm1(math.log1p(-FALSE_ALARM_FOR_POSSIBLE) / size))
 
 
 def count_family(results: Iterable[SearchResult | None]) -> int:

@@ -8,10 +8,13 @@ out. The searches' own statistics are tested in `test_periodicity_null.py` and
 
 from typing import Any
 
+import pytest
+
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import PeriodogramResult, StellarObject, TransitCandidate
 from astrometricslib.pipelines.photometry import batch
 from astrometricslib.pipelines.photometry.processing import periodicity_search as search
+from astrometricslib.pipelines.photometry.processing.family_wise_correction import single_search_limit
 
 
 def make_star(star_id: str, cycle: PeriodogramResult | None, dip: TransitCandidate | None) -> StellarObject:
@@ -64,8 +67,11 @@ class FakeAnalyzer:
         self.resolved_false_alarm = resolved_false_alarm
         self.fail = fail
         self.repeats: list[tuple[str, str, int | None]] = []
+        self.stop_limits: list[float | None] = []
 
-    def run_lomb_scargle_periodogram(self, star: StellarObject, shuffle_count: int | None = None) -> Any:
+    def run_lomb_scargle_periodogram(
+        self, star: StellarObject, shuffle_count: int | None = None, stop_above: float | None = None
+    ) -> Any:
         """Repeat a cycle search.
 
         Returns
@@ -79,6 +85,7 @@ class FakeAnalyzer:
             When this fake was built to fail.
         """
         self.repeats.append((star.id, "cycle", shuffle_count))
+        self.stop_limits.append(stop_above)
         if self.fail:
             raise ProcessingError("the repeat failed")
         result = detected_cycle(self.resolved_false_alarm, shuffle_count or 300)
@@ -98,7 +105,9 @@ class FakeAnalyzer:
 
         return np.array([]), np.array([])
 
-    def run_bls_transit_search(self, star: StellarObject, shuffle_count: int | None = None) -> Any:
+    def run_bls_transit_search(
+        self, star: StellarObject, shuffle_count: int | None = None, stop_above: float | None = None
+    ) -> Any:
         """Repeat a dip search.
 
         Returns
@@ -107,6 +116,7 @@ class FakeAnalyzer:
             The repeated result.
         """
         self.repeats.append((star.id, "dip", shuffle_count))
+        self.stop_limits.append(stop_above)
         return star.photometry.transit_candidate
 
 
@@ -122,6 +132,18 @@ def test_a_floor_result_is_repeated_with_enough_versions_and_can_survive() -> No
     survivor = stars[-1].photometry.periodogram
     assert survivor.verdict == search.VERDICT_DETECTED
     assert survivor.searches_in_family == 11
+
+
+def test_a_repeat_may_stop_once_it_is_certain_to_fail_the_family_limit() -> None:
+    """The repeat gets the one-search limit that matches the family cutoff."""
+    stars = [make_star(f"S{index}", quiet_cycle(), None) for index in range(10)]
+    stars.append(make_star("Hit", detected_cycle(1 / 301), None))
+    analyzer = FakeAnalyzer(resolved_false_alarm=1 / 1101)
+
+    batch._correct_for_the_number_of_searches(analyzer, stars, "T")
+
+    assert analyzer.stop_limits == [pytest.approx(single_search_limit(11))]
+    assert 0.0 < analyzer.stop_limits[0] < search.FALSE_ALARM_FOR_POSSIBLE
 
 
 def test_a_floor_result_that_resolves_to_a_large_probability_is_lowered() -> None:

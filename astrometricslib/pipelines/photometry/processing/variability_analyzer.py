@@ -57,8 +57,10 @@ from astrometricslib.models.quality.quality_summary import (
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     MINIMUM_POINTS_FOR_TRANSIT_SEARCH,
+    PeriodogramResult,
     PhotometryResult,
     StellarObject,
+    TransitCandidate,
 )
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -121,6 +123,11 @@ from astrometricslib.pipelines.photometry.processing.instrumental_artifacts impo
     field_step_summary,
     registration_step_threshold_px,
     step_artifact_reason,
+)
+from astrometricslib.pipelines.photometry.processing.periodicity_search import (
+    FALSE_ALARM_FOR_POSSIBLE,
+    VERDICT_INSUFFICIENT_DATA,
+    clean_light_curve,
 )
 from astrometricslib.pipelines.photometry.processing.scintillation_term import (
     add_scintillation_in_quadrature,
@@ -829,6 +836,28 @@ def _keep_where(values: list[Any], keep: Any) -> list[Any]:
     if not values or len(values) != len(keep):
         return values
     return [value for value, valid in zip(values, keep, strict=True) if valid]
+
+
+def _too_few_usable_note(usable: int, needed: int, dropped: int) -> str:
+    """Say why a star's light curve has too few measurements to search.
+
+    Parameters
+    ----------
+    usable : `int`
+        How many measurements have a finite time and brightness.
+    needed : `int`
+        The fewest measurements the search accepts.
+    dropped : `int`
+        How many measurements were left out for not being finite.
+
+    Returns
+    -------
+    note : `str`
+        A sentence for the result's ``note``.
+    """
+    plural = "s" if usable != 1 else ""
+    left_out = f" ({dropped} left out for having no finite time or brightness)" if dropped else ""
+    return f"Not searched: only {usable} usable measurement{plural}{left_out}; {needed} are needed."
 
 
 class VariabilityAnalyzer:
@@ -2373,7 +2402,12 @@ class VariabilityAnalyzer:
         self.ensemble_airmass_slope = slope
         return factor
 
-    def run_bls_transit_search(self, star: StellarObject, shuffle_count: int | None = None) -> Any | None:
+    def run_bls_transit_search(
+        self,
+        star: StellarObject,
+        shuffle_count: int | None = None,
+        stop_above: float | None = FALSE_ALARM_FOR_POSSIBLE,
+    ) -> Any | None:
         """Look for a repeating, box-shaped dip in brightness.
 
         A planet passing in front of its star and one star of an
@@ -2383,6 +2417,10 @@ class VariabilityAnalyzer:
         judged: the strongest dip always exists, so the returned candidate
         carries a verdict saying whether it stands out from noise.
 
+        Measurements whose time or brightness is not a finite number are left
+        out first. When fewer than the fewest points are left, the star gets
+        an ``insufficient_data`` result whose note says how many were usable.
+
         Parameters
         ----------
         star : `StellarObject`
@@ -2390,12 +2428,16 @@ class VariabilityAnalyzer:
         shuffle_count : `int`, optional
             How many noise-only versions to compare with; the search picks
             a default when omitted.
+        stop_above : `float` or `None`, optional
+            Stop searching noise-only versions once the false-alarm
+            probability is certain to be above this value (see
+            `periodicity_search.box_search`). `None` searches every version.
 
         Returns
         -------
         candidate : `TransitCandidate` or `None`
-            The search result (check its ``verdict``), or `None` if there
-            were fewer than 8 measurements.
+            The search result (check its ``verdict``), or `None` if the star
+            had fewer than 8 measurements to begin with.
         """
         minimum_points_for_transit_search = resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
         if not star.can_run_transit_search:
@@ -2404,22 +2446,37 @@ class VariabilityAnalyzer:
         from astrometricslib.pipelines.photometry.processing.periodicity_search import box_search
 
         time_days, fluxes = self._light_curve_arrays(star)
-        if fluxes.size < minimum_points_for_transit_search or np.mean(fluxes) <= 0:
+        errors = self.light_curve_errors(star)
+        time_days, fluxes, errors, dropped = clean_light_curve(time_days, fluxes, errors)
+        if fluxes.size < minimum_points_for_transit_search:
+            candidate = TransitCandidate(
+                verdict=VERDICT_INSUFFICIENT_DATA,
+                note=_too_few_usable_note(fluxes.size, minimum_points_for_transit_search, dropped),
+            )
+        elif np.mean(fluxes) <= 0:
             return None
-        candidate = box_search(
-            time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
-        )
+        else:
+            candidate = box_search(
+                time_days, fluxes, shuffle_count=shuffle_count, flux_errors=errors, stop_above=stop_above
+            )
         star.photometry.transit_candidate = candidate
         return candidate
 
     def run_lomb_scargle_periodogram(
-        self, star: StellarObject, shuffle_count: int | None = None
+        self,
+        star: StellarObject,
+        shuffle_count: int | None = None,
+        stop_above: float | None = FALSE_ALARM_FOR_POSSIBLE,
     ) -> Any | None:
         """Look for regular repeating patterns in the star's brightness.
 
         See `periodicity_search` for how the result is judged: the
         strongest cycle always exists, so the returned result carries a
         verdict saying whether it stands out from noise.
+
+        Measurements whose time or brightness is not a finite number are left
+        out first. When fewer than the fewest points are left, the star gets
+        an ``insufficient_data`` result whose note says how many were usable.
 
         Parameters
         ----------
@@ -2428,12 +2485,17 @@ class VariabilityAnalyzer:
         shuffle_count : `int`, optional
             How many noise-only versions to compare with; the search picks
             a default when omitted.
+        stop_above : `float` or `None`, optional
+            Stop searching noise-only versions once the false-alarm
+            probability is certain to be above this value (see
+            `periodicity_search.lomb_scargle_search`). `None` searches every
+            version.
 
         Returns
         -------
         periodogram : `PeriodogramResult` or `None`
-            The search result (check its ``verdict``), or `None` if there
-            were fewer than 5 measurements.
+            The search result (check its ``verdict``), or `None` if the star
+            had fewer than 5 measurements to begin with.
         """
         minimum_points_for_period_search = resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
         if not star.can_run_period_search:
@@ -2442,11 +2504,17 @@ class VariabilityAnalyzer:
         from astrometricslib.pipelines.photometry.processing.periodicity_search import lomb_scargle_search
 
         time_days, fluxes = self._light_curve_arrays(star)
+        errors = self.light_curve_errors(star)
+        time_days, fluxes, errors, dropped = clean_light_curve(time_days, fluxes, errors)
         if fluxes.size < minimum_points_for_period_search:
-            return None
-        result = lomb_scargle_search(
-            time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
-        )
+            result = PeriodogramResult(
+                verdict=VERDICT_INSUFFICIENT_DATA,
+                note=_too_few_usable_note(fluxes.size, minimum_points_for_period_search, dropped),
+            )
+        else:
+            result = lomb_scargle_search(
+                time_days, fluxes, shuffle_count=shuffle_count, flux_errors=errors, stop_above=stop_above
+            )
         star.photometry.periodogram = result
         return result
 

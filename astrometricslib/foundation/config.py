@@ -126,6 +126,16 @@ COSMIC_CLARITY_DENOISE_STRENGTH = TunedParameter(
     register_entry="STK-30",
     config_key=("Processing.CosmicClarity", "denoise_strength"),
 )
+PREVIEW_COLOR_DENOISE_STRENGTH = TunedParameter(
+    name="stacking.preview_color_denoise_strength",
+    default=0.3,
+    unit="fraction (0 to 1)",
+    description="How strongly Cosmic Clarity removes color speckle from a color stack's preview.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-D81",
+    config_key=("Processing.CosmicClarity", "color_denoise_strength"),
+)
 MAXIMUM_IDENTIFIED_STARS = TunedParameter(
     name="astrometry.maximum_identified_stars",
     default=500,
@@ -651,6 +661,7 @@ class AppConfiguration:
                 "denoise_executable": "",
                 "denoise_enabled": "true",
                 "denoise_strength": str(COSMIC_CLARITY_DENOISE_STRENGTH.default),
+                "color_denoise_strength": str(PREVIEW_COLOR_DENOISE_STRENGTH.default),
             },
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
@@ -787,6 +798,30 @@ class AppConfiguration:
             return min(1.0, max(0.0, float(raw)))
         except TypeError, ValueError:
             return float(COSMIC_CLARITY_DENOISE_STRENGTH.default)
+
+    def get_preview_color_denoise_strength(self) -> float:
+        """Return how strongly Cosmic Clarity smooths color speckle (0 to 1).
+
+        Only a color stack, such as one from the Nikon DSLR, uses it. A
+        single-channel stack has no color to smooth.
+
+        Returns
+        -------
+        strength : `float`
+            The configured strength, kept between 0 and 1. A missing or
+            unreadable setting gives 0.3. On one Nikon stack, 0.3 more than
+            halved the red-minus-blue speckle in the sky and kept about 85
+            percent of the stars' color; 0.5 turned the stars gray (STK-D81).
+        """
+        raw = self.get_value(
+            "Processing.CosmicClarity",
+            "color_denoise_strength",
+            fallback=str(PREVIEW_COLOR_DENOISE_STRENGTH.default),
+        )
+        try:
+            return min(1.0, max(0.0, float(raw)))
+        except TypeError, ValueError:
+            return float(PREVIEW_COLOR_DENOISE_STRENGTH.default)
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.

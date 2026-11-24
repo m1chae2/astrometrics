@@ -606,6 +606,7 @@ stacking.pointing_field_minimum_frames,STK-D73,exclusion criteria,Design estimat
 stacking.pointing_field_minimum_share,STK-D73,exclusion criteria,Design estimate
 stacking.poor_alignment_rms_px,STK-D30,judgment,Design estimate
 stacking.position_misfit_radius_factor,STK-D34,judgment,Design estimate
+stacking.preview_color_denoise_strength,STK-D81,measurement,Partly measured
 stacking.processed_minimum_coverage_fraction,STK-23,measurement,Partly measured
 stacking.reference_aperture_fwhm_multiple,STK-36,measurement,Partly measured
 stacking.reference_aperture_minimum_radius_px,STK-D23,measurement,Design estimate

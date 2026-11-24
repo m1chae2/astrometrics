@@ -363,6 +363,13 @@ denoise_enabled = "true"
 # library, with the denoise run after the stretch (see STK-30 in the
 # validation register).
 denoise_strength = "0.5"
+# How strongly to remove color speckle, from 0 (none) to 1 (full). Only a
+# color stack, such as one from the Nikon DSLR, uses it; a single-channel
+# stack keeps the brightness-only denoise. On one Nikon stack (NGC 6992), 0.3
+# cut the red-minus-blue sky speckle from 6.81 to 2.92 display units and kept
+# about 85 percent of the stars' color; 0.5 left the stars gray (see STK-D81
+# in the validation register).
+color_denoise_strength = "0.3"
 
 ["Processing.Siril"]
 # Match this to whichever --siril-source you passed to

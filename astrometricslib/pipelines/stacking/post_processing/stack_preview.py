@@ -29,7 +29,10 @@ anything. Up to seven steps turn it into a picture.
    `sky_level`): faint targets get a lighter sky so their faint structure
    stays visible, and bright targets get a darker one.
 5. Cosmic Clarity, if it is configured, removes noise with an AI model. It
-   runs after the stretch, on the stretched picture. Run before the stretch,
+   runs after the stretch, on the stretched picture. A color stack gets the
+   program's ``full`` mode, which also smooths the color speckle (strength
+   ``preview_color_denoise_strength``); a single-channel stack keeps the
+   brightness-only mode. Run before the stretch,
    it lowers the noise level that Autostretch measures, so the stretch turns
    the contrast back up and the remaining noise looks as strong as before,
    with extra blotchy structure. Measured on the M 13 stack, the visible
@@ -779,7 +782,11 @@ def _remove_own_staged_files(folder: str) -> None:
 
 
 def denoise_with_cosmic_clarity(
-    cosmic_clarity_executable: str, input_path: str, output_path: str, strength: float
+    cosmic_clarity_executable: str,
+    input_path: str,
+    output_path: str,
+    strength: float,
+    color_strength: float | None = None,
 ) -> bool:
     """Remove noise from an image with Cosmic Clarity's AI model.
 
@@ -799,7 +806,13 @@ def denoise_with_cosmic_clarity(
     output_path : `str`
         Where to put the denoised FITS image.
     strength : `float`
-        How strongly to remove noise, from 0 to 1.
+        How strongly to remove noise from the brightness, from 0 to 1.
+    color_strength : `float`, optional
+        How strongly to remove noise from the colors, from 0 to 1. Give it
+        for a color image: the program then runs in its ``full`` mode and
+        smooths the color speckle as well as the brightness noise. Leave it
+        out for a single-channel image, which has no color; the program then
+        runs in its ``luminance`` mode.
 
     Returns
     -------
@@ -827,9 +840,17 @@ def denoise_with_cosmic_clarity(
             return False
         try:
             shutil.copyfile(input_path, staged_input)
+            mode_options = (
+                ["--denoise_mode=luminance", f"--denoise_strength={strength}"]
+                if color_strength is None
+                else [
+                    "--denoise_mode=full",
+                    f"--denoise_strength={strength}",
+                    f"--color_denoise_strength={color_strength}",
+                ]
+            )
             completed = run_registered(
-                [cosmic_clarity_executable, "--denoise_mode=luminance", f"--denoise_strength={strength}"],
-                COSMIC_CLARITY_TIMEOUT_SECONDS,
+                [cosmic_clarity_executable, *mode_options], COSMIC_CLARITY_TIMEOUT_SECONDS
             )
             if completed.returncode != 0 or not os.path.isfile(produced_output):
                 return False
@@ -1527,6 +1548,10 @@ def _picture_script(
             else configuration.get_cosmic_clarity_denoise_strength()
         )
 
+        # Only a color stack has color speckle to remove; a single-channel
+        # stack keeps the brightness-only mode.
+        color_strength = configuration.get_preview_color_denoise_strength() if colour else None
+
         def denoise(input_path: str, output_path: str) -> bool:
             """Run Cosmic Clarity's denoise program.
 
@@ -1535,7 +1560,9 @@ def _picture_script(
             succeeded : `bool`
                 Whether Cosmic Clarity succeeded.
             """
-            return denoise_with_cosmic_clarity(denoise_executable, input_path, output_path, strength)
+            return denoise_with_cosmic_clarity(
+                denoise_executable, input_path, output_path, strength, color_strength
+            )
 
         denoised_name = _next_source(
             "Cosmic Clarity", name, "denoised.fits", scratch, denoise, skipped_steps=skipped_steps

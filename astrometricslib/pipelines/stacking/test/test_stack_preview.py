@@ -98,6 +98,7 @@ def _configure(
             get_cosmic_clarity_denoise_executable=lambda: cosmic_clarity,
             get_cosmic_clarity_denoise_path=lambda: cosmic_clarity,
             get_cosmic_clarity_denoise_strength=lambda: strength,
+            get_preview_color_denoise_strength=lambda: 0.3,
             get_preview_star_tone_enabled=lambda: star_tone,
             get_preview_remove_green_noise_enabled=lambda: remove_green,
             get_preview_colour_calibration_enabled=lambda: colour_calibration,
@@ -125,6 +126,7 @@ class _Programs:
         self.starnet_result = starnet_result
         self.flatten_calls: list[tuple[str, str, str]] = []
         self.denoise_calls: list[tuple[str, str, str, float]] = []
+        self.denoise_color_strengths: list[float | None] = []
         self.siril_calls: list[tuple[str, list[str]]] = []
         self.tone_calls: list[tuple[str, str]] = []
         self.tone_result = True
@@ -143,7 +145,14 @@ class _Programs:
             fits.writeto(f"{output_stem}.fits", image)
         return self.flatten_result
 
-    def denoise(self, executable: str, input_path: str, output_path: str, strength: float) -> bool:
+    def denoise(
+        self,
+        executable: str,
+        input_path: str,
+        output_path: str,
+        strength: float,
+        color_strength: float | None = None,
+    ) -> bool:
         """Act like Cosmic Clarity, writing a denoised copy if told to succeed.
 
         Returns
@@ -152,6 +161,7 @@ class _Programs:
             Whether this stand-in was told to succeed.
         """
         self.denoise_calls.append((executable, input_path, output_path, strength))
+        self.denoise_color_strengths.append(color_strength)
         if self.denoise_result:
             Path(output_path).write_bytes(b"denoised")
         return self.denoise_result
@@ -574,7 +584,13 @@ def test_a_denoise_program_that_cannot_start_keeps_the_stretched_copy(
     programs = _Programs()
     programs.install(monkeypatch)
 
-    def cannot_start(executable: str, input_path: str, output_path: str, strength: float) -> bool:
+    def cannot_start(
+        executable: str,
+        input_path: str,
+        output_path: str,
+        strength: float,
+        color_strength: float | None = None,
+    ) -> bool:
         """Act like a missing program.
 
         Raises
@@ -813,6 +829,26 @@ def test_cosmic_clarity_gets_a_copy_and_leaves_its_folders_clean(
     assert calls[0] == [str(cosmic_clarity), "--denoise_mode=luminance", "--denoise_strength=0.6"]
     assert list((cosmic_clarity.parent / "input").iterdir()) == []
     assert list((cosmic_clarity.parent / "output").iterdir()) == []
+
+
+def test_cosmic_clarity_runs_in_full_mode_when_given_a_color_strength(
+    tmp_path: Path, cosmic_clarity: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a color strength selects the full mode with both strengths."""
+    source = tmp_path / "in.fits"
+    source.write_bytes(b"flat")
+    calls = _fake_denoise_program(monkeypatch)
+
+    assert denoise_with_cosmic_clarity(
+        str(cosmic_clarity), str(source), str(tmp_path / "out.fits"), 0.5, color_strength=0.3
+    )
+
+    assert calls[0] == [
+        str(cosmic_clarity),
+        "--denoise_mode=full",
+        "--denoise_strength=0.5",
+        "--color_denoise_strength=0.3",
+    ]
 
 
 def test_cosmic_clarity_is_not_run_over_someone_elses_files(
@@ -1154,6 +1190,34 @@ def test_green_removal_can_be_switched_off(
     write_stack_preview(str(stack))
 
     assert "rmgreen" not in programs.siril_calls[0][1]
+
+
+def test_a_colour_stack_is_denoised_with_a_color_strength(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a colour stack's denoise is given the color strength."""
+    _write_colour_stack(stack)
+    _configure(monkeypatch, "siril-cli", None, cosmic_clarity="clarity")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert programs.denoise_color_strengths == [pytest.approx(0.3)]
+
+
+def test_a_single_channel_stack_is_denoised_without_a_color_strength(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a mono stack's denoise keeps the brightness-only mode."""
+    fits.writeto(stack, np.full((32, 32), 0.01, dtype=np.float32), overwrite=True)
+    _configure(monkeypatch, "siril-cli", None, cosmic_clarity="clarity")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert programs.denoise_color_strengths == [None]
 
 
 def test_the_stretch_before_the_denoise_also_gets_green_removal(

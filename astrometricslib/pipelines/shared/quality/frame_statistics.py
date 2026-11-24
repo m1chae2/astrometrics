@@ -142,6 +142,7 @@ def measure_frame_input_quality(
         or "failed" (because they couldn't be read).
     """
     from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+    from astrometricslib.pipelines.shared.quality.background_measurement import BACKGROUND_LEVEL_METHOD
     from astrometricslib.pipelines.shared.quality.quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
     )
@@ -151,7 +152,13 @@ def measure_frame_input_quality(
     for frame in target.frames:
         if camera_name and camera_name.lower() not in (frame.camera or "").lower():
             continue
-        if not remeasure and frame.measurements.background_level is not None:
+        # A level of an older method is measured again: it must not be
+        # compared with a newer one (`BACKGROUND_LEVEL_METHOD`).
+        if (
+            not remeasure
+            and frame.measurements.background_level is not None
+            and frame.measurements.background_level_method == BACKGROUND_LEVEL_METHOD
+        ):
             counts["skipped"] += 1
             continue
 
@@ -164,6 +171,7 @@ def measure_frame_input_quality(
             continue
 
         frame.measurements.background_level = metrics["background_level"]
+        frame.measurements.background_level_method = BACKGROUND_LEVEL_METHOD
         if metrics["saturated_pixel_fraction"] is not None:
             frame.measurements.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
         if metrics["fwhm_px"] is not None:

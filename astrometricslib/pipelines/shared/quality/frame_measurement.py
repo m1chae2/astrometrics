@@ -841,6 +841,63 @@ def measure_image_star_profiles(
     return results
 
 
+def star_profile_measurements(
+    star_profiles: list[tuple[str | None, StarProfileResult, str]],
+    frame: FrameRecord,
+    target_id: str,
+    *,
+    run_id: str,
+    job_id: str | None,
+    measured_at: datetime,
+    capture_setting_id: int | None,
+) -> list[QualityMeasurement]:
+    """Turn star profiles measured outside `measure_frame` into quality rows.
+
+    The frame quarantine step measures each frame's star shape itself, with
+    `measure_image_star_profiles`. This function writes that result with the
+    code `measure_frame` uses (`_emit_star_profile_measurements`), so the rows
+    have the same metrics, units, definitions and reasons as the rows of a full
+    frame measurement, and a later read of ``frame.star_elongation`` finds
+    them. A frame measured both ways has equal values, because both call
+    `measure_star_profiles` with the same pixels and the same top level.
+
+    Parameters
+    ----------
+    star_profiles : `list` of `tuple`
+        What `measure_image_star_profiles` returned for the frame's file.
+    frame : `FrameRecord`
+        The frame the profiles describe.
+    target_id : `str`
+        The target the frame belongs to.
+    run_id : `str`
+        The run the rows belong to.
+    job_id : `str` or `None`
+        The job, if any.
+    measured_at : `datetime`
+        When the profiles were measured (with a time zone).
+    capture_setting_id : `int` or `None`
+        The frame's capture setting row.
+
+    Returns
+    -------
+    measurements : `list` [`QualityMeasurement`]
+        The star width, elongation, angle, effective width and field-region
+        width rows of every plane, in the order `measure_frame` writes them.
+    """
+    context = _Context(
+        frame=frame,
+        target_id=target_id,
+        run_id=run_id,
+        job_id=job_id,
+        measured_at=measured_at,
+        capture_setting_id=capture_setting_id,
+        path=frame.path,
+    )
+    for channel, result, mosaic_note in star_profiles:
+        _emit_star_profile_measurements(context, result, channel, mosaic_note)
+    return context.measurements
+
+
 def _emit_synthetic_notice(context: _Context, header: fits.Header) -> None:
     """Add a warning when the header says the frame was drawn, not taken.
 
@@ -1014,9 +1071,11 @@ def _emit_background_and_saturation(
 ) -> float:
     """Emit the background level and saturated fraction of the collapsed frame.
 
-    The background uses the same call as `measure_frame_background_level`
-    (sigma-clipped median at 3 sigma), applied to the pixels already in memory
-    so the file is not read again.
+    The background is the sigma-clipped median at 3 sigma of every pixel,
+    applied to the pixels already in memory so the file is not read again. For
+    a raw color mosaic this mixes the color pixels, which is not the estimator
+    of `measure_frame_background_level` (it uses 2 x 2 super-pixels for the
+    stacking check's own level, STK-04); the two numbers are not compared.
 
     Parameters
     ----------

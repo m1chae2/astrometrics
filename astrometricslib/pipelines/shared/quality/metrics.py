@@ -210,7 +210,10 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "The frame's own filter. A color image is first collapsed to the mean of its color planes; "
             "an undebayered one-shot-color mosaic is measured as it is, with its color pixels mixed."
         ),
-        computed_by="pipelines.shared.quality.background_measurement.measure_frame_background_level",
+        # The stacking check's own level (`FrameMeasurements.background_level`)
+        # is a different estimator for a raw color mosaic: 2 x 2 super-pixels
+        # (`background_measurement.measure_frame_background_level`, STK-04).
+        computed_by="pipelines.shared.quality.frame_measurement._clipped_median",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         purpose=MetricPurpose.DECISION,

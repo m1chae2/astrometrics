@@ -712,10 +712,10 @@ def test_a_second_run_for_the_same_target_returns_at_once_and_says_so(
     assert later.frames_skipped_unchanged == 3
 
 
-def test_a_run_for_another_target_waits_its_turn_and_the_stage_never_waits(
+def test_a_run_for_another_target_waits_its_turn_unless_told_not_to(
     target: Target, store: QualityStore, biases: list[str]
 ) -> None:
-    """Runs take turns; the stacking stage skips instead of waiting."""
+    """Runs take turns; a caller that passes ``wait_for_turn=False`` skips."""
     other = Target(id="M 100", frames=[])
     started = threading.Event()
     release = threading.Event()

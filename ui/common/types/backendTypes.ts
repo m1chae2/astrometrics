@@ -91,6 +91,7 @@ export interface ErrorInfo {
  */
 export interface FrameMeasurements {
   backgroundLevel?: number | null;
+  backgroundLevelMethod?: number | null;
   saturatedPixelFraction?: number | null;
   saturatedPixelFractionLimitAdu?: number | null;
   measuredFwhmPx?: number | null;

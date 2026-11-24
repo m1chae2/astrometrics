@@ -77,7 +77,10 @@ from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quality.frame_measurement import measure_image_star_profiles
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_ELONGATION
-from astrometricslib.pipelines.shared.quality.star_profile_fitting import usable_top_level_adu
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
+    StarProfileResult,
+    usable_top_level_adu,
+)
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     QUARANTINE_EXCLUSION_REASON_PREFIX,
@@ -1255,12 +1258,14 @@ def stored_star_elongations(target_id: str) -> dict[str, float]:
     return stored_frame_values(target_id, FRAME_STAR_ELONGATION)
 
 
-def measure_star_elongation(path: str, camera: str | None) -> float | None:
-    """Measure a frame's star elongation, for a frame with no stored value.
+def measure_star_profile_planes(
+    path: str, camera: str | None
+) -> list[tuple[str | None, StarProfileResult, str]]:
+    """Fit the stars of a frame, for a frame with no stored star shape.
 
     This runs the frame measurement's own star-shape step
-    (`measure_image_star_profiles`), so the number has the same definition as
-    the stored one. It is slow (seconds per frame), which is why stored values
+    (`measure_image_star_profiles`), so the numbers have the same definition as
+    the stored ones. It is slow (seconds per frame), which is why stored values
     are read first.
 
     Parameters
@@ -1273,20 +1278,55 @@ def measure_star_elongation(path: str, camera: str | None) -> float | None:
 
     Returns
     -------
-    elongation : `float` or `None`
-        The median over the frame's colour planes, or `None` if no star
-        could be measured.
+    planes : `list` of `tuple`
+        ``(channel name or None, result, mosaic note)`` for each colour plane,
+        as `measure_image_star_profiles` returns them.
     """
     try:
         top_level = usable_top_level_adu(resolve_camera_profile(camera))
     except AstrometricsError:
         top_level = None
+    return measure_image_star_profiles(path, top_level)
+
+
+def median_star_elongation(planes: Sequence[tuple[str | None, StarProfileResult, str]]) -> float | None:
+    """Give the median star elongation over a frame's colour planes.
+
+    Parameters
+    ----------
+    planes : `Sequence` of `tuple`
+        What `measure_star_profile_planes` returned.
+
+    Returns
+    -------
+    elongation : `float` or `None`
+        The median over the planes, or `None` if no star could be measured.
+    """
     values = [
         result.elongation
-        for _, result, _ in measure_image_star_profiles(path, top_level)
+        for _, result, _ in planes
         if result.elongation is not None and math.isfinite(result.elongation)
     ]
     return float(statistics.median(values)) if values else None
+
+
+def measure_star_elongation(path: str, camera: str | None) -> float | None:
+    """Measure a frame's star elongation, for a frame with no stored value.
+
+    Parameters
+    ----------
+    path : `str`
+        The frame's FITS file.
+    camera : `str` or `None`
+        The camera name from the header (see `measure_star_profile_planes`).
+
+    Returns
+    -------
+    elongation : `float` or `None`
+        The median over the frame's colour planes, or `None` if no star
+        could be measured.
+    """
+    return median_star_elongation(measure_star_profile_planes(path, camera))
 
 
 def make_quarantine_measurer(target_id: str | None) -> Callable[[str], dict[str, Any]]:
@@ -1308,7 +1348,10 @@ def make_quarantine_measurer(target_id: str | None) -> Callable[[str], dict[str,
     measure : `Callable`
         Takes a frame path and returns the measurement dict, with
         ``star_elongation`` and ``elongation_source`` (``"stored"``,
-        ``"measured"`` or `None`) added.
+        ``"measured"`` or `None`) added. A frame whose stars were fitted here
+        also carries ``_star_profiles`` (what the fit gave for each colour
+        plane), which the stacking stage stores so the next stack does not
+        fit the frame again.
     """
     stored = stored_star_elongations(target_id) if target_id else {}
 
@@ -1324,8 +1367,13 @@ def make_quarantine_measurer(target_id: str | None) -> Callable[[str], dict[str,
         elongation = stored.get(frame_subject_id(path, target_id)) if target_id else None
         source = "stored" if elongation is not None else None
         if elongation is None:
-            elongation = measure_star_elongation(path, measurement.get("camera"))
+            planes = measure_star_profile_planes(path, measurement.get("camera"))
+            elongation = median_star_elongation(planes)
             source = "measured" if elongation is not None else None
+            # Kept so the stage can store what was fitted
+            # (`record_stage_frame_quality`), and the next stack reads it
+            # instead of fitting the frame again.
+            measurement["_star_profiles"] = planes
         measurement["star_elongation"] = elongation
         measurement["elongation_source"] = source
         return measurement

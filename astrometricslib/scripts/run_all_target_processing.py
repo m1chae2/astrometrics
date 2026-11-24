@@ -797,11 +797,9 @@ def _stack_one_target(
             f"Only {len(standard_frames)} imaging frame(s); at least "
             f"{MINIMUM_IMAGING_FRAMES_TO_STACK} are needed to make a stack"
         )
-    # The stack measures at most `STACKING_STAGE_MEASUREMENT_LIMIT` frames
-    # that were never measured, and its predicted noise needs the sky of every
-    # frame. So every imaging frame is measured first, with no limit. Frames
-    # measured before and unchanged since are skipped, so a resumed run does
-    # not repeat the work.
+    # The stack's predicted noise needs the sky of every frame, so every
+    # imaging frame is measured first. Frames measured before and unchanged
+    # since are skipped, so a resumed run does not repeat the work.
     measurement = astrometrics.quality.record_frame_measurements(target, frames=standard_frames)
     if measurement.already_running:
         raise RuntimeError(f"another run is measuring the frames of '{target.id}'; try again later")

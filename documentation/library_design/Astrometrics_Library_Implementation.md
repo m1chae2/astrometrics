@@ -330,7 +330,6 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.FIELD_REGION_CELLS_PER_SIDE -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL -->
-<!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_FLAT_PAIRS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_BIAS_PAIRS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MAXIMUM_TEMPERATURE_SPREAD_C -->

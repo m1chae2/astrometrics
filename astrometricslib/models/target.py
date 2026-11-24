@@ -64,6 +64,12 @@ class FrameMeasurements(BaseModel):
     # Statistics calculated straight from the raw picture, even if it
     # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
+    # The version of the method that gave `background_level`
+    # (`BACKGROUND_LEVEL_METHOD` in `background_measurement.py`). A level
+    # stored with no version, or with an older one, was measured another way
+    # (version 1 mixed the color pixels of a raw color mosaic), so it is
+    # measured again before it is compared with a newer level.
+    background_level_method: int | None = Field(default=None, alias="backgroundLevelMethod")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
     # The level, in ADU, at or above which a pixel was counted as saturated
     # when `saturated_pixel_fraction` was measured. Records written before

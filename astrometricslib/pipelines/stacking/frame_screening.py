@@ -14,7 +14,9 @@ The module also holds the two helpers those checks share with the stage's
 other users: `refresh_saturated_pixel_fraction` and `record_frame_quality`.
 """
 
+import contextvars
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -23,7 +25,12 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
-from astrometricslib.foundation.run_abandonment import RunAbandonedError
+from astrometricslib.foundation.run_abandonment import (
+    RunAbandonedError,
+    completed_unless_abandoned,
+    raise_if_abandoned,
+    stopping_on_abandonment,
+)
 from astrometricslib.models.quality.gate_result import GateResult, unchecked_gate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress, stage_window
@@ -37,8 +44,9 @@ logger = logging.getLogger(__name__)
 
 #: Where each long check sits inside the frame-check stage, as (start, span)
 #: fractions of the stage. Rough guesses from which checks read every frame
-#: (the cloud and trailing check reads all of them, the full measurement up to
-#: 40 more, the sky check one pass); they only shape the job's progress bar.
+#: (the cloud and trailing check reads all of them, the full measurement every
+#: frame not yet measured, the sky check one pass); they only shape the job's
+#: progress bar.
 QUARANTINE_WINDOW = (0.02, 0.43)
 QUALITY_ROWS_WINDOW = (0.45, 0.35)
 BACKGROUND_WINDOW = (0.80, 0.20)
@@ -365,6 +373,112 @@ def _quarantine_bad_frames(
         )
 
 
+def _background_is_current(frame: Any) -> bool:
+    """Say whether a frame's stored background level is of the current method.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The frame.
+
+    Returns
+    -------
+    current : `bool`
+        `True` when the frame has a level measured with
+        `BACKGROUND_LEVEL_METHOD`. A level with no method, or an older one,
+        is not current: it must not be compared with a newer level.
+    """
+    from astrometricslib.pipelines.shared.quality.background_measurement import BACKGROUND_LEVEL_METHOD
+
+    measurements = frame.measurements
+    return (
+        measurements.background_level is not None
+        and measurements.background_level_method == BACKGROUND_LEVEL_METHOD
+    )
+
+
+def _measure_one_frame_background(frame: Any, dry_run: bool) -> None:
+    """Measure one frame's sky background (and its saturated fraction).
+
+    The result is written onto the `FrameRecord` (which rides along with
+    Target's normal save path), so later pipelines and runs read it instead of
+    computing it again. A frame whose level is already of the current method
+    is not measured again. A failure leaves the frame without a level, so the
+    background check skips it: an older level that could not be replaced is
+    cleared, because it must never be compared with a newer one.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The frame. Its measurements are updated in place.
+    dry_run : `bool`
+        `True` skips the saturated fraction (the check does not use it).
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled.
+    """
+    from astrometricslib.pipelines.shared.quality.background_measurement import (
+        BACKGROUND_LEVEL_METHOD,
+        measure_frame_background_level,
+    )
+
+    raise_if_abandoned()
+    try:
+        if not _background_is_current(frame):
+            frame.measurements.background_level = measure_frame_background_level(frame.path)
+            frame.measurements.background_level_method = BACKGROUND_LEVEL_METHOD
+        if not dry_run:
+            refresh_saturated_pixel_fraction(frame)
+    except RunAbandonedError:
+        raise
+    except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
+        logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
+        if not _background_is_current(frame):
+            frame.measurements.background_level = None
+            frame.measurements.background_level_method = None
+
+
+def _measure_frame_backgrounds(frames: list[Any], dry_run: bool) -> None:
+    """Measure the sky background of every frame, several frames at once.
+
+    The frames are measured in the same number of worker threads as the
+    quarantine step (`MEASUREMENT_THREADS`). Each frame's result goes onto
+    that frame only, so the order of the frames and the values do not depend
+    on the order the workers finish. Progress is reported as each frame
+    finishes. A cancel is seen within half a second and stops the frames not
+    yet started.
+
+    Parameters
+    ----------
+    frames : `list` [`FrameRecord`]
+        The frames. Their measurements are updated in place.
+    dry_run : `bool`
+        Passed on to `_measure_one_frame_background`.
+
+    Notes
+    -----
+    `RunAbandonedError` is raised if the job was cancelled.
+    """
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import MEASUREMENT_THREADS
+
+    logger.info("Checking the sky background of %d frames\u2026", len(frames))
+    background_progress = LoopProgress("Sky background measured for", len(frames))
+    # Worker threads start without the caller's job context; each task gets
+    # its own copy so its log lines go to this job's log.
+    caller_context = contextvars.copy_context()
+    with stopping_on_abandonment(ThreadPoolExecutor(max_workers=MEASUREMENT_THREADS)) as pool:
+        futures = [
+            pool.submit(caller_context.copy().run, _measure_one_frame_background, frame, dry_run)
+            for frame in frames
+        ]
+        for finished in completed_unless_abandoned(futures):
+            finished.result()
+            with stage_window(*BACKGROUND_WINDOW):
+                background_progress.tick()
+
+
 def _drop_background_outliers(target: Target, screening: FrameScreening, dry_run: bool = False) -> None:
     """Leave out frames whose sky background differs from the rest.
 
@@ -400,30 +514,11 @@ def _drop_background_outliers(target: Target, screening: FrameScreening, dry_run
     if not background_check_enabled:
         logger.info("Skipping the sky background check: it is turned off in the settings.")
     if background_check_enabled:
-        logger.info("Checking the sky background of %d frames\u2026", len(screening.frames))
-        from astrometricslib.pipelines.shared.quality.background_measurement import (
-            measure_frame_background_level,
-        )
         from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
             find_dominant_background_subset_by_exposure,
         )
 
-        background_progress = LoopProgress("Sky background measured for", len(screening.frames))
-        for frame in screening.frames:
-            try:
-                # Computed once, recorded onto the FrameRecord (which
-                # rides along with Target's normal save path) -- later
-                # pipelines/runs read these instead of recomputing them.
-                if frame.measurements.background_level is None:
-                    frame.measurements.background_level = measure_frame_background_level(frame.path)
-                if not dry_run:
-                    refresh_saturated_pixel_fraction(frame)
-            except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
-                logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
-                continue
-            finally:
-                with stage_window(*BACKGROUND_WINDOW):
-                    background_progress.tick()
+        _measure_frame_backgrounds(screening.frames, dry_run)
 
         # Throw out frames with a different background level. If we
         # accidentally use a washed-out frame as the main reference for

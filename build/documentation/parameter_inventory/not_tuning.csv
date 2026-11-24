@@ -253,6 +253,7 @@ astrometricslib/pipelines/shared/image_scaling.py,_WHITE_COUNT_STRIDE,Speed stri
 astrometricslib/pipelines/shared/image_scaling.py,_autostretch_parameters.full_scale,Default full scale of a floating-point image (data format)
 astrometricslib/pipelines/shared/neighbor_masking.py,NeighborField.around.exclude_radius,Argument default of 0 meaning no star is excluded
 astrometricslib/pipelines/shared/neighbor_masking.py,_MAD_TO_SIGMA,Statistical constant: scales a median absolute deviation to a standard deviation
+astrometricslib/pipelines/shared/quality/background_measurement.py,BACKGROUND_LEVEL_METHOD,Version number of the background estimator (a label for stored values; not tuning)
 astrometricslib/pipelines/shared/quality/calibration_frame_measurement.py,NEIGHBOR_NOISE_COLUMN_STEP,Pixel step set by color sensor pattern
 astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_RESAMPLE_COUNT,Bootstrap resample count
 astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_SEED,software plumbing
@@ -382,7 +383,6 @@ astrometricslib/pipelines/stacking/frame_measurement_run.py,BIAS_FRAMES_FOR_LEVE
 astrometricslib/pipelines/stacking/frame_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_COUNT,Plumbing: worker count
 astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_NICENESS,"Process niceness; courtesy value, no effect on results."
-astrometricslib/pipelines/stacking/frame_measurement_run.py,STACKING_STAGE_MEASUREMENT_LIMIT,Plumbing: measurement cap
 astrometricslib/pipelines/stacking/frame_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/frame_screening.py,BACKGROUND_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUALITY_ROWS_WINDOW,Progress-bar windows; display only.

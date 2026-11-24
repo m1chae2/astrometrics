@@ -105,6 +105,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_co
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     load_line_spread_profile,
+    record_measured_spectral_bases,
     resolve_resolution_element_angstrom,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
@@ -1628,6 +1629,20 @@ class SpectroscopyPipeline:
                     self.instrument,
                 )
                 extracted.append((star, is_stellar_obj, result))
+
+        # The run's typical trail width, dispersion and line spread are
+        # measured from the spectra just read, before any star is applied,
+        # classified or checked. The limits of those steps (the zero-point
+        # offset, the refraction shift, the center search and the smoothing)
+        # are multiples of the line spread, so they must not run before it
+        # is known.
+        # An extraction result keeps its wavelengths in nanometers, and the
+        # bases are in Angstroms (1 nm is 10 Angstroms).
+        record_measured_spectral_bases(
+            (np.asarray(result.get("wavelengths") or [], dtype=float) * 10.0, result.get("trail_width_px"))
+            for _, _, result in extracted
+            if not result.get("is_neighbor_only")
+        )
 
         # Every star is read first, so each one's neighbors can be found and
         # their share of the star's light estimated before the results are

@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib.foundation.parameter_context import note_default_notices, worker_item_parameter_context
 from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -349,6 +350,34 @@ def _process_single_spectroscopy_frame_worker_v2(
     session_wcs_header: dict | None,
     follow_only: bool = False,
 ) -> dict:
+    """Extract spectra for one image, in a parameter context of its own.
+
+    The worker process is bound to the run's camera and optic when the pool
+    starts (`run_parallel_batch`). Each frame then gets a fresh context for
+    that equipment, so the trail width, dispersion and line spread this frame
+    measures are used for this frame only and never carry into the next one
+    the same process handles. The parameters that fell back to a default are
+    sent back as ``parameter_defaults``, because a worker cannot reach the
+    job that started it.
+
+    Returns
+    -------
+    result : `dict`
+        What `_extract_frame_spectra` returns, plus ``parameter_defaults``.
+    """
+    with worker_item_parameter_context() as item_context:
+        result = _extract_frame_spectra(path, target_id, session_stars, session_wcs_header, follow_only)
+        result["parameter_defaults"] = [] if item_context is None else list(item_context.notices)
+    return result
+
+
+def _extract_frame_spectra(
+    path: str,
+    target_id: str,
+    session_stars: list[StellarObject],
+    session_wcs_header: dict | None,
+    follow_only: bool = False,
+) -> dict:
     """Extract spectra for one image, using the session's known stars.
 
     With ``follow_only`` (the spectral variation stage), the frame is
@@ -663,6 +692,12 @@ def process_spectroscopy_frames_by_session(
 
     merged_summary = _merge_batch_summaries(session_summaries)
     merged_summary.skipped.extend(skipped_frames)
+    # A worker cannot reach this job, so each sent back the defaults it used.
+    note_default_notices(
+        notice
+        for frame_result in merged_summary.results.values()
+        for notice in frame_result.get("parameter_defaults") or []
+    )
     merged_summary.notes["followed_stars"] = followed_stars
     if session_results or not follow_only:
         _attach_spectroscopy_quality_summary(

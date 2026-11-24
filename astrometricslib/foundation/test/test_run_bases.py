@@ -109,7 +109,10 @@ def test_with_no_basis_the_reference_value_stands_in_with_a_notice() -> None:
         resolved = resolve(parameter)
     assert (resolved.value, resolved.origin) == (60.0, "default")
     assert context.notices == [
-        "test.scaled_value: no target size is known; using the reference-setup value 60.0"
+        (
+            "test.scaled_value: no target size is known (the run has not measured it and no setup in "
+            "the config matches this camera and optic); using the reference-setup value 60.0"
+        )
     ]
 
 

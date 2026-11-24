@@ -12,7 +12,6 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.quality_summary import (
@@ -54,10 +53,6 @@ from astrometricslib.pipelines.spectroscopy.post_processing.record_quality impor
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
     summarize_wavelength_scale,
-)
-from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
-    FWHM_PER_SIGMA,
-    estimate_resolution_element_angstrom,
 )
 from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
     record_and_flag_spectroscopy_stars,
@@ -399,46 +394,6 @@ def _registration_reference_candidates(
     ]
 
 
-def record_measured_spectral_bases(stellar_objects: list[Any]) -> None:
-    """Record the run's typical trail width, dispersion and line spread.
-
-    Each is the median over the run's spectra, recorded once, so the values
-    that scale with them (the wavelength limits, the sky bands and the
-    neighbor distances) follow the run's own data. Nothing is recorded for a
-    quantity no spectrum measured. Outside a run this does nothing.
-
-    Parameters
-    ----------
-    stellar_objects : `list`
-        The stars of the run, with the spectra the extraction produced.
-    """
-    trail_widths_px: list[float] = []
-    dispersions: list[float] = []
-    resolution_elements: list[float] = []
-    for stellar_object in stellar_objects:
-        spectrum = stellar_object.spectroscopy
-        if spectrum is None or not spectrum.wavelengths_angstrom:
-            continue
-        widths = [width for width in (spectrum.trail_width_px or []) if width > 0.0]
-        trail_widths_px.extend(widths)
-        wavelengths = np.asarray(spectrum.wavelengths_angstrom, dtype=float)
-        finite_wavelengths = np.sort(wavelengths[np.isfinite(wavelengths)])
-        if finite_wavelengths.size >= 2:
-            # One step along the trail is one pixel, so the gap between
-            # neighboring wavelengths is the Angstroms one pixel covers.
-            dispersions.append(float(np.median(np.abs(np.diff(finite_wavelengths)))))
-        resolution_element = estimate_resolution_element_angstrom(wavelengths, spectrum.trail_width_px)
-        if resolution_element is not None:
-            resolution_elements.append(resolution_element)
-    if trail_widths_px:
-        # The trail width is stored as a sigma; the basis is the FWHM.
-        record_basis(RunBasis.TRAIL_WIDTH_PX, FWHM_PER_SIGMA * statistics.median(trail_widths_px))
-    if dispersions:
-        record_basis(RunBasis.DISPERSION_ANGSTROM_PER_PX, statistics.median(dispersions))
-    if resolution_elements:
-        record_basis(RunBasis.SPECTRAL_RESOLUTION_ANGSTROM, statistics.median(resolution_elements))
-
-
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
     """Adapts `SpectroscopyPipeline` to the shared `AnalysisPipeline`."""
 
@@ -572,8 +527,6 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 target_id=target.id,
             )
         )
-
-        record_measured_spectral_bases(stellar_objects)
 
         return Result(
             context=context,

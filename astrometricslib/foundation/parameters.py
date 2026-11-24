@@ -444,7 +444,11 @@ def _resolve_with_basis(parameter: TunedParameter) -> ResolvedValue:
     # The model requires a reference value with a basis; the default is a
     # last resort that cannot be reached for a valid declaration.
     reference = parameter.reference_value if parameter.reference_value is not None else parameter.default
-    notice = f"{parameter.name}: no {basis} is known; using the reference-setup value {reference}"
+    if context.setup_bases is None:
+        why = "the run has not measured it and no setup in the config matches this camera and optic"
+    else:
+        why = "the run has not measured it yet and the setup cannot give it"
+    notice = f"{parameter.name}: no {basis} is known ({why}); using the reference-setup value {reference}"
     context.note(notice)
     logger.debug(notice)
     return ResolvedValue(name=parameter.name, value=reference, origin="default", notice=notice)

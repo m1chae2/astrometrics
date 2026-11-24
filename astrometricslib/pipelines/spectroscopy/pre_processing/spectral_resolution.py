@@ -41,6 +41,8 @@ rather than measuring the blur, and it is not used.
 
 import json
 import logging
+import statistics
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,12 +50,14 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 
@@ -220,6 +224,65 @@ def resolve_resolution_element_angstrom(
         return resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value, False
     logger.debug("Resolution element measured from the trail width: %.1f A", estimate)
     return estimate, True
+
+
+def record_measured_spectral_bases(
+    spectra: Iterable[tuple[np.ndarray | list[float], np.ndarray | list[float] | None]],
+) -> dict[RunBasis, float]:
+    """Record the run's typical trail width, dispersion and line spread.
+
+    Each is the median over the run's spectra, recorded once, so the values
+    that scale with them (the wavelength limits, the sky bands and the
+    neighbor distances) follow the run's own data. Nothing is recorded for a
+    quantity no spectrum measured. Outside a run context this records
+    nothing, but still returns what it measured.
+
+    The extraction calls this as soon as every star is read and before any
+    star is classified or checked, because those steps need the line spread
+    and the dispersion, and a spectrum cannot be judged against a value that
+    is only measured afterward.
+
+    Parameters
+    ----------
+    spectra : `Iterable` [`tuple`]
+        One pair for each spectrum of the run: its wavelengths, in Angstroms,
+        and its trail width (a sigma, in pixels) at each wavelength, or `None`
+        when it has none. A spectrum with no wavelengths is skipped.
+
+    Returns
+    -------
+    measured : `dict` [`RunBasis`, `float`]
+        What was measured and recorded: the trail width (a FWHM), the
+        dispersion and the spectral resolution, each only when a spectrum
+        gave it.
+    """
+    trail_widths_px: list[float] = []
+    dispersions: list[float] = []
+    resolution_elements: list[float] = []
+    for wavelength_angstrom, trail_width_px in spectra:
+        wavelengths = np.asarray(wavelength_angstrom, dtype=float)
+        if wavelengths.size == 0:
+            continue
+        trail_widths_px.extend(width for width in (trail_width_px or []) if width > 0.0)
+        finite_wavelengths = np.sort(wavelengths[np.isfinite(wavelengths)])
+        if finite_wavelengths.size >= 2:
+            # One step along the trail is one pixel, so the gap between
+            # neighboring wavelengths is the Angstroms one pixel covers.
+            dispersions.append(float(np.median(np.abs(np.diff(finite_wavelengths)))))
+        resolution_element = estimate_resolution_element_angstrom(wavelengths, trail_width_px)
+        if resolution_element is not None:
+            resolution_elements.append(resolution_element)
+    measured: dict[RunBasis, float] = {}
+    if trail_widths_px:
+        # The trail width is stored as a sigma; the basis is the FWHM.
+        measured[RunBasis.TRAIL_WIDTH_PX] = FWHM_PER_SIGMA * statistics.median(trail_widths_px)
+    if dispersions:
+        measured[RunBasis.DISPERSION_ANGSTROM_PER_PX] = statistics.median(dispersions)
+    if resolution_elements:
+        measured[RunBasis.SPECTRAL_RESOLUTION_ANGSTROM] = statistics.median(resolution_elements)
+    for basis, value in measured.items():
+        record_basis(basis, value)
+    return measured
 
 
 def blur_sigma_in_samples(resolution_element_angstrom: float, sample_spacing_angstrom: float) -> float:

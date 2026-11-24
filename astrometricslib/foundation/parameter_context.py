@@ -28,7 +28,7 @@ the context, so a run can list the values to set for new equipment.
 
 import contextvars
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -260,6 +260,24 @@ _JOB_NOTICE_COLLECTORS: contextvars.ContextVar[tuple[list[str], ...]] = contextv
 )
 _default_cache: tuple[float, ParameterContext] | None = None
 _worker_context_managers: list[Any] = []
+
+
+def note_default_notices(notices: Iterable[str]) -> None:
+    """Add notices a worker process collected to the jobs running here.
+
+    A worker process cannot reach the job that started it, so it sends back
+    the notices of its context (`ParameterContext.notices`) with its result,
+    and the parent calls this with them.
+
+    Parameters
+    ----------
+    notices : `Iterable` [`str`]
+        The sentences to record, each once per job.
+    """
+    for notice in notices:
+        for collected in _JOB_NOTICE_COLLECTORS.get():
+            if notice not in collected:
+                collected.append(notice)
 
 
 @contextmanager
@@ -558,6 +576,30 @@ def bind_equipment_key(key: tuple[str | None, str | None, float | None, str | No
     _worker_context_managers.append(manager)
 
 
+@contextmanager
+def worker_item_parameter_context() -> Generator[ParameterContext | None]:
+    """Start a fresh context for one item of work in a worker process.
+
+    The worker's context (`bind_equipment_key`) lives as long as the process,
+    and a process handles several items. A basis one item measured (its star
+    width, its trail width) must not carry into the next item, which has its
+    own frames. This opens a new context for the same equipment, with no
+    measured bases and no notices, for the length of one item.
+
+    Yields
+    ------
+    context : `ParameterContext` or `None`
+        The item's context, or `None` when the worker was bound to no
+        equipment (it then reads the active setup, as before).
+    """
+    key = current_equipment_key()
+    if key is None:
+        yield None
+        return
+    with _equipment_parameter_context(*key) as context:
+        yield context
+
+
 def _filter_section_name(frame: Any) -> str | None:
     """Give the filter name that a frame's ``Observatory.Filter`` section uses.
 
@@ -657,8 +699,10 @@ __all__ = [
     "equipment_parameter_context",
     "equipment_values_to_write",
     "frames_parameter_context",
+    "note_default_notices",
     "parameter_context",
     "record_basis",
     "run_basis_value",
     "setup_parameter_context",
+    "worker_item_parameter_context",
 ]

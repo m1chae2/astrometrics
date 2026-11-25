@@ -8,12 +8,14 @@ the narrow monochrome star. The alignment must also work when the
 monochrome stars are twice as wide as expected, the plate solutions disagree
 by more than the pairing radius, and the monochrome frame lies off the center
 of a wide color frame over a bright nebula (the M 42 and M 45 failure). The
-extended color must lose a tinted sky and the red skirts StarNet leaves
-around stars, and keep a nebula's color. The step must be skipped, with a
-reason, when there is no color stack or the color stack covers too little of
-the frame. A saturated star must not take the red color of its wing when
-the color stack's red stars are wider than its green ones: it takes its
-catalog color, or white. StarNet, SIMBAD and the Gaia archive are not used.
+extended color must lose a tinted sky, under a nebula or galaxy too, and
+the red skirts StarNet leaves around stars, and keep the object's own color.
+Where little sky lies near, the frame-wide tint is taken away. The step
+must be skipped, with a reason, when there is no color stack or the color
+stack covers too little of the frame. A saturated star must not take the
+red color of its wing when the color stack's red stars are wider than its
+green ones: it takes its catalog color, or white. StarNet, SIMBAD and the
+Gaia archive are not used.
 """
 
 from pathlib import Path
@@ -36,6 +38,7 @@ from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack i
     compose_color_picture,
     extended_color,
     make_color_preview_for_target,
+    neutralize_sky,
     write_color_preview,
 )
 from astrometricslib.pipelines.stacking.post_processing.other_stack_alignment import (
@@ -220,7 +223,8 @@ def test_extended_color_drops_a_tinted_sky_and_red_star_skirts_but_keeps_the_neb
 
     This is the Nikon 300 mm case: its starless picture has a sky slightly
     redder than green, and StarNet leaves the faint red outer skirt of each
-    star, because the lens's red stars are wider than its green ones.
+    star, because the lens's red stars are wider than its green ones. The
+    tint lies on the nebula's light too, so it is taken away there as well.
     """
     size = 300
     yy, xx = np.mgrid[0:size, 0:size]
@@ -243,28 +247,30 @@ def test_extended_color_drops_a_tinted_sky_and_red_star_skirts_but_keeps_the_neb
     a_value, b_value, statistics = extended_color(
         mono_starless, tinted.astype(np.float32), covered, labels, halo_radius_px=12.0
     )
-    reference_a, _, _ = extended_color(mono_starless, (clean + noise).astype(np.float32), covered)
-    old_a, old_b, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
+    reference_a, reference_b, _ = extended_color(mono_starless, (clean + noise).astype(np.float32), covered)
+    old_a, _, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
 
     assert statistics["sky_tint_removed_rgb"][0] > 0.005
+    assert statistics["sky_tint_largest_removed"] > 0.005
     # Beside a star the red skirt was strongly red before; it is gray now.
     row, column = star_positions[0]
     assert old_a[row, column + 5] > 3.0
     assert abs(a_value[row, column + 5]) < 1.0
-    # The nebula keeps its color: the sky tint is not taken away from it.
-    assert a_value[150, 150] == pytest.approx(old_a[150, 150], abs=1.0)
-    assert b_value[150, 150] == pytest.approx(old_b[150, 150], abs=1.0)
+    # The nebula has the color it has with no sky tint at all, and stays teal.
+    assert a_value[150, 150] == pytest.approx(reference_a[150, 150], abs=1.0)
+    assert b_value[150, 150] == pytest.approx(reference_b[150, 150], abs=1.0)
+    assert a_value[150, 150] < -5.0
     # The sky far from stars and nebula is as gray as with no tint.
     assert abs(a_value[150, 2]) <= abs(reference_a[150, 2]) + 0.5
-    assert a_value[150, 150] < -5.0
 
 
-def test_a_colored_object_filling_the_frame_keeps_its_color_while_the_sky_tint_goes() -> None:
-    """A large galaxy keeps its color; the reddish sky beside it turns gray.
+def test_a_galaxy_filling_the_frame_loses_the_sky_tint_but_keeps_its_own_color() -> None:
+    """A large red galaxy under a red sky tint keeps only its own red.
 
-    This is the M 31 case: the galaxy covers most of the frame, so a sky
-    sample taken as the darkest share of the frame holds its faint disk, and
-    taking that red away as a sky tint grays the galaxy.
+    This is the M 31 case: the galaxy covers most of the frame and the sky
+    is a strip at one edge. The sky sample must not hold the galaxy's faint
+    disk, or the galaxy's own red would be taken away as a tint. The sky tint
+    itself lies on the galaxy's light too, so it is taken away there.
     """
     size = 300
     yy, xx = np.mgrid[0:size, 0:size]
@@ -274,33 +280,65 @@ def test_a_colored_object_filling_the_frame_keeps_its_color_while_the_sky_tint_g
     mono_starless = (0.1 + 0.5 * galaxy + 0.002 * generator.standard_normal((size, size))).astype(np.float32)
     clean = np.stack([0.1 + 0.30 * galaxy, 0.1 + 0.22 * galaxy, 0.1 + 0.18 * galaxy])
     noise = 0.002 * generator.standard_normal((3, size, size))
-    tinted = clean + noise
-    tinted[0] += 0.006
-    tinted[1] -= 0.003
-    tinted[2] -= 0.003
+    tint = np.array([0.006, -0.003, -0.003])[:, None, None]
     covered = np.ones((size, size), dtype=bool)
     labels = np.zeros((size, size), dtype=np.int32)
     labels[5:8, 5:8] = 1
 
     a_value, b_value, statistics = extended_color(
-        mono_starless, tinted.astype(np.float32), covered, labels, 6.0
+        mono_starless, (clean + noise + tint).astype(np.float32), covered, labels, 6.0
     )
-    reference_a, reference_b, _ = extended_color(
-        mono_starless, (tinted - np.array([0.006, -0.003, -0.003])[:, None, None]).astype(np.float32), covered
-    )
-    untouched_a, untouched_b, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
+    reference_a, reference_b, _ = extended_color(mono_starless, (clean + noise).astype(np.float32), covered)
 
     removed = statistics["sky_tint_removed_rgb"]
     assert removed[0] == pytest.approx(0.006, abs=0.002)
-    # Where the galaxy is bright, the color is what it was before.
+    # Where the galaxy is bright, the color is the galaxy's own, still red.
     for row, column in ((150, 110), (150, 160), (100, 110)):
-        assert a_value[row, column] == pytest.approx(untouched_a[row, column], abs=0.5)
-        assert b_value[row, column] == pytest.approx(untouched_b[row, column], abs=0.5)
+        assert a_value[row, column] == pytest.approx(reference_a[row, column], abs=0.5)
+        assert b_value[row, column] == pytest.approx(reference_b[row, column], abs=0.5)
         assert a_value[row, column] > 3.0
     # The sky at the right edge is as gray as with no tint at all.
     sky = (slice(100, 200), slice(285, 295))
     assert np.abs(a_value[sky]).mean() <= np.abs(reference_a[sky]).mean() + 0.3
     assert np.abs(b_value[sky]).mean() <= np.abs(reference_b[sky]).mean() + 0.3
+
+
+def test_the_sky_tint_follows_the_nearby_sky_and_falls_back_to_the_frame_wide_tint() -> None:
+    """The tint taken is the nearby sky's; far from any sky, the frame's.
+
+    The sky is a band at the left edge. Its top third is red and the rest
+    is gray, so the frame-wide tint is gray. Next to the red sky the red goes;
+    next to the gray sky nothing is taken. Deep inside the object, level with
+    the red sky but where the smoothing holds almost no sky, the frame-wide
+    (gray) tint is used, so the object keeps its own red. Without the
+    fallback the map's red there would take that red away.
+    """
+    rows, columns = 1500, 1200
+    picture = np.full((3, rows, columns), 0.1, dtype=np.float32)
+    sky = np.zeros((rows, columns), dtype=bool)
+    sky[:, :300] = True
+    picture[0, :500, :300] += 0.008
+    # An object with a red color of its own fills the rest of the frame.
+    picture[:, :, 300:] += 0.2
+    picture[0, :, 300:] += 0.004
+
+    neutral, offsets, largest = neutralize_sky(picture, sky)
+
+    def red_minus_green(row: int, column: int) -> float:
+        """Give red minus green at one pixel of the result.
+
+        Returns
+        -------
+        difference : `float`
+            Red minus green, in picture units.
+        """
+        return float(neutral[0, row, column] - neutral[1, row, column])
+
+    assert max(abs(value) for value in offsets) < 0.002
+    assert largest > 0.004
+    assert abs(red_minus_green(50, 100)) < 0.001
+    assert abs(red_minus_green(1400, 100)) < 0.001
+    assert red_minus_green(100, 750) == pytest.approx(0.004, abs=0.0005)
 
 
 def make_star_field(seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[int, int]]]:

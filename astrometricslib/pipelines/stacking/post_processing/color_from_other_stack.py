@@ -19,11 +19,12 @@ stacks are never changed.
    color stack does not cover enough of the monochrome frame.
 3. *Color of the extended light.* StarNet (run through Siril) takes the
    stars out of both pictures. The starless color picture's sky is made gray
-   first: the red, green and blue levels of its sky (away from the stars,
-   where both pictures lie near their own sky level) are brought to their
-   mean, as the sky levelling of a color preview
-   does. It is then turned into CIE Lab, a color space with one lightness
-   channel (L) and two color channels (a, b). Its color channels are
+   first: the tint of its sky (each channel's offset from the mean of the
+   three, measured away from the stars where both pictures lie near their
+   own sky level) is smoothed into a map and taken away everywhere, under a
+   nebula or galaxy too, because a sky tint near an object is also in the
+   object's light. It is then turned into CIE Lab, a color space with one
+   lightness channel (L) and two color channels (a, b). Its color channels are
    blurred, so the color stack's noise does not show, and scaled so the
    color keeps its strength at the monochrome picture's lightness. The color
    fades in where the color stack's starless picture stands from 2 to 8
@@ -126,6 +127,7 @@ __all__ = [
     "COLOR_PREVIEW_SATURATED_HALO_RADII",
     "COLOR_PREVIEW_SKY_NOISE_MULTIPLE",
     "COLOR_PREVIEW_SKY_TINT_LIMITS",
+    "COLOR_PREVIEW_SKY_TINT_SMOOTHING",
     "ColorPreviewOutcome",
     "ColorStackChoice",
     "choose_color_stack",
@@ -294,6 +296,35 @@ COLOR_PREVIEW_SKY_TINT_LIMITS = TunedParameter(
     default=(0.002, 0.03),
     unit="picture units (0 to 1)",
     description="Sky tint below which none is taken away, and the most that is taken away.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-62",
+)
+
+# The sky tint is not the same over the frame: GraXpert leaves a broad warm
+# glow where the color stack's sky is brightest. So the tint is measured as a
+# map: each channel's offset on the sky pixels, averaged with a Gaussian of the
+# first number's width (in monochrome pixels) and divided by the share of sky
+# pixels under that Gaussian (the sky coverage). Where the coverage is below
+# the second number, the map is blended toward the frame-wide tint, reaching
+# it at zero coverage, because the nearest sky is then far away. On M 101
+# (Nikon D5300 at 300 mm, 3004 pixel frame) the tint under the arms was red
+# +2.4, blue -1.5 levels of 255 against +1.0, -0.5 for the whole frame. A
+# width of 150 pixels (5% of the frame) follows it: the arms' red over green
+# went from +5.8 to +2.2 levels; 300 pixels left +3.1. The coverage under the
+# galaxy was at least 0.20 on M 101 and 0.016 at the middle of M 81; under the
+# disk of M 31 it is zero. The map's red minus green, against the frame-wide
+# value, scattered by 0.31 levels (M 31) and 1.06 (M 81, where the warm glow
+# is) at a coverage of 0.05 to 0.20, by 0.55 and 0.79 at 0.01 to 0.05, and by
+# 1.14 on M 31 below 0.01, where the map rests on sky far away. Below 0.05 the
+# map is blended toward the frame-wide tint, with a fifth of its own weight
+# left at 0.01 (STK-62).
+COLOR_PREVIEW_SKY_TINT_SMOOTHING = TunedParameter(
+    name="stacking.color_preview_sky_tint_smoothing",
+    default=(150.0, 0.05),
+    unit="pixels, share of sky pixels",
+    description="Smoothing width of the sky tint map; sky share below which it nears the frame's tint.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -576,19 +607,20 @@ def _to_lab(channels_first: np.ndarray) -> np.ndarray:
     return rgb2lab(np.clip(np.moveaxis(np.asarray(channels_first), 0, -1), 0.0, 1.0)).astype(np.float32)
 
 
-def neutralize_sky(
-    color_starless: np.ndarray, sky: np.ndarray, weight: np.ndarray | None = None
-) -> tuple[np.ndarray, list[float]]:
-    """Bring the sky of a color picture to gray.
+def neutralize_sky(color_starless: np.ndarray, sky: np.ndarray) -> tuple[np.ndarray, list[float], float]:
+    """Take the sky tint out of a color picture, under its objects too.
 
-    Each channel is shifted so its median over the sky pixels equals the mean
-    of the three medians. The shift is taken away in full on the sky and not
-    at all on a nebula or galaxy (see ``weight``): the stretched color
-    picture is faint there, so even a small shift would change its color a
-    lot once it is scaled to the bright monochrome picture. The sky's
-    brightness is kept; only its tint goes. A tint below the first of
-    `COLOR_PREVIEW_SKY_TINT_LIMITS` is left alone, and one above the second
-    is held to it.
+    The tint of a pixel is each channel's offset from the mean of the three.
+    It is measured on the sky pixels and smoothed into a map (see
+    `COLOR_PREVIEW_SKY_TINT_SMOOTHING`), so a tint that changes across the
+    frame is followed. Where little sky lies near (inside a large galaxy),
+    the map is blended toward the frame-wide tint: each channel's median over
+    the sky pixels, less the mean of the three medians. The map is taken away
+    in full everywhere, because a sky tint near a nebula or galaxy is also in
+    its light; the object keeps the part of its color that differs from the
+    sky around it. The sky's brightness is kept; only its tint goes. Where
+    the tint is below the first of `COLOR_PREVIEW_SKY_TINT_LIMITS`, nothing
+    is taken away, and a tint above the second is held to it.
 
     Parameters
     ----------
@@ -596,34 +628,45 @@ def neutralize_sky(
         The color picture, shape (3, rows, columns), values 0 to 1.
     sky : `numpy.ndarray`
         Where the picture shows sky.
-    weight : `numpy.ndarray`, optional
-        How much of the shift each pixel takes, from 1 (sky) to 0 (the
-        light of a nebula or galaxy). By default every pixel takes all of it.
 
     Returns
     -------
     picture : `numpy.ndarray`
         The picture with a gray sky, clipped to 0 to 1.
     offsets : `list` [`float`]
-        What was taken from the red, green and blue channels (zero when
-        there are too few sky pixels or the tint is too small).
+        The frame-wide tint of the red, green and blue channels (zero when
+        there are too few sky pixels or it is below the floor).
+    largest : `float`
+        The largest offset taken from any channel at any pixel.
     """
     picture = np.asarray(color_starless, dtype=np.float32)
     if sky.sum() < _MINIMUM_SKY_SHARE * sky.size:
-        return picture, [0.0, 0.0, 0.0]
+        return picture, [0.0, 0.0, 0.0], 0.0
     levels = np.array([float(np.median(picture[channel][sky])) for channel in range(3)])
     offsets = levels - levels.mean()
     floor, cap = (float(value) for value in resolve(COLOR_PREVIEW_SKY_TINT_LIMITS).value)
-    largest = float(np.max(np.abs(offsets)))
+    width, least_coverage = (float(value) for value in resolve(COLOR_PREVIEW_SKY_TINT_SMOOTHING).value)
+    coverage = _blur_on_coarse_grid(sky.astype(np.float32), width)
+    blend = np.clip(coverage / least_coverage, 0.0, 1.0)
+    gray = picture.mean(axis=0)
+    tint = np.empty_like(picture)
+    for channel in range(3):
+        local = _blur_on_coarse_grid(np.where(sky, picture[channel] - gray, 0.0), width) / np.maximum(
+            coverage, 1e-6
+        )
+        tint[channel] = blend * local + (1.0 - blend) * float(offsets[channel])
+    del gray, coverage, blend
+    size = np.max(np.abs(tint), axis=0)
+    # A pixel whose tint is below the floor keeps its color; a larger tint
+    # is held to the cap.
+    tint *= np.where(size < floor, 0.0, np.minimum(1.0, cap / np.maximum(size, 1e-12)))[None, :, :]
+    largest = min(float(np.max(size)), cap)
     if largest < floor:
-        return picture, [0.0, 0.0, 0.0]
-    if largest > cap:
-        offsets = offsets * (cap / largest)
-    shift = offsets[:, None, None].astype(np.float32)
-    if weight is not None:
-        shift = shift * np.asarray(weight, dtype=np.float32)[None, :, :]
-    picture = np.clip(picture - shift, 0.0, 1.0)
-    return picture, [float(value) for value in offsets]
+        return picture, [0.0, 0.0, 0.0], 0.0
+    picture = np.clip(picture - tint, 0.0, 1.0)
+    if float(np.max(np.abs(offsets))) < floor:
+        offsets = np.zeros(3)
+    return picture, [float(value) for value in offsets], largest
 
 
 def fill_halos(chroma: np.ndarray, halos: np.ndarray, radius_px: float) -> np.ndarray:
@@ -793,10 +836,10 @@ def extended_color(
         The CIE Lab ``a`` and ``b`` of each pixel: zero (gray) where the
         color stack's signal is weak or where it does not cover.
     statistics : `dict` [`str`, `Any`]
-        The color stack's sky level and pixel noise, the sky tint taken
-        away, the halo radius, the number of stars with a wide halo and the
-        widest one, and the shares of the frame with full color and with
-        none.
+        The color stack's sky level and pixel noise, the frame-wide sky
+        tint and the largest local tint taken away, the halo radius, the
+        number of stars with a wide halo and the widest one, and the shares
+        of the frame with full color and with none.
     """
     blur, _ = (float(value) for value in resolve(COLOR_PREVIEW_CHROMA_BLUR_PIXELS).value)
     fade_low, fade_high, fade_blur = (float(value) for value in resolve(COLOR_PREVIEW_COLOR_FADE).value)
@@ -817,24 +860,21 @@ def extended_color(
         wide_radius = float(np.max(wide_halo_reach_px))
         away_from_stars = away_from_stars & ~wide
     # The sky sample: away from the stars, with both the monochrome and the
-    # color starless pictures near their own sky level. The shift is taken
-    # away where the monochrome picture looks like sky.
+    # color starless pictures near their own sky level.
     sky = np.zeros(covered.shape, dtype=bool)
-    correction_weight = None
     if away_from_stars.any():
         multiple = float(resolve(COLOR_PREVIEW_SKY_NOISE_MULTIPLE).value)
         mono_blurred = ndimage.gaussian_filter(np.asarray(mono_starless, dtype=np.float32), fade_blur)
         color_blurred = ndimage.gaussian_filter(
             np.asarray(color_starless, dtype=np.float32).mean(axis=0), fade_blur
         )
-        correction_weight = sky_weight(mono_blurred, away_from_stars, multiple)
         sky = (
             away_from_stars
-            & (correction_weight >= 1.0)
+            & (sky_weight(mono_blurred, away_from_stars, multiple) >= 1.0)
             & (sky_weight(color_blurred, away_from_stars, multiple) >= 1.0)
         )
         del mono_blurred, color_blurred
-    color_starless, sky_offsets = neutralize_sky(color_starless, sky, correction_weight)
+    color_starless, sky_offsets, largest_tint = neutralize_sky(color_starless, sky)
     lab = _to_lab(color_starless)
     chroma_a = ndimage.gaussian_filter(lab[..., 1], blur)
     chroma_b = ndimage.gaussian_filter(lab[..., 2], blur)
@@ -864,6 +904,7 @@ def extended_color(
         "color_starless_sky": round(sky_level, 5),
         "color_pixel_noise": round(pixel_noise, 5),
         "sky_tint_removed_rgb": [round(value, 5) for value in sky_offsets],
+        "sky_tint_largest_removed": round(largest_tint, 5),
         "sky_sample_fraction": round(float(np.mean(sky)), 4),
         "halo_radius_pixels": round(float(halo_radius_px), 2),
         "wide_halo_stars": int(np.count_nonzero(wide_halo_reach_px)) if wide is not None else 0,

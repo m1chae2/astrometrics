@@ -7,12 +7,16 @@ This module restores some of that range in the stretched picture with two
 curves.
 
 1. *Star dimming.* The stars are the light that sits well above the local
-   background. The module separates that light from the background, raises it
-   to a power, and adds it back. A power above 1 dims fainter stars more than
-   brighter ones, so bright stars stand out again. Only light that clearly
-   stands out is dimmed. Low-contrast structure, such as the knots along a
-   galaxy's spiral arms, is left as it was. Nebulae and the sky are part of
-   the background, so they are not touched.
+   background. The module separates that light from the background and
+   finds how much the brightest pixel of each star should be dimmed: it
+   raises the light to a power. A power above 1 dims fainter stars more than
+   brighter ones, so bright stars stand out again. The module then applies
+   the same factor to the whole star, wings included. Dimming each pixel on
+   its own would dim the core of a faint star and leave its wings, so a dark
+   ring would form around it. The sky level around a star is not scaled.
+   Only light that clearly stands out is dimmed. Low-contrast structure,
+   such as the knots along a galaxy's spiral arms, is left as it was.
+   Nebulae and the sky are part of the background, so they are not touched.
 2. *Soft highlights.* Above a knee, values are compressed with a smooth curve
    instead of being cut off at white. A saturated star core then ends a little
    below pure white, so it no longer looks like a flat disc.
@@ -182,6 +186,31 @@ _BACKGROUND_SMOOTHING_PIXELS = TunedParameter(
     register_entry="STK-D55",
 )
 
+# Each star is dimmed as a whole. The dimming a star's brightest pixel earns is
+# spread over a square around that pixel with this half-width, so the wings of
+# the star are dimmed by the same factor as its core. On the reference setup
+# this stands for 6 pixels, about 2.5 star widths (the width of the faint
+# wing of a star that is still above the noise); the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
+# Fixed by eye on NGC 6992 and M 81 stand-ins (STK-D55): at 4 pixels the
+# wings of bright stars were still dimmed less than their cores.
+_DIMMING_SPREAD_PIXELS = TunedParameter(
+    name="stacking.dimming_spread_pixels",
+    default=factor_for(6, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=6,
+    unit="× star width",
+    description="Half-width of the square over which a star's dimming is spread to its wings.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D55",
+)
+
+# The spread dimming map is blurred with a Gaussian whose width is this
+# fraction of the spread half-width, so the edge of the square does not show.
+_SPREAD_SMOOTHING_PER_PIXEL_OF_SPREAD = 0.3
+
 # The smallest room left above the background, so a bright background never
 # divides by zero.
 _MINIMUM_ROOM = 1e-6
@@ -231,6 +260,10 @@ def estimate_noise(image: np.ndarray) -> float:
 def dim_stars(image: np.ndarray, power: float | None = None) -> np.ndarray:
     """Dim the stars in a stretched picture, faint ones most.
 
+    Each star is dimmed as a whole. The dimming is worked out where the star
+    is brightest, then applied to the star's wings as well, so a faint star
+    gets no dark ring (a dim core inside an undimmed skirt).
+
     Parameters
     ----------
     image : `numpy.ndarray`
@@ -242,14 +275,17 @@ def dim_stars(image: np.ndarray, power: float | None = None) -> np.ndarray:
     Returns
     -------
     toned : `numpy.ndarray`
-        The picture with the background unchanged. Light more than
-        `STAR_DIMMING_FULL_AT` above the background is scaled by the fraction
-        of the available room it fills, raised to `power`. Light less than
-        `STAR_DIMMING_STARTS_AT` above it is unchanged, and light between the
-        two is a smooth mix of both. Both limits move up together, keeping
-        their distance, so that the start is at least
-        `NOISE_WIDTHS_ABOVE_THE_BACKGROUND` noise widths: sky noise is never
-        taken for a star.
+        The picture with the background unchanged. At the brightest pixel of a
+        star, light more than `STAR_DIMMING_FULL_AT` above the background is
+        scaled by the fraction of the available room it fills, raised to
+        `power`. Light less than `STAR_DIMMING_STARTS_AT` above it is
+        unchanged, and light between the two is a smooth mix of both. Both
+        limits move up together, keeping their distance, so that the start is
+        at least `NOISE_WIDTHS_ABOVE_THE_BACKGROUND` noise widths: sky noise
+        is never taken for a star. The same factor then scales the light of
+        the star's wings, out to the spread half-width. The sky level and
+        one noise width above it are not scaled, so the sky around a star
+        does not darken.
     """
     if power is None:
         power = resolve(STAR_DIMMING_POWER).value
@@ -261,14 +297,32 @@ def dim_stars(image: np.ndarray, power: float | None = None) -> np.ndarray:
     )
     star_light = np.clip(image - background, 0.0, None)
     room = np.clip(1.0 - background, _MINIMUM_ROOM, None)
-    starts_at = max(
-        star_dimming_starts_at, resolve(NOISE_WIDTHS_ABOVE_THE_BACKGROUND).value * estimate_noise(image)
-    )
+    noise = estimate_noise(image)
+    starts_at = max(star_dimming_starts_at, resolve(NOISE_WIDTHS_ABOVE_THE_BACKGROUND).value * noise)
     full_at = starts_at + (resolve(STAR_DIMMING_FULL_AT).value - star_dimming_starts_at)
-    ramp = np.clip((star_light - starts_at) / (full_at - starts_at), 0.0, 1.0)
+    # The sky sits a little above the background (the opening is a local
+    # minimum). Only light above the sky and one noise width is scaled, so the
+    # sky near a star keeps its level.
+    scaled_from = float(np.median(star_light)) + noise
+    # The light of the brightest pixel within the spread half-width decides the
+    # factor for every pixel around it.
+    spread_pixels = max(1, round(resolve(_DIMMING_SPREAD_PIXELS).value))
+    peak_light = ndimage.maximum_filter(star_light, size=2 * spread_pixels + 1)
+    ramp = np.clip((peak_light - starts_at) / (full_at - starts_at), 0.0, 1.0)
     weight = ramp * ramp * (3.0 - 2.0 * ramp)
-    dimmed = room * (star_light / room) ** power
-    return background + (1.0 - weight) * star_light + weight * dimmed
+    kept_light = (1.0 - weight) * peak_light + weight * room * (peak_light / room) ** power
+    scaled_peak = peak_light - scaled_from
+    factor = np.divide(
+        np.clip(kept_light - scaled_from, 0.0, None),
+        scaled_peak,
+        out=np.ones_like(scaled_peak),
+        where=scaled_peak > _MINIMUM_ROOM,
+    )
+    factor = ndimage.gaussian_filter(
+        np.clip(factor, 0.0, 1.0), _SPREAD_SMOOTHING_PER_PIXEL_OF_SPREAD * spread_pixels
+    )
+    scaled_light = np.clip(image - background - scaled_from, 0.0, None)
+    return image - (1.0 - factor) * scaled_light
 
 
 def tone_stars(image: np.ndarray) -> np.ndarray:

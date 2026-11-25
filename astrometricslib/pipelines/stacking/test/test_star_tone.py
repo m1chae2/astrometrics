@@ -223,3 +223,24 @@ def test_tone_stars_in_file_writes_a_toned_copy_with_the_header(tmp_path: Path) 
 def test_tone_stars_in_file_reports_an_unreadable_input(tmp_path: Path) -> None:
     """A missing file gives `False` instead of an exception."""
     assert not star_tone.tone_stars_in_file(str(tmp_path / "missing.fits"), str(tmp_path / "out.fits"))
+
+
+def test_a_faint_star_is_dimmed_as_a_whole_with_no_dark_ring() -> None:
+    """A star just above the start limit is dimmed by one factor throughout.
+
+    Dimmed pixel by pixel, the core of such a star was dimmed hard and its
+    wing, below the limit, was not. The wing then stood out as a ring around
+    a dim core. The factor worked out at the peak now scales the wing too.
+    """
+    peak = 0.17
+    image = BACKGROUND + gaussian_star(100, 100, peak, width=2.0)
+
+    toned = star_tone.dim_stars(image)
+
+    core_ratio = (toned[100, 100] - BACKGROUND) / peak
+    assert core_ratio < 0.7
+    for radius in (1, 2, 3, 4):
+        wing = image[100, 100 + radius] - BACKGROUND
+        assert (toned[100, 100 + radius] - BACKGROUND) / wing == pytest.approx(core_ratio, abs=0.04)
+    assert np.all(toned <= image + 1e-9)
+    assert np.median(toned) == pytest.approx(BACKGROUND, abs=1e-4)

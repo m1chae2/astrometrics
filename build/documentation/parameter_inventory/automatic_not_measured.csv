@@ -503,6 +503,7 @@ stacking.default_star_strength,STK-31,measurement,Partly measured
 stacking.default_star_stretch,STK-31,measurement,Partly measured
 stacking.detected_star_count,STK-D23,measurement,Design estimate
 stacking.detection_sigma,STK-D17,measurement,Design estimate
+stacking.dimming_spread_pixels,STK-D55,measurement,Design estimate
 stacking.elongation_outlier_sigmas,STK-01,exclusion criteria,Partly measured
 stacking.elongation_rise_above_median,STK-01,exclusion criteria,Partly measured
 stacking.elongation_rise_sigmas,STK-01,exclusion criteria,Partly measured

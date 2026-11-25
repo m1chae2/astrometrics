@@ -123,7 +123,7 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 - `group_star_gains.py`: measures the group scale factor from isolated stars.
 - `group_combination.py`: weights the groups and combines the group stacks. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.
 - `group_sky_matching.py`: fits and removes the sky background difference between a group and the reference group, one plane for each color channel.
-- `group_file_merging.py`: joins the per-group rejection maps and registration sequences into one file each.
+- `group_file_merging.py`: joins the per-group rejection maps and registration sequences into one file each. Each map is moved with its group's full alignment (shift, rotation and scale), resampled linearly so the fractions stay between 0 and 1.
 - `group_alignment.py`: lines up the group stacks and finds the zero-order target.
 - `star_pattern_candidates.py`: the star-pattern search that `group_alignment.py` falls back to.
 - `spectral_frame_alignment.py`: aligns spectral frames by phase correlation.

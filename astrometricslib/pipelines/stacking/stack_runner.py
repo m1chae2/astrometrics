@@ -1225,17 +1225,11 @@ def _write_combined_stack(
     write_image(final_path, combined, header)
 
     stem = os.path.splitext(final_path)[0]
-    shifts = [
-        None
-        if result.alignment is None
-        else (result.alignment.shift_rows_pixels, result.alignment.shift_columns_pixels)
-        for result in used
-    ]
     merge_rejection_maps(
         [_sibling_paths(result.path)[1] for result in used],
         [result.count for result in used],
         f"{stem}_RejMap.fits",
-        shifts=shifts,
+        alignments=[result.alignment for result in used],
     )
     merge_registration_sequences(
         [_sibling_paths(result.path)[2] for result in used], f"{stem}_Registration.seq"

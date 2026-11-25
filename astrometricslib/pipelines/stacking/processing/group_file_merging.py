@@ -29,7 +29,7 @@ def merge_rejection_maps(
     frame_counts: list[int],
     output_path: str,
     header: Any | None = None,
-    shifts: list[tuple[float, float] | None] | None = None,
+    alignments: list[Any | None] | None = None,
 ) -> bool:
     """Combine each group's rejection map into one map.
 
@@ -49,18 +49,23 @@ def merge_rejection_maps(
         Where to write the combined map.
     header : `astropy.io.fits.Header`, optional
         A FITS header to give the combined map.
-    shifts : `list` [`tuple` [`float`, `float`] or `None`], optional
-        For each group, the (rows, columns) shift that lined its stack up with
-        the reference group. The group's map is moved the same way, so the
-        maps line up with the combined image. `None` for a group that was not
-        moved.
+    alignments : `list` [`AlignmentResult` or `None`], optional
+        For each group, the move (shift, rotation and scale) that lined its
+        stack up with the reference group. The group's map gets the same
+        move, so the maps line up with the combined image. A group turned by
+        a half turn (a meridian flip between sessions) has its map turned
+        too. `None` for a group that was not moved. The map is resampled
+        linearly (spline order 1): a cubic spline would overshoot beside a
+        sharp edge and give fractions below 0 or above 1, and a nearest-pixel
+        copy would make the map's edges jagged. Where the move brings in no
+        data the map is 0, as before.
 
     Returns
     -------
     written : `bool`
         `True` when a map was written, `False` if no group had one.
     """
-    from astrometricslib.pipelines.stacking.processing.group_alignment import apply_shift
+    from astrometricslib.pipelines.stacking.processing.group_alignment import apply_alignment
 
     total = None
     weight_sum = 0.0
@@ -68,9 +73,9 @@ def merge_rejection_maps(
         if not path or not os.path.exists(path):
             continue
         data = np.asarray(read_data(path), dtype=np.float64)
-        shift = shifts[position] if shifts is not None else None
-        if shift is not None:
-            data = apply_shift(data, shift[0], shift[1], order=1)[0].astype(np.float64)
+        alignment = alignments[position] if alignments is not None else None
+        if alignment is not None:
+            data = apply_alignment(data, alignment, order=1)[0].astype(np.float64)
         total = data * count if total is None else total + data * count
         weight_sum += count
     if total is None or weight_sum == 0:

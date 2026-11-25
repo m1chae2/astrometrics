@@ -39,6 +39,7 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     split_frames_by_exposure,
     split_groups_by_night,
 )
+from astrometricslib.pipelines.stacking.processing.group_alignment import AlignmentResult
 from astrometricslib.pipelines.stacking.processing.group_combination import (
     combine_exposure_group_images,
     group_weight,
@@ -1045,3 +1046,35 @@ def test_group_weight_is_frames_times_exposure_squared_over_noise_squared() -> N
     """`group_weight` follows count x exposure^2 / noise^2."""
     assert group_weight(4, 2.0, 0.5) == pytest.approx(64.0)
     assert group_weight(1, 10.0, 10.0) == pytest.approx(1.0)
+
+
+def test_rejection_map_of_a_group_turned_half_a_turn_is_turned_too(tmp_path: Path) -> None:
+    """A half turn (a meridian flip) turns the group map too."""
+    rejection_map = np.zeros((21, 21), np.float32)
+    rejection_map[2:5, 2:5] = 1.0  # a marked block near the top-left corner
+    path = tmp_path / "flipped.fits"
+    fits.writeto(path, rejection_map)
+    # A half turn about the centre, with no shift.
+    alignment = AlignmentResult(0.0, 0.0, 1.0, rotation_degrees=180.0)
+
+    merge_rejection_maps([str(path)], [1], str(tmp_path / "merged.fits"), alignments=[alignment])
+
+    merged = fits.getdata(tmp_path / "merged.fits")
+    assert merged[16:19, 16:19].min() == pytest.approx(1.0, abs=1e-3)  # now at the bottom-right
+    assert merged[2:5, 2:5].max() == pytest.approx(0.0, abs=1e-3)
+    assert merged.sum() == pytest.approx(9.0, abs=1e-2)
+
+
+def test_rejection_map_of_a_shift_only_group_is_only_shifted(tmp_path: Path) -> None:
+    """A group with no rotation or scale has its map only shifted."""
+    rejection_map = np.zeros((21, 21), np.float32)
+    rejection_map[2:5, 2:5] = 1.0
+    path = tmp_path / "shifted.fits"
+    fits.writeto(path, rejection_map)
+    alignment = AlignmentResult(3.0, 5.0, 1.0)
+
+    merge_rejection_maps([str(path)], [1], str(tmp_path / "merged.fits"), alignments=[alignment])
+
+    merged = fits.getdata(tmp_path / "merged.fits")
+    assert merged[5:8, 7:10].min() == pytest.approx(1.0, abs=1e-3)
+    assert merged.sum() == pytest.approx(9.0, abs=1e-2)

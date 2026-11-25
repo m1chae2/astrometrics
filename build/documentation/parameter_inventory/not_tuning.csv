@@ -420,8 +420,10 @@ astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_FA
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_GAIA_MARGIN_DEGREES,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_HALO_FILL_MINIMUM_WEIGHT,Least share of outside pixels below which a halo is left gray; numerics.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_LIGHTNESS_OFFSET,Keeps a ratio of lightnesses finite on black pixels; numerics.
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MINIMUM_SKY_SHARE,Fewest sky pixels needed to measure the sky tint; a sanity guard.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MOVING_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_REFERENCE_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_SKY_HISTOGRAM_BINS,Histogram bins of the sky-level (mode) estimate; plumbing.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,extended_color.halo_radius_px,Default that turns the halo fill off for callers without star footprints; not a tuning value.
 astrometricslib/pipelines/stacking/post_processing/depth_limits.py,INDEPENDENT_PIXEL_EXPONENT,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/difference_noise.py,PAIRED_BOOTSTRAP_SEED,software plumbing

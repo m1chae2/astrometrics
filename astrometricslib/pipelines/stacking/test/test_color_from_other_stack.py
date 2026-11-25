@@ -240,18 +240,64 @@ def test_extended_color_drops_a_tinted_sky_and_red_star_skirts_but_keeps_the_neb
     a_value, b_value, statistics = extended_color(
         mono_starless, tinted.astype(np.float32), covered, labels, halo_radius_px=12.0
     )
-    reference_a, reference_b, _ = extended_color(mono_starless, (clean + noise).astype(np.float32), covered)
-    old_a, _, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
+    reference_a, _, _ = extended_color(mono_starless, (clean + noise).astype(np.float32), covered)
+    old_a, old_b, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
 
     assert statistics["sky_tint_removed_rgb"][0] > 0.005
     # Beside a star the red skirt was strongly red before; it is gray now.
     row, column = star_positions[0]
     assert old_a[row, column + 5] > 3.0
     assert abs(a_value[row, column + 5]) < 1.0
-    # The nebula keeps its color.
-    assert a_value[150, 150] == pytest.approx(reference_a[150, 150], abs=1.0)
-    assert b_value[150, 150] == pytest.approx(reference_b[150, 150], abs=1.0)
+    # The nebula keeps its color: the sky tint is not taken away from it.
+    assert a_value[150, 150] == pytest.approx(old_a[150, 150], abs=1.0)
+    assert b_value[150, 150] == pytest.approx(old_b[150, 150], abs=1.0)
+    # The sky far from stars and nebula is as gray as with no tint.
+    assert abs(a_value[150, 2]) <= abs(reference_a[150, 2]) + 0.5
     assert a_value[150, 150] < -5.0
+
+
+def test_a_colored_object_filling_the_frame_keeps_its_color_while_the_sky_tint_goes() -> None:
+    """A large galaxy keeps its color; the reddish sky beside it turns gray.
+
+    This is the M 31 case: the galaxy covers most of the frame, so a sky
+    sample taken as the darkest share of the frame holds its faint disk, and
+    taking that red away as a sky tint grays the galaxy.
+    """
+    size = 300
+    yy, xx = np.mgrid[0:size, 0:size]
+    generator = np.random.default_rng(31)
+    # An elongated galaxy over most of the frame; the right edge is sky.
+    galaxy = np.exp(-(((yy - 150) / 120.0) ** 2 + ((xx - 110) / 90.0) ** 2))
+    mono_starless = (0.1 + 0.5 * galaxy + 0.002 * generator.standard_normal((size, size))).astype(np.float32)
+    clean = np.stack([0.1 + 0.30 * galaxy, 0.1 + 0.22 * galaxy, 0.1 + 0.18 * galaxy])
+    noise = 0.002 * generator.standard_normal((3, size, size))
+    tinted = clean + noise
+    tinted[0] += 0.006
+    tinted[1] -= 0.003
+    tinted[2] -= 0.003
+    covered = np.ones((size, size), dtype=bool)
+    labels = np.zeros((size, size), dtype=np.int32)
+    labels[5:8, 5:8] = 1
+
+    a_value, b_value, statistics = extended_color(
+        mono_starless, tinted.astype(np.float32), covered, labels, 6.0
+    )
+    reference_a, reference_b, _ = extended_color(
+        mono_starless, (tinted - np.array([0.006, -0.003, -0.003])[:, None, None]).astype(np.float32), covered
+    )
+    untouched_a, untouched_b, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
+
+    removed = statistics["sky_tint_removed_rgb"]
+    assert removed[0] == pytest.approx(0.006, abs=0.002)
+    # Where the galaxy is bright, the color is what it was before.
+    for row, column in ((150, 110), (150, 160), (100, 110)):
+        assert a_value[row, column] == pytest.approx(untouched_a[row, column], abs=0.5)
+        assert b_value[row, column] == pytest.approx(untouched_b[row, column], abs=0.5)
+        assert a_value[row, column] > 3.0
+    # The sky at the right edge is as gray as with no tint at all.
+    sky = (slice(100, 200), slice(285, 295))
+    assert np.abs(a_value[sky]).mean() <= np.abs(reference_a[sky]).mean() + 0.3
+    assert np.abs(b_value[sky]).mean() <= np.abs(reference_b[sky]).mean() + 0.3
 
 
 def make_star_field(seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[int, int]]]:

@@ -19,8 +19,9 @@ stacks are never changed.
    color stack does not cover enough of the monochrome frame.
 3. *Color of the extended light.* StarNet (run through Siril) takes the
    stars out of both pictures. The starless color picture's sky is made gray
-   first: the red, green and blue levels of its darkest sky, away from the
-   stars, are brought to their mean, as the sky levelling of a color preview
+   first: the red, green and blue levels of its sky (away from the stars,
+   where both pictures lie near their own sky level) are brought to their
+   mean, as the sky levelling of a color preview
    does. It is then turned into CIE Lab, a color space with one lightness
    channel (L) and two color channels (a, b). Its color channels are
    blurred, so the color stack's noise does not show, and scaled so the
@@ -110,7 +111,8 @@ __all__ = [
     "COLOR_PREVIEW_HALO_WIDTHS",
     "COLOR_PREVIEW_MAXIMUM_ALIGNMENT_RMS_PIXELS",
     "COLOR_PREVIEW_MINIMUM_COVERAGE",
-    "COLOR_PREVIEW_SKY_SHARE",
+    "COLOR_PREVIEW_SKY_NOISE_MULTIPLE",
+    "COLOR_PREVIEW_SKY_TINT_LIMITS",
     "ColorPreviewOutcome",
     "ColorStackChoice",
     "choose_color_stack",
@@ -119,6 +121,7 @@ __all__ = [
     "fill_halos",
     "make_color_preview_for_target",
     "neutralize_sky",
+    "sky_weight",
     "write_color_preview",
 ]
 
@@ -247,23 +250,50 @@ COLOR_PREVIEW_STAR_CORE_TAPER = TunedParameter(
     register_entry="STK-62",
 )
 
-# The darkest share of the covered frame, away from the stars, whose red,
-# green and blue levels are taken as the sky of the starless color picture
-# and brought to gray. The Nikon D5300 pictures at 300 mm of M 101, M 13 and
-# M 81 had a sky about 1.5 levels (of 255) redder than green in the color
-# picture; a quarter of the frame is sky on every target tried, nebula
-# fields included, while a half reached the faint galaxy disk of M 81
-# (STK-62).
-COLOR_PREVIEW_SKY_SHARE = TunedParameter(
-    name="stacking.color_preview_sky_share",
-    default=0.25,
-    unit="fraction of the covered frame",
-    description="Darkest share of the frame, away from stars, taken as the color picture's sky.",
+# A pixel counts as sky for the color picture's sky tint only when it is away
+# from the stars and both the monochrome and the color starless pictures,
+# blurred, lie within this many sky spreads of their own sky level. The sky
+# level is the most common blurred value, and the spread is measured on the
+# darker side of it only, where no nebula or galaxy light is. The first
+# version took the darkest quarter of the frame as sky; on M 31 that quarter
+# held the faint galaxy disk, whose red was taken away as a sky tint and the
+# galaxy lost a third of its color. Two spreads keep almost all true sky and
+# leave the disk out (STK-62).
+COLOR_PREVIEW_SKY_NOISE_MULTIPLE = TunedParameter(
+    name="stacking.color_preview_sky_noise_multiple",
+    default=2.0,
+    unit="sky spreads",
+    description="How close to its sky level a pixel must be, on both pictures, to sample the color sky tint.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-62",
 )
+
+# The sky tint, the largest red, green or blue offset from gray in the
+# picture's units (0 to 1), below which nothing is taken away and above
+# which it is held. 0.002 is half a level of 255, under what can be seen. The
+# Nikon D5300 pictures at 300 mm of M 101, M 13 and M 81 had tints of 0.012
+# to 0.016 (3 to 4 levels); 0.03 allows twice that and stops a bad sky sample
+# from tinting the whole picture (STK-62).
+COLOR_PREVIEW_SKY_TINT_LIMITS = TunedParameter(
+    name="stacking.color_preview_sky_tint_limits",
+    default=(0.002, 0.03),
+    unit="picture units (0 to 1)",
+    description="Sky tint below which none is taken away, and the most that is taken away.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-62",
+)
+
+# The fewest sky pixels needed to measure the sky tint, as a share of the
+# covered frame; with fewer, the tint is left alone. Not tuned.
+_MINIMUM_SKY_SHARE = 0.005
+
+# The number of histogram bins between the 1st and 60th percentiles used to
+# find the most common (sky) value. Plumbing of a mode estimate, not tuned.
+_SKY_HISTOGRAM_BINS = 200
 
 # How far past each monochrome star's footprint the extended color is
 # replaced by the color just beyond, in widths of the color stack's widest
@@ -508,11 +538,19 @@ def _to_lab(channels_first: np.ndarray) -> np.ndarray:
     return rgb2lab(np.clip(np.moveaxis(np.asarray(channels_first), 0, -1), 0.0, 1.0)).astype(np.float32)
 
 
-def neutralize_sky(color_starless: np.ndarray, sky: np.ndarray) -> tuple[np.ndarray, list[float]]:
+def neutralize_sky(
+    color_starless: np.ndarray, sky: np.ndarray, weight: np.ndarray | None = None
+) -> tuple[np.ndarray, list[float]]:
     """Bring the sky of a color picture to gray.
 
     Each channel is shifted so its median over the sky pixels equals the mean
-    of the three medians. The sky's brightness is kept; only its tint goes.
+    of the three medians. The shift is taken away in full on the sky and not
+    at all on a nebula or galaxy (see ``weight``): the stretched color
+    picture is faint there, so even a small shift would change its color a
+    lot once it is scaled to the bright monochrome picture. The sky's
+    brightness is kept; only its tint goes. A tint below the first of
+    `COLOR_PREVIEW_SKY_TINT_LIMITS` is left alone, and one above the second
+    is held to it.
 
     Parameters
     ----------
@@ -520,21 +558,70 @@ def neutralize_sky(color_starless: np.ndarray, sky: np.ndarray) -> tuple[np.ndar
         The color picture, shape (3, rows, columns), values 0 to 1.
     sky : `numpy.ndarray`
         Where the picture shows sky.
+    weight : `numpy.ndarray`, optional
+        How much of the shift each pixel takes, from 1 (sky) to 0 (the
+        light of a nebula or galaxy). By default every pixel takes all of it.
 
     Returns
     -------
     picture : `numpy.ndarray`
         The picture with a gray sky, clipped to 0 to 1.
     offsets : `list` [`float`]
-        What was taken from the red, green and blue channels.
+        What was taken from the red, green and blue channels (zero when
+        there are too few sky pixels or the tint is too small).
     """
     picture = np.asarray(color_starless, dtype=np.float32)
-    if not sky.any():
+    if sky.sum() < _MINIMUM_SKY_SHARE * sky.size:
         return picture, [0.0, 0.0, 0.0]
     levels = np.array([float(np.median(picture[channel][sky])) for channel in range(3)])
     offsets = levels - levels.mean()
-    picture = np.clip(picture - offsets[:, None, None].astype(np.float32), 0.0, 1.0)
+    floor, cap = (float(value) for value in resolve(COLOR_PREVIEW_SKY_TINT_LIMITS).value)
+    largest = float(np.max(np.abs(offsets)))
+    if largest < floor:
+        return picture, [0.0, 0.0, 0.0]
+    if largest > cap:
+        offsets = offsets * (cap / largest)
+    shift = offsets[:, None, None].astype(np.float32)
+    if weight is not None:
+        shift = shift * np.asarray(weight, dtype=np.float32)[None, :, :]
+    picture = np.clip(picture - shift, 0.0, 1.0)
     return picture, [float(value) for value in offsets]
+
+
+def sky_weight(blurred: np.ndarray, sample: np.ndarray, multiple: float) -> np.ndarray:
+    """Say how much each pixel of a blurred picture looks like sky.
+
+    The sky level is the most common value of the sample (the peak of its
+    histogram between its 1st and 60th percentiles). The sky spread is the
+    robust spread of the sample's values below that level, mirrored, so the
+    light of a nebula or galaxy above the sky does not widen it.
+
+    Parameters
+    ----------
+    blurred : `numpy.ndarray`
+        The blurred picture.
+    sample : `numpy.ndarray`
+        The pixels to measure the sky on.
+    multiple : `float`
+        How many sky spreads above the sky level still count fully as sky.
+
+    Returns
+    -------
+    weight : `numpy.ndarray`
+        1 up to the sky level plus ``multiple`` spreads, falling evenly to 0
+        at twice as many spreads above it.
+    """
+    values = blurred[sample]
+    low, high = np.percentile(values, [1.0, 60.0])
+    if not high > low:
+        return (blurred <= high).astype(np.float32)
+    counts, edges = np.histogram(values, bins=_SKY_HISTOGRAM_BINS, range=(float(low), float(high)))
+    peak = int(np.argmax(counts))
+    level = 0.5 * (edges[peak] + edges[peak + 1])
+    below = level - values[values <= level]
+    spread = max(1.4826 * float(np.median(below)) if below.size else 0.0, float(edges[1] - edges[0]))
+    reach = multiple * spread
+    return np.clip((level + 2.0 * reach - blurred) / reach, 0.0, 1.0).astype(np.float32)
 
 
 def fill_halos(chroma: np.ndarray, halos: np.ndarray, radius_px: float) -> np.ndarray:
@@ -615,12 +702,25 @@ def extended_color(
     else:
         halos = np.zeros(covered.shape, dtype=bool)
         away_from_stars = covered
+    # The sky sample: away from the stars, with both the monochrome and the
+    # color starless pictures near their own sky level. The shift is taken
+    # away where the monochrome picture looks like sky.
     sky = np.zeros(covered.shape, dtype=bool)
+    correction_weight = None
     if away_from_stars.any():
-        share = float(resolve(COLOR_PREVIEW_SKY_SHARE).value)
-        level = float(np.quantile(mono_starless[away_from_stars], share))
-        sky = away_from_stars & (mono_starless <= level)
-    color_starless, sky_offsets = neutralize_sky(color_starless, sky)
+        multiple = float(resolve(COLOR_PREVIEW_SKY_NOISE_MULTIPLE).value)
+        mono_blurred = ndimage.gaussian_filter(np.asarray(mono_starless, dtype=np.float32), fade_blur)
+        color_blurred = ndimage.gaussian_filter(
+            np.asarray(color_starless, dtype=np.float32).mean(axis=0), fade_blur
+        )
+        correction_weight = sky_weight(mono_blurred, away_from_stars, multiple)
+        sky = (
+            away_from_stars
+            & (correction_weight >= 1.0)
+            & (sky_weight(color_blurred, away_from_stars, multiple) >= 1.0)
+        )
+        del mono_blurred, color_blurred
+    color_starless, sky_offsets = neutralize_sky(color_starless, sky, correction_weight)
     lab = _to_lab(color_starless)
     chroma_a = ndimage.gaussian_filter(lab[..., 1], blur)
     chroma_b = ndimage.gaussian_filter(lab[..., 2], blur)
@@ -647,6 +747,7 @@ def extended_color(
         "color_starless_sky": round(sky_level, 5),
         "color_pixel_noise": round(pixel_noise, 5),
         "sky_tint_removed_rgb": [round(value, 5) for value in sky_offsets],
+        "sky_sample_fraction": round(float(np.mean(sky)), 4),
         "halo_radius_pixels": round(float(halo_radius_px), 2),
         "fraction_full_color": round(float(np.mean(fade > 0.99)), 4),
         "fraction_no_color": round(float(np.mean(fade < 0.01)), 4),

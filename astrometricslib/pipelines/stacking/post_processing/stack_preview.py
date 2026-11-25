@@ -2,7 +2,7 @@
 
 A stacked FITS file holds linear data: pixel values proportional to the
 light collected. Most of the sky is far too dark in that form to see
-anything. Up to seven steps turn it into a picture.
+anything. Up to eight steps turn it into a picture.
 
 1. If GraXpert is configured, the sky's brightness gradient is removed in
    one of two ways (see `sky_plane`). A stack whose sky tilts by less than
@@ -57,14 +57,25 @@ anything. Up to seven steps turn it into a picture.
    with extra blotchy structure. Measured on the M 13 stack, the visible
    grain fell by only 22 percent that way, against 73 percent when the
    denoise ran after the stretch.
-6. Star toning (see `star_tone`) dims the stars in proportion to their
+6. Sky levelling (see `sky_levelling`) makes the sky of a color picture
+   neutral. The stretch multiplies the small differences between the
+   channels' sky levels that the linear steps leave (a green-cyan sky on the
+   NGC 6992 stack: red 27, green 30, blue 29 of 255). The step measures each
+   channel's empty sky on the stretched picture, adds an offset to red and
+   blue so their sky equals green's, and clips to the range 0 to 1. It runs
+   after Cosmic Clarity, which can also shift the colors, and before the star
+   toning, which leaves the sky alone. It is skipped, with a notice, when the
+   sky cannot be measured or an offset would exceed
+   `SKY_LEVELLING_MAXIMUM_OFFSET`. The offsets are in the record beside the
+   picture. A single-channel stack is not touched.
+7. Star toning (see `star_tone`) dims the stars in proportion to their
    brightness and compresses the brightest values below pure white. The
    stretch makes nearly every star a small white dot of about the same
    brightness. The toning brings back some of their real range. It acts on
    the stretched picture and leaves the background and nebulae alone. The
    setting ``preview_star_tone_enabled`` turns it off.
 
-7. The masked stretch (see `masked_stretch`) protects a small bright smooth
+8. The masked stretch (see `masked_stretch`) protects a small bright smooth
    object, such as the ring of M 57. The normal stretch pushes such an object
    to flat white. For a nebula or galaxy target with a smooth bright region,
    a second stretch, set by the region's own brightness, replaces the picture
@@ -158,6 +169,7 @@ from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
 )
 from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.sky_levelling import level_sky_in_file
 from astrometricslib.pipelines.stacking.post_processing.sky_plane import (
     SKY_PLANE_GRADIENT_LIMIT,
     choose_background_method_for_file,
@@ -1407,6 +1419,52 @@ def _check_white_balance(
     return name
 
 
+def _level_stretched_sky(
+    scratch: str,
+    name: str,
+    steps: list[str],
+    settings_used: dict[str, Any] | None,
+    skipped_steps: list[SkippedPreviewStep] | None,
+) -> str:
+    """Level the sky of a stretched color picture (see `sky_levelling`).
+
+    The step never fails the preview: when the sky cannot be measured or a
+    needed offset is too large, the picture is kept as it is, the reason goes
+    into the record and a notice is stored.
+
+    Parameters
+    ----------
+    scratch : `str`
+        The scratch folder.
+    name : `str`
+        The stretched picture's file name in the scratch folder.
+    steps : `list` [`str`]
+        The sentences of the steps; this step's sentence is added.
+    settings_used : `dict`, optional
+        The record of the choices the run used; ``sky_levelling`` is added.
+    skipped_steps : `list` [`SkippedPreviewStep`], optional
+        A step that changed nothing is added to it.
+
+    Returns
+    -------
+    file_name : `str`
+        The leveled picture's file name when the offsets were added,
+        otherwise `name`.
+    """
+    raise_if_abandoned()
+    leveled_name = "levelled.fits"
+    result = level_sky_in_file(os.path.join(scratch, name), os.path.join(scratch, leveled_name))
+    applied = result.applied and os.path.isfile(os.path.join(scratch, leveled_name))
+    steps.append(result.step_sentence())
+    if settings_used is not None:
+        settings_used["sky_levelling"] = result.record()
+    if applied:
+        return leveled_name
+    if skipped_steps is not None:
+        skipped_steps.append(SkippedPreviewStep("Sky levelling", result.reason))
+    return name
+
+
 def _picture_script(
     scratch: str,
     siril_executable: str,
@@ -1664,6 +1722,9 @@ def _picture_script(
         # The stars were stretched apart already, so the formula that dims
         # stars would act twice.
         tone_stars = False
+    # A color stack's sky is leveled after the stretch and the denoise (see
+    # `sky_levelling`); the stretch is then saved as FITS first.
+    level_sky = bool(colour)
     if settings_used is not None:
         strength_used = None
         if denoise_executable:
@@ -1683,7 +1744,13 @@ def _picture_script(
             masked_stretch=masked.record(),
             stretch_sky=stretch_record,
         )
-    if not stretched_by_starnet and not denoise_executable and not tone_stars and not masked.used:
+    if (
+        not stretched_by_starnet
+        and not denoise_executable
+        and not tone_stars
+        and not masked.used
+        and not level_sky
+    ):
         steps.extend(["Siril stretch done in the final script", denoise_note, "Star toning off"])
         logger.info("Preview steps: %s.", "; ".join(steps))
         if steps_log is not None:
@@ -1747,6 +1814,8 @@ def _picture_script(
         name = denoised_name
     else:
         steps.append(denoise_note)
+    if level_sky:
+        name = _level_stretched_sky(scratch, name, steps, settings_used, skipped_steps)
     if tone_stars:
         toned_name = _next_source(
             "Star toning", name, "toned.fits", scratch, tone_stars_in_file, skipped_steps=skipped_steps

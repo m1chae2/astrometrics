@@ -282,6 +282,7 @@ With no registration transforms (an older stack), the stack is trimmed by measur
     - **Setting.** `denoise_strength` (0 to 1, default 0.5) controls how much it removes from the brightness. `color_denoise_strength` (default 0.3) controls how much color speckle a color stack loses. `denoise_enabled` (default `true`) turns the step off; a blank program path also skips it.
     - **Why after the stretch.** Autostretch measures the noise level of the image it stretches. After a denoise, it measures less noise and turns the contrast back up, so the remaining noise looks as strong as before and large blotchy patches appear.
     - **Status.** The order and the 0.5 default are measured (see [STK-30](../../../documentation/library_design/validation/stacking.md#stk-30)). The color strength is partly measured (see [STK-D81](../../../documentation/library_design/validation/stacking.md#design-estimates)).
+    - **Sky levelling (color stacks).** `sky_levelling.py` runs on the stretched picture after the denoise, because the denoise can also shift colors. The stretch multiplies small leftover differences between the channels' sky levels, which gave a green-cyan sky on the NGC 6992 preview. The step measures each channel's sky on the darkest half of the picture with `measure_sky_background` and adds an offset to red and blue so their sky equals green's. It never scales, and it clips to 0 to 1. It is skipped, with a notice, if the sky cannot be measured or an offset is above 0.05. The offsets are in `settings_used.sky_levelling` (design estimate; see [STK-D86](../../../documentation/library_design/validation/stacking.md#design-estimates)).
     - **Safety.** The program only reads and writes the `input` and `output` folders next to it. The sub-step takes an exclusive lock, refuses to run if `input` already holds files, and deletes only its own files.
 6. **StarNet (optional).** StarNet (`starnet_stretch.py`) replaces the single stretch and the star toning.
     - **What it does.** Siril's `starnet` command splits the linear image into a starless image and a stars-only image. The pipeline stretches the starless image the usual way. It stretches the stars on their own with an arcsinh curve (`star_stretch`, default 1000: larger values lift fainter stars). It blends the two with a screen blend, which adds light without clipping, like projecting two slides onto one screen. The blend scales the stars by `star_strength` (default 0.8).
@@ -319,7 +320,7 @@ With no registration transforms (an older stack), the stack is trimmed by measur
 
 ### Skipped sub-steps, failures and logging
 
-Leaving a sub-step's setting blank skips it. Without Cosmic Clarity and the star toning, one Siril script stretches the image and saves the JPEG.
+Leaving a sub-step's setting blank skips it. Without Cosmic Clarity and the star toning, one Siril script stretches the image and saves the JPEG. A color stack always saves the stretch first, so the sky levelling can run.
 
 Both images are for people only. Nothing in the pipeline reads them, and the stack file does not change, so photometry and spectroscopy still read the linear data.
 

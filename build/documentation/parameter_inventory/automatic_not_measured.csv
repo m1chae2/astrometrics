@@ -643,6 +643,8 @@ stacking.single_night_fractions,STK-37,measurement,Design estimate
 stacking.size_radius_multiples,STK-D32,measurement,Design estimate
 stacking.sky_clip_passes,STK-D10,measurement,Design estimate
 stacking.sky_clip_sigmas,STK-D10,measurement,Design estimate
+stacking.sky_levelling_darkest_share,STK-D86,measurement,Design estimate
+stacking.sky_levelling_maximum_offset,STK-D86,measurement,Design estimate
 stacking.sky_match_block_pixels,STK-D10,measurement,Design estimate
 stacking.sky_match_block_valid_fraction,STK-D10,measurement,Design estimate
 stacking.sky_match_minimum_blocks,STK-D10,measurement,Design estimate

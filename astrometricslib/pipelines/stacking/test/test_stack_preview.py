@@ -1274,7 +1274,7 @@ def test_a_calibrated_colour_stack_is_stretched_with_one_shared_stretch(
 
     write_stack_preview(str(stack))
 
-    commands = programs.siril_calls[-1][1]
+    commands = programs.siril_calls[-2][1]
     assert 'load "colour.fits"' in commands
     assert any(command.startswith("mtf ") for command in commands)
     assert not any(command.startswith("autostretch") for command in commands)
@@ -1361,7 +1361,7 @@ def test_pcc_runs_first_and_its_result_feeds_a_shared_stretch(
 
     pcc_commands = programs.siril_calls[0][1]
     assert "platesolve -catalog=gaia" in pcc_commands
-    final_commands = programs.siril_calls[-1][1]
+    final_commands = programs.siril_calls[-2][1]
     assert 'load "colour.fits"' in final_commands
     assert any(command.startswith("mtf ") for command in final_commands)
 
@@ -1397,7 +1397,7 @@ def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
     with caplog.at_level("INFO", logger=stack_preview.logger.name):
         assert write_stack_preview(str(stack)) is not None
 
-    final_commands = programs.siril_calls[-1][1]
+    final_commands = programs.siril_calls[-2][1]
     assert 'load "colour.fits"' in final_commands
     assert any(command.startswith("mtf ") for command in final_commands)
     summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
@@ -1565,7 +1565,7 @@ def test_starnet_splits_the_image_then_stretches_the_pieces_apart(
     assert 'load "starless.fits"' in stretch_of_starless
     assert any(x.startswith("mtf ") for x in stretch_of_starless)
     # The final script saves the blend, and nothing stretches it again.
-    assert 'load "stretched.fits"' in commands[-1]
+    assert 'load "levelled.fits"' in commands[-1]
     assert not any(x.startswith("autostretch") for x in commands[-1])
 
 
@@ -1595,7 +1595,7 @@ def test_a_failed_starnet_falls_back_to_the_normal_stretch(
     with caplog.at_level("INFO", logger=stack_preview.logger.name):
         assert write_stack_preview(str(stack), settings=PreviewSettings(starnet=True)) is not None
 
-    assert any(x.startswith("autostretch") for x in programs.siril_calls[-1][1])
+    assert any(x.startswith("autostretch") for x in programs.siril_calls[-2][1])
     summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
     assert "StarNet failed: the normal stretch is used" in summary
 
@@ -2085,7 +2085,7 @@ def test_a_calibrated_colour_stack_is_stretched_from_its_measured_sky(
 
     write_stack_preview(str(stack), steps_log=steps)
 
-    final_commands = programs.siril_calls[-1][1]
+    final_commands = programs.siril_calls[-2][1]
     assert any(command.startswith("mtf ") for command in final_commands)
     record = read_preview_settings(str(stack))
     assert record is not None
@@ -2104,7 +2104,7 @@ def test_a_failed_colour_calibration_keeps_the_green_removal(
 
     assert write_stack_preview(str(stack)) is not None
 
-    final_commands = programs.siril_calls[-1][1]
+    final_commands = programs.siril_calls[-2][1]
     assert "rmgreen" in final_commands
     assert not any(command.startswith("autostretch -linked") for command in final_commands)
     recorded = read_preview_settings(str(stack))["settings_used"]["remove_green_noise"]
@@ -2220,13 +2220,14 @@ def test_the_white_balance_check_feeds_the_stretch_when_it_corrects(
     assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
 
     assert calls[0].endswith("colour.fits")
-    assert 'load "balanced.fits"' in programs.siril_calls[-1][1]
+    assert 'load "balanced.fits"' in programs.siril_calls[-2][1]
     assert "White balance check on 41 sun-like stars: red x0.877, blue x1.031" in steps
     recorded = read_preview_settings(str(stack))["settings_used"]["white_balance_check"]
     assert recorded["applied"] is True
     assert recorded["star_count"] == 41
     assert recorded["red_gain"] == pytest.approx(0.877)
-    assert skipped == []
+    # The stand-in Siril writes no real picture, so the sky levelling skips.
+    assert [step for step in skipped if step.step_name != "Sky levelling"] == []
 
 
 def test_a_check_that_changes_nothing_keeps_the_calibrated_image_and_says_why(
@@ -2243,12 +2244,16 @@ def test_a_check_that_changes_nothing_keeps_the_calibrated_image_and_says_why(
 
     assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
 
-    assert 'load "colour.fits"' in programs.siril_calls[-1][1]
+    assert 'load "colour.fits"' in programs.siril_calls[-2][1]
     assert "White balance check not applied (only 3 isolated sun-like stars)" in steps
-    assert [(step.step_name, step.reason) for step in skipped] == [
+    assert [(step.step_name, step.reason) for step in skipped if step.step_name == "White balance check"] == [
         ("White balance check", "only 3 isolated sun-like stars")
     ]
-    assert read_preview_settings(str(stack))["settings_used"]["white_balance_check"]["applied"] is False
+    used = read_preview_settings(str(stack))["settings_used"]
+    assert used["white_balance_check"]["applied"] is False
+    # The stand-in Siril writes no real picture, so levelling is skipped.
+    assert used["sky_levelling"]["applied"] is False
+    assert any(sentence.startswith("Sky levelling not applied") for sentence in steps)
 
 
 def test_the_white_balance_check_does_not_run_without_calibrated_colors(

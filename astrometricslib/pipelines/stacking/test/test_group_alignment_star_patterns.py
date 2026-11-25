@@ -218,7 +218,7 @@ def test_the_spectral_path_never_tries_star_patterns(monkeypatch: pytest.MonkeyP
         """
         raise AssertionError("star patterns must not be tried on this path")
 
-    monkeypatch.setattr(group_alignment, "find_alignment_from_star_patterns", fail)
+    monkeypatch.setattr(group_alignment, "search_star_patterns", fail)
     reference, _ = make_pair(1.0, 0j, seed=41)
     _, unrelated = make_pair(1.0, 0j, seed=42)
 
@@ -241,7 +241,7 @@ def test_a_shift_the_stars_agree_with_is_not_second_guessed(monkeypatch: pytest.
         """
         raise AssertionError("star patterns must not be tried here")
 
-    monkeypatch.setattr(group_alignment, "find_alignment_from_star_patterns", fail)
+    monkeypatch.setattr(group_alignment, "search_star_patterns", fail)
     reference, image = make_pair(1.0, 6 + 4j, seed=51)
 
     aligned, _, results = align_images_to_reference([reference, image], 0, refine_with_stars=True)

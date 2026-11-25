@@ -33,6 +33,8 @@ The steps are:
     - **How it works.** Small triangles of stars have a shape that does not change with shift, rotation or scale. Matching triangles gives a first guess with no starting offset.
     - **When the stacks differ much in exposure.** The search starts with the 150 brightest stars of each stack. A long exposure saturates its brightest stars, and saturated stars are skipped, so the two lists can share too few stars. When a count finds no believable guess, the search retries with 300 and then 600 stars (the star detector returns at most 400 stars per stack, so 600 means all of them) and logs which count worked (design estimate; see [STK-D14](../../../../documentation/library_design/validation/stacking.md#design-estimates)).
     - **When it is kept.** The stage keeps the guess only if it lines up at least 30 stars, with a scale within 0.5% of one and a leftover under 1.5 pixels. Unlike the refinement in sub-step 2, this search allows any rotation. That includes the half turn of a mount flip at the meridian, when the telescope mount turns the camera over as the target crosses the north-south line overhead.
+    - **When the stars miss by more than the limit.** Two groups framed hundreds of pixels apart see each star through a different part of the lens, so a shift, rotation and scale can leave the stars about 1.5 to 3 pixels off. The search then fits a smooth quadratic correction on top (`image_registration.py`). It needs enough matched stars in all four quarters of the image, and it is believed only when the leftover is under the same 1.5 pixel limit (design estimate; see [STK-D85](../../../../documentation/library_design/validation/stacking.md#design-estimates)). The log says which model was used, how many pairs matched and both leftovers. The group manifest records `alignment_model`, `alignment_similarity_residual_pixels` and `alignment_distortion`.
+    - **When it fails.** The search logs the best attempt (pairs lined up and leftover), and the reason a group is left out cites that attempt instead of the correlation.
     - **Status.** Partly measured; see [STK-15](../../../../documentation/library_design/validation/stacking.md#stk-15).
 
 Alignment accuracy matters most here. These steps place group stacks more accurately than Siril's registration of the same groups, so they stay in Python (measured; see [STK-16](../../../../documentation/library_design/validation/stacking.md#stk-16)).
@@ -123,9 +125,10 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 - `group_star_gains.py`: measures the group scale factor from isolated stars.
 - `group_combination.py`: weights the groups and combines the group stacks. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.
 - `group_sky_matching.py`: fits and removes the sky background difference between a group and the reference group, one plane for each color channel.
-- `group_file_merging.py`: joins the per-group rejection maps and registration sequences into one file each. Each map is moved with its group's full alignment (shift, rotation and scale), resampled linearly so the fractions stay between 0 and 1.
+- `group_file_merging.py`: joins the per-group rejection maps and registration sequences into one file each. Each map is moved with its group's full alignment (shift, rotation, scale and any distortion correction), resampled linearly so the fractions stay between 0 and 1.
 - `group_alignment.py`: lines up the group stacks and finds the zero-order target.
 - `star_pattern_candidates.py`: the star-pattern search that `group_alignment.py` falls back to.
+- `image_registration.py`: the fit and warp shared by every alignment of images (groups now; filter stacks, camera-to-camera stacks and color channels later).
 - `spectral_frame_alignment.py`: aligns spectral frames by phase correlation.
 - `group_derotation.py`: turns spectral group stacks to one trail tilt.
 

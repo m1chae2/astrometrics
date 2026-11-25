@@ -749,8 +749,10 @@ def _stack_exposure_groups(
         ``"exposure_group_weights"`` list with one entry for each group that
         was combined (see `_exposure_group_weight_entries`), an
         ``"exposure_group_alignments"`` list (each combined group's frame
-        count and its shift, rotation and scale onto the reference group, or
-        `None` for the reference), and a
+        count, its shift, rotation and scale onto the reference group, or
+        `None` for the reference, and a ``"distortion"`` record of the
+        smooth lens-distortion correction when the move has one, `None`
+        otherwise), and a
         ``"covered_in_every_group"`` mask of the pixels every combined group
         has data at.
     """
@@ -1011,6 +1013,30 @@ def _measure_group_stacks(
     )
 
 
+def alignment_left_out_reason(reference_exposure: float, alignment: Any) -> str:
+    """Say why a group could not be lined up with the reference group.
+
+    A star-pattern search that failed says why, with its numbers. The
+    correlation of the shift-only measurement is then not the cause, so it is
+    given only when no pattern search ran (a spectral stack).
+
+    Parameters
+    ----------
+    reference_exposure : `float`
+        The exposure time, in seconds, of the group the others are lined up
+        with.
+    alignment : `AlignmentResult`
+        The failed alignment of the group.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence stored as the group's left-out reason.
+    """
+    cause = alignment.failure_reason or f"correlation {alignment.correlation:.2f}"
+    return f"could not be lined up with the {reference_exposure:g} s group ({cause})"
+
+
 def _align_and_screen_groups(
     results: list[GroupResult], measurements: _GroupStackMeasurements, target_id: str, is_spectral: bool
 ) -> None:
@@ -1081,7 +1107,8 @@ def _align_and_screen_groups(
         if alignment is not None and alignment.star_pairs:
             logger.info(
                 "The %g s exposure group of '%s' was lined up with %d stars: shift (%.2f, %.2f) px, "
-                "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners.",
+                "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners "
+                "(%s model%s).",
                 result.exposure,
                 target_id,
                 alignment.star_pairs,
@@ -1090,13 +1117,14 @@ def _align_and_screen_groups(
                 alignment.rotation_degrees,
                 alignment.scale,
                 alignment.residual_pixels,
+                alignment.model,
+                f", {alignment.similarity_residual_pixels:.2f} px with a similarity alone"
+                if alignment.distortion is not None
+                else "",
             )
     for result in results:
         if result.aligned_image is None:
-            reason = (
-                f"could not be lined up with the {reference.exposure:g} s group "
-                f"(correlation {result.alignment.correlation:.2f})"
-            )
+            reason = alignment_left_out_reason(reference.exposure, result.alignment)
             result.left_out_reason = reason
             logger.warning(
                 "The %g s exposure group of '%s' %s; leaving it out.", result.exposure, target_id, reason
@@ -1323,6 +1351,13 @@ def _describe_groups(
             "alignment_scale": None if alignment is None else alignment.scale,
             "alignment_star_pairs": None if alignment is None else alignment.star_pairs,
             "alignment_residual_pixels": None if alignment is None else alignment.residual_pixels,
+            "alignment_model": None if alignment is None else alignment.model,
+            "alignment_similarity_residual_pixels": None
+            if alignment is None
+            else alignment.similarity_residual_pixels,
+            "alignment_distortion": None
+            if alignment is None or alignment.distortion is None
+            else alignment.distortion.to_record(),
         })
     for group, diagnostics in failed_groups:
         summaries.append(
@@ -1406,6 +1441,9 @@ def _join_group_diagnostics(
                 result.alignment.rotation_degrees,
                 result.alignment.scale,
             ],
+            "distortion": None
+            if result.alignment is None or result.alignment.distortion is None
+            else result.alignment.distortion.to_record(),
         }
         for result in used
     ]

@@ -478,10 +478,13 @@ astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,WARN_QUARA
 astrometricslib/pipelines/stacking/pre_processing/sensor_noise.py,MAD_TO_STANDARD_DEVIATION,unit or physical constant
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing
-astrometricslib/pipelines/stacking/processing/group_alignment.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/processing/group_alignment.py,EXTENDED_TARGET_RIVAL_WINDOW_FACTOR,Fixed multiple of the zero-order search window; relative
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_ATTEMPTS,Attempt cap for placing apertures; plumbing.
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_SEED,software plumbing
+astrometricslib/pipelines/stacking/processing/image_registration.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/processing/image_registration.py,_INVERSE_ROUNDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/processing/image_registration.py,_TERM_COUNT,"Number of terms of a quadratic in two variables; math constant."
+astrometricslib/pipelines/stacking/processing/image_registration.py,_WARP_ROWS_PER_BLOCK,"Memory block size of the resampling; plumbing."
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_FRAMES,software plumbing
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_SECONDS,software plumbing
 astrometricslib/pipelines/tasks.py,STACKING_TIMEOUT_BASE_SECONDS,Plumbing: timeout

@@ -151,7 +151,7 @@ $P$ is 1 for equal lengths. When it passes a tuned factor above one, each frame 
 
 ### 3.3 Stacking procedure
 
-The stacker calibrates raw lights, then aligns them so every star sits at one pixel in all frames; imaging frames are resampled with unclamped Lanczos interpolation, which keeps stars narrow. Broad-band frames get full alignment (shift, rotation, and stretch); spectral frames get shifts only, avoiding distortion along the dispersion axis. Table 3 lists the steps. Before stacking, the same checks and calibration choice can run in a decide-only mode that moves nothing and shows which frames would be set aside and which calibration each group would use.
+The stacker calibrates raw lights, then aligns them so every star sits at one pixel; imaging frames are resampled with unclamped Lanczos interpolation, which keeps stars narrow. Broad-band frames get full alignment (shift, rotation, and stretch, plus a quadratic lens-distortion correction between exposure groups when needed); spectral frames get shifts only, avoiding distortion along the dispersion axis. Table 3 lists the steps. Before stacking, the same checks and calibration choice can run in a decide-only mode that moves nothing and shows what would be set aside and chosen.
 
 **Table 3.** Stacking sequence.
 

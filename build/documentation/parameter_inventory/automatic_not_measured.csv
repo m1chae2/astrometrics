@@ -506,6 +506,7 @@ stacking.color_preview_shift_search_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_sky_noise_multiple,STK-62,measurement,Partly measured
 stacking.color_preview_sky_ring_gaps_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_sky_tint_limits,STK-62,measurement,Partly measured
+stacking.color_preview_sky_tint_smoothing,STK-62,measurement,Partly measured
 stacking.color_preview_star_core_taper,STK-62,measurement,Partly measured
 stacking.color_preview_star_widths_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_wing_calibration,STK-62,measurement,Partly measured

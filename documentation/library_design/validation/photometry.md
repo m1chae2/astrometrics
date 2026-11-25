@@ -982,6 +982,53 @@ print(median_signal_to_noise(table)[:10])
 - **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_negative_flux_and_signal_to_noise_pool.py` and `astrometricslib/pipelines/photometry/test/processing/test_half_empty_frames.py`.
 - **Raw record:** None kept outside the scratch folder of the run.
 
+### PHO-22
+
+**Gain and read noise of the Nikon D5300 at ISO 800**
+
+- **Claim:** In the raw 14-bit files the Nikon D5300 at ISO 800 has a gain of 0.237 electrons per ADU and a read noise of 1.70 electrons. The library holds no flat or bias frames at ISO 200, so that setting has no measured values.
+- **Settings it supports:**
+  - Config key `[Observatory.Camera.Nikon D5300] sensor_noise` in the configuration file: an entry for gain setting (ISO) 800, offset 0, binning 1x1 holding `gain_e_per_adu` (0.237, kind `measured`) and `read_noise_e` (1.70, kind `measured`) (`astrometricslib/astrometrics.config.example.toml` ships it). A frame at another ISO does not use them. Relation: derived from this entry. <!-- impl: astrometricslib.models.camera_profile.CameraProfile -->
+- **Status:** Measured. One ISO and one signal level, so no photon transfer curve was fitted.
+- **Data you need:** For your camera at one ISO: 5 or more pairs of flat frames taken back to back at one exposure, and 3 or more pairs of bias frames (the shortest exposure the camera allows), all indexed in the calibration library.
+- **Procedure:**
+  1. Call `measure_sensor_noise` for the camera and ISO, with the offset 0 and one flat exposure, and leave `save` off to read without writing.
+  2. Check the gain spread across pairs, and repeat on the other flat exposure as a cross-check.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  result = astro.processing.calibration.measure_sensor_noise(
+      "Nikon D5300", 800, 0, "1x1", exposure_seconds=0.04, telescope="Nikkor 300mm"
+  )
+  print(result.gain_e_per_adu, result.gain_spread_e_per_adu, result.read_noise_adu, result.read_noise_e)
+  ```
+
+  <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_sensor_noise -->
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The gain and its spread across the flat pairs, the read noise in ADU and in electrons, and the pair counts.
+- **Our result:** Run on 2026-11-25 on a copy of the configuration, without saving. The frames were cut to the central 1000 by 1000 pixels as they were read, the region the measurement uses, because loading 90 whole frames ran out of memory.
+
+  | Quantity | 0.04 s sky flats | 0.01 s flats |
+  | --- | --- | --- |
+  | Flat frames, date | 52, 2022-11-26 | 33, 2022-11-13 |
+  | Flat pairs | 26 | 16 |
+  | Signal (ADU) | 998 | 880 |
+  | Gain (e-/ADU) | 0.237 | 0.250 |
+  | Spread across pairs | 0.010 | 0.059 |
+  | Read noise, RMS (ADU) | 7.19 | 7.19 |
+  | Read noise, MAD (ADU) | 6.29 | 6.29 |
+  | Read noise (e-) | 1.70 | 1.80 |
+
+  The read noise comes from 88 bias frames at ISO 800 (44 pairs) from the sessions of 2023-10-07 and 2024-03-18; the pair values lie between 7.11 and 7.23 ADU. The profile keeps the 0.04 s set, which has more pairs and a spread six times smaller. Per Bayer channel the 0.04 s set gives 0.242 (red and both greens) and 0.218 (blue); the read noise is 6.65 ADU in green and 7.55 to 7.69 ADU in red and blue. As a sanity check, a gain of about 1.9 e-/ADU at ISO 100, a commonly published figure for this sensor, scales to about 0.24 at ISO 800.
+- **Verdict:** Not judged.
+- **Limits:** One ISO and a low signal level (about 6 percent of full scale), so linearity is not shown. The channels differ by up to 10 percent in gain and 15 percent in read noise, which suggests the camera scales its channels before it writes the raw file; the stored figure averages them. ISO 200 and other settings need their own flats and bias frames.
+- **To tune for your setup:** Take 10 or more flat pairs and bias pairs at each ISO you image with, and run the procedure with `save=True`.
+- **Regenerate with:** The procedure above.
+- **Guarded by tests:** None.
+- **Raw record:** None kept outside the scratch folder of the run.
+
 ## Design estimates
 
 These tuned values have not been measured. They are reasoned choices.

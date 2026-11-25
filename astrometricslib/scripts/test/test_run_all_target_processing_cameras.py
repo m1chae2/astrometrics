@@ -535,7 +535,9 @@ def test_a_nikon_target_is_refused_with_its_reason_while_a_zwo_target_runs(
     assert [call["target"] for call in fake.stack_calls] == ["Both", "AsiOnly"]
     by_target = {record["target"]: record for record in read_lines(progress_path)}
     assert by_target["NikonOnly"]["status"] == "refused"
-    assert "no sensor-noise entry for ISO 800, offset 0, binning 1" in by_target["NikonOnly"]["error"]
+    # The shipped profile measures ISO 800 (validation register PHO-22), so
+    # only the saturation threshold refuses the D5300 now.
+    assert "no sensor-noise entry" not in by_target["NikonOnly"]["error"]
     assert "above the clip ceiling" in by_target["NikonOnly"]["error"]
     assert by_target["AsiOnly"]["status"] == "success"
 
@@ -656,7 +658,7 @@ def test_the_review_list_has_one_row_per_target_with_what_was_recorded(
     assert rows["AsiOnly"]["weights_known"] == "assumed"
     assert rows["AsiOnly"]["predicted_noise_present"] == "no"
     assert rows["NikonOnly"]["status"] == "refused"
-    assert "no sensor-noise entry" in rows["NikonOnly"]["refusal_reason"]
+    assert "above the clip ceiling" in rows["NikonOnly"]["refusal_reason"]
     assert rows["NikonOnly"]["weights_known"] == "n/a"
 
 

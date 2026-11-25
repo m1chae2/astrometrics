@@ -216,6 +216,15 @@ bias_levels = [
     { gain_setting = "100", offset = "0", binning = "1x1", bias_level_adu = { value = 597.93, kind = "measured", source = "Mean of 22 bias frames (ISO 100); frame-to-frame spread 0.12 ADU. Measured 2026-10-31 (validation register STK-48)." } },
     { gain_setting = "800", offset = "0", binning = "1x1", bias_level_adu = { value = 599.08, kind = "measured", source = "Mean of 89 bias frames (ISO 800) from two sessions 5 months apart (599.01 and 599.15); frame-to-frame spread 0.21 ADU. Measured 2026-10-31 (validation register STK-48)." } },
 ]
+# Gain and read noise per ISO (see the ZWO section below for what each field
+# means). Only ISO 800 is measured: the library holds flats only at ISO 800,
+# and bias frames only at ISO 100 and 800, so ISO 200 has no entry and frames
+# at ISO 200 fall back to the header. The gain is in raw 14-bit ADU, all four
+# Bayer channels together (the green channels alone give 0.242). Derived by
+# photon transfer with measure_sensor_noise; validation register PHO-22.
+sensor_noise = [
+    { gain_setting = "800", offset = "0", binning = "1x1", gain_e_per_adu = { value = 0.237, kind = "measured", source = "Photon transfer on 26 pairs of 0.04 s sky flats (Nikkor 300mm, 2022-11-26), central 1000 x 1000 pixels, signal about 1000 ADU; pair-to-pair spread 0.010. The 16 pairs of 0.01 s flats of 2022-11-13 give 0.250 (spread 0.059). Measured 2026-11-25 (validation register PHO-22)." }, read_noise_e = { value = 1.70, kind = "measured", source = "Root-mean-square noise of 44 bias pairs (ISO 800, sessions 2023-10-07 and 2024-03-18), 7.19 ADU times the gain of 0.237; the median-based estimate is 6.29 ADU (1.49 e-). Measured 2026-11-25 (validation register PHO-22)." } },
+]
 
 ["Observatory.Camera.ZWO ASI533MM Pro"]
 name = "ZWO ASI533MM Pro"

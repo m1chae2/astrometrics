@@ -90,6 +90,8 @@ A star near the noise can measure at or below zero in a frame. The pipeline keep
 
 **The ASI 533MM Pro's numbers.** The shipped example config holds a gain of 0.783 e-/ADU and a read noise of 3.8 e- for gain setting 0, offset 10 and 1x1 binning (partly measured; see [PHO-03](../../../documentation/library_design/validation/photometry.md#pho-03)). The gain is in electrons per stored ADU. The sensor is 14-bit and the files are 16-bit in steps of 4, so it is a quarter of the datasheet's value in sensor ADU. A gain of 3.6 e-/ADU, a datasheet figure for the sensor's own 14-bit ADU, is wrong for these files and makes the error bars about 2 times too small.
 
+**The Nikon D5300's numbers.** The shipped example config holds a gain of 0.237 e-/ADU and a read noise of 1.70 e- for ISO 800, offset 0 and 1x1 binning, in raw 14-bit ADU (measured; see [PHO-22](../../../documentation/library_design/validation/photometry.md#pho-22)). The library has no flat or bias frames at ISO 200, so that ISO has no entry, and a frame taken at it gets nothing from the profile.
+
 **The 5 times limit.** `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` is set between clear and cloudy real fields (partly measured; see [PHO-02](../../../documentation/library_design/validation/photometry.md#pho-02)). A ratio far above it means patchy cloud or tracking loss, which dividing by the ensemble cannot remove. Before the scintillation term, the predicted errors of the bright comparison stars ran well below their scatter (a ratio of about 2 on the M 57 night). With the term the ratio sits near 1 for stars of every brightness on that night (see [Scintillation](#scintillation)). The limit of 5 was set on errors without the term, so it is still a loose limit.
 
 ### Scintillation

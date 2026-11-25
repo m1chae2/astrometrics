@@ -32,6 +32,9 @@ stacks are never changed.
    stars are wider than its green ones (such as the Nikkor at 300 mm) leaves
    it red. So around each monochrome star, out to a few color-stack star
    widths, the color is replaced by the color of the light just beyond.
+   Around a saturated star whose wing color is not trusted (see
+   `star_color_measurement`), the skirt reaches much farther, so the color
+   is replaced out to a few radii of the star's footprint.
 4. *Color of the stars.* Each star's color is measured once on the linear
    color stack and painted only inside the monochrome star (see
    `star_color_measurement`).
@@ -57,12 +60,16 @@ from datetime import UTC, datetime
 from subprocess import SubprocessError
 from typing import Any
 
+import astropy.units as u
 import numpy as np
+from astropy.coordinates import SkyCoord
+from astropy.table import Table
 from astropy.wcs import WCS
 from PIL import Image
 from scipy import ndimage
 from skimage.color import lab2rgb, rgb2lab
 
+from astrometricslib._internal.drivers.cached_simbad_driver import get_simbad_driver
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import ExternalServiceError
@@ -74,7 +81,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.gaia_star_colors import gaia_star_colors_in_footprint
+from astrometricslib.pipelines.shared.gaia_star_colors import (
+    BRIGHTEST_G_MAGNITUDE,
+    gaia_star_colors_in_footprint,
+)
+from astrometricslib.pipelines.shared.simbad_object_types import STAR_REGION_VOTABLE_FIELDS
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
     color_preview_path_for,
@@ -111,6 +122,7 @@ __all__ = [
     "COLOR_PREVIEW_HALO_WIDTHS",
     "COLOR_PREVIEW_MAXIMUM_ALIGNMENT_RMS_PIXELS",
     "COLOR_PREVIEW_MINIMUM_COVERAGE",
+    "COLOR_PREVIEW_SATURATED_HALO_RADII",
     "COLOR_PREVIEW_SKY_NOISE_MULTIPLE",
     "COLOR_PREVIEW_SKY_TINT_LIMITS",
     "ColorPreviewOutcome",
@@ -119,6 +131,7 @@ __all__ = [
     "compose_color_picture",
     "extended_color",
     "fill_halos",
+    "fill_wide_halos",
     "make_color_preview_for_target",
     "neutralize_sky",
     "sky_weight",
@@ -311,6 +324,31 @@ COLOR_PREVIEW_HALO_WIDTHS = TunedParameter(
     register_entry="STK-62",
 )
 
+# How far past the footprint of a saturated star whose wing color is not
+# trusted (the color stack's red stars are too wide, see
+# `star_color_measurement.STAR_RED_WIDE_TOLERANCE`) the extended color is
+# replaced, in radii of that footprint (the radius of a circle of the same
+# area). On M 45 (Nikon D5300 at 300 mm, red stars 22% wider than green) the
+# red-magenta skirt that StarNet left around Electra reached about 80 to 100
+# pixels from the star, whose footprint radius is 33 pixels, and around Maia
+# about 50 pixels (radius 27). Two radii past the footprint reach beyond both
+# (STK-62).
+COLOR_PREVIEW_SATURATED_HALO_RADII = TunedParameter(
+    name="stacking.color_preview_saturated_halo_radii",
+    default=2.0,
+    unit="footprint radii",
+    description="How far past an untrusted saturated star's footprint its color skirt is replaced.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-62",
+)
+
+# The wide halos of saturated stars are filled on a grid coarser by the
+# halo radius over this many pixels, because a blur that wide is slow at full
+# size and the filled color is smooth anyway. Plumbing, not tuned.
+_WIDE_HALO_SAMPLING_PIXELS = 8.0
+
 # The halo radius used when the color stack's star width could not be
 # measured, in pixels: the 8 pixel circle of the photometry fallback.
 # Not tuned.
@@ -329,6 +367,10 @@ _MOVING_STAR_COUNT = 2000
 # How far past the monochrome frame the Gaia question reaches, in degrees.
 # Not tuned.
 _GAIA_MARGIN_DEGREES = 0.02
+
+# The most rows one stored SIMBAD tile may hold. It is the star identifier's
+# limit, so both read the same stored answers. Not tuned.
+_SIMBAD_ROW_LIMIT = 5000
 
 # The lightness offset that keeps the lightness ratio finite on black
 # pixels, in CIE lightness units (0 to 100). Not tuned.
@@ -655,12 +697,111 @@ def fill_halos(chroma: np.ndarray, halos: np.ndarray, radius_px: float) -> np.nd
     return np.where(halos, filled, chroma).astype(np.float32)
 
 
+def _blur_on_coarse_grid(image: np.ndarray, sigma_px: float) -> np.ndarray:
+    """Blur a picture with a wide Gaussian, working on a coarser grid.
+
+    The picture is averaged in square blocks, blurred, and spread back to
+    full size by linear interpolation. For a blur many blocks wide this
+    gives nearly the same result as a full-size blur, much faster.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        The picture.
+    sigma_px : `float`
+        The width of the Gaussian, in full-size pixels.
+
+    Returns
+    -------
+    blurred : `numpy.ndarray`
+        The blurred picture, the same shape, as 32-bit floats.
+    """
+    block = max(1, int(sigma_px // _WIDE_HALO_SAMPLING_PIXELS))
+    rows, columns = image.shape
+    padded_rows, padded_columns = -(-rows // block) * block, -(-columns // block) * block
+    padded = np.pad(
+        np.asarray(image, dtype=np.float32),
+        ((0, padded_rows - rows), (0, padded_columns - columns)),
+        mode="edge",
+    )
+    coarse = padded.reshape(padded_rows // block, block, padded_columns // block, block).mean(axis=(1, 3))
+    coarse = ndimage.gaussian_filter(coarse, sigma_px / block)
+    if block == 1:
+        return coarse[:rows, :columns].astype(np.float32)
+    # Block centers sit half a block in; the positions are shifted to match.
+    row_positions = (np.arange(rows) + 0.5) / block - 0.5
+    column_positions = (np.arange(columns) + 0.5) / block - 0.5
+    grid_rows, grid_columns = np.meshgrid(row_positions, column_positions, indexing="ij")
+    return ndimage.map_coordinates(coarse, [grid_rows, grid_columns], order=1, mode="nearest").astype(
+        np.float32
+    )
+
+
+def fill_wide_halos(
+    chroma: np.ndarray, wide: np.ndarray, excluded: np.ndarray, radius_px: float
+) -> np.ndarray:
+    """Replace the color inside the wide halos of saturated stars.
+
+    It works as `fill_halos`, with a blur as wide as the widest halo, so the
+    color reaches into the middle of a large halo from the light around it.
+
+    Parameters
+    ----------
+    chroma : `numpy.ndarray`
+        One CIE Lab color channel (``a`` or ``b``).
+    wide : `numpy.ndarray`
+        Where the color is replaced.
+    excluded : `numpy.ndarray`
+        The pixels whose color is not used (every halo, wide or not).
+    radius_px : `float`
+        The width of the Gaussian average.
+
+    Returns
+    -------
+    chroma : `numpy.ndarray`
+        The channel with the wide halos filled; gray (zero) where almost
+        nothing around a halo lies outside every halo.
+    """
+    if not wide.any():
+        return chroma
+    outside = (~excluded).astype(np.float32)
+    weight = _blur_on_coarse_grid(outside, radius_px)
+    spread = _blur_on_coarse_grid(chroma * outside, radius_px)
+    filled = np.where(weight > _HALO_FILL_MINIMUM_WEIGHT, spread / np.maximum(weight, 1e-6), 0.0)
+    return np.where(wide, filled, chroma).astype(np.float32)
+
+
+def _wide_halos(star_labels: np.ndarray, reach_px: np.ndarray) -> np.ndarray:
+    """Mark the wide halos around the stars that have one.
+
+    Parameters
+    ----------
+    star_labels : `numpy.ndarray`
+        The monochrome star footprints (region number of each pixel).
+    reach_px : `numpy.ndarray`
+        For each region number, how far past its footprint its halo
+        reaches, in pixels; zero for no wide halo.
+
+    Returns
+    -------
+    wide : `numpy.ndarray`
+        Whether each pixel lies within the reach of the nearest footprint
+        that has a wide halo.
+    """
+    seeds = reach_px[star_labels] > 0
+    if not seeds.any():
+        return np.zeros(star_labels.shape, dtype=bool)
+    distance, (nearest_rows, nearest_columns) = ndimage.distance_transform_edt(~seeds, return_indices=True)
+    return distance <= reach_px[star_labels[nearest_rows, nearest_columns]]
+
+
 def extended_color(
     mono_starless: np.ndarray,
     color_starless: np.ndarray,
     covered: np.ndarray,
     star_labels: np.ndarray | None = None,
     halo_radius_px: float = 0.0,
+    wide_halo_reach_px: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Find the color of the extended light on the monochrome grid.
 
@@ -680,6 +821,11 @@ def extended_color(
     halo_radius_px : `float`, optional
         How far past each footprint the halo reaches, in pixels. Zero leaves
         the halos alone.
+    wide_halo_reach_px : `numpy.ndarray`, optional
+        For each region number of ``star_labels``, how far past its
+        footprint a wider halo reaches, in pixels (zero for none). It is
+        given to the saturated stars whose wing color is not trusted (see
+        `fill_wide_halos`).
 
     Returns
     -------
@@ -688,8 +834,9 @@ def extended_color(
         color stack's signal is weak or where it does not cover.
     statistics : `dict` [`str`, `Any`]
         The color stack's sky level and pixel noise, the sky tint taken
-        away, the halo radius, and the shares of the frame with full color
-        and with none.
+        away, the halo radius, the number of stars with a wide halo and the
+        widest one, and the shares of the frame with full color and with
+        none.
     """
     blur, _ = (float(value) for value in resolve(COLOR_PREVIEW_CHROMA_BLUR_PIXELS).value)
     fade_low, fade_high, fade_blur = (float(value) for value in resolve(COLOR_PREVIEW_COLOR_FADE).value)
@@ -699,9 +846,16 @@ def extended_color(
         distance = ndimage.distance_transform_edt(star_labels == 0)
         halos = distance <= halo_radius_px
         away_from_stars = covered & (distance > max(halo_radius_px, 1.0))
+        del distance
     else:
         halos = np.zeros(covered.shape, dtype=bool)
         away_from_stars = covered
+    wide = None
+    wide_radius = 0.0
+    if star_labels is not None and wide_halo_reach_px is not None and np.any(wide_halo_reach_px > 0):
+        wide = _wide_halos(star_labels, np.asarray(wide_halo_reach_px, dtype=np.float32))
+        wide_radius = float(np.max(wide_halo_reach_px))
+        away_from_stars = away_from_stars & ~wide
     # The sky sample: away from the stars, with both the monochrome and the
     # color starless pictures near their own sky level. The shift is taken
     # away where the monochrome picture looks like sky.
@@ -729,6 +883,9 @@ def extended_color(
     if halo_radius_px > 0.0:
         chroma_a = fill_halos(chroma_a, halos, halo_radius_px)
         chroma_b = fill_halos(chroma_b, halos, halo_radius_px)
+    if wide is not None:
+        chroma_a = fill_wide_halos(chroma_a, wide, halos | wide, wide_radius)
+        chroma_b = fill_wide_halos(chroma_b, wide, halos | wide, wide_radius)
     mono_lightness = ndimage.gaussian_filter(_lightness(mono_starless), blur)
     ratio = np.clip(
         (mono_lightness + _LIGHTNESS_OFFSET) / (color_lightness + _LIGHTNESS_OFFSET), ratio_low, ratio_high
@@ -749,6 +906,8 @@ def extended_color(
         "sky_tint_removed_rgb": [round(value, 5) for value in sky_offsets],
         "sky_sample_fraction": round(float(np.mean(sky)), 4),
         "halo_radius_pixels": round(float(halo_radius_px), 2),
+        "wide_halo_stars": int(np.count_nonzero(wide_halo_reach_px)) if wide is not None else 0,
+        "wide_halo_largest_pixels": round(wide_radius, 1),
         "fraction_full_color": round(float(np.mean(fade > 0.99)), 4),
         "fraction_no_color": round(float(np.mean(fade < 0.01)), 4),
     }
@@ -932,6 +1091,92 @@ def _gaia_colors(wcs: WCS, shape: tuple[int, int]) -> tuple[Any, str]:
     return stars, "" if stars is not None else " (Gaia has no stars here)"
 
 
+def _first_column(table: Table, names: tuple[str, ...]) -> np.ndarray | None:
+    """Read the first of several possible columns of a SIMBAD table as numbers.
+
+    Parameters
+    ----------
+    table : `astropy.table.Table`
+        The table.
+    names : `tuple` [`str`]
+        The names the column has had in different astroquery versions.
+
+    Returns
+    -------
+    values : `numpy.ndarray` or `None`
+        The values, NaN where blank, or `None` when no such column exists.
+    """
+    name = next((name for name in names if name in table.colnames), None)
+    if name is None:
+        return None
+    return np.ma.filled(np.ma.asarray(table[name], dtype=np.float64), np.nan)
+
+
+def _bright_star_colors(wcs: WCS, shape: tuple[int, int]) -> tuple[Table | None, str]:
+    """Get the SIMBAD ``B - V`` colors of the stars under the monochrome frame.
+
+    The Gaia color table holds no star brighter than G = 10.5, so the
+    brightest stars of a field, which saturate, are looked up in SIMBAD.
+    Only stars brighter than V = 10.5 are kept. The
+    question is the one the star identifier asks, so a field it has seen is
+    read from the stored answers with no network call.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The monochrome picture's plate solution.
+    shape : `tuple` [`int`, `int`]
+        The picture's rows and columns.
+
+    Returns
+    -------
+    stars : `astropy.table.Table` or `None`
+        The stars with ``ra``, ``dec``, ``v`` and ``b_minus_v``, or `None`.
+    note : `str`
+        Why there are none, or an empty string.
+    """
+    rows, columns = shape
+    center_ra, center_dec = wcs.all_pix2world([(columns - 1) / 2.0], [(rows - 1) / 2.0], 0)
+    corner_ra, corner_dec = wcs.all_pix2world([-0.5], [-0.5], 0)
+    center = SkyCoord(float(center_ra[0]) * u.deg, float(center_dec[0]) * u.deg)
+    radius = float(center.separation(SkyCoord(float(corner_ra[0]) * u.deg, float(corner_dec[0]) * u.deg)).deg)
+    try:
+        table = get_simbad_driver().query_region(
+            center,
+            f"{radius + _GAIA_MARGIN_DEGREES:.4f}d",
+            votable_fields=STAR_REGION_VOTABLE_FIELDS,
+            row_limit=_SIMBAD_ROW_LIMIT,
+        )
+    except (ExternalServiceError, ValueError, OSError) as error:
+        return None, f"The catalog colors of the bright stars could not be had: {error}."
+    if table is None or len(table) == 0:
+        return None, "SIMBAD lists no stars here, so the saturated stars were left white."
+    ra = _first_column(table, ("ra", "RA_d", "ra_d"))
+    dec = _first_column(table, ("dec", "DEC_d", "dec_d"))
+    blue = _first_column(table, ("B", "FLUX_B", "flux_b"))
+    visual = _first_column(table, ("V", "FLUX_V", "flux_v"))
+    if ra is None or dec is None or blue is None or visual is None:
+        return None, "The SIMBAD answer has no B and V magnitudes, so the saturated stars were left white."
+    # Only stars brighter than the Gaia color table's limit are kept. A
+    # fainter catalog star inside the large footprint of a bright star (a
+    # red field star in its glow) would otherwise color the whole glow; a
+    # faint star is paired with its Gaia color by position instead.
+    usable = (
+        np.isfinite(ra)
+        & np.isfinite(dec)
+        & np.isfinite(blue)
+        & np.isfinite(visual)
+        & (visual < BRIGHTEST_G_MAGNITUDE)
+    )
+    stars = Table({
+        "ra": ra[usable],
+        "dec": dec[usable],
+        "v": visual[usable],
+        "b_minus_v": (blue - visual)[usable],
+    })
+    return stars, ""
+
+
 def _skip(reason: str, record: dict[str, Any]) -> ColorPreviewOutcome:
     """Give the outcome of a normal skip.
 
@@ -1068,7 +1313,14 @@ def write_color_preview(
     if gaia_note:
         record["notes"].append(gaia_note.strip(" ()").capitalize() + ".")
     footprints, star_colors = measure_star_colors(
-        luminance, mono_starless, linear_on_grid, covered, mono_wcs, gaia_stars, gaia_note
+        luminance,
+        mono_starless,
+        linear_on_grid,
+        covered,
+        mono_wcs,
+        gaia_stars,
+        gaia_note,
+        lambda: _bright_star_colors(mono_wcs, shape),
     )
     del linear_on_grid
     color_widths = star_colors.record.get("color_star_width_pixels_rgb")
@@ -1077,8 +1329,17 @@ def write_color_preview(
         if color_widths
         else _FALLBACK_HALO_PIXELS
     )
+    wide_reach = None
+    if star_colors.untrusted_wing is not None:
+        # Region k + 1 has footprint area footprints.area[k].
+        wide_reach = np.zeros(footprints.count + 1, dtype=np.float32)
+        wide_reach[1:] = np.where(
+            star_colors.untrusted_wing[1:],
+            float(resolve(COLOR_PREVIEW_SATURATED_HALO_RADII).value) * np.sqrt(footprints.area / np.pi),
+            0.0,
+        )
     extended_a, extended_b, record["extended"] = extended_color(
-        mono_starless, color_starless, covered, footprints.labels, halo_radius
+        mono_starless, color_starless, covered, footprints.labels, halo_radius, wide_reach
     )
     del color_starless
     pixel_a, pixel_b = _pixel_color(luminance, warped_picture)

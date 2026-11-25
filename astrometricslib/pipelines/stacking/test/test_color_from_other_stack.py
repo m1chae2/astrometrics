@@ -11,7 +11,9 @@ of a wide color frame over a bright nebula (the M 42 and M 45 failure). The
 extended color must lose a tinted sky and the red skirts StarNet leaves
 around stars, and keep a nebula's color. The step must be skipped, with a
 reason, when there is no color stack or the color stack covers too little of
-the frame. StarNet and the Gaia archive are not used.
+the frame. A saturated star must not take the red color of its wing when
+the color stack's red stars are wider than its green ones: it takes its
+catalog color, or white. StarNet, SIMBAD and the Gaia archive are not used.
 """
 
 from pathlib import Path
@@ -20,6 +22,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.table import Table
 from astropy.wcs import WCS
 
 from astrometricslib.pipelines.shared.stack_preview_path import (
@@ -372,6 +375,112 @@ def test_star_color_is_painted_only_inside_the_narrow_monochrome_star() -> None:
     # A white star stays white.
     white_row, white_column = 60, 150
     assert np.ptp(picture[white_row, white_column]) < 0.05
+
+
+def make_red_wide_field() -> tuple[np.ndarray, np.ndarray, np.ndarray, WCS, Table, list[tuple[int, int]]]:
+    """Make a field with red-wide color stars and two saturated stars.
+
+    The 36 grid stars are white or red (a third of them) and have Gaia
+    colors. Their red light is spread 1.4 times wider than their green and
+    blue light, as with the Nikkor at 300 mm. Two hot, bright stars saturate
+    the color stack; the red wing around their flat core makes them look red.
+
+    Returns
+    -------
+    luminance : `numpy.ndarray`
+        The monochrome picture.
+    starless : `numpy.ndarray`
+        The same picture without stars.
+    linear : `numpy.ndarray`
+        The linear color stack, shape (3, rows, columns).
+    wcs : `astropy.wcs.WCS`
+        The plate solution shared by both.
+    gaia : `astropy.table.Table`
+        The Gaia colors of the grid stars (none for the saturated stars).
+    saturated : `list` [`tuple` [`int`, `int`]]
+        The positions of the two saturated stars.
+    """
+    size = 600
+    yy, xx = np.mgrid[0:size, 0:size]
+    generator = np.random.default_rng(8)
+    luminance = np.full((size, size), 0.1)
+    linear = np.full((3, size, size), 0.05)
+    wcs = make_wcs((size, size), 2.0, 0.0)
+    rows, columns, colors = [], [], []
+    for index, (row, column) in enumerate((60 + 90 * i, 60 + 90 * j) for i in range(6) for j in range(6)):
+        distance_squared = (yy - row) ** 2 + (xx - column) ** 2
+        luminance += 0.6 * np.exp(-distance_squared / (2 * 1.2**2))
+        red = 2.0 if index % 3 == 0 else 1.0
+        for channel, (weight, width) in enumerate(((red, 4.2), (1.0, 3.0), (1.0, 3.0))):
+            linear[channel] += 0.2 * weight * (3.0 / width) ** 2 * np.exp(-distance_squared / (2 * width**2))
+        rows.append(row)
+        columns.append(column)
+        colors.append(1.6 if index % 3 == 0 else 0.82)
+    saturated = [(105, 105), (285, 375)]
+    for row, column in saturated:
+        distance_squared = (yy - row) ** 2 + (xx - column) ** 2
+        luminance += 0.85 * np.exp(-distance_squared / (2 * 2.5**2))
+        for channel, width in enumerate((4.2, 3.0, 3.0)):
+            star = 40.0 * (3.0 / width) ** 2 * np.exp(-distance_squared / (2 * width**2))
+            linear[channel] = np.minimum(linear[channel] + star, 1.0)
+    luminance += 0.002 * generator.standard_normal((size, size))
+    linear += 0.0005 * generator.standard_normal((3, size, size))
+    ra, dec = wcs.pixel_to_world_values(np.array(columns, dtype=float), np.array(rows, dtype=float))
+    gaia = Table({"ra": ra, "dec": dec, "bp_rp": np.array(colors)})
+    starless = np.full((size, size), 0.1, dtype=np.float32)
+    return (
+        np.clip(luminance, 0.0, 1.0).astype(np.float32),
+        starless,
+        linear.astype(np.float32),
+        wcs,
+        gaia,
+        saturated,
+    )
+
+
+def test_a_saturated_star_with_a_red_wide_wing_takes_its_catalog_color_or_white() -> None:
+    """A hot saturated star is blue by catalog, or white; never red."""
+    luminance, starless, linear, wcs, gaia, saturated = make_red_wide_field()
+    covered = np.ones(luminance.shape, dtype=bool)
+    (hot_row, hot_column), (plain_row, plain_column) = saturated
+    hot_ra, hot_dec = wcs.pixel_to_world_values(float(hot_column), float(hot_row))
+    asked = []
+
+    def bright_star_catalog() -> tuple[Table, str]:
+        """Give a catalog with the first saturated star, a blue-white B star.
+
+        Returns
+        -------
+        catalog : `astropy.table.Table`
+            One star with ``B - V`` = -0.1.
+        note : `str`
+            An empty string.
+        """
+        asked.append(True)
+        return Table({"ra": [hot_ra], "dec": [hot_dec], "v": [3.0], "b_minus_v": [-0.1]}), ""
+
+    footprints, colors = measure_star_colors(
+        luminance, starless, linear, covered, wcs, gaia, "", bright_star_catalog
+    )
+
+    record = colors.record["saturated_stars"]
+    assert record["red_to_green_width_ratio"] > 1.2
+    assert record["wing_trusted"] is False
+    assert asked
+    hot = footprints.labels[hot_row, hot_column]
+    plain = footprints.labels[plain_row, plain_column]
+    assert colors.sources[hot] == SOURCE_NAMES.index("catalog")
+    assert colors.chroma_b[hot] < -0.05  # blue
+    assert colors.chroma_a[hot] < 0.05  # not red
+    assert colors.sources[plain] == SOURCE_NAMES.index("neutral")
+    assert abs(colors.chroma_a[plain]) < 1e-6 and abs(colors.chroma_b[plain]) < 1e-6
+    assert record["saturated_catalog"] >= 1 and record["saturated_neutral"] >= 1
+    assert record["saturated_wing"] == 0
+    zero = np.zeros(luminance.shape, dtype=np.float32)
+    picture = compose_color_picture(luminance, footprints, colors, zero, zero)
+    for row, column in saturated:
+        red, green, blue = picture[row, column + 2]
+        assert red <= green + 0.01 and red <= blue + 0.01
 
 
 def test_chroma_of_a_white_star_is_zero() -> None:

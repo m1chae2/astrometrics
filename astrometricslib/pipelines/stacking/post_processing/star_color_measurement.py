@@ -20,7 +20,14 @@ painted only where the monochrome star is.
 3. *Saturated stars.* A star whose core reaches the top of the color stack's
    range has a wrong color in its core. Its color is read from its wing (a
    ring of 6 to 16 pixels, unsaturated pixels only) and corrected by the
-   median wing-to-total color difference of bright unsaturated stars.
+   median wing-to-total color difference of bright unsaturated stars. The
+   wing is not trusted when the color stack's red stars are wider than its
+   green ones by more than a small tolerance (a lens that focuses red light
+   less sharply, such as the Nikkor at 300 mm): the far wing of a bright star
+   is then mostly red light, so a hot blue star would come out red. Such a
+   saturated star takes a catalog color instead: its Gaia ``BP - RP`` when
+   it is in the color table, else the ``B - V`` of a catalog of bright stars
+   (SIMBAD), turned into ``BP - RP``. With no catalog color it is white.
 4. *White balance.* The linear color stack is not color calibrated, so the
    red and blue ratios are scaled until stars with the Sun's Gaia color
    (``BP - RP`` 0.75 to 0.90) come out white. When the Gaia colors cannot be
@@ -32,13 +39,14 @@ painted only where the monochrome star is.
    measurement. Otherwise a Gaia ``BP - RP`` from the cache gives its color
    through a straight-line relation fitted on the measured stars (flagged as
    catalog-colored). A bright star in a blend with no Gaia color takes the
-   smoothed color of the color picture pixel by pixel. Every other star is
-   left neutral (gray).
+   smoothed color of the color picture pixel by pixel, except a saturated
+   star whose wing is not trusted. Every other star is left neutral (gray).
 
 The result also compares the measured color index with Gaia's ``BP - RP``
 over every cleanly measured star, as a check of the whole measurement.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -67,8 +75,10 @@ __all__ = [
     "STAR_APERTURE_RADIUS_RANGE_PIXELS",
     "STAR_COLOR_INDEX_ERROR_LIMIT",
     "STAR_CROWDED_APERTURE_PIXELS",
+    "STAR_RED_WIDE_TOLERANCE",
     "StarColors",
     "StarFootprints",
+    "bp_rp_from_b_v",
     "chroma_per_lightness",
     "find_star_footprints",
     "measure_star_colors",
@@ -198,6 +208,26 @@ STAR_SATURATION_SHARES = TunedParameter(
     register_entry="STK-62",
 )
 
+# A saturated star's wing color is not trusted when the color stack's red
+# star width is more than this share wider than its green star width. The
+# widths are the second-moment widths of `_star_widths`. Measured on the
+# color records of 2026-11-25: the Nikon D5300 at 405 mm gave red over green
+# 0.94 (M 27) and 1.14 (M 31); at 300 mm 0.97 to 0.99 (M 13, M 81), 1.14
+# (M 101), 1.22 (M 45) and 1.25 (M 42). On M 45 the bright Pleiades, hot
+# blue-white stars, came out red and magenta. 0.15 keeps both 405 mm pairs on
+# the wing color and moves the two worst 300 mm pairs to catalog colors; M 31
+# (1.14) is close to the limit (STK-62).
+STAR_RED_WIDE_TOLERANCE = TunedParameter(
+    name="stacking.color_preview_red_wide_tolerance",
+    default=0.15,
+    unit="fraction of the green star width",
+    description="How much wider than green the red stars may be before a saturated star's wing is not used.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-62",
+)
+
 # The ring that reads the color of a saturated star's wing, and the ring that
 # measures the sky around it, in pixels. The wing ring starts outside the
 # saturated core of the brightest M 27 stars and stays inside the sky ring.
@@ -264,6 +294,11 @@ STAR_GAIA_MATCH_PIXELS = TunedParameter(
 # 0.82). A sun-like star is drawn white. A published value, not tuned.
 _SUN_BP_RP = 0.82
 
+# The Johnson B - V color of the Sun (Ramirez et al. 2012 give 0.653). With
+# `_SUN_BP_RP` it sets the slope of `bp_rp_from_b_v`. A published value, not
+# tuned.
+_SUN_B_V = 0.653
+
 # The width of the smoothing of the stars-only picture before its peaks are
 # found, in pixels, and the size of the peak search box. Plumbing of the
 # footprint search, not tuned.
@@ -298,8 +333,8 @@ _MINIMUM_SKY_PIXELS = 30
 _MAGNITUDE_PER_RELATIVE_ERROR = 1.0857
 
 # What the codes of `StarColors.sources` mean.
-SOURCE_NAMES = ("none", "measured", "measured_wing", "gaia", "neutral", "pixel_fallback")
-_NONE, _MEASURED, _WING, _GAIA, _NEUTRAL, _PIXEL = range(6)
+SOURCE_NAMES = ("none", "measured", "measured_wing", "gaia", "neutral", "pixel_fallback", "catalog")
+_NONE, _MEASURED, _WING, _GAIA, _NEUTRAL, _PIXEL, _CATALOG = range(7)
 
 
 @dataclass
@@ -361,6 +396,11 @@ class StarColors:
         white balance, wing correction and the check against Gaia.
     notes : `list` [`str`]
         Plain sentences about what was skipped or fell back.
+    untrusted_wing : `numpy.ndarray` or `None`
+        For each region number, whether the star is saturated and its wing
+        color was not trusted (the color stack's red stars are too wide).
+        The extended color around such a star is not trusted either (see
+        `color_from_other_stack.extended_color`). `None` when no star is.
     """
 
     chroma_a: np.ndarray
@@ -369,6 +409,7 @@ class StarColors:
     counts: dict[str, int]
     record: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    untrusted_wing: np.ndarray | None = None
 
 
 def find_star_footprints(luminance: np.ndarray, starless: np.ndarray) -> StarFootprints:
@@ -442,6 +483,34 @@ def chroma_per_lightness(red_ratio: np.ndarray, blue_ratio: np.ndarray) -> tuple
     lab = rgb2lab(encoded[:, np.newaxis, :])[:, 0, :]
     lightness = np.maximum(lab[:, 0], 1e-6)
     return lab[:, 1] / lightness, lab[:, 2] / lightness
+
+
+def bp_rp_from_b_v(b_minus_v: np.ndarray) -> np.ndarray:
+    """Turn a Johnson ``B - V`` color into a Gaia ``BP - RP`` color.
+
+    Both color scales are tied to Vega, so a star of Vega's type (A0 V) has
+    zero in both. The Sun has ``B - V`` = 0.653 and ``BP - RP`` = 0.82. The
+    relation is the straight line through those two points: ``BP - RP`` is
+    1.256 times ``B - V``. It is used only for bright saturated stars, which
+    are not in the Gaia color table. Compared with stars that have both
+    colors in the stored catalog answers (V brighter than 11, 2,931 stars on
+    2026-11-25), the line is within 0.1 magnitude of the median ``BP - RP``
+    from ``B - V`` = 0.2 to 1.0. Redder stars lie below the line (1.41
+    against 1.70 at ``B - V`` = 1.35), where the catalogs' ``B - V`` of
+    faint stars is least certain. A blue-white B star with ``B - V`` = -0.1
+    gets ``BP - RP`` = -0.13.
+
+    Parameters
+    ----------
+    b_minus_v : `numpy.ndarray`
+        Johnson ``B - V`` colors, in magnitudes.
+
+    Returns
+    -------
+    bp_rp : `numpy.ndarray`
+        Gaia ``BP - RP`` colors, in magnitudes.
+    """
+    return np.asarray(b_minus_v, dtype=np.float64) * (_SUN_BP_RP / _SUN_B_V)
 
 
 def _star_widths(linear: np.ndarray, covered: np.ndarray, footprints: StarFootprints) -> np.ndarray | None:
@@ -695,6 +764,169 @@ def _match_gaia(stars: list[dict[str, Any]], gaia_stars: Any, wcs: WCS, shape: t
     return bp_rp
 
 
+def _match_catalog_by_footprint(
+    stars: list[dict[str, Any]], catalog: Any, wcs: WCS, labels: np.ndarray
+) -> np.ndarray:
+    """Find each star's catalog ``BP - RP`` color from its footprint.
+
+    A saturated star's light center can sit a few pixels from its catalog
+    position, so a catalog star is paired with the monochrome star whose
+    footprint holds its position, and that lies within the star's
+    photometry circle of the footprint's light center. The circle keeps a
+    fainter star that sits in the large footprint of a bright star's glow
+    from coloring the whole glow. When a footprint holds several such
+    catalog stars, the brightest one (smallest V) is used.
+
+    Parameters
+    ----------
+    stars : `list` [`dict`]
+        The measured stars, with their region number (``label``), light
+        center (``row``, ``column``) and photometry circle (``aperture``).
+    catalog : `astropy.table.Table` or `None`
+        Catalog stars with ``ra``, ``dec``, ``v`` and ``b_minus_v``.
+    wcs : `astropy.wcs.WCS`
+        The monochrome picture's plate solution.
+    labels : `numpy.ndarray`
+        The footprint region number of each pixel.
+
+    Returns
+    -------
+    bp_rp : `numpy.ndarray`
+        One color per star (see `bp_rp_from_b_v`), NaN when its footprint
+        holds no catalog star with a color.
+    """
+    bp_rp = np.full(len(stars), np.nan)
+    if catalog is None or len(catalog) == 0 or not stars:
+        return bp_rp
+    b_minus_v = np.ma.filled(np.ma.asarray(catalog["b_minus_v"], dtype=np.float64), np.nan)
+    visual = np.ma.filled(np.ma.asarray(catalog["v"], dtype=np.float64), np.nan)
+    columns, rows = wcs.world_to_pixel_values(
+        np.asarray(catalog["ra"], dtype=np.float64), np.asarray(catalog["dec"], dtype=np.float64)
+    )
+    rows = np.asarray(rows, dtype=np.float64)
+    columns = np.asarray(columns, dtype=np.float64)
+    centers = {star["label"]: (star["row"], star["column"], star["aperture"]) for star in stars}
+    usable = (
+        np.isfinite(b_minus_v)
+        & np.isfinite(rows)
+        & np.isfinite(columns)
+        & (rows >= 0)
+        & (rows < labels.shape[0] - 0.5)
+        & (columns >= 0)
+        & (columns < labels.shape[1] - 0.5)
+    )
+    label_color: dict[int, tuple[float, float]] = {}
+    for index in np.nonzero(usable)[0]:
+        label = int(labels[round(rows[index]), round(columns[index])])
+        if label not in centers:
+            continue
+        center_row, center_column, aperture = centers[label]
+        if np.hypot(rows[index] - center_row, columns[index] - center_column) > aperture:
+            continue
+        brightness = visual[index] if np.isfinite(visual[index]) else np.inf
+        if label not in label_color or brightness < label_color[label][0]:
+            label_color[label] = (brightness, float(b_minus_v[index]))
+    for k, star in enumerate(stars):
+        if star["label"] in label_color:
+            bp_rp[k] = float(bp_rp_from_b_v(label_color[star["label"]][1]))
+    return bp_rp
+
+
+def _glow_parents(
+    labels: np.ndarray, measured: list[dict[str, Any]], untrusted: np.ndarray
+) -> dict[int, int]:
+    """Find the regions that are pieces of a saturated star's glow.
+
+    The footprint of a bright saturated star is large, and the footprint
+    search cuts it into many regions: its core, each diffraction spike and
+    parts of its halo. Every region in the same connected patch of starlight
+    as a saturated star whose wing is not trusted counts as a piece of its
+    glow, and belongs to the nearest such star of the patch.
+
+    Parameters
+    ----------
+    labels : `numpy.ndarray`
+        The footprint region number of each pixel.
+    measured : `list` [`dict`]
+        The measured stars, with their region number (``label``), ``row``
+        and ``column``.
+    untrusted : `numpy.ndarray`
+        Whether each measured star is saturated with an untrusted wing.
+
+    Returns
+    -------
+    parents : `dict` [`int`, `int`]
+        For each region in such a patch (other than the saturated stars
+        themselves), the region number of its saturated star.
+    """
+    if not np.any(untrusted):
+        return {}
+    untrusted_labels = np.zeros(int(labels.max()) + 1, dtype=bool)
+    untrusted_labels[[star["label"] for star, flag in zip(measured, untrusted, strict=True) if flag]] = True
+    patches, _ = ndimage.label(labels > 0)
+    glow_patches = np.unique(patches[untrusted_labels[labels]])
+    glow_patches = glow_patches[glow_patches > 0]
+    parents: dict[int, int] = {}
+    boxes = ndimage.find_objects(patches)
+    for patch in glow_patches:
+        box = boxes[patch - 1]
+        inside = patches[box] == patch
+        patch_labels = np.where(inside, labels[box], 0)
+        seeds = untrusted_labels[patch_labels] & inside
+        _, (seed_rows, seed_columns) = ndimage.distance_transform_edt(~seeds, return_indices=True)
+        nearest = patch_labels[seed_rows, seed_columns]
+        for label in np.unique(patch_labels[inside & ~seeds]):
+            if label == 0:
+                continue
+            pixels = patch_labels == label
+            parents[int(label)] = int(np.bincount(nearest[pixels]).argmax())
+    return parents
+
+
+def _saturated_record(
+    measured: list[dict[str, Any]],
+    saturated: np.ndarray,
+    sources: np.ndarray,
+    red_to_green: float,
+    wing_trusted: bool,
+) -> dict[str, Any]:
+    """Count where the saturated stars took their color from.
+
+    Parameters
+    ----------
+    measured : `list` [`dict`]
+        The measured stars, with their region number (``label``).
+    saturated : `numpy.ndarray`
+        Whether each measured star is saturated.
+    sources : `numpy.ndarray`
+        The color source of each region (see `SOURCE_NAMES`).
+    red_to_green : `float`
+        The color stack's red star width over its green star width.
+    wing_trusted : `bool`
+        Whether the wing color of a saturated star could be used.
+
+    Returns
+    -------
+    record : `dict` [`str`, `Any`]
+        The width ratio, whether the wing was trusted, and the number of
+        saturated stars colored from their wing, from a catalog (Gaia or
+        the bright-star catalog), left white, and given the pixel-by-pixel
+        color. These counts are part of the counts by source, not added to
+        them.
+    """
+    saturated_sources = [
+        int(sources[star["label"]]) for star, flag in zip(measured, saturated, strict=True) if flag
+    ]
+    return {
+        "red_to_green_width_ratio": round(red_to_green, 3) if np.isfinite(red_to_green) else None,
+        "wing_trusted": bool(wing_trusted),
+        "saturated_wing": saturated_sources.count(_WING),
+        "saturated_catalog": saturated_sources.count(_GAIA) + saturated_sources.count(_CATALOG),
+        "saturated_neutral": saturated_sources.count(_NEUTRAL),
+        "saturated_pixel_fallback": saturated_sources.count(_PIXEL),
+    }
+
+
 def measure_star_colors(
     luminance: np.ndarray,
     starless: np.ndarray,
@@ -703,6 +935,7 @@ def measure_star_colors(
     wcs: WCS | None,
     gaia_stars: Any,
     gaia_note: str = "",
+    bright_star_catalog: Callable[[], tuple[Any, str]] | None = None,
 ) -> tuple[StarFootprints, StarColors]:
     """Find the monochrome stars and the color each one is painted with.
 
@@ -724,6 +957,12 @@ def measure_star_colors(
         when the colors could not be had.
     gaia_note : `str`, optional
         Why there are no Gaia stars, for the notes.
+    bright_star_catalog : `Callable`, optional
+        Gives the catalog colors of the field's bright stars, as a table with
+        ``ra``, ``dec``, ``v`` and ``b_minus_v`` (or `None`), and a note
+        saying why there are none (or an empty string). It is called only
+        when a saturated star needs a catalog color, so a field that needs
+        none asks no catalog.
 
     Returns
     -------
@@ -755,6 +994,10 @@ def measure_star_colors(
         )
         colors.record["color_star_width_pixels_rgb"] = [round(float(value), 2) for value in widths]
     colors.record["aperture_pixels"] = aperture
+    # A saturated star's wing is trusted unless the red stars are clearly
+    # wider than the green ones (or the widths are unknown, as before).
+    red_to_green = float(widths[0] / widths[1]) if widths is not None and widths[1] > 0 else float("nan")
+    wing_trusted = not red_to_green > 1.0 + float(resolve(STAR_RED_WIDE_TOLERANCE).value)
 
     stars = _photometry(linear, covered, footprints, aperture)
     measured = [star for star in stars if star.get("status") != "edge"]
@@ -837,7 +1080,7 @@ def measure_star_colors(
             "log_offset_blue": round(float(np.median(offset_blue)), 4),
             "scatter_color_index_mag": round(float(2.5 * robust_sigma(offset_blue - offset_red)), 4),
         }
-        usable_wing = saturated & np.isfinite(wing_red)
+        usable_wing = saturated & np.isfinite(wing_red) & wing_trusted
         raw_red[usable_wing] = wing_red[usable_wing] / 10 ** np.median(offset_red)
         raw_blue[usable_wing] = wing_blue[usable_wing] / 10 ** np.median(offset_blue)
     else:
@@ -872,15 +1115,20 @@ def measure_star_colors(
             f"Only {int(check.sum())} measured stars have a Gaia color; no Gaia check was made."
         )
 
-    def from_gaia(k: int) -> tuple[float, float]:
+    def from_gaia(bp_rp_value: float) -> tuple[float, float]:
         """Give a star's color from its Gaia color, through the fitted line.
+
+        Parameters
+        ----------
+        bp_rp_value : `float`
+            The star's ``BP - RP`` color.
 
         Returns
         -------
         a_per_l, b_per_l : `float`
             The Lab color per unit of lightness.
         """
-        offset = bp_rp[k] - _SUN_BP_RP
+        offset = bp_rp_value - _SUN_BP_RP
         a_value, b_value = chroma_per_lightness(
             10 ** np.polyval(relation[0], offset), 10 ** np.polyval(relation[1], offset)
         )
@@ -896,14 +1144,45 @@ def measure_star_colors(
         np.where(np.isfinite(red_ratio), red_ratio, 1.0), np.where(np.isfinite(blue_ratio), blue_ratio, 1.0)
     )
     has_gaia = np.isfinite(bp_rp) & (relation is not None)
+    # Saturated stars whose wing is not trusted: a catalog color or white.
+    untrusted = saturated & (not wing_trusted)
+    # The pieces of a saturated star's glow (its diffraction spikes and the
+    # rest of its large footprint, cut into regions of their own) were
+    # measured on the same red wing, so they are not trusted either.
+    glow_parent = _glow_parents(footprints.labels, measured, untrusted)
+    in_glow = np.array([star["label"] in glow_parent for star in measured], dtype=bool)
+    catalog_bp_rp = np.full(len(measured), np.nan)
+    if (
+        relation is not None
+        and wcs is not None
+        and bright_star_catalog is not None
+        and np.any((untrusted | in_glow) & ~has_gaia)
+    ):
+        catalog, catalog_note = bright_star_catalog()
+        if catalog_note:
+            colors.notes.append(catalog_note)
+        catalog_bp_rp = _match_catalog_by_footprint(measured, catalog, wcs, footprints.labels)
     for k, star in enumerate(measured):
         label = star["label"]
-        if not star["blended"] and good_flags[k]:
+        if untrusted[k] or in_glow[k]:
+            if has_gaia[k]:
+                chroma_a[label], chroma_b[label] = from_gaia(bp_rp[k])
+                sources[label] = _GAIA
+                counts["gaia"] += 1
+            elif relation is not None and np.isfinite(catalog_bp_rp[k]):
+                chroma_a[label], chroma_b[label] = from_gaia(catalog_bp_rp[k])
+                sources[label] = _CATALOG
+                counts["catalog"] += 1
+            elif untrusted[k]:
+                sources[label] = _NEUTRAL
+                counts["neutral"] += 1
+            # A glow piece with no catalog star takes its star's color below.
+        elif not star["blended"] and good_flags[k]:
             chroma_a[label], chroma_b[label] = measured_a[k], measured_b[k]
             sources[label] = _WING if star["saturated"] else _MEASURED
             counts["measured_wing" if star["saturated"] else "measured"] += 1
         elif has_gaia[k]:
-            chroma_a[label], chroma_b[label] = from_gaia(k)
+            chroma_a[label], chroma_b[label] = from_gaia(bp_rp[k])
             sources[label] = _GAIA
             counts["gaia"] += 1
         elif star["blended"] and star["core"] > bright_core:
@@ -912,6 +1191,31 @@ def measure_star_colors(
         else:
             sources[label] = _NEUTRAL
             counts["neutral"] += 1
+    glow_painted = 0
+    for k, star in enumerate(measured):
+        label = star["label"]
+        if in_glow[k] and sources[label] == _NONE:
+            parent = glow_parent[label]
+            chroma_a[label], chroma_b[label] = chroma_a[parent], chroma_b[parent]
+            sources[label] = sources[parent]
+            counts[SOURCE_NAMES[sources[parent]]] += 1
+            glow_painted += 1
+    colors.record["saturated_stars"] = _saturated_record(
+        measured, saturated, sources, red_to_green, wing_trusted
+    )
+    colors.record["saturated_stars"]["glow_pieces_colored_as_their_star"] = glow_painted
+    if untrusted.any():
+        colors.untrusted_wing = np.zeros(labels_total, dtype=bool)
+        untrusted_labels = [
+            star["label"] for star, flag in zip(measured, untrusted | in_glow, strict=True) if flag
+        ]
+        colors.untrusted_wing[untrusted_labels] = True
+        record = colors.record["saturated_stars"]
+        colors.notes.append(
+            f"The color stack's red stars are {100 * (red_to_green - 1):.0f}% wider than its green ones, "
+            f"so the wing color of saturated stars was not used: {record['saturated_catalog']} took a "
+            f"catalog color and {record['saturated_neutral']} were left white."
+        )
     colors.record["aperture_use"] = {
         "full": int(
             sum(1 for s, f in zip(measured, good_flags, strict=True) if f and s["aperture"] == aperture)

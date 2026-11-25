@@ -423,7 +423,9 @@ astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_LI
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MINIMUM_SKY_SHARE,Fewest sky pixels needed to measure the sky tint; a sanity guard.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MOVING_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_REFERENCE_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_SIMBAD_ROW_LIMIT,"Row cap of one stored SIMBAD tile, shared with the star identifier so both read the same answers; plumbing."
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_SKY_HISTOGRAM_BINS,Histogram bins of the sky-level (mode) estimate; plumbing.
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_WIDE_HALO_SAMPLING_PIXELS,Coarse-grid spacing of a wide blur; plumbing of a faster Gaussian.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,extended_color.halo_radius_px,Default that turns the halo fill off for callers without star footprints; not a tuning value.
 astrometricslib/pipelines/stacking/post_processing/depth_limits.py,INDEPENDENT_PIXEL_EXPONENT,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/difference_noise.py,PAIRED_BOOTSTRAP_SEED,software plumbing
@@ -500,6 +502,7 @@ astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_MI
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_MINIMUM_SKY_PIXELS,Fewest ring pixels before neighbors are left in; sampling.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_PEAK_BOX_PIXELS,Size of the local-maximum search box; plumbing.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_SUN_BP_RP,Published constant: the Gaia BP - RP color of the Sun.
+astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_SUN_B_V,Published constant: the Johnson B - V color of the Sun.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_CANDIDATES,Cap on stars examined for a median star width; sampling.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_HALF_BOX,Cut-out size of a second-moment star width; plumbing.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_ISOLATION,Isolation of the stars used for a star width; plumbing.

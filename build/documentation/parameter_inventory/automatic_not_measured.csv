@@ -498,7 +498,9 @@ stacking.color_preview_maximum_alignment_rms_pixels,STK-62,judgment,Partly measu
 stacking.color_preview_minimum_coverage,STK-62,judgment,Partly measured
 stacking.color_preview_nebula_chroma_gain,STK-62,measurement,Partly measured
 stacking.color_preview_pairing_radii_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_red_wide_tolerance,STK-62,exclusion criteria,Partly measured
 stacking.color_preview_resampling_noise_factor,STK-62,measurement,Partly measured
+stacking.color_preview_saturated_halo_radii,STK-62,measurement,Partly measured
 stacking.color_preview_saturation_shares,STK-62,exclusion criteria,Partly measured
 stacking.color_preview_shift_search_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_sky_noise_multiple,STK-62,measurement,Partly measured

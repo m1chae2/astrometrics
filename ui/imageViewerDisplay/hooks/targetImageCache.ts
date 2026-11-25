@@ -34,6 +34,12 @@ const MAX_CACHED_PREVIEWS = 50;
 const cache = new Map<string, CachedTargetImage>();
 /** Small JPEG previews by target id, oldest first. They need no object URL. */
 const previews = new Map<string, Blob>();
+/** Most color pictures kept at once. Older ones are freed first. */
+const MAX_CACHED_COLOR_PICTURES = 4;
+/** Color pictures (made from another stack of the target) by file path, oldest first. */
+const colorPictures = new Map<string, CachedTargetImage>();
+/** The color picture on screen. Its entry is never pushed out. */
+let shownColorPath: string | null = null;
 /** The target whose picture is on screen. Its entry is never pushed out of the cache. */
 let shownTargetId: string | null = null;
 let version = 0;
@@ -127,10 +133,56 @@ export function cacheTargetPreview(targetId: string, preview: Blob): void {
   }
 }
 
+/**
+ * Returns the kept color picture for a file path, if there is one.
+ *
+ * @param path Path of the color picture on the backend's computer.
+ * @return The picture, or undefined.
+ */
+export function getCachedColorPicture(path: string): CachedTargetImage | undefined {
+  return colorPictures.get(path);
+}
+
+/**
+ * Says which color picture is on screen, so its object URL is never freed while it is shown.
+ *
+ * @param path The shown color picture's path, or null when none is shown.
+ */
+export function setShownColorPicture(path: string | null): void {
+  shownColorPath = path;
+}
+
+/**
+ * Keeps a color picture. A picture already kept for the same path is freed.
+ *
+ * @param path Path of the color picture on the backend's computer.
+ * @param blob The picture data.
+ * @return The kept picture, with its new object URL.
+ */
+export function cacheColorPicture(path: string, blob: Blob): CachedTargetImage {
+  const previous = colorPictures.get(path);
+  if (previous) {
+    release(previous);
+    colorPictures.delete(path);
+  }
+  const entry: CachedTargetImage = { objectUrl: URL.createObjectURL(blob), blob };
+  colorPictures.set(path, entry);
+  while (colorPictures.size > MAX_CACHED_COLOR_PICTURES) {
+    const oldestKey = [...colorPictures.keys()].find((key) => key !== shownColorPath);
+    if (oldestKey === undefined) break;
+    const oldest = colorPictures.get(oldestKey);
+    if (oldest) release(oldest);
+    colorPictures.delete(oldestKey);
+  }
+  return entry;
+}
+
 /** Frees every picture and tells the viewers to read their pictures again. */
 export function clearTargetImageCache(): void {
   cache.forEach(release);
   cache.clear();
+  colorPictures.forEach(release);
+  colorPictures.clear();
   previews.clear();
   version += 1;
   versionListeners.forEach((listener) => listener());

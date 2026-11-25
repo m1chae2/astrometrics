@@ -171,6 +171,19 @@ so the picture does not jump. A target with no preview file shows the spinner un
 the FITS image is drawn. Star overlays use FITS pixel positions, so they wait for
 the full image and are never drawn on the preview.
 
+Black and white or color
+
+A black-and-white stack can also have a color picture, made from the colors of
+another stack of the same target (`<stack>_color_preview.jpg`). The target record
+names it in `stacking.colorPreviewImage`. `hooks/useColorPreview.ts` reads that
+name with `target:get`. Only when the name is set does the viewer header show a
+"Black and white" / "Color" switch (`Tabs`). The app never asks for the file
+without the name, so a target without a color picture makes no failed request.
+The picture is read from the backend's `/static` folders, like the stack preview,
+and only once the user picks Color. It is kept in `targetImageCache` by path, so a
+pause does not free it. The choice is kept while the app runs and starts on
+"Black and white". A frame opened from the Evidence list hides the switch.
+
 `hooks/useNeighborPrefetch.ts` prepares the two targets directly above and below
 the selected one in the list (as filtered and sorted). It starts only when the
 selected picture has loaded, the browser is idle (`requestIdleCallback`, or a short

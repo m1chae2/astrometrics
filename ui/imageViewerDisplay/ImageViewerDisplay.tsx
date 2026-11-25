@@ -13,6 +13,8 @@ import { on as onEvent, emit as emitEvent } from '../common/utils/eventBus';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTargetImage } from './hooks/useTargetImage';
 import { useNeighborPrefetch } from './hooks/useNeighborPrefetch';
+import { useColorPreview } from './hooks/useColorPreview';
+import type { PictureChoice } from './targetViewerManager/TargetViewerManager';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { CitedFramesPanel } from './citedFrames/CitedFramesPanel';
@@ -68,6 +70,12 @@ export const ImageViewerDisplay: React.FC = () => {
   useNeighborPrefetch(items.map((item) => ({ id: item.id, hasImage: Boolean(item.isProcessed) })), activeTarget, !loading && !error);
   // A frame opened from the Evidence list is shown in place of the target's image.
   const { openedFrame, openFrame, closeFrame } = useOpenedFrame();
+  // Black and white or color, for targets that have a color picture. Kept while the app runs;
+  // black and white first, so the viewer looks as it did before color pictures existed.
+  const [pictureChoice, setPictureChoice] = useState<PictureChoice>('mono');
+  const colorPreview = useColorPreview(activeTarget, pictureChoice === 'color');
+  const colorAvailable = Boolean(colorPreview.colorPreviewPath) && !openedFrame;
+  const showColor = colorAvailable && pictureChoice === 'color';
 
   const handleDeleteTarget = () => {
     if (activeTarget) setShowDeleteConfirm(true);
@@ -116,12 +124,14 @@ export const ImageViewerDisplay: React.FC = () => {
 
   const centerPanel = (
     <TargetViewerManager
-      imageUrl={openedFrame ? openedFrame.imageUrl : imageUrl}
-      imageBlob={openedFrame ? openedFrame.imageBlob : imageBlob}
-      previewBlob={openedFrame ? null : previewBlob}
-      loading={openedFrame ? openedFrame.loading : loading}
-      error={openedFrame ? openedFrame.error : error}
+      imageUrl={openedFrame ? openedFrame.imageUrl : showColor ? colorPreview.imageUrl : imageUrl}
+      imageBlob={openedFrame ? openedFrame.imageBlob : showColor ? colorPreview.imageBlob : imageBlob}
+      previewBlob={openedFrame || showColor ? null : previewBlob}
+      loading={openedFrame ? openedFrame.loading : showColor ? colorPreview.loading : loading}
+      error={openedFrame ? openedFrame.error : showColor ? colorPreview.error : error}
       selectedTarget={selectedTarget}
+      pictureChoice={colorAvailable ? pictureChoice : undefined}
+      onPictureChoiceChange={setPictureChoice}
     />
   );
 

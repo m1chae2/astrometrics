@@ -5,6 +5,7 @@
  * 1. Only the pipeline's `<stack>_processed.fits` files are treated as stretched pictures.
  * 2. Such a file is fetched as raw bytes and typed as FITS, not converted to a PNG on the server.
  * 3. A processed FITS that is missing on the server gives no image instead of an error.
+ * 4. A target's color picture is named by its record and read from the served folders.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -20,6 +21,8 @@ vi.mock('../common/utils/reportError', () => ({ reportError: vi.fn() }));
 import { callBackend } from '../common/services/backendApi';
 import {
   FITS_BLOB_TYPE,
+  fetchColorPreviewPath,
+  fetchColorPreviewPicture,
   fetchProcessedImage,
   isProcessedFitsPath,
 } from '../common/services/imaging/imageService';
@@ -63,5 +66,27 @@ describe('processed FITS pictures', () => {
     global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
 
     expect(await fetchProcessedImage('M 57')).toBeNull();
+  });
+
+  /** The color picture's path comes from the target record, and a target without one gives null. */
+  it('reads the color picture path from the target record', async () => {
+    const color = '/lights/M 57/M_57_L_Stacked_color_preview.jpg';
+    vi.mocked(callBackend).mockResolvedValueOnce({ stacking: { processedImage: PROCESSED, colorPreviewImage: color } } as never);
+    expect(await fetchColorPreviewPath('M 57')).toBe(color);
+    vi.mocked(callBackend).mockResolvedValueOnce({ stacking: { processedImage: PROCESSED, colorPreviewImage: '' } } as never);
+    expect(await fetchColorPreviewPath('M 57')).toBeNull();
+  });
+
+  /** The color picture is fetched from the static route and typed as a JPEG. */
+  it('fetches the color picture from the served folder', async () => {
+    const color = '/lights/M 57/M_57_L_Stacked_color_preview.jpg';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([9, 9]), { status: 200 }));
+    global.fetch = fetchMock;
+
+    const blob = await fetchColorPreviewPicture(color);
+
+    expect(fetchMock).toHaveBeenCalledWith(`http://backend/static/frames${color}`, expect.anything());
+    expect(blob?.type).toBe('image/jpeg');
+    expect(blob?.size).toBe(2);
   });
 });

@@ -5,6 +5,7 @@ import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import '../../common/styles/panels.css';
 import { Button } from '../../common/components/Button';
+import { Tabs } from '../../common/components/Tabs';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
 import { resolveProcessedImagePath } from '../../common/services/imaging/measurementPath';
 
@@ -22,6 +23,15 @@ const NO_PIXEL_DATA_MESSAGE = 'This picture is not a FITS file, so its stars can
  */
 const STRETCHED_PICTURE_RANGE = [0, 1] as const;
 
+/** Which picture of a target is shown: the black-and-white stack or its color picture. */
+export type PictureChoice = 'mono' | 'color';
+
+/** The two choices of the picture switch. */
+const PICTURE_CHOICES = [
+  { id: 'mono', label: 'Black and white' },
+  { id: 'color', label: 'Color' },
+];
+
 /** Props for the TargetViewerManager component. */
 interface Props {
   /** URL of the image to display. */
@@ -36,6 +46,13 @@ interface Props {
   error?: string | null;
   /** The target ID currently selected. */
   selectedTarget?: string;
+  /**
+   * The picture chosen with the black-and-white or color switch. Leave it out when the
+   * target has no color picture; the switch is then hidden.
+   */
+  pictureChoice?: PictureChoice;
+  /** Called with the picture the user chose. */
+  onPictureChoiceChange?: (choice: PictureChoice) => void;
 }
 
 /**
@@ -53,6 +70,8 @@ export const TargetViewerManager: React.FC<Props> = ({
   loading,
   error,
   selectedTarget,
+  pictureChoice,
+  onPictureChoiceChange,
 }) => {
   const rendererRef = useRef<FitsRendererHandle | null>(null);
   // True while the picture shows a marker at every star the astrometry run's star finder detects.
@@ -73,6 +92,16 @@ export const TargetViewerManager: React.FC<Props> = ({
         className="flex-fill"
         headerContent={
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {pictureChoice && onPictureChoiceChange && (
+              <Tabs
+                size="compact"
+                idPrefix="image-viewer-picture"
+                ariaLabel="Picture colors"
+                tabs={PICTURE_CHOICES}
+                selectedId={pictureChoice}
+                onChange={(choice) => onPictureChoiceChange(choice as PictureChoice)}
+              />
+            )}
             <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
             <Button size="small" onClick={() => rendererRef.current?.zoomIn()} title="Zoom In">+</Button>
             <Button size="small" disabled={viewAtMinimumZoom} onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</Button>

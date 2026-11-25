@@ -671,8 +671,8 @@ stacking.single_night_fractions,STK-37,measurement,Design estimate
 stacking.size_radius_multiples,STK-D32,measurement,Design estimate
 stacking.sky_clip_passes,STK-D10,measurement,Design estimate
 stacking.sky_clip_sigmas,STK-D10,measurement,Design estimate
-stacking.sky_levelling_darkest_share,STK-D86,measurement,Design estimate
 stacking.sky_levelling_maximum_offset,STK-D86,measurement,Design estimate
+stacking.sky_levelling_sky_sample,STK-D86,measurement,Design estimate
 stacking.sky_match_block_pixels,STK-D10,measurement,Design estimate
 stacking.sky_match_block_valid_fraction,STK-D10,measurement,Design estimate
 stacking.sky_match_minimum_blocks,STK-D10,measurement,Design estimate
@@ -696,6 +696,13 @@ stacking.star_match_radius_arcsec,STK-D34,judgment,Design estimate
 stacking.star_neighbour_fraction,STK-D60,measurement,Design estimate
 stacking.star_scale_percentile,STK-D56,measurement,Design estimate
 stacking.star_sigma,STK-D58,measurement,Design estimate
+stacking.star_width_match_bright_star_guard_pixels,STK-63,measurement,Partly measured
+stacking.star_width_match_grid,STK-63,measurement,Partly measured
+stacking.star_width_match_minimum_stars,STK-63,measurement,Partly measured
+stacking.star_width_match_radii_pixels,STK-63,measurement,Partly measured
+stacking.star_width_match_ratio_limits,STK-63,judgment,Partly measured
+stacking.star_width_match_regularization,STK-63,measurement,Partly measured
+stacking.star_width_match_star_selection,STK-63,measurement,Partly measured
 stacking.stretch_clipped_share_limit,STK-D78,measurement,Design estimate
 stacking.strip_pixels,STK-23,measurement,Partly measured
 stacking.sun_like_annulus_radii_pixels,STK-D86,measurement,Design estimate

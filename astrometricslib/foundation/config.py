@@ -631,6 +631,7 @@ class AppConfiguration:
                 "preview_star_tone_enabled": "true",
                 "preview_remove_green_noise_enabled": "true",
                 "preview_color_from_other_stack_enabled": "true",
+                "preview_star_width_match_enabled": "true",
                 "preview_colour_calibration_enabled": "true",
                 "preview_colour_calibration_method": "pcc",
                 "keep_previous_stack_enabled": "true",
@@ -1210,6 +1211,24 @@ class AppConfiguration:
             `True` if the color picture should be made.
         """
         val = self.get_value("Processing.Siril", "preview_color_from_other_stack_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_star_width_match_enabled(self) -> bool:
+        """Return whether a color preview matches its channels' star widths.
+
+        When on, the preview of a color stack measures the star width of each
+        color channel on the linear data and sharpens a channel whose stars
+        are clearly wider than the green channel's, so stars do not get a
+        colored ring (see
+        `pipelines/stacking/post_processing/star_width_match.py`). The stack
+        itself is never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the star width matching step should run.
+        """
+        val = self.get_value("Processing.Siril", "preview_star_width_match_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_preview_colour_calibration_enabled(self) -> bool:

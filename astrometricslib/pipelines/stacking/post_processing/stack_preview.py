@@ -13,7 +13,13 @@ anything. Up to eight steps turn it into a picture.
    The record beside the picture says which ran, with the measured gradient
    and the limit.
 2. Colour calibration (see `colour_calibration`) balances the colours of a
-   colour stack from its own stars, on the linear data. The setting
+   colour stack from its own stars, on the linear data. Just before it, the
+   star widths of the colour channels are matched (see `star_width_match`):
+   a channel whose stars are clearly wider than green's, such as red behind
+   the 300 mm camera lens, is sharpened to green's width, so the stars get no
+   colored ring and the calibration measures stars of one shape. It is
+   skipped, with the reason in the record, when the widths already agree;
+   the setting ``preview_star_width_match_enabled`` turns it off. The setting
    ``preview_colour_calibration_enabled`` turns it off. A white-balance check
    follows it (see `sun_like_balance`): stars that look like the Sun, found
    from their Gaia colours, should come out white, and the red and blue
@@ -177,6 +183,10 @@ from astrometricslib.pipelines.stacking.post_processing.sky_plane import (
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
+from astrometricslib.pipelines.stacking.post_processing.star_width_match import (
+    StarWidthMatch,
+    match_star_widths_in_file,
+)
 from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
     DEFAULT_STAR_STRENGTH,
     DEFAULT_STAR_STRETCH,
@@ -1419,6 +1429,58 @@ def _check_white_balance(
     return name
 
 
+def _match_star_widths(
+    scratch: str,
+    name: str,
+    steps: list[str],
+    settings_used: dict[str, Any] | None,
+    skipped_steps: list[SkippedPreviewStep] | None,
+) -> str:
+    """Match the star widths of a colour stack's channels.
+
+    See `star_width_match`.
+
+    The step runs on the linear data, before the colour calibration. It never
+    fails the preview: when it cannot run, the image is kept, the reason goes
+    into the record and a notice is stored. When the widths already agree it
+    changes nothing and only the record says so.
+
+    Parameters
+    ----------
+    scratch : `str`
+        The scratch folder.
+    name : `str`
+        The linear colour image's file name in the scratch folder.
+    steps : `list` [`str`]
+        The sentences of the steps; the step's sentence is added.
+    settings_used : `dict`, optional
+        The record of the choices the run used; ``star_width_match`` is
+        added.
+    skipped_steps : `list` [`SkippedPreviewStep`], optional
+        A step that could not run is added to it.
+
+    Returns
+    -------
+    file_name : `str`
+        The matched image's file name when a channel was sharpened,
+        otherwise `name`.
+    """
+    raise_if_abandoned()
+    matched_name = "widths.fits"
+    try:
+        result = match_star_widths_in_file(os.path.join(scratch, name), os.path.join(scratch, matched_name))
+    except (OSError, ValueError, MemoryError) as error:
+        result = StarWidthMatch(applied=False, reason=f"the step could not run ({error})")
+        if skipped_steps is not None:
+            skipped_steps.append(SkippedPreviewStep("Star width matching", result.reason))
+    steps.append(result.step_sentence())
+    if settings_used is not None:
+        settings_used["star_width_match"] = result.record()
+    if result.applied and os.path.isfile(os.path.join(scratch, matched_name)):
+        return matched_name
+    return name
+
+
 def _level_stretched_sky(
     scratch: str,
     name: str,
@@ -1583,6 +1645,12 @@ def _picture_script(
                 not_measured_outcome("GraXpert is not configured, so there is no model")
             )
     colour = is_colour_image(os.path.join(scratch, name))
+    if colour and configuration.get_preview_star_width_match_enabled():
+        name = _match_star_widths(scratch, name, steps, settings_used, skipped_steps)
+    elif colour:
+        steps.append("Star width matching off")
+        if settings_used is not None:
+            settings_used["star_width_match"] = {"applied": False, "reason": "the setting is off"}
     if colour and configuration.get_preview_colour_calibration_enabled():
         calibrated_name, method = name, ""
         pcc_imprecise: list[bool] = []
@@ -1943,9 +2011,9 @@ def preview_configuration() -> dict[str, Any]:
     """Give the saved settings that shape a stack's preview picture.
 
     These are the settings `_picture_script` reads: the GraXpert and Cosmic
-    Clarity programs, the denoise strength, the colour calibration, Remove
-    Green Noise and star toning. Program paths are kept as text, with an
-    empty string for a program that is not set up.
+    Clarity programs, the denoise strength, the star width matching, the
+    colour calibration, Remove Green Noise and star toning. Program paths are
+    kept as text, with an empty string for a program that is not set up.
 
     Returns
     -------
@@ -1961,6 +2029,7 @@ def preview_configuration() -> dict[str, Any]:
         "colour_calibration_method": str(configuration.get_preview_colour_calibration_method()),
         "remove_green_noise": bool(configuration.get_preview_remove_green_noise_enabled()),
         "star_toning": bool(configuration.get_preview_star_tone_enabled()),
+        "star_width_match": bool(configuration.get_preview_star_width_match_enabled()),
         # A change of the limit changes which stacks get a plane instead of
         # GraXpert, so a stack's picture is made again when it changes. A
         # record saved before the gate lacks the key, which also counts as a

@@ -97,6 +97,7 @@ from astrometricslib.pipelines.stacking.post_processing.other_stack_alignment im
     align_with_stars,
     find_bright_stars,
 )
+from astrometricslib.pipelines.stacking.post_processing.sky_levelling import sky_weight
 from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     SkippedPreviewStep,
@@ -134,7 +135,6 @@ __all__ = [
     "fill_wide_halos",
     "make_color_preview_for_target",
     "neutralize_sky",
-    "sky_weight",
     "write_color_preview",
 ]
 
@@ -303,10 +303,6 @@ COLOR_PREVIEW_SKY_TINT_LIMITS = TunedParameter(
 # The fewest sky pixels needed to measure the sky tint, as a share of the
 # covered frame; with fewer, the tint is left alone. Not tuned.
 _MINIMUM_SKY_SHARE = 0.005
-
-# The number of histogram bins between the 1st and 60th percentiles used to
-# find the most common (sky) value. Plumbing of a mode estimate, not tuned.
-_SKY_HISTOGRAM_BINS = 200
 
 # How far past each monochrome star's footprint the extended color is
 # replaced by the color just beyond, in widths of the color stack's widest
@@ -628,42 +624,6 @@ def neutralize_sky(
         shift = shift * np.asarray(weight, dtype=np.float32)[None, :, :]
     picture = np.clip(picture - shift, 0.0, 1.0)
     return picture, [float(value) for value in offsets]
-
-
-def sky_weight(blurred: np.ndarray, sample: np.ndarray, multiple: float) -> np.ndarray:
-    """Say how much each pixel of a blurred picture looks like sky.
-
-    The sky level is the most common value of the sample (the peak of its
-    histogram between its 1st and 60th percentiles). The sky spread is the
-    robust spread of the sample's values below that level, mirrored, so the
-    light of a nebula or galaxy above the sky does not widen it.
-
-    Parameters
-    ----------
-    blurred : `numpy.ndarray`
-        The blurred picture.
-    sample : `numpy.ndarray`
-        The pixels to measure the sky on.
-    multiple : `float`
-        How many sky spreads above the sky level still count fully as sky.
-
-    Returns
-    -------
-    weight : `numpy.ndarray`
-        1 up to the sky level plus ``multiple`` spreads, falling evenly to 0
-        at twice as many spreads above it.
-    """
-    values = blurred[sample]
-    low, high = np.percentile(values, [1.0, 60.0])
-    if not high > low:
-        return (blurred <= high).astype(np.float32)
-    counts, edges = np.histogram(values, bins=_SKY_HISTOGRAM_BINS, range=(float(low), float(high)))
-    peak = int(np.argmax(counts))
-    level = 0.5 * (edges[peak] + edges[peak + 1])
-    below = level - values[values <= level]
-    spread = max(1.4826 * float(np.median(below)) if below.size else 0.0, float(edges[1] - edges[0]))
-    reach = multiple * spread
-    return np.clip((level + 2.0 * reach - blurred) / reach, 0.0, 1.0).astype(np.float32)
 
 
 def fill_halos(chroma: np.ndarray, halos: np.ndarray, radius_px: float) -> np.ndarray:

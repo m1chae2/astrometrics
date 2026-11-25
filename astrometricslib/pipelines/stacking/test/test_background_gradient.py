@@ -450,6 +450,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, graxpert: str | None) -> None:
             get_preview_star_tone_enabled=lambda: False,
             get_preview_remove_green_noise_enabled=lambda: False,
             get_preview_colour_calibration_enabled=lambda: False,
+            get_preview_star_width_match_enabled=lambda: False,
             get_preview_colour_calibration_method=lambda: "stars",
         ),
     )

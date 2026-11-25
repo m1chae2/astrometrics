@@ -241,6 +241,16 @@ def test_star_toning_of_the_preview_can_be_turned_off(config_in_tmp_path: AppCon
     assert config.get_preview_star_tone_enabled() is False
 
 
+def test_star_width_matching_of_the_preview_is_on_by_default_and_can_be_turned_off(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """The star width matching setting is on until it is turned off."""
+    config = config_in_tmp_path
+    assert config.get_preview_star_width_match_enabled() is True
+    config.app_config.set("Processing.Siril", "preview_star_width_match_enabled", "false")
+    assert config.get_preview_star_width_match_enabled() is False
+
+
 def test_green_removal_of_the_preview_is_on_by_default_and_can_be_turned_off(
     config_in_tmp_path: AppConfiguration,
 ) -> None:

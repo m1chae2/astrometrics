@@ -444,6 +444,13 @@ preview_remove_green_noise_enabled = "true"
 # color stack. The monochrome picture and both stacks are never changed. Set
 # "false" to make only the monochrome picture.
 preview_color_from_other_stack_enabled = "true"
+# "true" (the default): the stack preview of a color stack measures the star
+# width of each color channel on the linear data. A channel whose stars are
+# clearly wider than the green channel's (red behind a camera lens, for
+# example) is sharpened to green's width, so stars do not get a colored ring.
+# The stack itself is never changed. Set "false" to leave the channels as they
+# are.
+preview_star_width_match_enabled = "true"
 # "true" (the default): the stack preview of a colour stack first balances its
 # colours from its own stars: each channel's sky level is subtracted, and red
 # and blue are scaled so the median star comes out neutral. Without it, stars

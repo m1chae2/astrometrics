@@ -84,11 +84,12 @@ def _configure(
     remove_green: bool = True,
     colour_calibration: bool = False,
     colour_method: str = "stars",
+    star_width_match: bool = False,
 ) -> None:
     """Give the module the commands for Siril, GraXpert and Cosmic Clarity.
 
-    The star toning is off unless asked for, so the tests of the other steps
-    see the pipeline without it.
+    The star toning and the star width matching are off unless asked for, so
+    the tests of the other steps see the pipeline without them.
     """
     monkeypatch.setattr(
         stack_preview,
@@ -104,6 +105,7 @@ def _configure(
             get_preview_remove_green_noise_enabled=lambda: remove_green,
             get_preview_colour_calibration_enabled=lambda: colour_calibration,
             get_preview_colour_calibration_method=lambda: colour_method,
+            get_preview_star_width_match_enabled=lambda: star_width_match,
         ),
     )
 
@@ -1681,6 +1683,7 @@ def test_a_preview_records_the_picture_settings_in_force(
         "colour_calibration_method": "stars",
         "remove_green_noise": True,
         "star_toning": True,
+        "star_width_match": False,
         "background_plane_limit": 0.03,
     }
     assert preview_is_out_of_date(str(stack)) is None

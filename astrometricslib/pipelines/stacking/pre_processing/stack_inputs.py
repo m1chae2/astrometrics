@@ -143,6 +143,7 @@ SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_preview_star_tone_enabled",
     "get_preview_remove_green_noise_enabled",
     "get_preview_color_from_other_stack_enabled",
+    "get_preview_star_width_match_enabled",
     "get_preview_colour_calibration_enabled",
     "get_preview_colour_calibration_method",
     "get_prefetch_frames",

@@ -15,6 +15,7 @@ from astrometricslib.pipelines.shared.image_scaling import measure_sky_backgroun
 from astrometricslib.pipelines.stacking.post_processing.sky_levelling import (
     level_sky_channels,
     level_sky_in_file,
+    true_sky,
 )
 
 SIZE = 400
@@ -154,3 +155,36 @@ def test_tint_in_the_dark_part_is_measured_not_the_whole_frame() -> None:
     assert abs(result.red_offset - 0.02) < 0.003
     medians = [float(np.median(channel[:, 10 : split - 10])) for channel in leveled]
     assert abs(medians[0] - medians[1]) < 0.002
+
+
+def test_red_star_skirts_are_not_taken_as_sky() -> None:
+    """Faint stars with wide red skirts leave a neutral sky neutral.
+
+    The sky is the same in all three channels. Two thirds of the frame is a
+    crowded star field whose stars have a red skirt wider than their green
+    and blue light, as behind the 300 mm lens; one third is empty sky. The
+    true-sky sample keeps clear of the skirts, so no red offset is measured.
+    """
+    generator = np.random.default_rng(11)
+    size = 600
+    image = np.full((3, size, size), 0.12, dtype=np.float32)
+    rows, columns = np.mgrid[:size, :size]
+    centers = generator.uniform(0, size, size=(2000, 2))
+    centers = centers[centers[:, 1] > 200]
+    for row, column in centers:
+        top, bottom = int(max(row - 20, 0)), int(min(row + 21, size))
+        left, right = int(max(column - 20, 0)), int(min(column + 21, size))
+        distance_squared = (rows[top:bottom, left:right] - row) ** 2 + (
+            columns[top:bottom, left:right] - column
+        ) ** 2
+        image[:, top:bottom, left:right] += 0.05 * np.exp(-distance_squared / (2 * 1.5**2))
+        image[0, top:bottom, left:right] += 0.01 * np.exp(-distance_squared / (2 * 5.0**2))
+    image += 0.004 * generator.standard_normal(image.shape).astype(np.float32)
+    image = np.clip(image, 0.0, 1.0)
+    sky = true_sky(image)
+    # The empty third (columns below 200) holds nearly all of the sample.
+    assert sky[:, :200].sum() > 0.9 * sky.sum()
+    _, result = level_sky_channels(image)
+    assert result.applied
+    assert abs(result.red_offset) < 0.0005
+    assert abs(result.blue_offset) < 0.0005

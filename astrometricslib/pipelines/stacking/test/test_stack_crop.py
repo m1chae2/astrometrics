@@ -639,3 +639,14 @@ def test_trimming_a_stack_of_aligned_groups_crops_the_picture_past_the_uncovered
     assert crops is not None and crops.processed is not None
     top = 0 if crops.stack is None else crops.stack.y0
     assert top + crops.processed.y0 >= 300
+
+
+def test_a_box_kept_inside_another_never_reaches_past_it() -> None:
+    """The picture crop stays inside the stack crop, shape kept."""
+    step = 4
+    counts = np.full((101, 151), 10, dtype=np.int32)
+    counts[:, :20] = 7
+    within = sc.CropBox(4, 599, 4, 399)
+    box = sc.find_coverage_crop_box(counts, step, 600, 400, 0.85, within=within, limit_trim=False)
+    assert within.x0 <= box.x0 < box.x1 <= within.x1
+    assert within.y0 <= box.y0 < box.y1 <= within.y1

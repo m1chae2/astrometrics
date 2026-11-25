@@ -653,6 +653,17 @@ def find_coverage_crop_box(
         height if bottom == counts.shape[0] else (bottom - 1) * step + 1,
     )
     box = _same_shape_box(clean, width, height)
+    if within is not None:
+        # Keeping the original shape can push a side a pixel or so past the
+        # box this one must stay inside; such a box no longer fits the
+        # trimmed stack, so it is pulled back inside.
+        box = replace(
+            box,
+            x0=max(box.x0, within.x0),
+            x1=min(box.x1, within.x1),
+            y0=max(box.y0, within.y0),
+            y1=min(box.y1, within.y1),
+        )
     maximum_trim_fraction = float(resolve(MAXIMUM_TRIM_FRACTION).value)
     sides = {"left": box.x0, "right": width - box.x1, "top": box.y0, "bottom": height - box.y1}
     if limit_trim and (

@@ -18,12 +18,16 @@ anything. Up to seven steps turn it into a picture.
 3. Siril's Remove Green Noise (``rmgreen``) lowers the green in a colour
    stack, such as one from the Nikon DSLR. A colour sensor has twice as many
    green pixels as red or blue, and the sky's glow is often green, so these
-   stacks look green. It runs on the linear data, just before the stretch. A
-   single-channel stack, such as one from the ZWO camera, has no colour to
-   balance and is left alone. The setting
-   ``preview_remove_green_noise_enabled`` turns it off. A colour stack with
-   calibrated colours gets this step as a Siril run of its own, so step 4
-   can measure the sky on the data it stretches.
+   stacks look green. It runs on the linear data, just before the stretch,
+   and only when step 2 did not calibrate the colours (see
+   `decide_remove_green`). Calibration already makes the sky equal in the
+   three channels, and the strong stretch turns the small shift that
+   ``rmgreen`` then makes into a magenta sky: green fell to 0.88 to 0.89 of
+   the mean of red and blue on two Nikon stacks, against 1.01 to 1.03 without
+   the step. A single-channel stack, such as one from the ZWO camera, has no
+   colour to balance and is left alone. The setting
+   ``preview_remove_green_noise_enabled`` is the master switch and turns the
+   step off. The record beside the picture says whether it ran and why.
 4. The stretch brightens the faint parts. It sets the black point (the value
    drawn as pure black) just below the sky, then bends the brightness curve
    so the sky lands on a chosen grey level. The level comes from the stack
@@ -425,6 +429,46 @@ def find_local_gaia_catalog(search_folders: list[str] | None = None) -> str | No
     return None
 
 
+def decide_remove_green(is_colour: bool, switch_on: bool, colours_calibrated: bool) -> tuple[bool, str]:
+    """Decide whether Siril's Remove Green Noise runs on a stack.
+
+    Colour calibration already makes the sky equal in all three channels.
+    ``rmgreen`` then lowers green wherever green is above the mean of red and
+    blue, which on a balanced sky is a shift of about 0.1 percent of the
+    linear sky. The strong stretch multiplies that shift, and the sky comes
+    out magenta: on the NGC 7023 and NGC 6992 stacks the stretched sky had
+    green at 0.88 to 0.89 of the mean of red and blue with the step, and 1.01
+    to 1.03 without it. So the step runs only when the colours were not
+    calibrated (the setting is off, or the calibration failed). The setting
+    ``preview_remove_green_noise_enabled`` stays the master switch: with it
+    off the step never runs.
+
+    Parameters
+    ----------
+    is_colour : `bool`
+        Whether the stack has three colour channels.
+    switch_on : `bool`
+        The setting ``preview_remove_green_noise_enabled``.
+    colours_calibrated : `bool`
+        Whether colour calibration (Siril PCC or the star-based fallback)
+        succeeded on this stack.
+
+    Returns
+    -------
+    run_step : `bool`
+        Whether Remove Green Noise runs.
+    reason : `str`
+        A short phrase that says why, for the preview's record.
+    """
+    if not is_colour:
+        return False, "the stack has a single channel"
+    if not switch_on:
+        return False, "the setting is off"
+    if colours_calibrated:
+        return False, "the colours were calibrated, which already balances the sky"
+    return True, "the colours were not calibrated"
+
+
 def online_catalog_reachable() -> bool:
     """Say whether the server that Siril asks for Gaia stars answers.
 
@@ -488,36 +532,6 @@ def build_pcc_script(
         f'load "{source_file_name}"',
         *([f"platesolve -catalog={catalog_name}"] if solve else []),
         f"pcc -catalog={catalog_name}",
-        f'save "{output_stem}"',
-        "close",
-    ]
-
-
-def build_remove_green_script(source_file_name: str, output_stem: str) -> list[str]:
-    """Write the Siril commands that remove excess green and save it.
-
-    A colour stack gets this step on its own, before the stretch, so the sky
-    can be measured on the data the stretch will see (see
-    `sky_background_for_file`).
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the linear colour image, relative to the folder Siril is
-        started in.
-    output_stem : `str`
-        File name for the result, relative to that folder and without the
-        ``.fits`` extension (Siril adds it).
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    return [
-        f"requires {_MINIMUM_SIRIL_VERSION}",
-        f'load "{source_file_name}"',
-        _REMOVE_GREEN_COMMAND,
         f'save "{output_stem}"',
         "close",
     ]
@@ -1475,48 +1489,15 @@ def _picture_script(
     else:
         linked = False
         steps.append("Colour calibration not used")
-    remove_green = configuration.get_preview_remove_green_noise_enabled() and colour
-    if remove_green and linked:
-        # A shared stretch is set from the sky measured on the data it sees,
-        # so the green removal runs first, as its own step. Siril's own
-        # Autostretch would take the sky from every pixel, and in a crowded
-        # field that sets the black point far below the sky.
-        def remove_green_noise(input_path: str, output_path: str) -> bool:
-            """Run Siril's Remove Green Noise on the linear image.
-
-            Returns
-            -------
-            succeeded : `bool`
-                Whether Siril exited without an error.
-            """
-            return run_preview_script(
-                scratch,
-                build_remove_green_script(
-                    os.path.basename(input_path), os.path.splitext(os.path.basename(output_path))[0]
-                ),
-                siril_executable,
-            )
-
-        greened_name = _next_source(
-            "Remove Green Noise",
-            name,
-            "greened.fits",
-            scratch,
-            remove_green_noise,
-            check_result=True,
-            skipped_steps=skipped_steps,
-        )
-        if greened_name != name:
-            name, remove_green = greened_name, False
-            steps.append("Remove Green Noise done before the stretch")
-        else:
-            # The stretch script removes the green itself, and the sky is
-            # left to Siril, as before.
-            steps.append("Remove Green Noise in the Siril stretch")
-    else:
-        steps.append(
-            "Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used"
-        )
+    green_switch_on = bool(configuration.get_preview_remove_green_noise_enabled())
+    remove_green, green_reason = decide_remove_green(colour, green_switch_on, linked)
+    steps.append(
+        f"Remove Green Noise in the Siril stretch ({green_reason})"
+        if remove_green
+        else f"Remove Green Noise not used ({green_reason})"
+    )
+    if settings_used is not None:
+        settings_used["remove_green_noise"] = {"ran": remove_green, "reason": green_reason}
     stretched_by_starnet = False
     linear_name = name
     if settings.starnet:

@@ -1039,10 +1039,10 @@ Every Python example assumes the library is installed and configured with your o
 
 **Green removal on color stacks**
 
-- **Claim:** Uncalibrated color stacks have a strongly green sky, and Siril's Remove Green Noise changes little once the color calibration has run.
+- **Claim:** Uncalibrated color stacks have a strongly green sky. Siril's Remove Green Noise changes the linear sky of a calibrated stack by about 0.1%, but the stretch makes that a magenta sky, so the step runs only when the color calibration did not.
 - **Settings it supports:**
   - config key `[Processing.Siril] preview_remove_green_noise_enabled` (default `true`). Relation: sanity check only; it is a warning threshold and blocks nothing.
-- **Status:** Partly measured. Four stacks for the green cast and two for the effect.
+- **Status:** Partly measured. Four stacks for the green cast and four for the effect.
 - **Data you need:** Color stacks of a few targets.
 - **Procedure:** Remake the preview with and without green removal (change the setting between runs) and compare the sky's mean red, green and blue values in the two JPEGs.
 
@@ -1057,7 +1057,7 @@ Every Python example assumes the library is installed and configured with your o
   `ProcessingPipelines.remake_preview` keeps the old pictures in `_previous_preview` for the comparison. <!-- impl: astrometricslib.api.processing.ProcessingPipelines.remake_preview -->
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The sky's green-to-red ratio before calibration, and the change in the sky's green level (0 to 255) between the two pictures.
-- **Our result:** The sky of four Nikon stacks had 1.5 to 2 times as much green as red. With the color calibration on, green removal moved the sky's green on M 51 and M 31 by about 2 levels out of 255. Date not recorded.
+- **Our result:** The sky of four Nikon stacks had 1.5 to 2 times as much green as red. With the color calibration on, green removal moved the sky's green on M 51 and M 31 by about 2 levels out of 255 (date not recorded). Measured 2026-11-24 on the Siril PCC output of NGC 7023 (300 mm) and NGC 6992, read-only, in a scratch copy: the linear sky channels were equal to 0.2% after PCC, and `rmgreen` moved the sky by about 0.1% in the linear data. After the preview's strong stretch the sky's green over the mean of red and blue was 0.88 to 0.89 with `rmgreen` and 1.01 to 1.03 without it, so the step turned a neutral sky magenta. Since then the preview skips `rmgreen` when the color calibration (Siril PCC or the star-based fallback) succeeded, and keeps it when the calibration is off or failed. The setting stays the master switch, and `settings_used.remove_green_noise` in the preview record says whether the step ran and why.
 - **Verdict:** Not judged.
 - **Limits:** Few stacks; picture-level check only.
 - **To tune for your setup:** Turn it off if it does nothing visible on your stacks.

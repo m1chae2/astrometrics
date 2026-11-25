@@ -117,10 +117,8 @@ class _Programs:
         denoise_result: bool = True,
         pcc_result: bool = True,
         starnet_result: bool = True,
-        green_result: bool = True,
     ) -> None:
         """Choose how each program will behave."""
-        self.green_result = green_result
         self.flatten_result = flatten_result
         self.siril_result = siril_result
         self.denoise_result = denoise_result
@@ -210,11 +208,6 @@ class _Programs:
                 Path(directory) / "starless_stretched.fits", np.full((3, 16, 16), 0.2, dtype=np.float32)
             )
             return True
-        if 'save "greened"' in commands:
-            if self.green_result:
-                image = np.random.default_rng(2).normal(0.01, 0.001, (3, 64, 64)).astype(np.float32)
-                fits.writeto(Path(directory) / "greened.fits", image)
-            return self.green_result
         if any(command.startswith("pcc -catalog=") for command in commands):
             if self.pcc_result:
                 image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
@@ -518,7 +511,8 @@ def test_the_log_lists_every_step_that_ran(
     assert "Star toning finished; the preview uses its result." in messages
     summary = next(message for message in messages if message.startswith("Preview steps:"))
     assert summary == (
-        "Preview steps: GraXpert done; Colour calibration not used; Remove Green Noise not used; "
+        "Preview steps: GraXpert done; Colour calibration not used; "
+        "Remove Green Noise not used (the stack has a single channel); "
         "Siril stretch done; "
         "Cosmic Clarity done; Star toning done."
     )
@@ -1277,7 +1271,7 @@ def test_a_calibrated_colour_stack_is_stretched_with_one_shared_stretch(
     write_stack_preview(str(stack))
 
     commands = programs.siril_calls[-1][1]
-    assert 'load "greened.fits"' in commands
+    assert 'load "colour.fits"' in commands
     assert any(command.startswith("mtf ") for command in commands)
     assert not any(command.startswith("autostretch") for command in commands)
 
@@ -1364,7 +1358,7 @@ def test_pcc_runs_first_and_its_result_feeds_a_shared_stretch(
     pcc_commands = programs.siril_calls[0][1]
     assert "platesolve -catalog=gaia" in pcc_commands
     final_commands = programs.siril_calls[-1][1]
-    assert 'load "greened.fits"' in final_commands
+    assert 'load "colour.fits"' in final_commands
     assert any(command.startswith("mtf ") for command in final_commands)
 
 
@@ -1400,7 +1394,7 @@ def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
         assert write_stack_preview(str(stack)) is not None
 
     final_commands = programs.siril_calls[-1][1]
-    assert 'load "greened.fits"' in final_commands
+    assert 'load "colour.fits"' in final_commands
     assert any(command.startswith("mtf ") for command in final_commands)
     summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
     assert "Colour calibration (from the stars) done" in summary
@@ -1635,6 +1629,7 @@ def test_a_preview_writes_a_record_of_the_settings_it_used(
     assert record["settings_used"].pop("object_category")["category"] is None
     # The test's stack file holds no pixels, so no stretch measurement is made.
     assert record["settings_used"].pop("stretch_sky") == {}
+    assert record["settings_used"].pop("remove_green_noise")["ran"] is False
     assert record["settings_used"] == {
         "denoise": True,
         "denoise_strength": 0.8,
@@ -2055,21 +2050,23 @@ def test_a_cluster_inside_a_nebula_reaches_the_masked_stretch_as_a_nebula(
     assert recorded["masked_stretch"]["category"] == "nebula"
 
 
-def test_a_calibrated_colour_stack_has_its_green_removed_in_a_step_of_its_own(
+def test_a_calibrated_colour_stack_is_not_given_green_removal(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify `rmgreen` runs alone, so the sky is measured after it."""
+    """Verify `rmgreen` is left out once colour calibration has run."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
     programs = _Programs()
     programs.install(monkeypatch)
+    steps: list[str] = []
 
-    write_stack_preview(str(stack))
+    write_stack_preview(str(stack), steps_log=steps)
 
-    green_step = programs.siril_calls[0][1]
-    assert green_step[1:5] == ['load "colour.fits"', "rmgreen", 'save "greened"', "close"]
-    final_commands = programs.siril_calls[-1][1]
-    assert "rmgreen" not in final_commands
+    assert not any("rmgreen" in call[1] for call in programs.siril_calls)
+    assert any(step.startswith("Remove Green Noise not used (the colours were calibrated") for step in steps)
+    recorded = read_preview_settings(str(stack))["settings_used"]["remove_green_noise"]
+    assert recorded["ran"] is False
+    assert "calibrated" in recorded["reason"]
 
 
 def test_a_calibrated_colour_stack_is_stretched_from_its_measured_sky(
@@ -2086,28 +2083,64 @@ def test_a_calibrated_colour_stack_is_stretched_from_its_measured_sky(
 
     final_commands = programs.siril_calls[-1][1]
     assert any(command.startswith("mtf ") for command in final_commands)
-    assert "Remove Green Noise done before the stretch" in steps
     record = read_preview_settings(str(stack))
     assert record is not None
     assert record["settings_used"]["stretch_sky"]["sky_noise"] > 0.0
 
 
-def test_a_failed_green_step_leaves_the_green_removal_to_the_stretch(
+def test_a_failed_colour_calibration_keeps_the_green_removal(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the picture is still made as before if the green step fails."""
+    """Verify `rmgreen` still runs when no calibration worked."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
-    programs = _Programs(green_result=False)
+    monkeypatch.setattr(stack_preview, "calibrate_colours_in_file", lambda input_path, output_path: False)
+    programs = _Programs()
     programs.install(monkeypatch)
-    skipped: list[stack_preview.SkippedPreviewStep] = []
 
-    assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
+    assert write_stack_preview(str(stack)) is not None
 
     final_commands = programs.siril_calls[-1][1]
     assert "rmgreen" in final_commands
-    assert any(command.startswith("autostretch -linked") for command in final_commands)
-    assert [step.step_name for step in skipped] == ["Remove Green Noise"]
+    assert not any(command.startswith("autostretch -linked") for command in final_commands)
+    recorded = read_preview_settings(str(stack))["settings_used"]["remove_green_noise"]
+    assert recorded == {"ran": True, "reason": "the colours were not calibrated"}
+
+
+def test_the_green_removal_switch_wins_over_the_calibration_rule(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the setting stays the master switch when calibration failed."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, remove_green=False)
+    monkeypatch.setattr(stack_preview, "calibrate_colours_in_file", lambda input_path, output_path: False)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert not any("rmgreen" in call[1] for call in programs.siril_calls)
+    recorded = read_preview_settings(str(stack))["settings_used"]["remove_green_noise"]
+    assert recorded == {"ran": False, "reason": "the setting is off"}
+
+
+@pytest.mark.parametrize(
+    ("is_colour", "switch_on", "calibrated", "expected"),
+    [
+        (True, True, False, True),
+        (True, True, True, False),
+        (True, False, False, False),
+        (False, True, False, False),
+    ],
+)
+def test_decide_remove_green_covers_every_case(
+    is_colour: bool, switch_on: bool, calibrated: bool, expected: bool
+) -> None:
+    """Verify the rule: colour, switch on, and no calibration."""
+    run_step, reason = stack_preview.decide_remove_green(is_colour, switch_on, calibrated)
+
+    assert run_step is expected
+    assert reason
 
 
 def test_the_sky_of_a_single_channel_stack_is_measured_as_before(tmp_path: Path) -> None:

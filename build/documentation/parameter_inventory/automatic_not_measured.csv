@@ -461,6 +461,7 @@ spectroscopy.xp_resolution_wavelengths_angstrom,SPE-28,measurement,Partly measur
 spectroscopy.zero_order_amplitude_outlier_sigma,SPE-29,judgment,Partly measured
 spectroscopy.zero_order_position_jump_outlier_sigma,SPE-29,judgment,Partly measured
 spectroscopy.zero_point_offset_limit_angstrom,SPE-D07,judgment,Design estimate
+stacking.aligned_edge_margin_px,STK-D84,measurement,Design estimate
 stacking.alignment_clip_sigmas,STK-D64,measurement,Design estimate
 stacking.alignment_high_pass_sigma_pixels,STK-D64,measurement,Design estimate
 stacking.alignment_upsample_factor,STK-D64,measurement,Design estimate

@@ -12,7 +12,13 @@ point 710 pixels away, and the right side is covered by only 111 of 123
 frames.
 
 The rule is a count of coverage. From each frame's registration transform, the
-module counts how many included frames cover each pixel. It makes two crops
+module counts how many included frames cover each pixel. When the stack was
+built from exposure groups, each frame's transform reaches only its own group's
+grid, so the count first moves the pixel back by the inverse of the group's
+alignment with the reference group (shift, rotation and scale). The rim of a
+resampled group, where the spline mixes in the empty border, does not count as
+covered. Without this step, a group moved by hundreds of pixels would look as
+if it covered the whole stack. It makes two crops
 from that count, each the largest box of the original shape inside the region
 covered by at least a set fraction of the frames, placed as near the centre of
 the original image as the covered area allows (the telescope points the target
@@ -164,6 +170,22 @@ _COVERAGE_GRID_STEP = TunedParameter(
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-23",
+)
+
+# When exposure groups are lined up with each other, a group's stack is
+# resampled with a cubic spline, and the spline mixes the empty border into
+# every pixel within two pixels of the group's edge. Those pixels are not
+# counted as covered by the group's frames. Three pixels is the spline's two
+# pixel reach plus one for the spacing of the counted pixels.
+_ALIGNED_EDGE_MARGIN_PX = TunedParameter(
+    name="stacking.aligned_edge_margin_px",
+    default=3,
+    unit="pixels",
+    description="Width of the resampled border of a lined-up exposure group that does not count as covered.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D84",
 )
 
 # The profile along one axis is measured on the middle of the other axis, so a
@@ -419,12 +441,21 @@ def frame_coverage_counts(
     width: int,
     height: int,
     step: int | None = None,
+    alignments: Sequence[Sequence[float] | None] | None = None,
 ) -> np.ndarray:
     """Count how many included frames cover each pixel of the stack.
 
     Each frame's transform moves its pixels onto the reference frame's grid,
     which is the stack's grid before any crop. A stack pixel is covered by a
     frame when the inverse transform lands inside that frame.
+
+    When the stack was built from exposure groups, each group was registered
+    to its own reference frame, and the group stacks were then lined up with
+    each other. A frame's transform only reaches its own group's grid, so the
+    stack pixel is first moved back onto that grid by the inverse of the
+    group's alignment. A stack pixel that falls outside the group's grid, or
+    within `_ALIGNED_EDGE_MARGIN_PX` of its border, is not covered by any frame
+    of the group.
 
     Parameters
     ----------
@@ -438,6 +469,13 @@ def frame_coverage_counts(
         The size in pixels of the frames and of the uncropped stack.
     step : `int`, optional
         Spacing of the counted pixels. Defaults to the tuned grid step.
+    alignments : `Sequence` of (`Sequence` of `float` or `None`), optional
+        For each frame, how its group's stack was moved onto the reference
+        group's grid: the shift along the rows, the shift along the columns,
+        the rotation in degrees and the scale, as in `AlignmentResult` (the
+        rotation and scale are about the image centre, and the shifts are
+        those of the centre). `None` for a frame of the reference group. Left
+        out, no frame's group was moved.
 
     Returns
     -------
@@ -447,18 +485,40 @@ def frame_coverage_counts(
         j * step.
     """
     spacing = int(step if step is not None else resolve(_COVERAGE_GRID_STEP).value)
+    margin = float(resolve(_ALIGNED_EDGE_MARGIN_PX).value)
     columns = np.arange(0, width, spacing, dtype=np.float64)
     rows = np.arange(0, height, spacing, dtype=np.float64)
-    siril_x, siril_y = np.meshgrid(columns, height - 1 - rows)
-    counts = np.zeros(siril_x.shape, dtype=np.int32)
-    for values, is_included in zip(homographies, included, strict=True):
+    stack_columns, stack_rows = np.meshgrid(columns, rows)
+    centre = complex((width - 1) / 2.0, (height - 1) / 2.0)
+    counts = np.zeros(stack_columns.shape, dtype=np.int32)
+    moves = [None] * len(homographies) if alignments is None else alignments
+    for values, is_included, move in zip(homographies, included, moves, strict=True):
         if not is_included:
             continue
+        group_columns, group_rows = stack_columns, stack_rows
+        inside_group = True
+        if move is not None:
+            # The alignment sent a group position z (column + 1j * row) to
+            # a * (z - c) + c + t, so a stack position z' came from
+            # (z' - c - t) / a + c.
+            shift_rows, shift_columns, rotation_degrees, scale = move
+            turn = scale * np.exp(1j * np.radians(rotation_degrees))
+            position = (stack_columns + 1j * stack_rows - centre - complex(shift_columns, shift_rows)) / turn
+            group_columns, group_rows = position.real + centre.real, position.imag + centre.imag
+            inside_group = (
+                (group_columns >= margin)
+                & (group_columns <= width - 1 - margin)
+                & (group_rows >= margin)
+                & (group_rows <= height - 1 - margin)
+            )
+        siril_x, siril_y = group_columns, height - 1 - group_rows
         inverse = np.linalg.inv(np.asarray(values, dtype=np.float64).reshape(3, 3))
-        scale = inverse[2, 0] * siril_x + inverse[2, 1] * siril_y + inverse[2, 2]
-        frame_x = (inverse[0, 0] * siril_x + inverse[0, 1] * siril_y + inverse[0, 2]) / scale
-        frame_y = (inverse[1, 0] * siril_x + inverse[1, 1] * siril_y + inverse[1, 2]) / scale
-        counts += (frame_x >= 0) & (frame_x <= width - 1) & (frame_y >= 0) & (frame_y <= height - 1)
+        scale_term = inverse[2, 0] * siril_x + inverse[2, 1] * siril_y + inverse[2, 2]
+        frame_x = (inverse[0, 0] * siril_x + inverse[0, 1] * siril_y + inverse[0, 2]) / scale_term
+        frame_y = (inverse[1, 0] * siril_x + inverse[1, 1] * siril_y + inverse[1, 2]) / scale_term
+        counts += (
+            inside_group & (frame_x >= 0) & (frame_x <= width - 1) & (frame_y >= 0) & (frame_y <= height - 1)
+        )
     return counts
 
 
@@ -677,7 +737,10 @@ def _coverage_from_diagnostics(
     ----------
     diagnostics : `Mapping` or `None`
         What the stacking run reported: ``registration_frames`` (one dict per
-        frame with a ``homography``) and ``registration_included``.
+        frame with a ``homography``) and ``registration_included``. For a
+        stack of exposure groups, ``exposure_group_alignments`` gives each
+        group's frame count and how its stack was moved onto the reference
+        group's grid.
     width, height : `int`
         The uncropped stack's size.
 
@@ -685,7 +748,8 @@ def _coverage_from_diagnostics(
     -------
     counts : `numpy.ndarray` or `None`
         The coverage counts, or `None` when the transforms are missing or not
-        nine numbers each.
+        nine numbers each, or when the groups' frame counts do not add up to
+        the number of frames (so a frame cannot be given its group's move).
     """
     frames = (diagnostics or {}).get("registration_frames") or []
     homographies = [facts.get("homography") or [] for facts in frames]
@@ -695,7 +759,19 @@ def _coverage_from_diagnostics(
     included = (
         [bool(flag) for flag in flags] if len(flags) == len(homographies) else [True] * len(homographies)
     )
-    return frame_coverage_counts(homographies, included, width, height)
+    groups = (diagnostics or {}).get("exposure_group_alignments") or []
+    alignments: list[Sequence[float] | None] | None = None
+    if any(group.get("alignment") is not None for group in groups):
+        alignments = [group.get("alignment") for group in groups for _ in range(int(group["frame_count"]))]
+        if len(alignments) != len(homographies):
+            logger.warning(
+                "The exposure groups' frame counts (%d) do not match the registered frames (%d); "
+                "frame coverage is not counted.",
+                len(alignments),
+                len(homographies),
+            )
+            return None
+    return frame_coverage_counts(homographies, included, width, height, alignments=alignments)
 
 
 # Header cards that record where a processed picture sits on its stack. The

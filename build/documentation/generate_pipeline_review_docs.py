@@ -3610,7 +3610,9 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
 5. **After the stack.** Thinly covered edges are trimmed (`stack_crop.py`). Frames never line up exactly,
-   so the edges of a stack are covered by fewer frames than the middle and are noisier. The linear
+   so the edges of a stack are covered by fewer frames than the middle and are noisier. For a
+   stack of exposure groups, the count of covering frames takes each group's alignment with the
+   reference group into account. The linear
    stack is cut only where fewer than half the frames cover it; the processed picture is cropped
    further, to the area at least 85% of the frames cover, before GraXpert and Cosmic Clarity run.
    A stack with full coverage is left alone. The quality summary and its gates are built (<<gate_count>>).

@@ -747,7 +747,10 @@ def _stack_exposure_groups(
         ``"exposure_group_frame_zero_fractions"`` list with every group's
         measured zero fraction (empty when the frames could not be read), an
         ``"exposure_group_weights"`` list with one entry for each group that
-        was combined (see `_exposure_group_weight_entries`), and a
+        was combined (see `_exposure_group_weight_entries`), an
+        ``"exposure_group_alignments"`` list (each combined group's frame
+        count and its shift, rotation and scale onto the reference group, or
+        `None` for the reference), and a
         ``"covered_in_every_group"`` mask of the pixels every combined group
         has data at.
     """
@@ -1395,6 +1398,23 @@ def _join_group_diagnostics(
         stack_weight,
         [result.summary_index for result in used],
     )
+    # How each group's stack was moved onto the reference group's grid, with
+    # the number of frames the group registered, so the crop can count how many
+    # frames cover each pixel of the combined stack (see `stack_crop`).
+    merged_diagnostics["exposure_group_alignments"] = [
+        {
+            "frame_count": len(result.artifacts.get("registration_frames") or []),
+            "alignment": None
+            if result.alignment is None
+            else [
+                result.alignment.shift_rows_pixels,
+                result.alignment.shift_columns_pixels,
+                result.alignment.rotation_degrees,
+                result.alignment.scale,
+            ],
+        }
+        for result in used
+    ]
     # Where every combined group has data. Empty-sky apertures keep out of the
     # rest (see `aperture_placement.uncovered_clearance_px()`).
     merged_diagnostics["covered_in_every_group"] = np.logical_and.reduce(combination.covered_masks)

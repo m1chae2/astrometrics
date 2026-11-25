@@ -521,3 +521,121 @@ def test_the_picture_crop_composes_with_a_quarter_turn(tmp_path: Path, degrees: 
     with fits.open(stack, memmap=False) as hdul:
         picture = hdul[0].data[box.y0 : box.y1, box.x0 : box.x1]
     assert np.array_equal(picture, turn_image(registered[5:45, 10:70], degrees))
+
+
+def aligned_groups_diagnostics(first: int, second: int, move: list[float]) -> dict:
+    """Build the registration facts of two exposure groups, the second moved.
+
+    Every frame sits on its group's grid with no shift of its own, so any
+    difference in coverage comes from the move of the second group.
+
+    Parameters
+    ----------
+    first, second : `int`
+        Number of frames in the reference group and in the moved group.
+    move : `list` [`float`]
+        The second group's shift along the rows, shift along the columns,
+        rotation in degrees and scale.
+
+    Returns
+    -------
+    diagnostics : `dict`
+        The ``registration_frames``, ``registration_included`` and
+        ``exposure_group_alignments`` entries.
+    """
+    diagnostics = shifted_group_diagnostics(first + second, 0, 0.0, 0.0)
+    diagnostics["exposure_group_alignments"] = [
+        {"frame_count": first, "alignment": None},
+        {"frame_count": second, "alignment": move},
+    ]
+    return diagnostics
+
+
+def test_a_group_moved_onto_the_reference_leaves_its_uncovered_strip_out_of_the_count() -> None:
+    """A group moved 300 rows and turned 180 degrees misses the first rows."""
+    diagnostics = aligned_groups_diagnostics(35, 15, [300.0, 0.0, 180.0, 1.0])
+
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+
+    assert counts is not None
+    # The turn about the centre sends row r to 999 - r + 300, so the moved
+    # group covers rows 300 to 999 (less its resampled margin). Before that,
+    # only the 35 frames of the first group cover. The first and last columns
+    # are the moved group's margin.
+    assert counts[: 300 // 4].max() == 35
+    assert counts[304 // 4 :, 2:-2].min() == 50
+
+
+def test_the_processed_box_leaves_out_the_strip_only_the_reference_group_covers() -> None:
+    """The 85% box starts below the strip the moved group does not reach."""
+    diagnostics = aligned_groups_diagnostics(35, 15, [300.0, 0.0, 180.0, 1.0])
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    stack_box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+    processed = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.85, within=stack_box, limit_trim=False)
+
+    # 35 of 50 frames is 70%: kept by the 50% rule, cut from the picture.
+    assert stack_box.y0 == 0
+    assert processed.y0 >= 300
+    assert processed.x1 - processed.x0 == processed.y1 - processed.y0
+
+
+def test_the_count_without_the_group_alignments_thinks_every_frame_covers_everything() -> None:
+    """Left out, the groups' alignments make the count full everywhere."""
+    diagnostics = aligned_groups_diagnostics(35, 15, [300.0, 0.0, 180.0, 1.0])
+    del diagnostics["exposure_group_alignments"]
+
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+
+    assert counts is not None
+    assert counts.min() == 50
+
+
+@pytest.mark.parametrize(
+    "move", [[60.0, -35.0, 20.0, 1.002], [-80.0, 25.0, -7.5, 1.0], [10.0, 90.0, 180.0, 1.0]]
+)
+def test_the_coverage_matches_the_pixels_the_alignment_moves_in(move: list[float]) -> None:
+    """The cells counted as covered are those `apply_alignment` fills."""
+    from astrometricslib.pipelines.stacking.processing.group_alignment import AlignmentResult, apply_alignment
+
+    diagnostics = aligned_groups_diagnostics(1, 1, move)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+    result = AlignmentResult(
+        shift_rows_pixels=move[0],
+        shift_columns_pixels=move[1],
+        correlation=1.0,
+        rotation_degrees=move[2],
+        scale=move[3],
+    )
+    _, filled = apply_alignment(np.ones((SIZE, SIZE), dtype=np.float32), result, order=1)
+
+    sampled = filled[::4, ::4]
+    counted = counts == 2
+    # They agree except in the few cells at the border (the margin).
+    assert np.mean(counted != sampled) < 0.01
+    assert not np.any(counted & ~sampled)
+
+
+def test_group_frame_counts_that_do_not_match_the_frames_give_no_coverage() -> None:
+    """When a frame cannot be given its group's move, no count is made."""
+    diagnostics = aligned_groups_diagnostics(35, 15, [300.0, 0.0, 180.0, 1.0])
+    diagnostics["exposure_group_alignments"][0]["frame_count"] = 30
+
+    assert sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE) is None
+
+
+def test_trimming_a_stack_of_aligned_groups_crops_the_picture_past_the_uncovered_strip(
+    tmp_path: Path,
+) -> None:
+    """`crop_stack_edges` gives a processed box that starts below the strip."""
+    stack = tmp_path / "NGC_6992_NONE_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+    diagnostics = aligned_groups_diagnostics(47, 17, [300.0, 4.0, 180.0, 1.0])
+
+    crops = sc.crop_stack_edges(str(stack), diagnostics)
+
+    assert crops is not None and crops.processed is not None
+    top = 0 if crops.stack is None else crops.stack.y0
+    assert top + crops.processed.y0 >= 300

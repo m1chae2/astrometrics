@@ -394,6 +394,41 @@ async def test_remake_preview_starts_the_apps_preview_job(monkeypatch: pytest.Mo
 
 
 @pytest.mark.anyio
+async def test_remake_preview_of_a_configuration_sends_that_configurations_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A camera and optic send their own stack to the remake."""
+    requests = fake_backend(
+        monkeypatch,
+        {"target:get": M_27_RECORD, "processing:remake_preview": {"status": "running", "job_id": "job-12"}},
+    )
+
+    reply = await app_jobs.tool_processing_remake_preview("M 27", camera_id="D5300", focal_length_mm=300)
+
+    assert requests[-1]["method"] == "processing:remake_preview"
+    assert requests[-1]["params"] == {"target_id": "M 27", "stack_path": "/stacks/M_27_Nikon_300.fits"}
+    assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
+    assert reply["job_id"] == "job-12"
+
+
+@pytest.mark.anyio
+async def test_remake_preview_refuses_an_unknown_unclear_or_spectral_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown or unclear cameras list the stacks; spectral is refused."""
+    requests = fake_backend(monkeypatch, {"target:get": M_27_RECORD})
+
+    with pytest.raises(InvalidArgumentError, match=r"has no stack for .*Nikon DSLR DSC D5300@300mm"):
+        await app_jobs.tool_processing_remake_preview("M 27", camera_id="Canon")
+    with pytest.raises(InvalidArgumentError, match="more than one stack"):
+        await app_jobs.tool_processing_remake_preview("M 27", camera_id="Nikon")
+    with pytest.raises(InvalidArgumentError, match="only for the main configuration"):
+        await app_jobs.tool_processing_remake_preview("M 27", kind="spectral", camera_id="Nikon")
+
+    assert "processing:remake_preview" not in [request["method"] for request in requests]
+
+
+@pytest.mark.anyio
 async def test_frame_sync_starts_the_sync_buttons_sync(monkeypatch: pytest.MonkeyPatch) -> None:
     """A real run calls ``telescope:sync`` and says how to follow it."""
     requests = fake_backend(monkeypatch, {"telescope:sync": {"started": True, "target_id": "M 13"}})

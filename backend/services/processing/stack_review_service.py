@@ -178,6 +178,7 @@ class StackReviewService:
         starnet: bool = False,
         star_strength: float | None = None,
         star_stretch: float | None = None,
+        stack_path: str | None = None,
     ) -> StackReviewStart:
         """Make a target's preview picture again, as a background job.
 
@@ -205,6 +206,10 @@ class StackReviewService:
             With ``starnet``, how much of the stars layer is blended, 0 to 1.
         star_stretch : `float`, optional
             With ``starnet``, the strength of the stars' own stretch.
+        stack_path : `str`, optional
+            The stack to make the picture of: the main stack or the stack of
+            one camera and optic. Left out, the main stack. Another camera's
+            stack never changes the picture the target shows.
 
         Returns
         -------
@@ -246,6 +251,7 @@ class StackReviewService:
                         star_strength=star_strength,
                         star_stretch=star_stretch,
                         register_job=True,
+                        stack_path=stack_path,
                     )
             finally:
                 with _preview_abandonments_lock:

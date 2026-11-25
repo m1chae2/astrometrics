@@ -356,7 +356,7 @@ The step then records the FITS file as the target's processed image (`processed_
 
 ### Remaking the preview
 
-`post_processing/preview_remake.py` runs only this step again on the stack that is already there, without restacking (`ProcessingPipelines.remake_preview`). A run can override the denoise and star-toning settings, or choose StarNet, without writing them to the configuration. By default it copies the old preview images into a `_previous_preview` folder first, so you can compare the two, and a failed run puts them back. It never opens the stack file for writing.
+`post_processing/preview_remake.py` runs only this step again on the stack that is already there, without restacking (`ProcessingPipelines.remake_preview`). A run can override the denoise and star-toning settings, or choose StarNet, without writing them to the configuration. By default it copies the old preview images into a `_previous_preview` folder first, so you can compare the two, and a failed run puts them back. It never opens the stack file for writing. A target with stacks from several cameras or optics keeps one for each (`stacking.stacks_by_configuration`); `stack_path` names one of them, and the run makes that stack's own pictures. The target's main stack and its `processed_image` stay as they were, and a color stack gets no color-from-another-stack step.
 
 ## Where the output goes
 

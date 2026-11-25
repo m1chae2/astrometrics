@@ -825,7 +825,10 @@ async def tool_processing_enhance(target: str, choice: str | None = None) -> Any
         "The app runs it as a preview job that shows in the job list. denoise, denoise_strength, "
         "star_toning and the StarNet choices apply to this run only and never reach the settings. The old "
         "pictures are kept in _previous_preview and put back if the run fails; the stack file is never "
-        "written. Needs the app's backend to be running."
+        "written. A target stacked with several cameras or optics has one stack for each: give camera_id "
+        "and focal_length_mm to remake that configuration's own pictures instead of the main stack's (an "
+        "unknown one is refused with the target's list); the main stack and the picture the target shows "
+        "stay as they were. Needs the app's backend to be running."
     ),
     {
         "type": "object",
@@ -856,6 +859,14 @@ async def tool_processing_enhance(target: str, choice: str | None = None) -> Any
                 "maximum": 100000,
                 "description": "With starnet: the stars' own stretch strength. Default 1000.",
             },
+            "camera_id": {
+                "type": "string",
+                "description": "Remake the stack of this camera (or part of its name). Default: main stack.",
+            },
+            "focal_length_mm": {
+                "type": "number",
+                "description": "Remake the stack taken at this focal length. Default: the main stack.",
+            },
         },
         "required": ["target"],
     },
@@ -870,6 +881,8 @@ async def tool_processing_remake_preview(
     starnet: bool | None = None,
     star_strength: float | None = None,
     star_stretch: float | None = None,
+    camera_id: str | None = None,
+    focal_length_mm: float | None = None,
 ) -> Any:
     """Start the job that makes a target's preview picture again.
 
@@ -883,15 +896,42 @@ async def tool_processing_remake_preview(
         Overrides for this run.
     denoise_strength, star_strength, star_stretch : `float`, optional
         Strengths for this run.
+    camera_id : `str`, optional
+        Remake the target's stack of this camera (``processing_stack``'s
+        meaning: the full name or part of it). The main stack by default.
+    focal_length_mm : `float`, optional
+        Remake the target's stack taken at this focal length.
 
     Returns
     -------
     reply : `Any`
         The backend's ``processing:remake_preview`` answer: ``status``
-        (``completed`` with ``result``, or ``running``) and ``job_id``.
+        (``completed`` with ``result``, or ``running``) and ``job_id``,
+        with ``configuration`` (the chosen camera and optic, when one was
+        asked for).
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the camera and optic name no stack of the target, or more than
+        one, or are given for a spectral stack.
     """
+    configuration: dict[str, Any] | None = None
+    if camera_id or focal_length_mm is not None:
+        if kind == "spectral":
+            raise InvalidArgumentError(
+                f"Spectral stacks are kept only for the main configuration of {target!r}. "
+                "Leave camera_id and focal_length_mm out, or choose kind imaging.",
+                details={"target": target},
+            )
+        configuration = await _chosen_configuration(target, camera_id, focal_length_mm)
     parameters = _without_empty({
         "target_id": target,
+        "stack_path": (
+            _first_text(configuration.get("stackedImage"), configuration.get("stacked_image"))
+            if configuration
+            else None
+        ),
         "kind": kind,
         "denoise": denoise,
         "denoise_strength": denoise_strength,
@@ -900,8 +940,10 @@ async def tool_processing_remake_preview(
         "star_strength": star_strength,
         "star_stretch": star_stretch,
     })
-    reply = await execute_rpc("processing:remake_preview", parameters)
-    return _with_hint(reply, FOLLOW_A_JOB)
+    reply = _with_hint(await execute_rpc("processing:remake_preview", parameters), FOLLOW_A_JOB)
+    if configuration and isinstance(reply, dict):
+        reply = {**reply, "configuration": _configuration_label(configuration)}
+    return reply
 
 
 @tool(

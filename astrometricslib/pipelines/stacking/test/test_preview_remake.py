@@ -15,6 +15,7 @@ import pytest
 
 from astrometricslib import ProcessingPipelines, Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError, ProcessingError
+from astrometricslib.models.target import StackConfigurationResult
 from astrometricslib.pipelines.shared.stack_preview_path import (
     preview_path_for,
     preview_settings_path_for,
@@ -200,6 +201,100 @@ def test_a_target_without_a_stack_is_an_error(tmp_path: Path) -> None:
         remake_stack_preview(target, False, PreviewSettings())
     with pytest.raises(NotFoundError, match="has no spectral stack"):
         remake_stack_preview(Target(id="T"), True, PreviewSettings())
+
+
+def add_configuration_stack(target: Target, folder: Path) -> Path:
+    """Give a target a second stack, from another camera and optic.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target; its main stack stays the shown one.
+    folder : `pathlib.Path`
+        Where the stack goes.
+
+    Returns
+    -------
+    stack : `pathlib.Path`
+        The other configuration's stack, with its own old pictures.
+    """
+    other = folder / "NGC_7331_Nikon_DSLR_DSC_D5300_300mm.fits"
+    other.write_bytes(b"other stack")
+    Path(preview_path_for(str(other))).write_bytes(b"other old jpeg")
+    main = target.stacking.stacked_image
+    target.stacking.stacks_by_configuration = {
+        "ASI533@405mm": StackConfigurationResult(
+            configuration_key="ASI533@405mm",
+            camera="ZWO ASI533MM Pro",
+            focal_length_mm=405.0,
+            stacked_image=main,
+            is_preferred=True,
+        ),
+        "Nikon@300mm": StackConfigurationResult(
+            configuration_key="Nikon@300mm",
+            camera="Nikon DSLR DSC D5300",
+            focal_length_mm=300.0,
+            stacked_image=str(other),
+        ),
+    }
+    return other
+
+
+def test_a_remake_of_another_configuration_writes_only_its_own_pictures(
+    stacked: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The named stack gets new pictures; the main stack and pointers stay."""
+    fake_preview(monkeypatch)
+    target = make_target(stacked)
+    other = add_configuration_stack(target, stacked.parent)
+    pointer = target.stacking.processed_image
+    target.stacking.color_preview_image = ""
+
+    result = remake_stack_preview(target, False, PreviewSettings(), stack_path=str(other))
+
+    assert result.stack_path == str(other)
+    assert result.preview_path == preview_path_for(str(other))
+    assert Path(result.preview_path).read_bytes() == b"new jpeg"
+    assert result.shown_in_viewer is False
+    assert other.read_bytes() == b"other stack"
+    assert Path(preview_path_for(str(stacked))).read_bytes() == b"old jpeg"
+    assert Path(processed_fits_path_for(str(stacked))).read_bytes() == b"old fits"
+    assert target.stacking.stacked_image == str(stacked)
+    assert target.stacking.processed_image == pointer
+    assert target.stacking.color_preview_image == ""
+    assert target.stacking.stacks_by_configuration["ASI533@405mm"].is_preferred is True
+
+
+def test_a_stack_that_is_not_the_targets_is_refused(stacked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the main stack or a recorded configuration's stack is remade."""
+    seen = fake_preview(monkeypatch)
+    target = make_target(stacked)
+    other = add_configuration_stack(target, stacked.parent)
+
+    with pytest.raises(InvalidArgumentError, match="is not a stack"):
+        remake_stack_preview(target, False, PreviewSettings(), stack_path="/elsewhere/X.fits")
+    with pytest.raises(InvalidArgumentError, match="is not a spectral stack"):
+        remake_stack_preview(
+            make_target(stacked, spectral=True), True, PreviewSettings(), stack_path=str(other)
+        )
+    assert seen == []
+
+
+def test_the_method_passes_the_stack_and_does_not_save_an_unshown_picture(
+    stacked: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``remake_preview`` hands the stack on; an unshown one saves nothing."""
+    saved: list[int] = []
+    pipelines = make_pipelines(saved)
+    fake_preview(monkeypatch)
+    target = make_target(stacked)
+    other = add_configuration_stack(target, stacked.parent)
+
+    result = pipelines.remake_preview(target, stack_path=str(other), register_job=False)
+
+    assert result.stack_path == str(other)
+    assert result.shown_in_viewer is False
+    assert saved == []
 
 
 def make_pipelines(saved: list[int]) -> ProcessingPipelines:

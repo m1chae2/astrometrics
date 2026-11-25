@@ -82,9 +82,34 @@ def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
             "star_strength": None,
             "star_stretch": None,
             "register_job": True,
+            "stack_path": None,
         }
     ]
     assert "keep_previous" not in calls[0]
+
+
+def test_a_remake_of_one_configuration_names_its_stack() -> None:
+    """The stack of a chosen camera and optic reaches the library."""
+    calls: list[dict[str, Any]] = []
+
+    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+        """Record the call and give a result.
+
+        Returns
+        -------
+        result : `PreviewRemakeResult`
+            A small result.
+        """
+        calls.append({"target": target, **options})
+        return _result()
+
+    service = StackReviewService(SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)))
+
+    reply = service.start_preview_remake("M 81", stack_path="/s/M_81_Nikon_300mm.fits")
+
+    assert reply.status == "completed"
+    assert calls[0]["stack_path"] == "/s/M_81_Nikon_300mm.fits"
+    assert calls[0]["kind"] == "imaging"
 
 
 def test_a_slow_remake_gives_back_to_the_caller_while_it_runs() -> None:

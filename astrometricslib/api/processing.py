@@ -1815,6 +1815,7 @@ class ProcessingPipelines:
         star_stretch: float | None = None,
         keep_previous: bool = True,
         register_job: bool = True,
+        stack_path: str | None = None,
     ) -> PreviewRemakeResult:
         """Make a target's preview picture again from its existing stack.
 
@@ -1859,6 +1860,13 @@ class ProcessingPipelines:
             Copy the current pictures aside first. On by default.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
+        stack_path : `str`, optional
+            Make the picture of this stack: the main stack or one of the
+            target's stacks by camera and optic
+            (``stacking.stacks_by_configuration``). Left out, the main
+            stack. Another configuration's stack gets its own pictures, and
+            the target's main stack and processed-image pointer stay as they
+            were.
 
         Returns
         -------
@@ -1871,7 +1879,8 @@ class ProcessingPipelines:
         ------
         InvalidArgumentError
             If ``kind``, ``denoise_strength``, ``star_strength`` or
-            ``star_stretch`` is out of range.
+            ``star_stretch`` is out of range, or ``stack_path`` is not one of
+            the target's stacks of that kind.
         """
         from astrometricslib.pipelines.stacking.post_processing.preview_remake import remake_stack_preview
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
@@ -1906,6 +1915,7 @@ class ProcessingPipelines:
                 job_id=current_job_id(),
                 measured_at=datetime.now(UTC),
                 configuration=self._config,
+                stack_path=stack_path,
             )
             # Not a final status: `registered_job` completes the job on the
             # way out and keeps this message, so the list stops saying

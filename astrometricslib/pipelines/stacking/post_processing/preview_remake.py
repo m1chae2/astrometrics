@@ -14,6 +14,11 @@ run can override the denoise and star-toning settings without writing them to
 the configuration. By default the old pictures are copied into a
 ``_previous_preview`` folder first, so the new and old can be compared, and a
 failed run puts them back. The stack file is never opened for writing.
+
+A target stacked with several cameras or optics keeps one imaging stack for
+each (``stacks_by_configuration``). A run can name one of those stacks; its
+own pictures are made again, and the target's main stack and its
+processed-image pointer stay as they were.
 """
 
 import logging
@@ -24,7 +29,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from astrometricslib.foundation.errors import NotFoundError, ProcessingError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
 from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.processing_results import PreviewRemakeResult, PreviewSettingsRecord
 from astrometricslib.pipelines.shared.stack_preview_path import (
@@ -137,6 +142,7 @@ def remake_stack_preview(
     job_id: str | None = None,
     measured_at: datetime | None = None,
     configuration: Any | None = None,
+    stack_path: str | None = None,
 ) -> PreviewRemakeResult:
     """Make the preview of a target's current stack again.
 
@@ -159,6 +165,11 @@ def remake_stack_preview(
         is stored (pipeline code does not read the clock).
     configuration : `AppConfiguration`, optional
         Where the quality store lives. The process-wide one if omitted.
+    stack_path : `str`, optional
+        The stack to make the picture of. It must be the target's main stack
+        or one of its stacks by camera and optic. Left out, the main stack.
+        Another configuration's stack gets its own pictures; the target's
+        processed-image pointer is changed only for the stack it shows.
 
     Returns
     -------
@@ -169,6 +180,8 @@ def remake_stack_preview(
 
     Raises
     ------
+    InvalidArgumentError
+        If ``stack_path`` is not one of the target's stacks of this kind.
     NotFoundError
         If the target has no such stack, or its file is missing.
     ProcessingError
@@ -177,8 +190,25 @@ def remake_stack_preview(
         If the job was cancelled. The old pictures are put back first.
     """
     stacking = target.spectral_stacking if spectral else target.stacking
-    stacked_path = stacking.stacked_image
     kind = "spectral stack" if spectral else "stack"
+    stacked_path = stacking.stacked_image
+    if stack_path and stack_path != stacked_path:
+        # Spectral stacks are kept only for the main configuration.
+        known = (
+            set()
+            if spectral
+            else {
+                recorded.stacked_image
+                for recorded in stacking.stacks_by_configuration.values()
+                if recorded.stacked_image
+            }
+        )
+        if stack_path not in known:
+            raise InvalidArgumentError(
+                f"'{stack_path}' is not a {kind} of '{target.id}'.",
+                details={"target": target.id, "stack_path": stack_path},
+            )
+        stacked_path = stack_path
     if not stacked_path:
         raise NotFoundError(f"Target '{target.id}' has no {kind}.", details={"target": target.id})
     if not os.path.isfile(stacked_path):
@@ -211,7 +241,9 @@ def remake_stack_preview(
     color_outcome = None
     if preview_path is not None:
         # A monochrome stack also gets its color picture again (see
-        # `color_from_other_stack`). It never fails the remake.
+        # `color_from_other_stack`). It never fails the remake. A color stack
+        # is skipped, and only the stack the target shows changes the
+        # target's color-picture pointer.
         color_outcome = make_color_preview_for_target(target, stacked_path, spectral, skipped_steps)
     record_preview_step_notices(
         skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration

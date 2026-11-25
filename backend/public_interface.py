@@ -191,7 +191,9 @@ RPC_METHODS: tuple[str, ...] = (
     # A target's current stack in one short answer (a read).
     "processing:stack_summary",
     # Makes a stack's preview picture again without restacking (a background
-    # job; writes the pictures and the target's processed-image pointer).
+    # job; writes the pictures and the target's processed-image pointer). An
+    # optional `stack_path` names one of the target's stacks by camera and
+    # optic; that stack gets its own pictures and the pointer is left alone.
     "processing:remake_preview",
     # The nebulae and galaxies SIMBAD lists inside a target's stack (a read;
     # asks SIMBAD once per stack file and keeps the list beside the stack).

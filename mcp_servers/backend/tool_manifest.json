@@ -91,7 +91,7 @@
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer. Since 2026-11-21 the astrometrics-backend server serves it through processing:remake_preview, so the app runs the job."
+      "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer. Since 2026-11-21 the astrometrics-backend server serves it through processing:remake_preview, so the app runs the job. Since 2026-11-25 camera_id and focal_length_mm remake the target's stack of that camera and optic (stacks_by_configuration, sent as stack_path) instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and the main stack and processed-image pointer stay as they were."
     },
     "processing_stack": {
       "tool_class": "process",

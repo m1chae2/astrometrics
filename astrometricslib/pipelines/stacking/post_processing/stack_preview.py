@@ -21,13 +21,22 @@ anything. Up to seven steps turn it into a picture.
    stacks look green. It runs on the linear data, just before the stretch. A
    single-channel stack, such as one from the ZWO camera, has no colour to
    balance and is left alone. The setting
-   ``preview_remove_green_noise_enabled`` turns it off.
-4. Siril's Autostretch command brightens the faint parts the way its own
-   display does. It sets the black point from the image's own background
-   noise, then bends the brightness curve so the typical background lands on
-   a chosen grey level. The level comes from the stack itself (see
-   `sky_level`): faint targets get a lighter sky so their faint structure
-   stays visible, and bright targets get a darker one.
+   ``preview_remove_green_noise_enabled`` turns it off. A colour stack with
+   calibrated colours gets this step as a Siril run of its own, so step 4
+   can measure the sky on the data it stretches.
+4. The stretch brightens the faint parts. It sets the black point (the value
+   drawn as pure black) just below the sky, then bends the brightness curve
+   so the sky lands on a chosen grey level. The level comes from the stack
+   itself (see `sky_level`): faint targets get a lighter sky so their faint
+   structure stays visible, and bright targets get a darker one. The sky
+   level and its noise are measured on the empty sky (see `stretch_sky`),
+   for a single-channel stack and for a colour stack with calibrated colours
+   (on the mean of its channels, which one shared stretch treats alike). A
+   colour stack whose calibration failed or is off, and any stack whose sky
+   cannot be measured, is stretched by Siril's own Autostretch, which takes
+   the sky from every pixel. In a crowded star field that spread is several
+   times the real pixel noise, so the black point falls far below the sky and
+   the picture is flat.
 5. Cosmic Clarity, if it is configured, removes noise with an AI model. It
    runs after the stretch, on the stretched picture. A color stack gets the
    program's ``full`` mode, which also smooths the color speckle (strength
@@ -479,6 +488,36 @@ def build_pcc_script(
         f'load "{source_file_name}"',
         *([f"platesolve -catalog={catalog_name}"] if solve else []),
         f"pcc -catalog={catalog_name}",
+        f'save "{output_stem}"',
+        "close",
+    ]
+
+
+def build_remove_green_script(source_file_name: str, output_stem: str) -> list[str]:
+    """Write the Siril commands that remove excess green and save it.
+
+    A colour stack gets this step on its own, before the stretch, so the sky
+    can be measured on the data the stretch will see (see
+    `sky_background_for_file`).
+
+    Parameters
+    ----------
+    source_file_name : `str`
+        File name of the linear colour image, relative to the folder Siril is
+        started in.
+    output_stem : `str`
+        File name for the result, relative to that folder and without the
+        ``.fits`` extension (Siril adds it).
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The script, one command per entry.
+    """
+    return [
+        f"requires {_MINIMUM_SIRIL_VERSION}",
+        f'load "{source_file_name}"',
+        _REMOVE_GREEN_COMMAND,
         f'save "{output_stem}"',
         "close",
     ]
@@ -1437,7 +1476,47 @@ def _picture_script(
         linked = False
         steps.append("Colour calibration not used")
     remove_green = configuration.get_preview_remove_green_noise_enabled() and colour
-    steps.append("Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used")
+    if remove_green and linked:
+        # A shared stretch is set from the sky measured on the data it sees,
+        # so the green removal runs first, as its own step. Siril's own
+        # Autostretch would take the sky from every pixel, and in a crowded
+        # field that sets the black point far below the sky.
+        def remove_green_noise(input_path: str, output_path: str) -> bool:
+            """Run Siril's Remove Green Noise on the linear image.
+
+            Returns
+            -------
+            succeeded : `bool`
+                Whether Siril exited without an error.
+            """
+            return run_preview_script(
+                scratch,
+                build_remove_green_script(
+                    os.path.basename(input_path), os.path.splitext(os.path.basename(output_path))[0]
+                ),
+                siril_executable,
+            )
+
+        greened_name = _next_source(
+            "Remove Green Noise",
+            name,
+            "greened.fits",
+            scratch,
+            remove_green_noise,
+            check_result=True,
+            skipped_steps=skipped_steps,
+        )
+        if greened_name != name:
+            name, remove_green = greened_name, False
+            steps.append("Remove Green Noise done before the stretch")
+        else:
+            # The stretch script removes the green itself, and the sky is
+            # left to Siril, as before.
+            steps.append("Remove Green Noise in the Siril stretch")
+    else:
+        steps.append(
+            "Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used"
+        )
     stretched_by_starnet = False
     linear_name = name
     if settings.starnet:

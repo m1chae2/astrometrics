@@ -113,6 +113,10 @@ class ProcessingFrameSelection:
         starless products.
     spectral_frames : `list` [`FrameRecord`]
         The selected spectral frames.
+    stack_path : `str` or `None`
+        The imaging stack the caller named as the one being analyzed, when
+        it is not the target's recorded stack. `None` means the target's
+        recorded stack.
     """
 
     camera_name: str | None
@@ -120,6 +124,7 @@ class ProcessingFrameSelection:
     frames: list[FrameRecord]
     standard_frames: list[FrameRecord]
     spectral_frames: list[FrameRecord]
+    stack_path: str | None = None
 
 
 def resolve_processing_frames(
@@ -127,12 +132,14 @@ def resolve_processing_frames(
     config: Any,
     camera_name: str | None = None,
     focal_length_mm: float | None = None,
+    stack_path: str | None = None,
 ) -> ProcessingFrameSelection:
     """Choose the frames a single-target run works on, the way the batch does.
 
-    When the target has a stack, the frames come from the camera and optic
-    of that stack (its header's ``INSTRUME`` and ``FOCALLEN``, or the
-    target's stack record), because the analysis measures that stack and
+    When the target has a stack (or the caller names the stack being
+    analyzed), the frames come from the camera and optic of that stack
+    (its header's ``INSTRUME`` and ``FOCALLEN``, or the target's stack
+    record), because the analysis measures that stack and
     leaves out frames of any other camera or optic. A target imaged only
     with a 300 mm lens is analyzed at 300 mm, even when the primary optic is
     405 mm. Without a stack, the choices are the batch script's: the first
@@ -157,6 +164,10 @@ def resolve_processing_frames(
         Use this optic. By default, the optic of the target's stack when it
         was taken with the chosen camera, or else the config's primary focal
         length.
+    stack_path : `str`, optional
+        The imaging stack being analyzed, when it is not the target's
+        recorded stack (for example another configuration's stack). Its
+        camera and optic are used instead of the recorded stack's.
 
     Returns
     -------
@@ -165,7 +176,9 @@ def resolve_processing_frames(
         nothing matches.
     """
     analyzed_stack = (
-        _analyzed_stack_configuration(target) if not camera_name or focal_length_mm is None else None
+        _analyzed_stack_configuration(target, stack_path)
+        if not camera_name or focal_length_mm is None
+        else None
     )
     if not camera_name and analyzed_stack is not None:
         camera_name = record_name_for_camera(analyzed_stack.camera, config)
@@ -188,7 +201,7 @@ def resolve_processing_frames(
                     target.id,
                     ", ".join(camera_names),
                 )
-                return ProcessingFrameSelection(None, focal_length_mm, [], [], [])
+                return ProcessingFrameSelection(None, focal_length_mm, [], [], [], stack_path)
     if focal_length_mm is None and analyzed_stack is not None and analyzed_stack.focal_length_mm:
         if _same_camera(camera_name, analyzed_stack.camera, config):
             focal_length_mm = float(analyzed_stack.focal_length_mm)
@@ -199,20 +212,22 @@ def resolve_processing_frames(
     frames = select_frames_for_processing(target, camera_name, focal_length_mm) or []
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, frames)
     return ProcessingFrameSelection(
-        camera_name or None, focal_length_mm, frames, standard_frames, spectral_frames
+        camera_name or None, focal_length_mm, frames, standard_frames, spectral_frames, stack_path
     )
 
 
-def _analyzed_stack_configuration(target: Any) -> AnalysisConfiguration | None:
+def _analyzed_stack_configuration(target: Any, stack_path: str | None = None) -> AnalysisConfiguration | None:
     """Read the camera and optic of the stack an analysis of the target reads.
 
-    The imaging stack is used when there is one, otherwise the spectral
-    stack.
+    The stack the caller names is used when given. Otherwise the imaging
+    stack is used when there is one, else the spectral stack.
 
     Parameters
     ----------
     target : `Any`
         The target. A stand-in without stack records has no stack.
+    stack_path : `str`, optional
+        The stack being analyzed, when the caller names one.
 
     Returns
     -------
@@ -220,6 +235,10 @@ def _analyzed_stack_configuration(target: Any) -> AnalysisConfiguration | None:
         The stack's camera and optic, or `None` when the target has no stack
         that names a camera.
     """
+    if stack_path:
+        named = stack_configuration(stack_path, target)
+        if named is not None:
+            return named
     for stacking_name in ("stacking", "spectral_stacking"):
         stacking = getattr(target, stacking_name, None)
         stack_path = getattr(stacking, "stacked_image", None)

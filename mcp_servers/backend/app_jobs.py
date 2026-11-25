@@ -277,6 +277,116 @@ def _first_text(*values: Any) -> str | None:
     return next((value for value in values if isinstance(value, str) and value), None)
 
 
+def _configuration_label(record: dict[str, Any]) -> str:
+    """Name one stack configuration, such as ``Nikon D5300@300mm``.
+
+    Parameters
+    ----------
+    record : `dict` [`str`, `Any`]
+        One entry of the target's stacks by configuration.
+
+    Returns
+    -------
+    label : `str`
+        The camera, then ``@`` and the whole focal length when known.
+    """
+    camera = _first_text(record.get("camera")) or "unknown camera"
+    focal_length = record.get("focalLengthMm", record.get("focal_length_mm"))
+    return camera if focal_length is None else f"{camera}@{round(float(focal_length))}mm"
+
+
+def _same_camera_name(recorded: str, wanted: str) -> bool:
+    """Say whether a camera name the caller gave names a recorded camera.
+
+    Case, spaces and punctuation are ignored, and part of a name is enough
+    (``D5300`` names ``Nikon DSLR DSC D5300``).
+
+    Parameters
+    ----------
+    recorded : `str`
+        The camera a stack record names.
+    wanted : `str`
+        The camera the caller gave.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when the plain letters and digits of ``wanted`` are part of
+        those of ``recorded``.
+    """
+
+    def plain(text: str) -> str:
+        """Keep only the lower-case letters and digits of a name.
+
+        Returns
+        -------
+        plain : `str`
+            The letters and digits.
+        """
+        return "".join(character for character in text.lower() if character.isalnum())
+
+    return bool(plain(wanted)) and plain(wanted) in plain(recorded)
+
+
+async def _chosen_configuration(
+    target: str, camera_id: str | None, focal_length_mm: float | None
+) -> dict[str, Any]:
+    """Find the one stack of the target taken with a camera and optic.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    camera_id : `str` or `None`
+        The camera, or part of its name.
+    focal_length_mm : `float` or `None`
+        The optic's focal length in millimeters.
+
+    Returns
+    -------
+    record : `dict` [`str`, `Any`]
+        The matching entry of the target's stacks by configuration.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If no stack, or more than one, matches. The message lists the
+        target's configurations.
+    """
+    record = await execute_rpc("target:get", {"target_id": target, "detail": "summary"})
+    stacking = (record.get("stacking") if isinstance(record, dict) else None) or {}
+    by_configuration = stacking.get("stacksByConfiguration") or stacking.get("stacks_by_configuration") or {}
+    configurations = [entry for entry in by_configuration.values() if isinstance(entry, dict)]
+    matches = []
+    for entry in configurations:
+        if camera_id and not _same_camera_name(_first_text(entry.get("camera")) or "", camera_id):
+            continue
+        focal_length = entry.get("focalLengthMm", entry.get("focal_length_mm"))
+        if focal_length_mm is not None and (
+            focal_length is None or round(float(focal_length)) != round(float(focal_length_mm))
+        ):
+            continue
+        if _first_text(entry.get("stackedImage"), entry.get("stacked_image")):
+            matches.append(entry)
+    if len(matches) == 1:
+        return matches[0]
+    labels = sorted(_configuration_label(entry) for entry in configurations)
+    asked = f"camera {camera_id!r}" if camera_id else "any camera"
+    asked += f" at {focal_length_mm:g} mm" if focal_length_mm is not None else ""
+    if matches:
+        raise InvalidArgumentError(
+            f"Target {target!r} has more than one stack for {asked}: "
+            f"{', '.join(sorted(_configuration_label(entry) for entry in matches))}. "
+            "Give both camera_id and focal_length_mm.",
+            details={"target": target, "configurations": labels},
+        )
+    raise InvalidArgumentError(
+        f"Target {target!r} has no stack for {asked}. Its configurations are: "
+        f"{', '.join(labels) or 'none recorded (stack the target first)'}.",
+        details={"target": target, "configurations": labels},
+    )
+
+
 @tool(
     "processing_analyze",
     (
@@ -285,7 +395,12 @@ def _first_text(*values: Any) -> str | None:
         "there. Leave stages out to do what the button does: photometry on the imaging stack and "
         "spectroscopy on the spectral stack when the target has both, or the one stack's own stage. Or "
         "choose stages from astrometry, photometry, spectroscopy and spectral_variation; astrometry runs "
-        "first when a stage needs it. Stack the target first: a stage with no stack to work on is refused. "
+        "first when a stage needs it. A target stacked with several cameras or optics has one stack for "
+        "each: give camera_id and focal_length_mm to analyze that configuration's stack and frames instead "
+        "of the main stack (an unknown one is refused with the target's list). Spectral stacks are kept "
+        "only for the main configuration, so another configuration gets astrometry and photometry; its "
+        "results replace the target's saved astrometry and photometry results. "
+        "Stack the target first: a stage with no stack to work on is refused. "
         "If an analysis of the target is already running, no second one starts. Read the results with "
         "star_query and processing_get_stack_identification. Needs the app's backend to be running."
     ),
@@ -298,12 +413,25 @@ def _first_text(*values: Any) -> str | None:
                 "items": {"type": "string", "enum": ANALYSIS_STAGES},
                 "description": "The stages to run. Default: the Analyze Target button's choice.",
             },
+            "camera_id": {
+                "type": "string",
+                "description": "Analyze the stack of this camera (or part of its name). Default: main stack.",
+            },
+            "focal_length_mm": {
+                "type": "number",
+                "description": "Analyze the stack taken at this focal length. Default: the main stack.",
+            },
         },
         "required": ["target"],
     },
     specs=JOB_TOOL_SPECS,
 )
-async def tool_processing_analyze(target: str, stages: list[str] | None = None) -> Any:
+async def tool_processing_analyze(
+    target: str,
+    stages: list[str] | None = None,
+    camera_id: str | None = None,
+    focal_length_mm: float | None = None,
+) -> Any:
     """Start the job the Analyze Target button starts.
 
     Parameters
@@ -313,18 +441,27 @@ async def tool_processing_analyze(target: str, stages: list[str] | None = None) 
     stages : `list` [`str`], optional
         The stages to run. When omitted, photometry and spectroscopy for a
         target with both stacks, or the stage of the one stack it has.
+    camera_id : `str`, optional
+        Analyze the target's stack of this camera (``processing_stack``'s
+        meaning: the full name or part of it). The main stack by default.
+    focal_length_mm : `float`, optional
+        Analyze the target's stack taken at this focal length.
 
     Returns
     -------
     reply : `Any`
         The backend's ``analysis:analyze_image`` answer (``status``
         ``started`` or ``already_running``, ``jobId`` and ``logFile``) with
-        ``stages`` and ``paths`` as sent, and how to follow it.
+        ``stages`` and ``paths`` as sent, ``configuration`` (the chosen
+        camera and optic, when one was asked for), and how to follow it.
 
     Raises
     ------
     InvalidArgumentError
-        If a stage is not one the app can run, or the list is empty.
+        If a stage is not one the app can run, or the list is empty; if the
+        camera and optic name no stack of the target, or more than one; or
+        if a spectral stage is asked for another configuration than the
+        main one.
     NotFoundError
         If a stage has nothing to work on (no stack, or no raw spectrum
         frames for spectral_variation).
@@ -341,6 +478,24 @@ async def tool_processing_analyze(target: str, stages: list[str] | None = None) 
     files = files if isinstance(files, dict) else {}
     imaging_stack = _first_text(files.get("stackedImage"), files.get("stacked_image"))
     spectral_stack = _first_text(files.get("stackedSpectralTarget"), files.get("stacked_spectral_target"))
+    configuration: dict[str, Any] | None = None
+    if camera_id or focal_length_mm is not None:
+        configuration = await _chosen_configuration(target, camera_id, focal_length_mm)
+        chosen_stack = _first_text(configuration.get("stackedImage"), configuration.get("stacked_image"))
+        if chosen_stack != imaging_stack:
+            # The spectral stack belongs to the main configuration; the
+            # spectral frames are not kept apart by camera and optic.
+            spectral_requested = [
+                stage for stage in stages or [] if stage in ("spectroscopy", "spectral_variation")
+            ]
+            if spectral_requested:
+                raise InvalidArgumentError(
+                    f"Spectral stacks are kept only for the main configuration of {target!r}, not for "
+                    f"{_configuration_label(configuration)}. Choose astrometry or photometry.",
+                    details={"target": target, "stages": spectral_requested},
+                )
+            imaging_stack = chosen_stack
+            spectral_stack = None
     if stages is None:
         if imaging_stack and spectral_stack:
             chosen = ["photometry", "spectroscopy"]
@@ -384,6 +539,12 @@ async def tool_processing_analyze(target: str, stages: list[str] | None = None) 
             "image_files": paths,
             "filter_name": "SPEC" if only_spectral else None,
             "stages": chosen,
+            "camera_id": _first_text(configuration.get("camera")) if configuration else None,
+            "focal_length_mm": (
+                configuration.get("focalLengthMm", configuration.get("focal_length_mm"))
+                if configuration
+                else None
+            ),
         }),
     )
     reply = _with_hint(
@@ -391,6 +552,8 @@ async def tool_processing_analyze(target: str, stages: list[str] | None = None) 
     )
     if isinstance(reply, dict):
         reply = {**reply, "stages": chosen, "paths": paths}
+        if configuration:
+            reply["configuration"] = _configuration_label(configuration)
     return reply
 
 

@@ -64,6 +64,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.analysis_configuration import configuration_stack_path
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
     StackKind,
@@ -2045,12 +2046,16 @@ class ProcessingPipelines:
         For one target, the chosen ``stages`` run in this process, always
         in the order astrometry, photometry, spectroscopy, spectral
         variation, asteroids.
-        Photometry measures only the frames of one camera and one optic,
-        chosen the way the batch run chooses them: the camera the batch
-        would give the target to (the first camera in the config's setups
-        that has frames of it, the primary camera first) and the primary
-        optic (``[Observatory.Telescope] focal_length_mm``). Pass
-        ``camera_id`` or ``focal_length_mm`` to choose differently.
+        Photometry measures only the frames of one camera and one optic:
+        those of the target's imaging stack, or, with no stack, the camera
+        the batch would give the target to and the primary optic
+        (``[Observatory.Telescope] focal_length_mm``). Pass ``camera_id`` or
+        ``focal_length_mm`` to choose differently. When they name one of the
+        target's other stacks (``stacking.stacks_by_configuration``, one per
+        camera and optic), that stack is analyzed: astrometry solves it
+        (unless ``astrometry={"path": ...}`` names another image) and
+        photometry measures its frames. The results replace the target's
+        saved astrometry and photometry summaries, which hold one run each.
         Spectroscopy is skipped (with a ``{"status": "skipped", ...}``
         entry, not an error) when the target has no spectral data. Each
         stage's own options are a separate dictionary, so an option meant
@@ -2123,10 +2128,12 @@ class ProcessingPipelines:
         camera_id : `str`, optional
             Only frames from this camera are processed (the full name, or
             part of it). Needed for several targets. For one target, it
-            defaults to the camera the batch would use.
+            defaults to the camera of the target's imaging stack, and with
+            ``focal_length_mm`` it can name another stack of the target.
         focal_length_mm : `float`, optional
             Only frames at this focal length are processed. For one target,
-            it defaults to the config's primary focal length.
+            it defaults to the optic of the target's imaging stack, else the
+            config's primary focal length.
         on_item_complete : `Callable`, optional
             For several targets, called as ``(target_id, result,
             completed_count, total_count)`` after each target finishes.
@@ -2232,9 +2239,21 @@ class ProcessingPipelines:
 
         moving_object_config_from_options((asteroids or {}).get("moving_object_config"))
         resolved = self._resolve(target)
+        # A camera or optic that names one of the target's stacks (one per
+        # camera and optic) analyzes that stack: astrometry solves it and
+        # photometry measures its frames.
+        configuration_stack = configuration_stack_path(resolved, camera_id, focal_length_mm, self._config)
+        if configuration_stack and os.path.realpath(configuration_stack) == os.path.realpath(
+            resolved.stacking.stacked_image or ""
+        ):
+            configuration_stack = None
+        if configuration_stack and not (astrometry or {}).get("path"):
+            stage_options["astrometry"] = {**(astrometry or {}), "path": configuration_stack}
         frame_selection = None
         if any(stage in chosen_stages for stage in ("photometry", "spectroscopy", "spectral_variation")):
-            frame_selection = resolve_processing_frames(resolved, self._config, camera_id, focal_length_mm)
+            frame_selection = resolve_processing_frames(
+                resolved, self._config, camera_id, focal_length_mm, stack_path=configuration_stack
+            )
         return tasks.run_target_stages(
             resolved,
             chosen_stages,

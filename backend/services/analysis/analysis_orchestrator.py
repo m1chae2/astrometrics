@@ -63,6 +63,22 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Cannot store {type(value).__name__} in a job result.")
 
 
+def _without_none(values: dict[str, Any]) -> dict[str, Any]:
+    """Drop the entries whose value is `None`.
+
+    Parameters
+    ----------
+    values : `dict` [`str`, `Any`]
+        The entries.
+
+    Returns
+    -------
+    kept : `dict` [`str`, `Any`]
+        The entries that have a value.
+    """
+    return {name: value for name, value in values.items() if value is not None}
+
+
 def _is_identification_job(job: Any) -> bool:
     """Say whether a job record is a stack's star identification.
 
@@ -227,6 +243,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         filter_name: str | None = None,
         type: str = "photometry",
         stages: list[str] | None = None,
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
     ) -> dict[str, Any]:
         """Start a background analysis job.
 
@@ -250,6 +268,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
             and its result is missing or older than the stack. When given,
             the stack is used for each stage that has one, and a sent file
             only for a stage whose stack the target lacks.
+        camera_id : `str`, optional
+            With ``stages``: the camera of the stack to analyze, when the
+            target has a stack for each camera and optic. Left out, the
+            target's main stack is analyzed.
+        focal_length_mm : `float`, optional
+            With ``stages``: the optic of the stack to analyze, in
+            millimeters.
 
         Returns
         -------
@@ -257,13 +282,20 @@ class AnalysisOrchestrator(BaseBackgroundService):
             Dict with `"status"` (`"started"` or
             `"already_running"`), `"jobId"`, and `"logFile"`.
 
-        Notes
-        -----
-        A ``stages`` list that is empty or names a stage other than
-        astrometry, photometry and spectroscopy raises
-        `InvalidArgumentError` before any job starts.
+        Raises
+        ------
+        InvalidArgumentError
+            Before any job starts, if the ``stages`` list is empty or names a
+            stage that cannot be chosen, or a camera or optic is given
+            without ``stages``.
         """
         chosen_stages = self._checked_stages(stages)
+        if chosen_stages is None and (camera_id or focal_length_mm is not None):
+            raise InvalidArgumentError(
+                "A camera or optic can be chosen only together with the stages to run.",
+                details={"camera_id": camera_id, "focal_length_mm": focal_length_mm},
+            )
+        configuration = _without_none({"camera_id": camera_id, "focal_length_mm": focal_length_mm})
         # Isolated log file per job
         safe_target = target_id.replace(" ", "_").replace("/", "_")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -284,6 +316,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 filter_name,
                 type,
                 chosen_stages,
+                configuration,
                 log_file_path=log_file,
             )
 
@@ -599,6 +632,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         filter_name: str | None,
         type: str = "photometry",
         stages: list[str] | None = None,
+        configuration: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Unified analysis worker.
@@ -643,7 +677,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             try:
                 with bind_abandonment(abandonment):
                     result = self._run_analysis_task_body(
-                        job_id, target_id, image_files, filter_name, type, stages
+                        job_id, target_id, image_files, filter_name, type, stages, configuration
                     )
             except RunAbandonedError:
                 # The user cancelled the job. `cancel_analysis` marked it.
@@ -680,6 +714,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         filter_name: str | None,
         type: str = "photometry",
         stages: list[str] | None = None,
+        configuration: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Body of `_start_analysis_task`, run with job logging attached.
 
@@ -740,7 +775,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         logger.info("[%s] Analysis task for %s found %s files", target_id, target_id, len(paths))
 
         if stages is not None:
-            return self._run_chosen_stages(job_id, target_id, paths, filter_name, stages)
+            return self._run_chosen_stages(job_id, target_id, paths, filter_name, stages, configuration)
 
         if not paths and type != "photometry":
             raise InvalidArgumentError(
@@ -846,7 +881,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
         )
 
     def _run_chosen_stages(
-        self, job_id: str, target_id: str, paths: list[str], filter_name: str | None, stages: list[str]
+        self,
+        job_id: str,
+        target_id: str,
+        paths: list[str],
+        filter_name: str | None,
+        stages: list[str],
+        configuration: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the stages a client chose, as one library call.
 
@@ -867,6 +908,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
             The filter for photometry.
         stages : `list` [`str`]
             The checked stages.
+        configuration : `dict`, optional
+            ``camera_id`` and ``focal_length_mm`` of the stack to analyze,
+            passed to the library, which analyzes that camera and optic's
+            stack and its frames. Empty or left out: the main stack.
 
         Returns
         -------
@@ -920,6 +965,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 # This job is already tracked (job_id), so the stages
                 # register none of their own.
                 register_job=False,
+                **(configuration or {}),
                 on_stages_planned=lambda requested, added: self._record_steps(
                     job_id, requested=list(requested), prerequisites=list(added)
                 ),

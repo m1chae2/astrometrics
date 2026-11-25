@@ -277,8 +277,56 @@ class TestChosenStages:
         orchestrator.analyze_image("M 57", ["/lib/a.fits"], stages=["spectroscopy", "photometry"])
         orchestrator.analyze_image("M 57", ["/lib/a.fits"])
 
-        assert orchestrator._submit_job.call_args_list[0].args[-1] == ["photometry", "spectroscopy"]
-        assert orchestrator._submit_job.call_args_list[1].args[-1] is None
+        assert orchestrator._submit_job.call_args_list[0].args[-2] == ["photometry", "spectroscopy"]
+        assert orchestrator._submit_job.call_args_list[1].args[-2] is None
+
+    def test_a_chosen_camera_and_optic_reach_the_worker(self) -> None:
+        """Verify the camera and optic of the stack go to the job."""
+        orchestrator = _make_orchestrator()
+        orchestrator._job_service = MagicMock()
+        orchestrator._job_service.get_jobs_for_target.return_value = []
+        orchestrator._submit_job = MagicMock(return_value="job1")
+        orchestrator._config_service.get_logs_path.return_value = Path("/tmp")
+
+        orchestrator.analyze_image(
+            "M 27", ["/lib/nikon.fits"], stages=["photometry"], camera_id="Nikon D5300", focal_length_mm=300.0
+        )
+        orchestrator.analyze_image("M 27", ["/lib/a.fits"], stages=["photometry"])
+
+        assert orchestrator._submit_job.call_args_list[0].args[-1] == {
+            "camera_id": "Nikon D5300",
+            "focal_length_mm": 300.0,
+        }
+        assert orchestrator._submit_job.call_args_list[1].args[-1] == {}
+
+    def test_a_camera_without_stages_is_refused(self) -> None:
+        """Verify a camera or optic needs the stages, and no job starts."""
+        orchestrator = _make_orchestrator()
+        orchestrator._submit_job = MagicMock()
+
+        with pytest.raises(InvalidArgumentError, match="stages"):
+            orchestrator.analyze_image("M 27", ["/lib/a.fits"], camera_id="Nikon D5300")
+
+        orchestrator._submit_job.assert_not_called()
+
+    def test_the_chosen_camera_and_optic_reach_the_library(self) -> None:
+        """Verify the library is asked for that camera and optic."""
+        frame = FrameRecord(path="/lib/nikon.fits", role="LIGHT", filter="Luminance")
+        target = Target(id="M 27", frames=[frame])
+        orchestrator, process_target = self._make_setup(target, self._outcome())
+
+        orchestrator._run_chosen_stages(
+            "job1",
+            "M 27",
+            ["/lib/nikon_stack.fits"],
+            None,
+            ["photometry"],
+            {"camera_id": "Nikon D5300", "focal_length_mm": 300.0},
+        )
+
+        keywords = process_target.call_args.kwargs
+        assert keywords["camera_id"] == "Nikon D5300"
+        assert keywords["focal_length_mm"] == pytest.approx(300.0)
 
     def test_a_target_with_stacks_uses_them_and_ignores_the_sent_files(self, tmp_path: Path) -> None:
         """Verify stacks win over sent files; spectroscopy keeps its limit."""

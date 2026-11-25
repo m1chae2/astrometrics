@@ -290,6 +290,95 @@ async def test_analyze_passes_an_already_running_answer_through(monkeypatch: pyt
     assert reply["jobId"] == "job-3"
 
 
+M_27_RECORD = {
+    "id": "M 27",
+    "stacking": {
+        "stackedImage": "/stacks/M_27_ASI_405.fits",
+        "stacksByConfiguration": {
+            "asi@405": {
+                "camera": "ZWO ASI 533MM Pro",
+                "focalLengthMm": 405.0,
+                "stackedImage": "/stacks/M_27_ASI_405.fits",
+                "isPreferred": True,
+            },
+            "nikon@405": {
+                "camera": "Nikon DSLR DSC D5300",
+                "focalLengthMm": 405.0,
+                "stackedImage": "/stacks/M_27_Nikon_405.fits",
+            },
+            "nikon@300": {
+                "camera": "Nikon DSLR DSC D5300",
+                "focalLengthMm": 300.0,
+                "stackedImage": "/stacks/M_27_Nikon_300.fits",
+            },
+        },
+    },
+}
+"""A target with one stack per camera and optic; the ASI533 one is main."""
+
+M_27_FILES = {
+    "files": [{"path": "/raw/S_1.fits", "filter": "SPEC"}],
+    "stackedImage": "/stacks/M_27_ASI_405.fits",
+    "stackedSpectralTarget": "/stacks/M_27_SPEC.fits",
+}
+"""M 27's file list: the main imaging stack and a spectral stack."""
+
+
+@pytest.mark.anyio
+async def test_analyze_a_configuration_sends_that_configurations_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A camera and optic send their own stack, camera and focal length."""
+    requests = fake_backend(
+        monkeypatch,
+        {"target:get_files": M_27_FILES, "target:get": M_27_RECORD, "analysis:analyze_image": STARTED},
+    )
+
+    reply = await app_jobs.tool_processing_analyze("M 27", camera_id="D5300", focal_length_mm=300)
+
+    assert requests[-1]["params"] == {
+        "target_id": "M 27",
+        "image_files": ["/stacks/M_27_Nikon_300.fits"],
+        "stages": ["photometry"],
+        "camera_id": "Nikon DSLR DSC D5300",
+        "focal_length_mm": 300.0,
+    }
+    assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
+
+
+@pytest.mark.anyio
+async def test_analyze_the_main_configuration_keeps_the_buttons_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming the main stack's camera and optic keeps both stacks."""
+    requests = fake_backend(
+        monkeypatch,
+        {"target:get_files": M_27_FILES, "target:get": M_27_RECORD, "analysis:analyze_image": STARTED},
+    )
+
+    await app_jobs.tool_processing_analyze("M 27", camera_id="ASI 533", focal_length_mm=405)
+
+    assert requests[-1]["params"]["image_files"] == ["/stacks/M_27_ASI_405.fits", "/stacks/M_27_SPEC.fits"]
+    assert requests[-1]["params"]["stages"] == ["photometry", "spectroscopy"]
+
+
+@pytest.mark.anyio
+async def test_analyze_refuses_an_unknown_or_unclear_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown or ambiguous camera and optic list the configurations."""
+    requests = fake_backend(monkeypatch, {"target:get_files": M_27_FILES, "target:get": M_27_RECORD})
+
+    with pytest.raises(InvalidArgumentError, match=r"has no stack for .*Nikon DSLR DSC D5300@300mm"):
+        await app_jobs.tool_processing_analyze("M 27", camera_id="Canon")
+    with pytest.raises(InvalidArgumentError, match="more than one stack"):
+        await app_jobs.tool_processing_analyze("M 27", camera_id="Nikon")
+    with pytest.raises(InvalidArgumentError, match="only for the main configuration"):
+        await app_jobs.tool_processing_analyze(
+            "M 27", stages=["spectroscopy"], camera_id="Nikon", focal_length_mm=300
+        )
+
+    assert "analysis:analyze_image" not in [request["method"] for request in requests]
+
+
 @pytest.mark.anyio
 async def test_remake_preview_starts_the_apps_preview_job(monkeypatch: pytest.MonkeyPatch) -> None:
     """The run's overrides go to ``processing:remake_preview`` unchanged."""

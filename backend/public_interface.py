@@ -227,7 +227,9 @@ RPC_METHODS: tuple[str, ...] = (
     # Astrometry, photometry, spectroscopy and spectral variation analysis.
     # `analyze_image` takes `target_id`, `image_files`, `filter_name`, `type`
     # and an optional `stages` (a list from astrometry, photometry,
-    # spectroscopy, spectral_variation; omitted, the file type chooses). The
+    # spectroscopy, spectral_variation; omitted, the file type chooses). With
+    # `stages`, an optional `camera_id` and `focal_length_mm` analyze the
+    # target's stack of that camera and optic instead of its main stack. The
     # library adds a stage first when another needs it and its result is
     # missing or older than the stack.
     "analysis:analyze_image",

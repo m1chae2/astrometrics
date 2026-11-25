@@ -296,7 +296,10 @@ DECISIONS = {
         "analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no "
         "stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's "
         "stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the "
-        "raw spectrum frames). Writes the analysis results; raw frames are never written.",
+        "raw spectrum frames). Writes the analysis results; raw frames are never written. Since 2026-11-25 "
+        "camera_id and focal_length_mm analyze the target's stack of that camera and optic "
+        "(stacks_by_configuration) instead of the main stack; an unknown or ambiguous one is refused with "
+        "the target's configurations, and another configuration gets only astrometry and photometry.",
         "process",
     ),
     "processing_cancel": ToolDecision(

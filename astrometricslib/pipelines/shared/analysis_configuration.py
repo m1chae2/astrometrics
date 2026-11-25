@@ -110,6 +110,84 @@ def stack_configuration(stack_path: str | None, target: Target | None = None) ->
     return None
 
 
+def configuration_stack_path(
+    target: Target,
+    camera: str | None,
+    focal_length_mm: float | None,
+    config: AppConfiguration | None = None,
+) -> str | None:
+    """Find the target's recorded imaging stack of one camera and optic.
+
+    A target keeps one imaging stack for each camera and optic it was
+    stacked with (``target.stacking.stacks_by_configuration``). This picks
+    the one that matches.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    camera : `str` or `None`
+        The camera: its full name, an alias, or part of its name. `None`
+        matches any camera.
+    focal_length_mm : `float` or `None`
+        The optic's focal length in millimeters, compared after rounding.
+        `None` matches any optic.
+    config : `AppConfiguration`, optional
+        The config whose camera profiles give the aliases.
+
+    Returns
+    -------
+    stack_path : `str` or `None`
+        The stack of the one matching record. `None` when no record or more
+        than one record matches, or when neither a camera nor an optic is
+        given.
+    """
+    if not camera and focal_length_mm is None:
+        return None
+    matches = [
+        recorded.stacked_image
+        for recorded in target.stacking.stacks_by_configuration.values()
+        if recorded.stacked_image
+        and _camera_is(recorded.camera, camera, config)
+        and (
+            focal_length_mm is None
+            or (
+                recorded.focal_length_mm is not None
+                and round(float(recorded.focal_length_mm)) == round(float(focal_length_mm))
+            )
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _camera_is(recorded_camera: str, wanted: str | None, config: AppConfiguration | None) -> bool:
+    """Say whether a recorded camera is the camera a caller asked for.
+
+    Parameters
+    ----------
+    recorded_camera : `str`
+        The camera a stack record names.
+    wanted : `str` or `None`
+        The camera asked for: a full name, an alias or part of a name.
+        `None` or empty matches any camera.
+    config : `AppConfiguration`, optional
+        The config whose camera profiles give the aliases.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when the names are aliases of one camera, or the wanted name
+        is part of the recorded one (case ignored).
+    """
+    if not wanted:
+        return True
+    if not recorded_camera:
+        return False
+    if camera_identity(recorded_camera, config) == camera_identity(wanted, config):
+        return True
+    return wanted.lower() in recorded_camera.lower()
+
+
 def frames_configuration(frames: Sequence[FrameRecord]) -> AnalysisConfiguration | None:
     """Give the camera and optic most of a list of frames share.
 
@@ -273,6 +351,7 @@ def analysis_frames_and_configuration(
     frames: list[FrameRecord] | None,
     path: str | None,
     config: AppConfiguration | None = None,
+    stack_path: str | None = None,
 ) -> tuple[AnalysisConfiguration | None, list[FrameRecord] | None, list[tuple[FrameRecord, str]]]:
     """Choose the camera and optic of one analysis, and its frames.
 
@@ -282,8 +361,10 @@ def analysis_frames_and_configuration(
     imaging stack, or the spectral stack for spectral variation), and keeps
     only frames of that camera and optic. A target with stacks for several
     configurations is analyzed for the configuration of its recorded stack
-    (``target.stacking.stacked_image``); frames of the others are left out.
-    With no stack, the camera and optic most of the frames share are used.
+    (``target.stacking.stacked_image``), or of ``stack_path`` when the
+    caller analyzes another configuration's stack; frames of the others are
+    left out. With no stack, the camera and optic most of the frames share
+    are used.
 
     Parameters
     ----------
@@ -297,6 +378,11 @@ def analysis_frames_and_configuration(
         The image a stack-based stage analyzes.
     config : `AppConfiguration`, optional
         The config whose camera profiles give the aliases.
+    stack_path : `str`, optional
+        For photometry and the asteroid search, the imaging stack whose
+        camera and optic the frames must match, when it is not the target's
+        recorded stack (for example the stack of another configuration in
+        ``target.stacking.stacks_by_configuration``).
 
     Returns
     -------
@@ -316,11 +402,10 @@ def analysis_frames_and_configuration(
         return configuration, None, []
 
     candidates = list(frames if frames is not None else target.frames or [])
-    stack_path = (
-        target.spectral_stacking.stacked_image
-        if pipeline_type == "spectral_variation"
-        else target.stacking.stacked_image
-    )
+    if pipeline_type == "spectral_variation":
+        stack_path = target.spectral_stacking.stacked_image
+    elif not stack_path:
+        stack_path = target.stacking.stacked_image
     configuration = stack_configuration(stack_path, target)
     if configuration is None:
         spectral = pipeline_type == "spectral_variation"

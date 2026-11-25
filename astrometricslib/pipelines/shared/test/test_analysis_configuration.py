@@ -31,6 +31,7 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.shared.analysis_configuration import (
     AnalysisConfiguration,
     analysis_frames_and_configuration,
+    configuration_stack_path,
     context_filter_name,
     left_out_summary,
     stack_configuration,
@@ -347,3 +348,62 @@ def test_a_stack_based_stage_takes_its_camera_from_the_image(tmp_path: Path) -> 
     assert left_out == []
     assert context_filter_name("spectroscopy", target.frames, configuration) == "SPEC"
     assert context_filter_name("astrometry", target.frames, configuration) == "L"
+
+
+def add_configuration_stacks(target: Target, tmp_path: Path) -> str:
+    """Record an ASI533 405 mm stack and a Nikon 300 mm stack on a target.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target, whose recorded stack stays the ASI533 one.
+    tmp_path : `pathlib.Path`
+        Where the Nikon stack is written.
+
+    Returns
+    -------
+    nikon_stack : `str`
+        The Nikon stack's path.
+    """
+    from astrometricslib.models.target import StackConfigurationResult
+
+    nikon_stack = write_stack(tmp_path / "nikon300.fits", NIKON, 300.0)
+    target.stacking.stacks_by_configuration = {
+        "asi@405": StackConfigurationResult(
+            configuration_key="asi@405",
+            camera=FRAME_CAMERA,
+            focal_length_mm=405.0,
+            stacked_image=target.stacking.stacked_image,
+            is_preferred=True,
+        ),
+        "nikon@300": StackConfigurationResult(
+            configuration_key="nikon@300", camera=NIKON, focal_length_mm=300.0, stacked_image=nikon_stack
+        ),
+    }
+    return nikon_stack
+
+
+def test_a_camera_and_optic_find_the_stack_of_that_configuration(tmp_path: Path) -> None:
+    """Pick the recorded stack of one camera and optic, or none."""
+    target = make_target(tmp_path)
+    nikon_stack = add_configuration_stacks(target, tmp_path)
+
+    assert configuration_stack_path(target, "D5300", 300.0) == nikon_stack
+    assert configuration_stack_path(target, NIKON, None) == nikon_stack
+    assert configuration_stack_path(target, None, 405.0) == target.stacking.stacked_image
+    assert configuration_stack_path(target, NIKON, 405.0) is None
+    assert configuration_stack_path(target, None, None) is None
+
+
+def test_photometry_of_another_configuration_keeps_that_configurations_frames(tmp_path: Path) -> None:
+    """A named stack decides the frames, not the target's recorded stack."""
+    target = make_target(tmp_path)
+    nikon_stack = add_configuration_stacks(target, tmp_path)
+
+    configuration, kept, left_out = analysis_frames_and_configuration(
+        target, "photometry", None, None, None, stack_path=nikon_stack
+    )
+
+    assert configuration == AnalysisConfiguration(NIKON, 300.0)
+    assert "/frames/nikon.fits" in [frame.path for frame in kept]
+    assert sorted(frame.path for frame, _reason in left_out) == ["/frames/l1.fits", "/frames/l2.fits"]

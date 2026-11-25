@@ -269,3 +269,25 @@ def test_an_explicit_optic_still_replaces_the_stack_optic() -> None:
     target = _target_with_stack("N7023", frames, NIKON, 300.0)
     selection = resolve_processing_frames(target, _Config(), focal_length_mm=405.0)
     assert [frame.focal_length_mm for frame in selection.frames] == [405.0]
+
+
+def test_a_named_stack_of_another_configuration_decides_the_frames() -> None:
+    """Check the stack being analyzed is the one read, not the main stack.
+
+    The target's recorded stack is the ASI533 at 405 mm; the analysis of its
+    Nikon 300 mm stack must take the Nikon 300 mm frames.
+    """
+    frames = [_frame(ASI, 405.0), _frame(NIKON, 300.0), _frame(NIKON, 405.0)]
+    target = _target_with_stack("M27", frames, ASI, 405.0)
+    nikon_stack = "/no/such/M27_nikon_300mm_Stacked.fits"
+    target.stacking.stacks_by_configuration["nikon@300mm"] = SimpleNamespace(
+        stacked_image=nikon_stack, camera=NIKON, focal_length_mm=300.0
+    )
+
+    main = resolve_processing_frames(target, _Config())
+    named = resolve_processing_frames(target, _Config(), stack_path=nikon_stack)
+
+    assert [(frame.camera, frame.focal_length_mm) for frame in main.frames] == [(ASI, 405.0)]
+    assert [(frame.camera, frame.focal_length_mm) for frame in named.frames] == [(NIKON, 300.0)]
+    assert named.stack_path == nikon_stack
+    assert main.stack_path is None

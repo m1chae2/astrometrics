@@ -18,7 +18,7 @@ from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
-from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.target import FrameRecord, StackConfigurationResult, Target
 from astrometricslib.pipelines import tasks
 
 
@@ -335,6 +335,48 @@ def test_one_target_photometry_uses_the_camera_and_optic_asked_for(
     )
 
     assert _photometry_paths(recorder) == ["/nikon300.fits"]
+
+
+def test_one_target_analyzes_the_stack_of_the_configuration_asked_for(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify a camera and optic with their own stack analyze that stack.
+
+    The target's recorded stack is the ASI533 one. Asking for the Nikon at
+    300 mm solves the Nikon 300 mm stack and measures only its frames; the
+    recorded stack does not put them aside as another camera's frames.
+    """
+    pipelines, recorder = setups_pipelines
+    target = _mixed_target()
+    target.stacking.stacked_image = "/no/such/asi405_Stacked.fits"
+    target.stacking.stacks_by_configuration = {
+        "asi@405mm": StackConfigurationResult(
+            configuration_key="asi@405mm",
+            camera=_ASI,
+            focal_length_mm=405.0,
+            stacked_image="/no/such/asi405_Stacked.fits",
+            is_preferred=True,
+        ),
+        "nikon@300mm": StackConfigurationResult(
+            configuration_key="nikon@300mm",
+            camera=_NIKON,
+            focal_length_mm=300.0,
+            stacked_image="/no/such/nikon300_Stacked.fits",
+        ),
+    }
+
+    pipelines.process_target(
+        target,
+        stages=["astrometry", "photometry"],
+        camera_id=_NIKON,
+        focal_length_mm=300.0,
+        run_prerequisites=False,
+        register_job=False,
+    )
+
+    astrometry_call = next(call for call in recorder.calls if call["pipeline_type"] == "astrometry")
+    assert astrometry_call["path"] == "/no/such/nikon300_Stacked.fits"
+    assert [path for path in _photometry_paths(recorder) if "spec" not in path] == ["/nikon300.fits"]
 
 
 def test_one_target_photometry_option_frames_still_win(

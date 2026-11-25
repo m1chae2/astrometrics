@@ -427,6 +427,7 @@ def analyze_target(
     register_job: bool = True,
     path: str | None = None,
     measured_at: datetime | None = None,
+    analyzed_stack: str | None = None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Run a specific analysis pipeline on the given target.
@@ -447,6 +448,10 @@ def analyze_target(
         with a time zone. Pipeline code never reads the clock, so the caller
         supplies it. With `None` (for tests only) the pipeline stores no
         quality measurements and logs a warning.
+    analyzed_stack : str, optional
+        For a frame-based stage (photometry), the imaging stack whose
+        camera and optic the frames must match, when it is not the target's
+        recorded stack. `None` uses the recorded stack.
 
     Returns
     -------
@@ -508,7 +513,7 @@ def analyze_target(
         # are never mixed in: a frame-based stage keeps only the frames of
         # the analyzed configuration and reports the rest.
         analysis_camera, kept_frames, left_out = analysis_frames_and_configuration(
-            target, pipeline_type, frames, path, get_configuration()
+            target, pipeline_type, frames, path, get_configuration(), stack_path=analyzed_stack
         )
         if kept_frames is not None:
             frames = kept_frames
@@ -1058,6 +1063,10 @@ def run_target_stages(
             options["drivers"] = drivers
         if stage == "photometry" and frame_selection is not None:
             options.setdefault("frames", frame_selection.frames)
+            if frame_selection.stack_path:
+                # The frames belong to the stack being analyzed, which may be
+                # another configuration's stack than the recorded one.
+                options.setdefault("analyzed_stack", frame_selection.stack_path)
         if stage == "spectral_variation" and frame_selection is not None:
             options.setdefault("frames", frame_selection.spectral_frames)
         if stage == "spectral_variation" and stage in skipped_for_no_input:

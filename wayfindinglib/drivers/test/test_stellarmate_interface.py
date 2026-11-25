@@ -476,13 +476,35 @@ def test_a_transfer_past_the_overall_limit_ends_rsync_and_its_helper(
     assert succeeded is False
     helper_process_id = int(helper_file.read_text())
     deadline = time.monotonic() + 5.0
-    while Path(f"/proc/{helper_process_id}").exists() and time.monotonic() < deadline:
-        state = Path(f"/proc/{helper_process_id}/stat").read_text().rsplit(")", 1)[1].split()[0]
-        if state == "Z":
+    while time.monotonic() < deadline:
+        state = _process_state(helper_process_id)
+        if state is None or state == "Z":
             break
         time.sleep(0.05)
-    stat_path = Path(f"/proc/{helper_process_id}/stat")
-    assert not stat_path.exists() or stat_path.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+    assert _process_state(helper_process_id) in (None, "Z")
+
+
+def _process_state(process_id: int) -> str | None:
+    """Read a process's state letter, or `None` once it is gone.
+
+    The process can end between any two reads of ``/proc``, so a missing
+    file or a vanished process both mean it is gone.
+
+    Parameters
+    ----------
+    process_id : `int`
+        The process to look up.
+
+    Returns
+    -------
+    state : `str` or `None`
+        The state letter from ``/proc/<id>/stat`` (``"Z"`` for a zombie),
+        or `None` when the process no longer exists.
+    """
+    try:
+        return Path(f"/proc/{process_id}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError, ProcessLookupError:
+        return None
 
 
 def _refused() -> subprocess.CalledProcessError:

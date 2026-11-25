@@ -230,8 +230,14 @@ def test_a_table_without_the_flux_columns_is_refused() -> None:
 def test_a_download_that_never_answers_is_abandoned(
     tmp_path: Path, archive: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
 ) -> None:
-    """A stalled archive raises after the timeout instead of hanging."""
+    """A stalled archive raises after the timeout instead of hanging.
+
+    The abandoned download thread may still be waiting for its rate-limit
+    slot when the deadline passes. The test waits until that thread has
+    reached the stand-in archive, so it cannot call the next test's stand-in.
+    """
     release = threading.Event()
+    reached = threading.Event()
 
     def stalled(**_keywords: Any) -> dict[str, list[Table]]:
         """Wait until the test lets go, as a stalled connection would.
@@ -241,6 +247,7 @@ def test_a_download_that_never_answers_is_abandoned(
         files : `dict`
             An empty reply.
         """
+        reached.set()
         release.wait(5.0)
         return {}
 
@@ -252,6 +259,7 @@ def test_a_download_that_never_answers_is_abandoned(
         with pytest.raises(GaiaXpDownloadError):
             driver.sampled_spectrum(SOURCE_ID)
     finally:
+        reached.wait(10.0)
         release.set()
     assert not list(tmp_path.glob("*.npz"))
 

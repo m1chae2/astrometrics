@@ -200,6 +200,7 @@ export interface StackConfigurationResult {
 export interface TargetStackingResult {
   stackedImage?: string;
   processedImage?: string;
+  colorPreviewImage?: string;
   stacksByConfiguration?: Record<string, StackConfigurationResult>;
   qualitySummary?: StackQualitySummary | null;
 }
@@ -4557,6 +4558,8 @@ export interface PreviewRemakeResult {
   previous_pictures?: string[];
   stack_file_unchanged?: boolean;
   preview_settings?: PreviewSettingsRecord | null;
+  color_preview_path?: string | null;
+  color_preview_note?: string | null;
 }
 
 /**

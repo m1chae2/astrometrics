@@ -1135,7 +1135,8 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
 
     It never changes the stack and a failure to make it is logged, not
     raised. The image viewer shows it through the target's processed image.
-    Sets ``run.preview_path``.
+    A monochrome stack of a target that also has a color stack gets a second,
+    color picture (see `color_from_other_stack`). Sets ``run.preview_path``.
 
     Parameters
     ----------
@@ -1147,6 +1148,9 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
         BackgroundGradientOutcome,
         record_background_gradient,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack import (
+        make_color_preview_for_target,
     )
     from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
     from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
@@ -1171,6 +1175,10 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         object_category=None if run.has_spectral else run.target.object_category,
         target_anchor=None if run.has_spectral else anchor_for_target(run.target),
     )
+    if run.preview_path:
+        # A monochrome stack also gets a color picture when the target has a
+        # color stack from another setup. It never fails the stack.
+        make_color_preview_for_target(run.target, stacked_path, run.has_spectral, skipped_steps)
     # A skipped step is a warning of this job, not only a line in the log.
     record_preview_step_notices(
         skipped_steps,

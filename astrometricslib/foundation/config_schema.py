@@ -109,6 +109,9 @@ class ProcessingConfig(BaseModel):
     preview_remove_green_noise_enabled : `bool`
         Whether the stack preview of a colour stack (such as one from the
         Nikon DSLR) first removes the excess green, by default `True`.
+    preview_color_from_other_stack_enabled : `bool`
+        Whether a monochrome stack also gets a color picture, with its color
+        taken from a color stack of the same target, by default `True`.
     skip_unchanged_stacks_enabled : `bool`
         Whether stacking skips a stack whose frames, calibration frames and
         settings are the same as when it was last made, by default `True`.
@@ -134,6 +137,7 @@ class ProcessingConfig(BaseModel):
     quarantine_bad_frames_enabled: bool = True
     preview_star_tone_enabled: bool = True
     preview_remove_green_noise_enabled: bool = True
+    preview_color_from_other_stack_enabled: bool = True
     preview_colour_calibration_enabled: bool = True
     preview_colour_calibration_method: str = "pcc"
     keep_previous_stack_enabled: bool = True

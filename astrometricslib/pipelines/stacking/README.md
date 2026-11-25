@@ -318,6 +318,20 @@ With no registration transforms (an older stack), the stack is trimmed by measur
 
 **Limits.** The limit separates stars from galaxies only loosely. A cluster would pass it too, so the target's kind keeps clusters out, and a star halo away from the target is never used. In a copy run, the galaxy in the M 51 stack was never a region, because it is under twice the sky, so that step was not used. The region search takes 10 to 40 seconds on a full-size stack.
 
+### Color from another stack (LRGB)
+
+**Why.** A monochrome stack (the ZWO ASI533MM with its luminance filter) is sharp and deep but has no color. A color stack of the same target from another setup (the Nikon D5300) has color, with wider stars and more noise. Using the monochrome picture for brightness and the color stack for color gives a color picture as sharp as the monochrome one. This is the LRGB method (L for luminance).
+
+**When it runs.** `color_from_other_stack.py` runs after a monochrome stack's preview is made, in stacking and in a remake. The target needs a color stack in `stacks_by_configuration` with a finished picture (`<stack>_processed.fits`); the one at the same focal length is chosen, else the nearest. `preview_color_from_other_stack_enabled` in `[Processing.Siril]` (default `true`) turns it off. A spectral stack, a color stack and a target without a color stack are skipped, with an information line in the log.
+
+**What it does.**
+
+- **Alignment.** `other_stack_alignment.py` finds stars on both pictures with the shared star finder, guesses each star's partner from the two plate solutions, and fits a similarity plus a quadratic distortion with `fit_transform`. The color picture and the linear color stack are moved onto the monochrome grid with `warp`. The step is skipped when a fit leaves more than 1 pixel between star pairs or the color stack covers less than 95% of the frame.
+- **Extended light.** StarNet, run through Siril, takes the stars out of both pictures. The color of the starless color picture, in CIE Lab, is blurred by 3 pixels, scaled to the monochrome lightness, and faded in where the color stack's signal is 2 to 8 noise widths above its sky, so the sky stays gray.
+- **Stars.** `star_color_measurement.py` cuts the monochrome stars-only picture into one region per star, measures each star's red, green and blue light on the moved linear color stack (an 8 pixel circle on M 27, 5 pixels with a bright neighbor, minus a sky ring), and balances red and blue so that stars with the Sun's Gaia color (`BP - RP` 0.75 to 0.90, from the stored Gaia colors) come out white. The color is painted only inside the monochrome star. A saturated star is measured on its wing; a star too faint or blended takes its Gaia color, or stays gray. Without the Gaia colors, the median star is taken as white.
+
+**What it writes.** `<stack>_color_preview.jpg` beside the monochrome preview, which it does not replace, and `<stack>_color_preview.json`: the color stack used, both alignment fits (residual, pairs, scale, turn), the coverage, the star counts by color source, the white balance and the check of the measured colors against Gaia. One information line in the log sums it up. A failure of StarNet or of reading a file is a warning and a notice of the job; the stack is never failed. Measured on one target only (partly measured; see [STK-62](../../../documentation/library_design/validation/stacking.md#stk-62)).
+
 ### Skipped sub-steps, failures and logging
 
 Leaving a sub-step's setting blank skips it. Without Cosmic Clarity and the star toning, one Siril script stretches the image and saves the JPEG. A color stack always saves the stretch first, so the sky levelling can run.
@@ -362,6 +376,7 @@ Each setting is described in the section named in the last column. A setting wit
 | `[Processing.GraXpert]`, `[Processing.CosmicClarity]` | blank | Names the program for gradient removal or denoising; blank skips the sub-step | [The preview image](#the-preview-image-step-7) |
 | `preview_colour_calibration_method` and `preview_colour_calibration_enabled` | `pcc`; on | Chooses the color calibration method, or turns it off | [The preview image](#the-preview-image-step-7) |
 | `preview_remove_green_noise_enabled`, `preview_star_tone_enabled` | on | Turn green removal or star toning off | [The preview image](#the-preview-image-step-7) |
+| `preview_color_from_other_stack_enabled` in `[Processing.Siril]` | on | Turns off the color picture of a monochrome stack | [Color from another stack](#color-from-another-stack-lrgb) |
 | `denoise_strength` | 0.5 (measured; see [STK-30](../../../documentation/library_design/validation/stacking.md#stk-30)) | How much the denoise removes | [The preview image](#the-preview-image-step-7) |
 | `color_denoise_strength` | 0.3 (partly measured; see [STK-D81](../../../documentation/library_design/validation/stacking.md#design-estimates)) | How much color speckle the denoise removes from a color stack | [The preview image](#the-preview-image-step-7) |
 | `star_stretch` and `star_strength` | 1000; 0.8 (partly measured; see [STK-31](../../../documentation/library_design/validation/stacking.md#stk-31)) | StarNet star stretch and blend strength | [The preview image](#the-preview-image-step-7) |

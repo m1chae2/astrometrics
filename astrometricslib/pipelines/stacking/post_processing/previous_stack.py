@@ -19,8 +19,9 @@ itself except by replacing it with a newer one.
 
 Companion files are the pictures and tables made with a stack: the rejection
 map, the registration table, the preview, the stretched FITS, the record of
-what made the preview, and the record of the inputs the stack was made from
-(see `stack_inputs.py`).
+what made the preview, the color picture of a monochrome stack and its record
+(see `color_from_other_stack.py`), and the record of the inputs the stack was
+made from (see `stack_inputs.py`).
 
 A target's folder can hold several stacks (luminance, spectral, one per
 camera). Each keeps its own previous version in the shared `_previous`
@@ -58,6 +59,8 @@ STACK_COMPANION_SUFFIXES = (
     "_processed.fits",
     "_preview_settings.json",
     "_background_model.fits",
+    "_color_preview.jpg",
+    "_color_preview.json",
     "_inputs.json",
     "_registration_frames.json",
 )

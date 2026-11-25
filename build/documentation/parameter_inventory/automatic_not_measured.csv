@@ -482,6 +482,28 @@ stacking.central_region_shape_pixels,STK-35,measurement,Partly measured
 stacking.checked_estimate_range_room_multiples,STK-40,judgment,Partly measured
 stacking.clipped_frame_zero_fraction,STK-22,exclusion criteria,Partly measured
 stacking.clipping_floor_sigmas,STK-D12,measurement,Design estimate
+stacking.color_preview_aperture_fwhm_multiple,STK-62,measurement,Partly measured
+stacking.color_preview_aperture_radius_range_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_blend_fraction,STK-62,exclusion criteria,Partly measured
+stacking.color_preview_chroma_blur_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_color_fade,STK-62,measurement,Partly measured
+stacking.color_preview_color_index_error_limit,STK-62,exclusion criteria,Partly measured
+stacking.color_preview_crowded_aperture_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_detection_sigmas,STK-62,measurement,Partly measured
+stacking.color_preview_footprint_noise_multiples,STK-62,measurement,Partly measured
+stacking.color_preview_gaia_match_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_lightness_ratio_limits,STK-62,measurement,Partly measured
+stacking.color_preview_maximum_alignment_rms_pixels,STK-62,judgment,Partly measured
+stacking.color_preview_minimum_coverage,STK-62,judgment,Partly measured
+stacking.color_preview_nebula_chroma_gain,STK-62,measurement,Partly measured
+stacking.color_preview_pairing_radii_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_resampling_noise_factor,STK-62,measurement,Partly measured
+stacking.color_preview_saturation_shares,STK-62,exclusion criteria,Partly measured
+stacking.color_preview_sky_ring_gaps_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_star_core_taper,STK-62,measurement,Partly measured
+stacking.color_preview_star_widths_pixels,STK-62,measurement,Partly measured
+stacking.color_preview_wing_calibration,STK-62,measurement,Partly measured
+stacking.color_preview_wing_radii_pixels,STK-62,measurement,Partly measured
 stacking.contamination_magnitude_margin,STK-D34,judgment,Design estimate
 stacking.core_ring_offset_pixels,STK-D60,measurement,Design estimate
 stacking.core_ring_width_pixels,STK-D60,measurement,Design estimate

@@ -1825,7 +1825,9 @@ class ProcessingPipelines:
         the stack first, so the two can be compared; a failed run puts them
         back. The target is saved when the viewer shows the new picture. A
         missing target or stack raises `NotFoundError`, and a run that makes
-        no preview raises `ProcessingError`.
+        no preview raises `ProcessingError`. A monochrome stack whose target
+        also has a color stack from another setup gets its color picture
+        made again too (see `color_from_other_stack`).
 
         Parameters
         ----------
@@ -1860,8 +1862,9 @@ class ProcessingPipelines:
         Returns
         -------
         result : `PreviewRemakeResult`
-            Where the picture went, the steps that ran, and where the old
-            pictures were kept.
+            Where the picture went, the steps that ran, where the old
+            pictures were kept, and the color picture (``color_preview_path``)
+            with a sentence on it (``color_preview_note``).
 
         Raises
         ------

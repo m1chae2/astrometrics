@@ -630,6 +630,7 @@ class AppConfiguration:
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
                 "preview_remove_green_noise_enabled": "true",
+                "preview_color_from_other_stack_enabled": "true",
                 "preview_colour_calibration_enabled": "true",
                 "preview_colour_calibration_method": "pcc",
                 "keep_previous_stack_enabled": "true",
@@ -1191,6 +1192,24 @@ class AppConfiguration:
             `True` if the star toning step should run.
         """
         val = self.get_value("Processing.Siril", "preview_star_tone_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_color_from_other_stack_enabled(self) -> bool:
+        """Return whether a monochrome stack also gets a color picture.
+
+        When on, and the target also has a color stack (from another camera
+        or optic), the preview step makes a second picture beside the
+        monochrome one: its brightness comes from the monochrome stack and
+        its color from the color stack (see
+        `pipelines/stacking/post_processing/color_from_other_stack.py`). The
+        monochrome picture and both stacks are never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the color picture should be made.
+        """
+        val = self.get_value("Processing.Siril", "preview_color_from_other_stack_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_preview_colour_calibration_enabled(self) -> bool:

@@ -437,6 +437,13 @@ preview_star_tone_enabled = "true"
 # touched, and the stack file itself is never changed. Set "false" to leave
 # the colour balance alone.
 preview_remove_green_noise_enabled = "true"
+# "true" (the default): when a target has a monochrome stack (the ZWO camera)
+# and also a color stack from another camera or optic (the Nikon DSLR), the
+# preview step makes a second picture beside the monochrome one. Its
+# brightness and detail come from the monochrome stack and its color from the
+# color stack. The monochrome picture and both stacks are never changed. Set
+# "false" to make only the monochrome picture.
+preview_color_from_other_stack_enabled = "true"
 # "true" (the default): the stack preview of a colour stack first balances its
 # colours from its own stars: each channel's sky level is subtracted, and red
 # and blue are scaled so the median star comes out neutral. Without it, stars

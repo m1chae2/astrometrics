@@ -289,6 +289,11 @@ class TargetStackingResult(BaseModel):
 
     stacked_image: str = Field(default="", alias="stackedImage")
     processed_image: str = Field(default="", alias="processedImage")
+    # The color picture of a monochrome stack, with its color taken from a
+    # color stack of another setup (see `color_from_other_stack`). Empty when
+    # there is none. It sits beside the stack's own picture and never
+    # replaces it.
+    color_preview_image: str = Field(default="", alias="colorPreviewImage")
     # A dictionary tracking the finished pictures from every telescope
     # setup used on this target. The key is a label like "CameraName@300mm".
     stacks_by_configuration: dict[str, StackConfigurationResult] = Field(

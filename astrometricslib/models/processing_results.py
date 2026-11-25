@@ -162,6 +162,12 @@ class PreviewRemakeResult(BaseModel):
     # What made the new picture, read from the record saved beside the stack.
     # None when the record could not be read, which means unknown.
     preview_settings: PreviewSettingsRecord | None = None
+    # The color picture of a monochrome stack, with its color taken from a
+    # color stack of another setup, when one was made.
+    color_preview_path: str | None = None
+    # One sentence on the color picture: what it was made from, or why it
+    # was not made. None for a spectral stack's remake.
+    color_preview_note: str | None = None
 
 
 class ProcessTargetResult(BaseModel):

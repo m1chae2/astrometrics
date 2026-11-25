@@ -7,7 +7,9 @@ those settings does not change the stack, but the stacking stage keeps an
 unchanged stack and its old picture, so the only way to a new picture used to
 be a full restack, which takes minutes and moves the current stack aside.
 
-This module runs only the preview step on the stack that is already there. A
+This module runs only the preview step on the stack that is already there,
+followed by the color picture of a monochrome stack when the target has a
+color stack (see `color_from_other_stack`). A
 run can override the denoise and star-toning settings without writing them to
 the configuration. By default the old pictures are copied into a
 ``_previous_preview`` folder first, so the new and old can be compared, and a
@@ -27,6 +29,8 @@ from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.processing_results import PreviewRemakeResult, PreviewSettingsRecord
 from astrometricslib.pipelines.shared.stack_preview_path import (
     background_model_path_for,
+    color_preview_path_for,
+    color_preview_record_path_for,
     preview_path_for,
     preview_settings_path_for,
     processed_fits_path_for,
@@ -34,6 +38,9 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
     BackgroundGradientOutcome,
     record_background_gradient,
+)
+from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack import (
+    make_color_preview_for_target,
 )
 from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
 from astrometricslib.pipelines.stacking.post_processing.preview_notices import record_preview_step_notices
@@ -72,6 +79,8 @@ def _keep_old_pictures(stacked_path: str) -> list[str]:
         processed_fits_path_for(stacked_path),
         preview_settings_path_for(stacked_path),
         background_model_path_for(stacked_path),
+        color_preview_path_for(stacked_path),
+        color_preview_record_path_for(stacked_path),
     ):
         if os.path.isfile(picture):
             os.makedirs(folder, exist_ok=True)
@@ -199,6 +208,11 @@ def remake_stack_preview(
         if kept:
             _put_old_pictures_back(stacked_path, kept)
         raise
+    color_outcome = None
+    if preview_path is not None:
+        # A monochrome stack also gets its color picture again (see
+        # `color_from_other_stack`). It never fails the remake.
+        color_outcome = make_color_preview_for_target(target, stacked_path, spectral, skipped_steps)
     record_preview_step_notices(
         skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
     )
@@ -228,4 +242,6 @@ def remake_stack_preview(
         previous_pictures=kept,
         stack_file_unchanged=os.path.getmtime(stacked_path) == modified_before,
         preview_settings=_read_settings_record(stacked_path),
+        color_preview_path=color_outcome.path if color_outcome is not None and color_outcome.made else None,
+        color_preview_note=color_outcome.summary() if color_outcome is not None else None,
     )

@@ -16,6 +16,7 @@ and owns its own `SimbadClass`, and holds `SIMBAD_LOCK` while it configures
 the client and queries it, so a second caller never sees a half-set client.
 """
 
+import re
 import socket
 import threading
 import urllib.parse
@@ -39,6 +40,7 @@ from astrometricslib._internal.drivers.outside_services.services import (
     SKYBOT,
     VIZIER,
 )
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.offline import require_online
 
 # Guards both the SIMBAD client's creation and every use of it. Held across
@@ -283,6 +285,33 @@ def vizier_query_region(
     return call_service(VIZIER, ask)
 
 
+# The start of the error astropy's VOTable reader raises when the reply is not
+# XML at all, or not a VOTable: "1:0: syntax error", "1:0: no element found",
+# "3:12: not well-formed (invalid token)", "None:2:0: E19: File does not appear
+# to be a VOTABLE", "5:2: mismatched tag". The ESA Gaia archive sends its HTML
+# home page (or an empty reply) instead of data while it is down.
+_NOT_A_TABLE_REPLY = re.compile(
+    r"^(\S+:)?\d+:\d+: (syntax error|no element found|not well-formed|mismatched tag|E19\b)"
+)
+
+
+def _reply_was_not_a_table(error: ValueError) -> bool:
+    """Say whether a parse error means the archive sent no table at all.
+
+    Parameters
+    ----------
+    error : `ValueError`
+        What reading the archive's reply raised.
+
+    Returns
+    -------
+    not_a_table : `bool`
+        `True` when the reply was not XML or not a VOTable, such as a web
+        page.
+    """
+    return bool(_NOT_A_TABLE_REPLY.match(str(error).strip()))
+
+
 def gaia_archive_query(adql_query: str, *, asynchronous: bool = False) -> Table:
     """Run one ADQL query on the ESA Gaia archive and wait for the rows.
 
@@ -297,7 +326,9 @@ def gaia_archive_query(adql_query: str, *, asynchronous: bool = False) -> Table:
     Returns
     -------
     table : `astropy.table.Table`
-        The rows.
+        The rows. When the archive answers with a web page or an empty
+        reply instead of a table (it does while it is down), an
+        `ExternalServiceError` saying so is raised.
     """
 
     def ask(host: str) -> Table:
@@ -307,11 +338,26 @@ def gaia_archive_query(adql_query: str, *, asynchronous: bool = False) -> Table:
         -------
         table : `astropy.table.Table`
             The rows.
+
+        Raises
+        ------
+        ExternalServiceError
+            If the reply was not a table.
+        ValueError
+            If the reply was a table that could not be read.
         """
         from astroquery.gaia import Gaia
 
         launch = Gaia.launch_job_async if asynchronous else Gaia.launch_job
-        return launch(adql_query, dump_to_file=False).get_results()
+        try:
+            return launch(adql_query, dump_to_file=False).get_results()
+        except ValueError as error:
+            if not _reply_was_not_a_table(error):
+                raise
+            raise ExternalServiceError(
+                "The Gaia archive answered with a web page instead of data "
+                f"(the archive is probably down; the reply could not be read: {error})"
+            ) from error
 
     return call_service(ESA_GAIA, ask)
 

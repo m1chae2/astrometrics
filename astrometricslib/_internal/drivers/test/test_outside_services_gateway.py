@@ -580,3 +580,54 @@ def test_an_error_reaches_every_waiting_thread() -> None:
     second.join(timeout=5)
 
     assert len(errors) == 2
+
+
+# --- Gaia archive replies that are not tables -------------------------------
+
+
+class _JobRaising:
+    """A stand-in for astroquery's Gaia job whose reply cannot be read."""
+
+    def __init__(self, error: Exception) -> None:
+        """Keep the error reading the reply raises.
+
+        Parameters
+        ----------
+        error : `Exception`
+            The error to raise from `get_results`.
+        """
+        self._error = error
+
+    def get_results(self) -> Table:
+        """Raise the stored error, as astroquery does on a bad reply."""
+        raise self._error
+
+
+@pytest.mark.parametrize(
+    "parse_error",
+    ["1:0: syntax error", "1:0: no element found", "None:2:0: E19: File does not appear to be a VOTABLE"],
+)
+def test_a_gaia_web_page_reply_is_reported_as_the_archive_being_down(
+    monkeypatch: pytest.MonkeyPatch, parse_error: str
+) -> None:
+    """A web page in place of a VOTable gives a clear service error."""
+    from astroquery.gaia import Gaia
+
+    from astrometricslib._internal.drivers.outside_services import clients
+
+    monkeypatch.setattr(Gaia, "launch_job", lambda *_args, **_kwargs: _JobRaising(ValueError(parse_error)))
+    with pytest.raises(ExternalServiceError, match="answered with a web page instead of data"):
+        clients.gaia_archive_query("SELECT TOP 1 * FROM gaiadr3.gaia_source")
+
+
+def test_any_other_gaia_value_error_is_raised_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A value error that is not an unreadable reply keeps its own type."""
+    from astroquery.gaia import Gaia
+
+    from astrometricslib._internal.drivers.outside_services import clients
+
+    monkeypatch.setattr(
+        Gaia, "launch_job", lambda *_args, **_kwargs: _JobRaising(ValueError("bad column name"))
+    )
+    with pytest.raises(ValueError, match="bad column name"):
+        clients.gaia_archive_query("SELECT TOP 1 * FROM gaiadr3.gaia_source")

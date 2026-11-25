@@ -627,8 +627,9 @@ class SirilImagingStacker(SirilSpectralStacker):
                 process=launch.process,
             )
 
-        writer = threading.Thread(target=write_commands)
-        writer.daemon = True
+        # The writer runs in the run's log context, so its lines reach
+        # only this run's log file.
+        writer = threading.Thread(target=contextvars.copy_context().run, args=(write_commands,), daemon=True)
         writer.start()
 
         result = self.read_output(

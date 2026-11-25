@@ -1232,6 +1232,7 @@ class CalibrationLibrary(BaseModel):
         temperature_c: float | None = None,
         temperature_tolerance_c: float | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Choose the dark frames for a batch of lights, and how well they fit.
 
@@ -1283,6 +1284,10 @@ class CalibrationLibrary(BaseModel):
             `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
         light_label : `str`, optional
             How the flag sentences name the lights.
+        flag_log_level : `int`, optional
+            The log level of the flag sentences, by default
+            `logging.WARNING`. A query that only shows the choice, and
+            returns the flags itself, passes `logging.DEBUG`.
 
         Returns
         -------
@@ -1302,6 +1307,7 @@ class CalibrationLibrary(BaseModel):
             temperature_tolerance_c,
             light_label,
             judge_temperature=True,
+            flag_log_level=flag_log_level,
         )
 
     def _select_dark_frames(
@@ -1316,6 +1322,7 @@ class CalibrationLibrary(BaseModel):
         temperature_tolerance_c: float,
         light_label: str,
         judge_temperature: bool,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Do the work of `select_dark_frames`, or skip the temperature.
 
@@ -1329,6 +1336,8 @@ class CalibrationLibrary(BaseModel):
             When `False`, every temperature slot is used and no temperature
             flag is made (the way `get_dark_frames` works when it is given no
             temperature).
+        flag_log_level : `int`, optional
+            As in `select_dark_frames`.
 
         Returns
         -------
@@ -1381,10 +1390,8 @@ class CalibrationLibrary(BaseModel):
             if temperature_flag is not None:
                 flags.append(temperature_flag)
 
-        for flag in flags:
-            logger.warning(flag)
-        for flag in blocking_flags:
-            logger.warning(flag)
+        for flag in [*flags, *blocking_flags]:
+            logger.log(flag_log_level, flag)
         return CalibrationSelection(_without_duplicates(frames), flags, blocking_flags)
 
     def get_dark_frames(
@@ -1457,6 +1464,7 @@ class CalibrationLibrary(BaseModel):
         offset: Any | None = None,
         binning: Any | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Choose the bias frames for a batch of lights, and how well they fit.
 
@@ -1482,6 +1490,10 @@ class CalibrationLibrary(BaseModel):
             binning is used with no flag.
         light_label : `str`, optional
             How the flag sentences name the lights.
+        flag_log_level : `int`, optional
+            The log level of the flag sentences, by default
+            `logging.WARNING`. A query that only shows the choice, and
+            returns the flags itself, passes `logging.DEBUG`.
 
         Returns
         -------
@@ -1497,7 +1509,7 @@ class CalibrationLibrary(BaseModel):
             }
         chosen, flags, blocking_flags = _choose_slots(slots, iso, offset, binning, "bias", light_label)
         for flag in [*flags, *blocking_flags]:
-            logger.warning(flag)
+            logger.log(flag_log_level, flag)
         frames = _without_duplicates([path for paths in chosen.values() for path in paths])
         return CalibrationSelection(
             frames, flags, blocking_flags, [parse_calibration_setting_key(key) for key in chosen]
@@ -1553,6 +1565,7 @@ class CalibrationLibrary(BaseModel):
         offset: Any | None = None,
         binning: Any | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Choose the flat frames for a batch of lights, and how well they fit.
 
@@ -1585,6 +1598,10 @@ class CalibrationLibrary(BaseModel):
             binning is used with no flag.
         light_label : `str`, optional
             How the flag sentences name the lights.
+        flag_log_level : `int`, optional
+            The log level of the flag sentences, by default
+            `logging.WARNING`. A query that only shows the choice, and
+            returns the flags itself, passes `logging.DEBUG`.
 
         Returns
         -------
@@ -1611,7 +1628,7 @@ class CalibrationLibrary(BaseModel):
         if flags and self._flat_offset_is_compensated(chosen, camera, iso, offset, binning, validate_paths):
             flags = []
         for flag in [*flags, *blocking_flags]:
-            logger.warning(flag)
+            logger.log(flag_log_level, flag)
         frames = _without_duplicates([path for paths in chosen.values() for path in paths])
         return CalibrationSelection(
             frames, flags, blocking_flags, [parse_calibration_setting_key(key) for key in chosen]

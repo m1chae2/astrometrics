@@ -231,7 +231,11 @@ class FlatBiasChoice:
 
 
 def choose_batch_calibration(
-    library: CalibrationLibrary, frames: list[Any], light_paths: list[str]
+    library: CalibrationLibrary,
+    frames: list[Any],
+    light_paths: list[str],
+    *,
+    flag_log_level: int = logging.WARNING,
 ) -> BatchCalibration:
     """Choose the darks, bias and flats for one batch of light frames.
 
@@ -248,7 +252,12 @@ def choose_batch_calibration(
         The batch's frame records (or dictionaries of them), not empty.
     light_paths : `list` [`str`]
         The batch's readable light file paths, in the order to try them for
-        the binning (see `representative_light_binning`).
+        the binning (see `representative_light_binning`). It may be empty
+        when no light file is read; the flag sentences then name the lights
+        by the frame records.
+    flag_log_level : `int`, optional
+        The log level of the flag sentences, by default `logging.WARNING`.
+        A query that only shows the choice passes `logging.DEBUG`.
 
     Returns
     -------
@@ -267,8 +276,10 @@ def choose_batch_calibration(
     exposure = dominant_exposure(frames)
     temperature_c = representative_light_temperature_c(frames)
     binning = representative_light_binning(frames, light_paths)
-    first_light = light_paths[0] if light_paths else ""
-    light_label = f"the {len(light_paths)} light frame(s) starting with {os.path.basename(first_light)}"
+    # With no light paths (a query that reads no files), the frame records
+    # name the lights, so a flag never says "the 0 light frame(s)".
+    named_paths = light_paths or sorted(str(_field(frame, "path", "")) for frame in frames)
+    light_label = f"the {len(named_paths)} light frame(s) starting with {os.path.basename(named_paths[0])}"
     dark = library.select_dark_frames(
         camera=camera,
         exposure=exposure,
@@ -277,12 +288,18 @@ def choose_batch_calibration(
         binning=binning,
         temperature_c=temperature_c,
         light_label=light_label,
+        flag_log_level=flag_log_level,
     )
     # Darks the defect job marked leave the choice here, so staging and the
     # stack check both skip them, and each mark becomes a flag sentence.
     dark = library.apply_dark_defect_verdicts(dark)
     bias = library.select_bias_frames(
-        camera=camera, iso=gain, offset=offset, binning=binning, light_label=light_label
+        camera=camera,
+        iso=gain,
+        offset=offset,
+        binning=binning,
+        light_label=light_label,
+        flag_log_level=flag_log_level,
     )
     flat = library.select_flat_frames(
         telescope=telescope,
@@ -292,6 +309,7 @@ def choose_batch_calibration(
         offset=offset,
         binning=binning,
         light_label=light_label,
+        flag_log_level=flag_log_level,
     )
     return BatchCalibration(
         camera=str(camera),

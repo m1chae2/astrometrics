@@ -6,6 +6,7 @@ These tests verify that we now measure frame quality independently, so we can
 judge how good a frame is before we even try to stack it.
 """
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -324,6 +325,26 @@ def test_a_bias_at_the_wrong_offset_is_a_fallback_with_the_reason(tmp_path: Path
     assert bias["fallbacks"]
     assert groups[0]["flatMatch"]["count"] == 0
     assert "no flat frames" in groups[0]["flatMatch"]["problem"]
+
+
+def test_grouped_stats_name_the_lights_and_do_not_warn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The grouping query returns its fallbacks without warning about them.
+
+    The query reads no light files, so the fallback sentence names the lights
+    by their frame records, never as "the 0 light frame(s)".
+    """
+    library = _library(tmp_path)
+    library.add_bias_frame(_calibration_frame(tmp_path / "bias.fits", 0.0, offset=10.0))
+    with caplog.at_level(logging.DEBUG):
+        groups = frame_statistics.get_frame_stats_grouped(_light_target(offset="30"), library)
+
+    by_exposure = {group["exposure"]: group for group in groups}
+    fallbacks = by_exposure["30"]["biasMatch"]["fallbacks"]
+    assert fallbacks
+    assert "the 2 light frame(s) starting with a.fits" in fallbacks[0]
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
 
 
 def test_grouped_stats_split_by_optic_and_report_it(tmp_path: Path) -> None:

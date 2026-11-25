@@ -231,3 +231,36 @@ def test_the_identifier_warns_once_and_flags_missing_tiles(
     assert len(warnings) == 1
     assert "offline test" in warnings[0].getMessage()
     assert identifier.astrometry_flags == [star_identifier_module.FLAG_GAIA_TILES_MISSING]
+
+
+@pytest.mark.parametrize(("cache_only", "expected_level"), [(True, logging.INFO), (False, logging.WARNING)])
+def test_an_empty_refit_cache_is_a_warning_only_after_a_real_fetch(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, cache_only: bool, expected_level: int
+) -> None:
+    """An empty refit cache is INFO in cache-only mode, WARNING otherwise.
+
+    The stacking solve reads the cache only, and a new field has nothing
+    cached until the analysis downloads it. After a real fetch, an empty
+    answer is still a warning. Both keep the note and the flag.
+    """
+    monkeypatch.setattr(star_identifier_module, "load_field_gaia_stars", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        StarIdentifier,
+        "_prepare_field_gaia_stars",
+        lambda self, wcs, width, height: type("Field", (), {"tiles": [1]})(),
+    )
+    identifier = StarIdentifier.__new__(StarIdentifier)
+    identifier.config = None
+    identifier.astrometry_flags = []
+    identifier.gaia_depth_prediction = None
+    identifier.field_gaia_stars = None
+    wcs = _wcs(size=300)
+
+    with caplog.at_level(logging.INFO):
+        kept = identifier._refine_wcs_against_gaia(wcs, [], 300, 300, cache_only=cache_only)
+
+    records = [record for record in caplog.records if "No Gaia stars for the refit" in record.getMessage()]
+    assert [record.levelno for record in records] == [expected_level]
+    assert kept is wcs
+    assert identifier.wcs_refit_note.startswith("not refit: no Gaia stars cached")
+    assert identifier.astrometry_flags == [star_identifier_module.FLAG_WCS_REFINEMENT_SKIPPED]

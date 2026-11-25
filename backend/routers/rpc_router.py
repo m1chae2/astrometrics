@@ -550,7 +550,11 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
     info : `ErrorInfo`
         The error as reported to the caller.
     """
-    if info.code in _EXPECTED_CODES:
+    if info.code == "not_found":
+        # Asking for something that is not there is an answer, not a
+        # problem: the caller gets the code and decides what to show.
+        logger.info("RPC %s failed (%s): %s", method, info.code, info.message)
+    elif info.code in _EXPECTED_CODES:
         logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
     elif info.code == "internal":
         logger.error("RPC %s raised an unexpected error", method, exc_info=exc)

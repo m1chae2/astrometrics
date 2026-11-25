@@ -465,7 +465,9 @@ class SirilStaging(SirilSession):
                 )
         if assessment.needs_smoothing and uses_color_filter_array:
             note = "not smoothed: blurring a colour sensor's flat would mix its colours"
-            (job_logger or logger).warning("Flat calibration: %s", note)
+            # A designed choice for every color sensor, not a problem: the
+            # note still goes into the stack's issues and notices.
+            (job_logger or logger).info("Flat calibration: %s", note)
             return dataclasses.replace(
                 assessment, smoothing_sigma_pixels=None, issues=[*assessment.issues, note]
             )

@@ -16,12 +16,15 @@ that point (a crash inside a sandbox, a version too old to understand
 no way for the caller to notice.
 """
 
+import contextvars
+import logging
 import os
 import pathlib
 import queue
 import subprocess
 import threading
 import time
+import types
 
 import pytest
 
@@ -349,3 +352,64 @@ def test_a_silent_long_command_is_not_resent_and_is_recorded(
     assert received == ["stack seq", "exit"]
     message = processor.last_run_diagnostics[session.SIRIL_COMMUNICATION_ERROR_KEY]
     assert "did not answer the command 'stack seq'" in message
+
+
+def test_a_writer_thread_error_reaches_only_the_running_jobs_log(
+    tmp_path: pathlib.Path,
+    processor: siril_interface.ImageProcessing,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A line logged by the command writer thread stays in its own job's log.
+
+    Two jobs log at once. The writer thread must carry the log context of
+    the job that started it; a thread without it is copied into every job's
+    log, which put one target's Siril errors into other targets' logs.
+    """
+    from astrometricslib._internal.drivers.siril_interface import imaging_stacker
+    from astrometricslib.foundation.jobs.runner import capture_job_logs
+
+    stacker_logger = logging.getLogger(imaging_stacker.__name__)
+    writer_done = threading.Event()
+
+    def fake_send_commands(*_args: object, **_kwargs: object) -> None:
+        """Log a Siril error from the writer thread, like a failed command."""
+        stacker_logger.error("status: error seqapplyreg")
+        writer_done.set()
+
+    def fake_read_output(*_args: object, **_kwargs: object) -> None:
+        """Wait for the writer, then report that nothing was stacked."""
+        writer_done.wait(timeout=5)
+
+    monkeypatch.setattr(processor, "send_commands", fake_send_commands, raising=False)
+    monkeypatch.setattr(processor, "read_output", fake_read_output, raising=False)
+    monkeypatch.setattr(processor, "_kill_process_tree", lambda *_args, **_kwargs: None, raising=False)
+
+    run = types.SimpleNamespace(
+        job_logger=stacker_logger,
+        request=types.SimpleNamespace(id="request-a", output_file=None),
+        library_dest=None,
+        generate_rejmap=False,
+    )
+    staged = types.SimpleNamespace(
+        command_pipe="unused", output_pipe="unused", status_queue=None, target_folder=str(tmp_path)
+    )
+    launch = types.SimpleNamespace(process=None)
+    script = types.SimpleNamespace(
+        commands=["seqapplyreg"], sequence_name="r_light", uses_phase_correlation=False
+    )
+
+    running_log = tmp_path / "running.log"
+    other_log = tmp_path / "other.log"
+    # The other job's capture is entered in a separate context, as it would
+    # be on another job's own thread.
+    other_context = contextvars.Context()
+    other_capture = capture_job_logs(job_id="job-other", log_file_path=str(other_log))
+    other_context.run(other_capture.__enter__)
+    try:
+        with capture_job_logs(job_id="job-running", log_file_path=str(running_log)):
+            processor._stack(run, staged, launch, script)
+    finally:
+        other_context.run(other_capture.__exit__, None, None, None)
+
+    assert "status: error seqapplyreg" in running_log.read_text()
+    assert "status: error seqapplyreg" not in other_log.read_text()

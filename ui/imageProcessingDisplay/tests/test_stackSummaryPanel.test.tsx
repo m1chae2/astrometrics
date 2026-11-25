@@ -210,6 +210,19 @@ describe('StackSummaryPanel', () => {
         expect(await screen.findByText(/Stars wider than expected/)).toBeTruthy();
     });
 
+    it('reads the stored checks, once, when the stacking job is no longer on record', async () => {
+        answerWith({
+            'processing:stack_summary': summary,
+            'jobs:query': new BackendError({ code: 'not_found', message: "No job with id 'job-stack-1'." }),
+            'quality:query': [storedRow('stacking.gate_stack_sharpness', 'M 81/M81.fits', 'failed', 1.26, 1.2)],
+        });
+        renderPanel();
+        expect(await screen.findByText(/Stars wider than expected/)).toBeTruthy();
+        expect(screen.queryByText('Could not read the warnings.')).toBeNull();
+        const jobQueries = callBackendMock.mock.calls.filter(([method]) => method === 'jobs:query');
+        expect(jobQueries).toHaveLength(1);
+    });
+
     it('says when the warnings could not be read', async () => {
         answerWith({ 'processing:stack_summary': summary, 'jobs:query': new Error('down') });
         renderPanel();

@@ -7,6 +7,7 @@
  */
 
 import { callBackend } from '../backendApi';
+import { BackendError } from '../backendError';
 import { GateStatus, SubjectLevel } from '../../types/backendTypes';
 import type {
     JobWarning,
@@ -129,12 +130,19 @@ const stackWarningFromRow = (row: QualityMeasurement): StackWarning => ({
 /**
  * Lists the warnings a stacking job detected.
  * @param jobId The id of the stacking job that made the stack.
- * @return One warning for each failed check of the job; empty when there are none.
+ * @return One warning for each failed check of the job; empty when there are none, or when the
+ *     job is no longer on record. A missing job is an answer, not a failure, so the caller does
+ *     not ask again and falls back to the checks stored for the stack.
  */
 export async function fetchStackJobWarnings(jobId: string): Promise<StackWarning[]> {
-    const answer = await callBackend(
-        'jobs:query', { job_id: jobId, detail: 'warnings' }, { silent: true });
-    return (answer.warnings ?? []).map(stackWarningFromJob);
+    try {
+        const answer = await callBackend(
+            'jobs:query', { job_id: jobId, detail: 'warnings' }, { silent: true });
+        return (answer.warnings ?? []).map(stackWarningFromJob);
+    } catch (error) {
+        if (error instanceof BackendError && error.code === 'not_found') return [];
+        throw error;
+    }
 }
 
 /**

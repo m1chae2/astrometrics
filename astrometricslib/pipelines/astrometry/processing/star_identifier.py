@@ -1553,7 +1553,12 @@ class StarIdentifier:
         gaia_table = None if refit_stars is None else refit_stars.table
         gaia_coords = None if refit_stars is None else refit_stars.coords
         if gaia_table is None or gaia_coords is None:
-            logger.warning("No Gaia stars for the refit of the solution; the solver's solution is kept.")
+            # In cache-only mode (stacking) a new field has no cached stars
+            # yet: the analysis downloads them later, so this is expected.
+            logger.log(
+                logging.INFO if cache_only else logging.WARNING,
+                "No Gaia stars for the refit of the solution; the solver's solution is kept.",
+            )
             self.wcs_refit_note = f"not refit: no Gaia stars cached for this field to depth G {refit_depth:g}"
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
             return wcs

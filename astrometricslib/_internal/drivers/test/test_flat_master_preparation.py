@@ -6,6 +6,7 @@ tests check that, that colour sensors and cached masters are left alone, and
 that the master flat's cache key changes with the smoothing recipe.
 """
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -85,14 +86,23 @@ def test_a_good_set_of_flats_is_left_alone(tmp_path: Path) -> None:
     assert not assessment.needs_smoothing
 
 
-def test_a_colour_sensor_flat_is_measured_but_not_smoothed(tmp_path: Path) -> None:
-    """Blurring a Bayer mosaic would mix colours, so it is only reported."""
+def test_a_colour_sensor_flat_is_measured_but_not_smoothed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Blurring a Bayer mosaic would mix colours, so it is only reported.
+
+    Leaving a color sensor's flat unsmoothed is the designed choice, so the
+    log line is INFO, not a warning; the note stays in the issues.
+    """
     stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment = make_processor().assess_staged_flats(
-        str(tmp_path), uses_color_filter_array=True, assess_flats=assess_flats
-    )
+    with caplog.at_level(logging.INFO):
+        assessment = make_processor().assess_staged_flats(
+            str(tmp_path), uses_color_filter_array=True, assess_flats=assess_flats
+        )
     assert not assessment.needs_smoothing
     assert any("colour sensor" in issue for issue in assessment.issues)
+    not_smoothed = [record for record in caplog.records if "not smoothed" in record.getMessage()]
+    assert [record.levelno for record in not_smoothed] == [logging.INFO]
 
 
 def test_one_flat_is_loaded_blurred_and_saved() -> None:

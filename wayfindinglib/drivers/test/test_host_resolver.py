@@ -87,16 +87,22 @@ def test_name_resolving_again_returns_to_the_name_with_one_info(caplog: pytest.L
     assert len(again) == 1
 
 
-def test_failure_with_nothing_saved_warns_once_and_returns_none(caplog: pytest.LogCaptureFixture) -> None:
-    """With no earlier address there is nothing to fall back to."""
+def test_failure_with_nothing_saved_notes_once_and_returns_none(caplog: pytest.LogCaptureFixture) -> None:
+    """With no earlier address there is nothing to fall back to.
+
+    A switched-off observatory computer is a status, not a problem, so the
+    failed lookup is noted once at info level and never as a warning.
+    """
     known = KnownHostAddress("scope.local")
     with (
         patch("socket.getaddrinfo", _lookup([socket.gaierror("fail")])),
-        caplog.at_level(logging.WARNING, logger="wayfindinglib.drivers.host_resolver"),
+        caplog.at_level(logging.INFO, logger="wayfindinglib.drivers.host_resolver"),
     ):
         assert known.resolve(7624) is None
         assert known.resolve(7624) is None
-    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+    notes = [r for r in caplog.records if "no earlier address is known" in r.getMessage()]
+    assert [r.levelno for r in notes] == [logging.INFO]
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 def test_changed_hostname_clears_saved_address() -> None:

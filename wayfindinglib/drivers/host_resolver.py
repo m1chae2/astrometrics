@@ -61,7 +61,7 @@ class KnownHostAddress:
     A failed lookup returns the stored address, if there is one, so callers can
     go on talking to the machine. Each change of state is logged once: the
     first fallback to the stored address (info), a failed lookup with nothing
-    stored (warning), and the name resolving again (info).
+    stored (info), and the name resolving again (info).
     """
 
     def __init__(self, hostname: str) -> None:
@@ -152,9 +152,9 @@ class KnownHostAddress:
                         self.cached_address,
                     )
                 else:
-                    logger.warning(
-                        "Cannot look up host name '%s', and no earlier address is known.", hostname
-                    )
+                    # An observatory computer that is switched off is a
+                    # status the app shows, not a problem to warn about.
+                    logger.info("Cannot look up host name '%s', and no earlier address is known.", hostname)
             return self.cached_address
 
     def fallback_address(self, port: int, timeout: float = 1.0) -> str | None:

@@ -7,6 +7,7 @@ also holds the seeded bootstrap error of a median, which the frame
 measurement and the photometry zero point both use.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -251,7 +252,9 @@ def _group_match(
     """
     from astrometricslib._internal.drivers.batch_calibration import choose_batch_calibration
 
-    chosen = choose_batch_calibration(calibration, frames, [])
+    # This only shows the choice, and returns its fallbacks to the caller,
+    # so the flag sentences are not logged as warnings on every call.
+    chosen = choose_batch_calibration(calibration, frames, [], flag_log_level=logging.DEBUG)
     gain, offset, binning = chosen.gain, chosen.offset, chosen.binning
     filter_name = chosen.filter_name
     setting_text = f"gain {gain}, offset {offset}, binning {binning}"

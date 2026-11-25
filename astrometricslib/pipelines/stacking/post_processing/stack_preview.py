@@ -14,7 +14,13 @@ anything. Up to seven steps turn it into a picture.
    and the limit.
 2. Colour calibration (see `colour_calibration`) balances the colours of a
    colour stack from its own stars, on the linear data. The setting
-   ``preview_colour_calibration_enabled`` turns it off.
+   ``preview_colour_calibration_enabled`` turns it off. A white-balance check
+   follows it (see `sun_like_balance`): stars that look like the Sun, found
+   from their Gaia colours, should come out white, and the red and blue
+   channels are scaled about the sky level if they do not. It is skipped, with
+   the reason in the record, when the stack has no plate solution, the Gaia
+   colours cannot be had, too few stars qualify, or the change it asks for is
+   too large. If Siril says its calibration is imprecise, a notice is stored.
 3. Siril's Remove Green Noise (``rmgreen``) lowers the green in a colour
    stack, such as one from the Nikon DSLR. A colour sensor has twice as many
    green pixels as red or blue, and the sky's glow is often green, so these
@@ -83,6 +89,7 @@ if GraXpert, Cosmic Clarity or the star toning fails, the picture is made from
 the result of the step before it, and if Siril fails, there is no picture.
 """
 
+import contextvars
 import json
 import logging
 import os
@@ -168,6 +175,10 @@ from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
     collect_starnet_outputs,
 )
 from astrometricslib.pipelines.stacking.post_processing.stretch_sky import measure_stretch_sky
+from astrometricslib.pipelines.stacking.post_processing.sun_like_balance import (
+    SunLikeBalance,
+    balance_sun_like_stars_in_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +202,15 @@ GRAXPERT_TIMEOUT_SECONDS = 300
 # seconds, so Cosmic Clarity took under that. Five minutes leaves room for a
 # larger stack or a slower card, and still stops a hung process.
 COSMIC_CLARITY_TIMEOUT_SECONDS = 300
+
+# The text Siril printed in the last script this thread ran, kept so a step can
+# read a warning that Siril logs and still exits with success (see
+# `last_siril_output`).
+_last_siril_output: contextvars.ContextVar[str] = contextvars.ContextVar("last_siril_output", default="")
+
+# The sentence Siril logs when its photometric color calibration fits the stars
+# poorly. The text follows Siril 1.4.
+_SIRIL_IMPRECISE_PCC_TEXT = "imprecise solution"
 
 # The scratch folder lives on the local disk (~/.cache/astrometrics/siril), not
 # system temp folder: that is often held in RAM, and a Flatpak Siril is
@@ -743,7 +763,20 @@ def run_preview_script(directory: str, commands: list[str], siril_executable: st
             completed = run_registered([*parts, "-d", directory, "-s", script_path], PREVIEW_TIMEOUT_SECONDS)
     finally:
         os.remove(script_path)
+    _last_siril_output.set(getattr(completed, "stdout", None) or "")
     return completed.returncode == 0
+
+
+def last_siril_output() -> str:
+    """Give the text Siril printed in the last script this thread ran.
+
+    Returns
+    -------
+    output : `str`
+        The standard output of the last `run_preview_script` call in this
+        thread, or an empty string if there was none.
+    """
+    return _last_siril_output.get()
 
 
 def graxpert_background_model_path(output_stem: str) -> str:
@@ -942,10 +975,10 @@ def _is_usable_image(path: str) -> bool:
 
 @dataclass(frozen=True)
 class SkippedPreviewStep:
-    """One preview step that was skipped, and why.
+    """One preview step that was skipped or warned about, and why.
 
-    The preview is made without the step, so the picture differs from the one
-    the settings describe. The caller stores a notice for it (see
+    The preview is made without a skipped step, so the picture differs from
+    the one the settings describe. The caller stores a notice for it (see
     `astrometricslib.pipelines.stacking.post_processing.preview_notices`).
 
     Attributes
@@ -955,10 +988,15 @@ class SkippedPreviewStep:
     reason : `str`
         The sentence that says what went wrong, such as
         ``"GraXpert did not finish"``.
+    still_used : `bool`, optional
+        `True` for a warning about a step that ran and whose result was kept,
+        such as Siril's note that its color calibration is imprecise. The
+        default `False` means the step's result was not used.
     """
 
     step_name: str
     reason: str
+    still_used: bool = False
 
 
 def _next_source(
@@ -1304,6 +1342,71 @@ def _remove_background(
     return flattened_name, record
 
 
+def _check_white_balance(
+    scratch: str,
+    name: str,
+    steps: list[str],
+    settings_used: dict[str, Any] | None,
+    skipped_steps: list[SkippedPreviewStep] | None,
+) -> str:
+    """Check the white balance of a calibrated stack against sun-like stars.
+
+    The check runs after the colour calibration (Siril PCC or the stars of
+    the stack), on the linear data (see `sun_like_balance`). It never fails
+    the preview: when it cannot run or a guard stops it, the calibrated image
+    is kept, the reason goes into the record and a notice is stored.
+
+    Parameters
+    ----------
+    scratch : `str`
+        The scratch folder.
+    name : `str`
+        The calibrated image's file name in the scratch folder.
+    steps : `list` [`str`]
+        The sentences of the steps; the check's sentence is added.
+    settings_used : `dict`, optional
+        The record of the choices the run used; ``white_balance_check`` is
+        added.
+    skipped_steps : `list` [`SkippedPreviewStep`], optional
+        A check that changed nothing is added to it.
+
+    Returns
+    -------
+    file_name : `str`
+        The corrected image's file name when the correction was applied,
+        otherwise `name`.
+    """
+    raise_if_abandoned()
+    balanced_name = "balanced.fits"
+    try:
+        balance = balance_sun_like_stars_in_file(
+            os.path.join(scratch, name), os.path.join(scratch, balanced_name)
+        )
+    except (OSError, ValueError) as error:
+        balance = SunLikeBalance(applied=False, reason=f"the check could not run ({error})")
+    applied = balance.applied and os.path.isfile(os.path.join(scratch, balanced_name))
+    steps.append(balance.step_sentence())
+    if settings_used is not None:
+        settings_used["white_balance_check"] = balance.record()
+    if applied:
+        logger.info(
+            "White balance check: %d sun-like stars read red %.3f and blue %.3f of green before, "
+            "%.3f and %.3f after (gains red x%.3f, blue x%.3f).",
+            balance.star_count,
+            balance.red_to_green_before,
+            balance.blue_to_green_before,
+            balance.red_to_green_after,
+            balance.blue_to_green_after,
+            balance.red_gain,
+            balance.blue_gain,
+        )
+        return balanced_name
+    logger.warning("White balance check not applied: %s.", balance.reason)
+    if skipped_steps is not None:
+        skipped_steps.append(SkippedPreviewStep("White balance check", balance.reason))
+    return name
+
+
 def _picture_script(
     scratch: str,
     siril_executable: str,
@@ -1424,6 +1527,7 @@ def _picture_script(
     colour = is_colour_image(os.path.join(scratch, name))
     if colour and configuration.get_preview_colour_calibration_enabled():
         calibrated_name, method = name, ""
+        pcc_imprecise: list[bool] = []
         if configuration.get_preview_colour_calibration_method() == "pcc":
             solve = not has_plate_solution(os.path.join(scratch, name))
 
@@ -1453,7 +1557,10 @@ def _picture_script(
                     solve,
                     local_catalog,
                 )
-                return run_preview_script(scratch, commands, siril_executable)
+                succeeded = run_preview_script(scratch, commands, siril_executable)
+                if succeeded and _SIRIL_IMPRECISE_PCC_TEXT in last_siril_output():
+                    pcc_imprecise.append(True)
+                return succeeded
 
             calibrated_name = _next_source(
                 "Siril PCC",
@@ -1465,6 +1572,13 @@ def _picture_script(
                 skipped_steps=skipped_steps,
             )
             method = "Siril PCC"
+            if calibrated_name != name and pcc_imprecise:
+                warning = "Siril reports that its photometric color calibration found an imprecise solution"
+                logger.warning("%s.", warning)
+                if skipped_steps is not None:
+                    skipped_steps.append(SkippedPreviewStep("Siril PCC", warning, still_used=True))
+                if settings_used is not None:
+                    settings_used["colour_calibration_warning"] = warning
         if calibrated_name == name:
             # PCC was not asked for, or failed (no network, no catalog, no
             # solution): measure the stars in the stack itself.
@@ -1486,6 +1600,8 @@ def _picture_script(
         # one by one, the channels would be set back to equal sky and scale.
         linked = calibrated_name != name
         name = calibrated_name
+        if linked:
+            name = _check_white_balance(scratch, name, steps, settings_used, skipped_steps)
     else:
         linked = False
         steps.append("Colour calibration not used")

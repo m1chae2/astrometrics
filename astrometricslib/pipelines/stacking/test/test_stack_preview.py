@@ -8,6 +8,7 @@ fails.
 
 import json
 import os
+import shutil
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -117,6 +118,7 @@ class _Programs:
         denoise_result: bool = True,
         pcc_result: bool = True,
         starnet_result: bool = True,
+        pcc_output: str = "",
     ) -> None:
         """Choose how each program will behave."""
         self.flatten_result = flatten_result
@@ -124,6 +126,7 @@ class _Programs:
         self.denoise_result = denoise_result
         self.pcc_result = pcc_result
         self.starnet_result = starnet_result
+        self.pcc_output = pcc_output
         self.flatten_calls: list[tuple[str, str, str]] = []
         self.denoise_calls: list[tuple[str, str, str, float]] = []
         self.denoise_color_strengths: list[float | None] = []
@@ -212,6 +215,7 @@ class _Programs:
             if self.pcc_result:
                 image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
                 fits.writeto(Path(directory) / "colour.fits", image)
+            stack_preview._last_siril_output.set(self.pcc_output)
             return self.pcc_result
         if self.siril_result:
             if 'save "stretched"' in commands:
@@ -2154,3 +2158,172 @@ def test_the_sky_of_a_single_channel_stack_is_measured_as_before(tmp_path: Path)
     assert sky is not None
     assert sky[0] == pytest.approx(0.01, abs=0.0005)
     assert sky[1] == pytest.approx(0.0005, rel=0.1)
+
+
+def _fake_white_balance(applied: bool, calls: list[str]) -> object:
+    """Make a stand-in for the white-balance check.
+
+    Parameters
+    ----------
+    applied : `bool`
+        Whether the stand-in corrects the image (it copies the input) or
+        leaves it alone.
+    calls : `list` [`str`]
+        Receives the input path of each call.
+
+    Returns
+    -------
+    check : `Callable`
+        The stand-in, with the signature of `balance_sun_like_stars_in_file`.
+    """
+
+    def check(input_path: str, output_path: str) -> stack_preview.SunLikeBalance:
+        """Act like the check.
+
+        Returns
+        -------
+        result : `SunLikeBalance`
+            An applied result with gains, or one that says nothing changed.
+        """
+        calls.append(input_path)
+        if not applied:
+            return stack_preview.SunLikeBalance(applied=False, reason="only 3 isolated sun-like stars")
+        shutil.copyfile(input_path, output_path)
+        return stack_preview.SunLikeBalance(
+            applied=True,
+            reason="done",
+            star_count=41,
+            red_to_green_before=1.14,
+            blue_to_green_before=0.97,
+            red_gain=0.877,
+            blue_gain=1.031,
+            red_to_green_after=1.0,
+            blue_to_green_after=1.0,
+        )
+
+    return check
+
+
+def test_the_white_balance_check_feeds_the_stretch_when_it_corrects(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the corrected image is stretched, and the check is recorded."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    calls: list[str] = []
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
+
+    assert calls[0].endswith("colour.fits")
+    assert 'load "balanced.fits"' in programs.siril_calls[-1][1]
+    assert "White balance check on 41 sun-like stars: red x0.877, blue x1.031" in steps
+    recorded = read_preview_settings(str(stack))["settings_used"]["white_balance_check"]
+    assert recorded["applied"] is True
+    assert recorded["star_count"] == 41
+    assert recorded["red_gain"] == pytest.approx(0.877)
+    assert skipped == []
+
+
+def test_a_check_that_changes_nothing_keeps_the_calibrated_image_and_says_why(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a skipped check keeps the calibrated image and adds a notice."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(False, []))
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
+
+    assert 'load "colour.fits"' in programs.siril_calls[-1][1]
+    assert "White balance check not applied (only 3 isolated sun-like stars)" in steps
+    assert [(step.step_name, step.reason) for step in skipped] == [
+        ("White balance check", "only 3 isolated sun-like stars")
+    ]
+    assert read_preview_settings(str(stack))["settings_used"]["white_balance_check"]["applied"] is False
+
+
+def test_the_white_balance_check_does_not_run_without_calibrated_colors(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a stack with no calibration, and a mono stack, skip the check."""
+    calls: list[str] = []
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=False)
+    _Programs().install(monkeypatch)
+    _write_colour_stack_with_stars(stack)
+    write_stack_preview(str(stack))
+    fits.writeto(stack, np.full((32, 32), 0.01, dtype=np.float32), overwrite=True)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    write_stack_preview(str(stack))
+
+    assert calls == []
+
+
+def test_siril_saying_its_calibration_is_imprecise_becomes_a_notice(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify Siril's warning is logged, recorded and kept as a notice."""
+    _use_online_catalog(monkeypatch, reachable=True)
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    programs = _Programs(
+        pcc_output="log: The photometric color calibration seems to have found an imprecise solution"
+    )
+    programs.install(monkeypatch)
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
+
+    warned = [step for step in skipped if step.still_used]
+    assert [step.step_name for step in warned] == ["Siril PCC"]
+    assert "imprecise solution" in warned[0].reason
+    recorded = read_preview_settings(str(stack))["settings_used"]
+    assert "imprecise solution" in recorded["colour_calibration_warning"]
+
+
+def test_a_precise_pcc_gives_no_warning(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a calibration without Siril's warning adds none."""
+    _use_online_catalog(monkeypatch, reachable=True)
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    _Programs(pcc_output="log: Photometric Color Calibration succeeded.").install(monkeypatch)
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    write_stack_preview(str(stack), skipped_steps=skipped)
+
+    assert not any(step.still_used for step in skipped)
+    assert "colour_calibration_warning" not in read_preview_settings(str(stack))["settings_used"]
+
+
+def test_the_text_siril_printed_can_be_read_after_a_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `last_siril_output` gives the output of the last script."""
+
+    def fake_run(arguments: list[str], _timeout_seconds: float) -> stack_preview.subprocess.CompletedProcess:
+        """Give a result with some output.
+
+        Returns
+        -------
+        completed : `subprocess.CompletedProcess`
+            A successful result that printed one line.
+        """
+        return stack_preview.subprocess.CompletedProcess(arguments, 0, "log: hello from Siril\n", "")
+
+    monkeypatch.setattr(stack_preview, "run_registered", fake_run)
+    monkeypatch.setattr(stack_preview, "siril_process_lock", nullcontext)
+
+    run_preview_script(str(tmp_path), ["noop"], "siril-cli")
+
+    assert stack_preview.last_siril_output() == "log: hello from Siril\n"

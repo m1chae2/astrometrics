@@ -668,6 +668,14 @@ stacking.star_scale_percentile,STK-D56,measurement,Design estimate
 stacking.star_sigma,STK-D58,measurement,Design estimate
 stacking.stretch_clipped_share_limit,STK-D78,measurement,Design estimate
 stacking.strip_pixels,STK-23,measurement,Partly measured
+stacking.sun_like_annulus_radii_pixels,STK-D86,measurement,Design estimate
+stacking.sun_like_aperture_radius_pixels,STK-D86,measurement,Design estimate
+stacking.sun_like_colour_range,STK-D86,measurement,Design estimate
+stacking.sun_like_isolation_pixels,STK-D86,exclusion criteria,Design estimate
+stacking.sun_like_magnitude_range,STK-D86,measurement,Design estimate
+stacking.sun_like_maximum_correction,STK-D86,judgment,Design estimate
+stacking.sun_like_minimum_stars,STK-D86,measurement,Design estimate
+stacking.sun_like_wide_colour_range,STK-D86,measurement,Design estimate
 stacking.surface_brightness_box_arcsec,STK-D34,judgment,Design estimate
 stacking.surface_brightness_sigma,STK-D34,judgment,Design estimate
 stacking.thin_set_frame_count,STK-D36,judgment,Design estimate

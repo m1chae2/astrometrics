@@ -243,6 +243,11 @@ astrometricslib/pipelines/photometry/session_tie.py,_MAD_TO_SIGMA,Statistical co
 astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety limit on the clipping loop; it settles in two or three rounds
 astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record format version: which header fields a frame record holds; not a measurement
+astrometricslib/pipelines/shared/gaia_star_colors.py,BRIGHTEST_G_MAGNITUDE,Bound of the stored catalog question; the stars that are measured are chosen by stacking.sun_like_magnitude_range.
+astrometricslib/pipelines/shared/gaia_star_colors.py,FAINTEST_G_MAGNITUDE,Bound of the stored catalog question; the stars that are measured are chosen by stacking.sun_like_magnitude_range.
+astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_LIFETIME_DAYS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_TILE_LEVEL,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/shared/gaia_star_colors.py,_ROW_LIMIT,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/image_conversions.py,ImageConverter.convert_fits_to_png_with_stats.max_dimensions,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of the frame or layer; 0 means the first
 astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
@@ -469,6 +474,7 @@ astrometricslib/pipelines/stacking/post_processing/stack_preview.py,_STALE_SCRAT
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_MINIMUM_ROOM,Divide-by-zero guard.
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_SPREAD_SMOOTHING_PER_PIXEL_OF_SPREAD,Fixed share of the spread half-width that hides the edge of the spread square.
 astrometricslib/pipelines/stacking/post_processing/stretch_sky.py,_CLIP_CHECK_SAMPLE_COUNT,"Sample size of the clipped-share check, a speed limit and not a threshold. Design estimate STK-D78."
+astrometricslib/pipelines/stacking/post_processing/sun_like_balance.py,_FIELD_MARGIN_DEGREES,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,EDGE_MARGIN_PX,Display margin so the zoomed view has pixels around the star
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_MINIMUM_FLUX_FRACTION,"Display choice of a reference star, picked by eye; does not act on data"
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_STAR_COUNT,Number of candidate stars offered to the caller for a display; not a detection limit

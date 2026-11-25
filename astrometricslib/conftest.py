@@ -242,12 +242,16 @@ def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Stacking writes a picture of each finished stack by running GraXpert and
     Siril. Tests that stack with a fake driver must not launch the real
-    programs. Tests of the preview code replace these stand-ins with their
-    own.
+    programs, and the white-balance check must not ask the Gaia archive.
+    Tests of the preview code replace these stand-ins with their own.
     """
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.post_processing.stack_preview.run_preview_script",
         lambda directory, commands, siril_executable: False,
+    )
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.sun_like_balance.gaia_star_colors_in_footprint",
+        lambda corners, margin_degrees, **options: None,
     )
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.post_processing.stack_preview.flatten_background",

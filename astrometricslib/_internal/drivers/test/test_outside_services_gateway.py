@@ -10,8 +10,10 @@ for each request.
 
 import itertools
 import multiprocessing
+import sys
 import threading
 import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -603,6 +605,27 @@ class _JobRaising:
         raise self._error
 
 
+def _use_gaia_stand_in(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    """Put a stand-in ``astroquery.gaia`` module in place for one test.
+
+    The test changes a module of its own rather than the shared ``Gaia``
+    object, which other tests may have replaced with a mock: undoing a
+    patch on that mock would remove ``launch_job`` from it for later tests.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The test's patcher, which puts the real module back afterwards.
+    error : `Exception`
+        The error reading the reply raises.
+    """
+    gaia = types.SimpleNamespace(
+        launch_job=lambda *_args, **_kwargs: _JobRaising(error),
+        launch_job_async=lambda *_args, **_kwargs: _JobRaising(error),
+    )
+    monkeypatch.setitem(sys.modules, "astroquery.gaia", types.SimpleNamespace(Gaia=gaia))
+
+
 @pytest.mark.parametrize(
     "parse_error",
     ["1:0: syntax error", "1:0: no element found", "None:2:0: E19: File does not appear to be a VOTABLE"],
@@ -611,23 +634,17 @@ def test_a_gaia_web_page_reply_is_reported_as_the_archive_being_down(
     monkeypatch: pytest.MonkeyPatch, parse_error: str
 ) -> None:
     """A web page in place of a VOTable gives a clear service error."""
-    from astroquery.gaia import Gaia
-
     from astrometricslib._internal.drivers.outside_services import clients
 
-    monkeypatch.setattr(Gaia, "launch_job", lambda *_args, **_kwargs: _JobRaising(ValueError(parse_error)))
+    _use_gaia_stand_in(monkeypatch, ValueError(parse_error))
     with pytest.raises(ExternalServiceError, match="answered with a web page instead of data"):
         clients.gaia_archive_query("SELECT TOP 1 * FROM gaiadr3.gaia_source")
 
 
 def test_any_other_gaia_value_error_is_raised_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     """A value error that is not an unreadable reply keeps its own type."""
-    from astroquery.gaia import Gaia
-
     from astrometricslib._internal.drivers.outside_services import clients
 
-    monkeypatch.setattr(
-        Gaia, "launch_job", lambda *_args, **_kwargs: _JobRaising(ValueError("bad column name"))
-    )
+    _use_gaia_stand_in(monkeypatch, ValueError("bad column name"))
     with pytest.raises(ValueError, match="bad column name"):
         clients.gaia_archive_query("SELECT TOP 1 * FROM gaiadr3.gaia_source")

@@ -416,10 +416,13 @@ astrometricslib/pipelines/stacking/post_processing/bright_object_choices.py,MAXI
 astrometricslib/pipelines/stacking/post_processing/bright_object_choices.py,MAXIMUM_LISTED_OBJECTS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/pipelines/stacking/post_processing/bright_object_choices.py,MINIMUM_LISTED_ARCMIN,"Design choice for which listed objects the menu keeps; a menu filter, not a measurement"
 astrometricslib/pipelines/stacking/post_processing/bright_object_choices.py,MINIMUM_UNNAMED_ARCMIN,"Design choice for which listed objects the menu keeps; a menu filter, not a measurement"
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_FALLBACK_HALO_PIXELS,Halo radius used only when the color stack's star width cannot be measured; the photometry fallback circle.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_GAIA_MARGIN_DEGREES,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_HALO_FILL_MINIMUM_WEIGHT,Least share of outside pixels below which a halo is left gray; numerics.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_LIGHTNESS_OFFSET,Keeps a ratio of lightnesses finite on black pixels; numerics.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MOVING_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_REFERENCE_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
+astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,extended_color.halo_radius_px,Default that turns the halo fill off for callers without star footprints; not a tuning value.
 astrometricslib/pipelines/stacking/post_processing/depth_limits.py,INDEPENDENT_PIXEL_EXPONENT,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/difference_noise.py,PAIRED_BOOTSTRAP_SEED,software plumbing
 astrometricslib/pipelines/stacking/post_processing/empty_apertures.py,APERTURE_FILE_VERSION,software plumbing
@@ -455,6 +458,11 @@ astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_CLI
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_CLIP_SIGMAS,Same clipping as the frame registration; not tuned here.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_EDGE_PIXELS,Margin that keeps cut stars at a stack edge out of the alignment; plumbing.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_MINIMUM_PAIRS,Same fewest-pairs choice as the frame registration; not tuned here.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_HALF_BOX,Half size of the box a star width is measured in; plumbing of a half-maximum width.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_LIMITS,Sanity guard on the measured star width; not tuned.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_PEAKS,Cap on how many peaks the star width is measured on; more only costs time.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_SATURATED_SHARE,Share of the picture's top above which a peak is a burnt-out core; plumbing of a half-maximum width.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_SMOOTHING_PIXELS,Smoothing before the star-width peaks are found; plumbing of a half-maximum width.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,align_with_stars.star_count,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."

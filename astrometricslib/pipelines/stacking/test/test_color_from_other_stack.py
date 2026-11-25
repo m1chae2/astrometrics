@@ -4,9 +4,14 @@ Each test builds small synthetic pictures with Gaussian stars and a plate
 solution (WCS). The alignment must recover a move that differs in scale,
 turn and position, and a small error in the plate solution. A star's color,
 measured on a wide red star of the color stack, must be painted only inside
-the narrow monochrome star. The step must be skipped, with a reason, when
-there is no color stack or the color stack covers too little of the frame.
-StarNet and the Gaia archive are not used.
+the narrow monochrome star. The alignment must also work when the
+monochrome stars are twice as wide as expected, the plate solutions disagree
+by more than the pairing radius, and the monochrome frame lies off the center
+of a wide color frame over a bright nebula (the M 42 and M 45 failure). The
+extended color must lose a tinted sky and the red skirts StarNet leaves
+around stars, and keep a nebula's color. The step must be skipped, with a
+reason, when there is no color stack or the color stack covers too little of
+the frame. StarNet and the Gaia archive are not used.
 """
 
 from pathlib import Path
@@ -26,6 +31,7 @@ from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack i
     ColorStackChoice,
     choose_color_stack,
     compose_color_picture,
+    extended_color,
     make_color_preview_for_target,
     write_color_preview,
 )
@@ -167,6 +173,85 @@ def test_alignment_recovers_scale_turn_and_a_plate_solution_error() -> None:
     assert (
         np.max(np.hypot(mapped_rows - expected_rows[inside], mapped_columns - expected_columns[inside])) < 0.1
     )
+
+
+def test_alignment_survives_wide_stars_a_large_plate_solution_error_and_an_off_center_overlap() -> None:
+    """Wide stars, a 10-pixel plate error and an off-center field still align.
+
+    This is the M 42 and M 45 case: the monochrome stars are about 7 pixels
+    wide (the finder's starting width is 3.5), a bright nebula fills the
+    field, the color frame is 1.42 times coarser and much wider, with the
+    monochrome field on its left side, and the two plate solutions disagree
+    by about 10 pixels, more than the first pairing radius.
+    """
+    stars = sky_stars(1500, seed=11, radius_degrees=0.3)
+    reference_shape = (500, 500)
+    reference_wcs = make_wcs(reference_shape, 1.9, 0.0)
+    reference = render(reference_shape, reference_wcs, stars, 3.0, 0.003, seed=12)
+    yy, xx = np.mgrid[0 : reference_shape[0], 0 : reference_shape[1]]
+    reference += (0.5 * np.exp(-((yy - 250) ** 2 + (xx - 220) ** 2) / (2 * 60.0**2))).astype(np.float32)
+    moving_shape = (500, 900)
+    # The monochrome field sits about 250 columns left of the color center.
+    true_moving_wcs = make_wcs(moving_shape, 1.9 * 1.42, 6.0, shift=(-250.0, 0.0))
+    moving = render(moving_shape, true_moving_wcs, stars, 2.0, 0.003, seed=13)
+    stated_moving_wcs = make_wcs(moving_shape, 1.9 * 1.42, 6.0, shift=(-243.0, -5.0))
+
+    reference_stars = find_bright_stars(reference, 3000, 3.5)
+    assert len(reference_stars) > 100
+    fit = align_with_stars(reference_stars, reference_wcs, moving, stated_moving_wcs, 4.7)
+
+    assert fit is not None
+    assert fit.plate_solution_offset_pixels > 8.0
+    assert fit.residual_pixels < 0.3
+    assert fit.model == "polynomial"
+    columns, rows = true_moving_wcs.world_to_pixel_values(stars[:, 0], stars[:, 1])
+    expected_columns, expected_rows = reference_wcs.world_to_pixel_values(stars[:, 0], stars[:, 1])
+    inside = (expected_rows > 40) & (expected_rows < 460) & (expected_columns > 40) & (expected_columns < 460)
+    mapped_rows, mapped_columns = fit.transform.map_points(rows[inside], columns[inside])
+    distance = np.hypot(mapped_rows - expected_rows[inside], mapped_columns - expected_columns[inside])
+    assert np.median(distance) < 0.3
+
+
+def test_extended_color_drops_a_tinted_sky_and_red_star_skirts_but_keeps_the_nebula() -> None:
+    """A red sky tint and red skirts around stars go; a teal nebula stays teal.
+
+    This is the Nikon 300 mm case: its starless picture has a sky slightly
+    redder than green, and StarNet leaves the faint red outer skirt of each
+    star, because the lens's red stars are wider than its green ones.
+    """
+    size = 300
+    yy, xx = np.mgrid[0:size, 0:size]
+    generator = np.random.default_rng(21)
+    nebula = np.exp(-((yy - 150) ** 2 + (xx - 150) ** 2) / (2 * 30.0**2))
+    mono_starless = (0.1 + 0.4 * nebula + 0.002 * generator.standard_normal((size, size))).astype(np.float32)
+    clean = np.stack([0.1 + 0.15 * nebula, 0.1 + 0.3 * nebula, 0.1 + 0.3 * nebula])
+    labels = np.zeros((size, size), dtype=np.int32)
+    skirts = np.zeros((size, size))
+    star_positions = [(30 + 60 * i, 30 + 60 * j) for i in range(5) for j in range(5) if (i, j) != (2, 2)]
+    for label, (row, column) in enumerate(star_positions, start=1):
+        distance_squared = (yy - row) ** 2 + (xx - column) ** 2
+        labels[distance_squared <= 4] = label
+        skirts += 0.05 * np.exp(-distance_squared / (2 * 5.0**2))
+    noise = 0.002 * generator.standard_normal((3, size, size))
+    tinted = clean + noise
+    tinted[0] += 0.01 + skirts
+    covered = np.ones((size, size), dtype=bool)
+
+    a_value, b_value, statistics = extended_color(
+        mono_starless, tinted.astype(np.float32), covered, labels, halo_radius_px=12.0
+    )
+    reference_a, reference_b, _ = extended_color(mono_starless, (clean + noise).astype(np.float32), covered)
+    old_a, _, _ = extended_color(mono_starless, tinted.astype(np.float32), covered)
+
+    assert statistics["sky_tint_removed_rgb"][0] > 0.005
+    # Beside a star the red skirt was strongly red before; it is gray now.
+    row, column = star_positions[0]
+    assert old_a[row, column + 5] > 3.0
+    assert abs(a_value[row, column + 5]) < 1.0
+    # The nebula keeps its color.
+    assert a_value[150, 150] == pytest.approx(reference_a[150, 150], abs=1.0)
+    assert b_value[150, 150] == pytest.approx(reference_b[150, 150], abs=1.0)
+    assert a_value[150, 150] < -5.0
 
 
 def make_star_field(seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[int, int]]]:

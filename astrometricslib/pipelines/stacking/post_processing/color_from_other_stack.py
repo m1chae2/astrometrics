@@ -18,13 +18,19 @@ stacks are never changed.
    step is skipped when the two grids do not agree well enough or when the
    color stack does not cover enough of the monochrome frame.
 3. *Color of the extended light.* StarNet (run through Siril) takes the
-   stars out of both pictures. The starless color picture is turned into
-   CIE Lab, a color space with one lightness channel (L) and two color
-   channels (a, b). Its color channels are blurred, so the color stack's
-   noise does not show, and scaled so the color keeps its strength at the
-   monochrome picture's lightness. The color fades in where the color
-   stack's starless picture stands from 2 to 8 noise widths above its sky,
-   so the noisy sky stays gray.
+   stars out of both pictures. The starless color picture's sky is made gray
+   first: the red, green and blue levels of its darkest sky, away from the
+   stars, are brought to their mean, as the sky levelling of a color preview
+   does. It is then turned into CIE Lab, a color space with one lightness
+   channel (L) and two color channels (a, b). Its color channels are
+   blurred, so the color stack's noise does not show, and scaled so the
+   color keeps its strength at the monochrome picture's lightness. The color
+   fades in where the color stack's starless picture stands from 2 to 8
+   noise widths above its sky, so the noisy sky stays gray. StarNet leaves
+   the faint outer skirt of each color star behind, and a lens whose red
+   stars are wider than its green ones (such as the Nikkor at 300 mm) leaves
+   it red. So around each monochrome star, out to a few color-stack star
+   widths, the color is replaced by the color of the light just beyond.
 4. *Color of the stars.* Each star's color is measured once on the linear
    color stack and painted only inside the monochrome star (see
    `star_color_measurement`).
@@ -101,14 +107,18 @@ from astrometricslib.pipelines.stacking.processing.image_registration import war
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "COLOR_PREVIEW_HALO_WIDTHS",
     "COLOR_PREVIEW_MAXIMUM_ALIGNMENT_RMS_PIXELS",
     "COLOR_PREVIEW_MINIMUM_COVERAGE",
+    "COLOR_PREVIEW_SKY_SHARE",
     "ColorPreviewOutcome",
     "ColorStackChoice",
     "choose_color_stack",
     "compose_color_picture",
     "extended_color",
+    "fill_halos",
     "make_color_preview_for_target",
+    "neutralize_sky",
     "write_color_preview",
 ]
 
@@ -119,8 +129,10 @@ STEP_NAME = "Color from another stack"
 # picture and on the linear color stack. It sizes the star finder's template.
 # Measured on M 27: the ZWO ASI533MM picture's stars are about 3.5 pixels
 # across; the stretched Nikon D5300 picture's about 6, and its linear stack's
-# about 4 (STK-62). The finder is not sensitive to a width that is off by a
-# pixel or two.
+# about 4 (STK-62). They are only the starting guess: the alignment measures
+# the star width on each picture and uses that (see `other_stack_alignment`),
+# because the ZWO stars of M 42 and M 45 were about 7 pixels wide, and a 3.5
+# pixel template found 5 stars on M 42.
 COLOR_PREVIEW_STAR_WIDTHS_PIXELS = TunedParameter(
     name="stacking.color_preview_star_widths_pixels",
     default=(3.5, 6.0, 4.0),
@@ -234,6 +246,49 @@ COLOR_PREVIEW_STAR_CORE_TAPER = TunedParameter(
     kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-62",
 )
+
+# The darkest share of the covered frame, away from the stars, whose red,
+# green and blue levels are taken as the sky of the starless color picture
+# and brought to gray. The Nikon D5300 pictures at 300 mm of M 101, M 13 and
+# M 81 had a sky about 1.5 levels (of 255) redder than green in the color
+# picture; a quarter of the frame is sky on every target tried, nebula
+# fields included, while a half reached the faint galaxy disk of M 81
+# (STK-62).
+COLOR_PREVIEW_SKY_SHARE = TunedParameter(
+    name="stacking.color_preview_sky_share",
+    default=0.25,
+    unit="fraction of the covered frame",
+    description="Darkest share of the frame, away from stars, taken as the color picture's sky.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-62",
+)
+
+# How far past each monochrome star's footprint the extended color is
+# replaced by the color just beyond, in widths of the color stack's widest
+# star (red or green). The color previews of M 101, M 13 and M 81 (Nikon
+# D5300, 300 mm, red stars about 40% wider than green) showed red skirts out
+# to about 10 to 20 pixels from a star, which two widths reach (STK-62).
+COLOR_PREVIEW_HALO_WIDTHS = TunedParameter(
+    name="stacking.color_preview_halo_widths",
+    default=2.0,
+    unit="color-stack star widths",
+    description="How far past a star's footprint its color skirt is replaced, in color-stack star widths.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-62",
+)
+
+# The halo radius used when the color stack's star width could not be
+# measured, in pixels: the 8 pixel circle of the photometry fallback.
+# Not tuned.
+_FALLBACK_HALO_PIXELS = 8.0
+
+# Where fewer than this share of the pixels around a halo lie outside every
+# halo (the core of a dense cluster), the halo is gray. Not tuned.
+_HALO_FILL_MINIMUM_WEIGHT = 0.05
 
 # The most stars found on the monochrome picture for the alignment, and on
 # each color image. Enough for a quadratic fit in every quarter; more only
@@ -453,11 +508,73 @@ def _to_lab(channels_first: np.ndarray) -> np.ndarray:
     return rgb2lab(np.clip(np.moveaxis(np.asarray(channels_first), 0, -1), 0.0, 1.0)).astype(np.float32)
 
 
+def neutralize_sky(color_starless: np.ndarray, sky: np.ndarray) -> tuple[np.ndarray, list[float]]:
+    """Bring the sky of a color picture to gray.
+
+    Each channel is shifted so its median over the sky pixels equals the mean
+    of the three medians. The sky's brightness is kept; only its tint goes.
+
+    Parameters
+    ----------
+    color_starless : `numpy.ndarray`
+        The color picture, shape (3, rows, columns), values 0 to 1.
+    sky : `numpy.ndarray`
+        Where the picture shows sky.
+
+    Returns
+    -------
+    picture : `numpy.ndarray`
+        The picture with a gray sky, clipped to 0 to 1.
+    offsets : `list` [`float`]
+        What was taken from the red, green and blue channels.
+    """
+    picture = np.asarray(color_starless, dtype=np.float32)
+    if not sky.any():
+        return picture, [0.0, 0.0, 0.0]
+    levels = np.array([float(np.median(picture[channel][sky])) for channel in range(3)])
+    offsets = levels - levels.mean()
+    picture = np.clip(picture - offsets[:, None, None].astype(np.float32), 0.0, 1.0)
+    return picture, [float(value) for value in offsets]
+
+
+def fill_halos(chroma: np.ndarray, halos: np.ndarray, radius_px: float) -> np.ndarray:
+    """Replace the color inside the star halos with the color just beyond.
+
+    The color outside the halos is spread inward by a Gaussian average that
+    counts only pixels outside every halo (a normalized blur), so each halo
+    takes the mean color of the light around it.
+
+    Parameters
+    ----------
+    chroma : `numpy.ndarray`
+        One CIE Lab color channel (``a`` or ``b``).
+    halos : `numpy.ndarray`
+        Where the color is replaced.
+    radius_px : `float`
+        The halo radius; the width of the Gaussian average.
+
+    Returns
+    -------
+    chroma : `numpy.ndarray`
+        The channel with the halos filled; gray (zero) where almost nothing
+        around a halo lies outside every halo.
+    """
+    if not halos.any():
+        return chroma
+    outside = (~halos).astype(np.float32)
+    weight = ndimage.gaussian_filter(outside, radius_px)
+    spread = ndimage.gaussian_filter(chroma * outside, radius_px)
+    filled = np.where(weight > _HALO_FILL_MINIMUM_WEIGHT, spread / np.maximum(weight, 1e-6), 0.0)
+    return np.where(halos, filled, chroma).astype(np.float32)
+
+
 def extended_color(
     mono_starless: np.ndarray,
     color_starless: np.ndarray,
     covered: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    star_labels: np.ndarray | None = None,
+    halo_radius_px: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Find the color of the extended light on the monochrome grid.
 
     Parameters
@@ -469,42 +586,68 @@ def extended_color(
         (3, rows, columns).
     covered : `numpy.ndarray`
         Where the moved color picture holds real data.
+    star_labels : `numpy.ndarray`, optional
+        The monochrome star footprints (nonzero inside a star). With them,
+        the sky is taken away from the stars and the star halos are filled
+        (see `fill_halos`).
+    halo_radius_px : `float`, optional
+        How far past each footprint the halo reaches, in pixels. Zero leaves
+        the halos alone.
 
     Returns
     -------
     chroma_a, chroma_b : `numpy.ndarray`
         The CIE Lab ``a`` and ``b`` of each pixel: zero (gray) where the
         color stack's signal is weak or where it does not cover.
-    statistics : `dict` [`str`, `float`]
-        The color stack's sky level and pixel noise, and the shares of the
-        frame with full color and with none.
+    statistics : `dict` [`str`, `Any`]
+        The color stack's sky level and pixel noise, the sky tint taken
+        away, the halo radius, and the shares of the frame with full color
+        and with none.
     """
     blur, _ = (float(value) for value in resolve(COLOR_PREVIEW_CHROMA_BLUR_PIXELS).value)
     fade_low, fade_high, fade_blur = (float(value) for value in resolve(COLOR_PREVIEW_COLOR_FADE).value)
     ratio_low, ratio_high = (float(value) for value in resolve(COLOR_PREVIEW_LIGHTNESS_RATIO_LIMITS).value)
     gain = float(resolve(COLOR_PREVIEW_NEBULA_CHROMA_GAIN).value)
+    if star_labels is not None and np.any(star_labels):
+        distance = ndimage.distance_transform_edt(star_labels == 0)
+        halos = distance <= halo_radius_px
+        away_from_stars = covered & (distance > max(halo_radius_px, 1.0))
+    else:
+        halos = np.zeros(covered.shape, dtype=bool)
+        away_from_stars = covered
+    sky = np.zeros(covered.shape, dtype=bool)
+    if away_from_stars.any():
+        share = float(resolve(COLOR_PREVIEW_SKY_SHARE).value)
+        level = float(np.quantile(mono_starless[away_from_stars], share))
+        sky = away_from_stars & (mono_starless <= level)
+    color_starless, sky_offsets = neutralize_sky(color_starless, sky)
     lab = _to_lab(color_starless)
     chroma_a = ndimage.gaussian_filter(lab[..., 1], blur)
     chroma_b = ndimage.gaussian_filter(lab[..., 2], blur)
     color_lightness = ndimage.gaussian_filter(lab[..., 0], blur)
     del lab
+    if halo_radius_px > 0.0:
+        chroma_a = fill_halos(chroma_a, halos, halo_radius_px)
+        chroma_b = fill_halos(chroma_b, halos, halo_radius_px)
     mono_lightness = ndimage.gaussian_filter(_lightness(mono_starless), blur)
     ratio = np.clip(
         (mono_lightness + _LIGHTNESS_OFFSET) / (color_lightness + _LIGHTNESS_OFFSET), ratio_low, ratio_high
     )
-    gray = np.asarray(color_starless, dtype=np.float32).mean(axis=0)
-    sky = float(np.median(gray[covered])) if covered.any() else 0.0
+    gray = color_starless.mean(axis=0)
+    sky_level = float(np.median(gray[covered])) if covered.any() else 0.0
     pixel_noise = float(robust_sigma((gray - ndimage.median_filter(gray, 5))[::3, ::3].ravel()))
     # The noise of a Gaussian-weighted mean of independent pixels.
     smooth_noise = max(pixel_noise / (2.0 * np.sqrt(np.pi) * fade_blur), 1e-12)
-    signal_to_noise = (ndimage.gaussian_filter(gray, fade_blur) - sky) / smooth_noise
+    signal_to_noise = (ndimage.gaussian_filter(gray, fade_blur) - sky_level) / smooth_noise
     fade = np.clip((signal_to_noise - fade_low) / (fade_high - fade_low), 0.0, 1.0)
     fade = fade * fade * (3.0 - 2.0 * fade)
     fade[~covered] = 0.0
     scale = ratio * fade * gain
     statistics = {
-        "color_starless_sky": round(sky, 5),
+        "color_starless_sky": round(sky_level, 5),
         "color_pixel_noise": round(pixel_noise, 5),
+        "sky_tint_removed_rgb": [round(value, 5) for value in sky_offsets],
+        "halo_radius_pixels": round(float(halo_radius_px), 2),
         "fraction_full_color": round(float(np.mean(fade > 0.99)), 4),
         "fraction_no_color": round(float(np.mean(fade < 0.01)), 4),
     }
@@ -820,8 +963,6 @@ def write_color_preview(
     del color_starless_original
     color_starless = np.clip(color_starless, 0.0, 1.0)
 
-    extended_a, extended_b, record["extended"] = extended_color(mono_starless, color_starless, covered)
-    del color_starless
     gaia_stars, gaia_note = _gaia_colors(mono_wcs, shape)
     if gaia_note:
         record["notes"].append(gaia_note.strip(" ()").capitalize() + ".")
@@ -829,6 +970,16 @@ def write_color_preview(
         luminance, mono_starless, linear_on_grid, covered, mono_wcs, gaia_stars, gaia_note
     )
     del linear_on_grid
+    color_widths = star_colors.record.get("color_star_width_pixels_rgb")
+    halo_radius = (
+        float(resolve(COLOR_PREVIEW_HALO_WIDTHS).value) * max(float(color_widths[0]), float(color_widths[1]))
+        if color_widths
+        else _FALLBACK_HALO_PIXELS
+    )
+    extended_a, extended_b, record["extended"] = extended_color(
+        mono_starless, color_starless, covered, footprints.labels, halo_radius
+    )
+    del color_starless
     pixel_a, pixel_b = _pixel_color(luminance, warped_picture)
     picture = compose_color_picture(
         luminance, footprints, star_colors, extended_a, extended_b, pixel_a, pixel_b

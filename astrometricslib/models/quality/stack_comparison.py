@@ -49,6 +49,13 @@ class StackMeasurements(BaseModel):
     # Median star width (FWHM) in pixels, from a Gaussian fit. `None` if too
     # few stars could be fitted.
     fwhm_px: float | None = Field(default=None, alias="fwhmPx")
+    # The `StarWidthEstimator` of ``fwhm_px``: ``"stack Gaussian"``. `None`
+    # with no width.
+    fwhm_estimator: str | None = Field(default=None, alias="fwhmEstimator")
+    # ``fwhm_px`` on the library's one star-width scale (the per-frame
+    # Gaussian of the brightest stars), in pixels, with the stack Gaussian's
+    # ratio. `None` with no width.
+    fwhm_on_scale_px: float | None = Field(default=None, alias="fwhmOnScalePx")
     # Share of pixels at exactly zero, a sign of a blank or over-subtracted
     # stack (the empty edge of a registered stack counts).
     zero_fraction: float | None = Field(default=None, alias="zeroFraction")

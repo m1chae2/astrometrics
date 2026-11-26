@@ -157,7 +157,7 @@ def test_star_widths_measures_the_made_star_width(records: QualityBlocks) -> Non
     assert len(widths.widths_px) == 1
     assert widths.widths_px[0] == pytest.approx(2.3548 * STAR_SIGMA, rel=0.15)
     assert widths.estimator == "preview channel second moment"
-    assert widths.widths_on_scale_px == [None]
+    assert "widths_on_scale_px" not in widths.model_dump()
 
 
 def test_star_widths_of_a_color_image_gives_one_width_per_channel(records: QualityBlocks) -> None:

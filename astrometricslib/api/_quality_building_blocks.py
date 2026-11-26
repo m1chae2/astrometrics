@@ -563,9 +563,10 @@ class QualityBlocks:
         Each star's width is the spread of its light around its center (the
         second moment), given as the full width at half maximum (FWHM) of a
         Gaussian star of that spread. A channel's width is the median over
-        the stars. No ratio of this estimator to the library's one
-        star-width scale has been measured, so compare its widths only with
-        each other. Nothing is stored.
+        the stars. The widths are for comparing the color channels of one
+        image with each other (the preview's channel matching), not one image
+        with another; `QualityRecords.measure_star_profile` gives widths on
+        the library's one star-width scale. Nothing is stored.
 
         Parameters
         ----------
@@ -586,8 +587,7 @@ class QualityBlocks:
         widths : `ChannelStarWidths`
             Fields: ``widths_px`` (one FWHM per channel, red, green and blue
             for a color image; empty with no stars; NaN for a channel where
-            no star could be measured), ``estimator``,
-            ``widths_on_scale_px`` (`None` per channel) and ``star_count``.
+            no star could be measured), ``estimator`` and ``star_count``.
         """
         from astrometricslib.pipelines.stacking.post_processing.star_width_match import (
             find_measurable_stars,
@@ -608,9 +608,7 @@ class QualityBlocks:
                 dtype=np.float64,
             ).reshape(-1, 2)
         widths = [float(width) * read.cell for width in measure_channel_widths(cube, stars)]
-        return ChannelStarWidths(
-            widths_px=widths, widths_on_scale_px=[None] * len(widths), star_count=len(stars)
-        )
+        return ChannelStarWidths(widths_px=widths, star_count=len(stars))
 
     def measure_sky_gradient(self, image: ImageInput, *, debayer: bool = False) -> SkyGradient:
         """Measure how much the sky tilts across a frame, as the preview does.

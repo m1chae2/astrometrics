@@ -140,7 +140,10 @@ class ChannelStarWidths(BaseModel):
     This is the width the color preview uses to match its channels' star
     widths: the spread of each star's light around its center (its second
     moment), given as the full width at half maximum (FWHM) of a Gaussian
-    star of that spread, and the median over the stars.
+    star of that spread, and the median over the stars. These widths are for
+    comparing the color channels of one image with each other, not one image
+    with another. `QualityRecords.measure_star_profile` gives widths on the
+    library's one star-width scale.
 
     Parameters
     ----------
@@ -151,17 +154,12 @@ class ChannelStarWidths(BaseModel):
     estimator : `str`
         The estimator's name, ``"preview channel second moment"``. It is not
         one of the `StarWidthEstimator` members.
-    widths_on_scale_px : `list` [`float` or `None`]
-        The widths on the library's one star-width scale. `None` for each
-        channel: no ratio of this estimator to the scale has been measured
-        yet, so compare these widths only with each other.
     star_count : `int`
         How many stars were measured.
     """
 
     widths_px: list[float]
     estimator: str = "preview channel second moment"
-    widths_on_scale_px: list[float | None]
     star_count: int
 
 

@@ -4850,8 +4850,11 @@ export interface StackQualityReport {
   target_id?: string | null;
   included?: string[];
   fwhm_px?: number | null;
+  fwhm_estimator?: string | null;
+  fwhm_on_scale_px?: number | null;
   rejected_fraction?: number | null;
   registration?: RegistrationRow[] | null;
+  registration_fwhm_estimator?: string | null;
   comparison?: StackComparison | null;
   notes?: string[];
 }
@@ -6562,6 +6565,8 @@ export interface StackMeasurements {
   flatnessRms?: number | null;
   flatnessPeakToPeak?: number | null;
   fwhmPx?: number | null;
+  fwhmEstimator?: string | null;
+  fwhmOnScalePx?: number | null;
   zeroFraction?: number | null;
   notMeasured?: Record<string, string>;
   notes?: string[];

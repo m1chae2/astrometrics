@@ -22,16 +22,28 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import StarWidthEstimator, star_width_on_scale
 from astrometricslib.models.quality.quality_reports import InputQualityReport, RawFrameCheckReport
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import frame_selection, frame_statistics
 from astrometricslib.pipelines.shared.quality.frame_trends import MINIMUM_FRAMES, find_trends
+from astrometricslib.pipelines.shared.quality.star_width_labels import (
+    RAW_CHECK_WIDTH_ESTIMATOR,
+    no_ratio_reason,
+)
 
 __all__ = ["input_quality_report", "raw_check_report"]
 
 INPUT_QUALITY_METRICS = ("background_level", "saturated_pixel_fraction", "measured_fwhm_px")
 """The numbers `input_quality_report` gives for each frame."""
+
+FWHM_ON_SCALE_KEY = "measured_fwhm_on_scale_px"
+"""The row key of a frame's ``measured_fwhm_px`` on the one width scale."""
+
+INPUT_QUALITY_ESTIMATOR = StarWidthEstimator.FRAME_GAUSSIAN
+"""The estimator of ``measured_fwhm_px``: the frame Gaussian of
+`measure_fwhm_from_data`, as `measure_frame_input_quality` records it."""
 
 SKY_RATE_KEY = "sky_rate_e_per_s_per_px"
 """The row key for a frame's stored sky rate (electrons per second per pixel),
@@ -149,6 +161,8 @@ def raw_check_report(
         target_id=target.id,
         frames_matching=matching,
         frames_checked=len(paths),
+        fwhm_estimator=RAW_CHECK_WIDTH_ESTIMATOR,
+        fwhm_not_on_scale_reason=no_ratio_reason(RAW_CHECK_WIDTH_ESTIMATOR),
     )
     if not paths:
         return report.model_copy(update={"batch": {"frame_count": 0}})
@@ -234,8 +248,13 @@ def input_quality_report(
         }
         for frame in working.frames
     ]
+    for row in rows:
+        width = row["measured_fwhm_px"]
+        row[FWHM_ON_SCALE_KEY] = (
+            None if width is None else float(star_width_on_scale(float(width), INPUT_QUALITY_ESTIMATOR))
+        )
     summary = {}
-    for name in INPUT_QUALITY_METRICS:
+    for name in (*INPUT_QUALITY_METRICS, FWHM_ON_SCALE_KEY):
         values = sorted(row[name] for row in rows if row[name] is not None)
         summary[name] = (
             {
@@ -260,6 +279,7 @@ def input_quality_report(
         spectral_light_frames_in_target=sum(1 for frame in every_light if frame_is_spectral(frame)),
         frames_matching=frames_matching,
         frames_measured=len(rows),
+        fwhm_estimator=INPUT_QUALITY_ESTIMATOR.value if summary["measured_fwhm_px"]["frames"] else None,
         counts=counts,
         summary=summary,
         trends=trends,

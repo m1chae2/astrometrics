@@ -61,9 +61,10 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
 from astrometricslib.foundation.errors import ExternalServiceError
-from astrometricslib.foundation.offline import network_is_offline, require_online
+from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -292,10 +293,7 @@ def _run_gaia_query(adql_query: str) -> Any:
     result_table : `astropy.table.Table` or `None`
         The rows Gaia returned.
     """
-    require_online("the Gaia archive")
-    from astroquery.gaia import Gaia
-
-    return Gaia.launch_job(adql_query, dump_to_file=False).get_results()
+    return outside_services.gaia_archive_query(adql_query)
 
 
 def _run_with_timeout(run_query: Callable[[str], Any], adql_query: str, timeout_seconds: float) -> Any:
@@ -328,7 +326,7 @@ def _run_with_timeout(run_query: Callable[[str], Any], adql_query: str, timeout_
         """Run the query and store its rows or its error."""
         try:
             outcome["table"] = run_query(adql_query)
-        except ONLINE_QUERY_ERRORS as query_error:
+        except (ExternalServiceError, *ONLINE_QUERY_ERRORS) as query_error:
             outcome["error"] = query_error
 
     worker = threading.Thread(target=contextvars.copy_context().run, args=(work,), daemon=True)

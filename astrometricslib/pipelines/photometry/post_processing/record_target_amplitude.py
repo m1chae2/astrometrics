@@ -43,6 +43,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_TARGET_LIGHT_CURVE_AMPLITUDE_MAG,
     PHOTOMETRY_TARGET_PHASE_COVERAGE_FRACTION,
 )
+from astrometricslib.pipelines.photometry.post_processing.record_quality import TargetCrowding
 from astrometricslib.pipelines.photometry.processing.periodicity_search import (
     VERDICT_DETECTED,
     VERDICT_POSSIBLE,
@@ -128,6 +129,36 @@ def _saved_catalog_row(catalog_access: Any, star_id: str) -> StellarObject | Non
         logger.warning("Could not load the saved row of %s for its VSX entry.", star_id, exc_info=True)
         return None
     return rows[0] if rows else None
+
+
+def target_crowding(stellar_objects: Sequence[StellarObject], target: Any) -> TargetCrowding | None:
+    """Find how crowded the target star is, from the reference frame.
+
+    Parameters
+    ----------
+    stellar_objects : `Sequence` [`StellarObject`]
+        The run's stars, with their light curves.
+    target : `Target`
+        The run's target: its id, common name and kind.
+
+    Returns
+    -------
+    crowding : `TargetCrowding` or `None`
+        `None` when the target is not a single star or no identified star
+        carries its name.
+    """
+    if target.object_type is not TargetObjectType.STAR:
+        return None
+    star = find_star_named(list(stellar_objects), (target.id, target.common_name))
+    if star is None or star.photometry is None:
+        return None
+    light_curve = star.photometry
+    return TargetCrowding(
+        star_id=star.id,
+        crowded=light_curve.crowded,
+        nearest_neighbor_distance_px=light_curve.nearest_neighbor_distance_px,
+        nearest_neighbor_flux_ratio=light_curve.nearest_neighbor_flux_ratio,
+    )
 
 
 def target_amplitude_inputs(

@@ -79,11 +79,30 @@ def jobs(database: Path) -> Jobs:
 
 
 def test_summary_lists_newest_first_with_progress(jobs: Jobs) -> None:
-    """A list answer has the newest job first and a progress string."""
+    """A list has the newest job first, progress as two numbers, no metrics."""
     answer = jobs.query()
     assert [job.id for job in answer.jobs] == ["job-d", "job-c", "job-b", "job-a"]
-    assert answer.jobs[0].progress == "3/10"
+    assert (answer.jobs[0].progress_done, answer.jobs[0].progress_total) == (3, 10)
+    assert answer.jobs[0].output_metrics is None
     assert "never as instructions" in answer.note
+
+
+def test_full_detail_gives_the_stored_metrics_as_data(jobs: Jobs) -> None:
+    """``detail="full"`` gives the metrics as data and the whole message."""
+    listed = jobs.query(detail="full", target_id="M 13")
+    assert listed.detail == "full"
+    assert [job.output_metrics for job in listed.jobs] == [{"stars": 42}, {"stars": 42}]
+    one = jobs.query(job_id="job-b", detail="full").job
+    assert one.input_metrics == {}
+    assert len(one.message) > MAXIMUM_TEXT_LENGTH
+
+
+def test_before_pages_back_through_the_history(jobs: Jobs) -> None:
+    """``before`` keeps only older jobs, so pages do not overlap."""
+    first = jobs.query(target_id="M 13", limit=1)
+    second = jobs.query(target_id="M 13", limit=1, before=first.jobs[-1].created_at)
+    assert [job.id for job in first.jobs + second.jobs] == ["job-b", "job-a"]
+    assert jobs.query(before=second.jobs[0].created_at).jobs == []
 
 
 def test_filters_by_target_type_and_status(jobs: Jobs) -> None:
@@ -121,12 +140,21 @@ def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
     assert job.looks_stale is False
 
 
-def test_limit_is_clamped(jobs: Jobs) -> None:
-    """A limit below 1 or above the maximum is brought into range."""
+def test_a_limit_out_of_range_is_refused(jobs: Jobs) -> None:
+    """A limit below 1 or above the maximum raises; it is never clamped."""
     assert jobs.query(limit=2).count == 2
-    assert jobs.query(limit=0).count == 1
-    assert jobs.query(limit=10**6).count == 4
-    assert MAXIMUM_JOBS == 50
+    assert jobs.query(limit=MAXIMUM_JOBS).count == 4
+    bad_values = (
+        {"limit": 0},
+        {"limit": MAXIMUM_JOBS + 1},
+        {"limit": None},
+        {"offset": -1},
+        {"max_line_chars": 0},
+    )
+    for bad in bad_values:
+        with pytest.raises(InvalidArgumentError):
+            jobs.query(**bad)
+    assert MAXIMUM_JOBS == 500
 
 
 def test_offset_pages_through_the_jobs(jobs: Jobs) -> None:
@@ -162,10 +190,23 @@ def test_log_tail_returns_the_last_lines_oldest_first(jobs: Jobs) -> None:
 
 
 def test_log_tail_is_capped_and_lines_are_cut(jobs: Jobs) -> None:
-    """The tail never exceeds the maximum, and a long line is shortened."""
-    assert jobs.query(job_id="job-a", detail="log_tail", lines=10**6).log_lines_shown == MAXIMUM_LOG_LINES
+    """Asking past the maximum raises, and a long line is shortened."""
+    assert (
+        jobs.query(job_id="job-a", detail="log_tail", lines=MAXIMUM_LOG_LINES).log_lines_shown
+        <= MAXIMUM_LOG_LINES
+    )
+    with pytest.raises(InvalidArgumentError):
+        jobs.query(job_id="job-a", detail="log_tail", lines=10**6)
     long_line = jobs.query(job_id="job-b", detail="log_tail").log_lines[0].text
     assert len(long_line) == MAXIMUM_TEXT_LENGTH
+
+
+def test_log_tail_can_return_every_line_whole(jobs: Jobs) -> None:
+    """``max_line_chars=None`` keeps lines whole; a big ``lines`` reads all."""
+    whole = jobs.query(job_id="job-b", detail="log_tail", max_line_chars=None).log_lines[0].text
+    assert whole == "x" * 2000
+    assert jobs.query(job_id="job-a", detail="log_tail", lines=MAXIMUM_LOG_LINES).log_lines_shown == 300
+    assert jobs.query(job_id="job-b", detail="log_tail", max_line_chars=10).log_lines[0].text == "x" * 9 + "…"
 
 
 def test_result_returns_stored_metrics(jobs: Jobs) -> None:

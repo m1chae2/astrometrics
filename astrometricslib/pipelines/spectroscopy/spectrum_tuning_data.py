@@ -22,16 +22,14 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
+from astrometricslib.utilities.table_cells import optional_float
 
 # How many stars are loaded from the library at once.
 _LOAD_CHUNK_SIZE = 200
 
 # The names a frame's filter takes when it is the spectroscopy grating.
 _SPECTRAL_FILTER_NAMES = ("SPEC", "STAR ANALYZER 200", "SPECTROSCOPY")
-
-# The scale that turns the median absolute deviation into the standard
-# deviation of a normal distribution.
-MEDIAN_ABSOLUTE_DEVIATION_TO_SIGMA = 1.4826
 
 
 @dataclass(frozen=True)
@@ -101,26 +99,6 @@ def require_spectral_filter(inputs: TuningInputs) -> None:
         raise TuningSkippedError(f"{inputs.filter_name!r} is not the spectroscopy grating")
 
 
-def _optional_float(value: Any) -> float | None:
-    """Read a stored number that may be missing or not a number.
-
-    Parameters
-    ----------
-    value : `Any`
-        The stored value.
-
-    Returns
-    -------
-    number : `float` or `None`
-        The value as a finite float, or `None`.
-    """
-    try:
-        number = float(value)
-    except TypeError, ValueError:
-        return None
-    return number if np.isfinite(number) else None
-
-
 def stored_star_spectrum(star: Any) -> StoredStarSpectrum | None:
     """Make a record from one library star.
 
@@ -169,13 +147,13 @@ def stored_star_spectrum(star: Any) -> StoredStarSpectrum | None:
         intensity_error=matching(spectrum.intensity_errors),
         quantum_efficiency_corrected=matching(spectrum.quantum_efficiency_corrected_intensities),
         response_corrected=matching(spectrum.response_corrected_intensities),
-        resolution_element_angstrom=_optional_float(spectrum.resolution_element_angstrom),
+        resolution_element_angstrom=optional_float(spectrum.resolution_element_angstrom),
         trail_width_px=matching(spectrum.trail_width_px),
         catalog_type=str(star.spectral_type or ""),
-        catalog_b_minus_v=_optional_float(star.b_minus_v),
-        own_rms=_optional_float(spectrum.self_determined_spectral_type_rms),
-        gaia_residual_rms=_optional_float(comparison.residual_rms_fraction) if compared else None,
-        gaia_slope_percent=_optional_float(comparison.slope_percent_per_1000_angstrom) if compared else None,
+        catalog_b_minus_v=optional_float(star.b_minus_v),
+        own_rms=optional_float(spectrum.self_determined_spectral_type_rms),
+        gaia_residual_rms=optional_float(comparison.residual_rms_fraction) if compared else None,
+        gaia_slope_percent=optional_float(comparison.slope_percent_per_1000_angstrom) if compared else None,
     )
 
 
@@ -209,23 +187,6 @@ def load_stored_star_spectra(astrometrics: Any) -> list[StoredStarSpectrum]:
     if not spectra:
         raise TuningSkippedError("the library holds no stored star spectra")
     return spectra
-
-
-def robust_sigma(values: Sequence[float] | np.ndarray) -> float:
-    """Estimate the spread of values that a few outliers cannot inflate.
-
-    Parameters
-    ----------
-    values : `Sequence` [`float`] or `numpy.ndarray`
-        The values.
-
-    Returns
-    -------
-    sigma : `float`
-        1.4826 times the median absolute deviation.
-    """
-    array = np.asarray(values, dtype=float)
-    return MEDIAN_ABSOLUTE_DEVIATION_TO_SIGMA * float(np.median(np.abs(array - np.median(array))))
 
 
 def upper_limit_from_spread(values: Sequence[float] | np.ndarray, sigma_multiple: float) -> float:

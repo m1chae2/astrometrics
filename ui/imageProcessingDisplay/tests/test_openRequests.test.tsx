@@ -50,7 +50,7 @@ import { ImageProcessingDisplay } from '../ImageProcessingDisplay';
 /** Answers each backend method with an empty but valid reply. */
 function answer(method: string): unknown {
     if (method === 'target:get_frames_grouped') return [];
-    if (method === 'processing:list_jobs') return [];
+    if (method === 'jobs:query') return { detail: 'full', jobs: [] };
     if (method === 'astronomy:get_overlay_stars') return { stars: [], reason: 'No sky solution' };
     if (method === 'calibration:query') return { darks: [], biases: [], flats: [] };
     return null;
@@ -86,7 +86,6 @@ describe('Image Processing backend calls on open', () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         const counts = countsByMethod();
         console.info('Image Processing calls on open:', JSON.stringify(counts));
-        expect(counts['processing:list_jobs']).toBeUndefined();
         expect(counts['jobs:query']).toBeUndefined();
         expect(counts['astronomy:get_overlay_stars']).toBeUndefined();
         expect(counts['target:get_frames_grouped']).toBe(1);
@@ -96,6 +95,6 @@ describe('Image Processing backend calls on open', () => {
         renderDisplay();
         await new Promise((resolve) => setTimeout(resolve, 50));
         await userEvent.click(screen.getByRole('tab', { name: 'Analysis' }));
-        await waitFor(() => expect(countsByMethod()['processing:list_jobs']).toBeGreaterThan(0));
+        await waitFor(() => expect(countsByMethod()['jobs:query']).toBeGreaterThan(0));
     });
 });

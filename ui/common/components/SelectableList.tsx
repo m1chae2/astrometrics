@@ -1,7 +1,18 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Button } from './Button';
 import { EmptyState } from './EmptyState';
+import { Badge, type BadgeTone } from './Badge';
 import '../../common/styles/listCommon.css';
+
+/** A small badge drawn after a row's name, such as "NB" for a notebook. */
+export interface SelectableItemBadge {
+    /** The badge text. Keep it to a word or two letters. */
+    label: string;
+    /** The badge color. Leave it out for neutral grey. */
+    tone?: BadgeTone;
+    /** Hover text that says what the badge means, such as "Jupyter notebook". */
+    title?: string;
+}
 
 export interface SelectableItem {
     id: string;
@@ -23,6 +34,12 @@ export interface SelectableItem {
     hasCatalogMagnitude?: boolean;
     /** Optional catalog spectral type, such as "K3II+B9.5V". */
     spectralType?: string;
+    /** True when the target is under the horizon. The row then shows a small muted "Below" badge. */
+    isBelowHorizon?: boolean;
+    /** Hover text for the "Below" badge, such as "Below the horizon now". */
+    belowHorizonTooltip?: string;
+    /** Optional badges drawn after the name, for lists that need their own markers. */
+    badges?: SelectableItemBadge[];
 }
 
 export interface SelectableListProps {
@@ -44,6 +61,12 @@ export interface SelectableListProps {
     errorMessage?: React.ReactNode;
     /** Called by the "Try again" button shown with the error message. */
     onRetry?: () => void;
+    /**
+     * Lets a long name wrap onto a second line instead of being cut off with "...". Every row
+     * then gets the taller height, so the rows stay evenly spaced. Names longer than two lines
+     * are still cut off at the end of the second line.
+     */
+    wrapLabels?: boolean;
 }
 
 // Match .selectable-list__item's CSS min-height (and its --two-line
@@ -55,6 +78,8 @@ export interface SelectableListProps {
 // the taller row for every row so the rows stay evenly spaced.
 const ROW_HEIGHT_PX = 32;
 const TWO_LINE_ROW_HEIGHT_PX = 48;
+// A row whose name may wrap to two lines and also has a subtitle under it.
+const THREE_LINE_ROW_HEIGHT_PX = 64;
 
 // Rendered above/below the visible viewport so a fast scroll or key
 // repeat doesn't show blank space for a frame before the next batch
@@ -88,6 +113,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     isError = false,
     errorMessage = 'Could not load the list.',
     onRetry,
+    wrapLabels = false,
 }) => {
     // Every list needs ids and a radio group name of its own. Two displays can be mounted
     // at once (a hidden display stays mounted) and use the same className, so a name built from
@@ -119,7 +145,13 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     }, []);
 
     const hasSubtitles = items.some((item) => item.subtitle !== undefined);
-    const rowHeightPx = hasSubtitles ? TWO_LINE_ROW_HEIGHT_PX : ROW_HEIGHT_PX;
+    const rowHeightPx = wrapLabels
+        ? (hasSubtitles ? THREE_LINE_ROW_HEIGHT_PX : TWO_LINE_ROW_HEIGHT_PX)
+        : (hasSubtitles ? TWO_LINE_ROW_HEIGHT_PX : ROW_HEIGHT_PX);
+    const rowHeightClass = wrapLabels
+        ? (hasSubtitles ? ' selectable-list__item--three-line' : ' selectable-list__item--two-line')
+        : (hasSubtitles ? ' selectable-list__item--two-line' : '');
+    const labelTextClass = `selectable-list__label-text${wrapLabels ? ' selectable-list__label-text--wrap' : ''}`;
     const totalHeight = items.length * rowHeightPx;
     const firstVisibleIndex = Math.floor(scrollTop / rowHeightPx);
     const startIndex = Math.max(0, firstVisibleIndex - OVERSCAN_ROWS);
@@ -171,7 +203,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                         <label
                             key={`${item.id}-${idx}`}
                             htmlFor={radioId}
-                            className={`selectable-list__item${hasSubtitles ? ' selectable-list__item--two-line' : ''}${isSelected ? ' selectable-list__item--selected' : ''}${isHighlighted ? ' selectable-list__item--highlighted' : ''}`}
+                            className={`selectable-list__item${rowHeightClass}${wrapLabels ? ' selectable-list__item--wrap' : ''}${isSelected ? ' selectable-list__item--selected' : ''}${isHighlighted ? ' selectable-list__item--highlighted' : ''}`}
                             style={{ position: 'absolute', top: idx * rowHeightPx, left: 0, right: 0 }}
                             title={item.tooltip}
                         >
@@ -197,17 +229,35 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                             <span className="selectable-list__label selectable-list__label-content">
                                 {hasSubtitles ? (
                                     <span className="selectable-list__label-stack">
-                                        <span className="selectable-list__label-text">{item.label}</span>
+                                        <span className={labelTextClass}>{item.label}</span>
                                         <span className="selectable-list__subtitle">{item.subtitle ?? ''}</span>
                                     </span>
                                 ) : (
-                                    <span className="selectable-list__label-text">{item.label}</span>
+                                    <span className={labelTextClass}>{item.label}</span>
                                 )}
+                                {item.badges?.map((badge) => (
+                                    <Badge
+                                        key={badge.label}
+                                        tone={badge.tone}
+                                        title={badge.title}
+                                        className="selectable-list__row-badge"
+                                    >
+                                        {badge.label}
+                                    </Badge>
+                                ))}
                                 {item.hasSpectra && (
                                     <span className="selectable-list__badge selectable-list__badge--spectra" title="Has Spectrum Data">S</span>
                                 )}
                                 {item.hasPhotometry && (
                                     <span className="selectable-list__badge selectable-list__badge--photometry" title="Has Photometry Data">P</span>
+                                )}
+                                {item.isBelowHorizon && (
+                                    <span
+                                        className="selectable-list__badge selectable-list__badge--below-horizon"
+                                        title={item.belowHorizonTooltip ?? 'Below the horizon'}
+                                    >
+                                        Below
+                                    </span>
                                 )}
                                 {item.isProcessed === false && (
                                     <span

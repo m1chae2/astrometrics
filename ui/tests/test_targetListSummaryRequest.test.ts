@@ -18,13 +18,13 @@ describe('target list requests', () => {
     it('asks for the summary list', async () => {
         vi.mocked(callBackend).mockResolvedValue([{ id: 'M 31', frames: [] }] as never);
         const list = await fetchTargetList();
-        expect(callBackend).toHaveBeenCalledWith('target:get_targets', { detail: 'summary' });
+        expect(callBackend).toHaveBeenCalledWith('target:get', { detail: 'summary' });
         expect(list).toHaveLength(1);
     });
 
     it('asks for the full record of one target', async () => {
         vi.mocked(callBackend).mockResolvedValue({ id: 'M 31', frames: [] } as never);
         await fetchTargetObject('M 31');
-        expect(callBackend).toHaveBeenCalledWith('target:get_targets', { target_id: 'M 31' });
+        expect(callBackend).toHaveBeenCalledWith('target:get', { target_id: 'M 31' });
     });
 });

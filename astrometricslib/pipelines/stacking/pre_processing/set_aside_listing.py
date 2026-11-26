@@ -95,6 +95,37 @@ def _header_exposure_seconds(path: str) -> float | None:
     return None
 
 
+def _header_identity(path: str) -> tuple[str, str, str]:
+    """Read a frame's camera, filter name and capture time from its file.
+
+    This uses the same reader as the target's own frame records, so a
+    set-aside frame shows the same values a normal frame does.
+
+    Parameters
+    ----------
+    path : `str`
+        The frame file.
+
+    Returns
+    -------
+    identity : `tuple` [`str`, `str`, `str`]
+        The camera name, the filter name and the capture time as
+        ``YYYY-MM-DD HH:MM:SS`` (from the header, else from the file name).
+        Each is an empty string when it is not known.
+    """
+    from astrometricslib.foundation.enums import FilterType
+    from astrometricslib.pipelines.shared.frame_scanning import (
+        capture_time_from_file_name,
+        create_frame_record_from_fits,
+    )
+
+    record = create_frame_record_from_fits(path)
+    camera = "" if record.camera == "Unknown" else record.camera
+    filter_name = "None" if record.filter == FilterType.NONE else record.filter.name
+    # A file with no capture time in its header may have one in its name.
+    return camera, filter_name, record.date or capture_time_from_file_name(os.path.basename(path))
+
+
 def build_set_aside_records(
     target_id: str,
     folders: Sequence[str],
@@ -165,6 +196,7 @@ def build_set_aside_records(
                 moved_at = moved_at or row.measured_at.isoformat(timespec="seconds")
             if exposure_seconds is None:
                 exposure_seconds = _header_exposure_seconds(path)
+            camera, filter_name, date = _header_identity(path)
             records.append(
                 SetAsideFrameRecord(
                     file=file_name,
@@ -178,6 +210,9 @@ def build_set_aside_records(
                     exposure_seconds=exposure_seconds,
                     capture_setting_id=capture_setting_id,
                     moved_at=moved_at,
+                    camera=camera,
+                    filter=filter_name,
+                    date=date,
                     restorable=entry is not None,
                     restore_note=(
                         ""

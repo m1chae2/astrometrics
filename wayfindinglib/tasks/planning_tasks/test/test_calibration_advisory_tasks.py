@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from astrometricslib import FilterType
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from wayfindinglib.models.planning.observation_package import FrameType
 from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 

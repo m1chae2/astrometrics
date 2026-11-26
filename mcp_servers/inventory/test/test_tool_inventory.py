@@ -217,7 +217,7 @@ def test_every_served_tool_gets_a_category_and_disposition() -> None:
 
 def test_a_replaced_tool_is_dropped_and_names_its_replacement() -> None:
     """A replaced tool is dropped, and its note names the new tool."""
-    record = ToolRecord("srv", "target_list", "", tool_class="observe")
+    record = ToolRecord("srv", "target_get", "", tool_class="observe")
     apply_decisions(record)
     assert (record.category, record.disposition) == ("targets", "drop")
     assert "target_query" in record.note

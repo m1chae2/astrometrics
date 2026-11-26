@@ -325,13 +325,20 @@ def test_night_analysis_and_summary_choose_the_right_method(observatory: _Observ
     assert build_night_history(observatory, "capture", session_id="2026-10-02")["analysis"]["flagged"] is True
     build_night_history(observatory, "guiding", session_id="2026-10-02")
     build_night_history(observatory, "capture", limit=7)
-    build_night_history(observatory, "guiding", limit=1000)
-    build_night_history(observatory, "recurring_issues", limit=0)
+    build_night_history(observatory, "guiding", limit=50)
+    build_night_history(observatory, "recurring_issues", limit=1)
     assert ("capture_night_analysis", "2026-10-02") in observatory.calls
     assert ("guiding_night_analysis", "2026-10-02") in observatory.calls
     assert ("capture_night_summaries", 7) in observatory.calls
     assert ("guiding_night_summaries", 50) in observatory.calls
     assert ("recurring_issues", 1) in observatory.calls
+
+
+@pytest.mark.parametrize("limit", [0, 51, 1000])
+def test_a_limit_outside_its_range_is_refused(observatory: _Observatory, limit: int) -> None:
+    """A limit below 1 or above 50 is an error, not moved into range."""
+    with pytest.raises(InvalidArgumentError):
+        build_night_history(observatory, "guiding", limit=limit)
 
 
 def test_night_with_nothing_recorded_is_an_error(observatory: _Observatory) -> None:

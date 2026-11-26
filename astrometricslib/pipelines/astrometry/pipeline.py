@@ -12,9 +12,14 @@ from typing import Any
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.foundation.errors import ExternalServiceError, InvalidArgumentError
+from astrometricslib.pipelines.astrometry.processing.extended_catalog_entry import is_extended_object_type
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
+from astrometricslib.pipelines.shared.analysis_context import (
+    AnalysisContext,
+    ExtendedSourceHint,
+    KnownTarget,
+)
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -50,6 +55,9 @@ class AstrometryPipeline:
         self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
         # Whether the last `solve_wcs` refit its solution to cached Gaia stars.
         self.last_solve_was_refit = False
+        # One sentence saying what happened to that refit (see
+        # `StarIdentifier.wcs_refit_note`).
+        self.last_solve_refit_note = ""
 
     def prepare_image(
         self,
@@ -89,6 +97,7 @@ class AstrometryPipeline:
         target_ra: float | None = None,
         target_dec: float | None = None,
         target_name: str | None = None,
+        known_target: KnownTarget | None = None,
     ) -> AnalysisContext:
         """Run the whole pipeline on an image.
 
@@ -108,6 +117,10 @@ class AstrometryPipeline:
             solved, it names the star at the frame centre, and a planet or
             the Moon is left without a star's name (see
             `StarIdentifier._identify_stars_with_simbad`).
+        known_target : `KnownTarget`, optional
+            What the library's own target record says about the target. It
+            stands in for SIMBAD when SIMBAD cannot be reached (see
+            `check_extended_source`).
 
         Returns
         -------
@@ -131,12 +144,11 @@ class AstrometryPipeline:
         wcs = self._fallback_to_header_wcs(image, wcs)
 
         object_name = self._resolve_object_name(image)
-        extended_source_hint = self._build_extended_source_hint(object_name, wcs, target_ra, target_dec)
+        extended_source_hint = self._build_extended_source_hint(
+            object_name, wcs, target_ra, target_dec, known_target
+        )
 
-        # Start downloading Gaia DR3 stars for this image's area in the
-        # background.
-        self._seed_gaia_cache_from_wcs(image, wcs)
-
+        field = self.star_identifier.field_gaia_stars
         return AnalysisContext(
             image=image,
             stellar_objects=stellar_objects,
@@ -154,6 +166,8 @@ class AstrometryPipeline:
             gaia_fit_peak_over_noise=self.star_identifier.gaia_fit_peak_over_noise,
             gaia_fit_signal_reason=self.star_identifier.gaia_fit_signal_reason,
             astrometry_flags=list(self.star_identifier.astrometry_flags),
+            gaia_tiles_count=0 if field is None else len(field.tiles),
+            gaia_tiles_missing_count=0 if field is None else len(field.missing_tiles),
         )
 
     def solve_wcs(
@@ -167,13 +181,13 @@ class AstrometryPipeline:
 
         This detects the stars and runs the plate solver, as `process` does,
         then stops. It skips the refit to Gaia, the naming of stars from
-        SIMBAD and Gaia, the extended-source hint and the Gaia cache seeding,
-        so it asks no online catalog. It is for callers that need only a
+        SIMBAD and Gaia and the extended-source hint, so it asks no online
+        catalog. It is for callers that need only a
         place to put apertures. By default the solution is returned unrefined
         (see `process` for the refined one). With `refit_from_cache`, it is
-        refit to Gaia when a complete cached download covers the field, using
-        the cache alone; `last_solve_was_refit` then says whether that
-        happened.
+        refit to the Gaia stars of the cache tiles that are already complete,
+        using the cache alone; `last_solve_was_refit` then says whether that
+        happened, and `last_solve_refit_note` says why not.
         A field the solver cannot solve raises `PlateSolveFailedError`, as in
         `process`.
 
@@ -185,8 +199,8 @@ class AstrometryPipeline:
             A hint for where the telescope was pointing, in degrees. Left
             out, the image's FITS header supplies one.
         refit_from_cache : `bool`, optional
-            If True, refit the solution to cached Gaia stars when a complete
-            download covers the field. Never sends a query.
+            If True, refit the solution to the Gaia stars of the cache tiles
+            that are already complete. Never sends a query.
 
         Returns
         -------
@@ -208,6 +222,9 @@ class AstrometryPipeline:
         )
         refinement = self.star_identifier.wcs_refinement
         self.last_solve_was_refit = bool(refinement is not None and refinement.applied)
+        self.last_solve_refit_note = (
+            self.star_identifier.wcs_refit_note if refit_from_cache else "not refit: it was not asked for"
+        )
         return wcs
 
     def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:
@@ -411,7 +428,12 @@ class AstrometryPipeline:
         return extraction_radius_px
 
     def build_extended_source_hint(
-        self, image: AstrometricsImage, wcs: Any, target_ra: float | None, target_dec: float | None
+        self,
+        image: AstrometricsImage,
+        wcs: Any,
+        target_ra: float | None,
+        target_dec: float | None,
+        known_target: KnownTarget | None = None,
     ) -> ExtendedSourceHint | None:
         """Build an image's extended-source hint from a supplied WCS.
 
@@ -446,8 +468,9 @@ class AstrometryPipeline:
         wcs: Any,
         target_ra: float | None,
         target_dec: float | None,
+        known_target: KnownTarget | None = None,
     ) -> ExtendedSourceHint | None:
-        """Build the extended-source hint for a target, if SIMBAD flags one.
+        """Build the extended-source hint for a target, if it is one.
 
         Looks up `object_name` in SIMBAD; if it comes back as an
         extended object (a galaxy, nebula, or cluster rather than a
@@ -465,9 +488,19 @@ class AstrometryPipeline:
         if not object_name:
             return None
 
+        if wcs is None:
+            # A spectral stack has no plate solution when `process` runs. The
+            # spectroscopy runner builds the hint again once it has worked
+            # one out, so this is not a failure.
+            logger.info(
+                "No plate solution yet for '%s', so its extended-source hint is not built now.",
+                object_name,
+            )
+            return None
+
         # 2. Ask the SIMBAD database to figure out what type of object
-        # this is.
-        is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name)
+        # this is (or the library's own record, if SIMBAD cannot say).
+        is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name, known_target)
 
         if not is_extended:
             return None
@@ -502,30 +535,15 @@ class AstrometryPipeline:
         logger.info("Recorded extended-source hint for '%s'.", object_name)
         return extended_source_hint
 
-    def _seed_gaia_cache_from_wcs(self, image: AstrometricsImage, wcs: Any) -> None:
-        """Kick off a background Gaia DR3 seed for this image's sky area.
-
-        This speeds things up by saving the stars to the local database.
-        """
-        if wcs is None or not wcs.is_celestial:
-            return
-        try:
-            from astropy.wcs.utils import proj_plane_pixel_scales
-
-            scales = proj_plane_pixel_scales(wcs)
-            deg_per_px = float(scales[0])
-            width = image.data.shape[1] if hasattr(image, "data") and image.data is not None else 1000
-            height = image.data.shape[0] if hasattr(image, "data") and image.data is not None else 1000
-            field_radius_deg = (max(width, height) * deg_per_px) / 2.0
-            field_radius_deg = min(max(0.2, field_radius_deg), 1.0)
-
-            ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
-            self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
-        except (ConfigurationError, *DATA_ERRORS) as e:
-            logger.warning("Automatic Gaia cache seeding skipped: %s", e)
-
-    def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
+    def check_extended_source(
+        self, object_name: str, known_target: KnownTarget | None = None
+    ) -> tuple[bool, Any | None, str | None, float | None]:
         """Ask the SIMBAD database if this target is an extended object.
+
+        When SIMBAD cannot be reached, or does not know the name, the
+        library's own record of the target (`known_target`) answers instead:
+        its type, position and size were saved from SIMBAD earlier. A target
+        with no usable record is reported as not extended.
 
         An "extended object" is something that looks like a fuzzy shape
         (like a galaxy, nebula, or star cluster) instead of a single dot.
@@ -534,6 +552,8 @@ class AstrometryPipeline:
         ----------
         object_name : `str`
             The name of the object to look up (like "M 13" or "Andromeda").
+        known_target : `KnownTarget`, optional
+            The library's own record of the target.
 
         Returns
         -------
@@ -550,17 +570,6 @@ class AstrometryPipeline:
         """
         if not object_name:
             return False, None, None, None
-
-        extended_otypes = {
-            "GlC",  # Globular Cluster
-            "HII",  # H II region / Emission Nebula
-            "PN",  # Planetary Nebula
-            "Neb",  # General Nebula
-            "G",  # Galaxy
-            "Cl*",  # Cluster of Stars
-            "OpC",  # Open Cluster
-            "Assoc*",  # Association of Stars
-        }
 
         try:
             import warnings
@@ -590,8 +599,46 @@ class AstrometryPipeline:
                         except ValueError, TypeError:
                             pass
 
-                return otype in extended_otypes, coord, otype, majaxis
+                return is_extended_object_type(otype), coord, otype, majaxis
         except (ExternalServiceError, *DATA_ERRORS) as e:
-            logger.warning("SIMBAD query failed for object '%s': %s", object_name, e)
+            # An unreachable SIMBAD is a status, not an error.
+            logger.info("SIMBAD could not answer for object '%s': %s", object_name, e)
 
-        return False, None, None, None
+        return self._extended_source_from_known_target(object_name, known_target)
+
+    @staticmethod
+    def _extended_source_from_known_target(
+        object_name: str, known_target: KnownTarget | None
+    ) -> tuple[bool, Any | None, str | None, float | None]:
+        """Answer `check_extended_source` from the library's own target record.
+
+        Parameters
+        ----------
+        object_name : `str`
+            The target's name, for the log message.
+        known_target : `KnownTarget` or `None`
+            The record, or `None` when the caller has none.
+
+        Returns
+        -------
+        is_extended, coordinates, simbad_object_type, major_axis_arcmin
+            The same four values as `check_extended_source`; not extended
+            and empty when there is no record or it has no type.
+        """
+        if known_target is None or not known_target.object_type:
+            return False, None, None, None
+        from astropy import units as u
+        from astropy.coordinates import SkyCoord
+
+        logger.info(
+            "Using the library's record of '%s' (type %s) instead of SIMBAD.",
+            object_name,
+            known_target.object_type,
+        )
+        coord = SkyCoord(known_target.ra_deg * u.deg, known_target.dec_deg * u.deg)
+        return (
+            is_extended_object_type(known_target.object_type),
+            coord,
+            known_target.object_type,
+            known_target.major_axis_arcmin,
+        )

@@ -13,7 +13,7 @@ import pytest
 
 from simulator.exposure_driver import BackendTargetFinder, ExposureDriver, position_name, upload_prefix
 
-#: M 13 and M 92 as the backend's ``target:get_targets`` reply gives them:
+#: M 13 and M 92 as the backend's ``target:get`` reply gives them:
 #: the position is text, as the app shows it, not degrees.
 M13 = {"id": "M 13", "ra": "16h 41m 42s", "dec": "36° 27′ 40′′"}
 M92 = {"id": "M 92", "ra": "17h 17m 07s", "dec": "43° 08′ 09′′"}

@@ -2,23 +2,51 @@
 
 Description: A good stack is at least as sharp as the width its input frames
 predict. This module measures the star width (FWHM, full width at half
-maximum) of a sample of the input frames, in parallel when it is safe to do
-so, and compares it with the star width of the stacked image. It sets the
-FWHM fields and the degradation flag on the stack's quality summary.
+maximum) of every frame in the stack, reusing the widths the frame quality
+step already stored and measuring the rest in parallel when it is safe to do
+so. It predicts the stack's width from them, with each frame weighted as the
+stacking program weighted it, and measures the star width of the stacked
+image. It sets the FWHM fields on the stack's quality summary.
 """
 
 import logging
 import multiprocessing
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["measure_fwhm_degradation"]
+# The share of the stack's weight whose frames must have a measured star width
+# before the stack's expected width is given. A colour (CFA) frame with no
+# stored width cannot be measured here, so a night whose frames were never
+# measured drops out of the prediction; on NGC 6888 (Nikon D5300) 67 of 156
+# frames had no width, nearly all from the wider second night, and the
+# prediction fell to 2.9 px against inputs of 4.7 px, so the sharpness gate
+# failed a stack that was not blurred. Below this share the expected width is
+# not given and the gate is not checked. Design estimate.
+EXPECTED_FWHM_MINIMUM_WEIGHT_SHARE = TunedParameter(
+    name="stacking.expected_fwhm_minimum_weight_share",
+    default=0.9,
+    unit="fraction",
+    description="Share of the stack's weight needing a measured frame star width to predict its width.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D80",
+)
+
+__all__ = ["measure_fwhm_degradation", "stored_frame_widths"]
 
 
 def _measure_one_frame_fwhm(path: str) -> float | None:
@@ -46,21 +74,21 @@ def _measure_one_frame_fwhm(path: str) -> float | None:
         return None
 
 
-def _fwhm_worker_count(sample_size: int) -> int:
-    """Choose how many processes measure the sample frames at once.
+def _fwhm_worker_count(frame_count: int) -> int:
+    """Choose how many processes measure the frames at once.
 
     Uses the configured inner worker count (``photometry_workers``, the
     same setting the other per-target parallel steps use), kept within the
     available memory by `resolve_worker_counts`. One measurement of a 24
     megapixel frame was measured to use about 1 GB; the helper's default
     budget of 1.5 GB per worker covers that with margin. The count never
-    exceeds the sample size. A process that is itself a daemon (such as a
+    exceeds the number of frames. A process that is itself a daemon (such as a
     `multiprocessing.Pool` worker) may not have child processes, so it
     measures serially.
 
     Parameters
     ----------
-    sample_size : `int`
+    frame_count : `int`
         Number of frames to measure.
 
     Returns
@@ -70,7 +98,7 @@ def _fwhm_worker_count(sample_size: int) -> int:
     """
     import multiprocessing
 
-    if sample_size < 2 or multiprocessing.current_process().daemon:
+    if frame_count < 2 or multiprocessing.current_process().daemon:
         return 1
     try:
         from astrometricslib.foundation.config import get_configuration
@@ -80,10 +108,10 @@ def _fwhm_worker_count(sample_size: int) -> int:
     except (AstrometricsError, OSError, ValueError) as configuration_error:
         logger.debug("Measuring FWHM serially; worker count unavailable: %s", configuration_error)
         return 1
-    return max(1, min(counts.inner_worker_count, sample_size))
+    return max(1, min(counts.inner_worker_count, frame_count))
 
 
-def _measure_sample_fwhms(paths: list[str], worker_count: int) -> list[float | None]:
+def _measure_frame_fwhms(paths: list[str], worker_count: int) -> list[float | None]:
     """Measure the star width of each frame, keeping the order of `paths`.
 
     Parameters
@@ -121,16 +149,129 @@ def _measure_sample_fwhms(paths: list[str], worker_count: int) -> list[float | N
     return [_measure_one_frame_fwhm(path) for path in paths]
 
 
+def stored_frame_widths(target_id: str, frames: Sequence[Any], configuration: Any = None) -> dict[str, float]:
+    """Read the star widths the frame quality step already stored.
+
+    The frame quality step stores each raw frame's
+    ``frame.star_width_gaussian_brightest_px``, the value of
+    `measure_fwhm_from_data` on the frame. That is the same estimator, on the
+    same pixels, as `measure_image_fwhm` on the frame's file, so the stack
+    check can use it instead of measuring the frame again. Only measured rows
+    of the metric's current definition, for the whole frame (not one color
+    plane), are used.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target the frames belong to.
+    frames : `Sequence`
+        The frames (they have ``path``).
+    configuration : `AppConfiguration`, optional
+        Says where the quality store is. The process-wide one if omitted.
+
+    Returns
+    -------
+    widths : `dict` [`str`, `float`]
+        The stored width of each frame that has one, by path. Empty when the
+        store cannot be read; the caller then measures the frames.
+    """
+    from astrometricslib._internal.drivers.quality_store import MAXIMUM_SUBJECT_IDS_PER_QUERY, QualityStore
+    from astrometricslib.models.quality.measurement import MeasurementStatus
+    from astrometricslib.pipelines.shared.quality.metrics import (
+        FRAME_METRICS,
+        FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
+    )
+    from astrometricslib.utilities.frame_identity import frame_subject_id
+
+    version = next(
+        spec.definition_version
+        for spec in FRAME_METRICS
+        if spec.name == FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX
+    )
+    path_by_subject = {frame_subject_id(frame.path, target_id): frame.path for frame in frames}
+    subjects = list(path_by_subject)
+    widths: dict[str, float] = {}
+    try:
+        store = QualityStore.from_configuration(configuration)
+        for start in range(0, len(subjects), MAXIMUM_SUBJECT_IDS_PER_QUERY):
+            for row in store.query(
+                metric=FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
+                target_id=target_id,
+                library_only=True,
+                subject_ids=subjects[start : start + MAXIMUM_SUBJECT_IDS_PER_QUERY],
+            ):
+                if (
+                    row.definition_version == version
+                    and row.status == MeasurementStatus.MEASURED
+                    and not row.subject.channel
+                    and row.value is not None
+                ):
+                    widths[path_by_subject[row.subject.subject_id]] = float(row.value)
+    except (AstrometricsError, OSError, ValueError) as store_error:
+        logger.debug("Stored frame widths of '%s' could not be read; measuring: %s", target_id, store_error)
+        return {}
+    return widths
+
+
+def _stack_frames_and_weights(
+    target_frames: list[Any], diagnostics: dict | None, stack_weight: str | None
+) -> tuple[list[Any], list[float] | None]:
+    """List the frames in the stack and the weight each had.
+
+    Parameters
+    ----------
+    target_frames : `list`
+        The frames given to the stage.
+    diagnostics : `dict` or `None`
+        What the stacking run reported. `None` means every frame counts, with
+        equal weight.
+    stack_weight : `str` or `None`
+        The Siril ``-weight`` mode the stack used, `None` for equal weights.
+
+    Returns
+    -------
+    frames : `list`
+        The stack's member frames (see `determine_stack_members`).
+    weights : `list` [`float`] or `None`
+        Each member's weight, with mean 1, or `None` when the weights are not
+        known (the prediction then uses equal weights).
+    """
+    if diagnostics is None:
+        return list(target_frames), None
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+        determine_stack_members,
+        normalized_weights,
+    )
+
+    membership = determine_stack_members(target_frames, diagnostics, stack_weight)
+    frames = [member.frame for member in membership.members]
+    weights = normalized_weights(membership)
+    if not frames or any(weight is None for weight in weights):
+        if frames and membership.weights_reason:
+            logger.info("Expected stack width uses equal weights: %s", membership.weights_reason)
+        return frames or list(target_frames), None
+    return frames, [float(weight) for weight in weights if weight is not None]
+
+
 def measure_fwhm_degradation(
-    summary: Any, stacked_path: str, target_frames: list[Any], stacked_fwhm: float | None = None
+    summary: Any,
+    stacked_path: str,
+    target_frames: list[Any],
+    stacked_fwhm: float | None = None,
+    *,
+    diagnostics: dict | None = None,
+    stack_weight: str | None = None,
+    stored_widths: Mapping[str, float] | None = None,
 ) -> None:
     """Compare the stacked image's sharpness against its input frames.
 
-    Measured with the same `measure_image_fwhm` function on both sides. The
-    input sample is spread evenly over all the frames, so a stack of several
-    nights is judged against all of them and not only the first night. The
-    stack is compared with the width its inputs predict (see
-    `expected_stack_fwhm`), not with their median.
+    Measured with the same `measure_image_fwhm` function on both sides. Every
+    frame in the stack counts, so a stack of several nights is judged against
+    all of them, and adding or removing one frame changes the numbers. A
+    frame whose width the frame quality step already stored (`stored_widths`)
+    is not measured again. The stack is compared with the width its inputs
+    predict (see `expected_stack_fwhm`), with each frame weighted as the
+    stacking program weighted it, not with their median.
 
     A stack combined from exposure groups arrives with its width already
     measured, away from the cores that the combine patched (see
@@ -138,36 +279,71 @@ def measure_fwhm_degradation(
     measuring the file, which would pick those patched cores as its
     brightest stars.
 
-    Sets `summary.stacking_metrics`' FWHM fields and the degradation
-    flag in place.
+    Sets `summary.stacking_metrics`' FWHM fields in place.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The stack's quality summary. Its FWHM fields are set.
+    stacked_path : `str`
+        The stacked image.
+    target_frames : `list`
+        The frames given to the stage.
+    stacked_fwhm : `float`, optional
+        The stack's width, when it was already measured.
+    diagnostics : `dict`, optional
+        What the stacking run reported. It says which frames are in the stack
+        and their weights (see `determine_stack_members`). Without it every
+        frame counts with equal weight.
+    stack_weight : `str`, optional
+        The Siril ``-weight`` mode the stack used, `None` for equal weights.
+    stored_widths : `Mapping` [`str`, `float`], optional
+        Widths already measured with the same estimator, by frame path (see
+        `stored_frame_widths`).
     """
-    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import (
-        FWHM_MEASUREMENT_STAR_COUNT,
-        measure_image_fwhm,
-    )
+    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
     from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
         expected_stack_fwhm,
     )
 
-    fwhm_measurement_star_count = resolve(FWHM_MEASUREMENT_STAR_COUNT).value
+    frames, weights = _stack_frames_and_weights(target_frames, diagnostics, stack_weight)
+    known = dict(stored_widths or {})
+    missing_paths = list(dict.fromkeys(frame.path for frame in frames if frame.path not in known))
+    if missing_paths:
+        measured = _measure_frame_fwhms(missing_paths, _fwhm_worker_count(len(missing_paths)))
+        known.update({
+            path: width for path, width in zip(missing_paths, measured, strict=True) if width is not None
+        })
 
-    # A sample of at most 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT),
-    # spaced evenly over the whole set. A median or an RMS only needs a
-    # representative sample, unlike the background-split check, which needs
-    # every frame to avoid missing a split.
-    step = max(1, len(target_frames) // fwhm_measurement_star_count)
-    sample_paths = [frame.path for frame in target_frames[::step][:fwhm_measurement_star_count]]
-    input_fwhms = [
-        fwhm
-        for fwhm in _measure_sample_fwhms(sample_paths, _fwhm_worker_count(len(sample_paths)))
-        if fwhm is not None
-    ]
-    expected = expected_stack_fwhm(input_fwhms)
+    input_fwhms: list[float] = []
+    input_weights: list[float] = []
+    total_weight = 0.0
+    for index, frame in enumerate(frames):
+        frame_weight = 1.0 if weights is None else weights[index]
+        total_weight += frame_weight
+        width = known.get(frame.path)
+        if width is None:
+            continue
+        input_fwhms.append(width)
+        input_weights.append(frame_weight)
+    expected = expected_stack_fwhm(input_fwhms, input_weights)
     if input_fwhms:
         import statistics as _statistics
 
         summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
-        summary.stacking_metrics.expected_stack_fwhm_px = expected
+        weight_share = sum(input_weights) / total_weight if total_weight > 0 else 0.0
+        minimum_share = float(resolve(EXPECTED_FWHM_MINIMUM_WEIGHT_SHARE).value)
+        if weight_share >= minimum_share:
+            summary.stacking_metrics.expected_stack_fwhm_px = expected
+        else:
+            logger.info(
+                "Star widths are known for %d of %d stacked frames (%.0f%% of the stack's weight, "
+                "below %.0f%%), so the stack's expected width is not given and its sharpness is not judged.",
+                len(input_fwhms),
+                len(frames),
+                100.0 * weight_share,
+                100.0 * minimum_share,
+            )
 
     if stacked_fwhm is None:
         stacked_fwhm = measure_image_fwhm(stacked_path)

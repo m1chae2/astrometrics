@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import Astrometrics
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+from astrometricslib._internal.testing import astrometrics_with_drivers
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
@@ -137,7 +137,7 @@ def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_pat
     latest = quality.query(level="frame").rows
     assert [measurement.value for measurement in latest] == [3.0]
     assert len(quality.query(level="frame", latest_only=False).rows) == 2
-    assert [m.subject.target_id for m in quality.query(camera="ASI533MM").rows] == ["M13"]
+    assert [m.subject.target_id for m in quality.query(camera_id="ASI533MM").rows] == ["M13"]
     assert quality.query(target_id="nobody").rows == []
     assert len(quality.query(since="2026-10-01T03:30:00").rows) == 1
     assert len(quality.query(since=BASE_TIME + timedelta(hours=2)).rows) == 0
@@ -249,7 +249,7 @@ def test_the_root_object_holds_the_quality_child() -> None:
 
     from astrometricslib import AppConfiguration
 
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     assert isinstance(astrometrics.quality, QualityRecords)
     assert astrometrics.quality._targets is astrometrics.targets
     assert not hasattr(astrometrics.processing, "diagnostics")

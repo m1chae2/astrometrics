@@ -51,7 +51,7 @@ Code outside the library calls the pipelines through the package root (see `Astr
 | Pipeline | Review guide | Adapter class | Quality summary | Gates |
 | --- | --- | --- | --- | --- |
 | Astrometry | [Astrometry](astrometry.md) | `AstrometryPipelineAdapter` | `AstrometryQualitySummary` | 5 run gates |
-| Photometry | [Photometry](photometry.md) | `PhotometryPipelineAdapter` | `PhotometryQualitySummary` | 11 run gates + 2 period checks |
+| Photometry | [Photometry](photometry.md) | `PhotometryPipelineAdapter` | `PhotometryQualitySummary` | 12 run gates + 2 period checks |
 | Spectroscopy | [Spectroscopy](spectroscopy.md) | `SpectroscopyPipelineAdapter` | `SpectroscopyQualitySummary` | 9 run gates |
 | Asteroid detection | [Asteroid detection](asteroid_detection.md) | `AsteroidDetectionPipelineAdapter` | `AsteroidDetectionQualitySummary` | 5 run gates |
 | Image stacking | [Image stacking](stacking.md) | None (runs from `stage.stack_frames`) | `StackQualitySummary` | 25 run gates |

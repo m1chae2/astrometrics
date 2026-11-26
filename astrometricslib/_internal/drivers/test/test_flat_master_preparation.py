@@ -6,6 +6,7 @@ tests check that, that colour sensors and cached masters are left alone, and
 that the master flat's cache key changes with the smoothing recipe.
 """
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,7 @@ from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.siril_interface import build_flat_master_commands
 from astrometricslib._internal.drivers.siril_interface.staging import (
     _calibration_source_fingerprint,
-    _master_recipe,
+    master_recipe,
 )
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 
@@ -85,14 +86,23 @@ def test_a_good_set_of_flats_is_left_alone(tmp_path: Path) -> None:
     assert not assessment.needs_smoothing
 
 
-def test_a_colour_sensor_flat_is_measured_but_not_smoothed(tmp_path: Path) -> None:
-    """Blurring a Bayer mosaic would mix colours, so it is only reported."""
+def test_a_colour_sensor_flat_is_measured_but_not_smoothed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Blurring a Bayer mosaic would mix colours, so it is only reported.
+
+    Leaving a color sensor's flat unsmoothed is the designed choice, so the
+    log line is INFO, not a warning; the note stays in the issues.
+    """
     stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment = make_processor().assess_staged_flats(
-        str(tmp_path), uses_color_filter_array=True, assess_flats=assess_flats
-    )
+    with caplog.at_level(logging.INFO):
+        assessment = make_processor().assess_staged_flats(
+            str(tmp_path), uses_color_filter_array=True, assess_flats=assess_flats
+        )
     assert not assessment.needs_smoothing
     assert any("colour sensor" in issue for issue in assessment.issues)
+    not_smoothed = [record for record in caplog.records if "not smoothed" in record.getMessage()]
+    assert [record.levelno for record in not_smoothed] == [logging.INFO]
 
 
 def test_one_flat_is_loaded_blurred_and_saved() -> None:
@@ -130,10 +140,14 @@ def test_several_flats_are_stacked_and_then_blurred() -> None:
 
 
 def test_only_the_flat_master_has_a_recipe_in_its_cache_key() -> None:
-    """Bias and dark masters keep their old keys; the flat key is new."""
-    assert _master_recipe("bias") == ""
-    assert _master_recipe("dark") == ""
-    assert _master_recipe("flat") != ""
+    """Bias masters keep their old key; the dark and flat keys carry a recipe.
+
+    The dark recipe was added when master darks became median stacks, so
+    masters built the old way are not reused.
+    """
+    assert master_recipe("bias") == ""
+    assert master_recipe("dark") != ""
+    assert master_recipe("flat") != ""
 
 
 def test_the_recipe_changes_the_fingerprint_of_the_same_frames(tmp_path: Path) -> None:
@@ -164,3 +178,26 @@ def test_staged_flats_are_judged_against_the_named_cameras_clip_ceiling(tmp_path
     assert any(issue.startswith("flats are faint:") for issue in without_camera.issues)
     assert not any(issue.startswith("flats are faint:") for issue in with_camera.issues)
     assert with_camera.full_scale == pytest.approx(16383.0)
+
+
+def test_clipped_flats_are_taken_out_of_the_staged_folder_only(tmp_path: Path) -> None:
+    """Staging drops the clipped frames' names and keeps the library files."""
+    library = tmp_path / "library"
+    library.mkdir()
+    staged = tmp_path / "run" / "flats"
+    staged.mkdir(parents=True)
+    for index, counts in enumerate([8000, 8000, 16383, 16383]):
+        data = np.full((SIZE, SIZE), counts, dtype=np.uint16)
+        fits.writeto(library / f"flat_{index}.fits", data)
+        stage_file(str(library / f"flat_{index}.fits"), str(staged / f"flat_source_{index:05d}.fits"))
+    before = _calibration_source_fingerprint(str(staged))
+    assessment = make_processor().assess_staged_flats(
+        str(tmp_path / "run"), uses_color_filter_array=False, assess_flats=assess_flats, camera="Nikon D5300"
+    )
+    assert len(assessment.left_out_paths) == 2
+    assert sorted(path.name for path in staged.iterdir()) == [
+        "flat_source_00000.fits",
+        "flat_source_00001.fits",
+    ]
+    assert len(list(library.iterdir())) == 4
+    assert _calibration_source_fingerprint(str(staged)) != before

@@ -34,11 +34,21 @@ from astrometricslib.models.moving_object import (
     FrameDetection,
     MovingObjectTrack,
 )
-from astrometricslib.models.processing_results import PreviewRemakeResult
+from astrometricslib.models.processing_results import (
+    BrightObjectChoice,
+    BrightObjectChoices,
+    PredictedCalibration,
+    PredictedFrame,
+    PredictedGroup,
+    PreviewRemakeResult,
+    StackPrediction,
+)
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.blink_pair import BlinkPair
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
+from astrometricslib.models.quality.frame_status import FrameStatus, FrameStatusReport
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -77,6 +87,8 @@ from astrometricslib.models.quality.quality_summary import (
     NoiseModelPoint,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
+    SessionScintillationRecord,
+    SessionTieRecord,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
     StackingPipelineQualityMetrics,
@@ -104,6 +116,7 @@ from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasureme
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
+    CalibrationGroupMatch,
     DifferentialRefractionRecord,
     ExtinctionCorrectionRecord,
     FileItem,
@@ -115,6 +128,8 @@ from astrometricslib.models.stellar_source import (
     SpectralExtractionDiagnostics,
     SpectralNoiseModelRecord,
     SpectroscopyResult,
+    StackChoice,
+    StackConfigurationRef,
     StellarObject,
     StellarSessionMatch,
     TargetFilesResponse,
@@ -127,6 +142,7 @@ from astrometricslib.models.target import (
     FrameMeasurements,
     FrameRecord,
     ImageType,
+    PreviewBrightObject,
     RenderedImage,
     StackConfigurationResult,
     StretchParameters,
@@ -192,6 +208,7 @@ from wayfindinglib.models.session.observation_session import (
     WeatherSample,
 )
 from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
+from wayfindinglib.models.session.star_shape_review import StarShapeReview
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionSummary,
@@ -536,13 +553,17 @@ def render_types() -> str:
         generate_interface(FrameMeasurements, "FrameMeasurements"),
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
+        generate_interface(StackConfigurationRef, "StackConfigurationRef"),
+        generate_interface(StackChoice, "StackChoice"),
         generate_interface(StackConfigurationResult, "StackConfigurationResult"),
         generate_interface(TargetStackingResult, "TargetStackingResult"),
         generate_interface(AsteroidDetectionResult, "AsteroidDetectionResult"),
         generate_interface(TargetQualitySummaries, "TargetQualitySummaries"),
+        generate_interface(PreviewBrightObject, "PreviewBrightObject"),
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),
+        generate_interface(CalibrationGroupMatch, "CalibrationGroupMatch"),
         generate_interface(GroupedFrameStat, "GroupedFrameStat"),
         generate_interface(PlotData, "PlotData"),
         generate_interface(StellarObject, "Spectrum"),
@@ -580,6 +601,8 @@ def render_types() -> str:
         generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),
         generate_interface(PhotometryResult, "PhotometryResult"),
         generate_interface(FrameCopyPulse, "FrameCopyPulse"),
+        generate_interface(FrameStatus, "FrameStatus"),
+        generate_interface(FrameStatusReport, "FrameStatusReport"),
         generate_interface(TelescopePulse, "TelescopePulse"),
         generate_interface(ProcessingJobPulse, "ProcessingJobPulse"),
         generate_interface(SystemPulse, "SystemPulse"),
@@ -633,6 +656,8 @@ def render_types() -> str:
         generate_interface(AstrometryQualitySummary, "AstrometryQualitySummary"),
         generate_interface(FrameEnsembleComposition, "FrameEnsembleComposition"),
         generate_interface(NoiseModelPoint, "NoiseModelPoint"),
+        generate_interface(SessionTieRecord, "SessionTieRecord"),
+        generate_interface(SessionScintillationRecord, "SessionScintillationRecord"),
         generate_interface(PhotometryPipelineQualityMetrics, "PhotometryPipelineQualityMetrics"),
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
@@ -701,6 +726,7 @@ def render_types() -> str:
                 DepthGoalStatus,
                 DepthLevelOption,
                 NightQuality,
+                StarShapeReview,
                 NightListEntry,
                 TargetChange,
                 LiveSessionStatus,
@@ -716,7 +742,14 @@ def render_types() -> str:
                 JobWarning,
                 StackSummary,
                 PreviewRemakeResult,
+                BrightObjectChoice,
+                BrightObjectChoices,
+                StackPrediction,
+                PredictedGroup,
+                PredictedCalibration,
+                PredictedFrame,
                 SetAsideFrameRecord,
+                BlinkPair,
                 StackReviewStart,
                 StackQualityReport,
             ],

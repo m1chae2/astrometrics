@@ -9,7 +9,7 @@ from typing import Any
 
 from astrometricslib.drivers import is_path_inside
 from astrometricslib.exceptions import ConflictError, NotFoundError
-from astrometricslib.jobs import JobStore, ProcessingJob
+from astrometricslib.jobs import JobStore, ProcessingJob, current_process_identity
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +59,16 @@ class JobService:
     ) -> ProcessingJob:
         """Create a new job and record it to the database.
 
+        The job records this program (the backend) as its owner, the same way
+        a job run by the library does, so a job the backend leaves open when
+        it ends can be recognized and closed.
+
         Returns
         -------
         job : `ProcessingJob`
             The newly created job record.
         """
+        owner_pid, owner_started_at = current_process_identity()
         job = ProcessingJob(
             id=str(uuid.uuid4()),
             target_id=target_id,
@@ -76,6 +81,8 @@ class JobService:
             updated_at=datetime.now().isoformat(),
             input_metrics=input_metrics or {},
             output_metrics={},
+            owner_pid=owner_pid,
+            owner_started_at=owner_started_at,
         )
         self.repository.upsert_job(job)
         return job
@@ -114,6 +121,24 @@ class JobService:
         job.updated_at = datetime.now().isoformat()
         self.repository.upsert_job(job)
 
+    def record_input_metrics(self, job_id: str, updates: dict[str, Any]) -> None:
+        """Add keys to a job's input metrics, keeping the keys already there.
+
+        The job list shows the steps a job ran (``steps``) and the kinds of
+        stack it made (``stackKinds``) from these metrics.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job to change. An unknown job is ignored.
+        updates : `dict` [`str`, `Any`]
+            The keys to set.
+        """
+        job = self.repository.get_job(job_id)
+        if not job:
+            return
+        self.update_job(job_id, input_metrics={**(job.input_metrics or {}), **updates})
+
     def get_job(self, job_id: str) -> ProcessingJob | None:
         """Get details for a specific job.
 
@@ -140,19 +165,15 @@ class JobService:
         job_type: str | None = None,
         status: str | None = None,
         limit: int = 50,
-        before: str | None = None,
     ) -> list[ProcessingJob]:
         """Retrieve historical jobs for a target.
-
-        Pass ``before`` (an ISO time) to get only jobs created earlier than
-        that time, so a caller can page back through history.
 
         Returns
         -------
         jobs : `list`
             Historical jobs for the target, matching the given filters.
         """
-        return self.repository.get_jobs_by_target(target_id, job_type, status, limit, before)
+        return self.repository.get_jobs_by_target(target_id, job_type, status, limit)
 
     def get_recent_jobs(self, limit: int = 50, job_type: str | None = None) -> list[ProcessingJob]:
         """Retrieve most recent jobs globally.
@@ -175,29 +196,6 @@ class JobService:
         # Simple filter for now
         all_recent = self.get_recent_jobs(limit=100)
         return [j for j in all_recent if j.status in ["started", "running"]]
-
-    def list_jobs(
-        self,
-        target_id: str | None = None,
-        job_type: str | None = None,
-        limit: int = 50,
-        before: str | None = None,
-    ) -> list[ProcessingJob]:
-        """List jobs from history, optionally filtered.
-
-        ``before`` (an ISO time) keeps only jobs created earlier than that
-        time. It applies to a single target only.
-
-        Returns
-        -------
-        jobs : `list`
-            Jobs for the target if given, otherwise the most recent
-            jobs globally.
-        """
-        if target_id:
-            return self.get_jobs_for_target(target_id, job_type=job_type, limit=limit, before=before)
-        else:
-            return self.get_recent_jobs(limit=limit, job_type=job_type)
 
     def delete_job(self, job_id: str) -> bool:
         """Permanently delete a job record and its associated log file.

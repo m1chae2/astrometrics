@@ -192,11 +192,91 @@ export async function analyzeStarPeriodicity(starId: string): Promise<Spectrum |
     }
 }
 
+/** How a star of a stack's own star names was found. */
+export type StarMatchKind = 'matched' | 'unmatched' | 'catalog_only';
+
 /**
  * One catalog star placed on a target's image, for the astrometry overlay.
- * The library's `OverlayStar` model, generated into `backendTypes.ts`.
+ * The library's `OverlayStar` model, generated into `backendTypes.ts`. A star of a stack's own
+ * star names (see {@link fetchStackIdentification}) also says how it was found and where it is on the sky.
  */
-export type AstrometryOverlayStar = OverlayStar;
+export type AstrometryOverlayStar = OverlayStar & {
+    /** `matched`: a detection with a catalog star; `unmatched`: a detection with none; `catalog_only`: a missed catalog star. */
+    matchKind?: StarMatchKind;
+    /** Right ascension, in degrees. */
+    raDeg?: number;
+    /** Declination, in degrees. */
+    decDeg?: number;
+    /** Gaia G magnitude, when a Gaia star is matched. */
+    gMag?: number | null;
+    /** The Gaia DR3 source id (digits only), when a Gaia star is matched. */
+    gaiaSourceId?: string | null;
+    /** Where the name came from: `simbad`, `gaia` or `none`. */
+    nameSource?: string;
+    /**
+     * The id of the star's library record. A stack's star carries the id the library gave it when it
+     * named the stack; a raw frame's star comes from the library, so it is the star's own id.
+     */
+    libraryId?: string | null;
+};
+
+/** The saved star names of a stack. */
+export interface StackIdentificationResult {
+    /** Every detection, then the catalog stars with no detection, in 1-based pixels of the viewer copy. */
+    stars: AstrometryOverlayStar[];
+    /** How many detections have a catalog name. */
+    matchedCount: number;
+    /** How many detections have no catalog star. */
+    unmatchedCount: number;
+    /** How many bright catalog stars have no detection. */
+    catalogOnlyCount: number;
+    /** True when the stack's saved plate solution was used. */
+    solutionReused: boolean;
+    /** Sentences for the person, such as why SIMBAD names are missing. */
+    notes: string[];
+}
+
+/** The star names of a stack, and the job that makes them. */
+export interface StackIdentificationState {
+    /** True while a job is naming the stars. */
+    running: boolean;
+    /** The latest naming job, or null. */
+    jobId: string | null;
+    /** Share done, 0 to 1, while running. */
+    progress: number | null;
+    /** What the running job is doing. */
+    message: string | null;
+    /** Why the last job failed, or null. */
+    error: string | null;
+    /** The saved names, or null when there are none for the stack as it is. */
+    identification: StackIdentificationResult | null;
+}
+
+/**
+ * Starts naming the detected stars of a stack, as a job of the analysis type.
+ * @param targetId The target.
+ * @param stackPath The stack shown.
+ * @returns The job id, and whether one was already running.
+ */
+export async function startStackIdentification(
+    targetId: string,
+    stackPath: string
+): Promise<{ status: string; jobId: string }> {
+    return callBackend("analysis:identify_stack", { target_id: targetId.trim(), stack_path: stackPath });
+}
+
+/**
+ * Reads the saved star names of a stack and the state of the job that makes them.
+ * @param targetId The target.
+ * @param stackPath The stack shown.
+ * @returns The state.
+ */
+export async function fetchStackIdentification(
+    targetId: string,
+    stackPath: string
+): Promise<StackIdentificationState> {
+    return callBackend("analysis:get_stack_identification", { target_id: targetId.trim(), stack_path: stackPath });
+}
 
 /**
  * The stars placed on an image, with the reason when there are none.
@@ -234,3 +314,25 @@ export async function fetchAstrometryOverlayStars(
         reason: typeof data?.reason === 'string' ? data.reason : null
     };
 }
+
+/**
+ * Reads the target's stars that have photometry, with the names the star lists show.
+ *
+ * The Astrometry overlay labels each star with this name, so a star reads the same on the
+ * image as in the Astronomy Manager's lists.
+ *
+ * @param targetId The target.
+ * @returns Each star's library id mapped to its record's name (its id when it has no name).
+ */
+export async function fetchPhotometryStarNames(targetId: string): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (!targetId || targetId.trim() === '') return names;
+    const rows = await callBackend("astronomy:list", { target_id: targetId.trim(), filter_type: 'photometry', limit: 0 });
+    if (!Array.isArray(rows)) return names;
+    for (const row of rows) {
+        if (typeof row.id !== 'string' || row.id === '') continue;
+        names.set(row.id, typeof row.name === 'string' && row.name !== '' ? row.name : row.id);
+    }
+    return names;
+}
+

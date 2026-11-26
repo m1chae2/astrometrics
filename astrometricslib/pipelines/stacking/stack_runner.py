@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
@@ -39,6 +39,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackingDriver,
     StackSettings,
 )
+from astrometricslib._internal.drivers.siril_interface.run_models import SIRIL_COMMUNICATION_ERROR_KEY
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
 from astrometricslib.models.tuned_parameter import (
@@ -50,6 +51,9 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import align_calibrated_frames
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+
+if TYPE_CHECKING:
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +94,42 @@ MINIMUM_REGISTERED_FRACTION = TunedParameter(
 # reference selection or frame filtering the way star-based registration
 # can.
 SPECTRAL_STAR_DETECTION_ORDER = ("standard", "relaxed", "phase_correlation")
+
+
+def split_into_stack_batches(frames: list[Any], is_spectral: bool) -> list[ExposureGroup]:
+    """Split the frames of a stack into the batches it stacks one by one.
+
+    Frames of different exposure lengths are stacked one length at a time,
+    for spectra and for images. Each length needs the dark frames of its own
+    length, and the normalization and rejection of one stack cannot treat
+    frames of different lengths as one population (see `exposure_groups`).
+    The stack check (`predict_stack`) uses this same split, so it reports the
+    batches the stack will make.
+
+    Parameters
+    ----------
+    frames : `list`
+        The frame records to stack.
+    is_spectral : `bool`
+        Whether they are spectroscopy frames. Those are also split by night:
+        the zero order sits on a different pixel each night and registering
+        two nights together can lose most frames (see
+        `split_groups_by_night`).
+
+    Returns
+    -------
+    groups : `list` [`ExposureGroup`]
+        The batches, shortest exposure first. Always at least one.
+    """
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+        split_frames_by_exposure,
+        split_groups_by_night,
+    )
+
+    groups = split_frames_by_exposure(frames)
+    if is_spectral:
+        groups = split_groups_by_night(groups)
+    return groups
 
 
 def run_stack(
@@ -147,21 +187,15 @@ def run_stack(
     """
     if output_file is None:
         output_file = f"{target_id.replace(' ', '_')}_Stacked.fits"
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-        split_frames_by_exposure,
-        split_groups_by_night,
-    )
-
-    # Frames of different exposure lengths are stacked one length at a time,
-    # for spectra and for images. Each length needs the dark frames of its own
-    # length, and the normalization and rejection of one stack cannot treat
-    # frames of different lengths as one population (see `exposure_groups`).
-    groups = split_frames_by_exposure(frames)
-    if is_spectral:
-        # Each night's frames are stacked on their own too: the zero order
-        # sits on a different pixel each night and registering two nights
-        # together can lose most frames (see `split_groups_by_night`).
-        groups = split_groups_by_night(groups)
+    groups = split_into_stack_batches(frames, is_spectral)
+    if sum(len(group.frames) for group in groups) < len(frames):
+        # The frame screening records these frames (see `frame_screening`);
+        # a caller that skipped it still must not stack them.
+        logger.warning(
+            "Leaving %d frame(s) out of the stack: their exposure has no group near enough.",
+            len(frames) - sum(len(group.frames) for group in groups),
+        )
+        frames = [frame for group in groups for frame in group.frames]
     if len(groups) > 1:
         stacked_path, diagnostics = _stack_exposure_groups(
             engine,
@@ -238,7 +272,9 @@ def _stack_one_batch(
 
     For spectral frames the standard star detection is tried first. If too
     few frames register, the relaxed detection is tried as well and the run
-    that registered more frames is kept.
+    that registered more frames is kept. The relaxed detection is not tried
+    when Siril failed to answer a command: that is a Siril problem, not a
+    star detection problem.
 
     Returns
     -------
@@ -288,6 +324,17 @@ def _stack_one_batch(
             diagnostics["spectral_star_detection"] = mode
             diagnostics["registered_fraction"] = fraction
         attempts.append((path, diagnostics, fraction))
+        communication_error = diagnostics.get(SIRIL_COMMUNICATION_ERROR_KEY)
+        if communication_error and not path:
+            # Siril stopped answering. Other star detection settings would
+            # not help, so the run is not repeated with them.
+            logger.error(
+                "Stacking %d frames for '%s' stopped because Siril did not answer: %s",
+                len(frames),
+                target_id,
+                communication_error,
+            )
+            break
         if path and fraction >= minimum_registered_fraction:
             break
         if mode is not None and attempt_index + 1 < len(modes):
@@ -700,7 +747,12 @@ def _stack_exposure_groups(
         ``"exposure_group_frame_zero_fractions"`` list with every group's
         measured zero fraction (empty when the frames could not be read), an
         ``"exposure_group_weights"`` list with one entry for each group that
-        was combined (see `_exposure_group_weight_entries`), and a
+        was combined (see `_exposure_group_weight_entries`), an
+        ``"exposure_group_alignments"`` list (each combined group's frame
+        count, its shift, rotation and scale onto the reference group, or
+        `None` for the reference, and a ``"distortion"`` record of the
+        smooth lens-distortion correction when the move has one, `None`
+        otherwise), and a
         ``"covered_in_every_group"`` mask of the pixels every combined group
         has data at.
     """
@@ -775,8 +827,13 @@ def _stack_each_group(
     )
     results: list[GroupResult] = []
     failed_groups = []
+    # Groups at one exposure length but different ISOs would share a file
+    # name, so the ISO joins the name whenever the groups' ISOs differ.
+    mixed_isos = len({group.iso for group in groups}) > 1
     for group in groups:
         tag = f"exp{group.exposure_seconds:g}s".replace(".", "p")
+        if mixed_isos and group.iso is not None:
+            tag += f"_iso{group.iso:g}".replace(".", "p")
         if group.night is not None:
             tag += f"_{group.night}"
         path, diagnostics = _stack_one_batch(
@@ -956,6 +1013,30 @@ def _measure_group_stacks(
     )
 
 
+def alignment_left_out_reason(reference_exposure: float, alignment: Any) -> str:
+    """Say why a group could not be lined up with the reference group.
+
+    A star-pattern search that failed says why, with its numbers. The
+    correlation of the shift-only measurement is then not the cause, so it is
+    given only when no pattern search ran (a spectral stack).
+
+    Parameters
+    ----------
+    reference_exposure : `float`
+        The exposure time, in seconds, of the group the others are lined up
+        with.
+    alignment : `AlignmentResult`
+        The failed alignment of the group.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence stored as the group's left-out reason.
+    """
+    cause = alignment.failure_reason or f"correlation {alignment.correlation:.2f}"
+    return f"could not be lined up with the {reference_exposure:g} s group ({cause})"
+
+
 def _align_and_screen_groups(
     results: list[GroupResult], measurements: _GroupStackMeasurements, target_id: str, is_spectral: bool
 ) -> None:
@@ -980,6 +1061,7 @@ def _align_and_screen_groups(
     import numpy as np
 
     from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import exposure_group_iso
     from astrometricslib.pipelines.stacking.processing.group_alignment import (
         SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
         align_images_to_reference,
@@ -991,6 +1073,8 @@ def _align_and_screen_groups(
     from astrometricslib.pipelines.stacking.processing.group_gains import (
         describe_bright_sky_group,
         describe_nonlinear_group,
+        describe_unbelievable_gain_group,
+        normalize_sky_ratios_by_iso,
     )
 
     # Line the group stacks up with the group that carries the most weight
@@ -1023,7 +1107,8 @@ def _align_and_screen_groups(
         if alignment is not None and alignment.star_pairs:
             logger.info(
                 "The %g s exposure group of '%s' was lined up with %d stars: shift (%.2f, %.2f) px, "
-                "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners.",
+                "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners "
+                "(%s model%s).",
                 result.exposure,
                 target_id,
                 alignment.star_pairs,
@@ -1032,13 +1117,14 @@ def _align_and_screen_groups(
                 alignment.rotation_degrees,
                 alignment.scale,
                 alignment.residual_pixels,
+                alignment.model,
+                f", {alignment.similarity_residual_pixels:.2f} px with a similarity alone"
+                if alignment.distortion is not None
+                else "",
             )
     for result in results:
         if result.aligned_image is None:
-            reason = (
-                f"could not be lined up with the {reference.exposure:g} s group "
-                f"(correlation {result.alignment.correlation:.2f})"
-            )
+            reason = alignment_left_out_reason(reference.exposure, result.alignment)
             result.left_out_reason = reason
             logger.warning(
                 "The %g s exposure group of '%s' %s; leaving it out.", result.exposure, target_id, reason
@@ -1047,7 +1133,8 @@ def _align_and_screen_groups(
     if len(used) > 1:
         # A group whose brightness is not one scale factor of the reference
         # (its bright stars' flux ratio disagrees with its faint stars') is
-        # nonlinear or clipped at the bright end. Rescaling it would change
+        # marked nonlinear, whether its bright end is clipped or not (the
+        # reason says which). Rescaling it would change
         # its faint stars by the wrong amount, so it is left out and the
         # others are combined, the same fallback as for a group that cannot
         # be lined up. So is a group whose sky is far brighter than the
@@ -1063,17 +1150,33 @@ def _align_and_screen_groups(
             clip_ceiling_adu=measurements.clip_ceiling_adu,
             use_star_fluxes=not is_spectral,
         )
+        # Groups of different ISO have raw skies that differ by the ISO ratio
+        # alone, so the sky is compared per unit ISO.
+        normalize_sky_ratios_by_iso(
+            gain_measurements,
+            [exposure_group_iso(result.group.frames) for result in used],
+            reference_in_used,
+        )
         for result, gain_measurement in zip(used, gain_measurements, strict=True):
             result.gain_measurement = gain_measurement
         for result, gain_measurement in zip(used, gain_measurements, strict=True):
-            if not (gain_measurement.nonlinear or gain_measurement.sky_too_bright):
+            if not (
+                gain_measurement.nonlinear
+                or gain_measurement.sky_too_bright
+                or gain_measurement.gain_rejected
+            ):
                 continue
             reference_exposure = used[reference_in_used].exposure
-            reason = (
-                describe_nonlinear_group(gain_measurement, reference_exposure)
-                if gain_measurement.nonlinear
-                else describe_bright_sky_group(gain_measurement, reference_exposure)
-            )
+            if gain_measurement.nonlinear:
+                reason = describe_nonlinear_group(
+                    gain_measurement,
+                    reference_exposure,
+                    get_configuration().get_exposure_group_gain_tolerance(),
+                )
+            elif gain_measurement.gain_rejected:
+                reason = describe_unbelievable_gain_group(gain_measurement, reference_exposure)
+            else:
+                reason = describe_bright_sky_group(gain_measurement, reference_exposure)
             result.left_out_reason = reason
             logger.warning("The %g s exposure group of '%s' %s.", result.exposure, target_id, reason)
 
@@ -1150,17 +1253,11 @@ def _write_combined_stack(
     write_image(final_path, combined, header)
 
     stem = os.path.splitext(final_path)[0]
-    shifts = [
-        None
-        if result.alignment is None
-        else (result.alignment.shift_rows_pixels, result.alignment.shift_columns_pixels)
-        for result in used
-    ]
     merge_rejection_maps(
         [_sibling_paths(result.path)[1] for result in used],
         [result.count for result in used],
         f"{stem}_RejMap.fits",
-        shifts=shifts,
+        alignments=[result.alignment for result in used],
     )
     merge_registration_sequences(
         [_sibling_paths(result.path)[2] for result in used], f"{stem}_Registration.seq"
@@ -1211,12 +1308,12 @@ def _describe_groups(
     summaries : `list` [`dict`]
         One summary per group, stacked groups first.
     """
+    from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
         measure_group_saturation,
         write_group_manifest,
     )
-    from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 
     clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
 
@@ -1254,6 +1351,13 @@ def _describe_groups(
             "alignment_scale": None if alignment is None else alignment.scale,
             "alignment_star_pairs": None if alignment is None else alignment.star_pairs,
             "alignment_residual_pixels": None if alignment is None else alignment.residual_pixels,
+            "alignment_model": None if alignment is None else alignment.model,
+            "alignment_similarity_residual_pixels": None
+            if alignment is None
+            else alignment.similarity_residual_pixels,
+            "alignment_distortion": None
+            if alignment is None or alignment.distortion is None
+            else alignment.distortion.to_record(),
         })
     for group, diagnostics in failed_groups:
         summaries.append(
@@ -1323,6 +1427,26 @@ def _join_group_diagnostics(
         stack_weight,
         [result.summary_index for result in used],
     )
+    # How each group's stack was moved onto the reference group's grid, with
+    # the number of frames the group registered, so the crop can count how many
+    # frames cover each pixel of the combined stack (see `stack_crop`).
+    merged_diagnostics["exposure_group_alignments"] = [
+        {
+            "frame_count": len(result.artifacts.get("registration_frames") or []),
+            "alignment": None
+            if result.alignment is None
+            else [
+                result.alignment.shift_rows_pixels,
+                result.alignment.shift_columns_pixels,
+                result.alignment.rotation_degrees,
+                result.alignment.scale,
+            ],
+            "distortion": None
+            if result.alignment is None or result.alignment.distortion is None
+            else result.alignment.distortion.to_record(),
+        }
+        for result in used
+    ]
     # Where every combined group has data. Empty-sky apertures keep out of the
     # rest (see `aperture_placement.uncovered_clearance_px()`).
     merged_diagnostics["covered_in_every_group"] = np.logical_and.reduce(combination.covered_masks)

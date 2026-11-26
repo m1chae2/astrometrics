@@ -3,7 +3,7 @@
  * @fileoverview Shared types for the Planetarium overlay rendering pipeline.
  */
 
-import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
+import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment, StackSkyPicture } from '../../common/types/planetariumTypes';
 import type { FramingPanelCorners } from './FramingOverlay';
 import { AlignmentTargetSession, PolarAlignmentStatus, TrackingRiskMap } from '../../common/types/backendTypes';
 
@@ -60,6 +60,20 @@ export interface ProjectionContext {
   trackingRisk?: TrackingRiskMap | null;
   /** Framing panels to outline, as corners in RA and Dec degrees. */
   framingPanels?: FramingPanelCorners[];
+  /** The Images layer: each target's stack picture and where it lies on the sky. */
+  stackPictures?: StackPictureLayerInput;
+}
+
+/** What the Images layer (StackPictureOverlay) draws from. */
+export interface StackPictureLayerInput {
+  /** Whether the layer is on. */
+  show: boolean;
+  /** Opacity of the pictures, from 0 to 1. */
+  opacity: number;
+  /** The placed pictures. */
+  pictures: StackSkyPicture[];
+  /** The loaded copy of a picture, or null while it loads (asking starts the load). */
+  getDrawable: (picture: StackSkyPicture, full: boolean) => HTMLImageElement | HTMLCanvasElement | ImageBitmap | null;
 }
 
 /**

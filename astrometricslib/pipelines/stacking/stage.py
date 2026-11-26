@@ -16,9 +16,10 @@ from astrometricslib.foundation.errors import AstrometricsError, ConflictError
 from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
-from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation
+from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation, stored_frame_widths
 from astrometricslib.pipelines.stacking.registration_records import (
     check_spectral_registration_quality,
     update_frame_registration_results,
@@ -230,7 +231,11 @@ def _stack_frames_guarded(
             # An up-to-date stack made before the solution was saved still
             # needs one for the viewer's star names.
             _save_stack_plate_solution(run, run.stacked_path)
-            _remake_preview_if_out_of_date(run)
+            _record_stack_star_shapes(run, run.stacked_path, only_if_missing=True)
+            was_turned = _turn_stack_north_up(run, run.stacked_path)
+            _remake_preview_if_out_of_date(
+                run, "the stack was turned so that north is near the top" if was_turned else None
+            )
             finish_stages()
             return run.stacked_path
         begin_stage(
@@ -240,6 +245,7 @@ def _stack_frames_guarded(
         _run_stacking_engine(run)  # run.stacked_path, diagnostics
         begin_stage(SUMMARIZE_STAGE, "trimming the stack edges and summarizing the stack")
         _trim_stack_edges(run)  # run.crop_offset, excluded_frames
+        raise_if_abandoned()
         summary = _summarize_stack(run)
         if run.stacked_path:
             _finish_made_stack(run, run.stacked_path, summary)
@@ -456,8 +462,9 @@ def _stack_is_unchanged(run: StackRun) -> bool:
     )
     if decision.skip:
         logger.info(
-            "Skipping the stack of '%s' at %s: its frames, calibration frames, settings and the "
-            "stacking code are the same as when it was made. Pass force=True to rebuild it.",
+            "Skipping the stack of '%s' at %s: its frames, calibration frames, master calibration "
+            "recipes, stacking settings and stacking code are the same as when it was made. "
+            "Pass force=True to rebuild it.",
             run.target.id,
             run.expected_path,
         )
@@ -546,7 +553,7 @@ def _trim_stack_edges(run: StackRun) -> None:
     from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
 
     run.crop_offset = trim_noisy_stack_edges(
-        run.stacked_path, get_configuration(), is_spectral=run.has_spectral
+        run.stacked_path, get_configuration(), is_spectral=run.has_spectral, diagnostics=run.diagnostics
     )
     run.excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
@@ -614,6 +621,8 @@ def _summarize_stack(run: StackRun) -> StackQualitySummary:
         background_split=run.background_split,
         stacked_path=run.stacked_path,
         gate_results=run.gate_results,
+        stack_weight=run.stack_weight,
+        configuration=None if run.quality_recording is None else run.quality_recording.configuration,
     )
     if run.has_spectral:
         run.target.spectral_stacking.quality_summary = summary
@@ -637,6 +646,9 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     summary : `StackQualitySummary`
         The stack's quality summary.
     """
+    # A cancelled job stops between steps. The inputs record is saved last,
+    # so a stack cut short here is stacked again by the next run.
+    raise_if_abandoned()
     _point_target_at_stack(run, stacked_path)
     _record_provenance(run, stacked_path, summary)
     _save_registration_record(run, stacked_path, summary)
@@ -645,9 +657,15 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
         "measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)",
     )
     _store_stack_quality(run, stacked_path, summary)
+    raise_if_abandoned()
+    _record_stack_star_shapes(run, stacked_path)
+    raise_if_abandoned()
     # Before the preview, so the new stretched FITS the preview writes copies
     # the solution from the stack's header.
     _save_stack_plate_solution(run, stacked_path)
+    raise_if_abandoned()
+    # The quality rows above are measured on the stack as Siril registered it.
+    _turn_stack_north_up(run, stacked_path)
     begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     _make_preview(run, stacked_path)  # run.preview_path
     _save_stack_inputs(run, stacked_path)
@@ -667,9 +685,11 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     which marks it as plate-solved. A stack that already carries a plate
     solution is not solved again.
 
-    The viewer shows the stack's stretched FITS (`processed_fits_path_for`),
-    which has the same pixel grid, so the solution is written there too when
-    that file exists, has the same size and has no solution yet.
+    The viewer shows the stack's stretched FITS (`processed_fits_path_for`).
+    The solution is written there too when that file exists and has none yet.
+    The file has the stack's pixel grid, or a crop of it whose place on the
+    stack its header gives (``CROPX0`` and the other crop cards), and then the
+    solution is moved by the crop's offset.
 
     This runs for a stack that was just made and for one that was up to date
     and skipped, so an older stack gets its solution on the next run. A
@@ -685,38 +705,110 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     """
     if run.has_spectral or not stacked_path:
         return
-    from astropy.wcs import WCS
+    ensure_stack_plate_solution(stacked_path, run.drivers)
 
-    from astrometricslib._internal.drivers.fits_access import read_header
+
+def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple[Any, str, bool]:
+    """Give an imaging stack's plate solution, solving and saving it if needed.
+
+    A stack whose header carries a plate solution (``PLTSOLVD``) keeps it.
+    Otherwise the stack is solved with the no-network solve the noise step
+    uses (`_plate_solve_stack_wcs`), and the solution is written into the
+    stack with `write_wcs_to_fits_header`. Either way, the viewer's copy
+    (`processed_fits_path_for`) gets the solution when it has none yet: as it
+    is on the same pixel grid, or moved by the crop offset its header gives.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The imaging stack.
+    drivers : `Drivers`, optional
+        The outside services; the plate solver is used.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution on the stack's own grid, or `None`.
+    reason : `str`
+        Why there is none; empty when there is one.
+    solved_now : `bool`
+        True when the stack was solved by this call.
+    """
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
     from astrometricslib.pipelines.shared.session_identification import (
-        header_is_plate_solved,
+        header_is_refit_to_gaia,
         write_wcs_to_fits_header,
     )
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+        PLATE_SOLVE_REFIT_WCS_SOURCE,
+    )
     from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
-    from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
 
     try:
         stack_header = read_header(stacked_path)
     except (OSError, *DATA_ERRORS) as error:
         logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
-        return
-    if header_is_plate_solved(stack_header):
-        wcs = WCS(stack_header).celestial
+        return None, f"the header could not be read: {error}", False
+    solved_now = False
+    saved_wcs = celestial_wcs(stack_header) if header_is_plate_solved(stack_header) else None
+    if saved_wcs is not None:
+        wcs = saved_wcs
+        refit_to_gaia = header_is_refit_to_gaia(stack_header)
     else:
-        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, run.drivers)
+        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
         if wcs is None:
             logger.warning(
                 "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
             )
-            return
-        write_wcs_to_fits_header(stacked_path, wcs)
+            return None, reason, False
+        refit_to_gaia = source == PLATE_SOLVE_REFIT_WCS_SOURCE
+        write_wcs_to_fits_header(stacked_path, wcs, refit_to_gaia=refit_to_gaia)
+        solved_now = True
         logger.info("Saved the stack's plate solution in its header (%s).", source)
+
+    _save_solution_in_viewer_copy(stacked_path, wcs, replace=False, refit_to_gaia=refit_to_gaia)
+    return wcs, "", solved_now
+
+
+def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool, refit_to_gaia: bool) -> None:
+    """Give the stack's viewer copy the stack's plate solution.
+
+    The copy has the stack's pixel grid, or a crop of it whose place on the
+    stack its header gives (``CROPX0`` and the other crop cards); a crop gets
+    the solution moved by that offset. A copy that is missing, cannot be read
+    or has a grid this function cannot place is left alone.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The imaging stack, whose header already holds the solution.
+    wcs : `astropy.wcs.WCS`
+        The solution on the stack's own grid.
+    replace : `bool`
+        True to write over a solution the copy already has; False to write
+        only when it has none.
+    refit_to_gaia : `bool`
+        Whether the solution was refit to Gaia stars (see
+        `write_wcs_to_fits_header`).
+    """
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
+    from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
+    from astrometricslib.pipelines.stacking.post_processing.stack_crop import (
+        CROP_HEIGHT_KEYWORD,
+        CROP_WIDTH_KEYWORD,
+        CROP_X0_KEYWORD,
+        CROP_Y0_KEYWORD,
+        CropBox,
+        shift_header_for_crop,
+    )
+    from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
 
     processed_path = processed_fits_path_for(stacked_path)
     if not os.path.exists(processed_path):
         return
     try:
         processed_header = read_header(processed_path)
+        stack_header = read_header(stacked_path)
     except (OSError, *DATA_ERRORS) as error:
         logger.warning("Could not read %s to add the plate solution: %s", processed_path, error)
         return
@@ -724,9 +816,160 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
         stack_header.get("NAXIS1"),
         stack_header.get("NAXIS2"),
     )
-    if same_grid and not header_is_plate_solved(processed_header):
-        write_wcs_to_fits_header(processed_path, wcs)
+    if header_is_plate_solved(processed_header) and not replace:
+        return
+    if same_grid:
+        write_wcs_to_fits_header(processed_path, wcs, refit_to_gaia=refit_to_gaia)
         logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
+        return
+    # A cropped picture: its header says where it sits on the stack, so the
+    # stack's solution is moved by that offset.
+    crop = [
+        processed_header.get(key)
+        for key in (CROP_X0_KEYWORD, CROP_Y0_KEYWORD, CROP_WIDTH_KEYWORD, CROP_HEIGHT_KEYWORD)
+    ]
+    if None in crop or (crop[2], crop[3]) != (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")):
+        return
+    shift_header_for_crop(stack_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
+    shifted_wcs = celestial_wcs(stack_header)
+    if shifted_wcs is None:
+        return
+    write_wcs_to_fits_header(processed_path, shifted_wcs, refit_to_gaia=refit_to_gaia)
+    logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
+
+
+def save_refit_stack_plate_solution(stacked_path: str, refit_wcs: Any) -> bool:
+    """Save a plate solution refit to Gaia in a stack whose own is not.
+
+    The analysis step downloads the Gaia stars of the field and refits the
+    solution. The stack's plate solve cannot do that while it runs (it reads
+    the cache only, and a field the cache holds only to a shallow depth has no
+    refit). This is the one place that saves the later, better solution. It
+    uses the writer the stack's own solve uses (`write_wcs_to_fits_header`),
+    marks the header as refit (``WCSREFIT``) and gives the viewer's copy the
+    same solution. A stack that already holds a refit solution is left alone.
+    The caller must pass only a refit that the refit's own acceptance rules
+    accepted (`wcs_refinement.WcsRefinement.applied`).
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The imaging stack.
+    refit_wcs : `astropy.wcs.WCS`
+        The accepted refit, on the stack's own pixel grid.
+
+    Returns
+    -------
+    saved : `bool`
+        True when the solution was written; False when the stack already
+        had a refit one or its header could not be read.
+    """
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import (
+        header_is_refit_to_gaia,
+        write_wcs_to_fits_header,
+    )
+
+    try:
+        stack_header = read_header(stacked_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read the header of %s to save its refit solution: %s", stacked_path, error)
+        return False
+    if header_is_refit_to_gaia(stack_header):
+        return False
+    write_wcs_to_fits_header(stacked_path, refit_wcs, refit_to_gaia=True)
+    logger.info("Saved the stack's plate solution refit to Gaia stars in its header.")
+    _save_solution_in_viewer_copy(stacked_path, refit_wcs, replace=True, refit_to_gaia=True)
+    return True
+
+
+def _turn_stack_north_up(run: StackRun, stacked_path: str | None) -> bool:
+    """Save the stack turned so that north is near the top.
+
+    Siril registers to one reference frame, so the stack's north can be at the
+    bottom (after a meridian flip) or at a side. The turn moves pixels only
+    (no resampling), and it moves the stack's plate solution with them (see
+    `quarter_turn`). The stack's viewer copy and rejection map are turned too.
+    The registration record keeps the turn, so the later steps that match the
+    stack with the registered frames can undo it. The turn is recorded in the
+    stack's header (``QTURN``), as a notice row and in ``run.quarter_turn``.
+
+    This runs for a stack that was just made, after its quality rows (which
+    are measured on the stack as registered) and its plate solution, and for
+    one that was up to date and skipped, so an older stack is turned once on
+    the next run. A stack with no plate solution, a spectral stack and a stack
+    that has already been checked are left alone. A failure is logged and
+    never fails the stack.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str` or `None`
+        The stack, made or kept. Nothing happens without one.
+
+    Returns
+    -------
+    turned : `bool`
+        `True` when the stack file was turned now, so its picture must be made
+        again.
+    """
+    if run.has_spectral or not stacked_path:
+        return False
+    from astrometricslib.pipelines.shared.registration_record import record_quarter_turn
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import apply_quarter_turn
+
+    result = apply_quarter_turn(stacked_path)
+    if result is None:
+        return False
+    run.quarter_turn = result
+    if result.degrees == 0:
+        return False
+    record_quarter_turn(stacked_path, result.degrees)
+    _record_stack_turn_notice(run, stacked_path, result.degrees, result.reason)
+    return True
+
+
+def _record_stack_turn_notice(run: StackRun, stacked_path: str, degrees: int, reason: str) -> None:
+    """Store the notice row that says the stack was turned.
+
+    A failure is logged and never fails the stack.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str`
+        The stack that was turned.
+    degrees : `int`
+        The turn applied.
+    reason : `str`
+        The turn's own sentence.
+    """
+    if run.measured_at is None:
+        return
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+        PipelineRunContext,
+        record_run_measurements,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import stack_turned_measurement
+
+    context = PipelineRunContext.from_options(
+        run.target.id,
+        "stacking",
+        STACKING_PIPELINE_VERSION,
+        {"job_id": run.job_id, "measured_at": run.measured_at},
+    )
+    if context is None:
+        return
+    try:
+        row = stack_turned_measurement(context, os.path.basename(stacked_path), degrees, reason)
+        record_run_measurements(
+            [row], config=None if run.quality_recording is None else run.quality_recording.configuration
+        )
+    except Exception:  # a by-product of the stack: no failure here may fail it
+        logger.exception("The turn notice of the stack %s was not stored", stacked_path)
 
 
 def _point_target_at_stack(run: StackRun, stacked_path: str) -> None:
@@ -841,12 +1084,55 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
     )
 
 
+def _record_stack_star_shapes(
+    run: StackRun, stacked_path: str | None, *, only_if_missing: bool = False
+) -> None:
+    """Store how round the stack's stars are, as the frames' star shapes are.
+
+    This runs for a stack that was just made and for one that was up to date
+    and skipped, so an older stack gets its rows on the next run (once: the
+    skipped stack passes `only_if_missing`). A failure is logged as a warning
+    and never fails the stack. Spectral stacks are skipped.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str` or `None`
+        The stack, made or kept. Nothing happens without one.
+    only_if_missing : `bool`, optional
+        Measure only when the store holds no star-shape row for the stack.
+    """
+    if run.has_spectral or not stacked_path or run.measured_at is None:
+        return
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+    from astrometricslib.pipelines.stacking.post_processing.stack_star_shape import record_stack_star_shapes
+
+    context = PipelineRunContext.from_options(
+        run.target.id,
+        "stacking",
+        STACKING_PIPELINE_VERSION,
+        {"job_id": run.job_id, "measured_at": run.measured_at},
+    )
+    if context is None:
+        return
+    record_stack_star_shapes(
+        context,
+        stacked_path,
+        is_spectral=run.has_spectral,
+        config=None if run.quality_recording is None else run.quality_recording.configuration,
+        only_if_missing=only_if_missing,
+    )
+
+
 def _make_preview(run: StackRun, stacked_path: str) -> None:
     """Make a picture of the stack for people to look at.
 
     It never changes the stack and a failure to make it is logged, not
     raised. The image viewer shows it through the target's processed image.
-    Sets ``run.preview_path``.
+    A monochrome stack of a target that also has a color stack gets a second,
+    color picture (see `color_from_other_stack`). Sets ``run.preview_path``.
 
     Parameters
     ----------
@@ -855,17 +1141,40 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     stacked_path : `str`
         The stack that was made.
     """
+    from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+        BackgroundGradientOutcome,
+        record_background_gradient,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack import (
+        make_color_preview_for_target,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
     from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
         record_preview_step_notices,
     )
+    from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
-        SkippedPreviewStep,
         record_preview_as_processed_image,
         write_stack_preview,
     )
 
     skipped_steps: list[SkippedPreviewStep] = []
-    run.preview_path = write_stack_preview(stacked_path, run.preview_settings, skipped_steps=skipped_steps)
+    # A spectral stack has no sky gradient worth measuring: GraXpert's model
+    # is not measured for it.
+    background_outcomes: list[BackgroundGradientOutcome] | None = None if run.has_spectral else []
+    run.preview_path = write_stack_preview(
+        stacked_path,
+        run.preview_settings,
+        skipped_steps=skipped_steps,
+        background_outcomes=background_outcomes,
+        # The masked stretch is for imaging stacks of a nebula or a galaxy.
+        object_category=None if run.has_spectral else run.target.object_category,
+        target_anchor=None if run.has_spectral else anchor_for_target(run.target),
+    )
+    if run.preview_path:
+        # A monochrome stack also gets a color picture when the target has a
+        # color stack from another setup. It never fails the stack.
+        make_color_preview_for_target(run.target, stacked_path, run.has_spectral, skipped_steps)
     # A skipped step is a warning of this job, not only a line in the log.
     record_preview_step_notices(
         skipped_steps,
@@ -875,26 +1184,38 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         run.measured_at,
         None if run.quality_recording is None else run.quality_recording.configuration,
     )
+    if background_outcomes is not None:
+        record_background_gradient(
+            background_outcomes,
+            run.target.id,
+            os.path.basename(stacked_path),
+            run.job_id,
+            run.measured_at,
+            None if run.quality_recording is None else run.quality_recording.configuration,
+        )
     if run.preview_path:
         record_preview_as_processed_image(run.target, run.has_spectral, stacked_path, run.preview_path)
 
 
-def _remake_preview_if_out_of_date(run: StackRun) -> None:
+def _remake_preview_if_out_of_date(run: StackRun, forced_reason: str | None = None) -> None:
     """Skip the stages after an up-to-date stack; remake its picture if needed.
 
     The stack is kept. Its preview picture is made again when it is missing
     or the picture settings changed since it was made (see
-    `stack_preview.preview_is_out_of_date`); otherwise every stage left is
+    `preview_settings.preview_is_out_of_date`); otherwise every stage left is
     skipped.
 
     Parameters
     ----------
     run : `StackRun`
         The run, with an up-to-date stack at ``run.stacked_path``.
+    forced_reason : `str`, optional
+        A reason to make the picture again whatever its settings say, such as
+        a stack that was just turned.
     """
-    from astrometricslib.pipelines.stacking.post_processing.stack_preview import preview_is_out_of_date
+    from astrometricslib.pipelines.stacking.post_processing.preview_settings import preview_is_out_of_date
 
-    reason = preview_is_out_of_date(run.stacked_path)
+    reason = forced_reason or preview_is_out_of_date(run.stacked_path)
     if reason is None:
         skip_remaining_stages("the stack is already up to date")
         return
@@ -1416,6 +1737,18 @@ def _measure_stacked_pixel_fractions(
         summary.stacking_metrics.saturated_pixel_fraction = saturated_fraction
 
 
+def _record_stack_crop(summary: StackQualitySummary, diagnostics: dict) -> None:
+    """Copy the stack crop's reason and area share from a run.
+
+    The trim step puts them in ``diagnostics["stack_crop"]`` when it crops.
+    Sets the crop fields of `summary.stacking_metrics` in place.
+    """
+    crop = diagnostics.get("stack_crop")
+    if crop:
+        summary.stacking_metrics.stack_crop_reason = crop["reason"]
+        summary.stacking_metrics.stack_crop_area_fraction = crop["area_fraction"]
+
+
 def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> None:
     """Copy the exposure-group entries and recommended exposure from a run.
 
@@ -1458,14 +1791,44 @@ def _build_stack_quality_summary(
     background_split: dict | list[dict] | None,
     stacked_path: str | None,
     gate_results: list[GateResult] | None = None,
+    stack_weight: str | None = None,
+    configuration: Any = None,
 ) -> StackQualitySummary:
     """Gather diagnostic data into a final `StackQualitySummary`.
 
     This checks the quality of the stack differently depending on the type
     of image. For regular images, it compares the overall sharpness (FWHM)
-    of the final stack against the average sharpness of the original frames.
-    For spectroscopy images, it uses a special tracking analysis because
-    measuring the sharpness of stretched-out light spectrums doesn't work.
+    of the final stack against the width its frames predict, each frame
+    weighted as the stacking program weighted it (see
+    `measure_fwhm_degradation`). For spectroscopy images, it uses a special
+    tracking analysis because measuring the sharpness of stretched-out light
+    spectrums doesn't work.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target that was stacked.
+    is_spectral : `bool`
+        Whether the stack is spectral.
+    frames_submitted : `int`
+        How many frames were offered to the stage.
+    target_frames : `list`
+        The frames given to the stacking program.
+    excluded_frames : `list`
+        The frames left out before stacking.
+    diagnostics : `dict`
+        What the stacking run reported.
+    background_split : `dict`, `list` [`dict`] or `None`
+        The background-split check's result.
+    stacked_path : `str` or `None`
+        The stacked image, or `None` when there is none.
+    gate_results : `list` [`GateResult`], optional
+        Gates already judged before the summary was built.
+    stack_weight : `str`, optional
+        The Siril ``-weight`` mode the stack used, `None` for equal weights.
+    configuration : `AppConfiguration`, optional
+        Says where the quality store is, for the frame widths the frame
+        quality step stored. The process-wide one if omitted.
 
     Returns
     -------
@@ -1489,6 +1852,7 @@ def _build_stack_quality_summary(
         summary.stacking_metrics.background_split_detail = split_detail
 
     _record_exposure_groups(summary, diagnostics)
+    _record_stack_crop(summary, diagnostics)
 
     if stacked_path:
         _measure_stacked_pixel_fractions(summary, stacked_path, diagnostics)
@@ -1496,11 +1860,15 @@ def _build_stack_quality_summary(
 
         if not is_spectral and summary.quality_processing_applied:
             update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
+            stack_frames = _frames_in_combined_groups(target_frames, diagnostics)
             measure_fwhm_degradation(
                 summary,
                 stacked_path,
-                _frames_in_combined_groups(target_frames, diagnostics),
+                stack_frames,
                 stacked_fwhm=diagnostics.get("stacked_fwhm_px"),
+                diagnostics=diagnostics,
+                stack_weight=stack_weight,
+                stored_widths=stored_frame_widths(target.id, stack_frames, configuration),
             )
 
         if is_spectral and summary.quality_processing_applied:

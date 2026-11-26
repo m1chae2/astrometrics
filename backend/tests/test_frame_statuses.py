@@ -1,0 +1,87 @@
+"""Tests of the File Browser's frame statuses and the Put back call.
+
+`TargetService.get_frame_statuses` passes the target to the library's
+frame-status rule (`quality.frame_statuses`, tested in the library, which
+finds the newest stack file itself) and passes its answer through.
+`put_back_frames` moves chosen set-aside frames back through the library.
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from astrometricslib.exceptions import NotFoundError
+from backend.public_interface import RPC_METHODS
+from backend.routers.rpc_router import rpc_registry
+from backend.services.data.target_service import TargetService
+
+
+def _service() -> TargetService:
+    """Build a service whose library is a stand-in.
+
+    Returns
+    -------
+    service : `TargetService`
+        A service with a mocked library.
+    """
+    service = TargetService.__new__(TargetService)
+    service.astrometrics = MagicMock()
+    service.astrometrics.quality.frame_statuses.return_value.model_dump.return_value = {"frames": []}
+    return service
+
+
+def test_the_library_rule_gets_only_the_target() -> None:
+    """The library finds the newest stack; the service sends the target."""
+    service = _service()
+
+    service.get_frame_statuses("M 1")
+
+    service.astrometrics.quality.frame_statuses.assert_called_once_with("M 1")
+    service.astrometrics.quality.frame_statuses.return_value.model_dump.assert_called_once_with(by_alias=True)
+
+
+def test_the_flagged_reason_reaches_the_answer() -> None:
+    """A flagged frame comes back as the library words it."""
+    service = _service()
+    flagged = {
+        "path": "/a.fits",
+        "state": "flagged",
+        "elongation": 1.25,
+        "reason": "Stacked, but its stars are stretched: elongation 1.25, warning level 1.20, "
+        "set-aside threshold 1.32.",
+    }
+    service.astrometrics.quality.frame_statuses.return_value.model_dump.return_value = {"frames": [flagged]}
+
+    assert service.get_frame_statuses("M 1")["frames"] == [flagged]
+
+
+def test_an_unknown_target_is_the_librarys_not_found_error() -> None:
+    """A target that is not there raises the library's `NotFoundError`."""
+    service = _service()
+    service.astrometrics.quality.frame_statuses.side_effect = NotFoundError("No target named 'Nope'.")
+
+    with pytest.raises(NotFoundError, match="Nope"):
+        service.get_frame_statuses("Nope")
+
+
+def test_put_back_goes_through_the_library_and_reports_what_moved() -> None:
+    """The service passes the paths to the library's put-back call."""
+    service = _service()
+    service.astrometrics.quality.put_back_set_aside_frames.return_value = ["/frames/lights/M 1/c.fits"]
+
+    result = service.put_back_frames("M 1", ["/frames/lights/M 1/_excluded/c.fits"])
+
+    assert result == {"restored": ["/frames/lights/M 1/c.fits"]}
+    service.astrometrics.quality.put_back_set_aside_frames.assert_called_once_with(
+        "M 1", ["/frames/lights/M 1/_excluded/c.fits"]
+    )
+
+
+def test_the_two_calls_are_declared_and_wired() -> None:
+    """Both RPC names are public and reach the target service."""
+    for method, handler in (
+        ("target:get_frame_statuses", "get_frame_statuses"),
+        ("target:put_back_frames", "put_back_frames"),
+    ):
+        assert method in RPC_METHODS
+        assert rpc_registry._handlers[method] == ("target_service", handler)

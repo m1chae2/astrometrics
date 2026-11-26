@@ -42,6 +42,8 @@ import psutil
 
 from astrometricslib.foundation.jobs import JOB_LOG_PACKAGES
 from astrometricslib.foundation.logging import configure_logging, get_job_log_router, log_context
+from astrometricslib.foundation.parameter_context import bind_equipment_key, current_equipment_key
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.foundation.system import lower_process_priority
 
 logger = logging.getLogger(__name__)
@@ -60,9 +62,15 @@ class BatchRunSummary:
     failed: list[tuple[str, str]] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
     results: dict[str, Any] = field(default_factory=dict)
+    # Facts about the run as a whole that are not tied to one item.
+    notes: dict[str, Any] = field(default_factory=dict)
 
 
-def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -> None:
+def _initialize_worker_process(
+    niceness: int = 10,
+    max_memory_mb: int = 20480,
+    equipment_key: tuple[str | None, str | None, float | None, str | None] | None = None,
+) -> None:
     """Initialize a worker process with priority and memory limits.
 
     Runs once per worker process at pool startup, and sets up the worker's
@@ -98,6 +106,13 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -
     max_memory_mb : int, optional
         Maximum virtual memory in megabytes allowed for this process
         (default 20480 MB = 20 GB). Set to 0 or None to disable.
+    equipment_key : `tuple` or `None`, optional
+        The camera, optic, focal length and filter the parent run reads its
+        parameters for (`current_equipment_key`). A spawned worker starts
+        with no parameter context, so it would read the active setup's
+        values, which can be another camera's. Binding the key here makes
+        every item read the parent run's equipment values. `None` changes
+        nothing.
     """
     lower_process_priority(niceness)
 
@@ -117,6 +132,7 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -
     # records to that item's output buffer (see
     # `_run_worker_with_captured_output`).
     configure_logging("batch-worker", level=logging.INFO, log_dir="", console=False)
+    bind_equipment_key(equipment_key)
 
 
 def _run_worker_with_captured_output(
@@ -312,6 +328,8 @@ def run_parallel_batch(
     total_item_count = len(item_ids)
     completed_item_count = 0
     spawn_context = multiprocessing.get_context("spawn")
+    # The parent run's equipment, bound again in each spawned worker.
+    equipment_key = current_equipment_key()
 
     def report_item_complete(item_id: str, result: dict) -> None:
         nonlocal completed_item_count
@@ -335,7 +353,7 @@ def run_parallel_batch(
             max_workers=current_max_workers,
             mp_context=spawn_context,
             initializer=_initialize_worker_process,
-            initargs=(niceness, max_worker_memory_mb),
+            initargs=(niceness, max_worker_memory_mb, equipment_key),
             max_tasks_per_child=max_tasks_per_child,
         )
 
@@ -368,6 +386,8 @@ def run_parallel_batch(
         try:
             while active_futures:
                 done_futures, _ = wait(active_futures.keys(), return_when=FIRST_COMPLETED)
+                # A cancelled job starts no more items.
+                raise_if_abandoned()
                 for future in done_futures:
                     item_id = active_futures.pop(future)
                     try:
@@ -462,6 +482,6 @@ def run_parallel_batch(
                     current_max_workers = 1
                 pending_item_ids = still_pending_item_ids
         finally:
-            executor.shutdown(wait=False)
+            executor.shutdown(wait=False, cancel_futures=True)
 
     return summary

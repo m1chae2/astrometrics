@@ -32,8 +32,7 @@ AGENT_VISIBLE_NAMES = frozenset({
     "doc",
     "np",
     "plt",
-    "pd",
-    "astropy",
+    "fits",
     "astrometrics",
     "wayfinder",
 })

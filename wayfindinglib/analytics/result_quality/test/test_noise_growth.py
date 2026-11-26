@@ -360,6 +360,17 @@ def test_a_new_group_without_a_camera_gain_is_refused() -> None:
     assert ng.plan_group_stack(existing, new, electrons_per_adu=0.8).forecast.noise is not None
 
 
+def test_new_frames_the_stacker_would_leave_out_refuse_the_plan() -> None:
+    """Three 300 s frames beside 30 s and 60 s groups are 5x away: refused."""
+    existing = [_group(30.0, 8, 20.0), _group(60.0, 10, 30.0)]
+    new = [_frame(100 + i, exposure=300.0, width=3.0) for i in range(3)]
+    plan = ng.plan_group_stack(existing, new)
+    assert plan.forecast.noise is None
+    assert "leave" in str(plan.reason)
+    assert "nearest group (60 s)" in str(plan.reason)
+    assert ng.exposure_lengths_left_out([60.0] * 6 + [300.0])[-1] is not None
+
+
 def test_few_new_frames_are_folded_where_the_stacker_would_fold_them() -> None:
     """Three 100 s frames go into the 120 s group, the nearest in ratio."""
     existing = [_group(60.0, 10, 30.0), _group(120.0, 10, 45.0)]
@@ -675,7 +686,9 @@ def test_the_group_ratio_leaves_the_mean_exposure_scale_out() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _folded_group(reference: float | None, sky: float = 2.0, read: float = 3.5) -> ng.StackGroup:
+def _folded_group(
+    reference: float | None, sky: float = 2.0, read: float = 3.5, folded_exposure: float = 300.0
+) -> ng.StackGroup:
     """Build a 120 s group that holds one folded 300 s frame.
 
     Parameters
@@ -684,6 +697,8 @@ def _folded_group(reference: float | None, sky: float = 2.0, read: float = 3.5) 
         The exposure of the group's reference frame.
     sky, read : `float`
         Sky rate and read noise of every frame.
+    folded_exposure : `float`, optional
+        The exposure of the one folded frame.
 
     Returns
     -------
@@ -692,7 +707,7 @@ def _folded_group(reference: float | None, sky: float = 2.0, read: float = 3.5) 
     """
     frames = (
         *(_frame(index, exposure=120.0, sky=sky, read=read) for index in range(8)),
-        _frame(8, exposure=300.0, sky=sky, read=read),
+        _frame(8, exposure=folded_exposure, sky=sky, read=read),
     )
     return ng.StackGroup(
         frames=frames,
@@ -800,7 +815,7 @@ def test_new_frames_folded_into_a_group_are_forecast_with_their_scaling() -> Non
 
 def test_a_folded_existing_group_with_no_reference_refuses_new_frames_for_it() -> None:
     """A mixed-length group with no known reference takes no new frames."""
-    existing = [_group(60.0, 10, 30.0), _folded_group(None)]
+    existing = [_group(60.0, 10, 30.0), _folded_group(None, folded_exposure=240.0)]
     new = [_frame(100 + i, exposure=120.0, sky=2.0, read=3.5, width=3.0) for i in range(2)]
     plan = ng.plan_group_stack(existing, new)
     assert plan.forecast.noise is None

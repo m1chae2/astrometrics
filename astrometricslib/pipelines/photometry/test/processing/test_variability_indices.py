@@ -197,15 +197,15 @@ def test_the_expected_scatter_is_never_below_the_stars_own_propagated_error() ->
     assert vi.expected_rms_mag(model, noisy) == pytest.approx(0.054)
 
 
-def test_extract_series_drops_bad_points_and_mismatched_errors() -> None:
-    """Bad points leave with their errors; short curves give None."""
+def test_extract_series_drops_non_finite_points_and_mismatched_errors() -> None:
+    """A non-finite point leaves with its error, a negative one stays."""
     star = make_star("A", [1.0, 1.1, float("nan"), 0.9, 1.0, -1.0, 1.05], [0.1] * 7, flux=100.0)
     series = vi.extract_series(star)
 
     assert series is not None
-    assert series.values.tolist() == [1.0, 1.1, 0.9, 1.0, 1.05]
+    assert series.values.tolist() == [1.0, 1.1, 0.9, 1.0, -1.0, 1.05]
     assert series.errors is not None
-    assert series.errors.size == 5
+    assert series.errors.size == 6
     assert series.instrumental_magnitude == pytest.approx(-5.0)
     assert vi.extract_series(make_star("B", [1.0, 1.1, 0.9], [0.1] * 3)) is None
     mismatched = make_star("C", [1.0] * 6, [0.1] * 5)

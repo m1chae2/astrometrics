@@ -42,6 +42,7 @@ from scipy.ndimage import maximum_filter
 
 from astrometricslib import Astrometrics
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # How closely two star widths must agree to count as the same measurement.
 # The two methods weigh a star's wings differently, so they are not expected
@@ -175,7 +176,7 @@ def independent_fwhm(data: np.ndarray) -> float | None:
     if finite.size == 0:
         return None
     sky = float(np.median(finite))
-    sigma = 1.4826 * float(np.median(np.abs(finite - sky))) or 1e-12
+    sigma = MAD_TO_SIGMA * float(np.median(np.abs(finite - sky))) or 1e-12
     local_maximum = maximum_filter(image, size=_ISOLATION_PX) == image
     ceiling = float(np.nanmax(image))
     peaks = np.argwhere(local_maximum & (image > sky + _PEAK_SIGMA * sigma) & (image < 0.98 * ceiling))

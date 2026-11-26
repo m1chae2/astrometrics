@@ -82,3 +82,15 @@ def test_by_default_a_star_reported_twice_is_merged() -> None:
     assert len(merged) == 1
     assert merged[0]["x_centroid"] == pytest.approx(100.0)
     assert merged[0]["flux"] == pytest.approx(1000.0)
+
+
+def test_deduplicate_returns_new_dictionaries_for_every_star() -> None:
+    """A single star comes back as a copy, not as the same dictionary."""
+    sources = [_source(10.0, 10.0, 100.0), _source(500.0, 500.0, 90.0)]
+
+    unique = SourceDetector().deduplicate(sources, separation_px=15.0)
+    unique[0]["x_centroid"] = -1.0
+
+    assert len(unique) == 2
+    assert all(star is not original for star, original in zip(unique, sources, strict=True))
+    assert sources[0]["x_centroid"] == pytest.approx(10.0)

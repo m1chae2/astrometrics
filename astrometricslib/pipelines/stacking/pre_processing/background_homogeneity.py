@@ -169,10 +169,38 @@ def find_dominant_background_subset(
     return dominant_subset, excluded, split_summary
 
 
+def _frames_by_exact_exposure(frames: list[Any]) -> list[tuple[float | None, list[Any]]]:
+    """Sort frames into buckets of one exact exposure length.
+
+    The length is rounded the way exposure groups round it
+    (`exposure_group_key`). This is not the exposure group: a short list of
+    frames folded into a group of another length stays in a bucket of its own.
+
+    Parameters
+    ----------
+    frames : `list` [`Any`]
+        The frame records.
+
+    Returns
+    -------
+    buckets : `list` [`tuple` [`float` or `None`, `list` [`Any`]]]
+        The rounded length (`None` for frames with no readable length) and
+        the frames of that length, shortest first.
+    """
+    from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import exposure_group_key
+
+    by_key: dict[float | None, list[Any]] = {}
+    for frame in frames:
+        exposure = frame_exposure_seconds(frame)
+        by_key.setdefault(None if exposure is None else exposure_group_key(exposure), []).append(frame)
+    return sorted(by_key.items(), key=lambda item: (item[0] is None, item[0] or 0.0))
+
+
 def find_dominant_background_subset_by_exposure(
     frames: list[Any], gap_ratio_threshold: float | None = None
 ) -> tuple[list[Any], list[Any], list[dict[str, Any]]]:
-    """Check for a sky-background split within each exposure length.
+    """Check for a sky-background split within each exact exposure length.
 
     The sky background of a frame grows with its exposure length, so frames of
     different lengths cannot be compared with each other. Checked together, a
@@ -181,12 +209,19 @@ def find_dominant_background_subset_by_exposure(
     fourteen 60 s frames were excluded (measured 2026-09-21). Each exposure
     length is therefore checked on its own.
 
+    The check is made on the frames of one exact length, not on the exposure
+    groups. A frame folded into a group of another length has a sky level
+    that scales with its own length, so inside that group it would look like
+    a change of sky (on 2026-11-22 twelve valid folded frames were excluded
+    this way). A length with fewer than `MINIMUM_MEASURED_FRAMES_TO_JUDGE`
+    measured frames cannot be judged and is kept.
+
     Parameters
     ----------
     frames : `list` [`Any`]
         The images to check.
     gap_ratio_threshold : `float`, optional
-        The threshold to decide if conditions changed within a group.
+        The threshold to decide if conditions changed within a length.
 
     Returns
     -------
@@ -202,21 +237,25 @@ def find_dominant_background_subset_by_exposure(
     """
     if gap_ratio_threshold is None:
         gap_ratio_threshold = resolve(DEFAULT_GAP_RATIO_THRESHOLD).value
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import split_frames_by_exposure
+    minimum_measured = resolve(MINIMUM_MEASURED_FRAMES_TO_JUDGE).value
 
     if not frames:
         return [], [], []
     kept_ids: set[int] = set()
     excluded: list[Any] = []
     split_summaries: list[dict[str, Any]] = []
-    for group in split_frames_by_exposure(frames):
-        dominant, group_excluded, split_summary = find_dominant_background_subset(
-            group.frames, gap_ratio_threshold
+    for length, bucket in _frames_by_exact_exposure(frames):
+        measured = [f for f in bucket if f.measurements.background_level is not None]
+        if len(measured) < minimum_measured:
+            kept_ids.update(id(frame) for frame in bucket)
+            continue
+        dominant, bucket_excluded, split_summary = find_dominant_background_subset(
+            bucket, gap_ratio_threshold
         )
         kept_ids.update(id(frame) for frame in dominant)
-        excluded.extend(group_excluded)
+        excluded.extend(bucket_excluded)
         if split_summary:
-            split_summaries.append({**split_summary, "exposure_seconds": group.exposure_seconds})
+            split_summaries.append({**split_summary, "exposure_seconds": length})
     return [frame for frame in frames if id(frame) in kept_ids], excluded, split_summaries
 
 
@@ -263,8 +302,6 @@ def background_homogeneity_gate(
         ``failed`` when a split was found, ``not_checked`` when the check is
         off or no exposure length could be judged, otherwise ``passed``.
     """
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import split_frames_by_exposure
-
     default_gap_ratio_threshold = resolve(DEFAULT_GAP_RATIO_THRESHOLD).value
     minimum_measured_frames_to_judge = resolve(MINIMUM_MEASURED_FRAMES_TO_JUDGE).value
 
@@ -284,8 +321,8 @@ def background_homogeneity_gate(
             limit_source=source,
         )
     judged = 0
-    for group in split_frames_by_exposure(frames) if frames else []:
-        measured = [f for f in group.frames if f.measurements.background_level is not None]
+    for _, bucket in _frames_by_exact_exposure(frames) if frames else []:
+        measured = [f for f in bucket if f.measurements.background_level is not None]
         if len(measured) >= minimum_measured_frames_to_judge:
             judged += 1
     if judged == 0:

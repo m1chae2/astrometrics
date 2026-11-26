@@ -361,3 +361,72 @@ def test_the_process_check_uses_the_process_list() -> None:
     assert process_locks._process_is_alive(os.getpid())
     assert not process_locks._process_is_alive(0)
     assert not process_locks._process_is_alive(-5)
+
+
+def test_a_run_cancelled_while_waiting_for_a_slot_stops_waiting_and_runs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A waiter given up on leaves and does no work."""
+    from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    configuration = make_configuration(tmp_path)
+    abandonment = RunAbandonment()
+    ran_work: list[str] = []
+    outcome: list[str] = []
+    holder_has_slot = threading.Event()
+    release_holder = threading.Event()
+    waiter_is_waiting = threading.Event()
+
+    def holder() -> None:
+        """Hold the only slot until told to let go."""
+        with acquire_resource_slot(configuration, "job", 1, work_name="holder"):
+            holder_has_slot.set()
+            release_holder.wait(timeout=WAIT_SECONDS)
+
+    def waiter() -> None:
+        """Ask for the slot as a run that will be cancelled."""
+        with bind_abandonment(abandonment):
+            waiter_is_waiting.set()
+            try:
+                with acquire_resource_slot(configuration, "job", 1, poll_interval_seconds=0.05):
+                    ran_work.append("stage 1")
+            except RunAbandonedError:
+                outcome.append("cancelled")
+
+    holder_thread = threading.Thread(target=holder, daemon=True)
+    holder_thread.start()
+    assert holder_has_slot.wait(timeout=WAIT_SECONDS)
+    waiter_thread = threading.Thread(target=waiter, daemon=True)
+    waiter_thread.start()
+    assert waiter_is_waiting.wait(timeout=WAIT_SECONDS)
+    abandonment.abandon()
+    waiter_thread.join(timeout=WAIT_SECONDS)
+    still_held = [entry["work_name"] for entry in list_slot_holders("job", 1)]
+    release_holder.set()
+    holder_thread.join(timeout=WAIT_SECONDS)
+
+    assert not waiter_thread.is_alive()
+    assert outcome == ["cancelled"]
+    assert ran_work == []
+    assert still_held == ["holder"]
+
+
+def test_a_run_cancelled_just_as_the_slot_frees_never_runs_its_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run given up on before it asks takes no slot, even a free one."""
+    from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    configuration = make_configuration(tmp_path)
+    abandonment = RunAbandonment()
+    abandonment.abandon()
+    ran_work: list[str] = []
+
+    with bind_abandonment(abandonment), pytest.raises(RunAbandonedError):
+        with acquire_resource_slot(configuration, "job", 1):
+            ran_work.append("stage 1")
+
+    assert ran_work == []
+    assert list_slot_holders("job", 1) == []

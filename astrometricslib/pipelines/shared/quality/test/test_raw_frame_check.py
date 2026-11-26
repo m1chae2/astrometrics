@@ -139,13 +139,14 @@ def test_a_soft_frame_is_flagged_for_its_star_width(tmp_path: Path) -> None:
     assert any("soft" in flag for flag in flags)
 
 
-def test_an_elongated_frame_is_flagged_for_its_roundness(tmp_path: Path) -> None:
-    """Stars twice as wide as tall read as elongated."""
+def test_the_raw_check_no_longer_measures_roundness(tmp_path: Path) -> None:
+    """Trailing is judged on the stored elongation, so no roundness is made."""
     _write_batch(tmp_path, [*_clean_batch(4), _frame(sigma_x=2.4, sigma_y=1.2, seed=9)])
 
-    flags = raw_frame_check.check_raw_frames(folder=str(tmp_path))["frames"][-1]["flags"]
+    last = raw_frame_check.check_raw_frames(folder=str(tmp_path))["frames"][-1]
 
-    assert any("elongated" in flag for flag in flags)
+    assert "roundness" not in last
+    assert not any("elongated" in flag for flag in last["flags"])
 
 
 def test_the_shift_between_frames_is_measured_and_a_jump_flagged(tmp_path: Path) -> None:
@@ -182,12 +183,18 @@ def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
     }
 
 
-def test_the_diagnostics_api_runs_the_check_on_a_folder(tmp_path: Path) -> None:
-    """`measure_frames(kind="raw_check")` runs the same check on a folder."""
+def test_the_diagnostics_api_runs_the_check_on_a_targets_frames(tmp_path: Path) -> None:
+    """`measure_frames(kind="raw_check")` checks a target's lights."""
+    from astrometricslib.models.target import FrameRecord, Target
+
     _write_batch(tmp_path, _clean_batch(3))
+    frames = [
+        FrameRecord(path=str(path), role="LIGHT", camera="ZWO ASI533", timestamp=float(number))
+        for number, path in enumerate(sorted(tmp_path.glob("*.fits")))
+    ]
 
     diagnostics = QualityRecords(AppConfiguration(), MagicMock())
-    report = diagnostics.measure_frames(folder_path=str(tmp_path), kind="raw_check", register_job=False)
+    report = diagnostics.measure_frames(Target(id="T", frames=frames), kind="raw_check", register_job=False)
 
     assert report.batch["frame_count"] == 3
     assert report.frames_checked == 3
@@ -440,7 +447,6 @@ def _counts_batch(star_counts: list[int]) -> list[dict[str, Any]]:
             "line_trail_px": 0,
             "line_trail_angle_deg": None,
             "fwhm_px": 3.5,
-            "roundness": 0.95,
             "width_px": 3008,
             "shift_from_previous_px": None if index == 0 else [1.0, 1.0],
         }
@@ -543,5 +549,39 @@ def test_the_colour_flag_leaves_every_measured_value_unchanged(tmp_path: Path) -
     colour = raw_frame_check.measure_raw_frame(str(tmp_path / "colour.fits"))
     mono = raw_frame_check.measure_raw_frame(str(tmp_path / "mono.fits"))
 
-    for key in ("star_count", "fwhm_px", "roundness", "sky_median_adu", "longest_trail_px", "line_trail_px"):
+    for key in ("star_count", "fwhm_px", "sky_median_adu", "longest_trail_px", "line_trail_px"):
         assert colour[key] == mono[key]
+
+
+def test_the_sky_grid_follows_a_gradient_and_ignores_stars() -> None:
+    """Each grid box reads its own sky; a bright star does not lift its box."""
+    generator = np.random.default_rng(5)
+    image = 1000.0 + generator.normal(0.0, 5.0, size=(512, 512)).astype(np.float32)
+    image += np.linspace(0.0, 200.0, 512, dtype=np.float32)[None, :]
+    image[60:70, 60:70] += 20000.0
+
+    grid = raw_frame_check.measure_sky_grid(image, cells_per_side=4)
+
+    assert grid.shape == (4, 4)
+    assert grid[0, 3] - grid[0, 0] == pytest.approx(150.0, abs=10.0)
+    assert grid[0, 0] == pytest.approx(grid[1, 0], abs=5.0)
+
+
+def test_the_field_offset_sees_a_move_and_a_half_turn() -> None:
+    """A shifted frame reads its shift; a turned frame reads none."""
+    generator = np.random.default_rng(8)
+    positions = generator.uniform(100, 1900, size=(80, 2))
+    reference = np.column_stack([positions, np.full(80, 2.0), np.full(80, 2.0)])
+    shape = (2000, 2000)
+    shifted = reference.copy()
+    shifted[:, 1] += 300.0
+    turned = reference.copy()
+    turned[:, 0] = shape[0] - 1 - reference[:, 0]
+    turned[:, 1] = shape[1] - 1 - reference[:, 1]
+
+    moved = raw_frame_check.measure_field_offset(reference, shifted, shape)
+    flipped = raw_frame_check.measure_field_offset(reference, turned, shape)
+
+    assert moved is not None and moved[:2] == pytest.approx((0.0, -300.0), abs=1.0) and not moved[3]
+    assert flipped is not None and flipped[:2] == pytest.approx((0.0, 0.0), abs=1.0) and flipped[3]
+    assert raw_frame_check.measure_field_offset(reference, reference[:5], shape) is None

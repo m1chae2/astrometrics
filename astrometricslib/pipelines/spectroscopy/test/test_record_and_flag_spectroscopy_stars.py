@@ -44,18 +44,25 @@ def catalog_access(tmp_path: Path) -> CatalogAccess:
 
 
 def test_an_unresolved_star_is_dropped_and_the_rest_are_saved(catalog_access: CatalogAccess) -> None:
-    """An unresolved placeholder is dropped; a real star is saved and kept."""
+    """An unresolved placeholder is dropped; a star with a spectrum is saved.
+
+    A named star with no spectrum is handed back but not saved, since the
+    catalog keeps only measured stars.
+    """
     unresolved = StellarObject(id="Star_1")
-    identified = StellarObject(id="HD 1", right_ascension=10.0, declination=20.0)
+    spectrum = SpectroscopyResult(wavelengths_angstrom=[4000.0, 4100.0], intensities=[1.0, 1.0])
+    identified = StellarObject(id="HD 1", right_ascension=10.0, declination=20.0, spectroscopy=spectrum)
+    without_spectrum = StellarObject(id="HD 3", right_ascension=50.0, declination=20.0)
 
     saved, breakdown, _concerns = record_and_flag_spectroscopy_stars(
-        [unresolved, identified], catalog_access=catalog_access, target_id="TestTarget"
+        [unresolved, identified, without_spectrum], catalog_access=catalog_access, target_id="TestTarget"
     )
 
-    assert [star.id for star in saved] == ["HD 1"]
+    assert [star.id for star in saved] == ["HD 1", "HD 3"]
+    assert catalog_access.get_by_ids("stellar_catalog", ["HD 3"]) == []
     assert breakdown is not None
     assert breakdown.unresolved == 1
-    assert breakdown.catalog_matched + breakdown.position_only == 1
+    assert breakdown.catalog_matched + breakdown.position_only == 2
     stored = catalog_access.get_by_ids("stellar_catalog", ["HD 1"])
     assert len(stored) == 1
     assert "Star_1" not in [row.id for row in catalog_access.get_by_ids("stellar_catalog", ["Star_1"])]

@@ -4,6 +4,7 @@ import { reportError } from '../../common/utils/reportError';
 import { getTargetsUpdatedVersion } from '../../common/utils/targetsUpdatedVersion';
 import { FrameFilterGroup, TargetDetails } from './targetDetails/TargetDetails';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { CollapsibleColumn } from '../../common/components/CollapsibleColumn';
 import { ListActions } from '../../common/components/ListActions';
 import '../../common/styles/panels.css';
 import { Button } from '../../common/components/Button';
@@ -26,6 +27,10 @@ export interface TargetDetailsManagerProps {
   onSaveTarget?: () => void;
   /** Callback to trigger deleting the target from the library. */
   onDeleteTarget?: () => void;
+  /** True when the whole right column is folded to a thin strip. */
+  collapsed?: boolean;
+  /** Called with the new fold state when the Information title or the strip is clicked. */
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 /**
@@ -43,6 +48,8 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   onCommonNameChange,
   onSaveTarget,
   onDeleteTarget,
+  collapsed = false,
+  onCollapsedChange,
 }) => {
   const [camera, setCamera] = useState<string>('');
   const [telescope, setTelescope] = useState<string>('');
@@ -209,7 +216,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
     };
   }, [selectedTarget, updateTargetState]);
 
-  /** Opens LocalSend with this target's JPEG picture ready to send. */
+  /** Sends this target's JPEG picture to the connected phone. */
   const handleSendToPhone = async (): Promise<void> => {
     if (!selectedTarget) return;
     try {
@@ -220,9 +227,29 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
     }
   };
 
+  // Folded: the whole right column, Target Controls too, is just a strip on the right edge.
+  if (collapsed && onCollapsedChange) {
+    return (
+      <CollapsibleColumn
+        collapsed
+        side="right"
+        onCollapsedChange={onCollapsedChange}
+        stripTitle="Information"
+        showLabel="Expand Information"
+      >
+        {null}
+      </CollapsibleColumn>
+    );
+  }
+
   return (
-    <div className="panel-group">
-      <SectionPanel title="Information" className="flex-fill target-details-manager__panel">
+    <div className="target-details-manager panel-group">
+      <SectionPanel
+        title="Information"
+        className="flex-fill target-details-manager__panel"
+        onTitleClick={onCollapsedChange ? () => onCollapsedChange(true) : undefined}
+        titleButtonLabel="Collapse Information"
+      >
         <TargetDetails
           catalogId={catalogId}
           commonName={commonName}

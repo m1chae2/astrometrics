@@ -31,10 +31,10 @@ def record_and_flag_spectroscopy_stars(
 
     Runs `record_pipeline_stars` (target-id tagging, unresolved-star
     dropping, position-only/identified-star reconciliation, and the
-    catalog merge/save), then builds spectral-classification concerns
-    on the saved stars -- so every spectroscopy save path does the
-    exact same steps in the exact same order, instead of each one
-    hand-rolling its own subset.
+    catalog merge/save of the stars with a spectrum), then builds
+    spectral-classification concerns on the run's stars -- so every
+    spectroscopy save path does the exact same steps in the exact same
+    order, instead of each one hand-rolling its own subset.
 
     Parameters
     ----------
@@ -48,7 +48,8 @@ def record_and_flag_spectroscopy_stars(
     Returns
     -------
     stellar_objects : `list` [`StellarObject`]
-        The saved stars, tagged and reconciled.
+        The run's stars, tagged and reconciled; only those with a spectrum
+        were saved.
     breakdown : `StarIdentificationBreakdown` or `None`
         The drop step's counts (see `record_pipeline_stars`).
     concerns : `list` [`dict`]
@@ -61,6 +62,7 @@ def record_and_flag_spectroscopy_stars(
         target_id=target_id,
         merge_function=merge_spectroscopy_stellar_object,
         pipeline_name="spectroscopy",
+        measured_only=True,
     )
     concerns = build_spectral_classification_concerns(stellar_objects)
     return stellar_objects, breakdown, concerns

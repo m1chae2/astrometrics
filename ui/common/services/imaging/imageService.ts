@@ -56,6 +56,40 @@ async function fetchPreviewPicture(processedFitsPath: string, signal?: AbortSign
 }
 
 /**
+ * Looks up a target's color picture: the one made for a black-and-white stack
+ * from the colors of another stack of the same target. The target record names
+ * it, so no file is asked for that may not exist.
+ *
+ * @param objectId The target.
+ * @param signal Cancels the request.
+ * @returns The picture's path, or null when the target has none.
+ */
+export async function fetchColorPreviewPath(objectId: string, signal?: AbortSignal): Promise<string | null> {
+    const target = await callBackend('target:get', { target_id: objectId }, { silent: true, signal });
+    // A named target is one record; only a call with no target lists them.
+    return (Array.isArray(target) ? null : target?.stacking?.colorPreviewImage) || null;
+}
+
+/**
+ * Reads a target's color picture from the folders the backend serves.
+ *
+ * @param path Path of the color picture, as the target record names it.
+ * @param signal Cancels the download.
+ * @returns The picture, or null when the backend serves no folder that holds it or it is empty.
+ */
+export async function fetchColorPreviewPicture(path: string, signal?: AbortSignal): Promise<Blob | null> {
+    await loadStaticMounts();
+    const src = resolveImageSrc(path);
+    if (!src) return null;
+    const response = await fetchImageFile(src, signal, true);
+    if (!response.ok || response.status === 204) {
+        throw new Error(`Failed to read the color picture ${path}: ${response.status} ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    return blob.size > 0 ? new Blob([blob], { type: 'image/jpeg' }) : null;
+}
+
+/**
  * Fetches the processed image blob for a target object using its registered target details.
  * Retrieves target metadata through the JSON-RPC backend call, resolves the static path,
  * and fetches the image blob directly. For a stretched FITS picture it can also
@@ -69,7 +103,7 @@ export async function fetchProcessedImage(
 ): Promise<Blob | null> {
     try {
         const target = await callBackend("target:get", { target_id: objectId });
-        if (!target) {
+        if (!target || Array.isArray(target)) {
             return null;
         }
 

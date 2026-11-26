@@ -8,9 +8,10 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from astrometricslib.exceptions import AstrometricsError, NotFoundError
-from astrometricslib.jobs import run_as_background_job
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
+from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment, run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
+from backend.services.processing.stack_review_service import abandon_preview_job, is_preview_job_running
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,37 @@ CALIBRATION_MEASUREMENT_GRACE_SECONDS = 3.0
 # The kinds of calibration frame that are measured after they arrive. Flats
 # are measured when the library rescans them, so they are not listed.
 MEASURED_CALIBRATION_KINDS = ("dark", "bias")
+
+
+# The running stacking jobs of this process, by job id, so a cancel can stop
+# the job's slot wait and its next stage. A job is listed from the moment its
+# task starts until the task ends.
+_stack_abandonments: dict[str, RunAbandonment] = {}
+_stack_abandonments_lock = threading.Lock()
+
+
+def abandon_stacking_job(job_id: str) -> bool:
+    """Give up on a running stacking job of this process.
+
+    The job stops waiting for a heavy-work slot, starts no further stage and
+    stops the programs it started.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The stacking job to give up on.
+
+    Returns
+    -------
+    abandoned : `bool`
+        `True` if the job's task is running in this process.
+    """
+    with _stack_abandonments_lock:
+        abandonment = _stack_abandonments.get(job_id)
+    if abandonment is None:
+        return False
+    abandonment.abandon()
+    return True
 
 
 class ImageProcessingService(BaseBackgroundService):
@@ -82,24 +114,6 @@ class ImageProcessingService(BaseBackgroundService):
         global LOG_DIR
         LOG_DIR = str(self._config_service.get_logs_path())
         self._notification_service = notification_service
-
-    def get_calibration_stats(self) -> dict[str, Any]:
-        """Count the calibration frames in the library.
-
-        Returns
-        -------
-        stats : `dict` [`str`, `Any`]
-            ``"darks"``, ``"biases"`` and ``"flats"``, each a list of
-            per-group counts.
-        """
-        answer = self._calibration.query(detail="counts")
-        return {
-            key: [
-                {name: value for name, value in row.items() if name != "row_key"}
-                for row in (getattr(answer, key) or [])
-            ]
-            for key in ("darks", "biases", "flats")
-        }
 
     def start_calibration_measurement(
         self, kind: str | None = None, camera_id: str | None = None, force: bool = False
@@ -230,7 +244,7 @@ class ImageProcessingService(BaseBackgroundService):
         return {"processing": len(active) > 0}
 
     def cancel_processing_jobs(self, target_id: str) -> dict:
-        """Cancel active stacking jobs for a target.
+        """Cancel active stacking jobs and picture remakes for a target.
 
         A job that runs in another process is left alone and reported, since
         this process cannot stop it.
@@ -245,19 +259,37 @@ class ImageProcessingService(BaseBackgroundService):
         """
         if not self._job_service:
             return {"status": "none", "message": "No jobs are tracked."}
-        active = self._job_service.get_jobs_for_target(target_id, job_type="stacking", status="started")
-        if not active:
-            active = self._job_service.get_jobs_for_target(target_id, job_type="stacking", status="running")
+        active = []
+        for job_type in ("stacking", "preview"):
+            for status in ("started", "running"):
+                active.extend(
+                    self._job_service.get_jobs_for_target(target_id, job_type=job_type, status=status)
+                )
 
         cancelled = False
         reasons: list[str] = []
         for job in active:
+            if job.job_type == "preview":
+                # A picture remake of this process: the cancel is final in the
+                # job list first, so the late end of the work cannot change it,
+                # then the work gives up and puts the old pictures back.
+                if is_preview_job_running(job.id):
+                    self._job_service.update_job(
+                        job.id, status="cancelled", progress=0, status_message="Cancelled by user"
+                    )
+                    abandon_preview_job(job.id)
+                    logger.info("Cancelled the picture remake of %s.", target_id)
+                    cancelled = True
+                    continue
             outcome = self.cancel_processing(job.id)
             if outcome["cancelled"] or outcome["own_process"]:
                 # A job of this process is marked cancelled even if its
                 # thread cannot be interrupted, so the list stops showing it.
+                # Giving up on the run stops its wait for a slot and its next
+                # stage; the store keeps the cancelled status final.
+                abandon_stacking_job(job.id)
                 self._job_service.update_job(
-                    job.id, status="cancelled", progress=0, status_message="Cancelled by user."
+                    job.id, status="cancelled", progress=0, status_message="Cancelled by user"
                 )
                 cancelled = True
             else:
@@ -267,22 +299,10 @@ class ImageProcessingService(BaseBackgroundService):
             return {"status": "cancelled", "message": None}
         if reasons:
             return {"status": "other_process", "message": reasons[0]}
-        return {"status": "none", "message": "There is no active stacking job for this target."}
-
-    def fetch_job_log_tail(self, job_id: str, lines: int = 100) -> list:
-        """Fetch the tail of DB-recorded log entries for a job.
-
-        Returns
-        -------
-        entries : `list`
-            The last `lines` formatted log entry strings for the
-            job, oldest first.
-        """
-        if not self._job_service:
-            return []
-        entries = self._job_service.get_log_entries_for_job(job_id)
-        formatted = [f"{e['created_at']} - {e['level']} - {e['message']}" for e in entries]
-        return formatted[-lines:]
+        return {
+            "status": "none",
+            "message": "There is no active stacking job or picture remake for this target.",
+        }
 
     def open_siril(self, target_id: str) -> bool:
         """Open the Siril GUI for the specified target's stacked image.
@@ -321,8 +341,99 @@ class ImageProcessingService(BaseBackgroundService):
             logger.exception("Failed to launch Siril for %s", target_id)
             return False
 
-    def process_target(self, target_id: str, image_files: list) -> dict:
-        """Start a background processing job for a target using threads.
+    def _refuse_unusable_frame_list(self, target_id: str, image_files: list | None) -> None:
+        """Refuse a frame list the library will not stack, before a job starts.
+
+        The library checks an exact frame list when it chooses the frames
+        (one camera, one optic, and not a mix of imaging and spectral
+        frames). Asking for the frame choice alone (`predict_stack` with
+        ``checks=False``) runs that check without stacking or writing
+        anything, so a bad list is refused here as an error to the caller,
+        not as a job that fails.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        image_files : `list` or `None`
+            The listed frames, as paths or frame dictionaries with a
+            ``path`` key.
+
+        Notes
+        -----
+        The library's `InvalidArgumentError` passes through when the frames
+        mix imaging and spectral frames, or come from more than one camera
+        or optic.
+        """
+        if not image_files or not self._processing_api or not self._target_service:
+            return
+        target = self._target_service.get_targets(target_id)
+        if target is None:
+            return
+        wanted = {item if isinstance(item, str) else item.get("path") for item in image_files}
+        frames = [frame for frame in target.frames if frame.path in wanted]
+        if frames:
+            self._processing_api.predict_stack(target_id, frames=frames, checks=False)
+
+    def stack_target(
+        self,
+        target_id: str,
+        image_files: list | None = None,
+        kind: str | None = None,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
+        force: bool = False,
+        denoise: bool | None = None,
+        denoise_strength: float | None = None,
+        star_toning: bool | None = None,
+    ) -> dict:
+        """Start a background stacking job for a target.
+
+        The app's Stack button sends the frames it shows as checked in
+        ``image_files``. A caller without a frame list (the AI's
+        ``processing_stack`` tool) leaves it out and chooses the frames the
+        way the library's ``processing.stack`` does, with ``kind``, a
+        filter, a file range, a time range, a camera and a focal length.
+        Both start the same ``stacking`` job, so it shows in the job list
+        with its progress and log, and the app's Cancel button reaches it.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target to stack.
+        image_files : `list`, optional
+            The frames to stack, as paths or frame dictionaries. Cannot be
+            combined with the frame choices below.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"`` frames, when the frames
+            are chosen here.
+        filter_name : `str`, optional
+            Only frames of this filter.
+        first_file : `str`, optional
+            Only frames from this file onward (``"013"`` means frame 013).
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, optional
+            Only frames taken at or after this ISO time.
+        until : `str`, optional
+            Only frames taken at or before this ISO time.
+        camera_id : `str`, optional
+            Only frames from this camera.
+        focal_length_mm : `float`, optional
+            Only frames taken at this focal length.
+        force : `bool`, optional
+            Stack again even if nothing changed since the stack on disk.
+        denoise : `bool`, optional
+            Run or skip Cosmic Clarity for this run's preview.
+        denoise_strength : `float`, optional
+            Cosmic Clarity's strength for this run, from 0 to 1.
+        star_toning : `bool`, optional
+            Turn the preview's star toning on or off for this run.
 
         Returns
         -------
@@ -330,9 +441,55 @@ class ImageProcessingService(BaseBackgroundService):
             Dict describing the job: `"status"` (`"started"` or
             `"already_running"`), `"jobId"`, `"expectedOutput"`, and
             `"logFile"`.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``image_files`` is combined with a frame choice. The library's
+            frame choice raises its own errors for a choice that is out of
+            range or matches no frame.
         """
+        selection = {
+            name: value
+            for name, value in (
+                ("filter_name", filter_name),
+                ("first_file", first_file),
+                ("last_file", last_file),
+                ("since", since),
+                ("until", until),
+                ("camera_id", camera_id),
+                ("focal_length_mm", focal_length_mm),
+            )
+            if value is not None
+        }
+        stack_options = {
+            name: value
+            for name, value in (
+                ("denoise", denoise),
+                ("denoise_strength", denoise_strength),
+                ("star_toning", star_toning),
+            )
+            if value is not None
+        }
+        if force:
+            stack_options["force"] = True
+        choose_here = image_files is None
+        if choose_here:
+            # The library chooses the frames. The choice alone is quick and
+            # writes nothing, so a choice that matches no frame, or frames
+            # from two cameras, is refused here instead of as a failed job.
+            selection["kind"] = kind or "imaging"
+            self._processing_api.predict_stack(target_id, checks=False, **selection)
+        elif selection or kind is not None:
+            raise InvalidArgumentError(
+                "Pass image_files, or choose the frames with kind, filter_name, first_file, last_file, "
+                "since, until, camera_id and focal_length_mm, not both."
+            )
+        if not choose_here:
+            self._refuse_unusable_frame_list(target_id, image_files)
+
         # Rehydrate metadata if image_files is a flat list
-        if isinstance(image_files, list) and self._target_service:
+        if image_files and isinstance(image_files, list) and self._target_service:
             try:
                 target = self._target_service.get_targets(target_id)
                 if target and target.frames:
@@ -359,10 +516,8 @@ class ImageProcessingService(BaseBackgroundService):
         log_file = os.path.join(LOG_DIR, f"process_{safe_target_id}_{int(time.time())}.log")
 
         if self._job_service:
-            active_jobs = self._job_service.get_jobs_for_target(
-                target_id, job_type="stacking", status="started"
-            )
-            for job in active_jobs:
+            # Rows left by a program that ended do not count as running.
+            for job in self.get_live_jobs_for_target(target_id, "stacking"):
                 return {
                     "status": "already_running",
                     "jobId": job.id,
@@ -380,6 +535,8 @@ class ImageProcessingService(BaseBackgroundService):
             target_service=self._target_service,
             job_repository=self._job_repository,
             notification_service=self._notification_service,
+            selection=selection if choose_here else None,
+            stack_options=stack_options,
         )
 
         return {
@@ -430,6 +587,27 @@ def _log_what_the_saved_record_names(
     logger.info("The saved record for %s names the stack. Processed image: %s.", target_id, picture or "none")
 
 
+def _record_stack_kind(job_repository: Any, job_id: str, kind: str) -> None:
+    """Save the kind of stack a job makes, so the job list can name it.
+
+    Parameters
+    ----------
+    job_repository : `Any`
+        The database that keeps the jobs. Without one nothing is saved.
+    job_id : `str`
+        The stacking job.
+    kind : `str`
+        ``"imaging"`` or ``"spectral"``.
+    """
+    if job_repository is None:
+        return
+    job = job_repository.get_job(job_id)
+    if job is None:
+        return
+    job.input_metrics = {**(job.input_metrics or {}), "stackKinds": [kind]}
+    job_repository.upsert_job(job)
+
+
 def start_siril_processing_task(
     job_id: str,
     target_id: str,
@@ -438,6 +616,8 @@ def start_siril_processing_task(
     target_service: Any = None,
     job_repository: Any = None,
     notification_service: Any = None,
+    selection: dict[str, Any] | None = None,
+    stack_options: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> str | None:
     """Worker task that stacks a target's frames with the full stacking stage.
@@ -445,7 +625,11 @@ def start_siril_processing_task(
     This is the same stage the batch script runs, so a stack made from the
     viewer gets the same quality summary, provenance record and processed
     picture as one made in a batch. The ``job_repository`` is the database
-    that keeps the job log lines.
+    that keeps the job log lines. With ``selection`` (the frame choice of
+    ``processing.stack``, with its ``kind``) the library chooses the frames
+    and ``image_files`` is not used. ``stack_options`` (``force``,
+    ``denoise``, ``denoise_strength``, ``star_toning``) go to the stack
+    unchanged.
 
     Returns
     -------
@@ -479,8 +663,15 @@ def start_siril_processing_task(
         target = target_service.get_targets(target_id) if target_service else None
         if target is None:
             raise NotFoundError(f"Cannot stack '{target_id}': the target is not in the library.")
-        requested_paths = {frame if isinstance(frame, str) else frame.get("path") for frame in image_files}
-        frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
+        if selection is None:
+            requested_paths = {
+                frame if isinstance(frame, str) else frame.get("path") for frame in image_files
+            }
+            frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
+            frame_choice: dict[str, Any] = {"frames": frames_to_stack}
+        else:
+            frames_to_stack = []
+            frame_choice = {name: value for name, value in selection.items() if name != "kind"}
 
         # `ProcessingPipelines.stack` runs the whole stacking stage, the same
         # one the batch script runs: it holds a stacking slot (an OS-level
@@ -493,16 +684,29 @@ def start_siril_processing_task(
         from astrometricslib.exceptions import ProcessingError
         from astrometricslib.jobs import log_context, running_as_job
 
-        kind = (
-            "spectral"
-            if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
-            else "imaging"
-        )
+        if selection is not None:
+            kind = selection.get("kind", "imaging")
+        else:
+            kind = (
+                "spectral"
+                if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
+                else "imaging"
+            )
+        _record_stack_kind(job_repository, job_id, kind)
+        abandonment = RunAbandonment()
+        with _stack_abandonments_lock:
+            _stack_abandonments[job_id] = abandonment
         try:
+            # A cancel that came before the run was registered has marked the
+            # job but could not reach it, so check the record once here.
+            stored_job = job_repository.get_job(job_id) if job_repository is not None else None
+            if stored_job is not None and stored_job.status == "cancelled":
+                abandonment.abandon()
             # `running_as_job` makes this job row the current job, so the
             # stack's stage progress ("Stage 2 of 7") moves the job's bar.
             # This service still marks the job finished.
             with (
+                bind_abandonment(abandonment),
                 log_context(job_id=job_id),
                 running_as_job(
                     job_id,
@@ -513,12 +717,25 @@ def start_siril_processing_task(
                 ),
             ):
                 stack_result = target_service.astrometrics.processing.stack(
-                    target, frames=frames_to_stack, kind=kind, log_file=log_file_path, register_job=False
+                    target,
+                    kind=kind,
+                    log_file=log_file_path,
+                    register_job=False,
+                    **frame_choice,
+                    **(stack_options or {}),
                 )
             final_path = stack_result.stacked_path
+        except RunAbandonedError:
+            # The user cancelled the job. It never ran its stages if it was
+            # still waiting for a slot, and its status stays "cancelled".
+            logger.info("Stacking %s was cancelled.", target_id)
+            return None
         except ProcessingError:
             logger.exception("Stacking %s made no stack", target_id)
             final_path = None
+        finally:
+            with _stack_abandonments_lock:
+                _stack_abandonments.pop(job_id, None)
 
         if notification_service:
             if final_path:

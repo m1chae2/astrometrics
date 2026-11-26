@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from astrometricslib._internal.drivers.interfaces.stacking_driver import StackingDriver
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import QuarterTurnResult
 
 
 @dataclass
@@ -100,4 +101,5 @@ class StackRun:
     stacked_path: str | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
     crop_offset: tuple[int, int] = (0, 0)
+    quarter_turn: QuarterTurnResult | None = None
     preview_path: str | None = None

@@ -5,6 +5,7 @@ not need the thousands of frame records. ``detail="summary"`` returns every
 target with an empty frame list, and everything else the same.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,7 +30,7 @@ def _service_with(*targets: Target) -> TargetService:
     """
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
-    service.astrometrics.targets.list.return_value = list(targets)
+    service.astrometrics.targets.query.return_value.objects = list(targets)
     service.astrometrics.targets.get.side_effect = lambda target_id: next(
         (target for target in targets if target.id == target_id), None
     )
@@ -114,3 +115,95 @@ def test_the_file_list_sends_each_frames_focal_length() -> None:
 
     assert [file["focalLengthMm"] for file in files] == [300.0, 405.2, None]
     assert all(value is None or type(value) is float for value in (file["focalLengthMm"] for file in files))
+
+
+def test_file_list_reports_only_stacks_that_exist(tmp_path: Path) -> None:
+    """A missing stack gives none; a moved one is found in the stacks."""
+    moved = tmp_path / "stacks" / "lights" / "Mars" / "Mars_SPEC_Stacked.fits"
+    moved.parent.mkdir(parents=True)
+    moved.write_text("x")
+    target = _target("Mars")
+    target.stacking.stacked_image = str(tmp_path / "lights" / "Mars" / "Mars_NONE_Stacked.fits")
+    target.spectral_stacking.stacked_image = str(tmp_path / "lights" / "Mars" / "Mars_SPEC_Stacked.fits")
+    service = _service_with(target)
+    service.config = MagicMock()
+    service.config.get_stacks_path.return_value = str(tmp_path / "stacks")
+    service.get_targets = lambda target_id: target
+
+    result = service.get_file_list("Mars")
+
+    assert result["stackedImage"] is None
+    assert result["stackedSpectralTarget"] == str(moved)
+
+
+def test_file_list_names_the_preferred_stack_configuration() -> None:
+    """The file list names the camera and optic of the current stack."""
+    target = _target("M 31")
+    target.stacking = target.stacking.model_validate({
+        "stacksByConfiguration": {
+            "nikon": {"configurationKey": "nikon", "camera": "Nikon D5300", "focalLengthMm": 300.0},
+            "asi": {
+                "configurationKey": "asi",
+                "camera": "ZWO ASI 533MM Pro",
+                "focalLengthMm": 405.2,
+                "isPreferred": True,
+            },
+        },
+    })
+
+    result = _service_with(target).get_file_list("M 31")
+
+    assert result["stackConfiguration"] == {
+        "camera": "ZWO ASI 533MM Pro",
+        "focalLengthMm": 405,
+        "label": "asi",
+    }
+
+
+def test_file_list_lists_each_stack_on_disk_with_the_main_one_first(tmp_path: Path) -> None:
+    """Each stack on disk is listed, the main stack first."""
+    main_stack = tmp_path / "M27_asi.fits"
+    nikon_stack = tmp_path / "M27_nikon300.fits"
+    main_stack.write_text("x")
+    nikon_stack.write_text("x")
+    target = _target("M 27")
+    target.stacking = target.stacking.model_validate({
+        "stackedImage": str(main_stack),
+        "stacksByConfiguration": {
+            "Nikon@300mm": {
+                "configurationKey": "Nikon@300mm",
+                "camera": "Nikon D5300",
+                "focalLengthMm": 300.0,
+                "framesStacked": 40,
+                "stackedImage": str(nikon_stack),
+            },
+            "Nikon@405mm": {
+                "configurationKey": "Nikon@405mm",
+                "camera": "Nikon D5300",
+                "focalLengthMm": 405.0,
+                "stackedImage": str(tmp_path / "missing.fits"),
+            },
+            "ZWO@405mm": {
+                "configurationKey": "ZWO@405mm",
+                "camera": "ZWO ASI 533MM Pro",
+                "focalLengthMm": 405.2,
+                "framesStacked": 90,
+                "stackedImage": str(main_stack),
+                "isPreferred": True,
+            },
+        },
+    })
+
+    stacks = _service_with(target).get_file_list("M 27")["stacks"]
+
+    assert [stack["configurationKey"] for stack in stacks] == ["ZWO@405mm", "Nikon@300mm"]
+    assert stacks[0] == {
+        "configurationKey": "ZWO@405mm",
+        "camera": "ZWO ASI 533MM Pro",
+        "focalLengthMm": 405,
+        "framesStacked": 90,
+        "stackedImage": str(main_stack),
+        "isMain": True,
+    }
+    assert stacks[1]["isMain"] is False
+    assert stacks[1]["stackedImage"] == str(nikon_stack)

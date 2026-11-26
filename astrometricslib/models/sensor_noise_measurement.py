@@ -1,6 +1,6 @@
 """The result of measuring a camera's gain and read noise.
 
-`measure_sensor_noise` (in `astrometricslib.api.processing`) takes flat and
+`measure_sensor_noise` (in `astrometricslib.api.calibration`) takes flat and
 bias frames of one camera setting and measures two numbers:
 
 - the conversion gain, in electrons per ADU (ADU is analog-to-digital unit,

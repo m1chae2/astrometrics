@@ -242,3 +242,17 @@ def test_cache_hit_is_reported_to_the_job_log(tmp_path: Path) -> None:
     # The logger gets a %-style message and its values; fill them in.
     messages = [call.args[0] % call.args[1:] for call in job_logger.info.call_args_list]
     assert any("Reusing cached master bias" in message for message in messages)
+
+
+def test_dark_cache_key_holds_the_combine_method_but_the_bias_key_does_not(tmp_path: Path) -> None:
+    """A mean-combined master dark is never reused: darks use the median."""
+    from astrometricslib._internal.drivers.siril_interface.staging import DARK_MASTER_RECIPE, master_recipe
+
+    darks = _stage_frames(str(tmp_path / "run"), "darks", str(tmp_path / "library_darks"), 3)
+
+    old_key = _calibration_source_fingerprint(darks)
+    new_key = _calibration_source_fingerprint(darks, master_recipe("dark"))
+
+    assert DARK_MASTER_RECIPE in master_recipe("dark")
+    assert new_key != old_key
+    assert master_recipe("bias") == ""

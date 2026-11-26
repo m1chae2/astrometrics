@@ -222,7 +222,7 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Whether more exposure would separate the best classes is not known.",
-        plain_wording=("We do not yet know whether a longer exposure would tell the closest classes apart."),
+        plain_wording=("It is not yet known whether a longer exposure would tell the closest classes apart."),
         purpose=(
             "Says that 'not reachable at this resolution' cannot be judged until the class gap is "
             "calibrated against the signal-to-noise ratio."

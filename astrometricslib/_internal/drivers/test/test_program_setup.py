@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib._internal.drivers import program_setup
+from astrometricslib._internal.drivers.outside_services import clients
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.scripts import set_up_programs as setup_script
 
@@ -151,7 +152,7 @@ def windows_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _serve(monkeypatch: pytest.MonkeyPatch, data: bytes) -> None:
     """Make every download answer with `data`."""
-    monkeypatch.setattr(program_setup.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(data))
+    monkeypatch.setattr(clients.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(data))
 
 
 def test_a_matching_zip_is_unpacked_and_used(windows_world: Path, monkeypatch: pytest.MonkeyPatch) -> None:

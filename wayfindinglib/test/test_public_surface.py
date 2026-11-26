@@ -114,6 +114,7 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
+    "get_star_shape_review",
     # What the recorded nights say about the equipment itself.
     "measure_unguided_mount_error",
     "measure_guiding_spectrum",
@@ -175,7 +176,7 @@ CHILDREN = {
         "run_loop",
         "stop_loop",
     },
-    "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
+    "remote": {"list", "check_connection", "frame_locations", "sync_frames", "sync_logs"},
     "safety": {
         "status",
         "apply_promotion_decision",

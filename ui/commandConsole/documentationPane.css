@@ -1,0 +1,97 @@
+/**
+ * @file documentationPane.css
+ * @description Layout of the Command Console's Documentation tab that is not in
+ * commandConsole.css: the find-in-page row and its marks, the light on an entry opened from
+ * the terminal, and text that wraps so the page never scrolls sideways.
+ */
+
+.documentation-pane:focus {
+  outline: none;
+}
+
+.documentation-pane__viewer {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The find-in-page row, under the toolbar. */
+.documentation-pane__find {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--term-border);
+}
+
+.documentation-pane__find-count {
+  min-width: 80px;
+  color: var(--text-dim);
+  font-size: var(--compact-font-size);
+  white-space: nowrap;
+}
+
+/* Every match, then the current one, marked with the CSS Custom Highlight API. */
+::highlight(doc-find-match) {
+  background-color: color-mix(in srgb, var(--warning-amber) 35%, transparent);
+}
+
+::highlight(doc-find-current) {
+  background-color: var(--warning-orange);
+  color: var(--cmd-bg-darkest);
+}
+
+/* Long signatures, code and table cells wrap, so the page never scrolls sideways. */
+.documentation-pane .doc-viewer-container {
+  overflow-x: hidden;
+}
+
+.documentation-pane .doc-viewer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.documentation-pane .doc-viewer code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.documentation-pane .doc-viewer pre {
+  overflow-x: hidden;
+  white-space: pre-wrap;
+}
+
+.documentation-pane .doc-viewer td,
+.documentation-pane .doc-viewer th {
+  overflow-wrap: anywhere;
+}
+
+/* An API entry scrolls in under the top edge with a little room above it. */
+.documentation-pane .doc-viewer__entry {
+  scroll-margin-top: var(--space-4);
+}
+
+/* An entry opened from the terminal lights up, then fades. */
+.documentation-pane .doc-viewer__entry--flash {
+  border-radius: var(--radius-sm);
+  animation: documentation-entry-fade 2s ease-out;
+}
+
+@keyframes documentation-entry-fade {
+  from {
+    background-color: color-mix(in srgb, var(--accent-blue) 35%, transparent);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+/* With less motion asked for, the entry is lit without a fade until the light goes off. */
+@media (prefers-reduced-motion: reduce) {
+  .documentation-pane .doc-viewer__entry--flash {
+    animation: none;
+    background-color: color-mix(in srgb, var(--accent-blue) 25%, transparent);
+  }
+}

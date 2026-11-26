@@ -286,7 +286,7 @@ def build_frame_lookup(astrometrics: Any) -> FrameLookup:
     """
     frames = sorted(
         (frame.timestamp, frame.telescope, frame.camera)
-        for target in astrometrics.targets.list()
+        for target in astrometrics.targets.query(detail="objects", limit=None).objects
         for frame in target.frames
         if frame.timestamp is not None and str(frame.role).upper().endswith("LIGHT")
     )

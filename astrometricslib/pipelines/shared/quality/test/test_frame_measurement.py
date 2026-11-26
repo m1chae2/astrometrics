@@ -28,6 +28,7 @@ from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     frame_subject_id,
     measure_clipped_mean_adu,
@@ -46,6 +47,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE,
     FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
     FRAME_STAR_WIDTH_EFFECTIVE_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
@@ -74,7 +76,6 @@ from astrometricslib.pipelines.shared.quality.time_budget import (
     FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
     Stopwatch,
 )
-from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.test.golden import measurements as golden_measurements
 
 # The camera setting of the synthetic frames, and the numbers the profile holds
@@ -424,7 +425,8 @@ def test_round_stars_read_round(round_frame_result: dict[str, list[QualityMeasur
     """Round stars give an elongation near 1 and a weak angle."""
     elongation = round_frame_result[FRAME_STAR_ELONGATION][0]
     assert 1.0 <= elongation.value < 1.06
-    assert "coherence" in round_frame_result[FRAME_STAR_ELONGATION_ANGLE_DEG][0].reason
+    coherence = round_frame_result[FRAME_STAR_ELONGATION_COHERENCE][0]
+    assert coherence.value is not None and 0.0 <= coherence.value <= 1.0
 
 
 def test_stretched_stars_give_their_elongation_and_angle() -> None:

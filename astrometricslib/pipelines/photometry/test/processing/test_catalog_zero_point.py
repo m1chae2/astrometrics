@@ -11,6 +11,7 @@ only when the colors allow, and that the helper for the spread of a night
 is the robust spread of its frames.
 """
 
+import logging
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -421,6 +422,22 @@ def test_a_path_list_of_the_wrong_length_leaves_the_frames_without_a_path() -> N
     assert len(session.frames) == 5
     assert all(frame.frame_path is None for frame in session.frames)
     assert session.frames[0].estimate.zero_point_mag is not None
+
+
+def test_a_session_with_no_measured_star_does_not_warn_about_paths(caplog: pytest.LogCaptureFixture) -> None:
+    """A session that measured no star has no frames and no path warning."""
+    with caplog.at_level(logging.INFO):
+        session = session_zero_points(
+            "night",
+            [],
+            ["a.fits", "b.fits"],
+            FRAME_SHAPE,
+            photometric_linearity_limit_adu=LINEARITY_LIMIT_ADU,
+            peak_adu_by_star_id={},
+        )
+    assert len(session.frames) == 0
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert "No star was measured" in caplog.text
 
 
 def test_the_spread_is_the_robust_sigma_and_ignores_a_cloudy_outlier() -> None:

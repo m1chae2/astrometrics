@@ -143,6 +143,14 @@ def _camera_default_iso(camera_name: str, config: Any) -> str | None:
     return None
 
 
+# The set of header fields a header read fills in. Raise it when a field is
+# added to `refresh_acquisition_conditions`, so re-indexing reads every known
+# frame once more instead of skipping the unchanged files. Version 1 added the
+# ISO (or gain): records made before frame scanning read ``ISOSPEED`` all held
+# the stand-in ISO 800, which made frames at ISO 200 and 800 look alike.
+HEADER_FIELDS_VERSION = 1
+
+
 def read_iso_or_gain(header: Any, camera_name: str, config: Any, placeholder: str) -> str:
     """Read the ISO (or gain) an image was taken at.
 
@@ -213,6 +221,30 @@ def _record_camera_name(header_camera_name: str, config: Any) -> str:
     return "Unknown"
 
 
+_FILE_NAME_CAPTURE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})")
+"""The date and time a capture program writes into a frame's file name."""
+
+
+def capture_time_from_file_name(file_name: str) -> str:
+    """Read the capture time a capture program wrote into a frame's file name.
+
+    Parameters
+    ----------
+    file_name : `str`
+        The frame's file name, such as ``M_31_Light_2026-09-24T21-14-05.fits``.
+
+    Returns
+    -------
+    date : `str`
+        ``YYYY-MM-DD HH:MM:SS``, or an empty string when the name has none.
+    """
+    match = _FILE_NAME_CAPTURE_TIME.search(file_name)
+    if match is None:
+        return ""
+    day, hour, minute, second = match.groups()
+    return f"{day} {hour}:{minute}:{second}"
+
+
 def create_frame_record_from_fits(path: str, camera: str | None = None, config: Any = None) -> FrameRecord:
     """Read an image file and create a record for it.
 
@@ -264,13 +296,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
             record.date = datetime.fromtimestamp(image.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         else:
             # Fallback to filename date extraction if timestamp is missing
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})", filename)
-            if date_match:
-                raw = date_match.group(1)
-                parts = raw.split("T")
-                d_part = parts[0]
-                t_part = parts[1].replace("-", ":")
-                record.date = f"{d_part} {t_part}"
+            record.date = capture_time_from_file_name(filename) or record.date
 
         if not camera:
             record.camera = _record_camera_name(
@@ -278,6 +304,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
             )
 
         record.iso = read_iso_or_gain(header, record.camera, config, PLACEHOLDER_RECORD_ISO)
+        record.header_fields_version = HEADER_FIELDS_VERSION
 
         # The focal length is read here, before the optic is chosen, because
         # the optic is chosen by matching it.
@@ -323,6 +350,12 @@ def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
         return False
 
     _populate_acquisition_conditions(frame, header)
+    # Only a value the header itself gives replaces the stored ISO; the
+    # camera's configured default and the stand-in are for new records only.
+    header_iso = iso_or_gain_text(header)
+    if header_iso is not None:
+        frame.iso = header_iso
+    frame.header_fields_version = HEADER_FIELDS_VERSION
     return True
 
 
@@ -432,9 +465,12 @@ def _is_unchanged(frame: Any, file_state: os.stat_result | None) -> bool:
     -------
     unchanged : `bool`
         `True` only if the record has both stored values and both match
-        `file_state`. A record without them (saved by older code) is never
-        unchanged, so it is read once and stamped.
+        `file_state`. A record without them (saved by older code), or one
+        read before the current `HEADER_FIELDS_VERSION`, is never unchanged,
+        so it is read once and stamped.
     """
+    if getattr(frame, "header_fields_version", None) != HEADER_FIELDS_VERSION:
+        return False
     return file_state_matches(
         file_state, getattr(frame, "file_size", None), getattr(frame, "file_modified_ns", None)
     )

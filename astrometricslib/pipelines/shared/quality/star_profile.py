@@ -22,6 +22,7 @@ reads a file but changes nothing.
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 from astropy.stats import sigma_clipped_stats
@@ -30,7 +31,7 @@ from scipy import ndimage, optimize
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.foundation.run_bases import StarWidthEstimator, factor_for, star_width_on_scale
 from astrometricslib.models.quality.star_profile import ProfileFit, StarProfileMeasurement
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -40,9 +41,45 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.quality.star_ring import analyze_star_ring
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
+    MOFFAT_FIT_BOX_HALF_WIDTH_PX,
+    STAR_FINDER_THRESHOLD_SIGMA,
+    explain_single_star_shape,
+)
+from astrometricslib.pipelines.shared.quality.star_ring import (
+    STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE,
+    STAR_RING_TARGET_MATCH_RADIUS_PX,
+    analyze_star_ring,
+)
 
-__all__ = ["measure_star_profile_in_file"]
+__all__ = ["PhotometryGeometry", "measure_star_profile_in_file"]
+
+
+@dataclass(frozen=True)
+class PhotometryGeometry:
+    """The photometry circle, sky ring and crowding limits, as numbers.
+
+    The caller reads these from the photometry parameters and passes them in,
+    so this module needs no knowledge of the photometry pipeline.
+
+    Attributes
+    ----------
+    aperture_radius_px : `float`
+        The radius of the photometry circle.
+    sky_inner_px, sky_outer_px : `float`
+        The inner and outer radius of the photometry sky ring.
+    crowding_margin_px : `float`
+        How far beyond the circle a neighbor still counts as crowding it.
+    crowding_neighbor_peak_fraction : `float`
+        The share of the star's peak a neighbor must reach to crowd the circle.
+    """
+
+    aperture_radius_px: float
+    sky_inner_px: float
+    sky_outer_px: float
+    crowding_margin_px: float
+    crowding_neighbor_peak_fraction: float
+
 
 # The default radius of the profile. A Moffat star with a typical beta has
 # most of its light within about 3 FWHM, and the wings out to 6 FWHM give the
@@ -432,10 +469,13 @@ def _fit_curves(
             curve = _moffat_values(grid, parameters[0], parameters[3], parameters[4])
         else:
             curve = _gaussian_values(grid, parameters[0], parameters[3])
+        estimator = StarWidthEstimator.FRAME_MOFFAT if name == "moffat" else StarWidthEstimator.FRAME_GAUSSIAN
         return ProfileFit(
             model=name,
             fitted=True,
             fwhm_px=float(fwhm),
+            estimator=estimator.value,
+            fwhm_on_scale_px=float(star_width_on_scale(float(fwhm), estimator)),
             fwhm_arcsec=None if scale is None else float(fwhm * scale),
             peak=float(parameters[0]),
             beta=beta,
@@ -447,6 +487,49 @@ def _fit_curves(
         )
 
     return fit_one("moffat"), fit_one("gaussian")
+
+
+def _position_angle_east_of_north(
+    header: object, center_column: float, center_row: float, angle_deg: float | None
+) -> float | None:
+    """Turn a direction on the image into a position angle on the sky.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The image's header.
+    center_column, center_row : `float`
+        The star's center, 0-based.
+    angle_deg : `float` or `None`
+        The direction on the image, from +y toward +x, in degrees.
+
+    Returns
+    -------
+    position_angle : `float` or `None`
+        The same direction on the sky, from north toward east, 0 up to but
+        not including 180 degrees. `None` when there is no direction or the
+        image has no plate solution.
+    """
+    from astropy.coordinates import SkyCoord
+
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
+    from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+
+    if angle_deg is None or header is None or not header_is_plate_solved(header):  # type: ignore[arg-type]
+        return None
+    wcs = celestial_wcs(header)  # type: ignore[arg-type]
+    if wcs is None:
+        return None
+    radians = math.radians(angle_deg)
+    columns = [center_column, center_column + math.sin(radians)]
+    rows = [center_row, center_row + math.cos(radians)]
+    try:
+        ra, dec = wcs.all_pix2world(columns, rows, 0)
+    except ValueError, RuntimeError:
+        return None
+    start, end = SkyCoord(ra[0], dec[0], unit="deg"), SkyCoord(ra[1], dec[1], unit="deg")
+    position_angle = float(start.position_angle(end).deg) % 180.0
+    return position_angle if math.isfinite(position_angle) else None
 
 
 def _judge_star(peak: float, sky_noise: float, moffat: ProfileFit) -> tuple[bool, str | None]:
@@ -471,6 +554,212 @@ def _judge_star(peak: float, sky_noise: float, moffat: ProfileFit) -> tuple[bool
     return True, None
 
 
+def _judge_core_shape(
+    data: np.ndarray,
+    center_column: float,
+    center_row: float,
+    signal_to_noise: float,
+    clipped: bool,
+    star_found: bool,
+    circle_neighbor_count: int,
+) -> tuple[float | None, float | None, bool, str | None, str | None]:
+    """Measure the star's core shape the way the frame measurement does.
+
+    The shape comes from `explain_single_star_shape`, the one-star form of
+    the estimator behind `frame.star_elongation`. It is judgeable only when
+    the frame measurement would accept the star: peak at least the star
+    finder's detection floor (`STAR_FINDER_THRESHOLD_SIGMA`) above the sky
+    noise, no clipped core, no bright neighbor in the star circle, a fit box
+    that lies inside the image, and a Moffat fit that the frame measurement's
+    own limits accept. The first check that fails names the reason.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The image.
+    center_column, center_row : `float`
+        The star's center, 0-based.
+    signal_to_noise : `float`
+        The peak above the sky divided by the sky noise.
+    clipped : `bool`
+        Whether the peak looks clipped.
+    star_found : `bool`
+        Whether the profile looks like a star.
+    circle_neighbor_count : `int`
+        How many bright neighbors crowd the star circle.
+
+    Returns
+    -------
+    elongation : `float` or `None`
+        Long axis divided by short axis, or `None` when not judgeable.
+    angle_deg : `float` or `None`
+        Direction of the long axis, from +x (columns) toward +y (rows), 0 up
+        to 180 degrees, or `None` when not judgeable.
+    judgeable : `bool`
+        Whether the shape can be trusted.
+    note : `str` or `None`
+        A short reason when it cannot (for example "a neighbor is too close"),
+        else `None`.
+    detail : `str` or `None`
+        A full sentence for the same reason, else `None`.
+    """
+    if not star_found:
+        return None, None, False, "not a single star", "This does not look like a single star."
+    floor = float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value)  # type: ignore[arg-type]
+    if signal_to_noise < floor:
+        return (
+            None,
+            None,
+            False,
+            "too faint",
+            f"The star's peak is {signal_to_noise:.1f} times the sky noise, "
+            f"below the {floor:g} needed to judge its shape.",
+        )
+    if clipped:
+        return (
+            None,
+            None,
+            False,
+            "the core is clipped",
+            "The star's core is at the top of the camera's range, so its true shape is lost.",
+        )
+    if circle_neighbor_count > 0:
+        return (
+            None,
+            None,
+            False,
+            "a neighbor is too close",
+            "A bright neighbor lies inside the star circle and would pull the shape toward itself.",
+        )
+    half = int(resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value)  # type: ignore[arg-type]
+    column, row = round(center_column), round(center_row)
+    height, width = data.shape
+    if column - half < 0 or row - half < 0 or column + half >= width or row + half >= height:
+        return (
+            None,
+            None,
+            False,
+            "too near the edge",
+            "The star is too near the edge of the image for the shape fit to fit on it.",
+        )
+    box = data[row - half : row + half + 1, column - half : column + half + 1]
+    if not np.isfinite(box).all():
+        return (
+            None,
+            None,
+            False,
+            "gaps in the image",
+            "The image has gaps around the star, so the shape fit cannot be made.",
+        )
+    shape, reason = explain_single_star_shape(box)
+    if shape is None:
+        return (
+            None,
+            None,
+            False,
+            "the fit did not hold",
+            f"The shape fit was refused: {reason or 'the fit did not hold'}. "
+            "The frame measurement would skip this star too.",
+        )
+    return shape.elongation, shape.angle_deg, True, None, None
+
+
+def _survey_surroundings(
+    data: np.ndarray,
+    center: tuple[float, float],
+    sky_noise: float,
+    peak: float,
+    find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None,
+    geometry: PhotometryGeometry,
+) -> dict[str, float | int]:
+    """Describe what lies around a star the way photometry would see it.
+
+    The photometry circle and its sky ring come from ``geometry``. The
+    result says how far the star is from the image edge, how
+    much of the sky ring lies on real pixels, and how many neighbors crowd the
+    circle or sit in the sky ring.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The whole image.
+    center : `tuple` [`float`, `float`]
+        The star's center as 0-based column and row.
+    sky_noise : `float`
+        The sky scatter, in image units.
+    peak : `float`
+        The star's peak above the sky.
+    find_neighbors : callable or `None`
+        The star finder for a piece of the image, as in
+        `measure_star_profile_in_file`. `None` finds no neighbors.
+    geometry : `PhotometryGeometry`
+        The photometry circle, sky ring and crowding limits.
+
+    Returns
+    -------
+    surroundings : `dict`
+        Keys ``edge_distance_px``, ``coverage_fraction``,
+        ``aperture_radius_px``, ``sky_inner_px``, ``sky_outer_px``,
+        ``circle_neighbor_count`` and ``sky_ring_neighbor_count``.
+    """
+    column, row = center
+    height, width = data.shape
+    aperture = geometry.aperture_radius_px
+    sky_inner = geometry.sky_inner_px
+    sky_outer = geometry.sky_outer_px
+    margin = geometry.crowding_margin_px
+    peak_fraction = geometry.crowding_neighbor_peak_fraction
+    edge_distance = float(min(column, row, width - 1 - column, height - 1 - row))
+
+    # Coverage: the share of the pixels within the sky ring that hold a value.
+    x_low, x_high = max(int(column - sky_outer) - 1, 0), min(int(column + sky_outer) + 2, width)
+    y_low, y_high = max(int(row - sky_outer) - 1, 0), min(int(row + sky_outer) + 2, height)
+    window_rows, window_columns = np.mgrid[y_low:y_high, x_low:x_high]
+    disc = np.hypot(window_columns - column, window_rows - row) <= sky_outer
+    window = data[y_low:y_high, x_low:x_high]
+    expected = math.pi * sky_outer**2
+    coverage = min(1.0, float(np.sum(disc & np.isfinite(window))) / expected) if expected > 0 else 1.0
+
+    circle_count = 0
+    ring_count = 0
+    if find_neighbors is not None:
+        reach = sky_outer + 2.0
+        box_x0, box_x1 = max(int(column - reach), 0), min(int(column + reach) + 2, width)
+        box_y0, box_y1 = max(int(row - reach), 0), min(int(row + reach) + 2, height)
+        box = data[box_y0:box_y1, box_x0:box_x1]
+        sky_guess = float(np.nanmedian(box)) if np.isfinite(box).any() else 0.0
+        found = find_neighbors(np.nan_to_num(box, nan=sky_guess))
+        own = float(resolve(STAR_RING_TARGET_MATCH_RADIUS_PX).value)  # type: ignore[arg-type]
+        minimum_height = float(resolve(STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE).value) * sky_noise  # type: ignore[arg-type]
+        for found_column, found_row in found:
+            neighbor_column, neighbor_row = box_x0 + found_column, box_y0 + found_row
+            offset = math.hypot(neighbor_column - column, neighbor_row - row)
+            if offset <= own or offset > sky_outer:
+                continue
+            near = data[
+                max(round(neighbor_row) - 1, 0) : min(round(neighbor_row) + 2, height),
+                max(round(neighbor_column) - 1, 0) : min(round(neighbor_column) + 2, width),
+            ]
+            if not np.isfinite(near).any():
+                continue
+            height_above_sky = float(np.nanmax(near)) - sky_guess
+            if height_above_sky < minimum_height:
+                continue
+            if offset <= aperture + margin and height_above_sky >= peak_fraction * peak:
+                circle_count += 1
+            elif offset >= sky_inner:
+                ring_count += 1
+    return {
+        "edge_distance_px": edge_distance,
+        "coverage_fraction": coverage,
+        "aperture_radius_px": aperture,
+        "sky_inner_px": sky_inner,
+        "sky_outer_px": sky_outer,
+        "circle_neighbor_count": circle_count,
+        "sky_ring_neighbor_count": ring_count,
+    }
+
+
 def measure_star_profile_in_file(
     path: str,
     x: float,
@@ -480,6 +769,8 @@ def measure_star_profile_in_file(
     cut_half_length_px: float | None = None,
     search_radius_px: float | None = None,
     find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None = None,
+    *,
+    photometry_geometry: PhotometryGeometry,
 ) -> StarProfileMeasurement:
     """Measure a star's radial profile, a straight cut and the ring around it.
 
@@ -504,6 +795,10 @@ def measure_star_profile_in_file(
         A star finder for the ring's neighbor mask: it takes a piece of the
         image and returns the 0-based ``(column, row)`` of each star in it.
         `None` leaves neighbors in the ring.
+    photometry_geometry : `PhotometryGeometry`
+        The photometry circle, sky ring and crowding limits, resolved by
+        the caller, used to report how the star's surroundings look to
+        photometry.
 
     Returns
     -------
@@ -651,6 +946,24 @@ def measure_star_profile_in_file(
         find_neighbors,
     )
 
+    surroundings = _survey_surroundings(
+        data, (center_column, center_row), float(sky_noise), peak, find_neighbors, photometry_geometry
+    )
+
+    elongation, elongation_angle, shape_judgeable, shape_note, shape_detail = _judge_core_shape(
+        data,
+        center_column,
+        center_row,
+        float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
+        bool(clipped),
+        star_found,
+        int(surroundings["circle_neighbor_count"]),
+    )
+
+    # The core-shape fit gives its angle from +x toward +y, as the frame
+    # metric does; the result gives every angle from +y toward +x, as the cut.
+    profile_angle = None if elongation_angle is None else float((90.0 - elongation_angle) % 180.0)
+
     return StarProfileMeasurement(
         path=path,
         color_note=color_note,
@@ -698,4 +1011,14 @@ def measure_star_profile_in_file(
         ring_masked_neighbor_count=len(ring.neighbors),
         ring_masked_fraction=ring.masked_fraction,
         ring_note=ring.note,
+        peak_over_sky_noise=float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
+        star_elongation=elongation,
+        star_elongation_angle_deg=profile_angle,
+        star_elongation_position_angle_deg=_position_angle_east_of_north(
+            image.header, center_column, center_row, profile_angle
+        ),
+        star_shape_judgeable=shape_judgeable,
+        star_shape_note=shape_note,
+        star_shape_detail=shape_detail,
+        **surroundings,  # type: ignore[arg-type]
     )

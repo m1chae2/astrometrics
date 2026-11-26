@@ -1,20 +1,14 @@
-"""Purpose: Tests for the linked spectrum read and the target star read.
+"""Purpose: Tests for the linked spectrum read.
 
-Description: Covers `StellarCatalog.get_spectrum` and
-`TargetCatalog.get_stars`. A star's spectrum is read from the star itself,
-an older ``::spectroscopy`` copy is only a fallback, and a target's stars
-come back as full records with no cap.
+Description: Covers `StellarCatalog.get_spectrum`. A star's spectrum is read
+from the star itself, and an older ``::spectroscopy`` copy is only a
+fallback.
 """
 
 from unittest.mock import MagicMock
 
-from pytest_mock import MockerFixture
-
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.api.targets import TargetCatalog
-from astrometricslib.models.catalog_queries import StarQueryResult
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
-from astrometricslib.models.target import Target
 
 
 def _star(star_id: str, with_spectrum: bool) -> StellarObject:
@@ -77,32 +71,3 @@ class TestGetSpectrum:
         catalog = _stars_with(_star("HD 1", False))
         assert catalog.get_spectrum("HD 1") is None
         assert catalog.get_spectrum("HD 2") is None
-
-
-class TestGetStars:
-    """Unit test suite for TargetCatalog.get_stars."""
-
-    def test_returns_all_full_records_of_the_target(self, mocker: MockerFixture) -> None:
-        """The call asks for full, uncapped records of the target."""
-        stars = [_star("HD 1", False), _star("HD 2", True)]
-        run_query = mocker.patch(
-            "astrometricslib.pipelines.shared.star_catalog_queries.run_star_query",
-            return_value=StarQueryResult(detail="objects", objects=stars),
-        )
-        catalog = TargetCatalog(MagicMock(), MagicMock(get=MagicMock(return_value=[])))
-        mocker.patch.object(TargetCatalog, "resolve", return_value=Target(id="M13"))
-
-        assert catalog.get_stars("M13") == stars
-        star_query, detail, limit = run_query.call_args.args[1:4]
-        assert (star_query.target_id, detail, limit) == ("M13", "objects", None)
-
-    def test_a_target_without_stars_gives_an_empty_list(self, mocker: MockerFixture) -> None:
-        """No stars is an empty list, not `None`."""
-        mocker.patch(
-            "astrometricslib.pipelines.shared.star_catalog_queries.run_star_query",
-            return_value=StarQueryResult(detail="objects", objects=None),
-        )
-        catalog = TargetCatalog(MagicMock(), MagicMock(get=MagicMock(return_value=[])))
-        mocker.patch.object(TargetCatalog, "resolve", return_value=Target(id="M13"))
-
-        assert catalog.get_stars("M13") == []

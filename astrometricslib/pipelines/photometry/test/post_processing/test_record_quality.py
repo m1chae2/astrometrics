@@ -131,16 +131,17 @@ def good_run(**changes: Any) -> dict[str, GateResult]:
         "cutoff_cv": 0.04,
         "median_flux_error_mag": 0.02,
         "errors_assume_unit_gain": False,
+        "target_crowding": rg.TargetCrowding("Star_1", False, 40.0, 0.01),
     }
     inputs.update(changes)
     return {gate.name: gate for gate in rg.photometry_run_gates(**inputs)}
 
 
 def test_a_healthy_run_passes_every_gate() -> None:
-    """Nothing wrong gives eleven passes and no failure."""
+    """Nothing wrong gives twelve passes and no failure."""
     gates = good_run()
 
-    assert len(gates) == 11
+    assert len(gates) == 12
     assert {gate.status for gate in gates.values()} == {GateStatus.PASSED}
 
 
@@ -632,3 +633,18 @@ def test_the_amplitude_gate_reads_the_noise_floor_when_the_run_has_a_noise_model
     assert noisy.measured_value == pytest.approx(0.1 * 2.0 * 2**0.5 * (1.5**2 - 1.0) ** 0.5)
     assert "from the noise model" in noisy.limit_source
     assert quiet.status is GateStatus.PASSED
+
+
+def test_the_target_crowding_gate_fails_for_a_crowded_target() -> None:
+    """A crowded target gives a warning that names the star."""
+    gate = good_run(target_crowding=rg.TargetCrowding("Star_1", True, 3.0, 0.5))[rg.TARGET_CROWDING_GATE_NAME]
+    assert gate.status is GateStatus.FAILED
+    assert "Star_1" in gate.detail
+    assert gate.measured_value == pytest.approx(0.5)
+
+
+def test_the_target_crowding_gate_is_not_checked_without_a_target_star() -> None:
+    """No single target star, or no recorded crowding, is not a pass."""
+    assert good_run(target_crowding=None)[rg.TARGET_CROWDING_GATE_NAME].status is GateStatus.NOT_CHECKED
+    unrecorded = rg.TargetCrowding("Star_1", None)
+    assert good_run(target_crowding=unrecorded)[rg.TARGET_CROWDING_GATE_NAME].status is GateStatus.NOT_CHECKED

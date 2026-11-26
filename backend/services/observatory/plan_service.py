@@ -66,23 +66,6 @@ class PlanService:
         self._socket_manager = socket_manager
         self._refresh_worker = refresh_worker
 
-    def get_plan(self, session_id: str | None = None) -> Any:
-        """Read one night plan, or list every recorded one.
-
-        Parameters
-        ----------
-        session_id : `str`, optional
-            The session to read. When left out, one summary line per session.
-
-        Returns
-        -------
-        plan : `ObservationSession` or `list` [`ObservationSessionSummary`]
-            The whole session, or the list of summaries.
-        """
-        if session_id is None:
-            return self.wayfinder.planning.query_plans()
-        return self.wayfinder.planning.get_plan(session_id)
-
     def list_packages(
         self, status: str | None = None, target: str | None = None, include_dismissed: bool = False
     ) -> list[ObservationPackage]:
@@ -159,22 +142,6 @@ class PlanService:
             return {"started": False}
         self._refresh_worker.request(target_ids)
         return {"started": True}
-
-    def create_plan(self, night_id: str | None = None) -> Any:
-        """Create an empty night plan to fill by hand.
-
-        Parameters
-        ----------
-        night_id : `str`, optional
-            The night the plan is for. The library chooses when left out.
-            The night's existing session comes back if it has one.
-
-        Returns
-        -------
-        plan : `ObservationSession`
-            The night's session.
-        """
-        return self.wayfinder.planning.create_session(observing_night_id=night_id)
 
     def create_package(
         self,

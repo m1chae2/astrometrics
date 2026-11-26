@@ -159,7 +159,10 @@ KNOWN_WALL_CLOCK_SITES = frozenset({
     "pipelines/stacking/pre_processing/frame_quarantine.py",
     # Writes when a preview picture was made, in its settings record. It dates
     # the picture, not any frame's observation.
-    "pipelines/stacking/post_processing/stack_preview.py",
+    "pipelines/stacking/post_processing/preview_settings.py",
+    # Writes when a color picture was made, in its JSON record, like the
+    # preview's settings record. It dates the picture, not any observation.
+    "pipelines/stacking/post_processing/color_from_other_stack.py",
 })
 
 

@@ -8,6 +8,7 @@ the driver class `ImageProcessing`.
 
 import contextlib
 import contextvars
+import dataclasses
 import glob
 import logging
 import os
@@ -40,7 +41,7 @@ from astrometricslib._internal.drivers.siril_interface.script_builders import (
     build_master_calibration_commands,
     calibration_count_flags,
 )
-from astrometricslib._internal.drivers.siril_interface.session import siril_process_lock
+from astrometricslib._internal.drivers.siril_interface.session import SirilStatusQueue, siril_process_lock
 from astrometricslib._internal.drivers.siril_interface.spectral_stacker import SirilSpectralStacker
 from astrometricslib._internal.drivers.siril_interface.staging import (
     _frames_use_color_filter_array,
@@ -232,7 +233,7 @@ class SirilImagingStacker(SirilSpectralStacker):
         # halves explicitly, rather than instance state:
         # max_concurrent_jobs allows several process_target calls to
         # share one ImageProcessing instance, and each needs its own.
-        status_queue: queue.Queue[str] = queue.Queue()
+        status_queue: queue.Queue[str] = SirilStatusQueue()
 
         # Get actual counts to handle 1-frame sequence issue in
         # Siril. Siril's 'convert' does not create a .seq file
@@ -459,10 +460,14 @@ class SirilImagingStacker(SirilSpectralStacker):
             if job_logger:
                 job_logger.exception("Error in Siril stdout reader thread")
 
-    def _prepare_calibration(self, run: SirilStackRun, staged: StagedInputs) -> tuple[set[str], float | None]:
-        """Restore cached masters, assess the flats and record the count flags.
+    def _prepare_calibration(
+        self, run: SirilStackRun, staged: StagedInputs
+    ) -> tuple[set[str], float | None, StagedFrameCounts]:
+        """Assess the flats, restore cached masters and record the count flags.
 
-        Masters already built for this exact set of calibration
+        The flats are assessed first. Clipped flat frames are left out of the
+        staged folder, so the cache is searched for the master of the frames
+        that are used. Masters already built for this exact set of calibration
         frames are copied straight in, and their build steps are
         skipped -- the frames still had to be staged, since their
         fingerprint is what identifies the master.
@@ -486,13 +491,16 @@ class SirilImagingStacker(SirilSpectralStacker):
             The masters restored from the cache.
         flat_smoothing_sigma : `float` or `None`
             The blur width for a master flat built now, or `None`.
+        counts : `StagedFrameCounts`
+            The staged counts. The flat count is lower than the staged one
+            when clipped flat frames were left out.
         """
         job_logger = run.job_logger
         counts = staged.counts
-        restored_master_kinds = self.restore_cached_calibration_masters(
-            staged.target_folder, job_logger=job_logger
-        )
-        flat_smoothing_sigma = None
+        # The flats are assessed before the cache is searched: clipped frames
+        # are taken out of the staged folder first, so the cache key is the
+        # key of the frames that are used.
+        flat_assessment = None
         if counts.flats > 0:
             flat_assessment = self.assess_staged_flats(
                 staged.target_folder,
@@ -501,13 +509,20 @@ class SirilImagingStacker(SirilSpectralStacker):
                 camera=run.camera_filter,
                 assess_flats=run.steps.assess_flats,
             )
-            if flat_assessment is not None:
-                self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
-                # A master restored from the cache was built, smoothed or
-                # not, under the same recipe, so only a master built now
-                # is blurred.
-                if "flat" not in restored_master_kinds:
-                    flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
+            counts = dataclasses.replace(
+                counts, flats=len(os.listdir(os.path.join(staged.target_folder, "flats")))
+            )
+        restored_master_kinds = self.restore_cached_calibration_masters(
+            staged.target_folder, job_logger=job_logger
+        )
+        flat_smoothing_sigma = None
+        if flat_assessment is not None:
+            self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
+            # A master restored from the cache was built, smoothed or
+            # not, under the same recipe, so only a master built now
+            # is blurred.
+            if "flat" not in restored_master_kinds:
+                flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
 
         # A master built from fewer frames than the minimum is still
         # built (the library can legitimately hold one flat), but the run
@@ -521,7 +536,7 @@ class SirilImagingStacker(SirilSpectralStacker):
         self.last_run_diagnostics[CALIBRATION_BLOCKING_FLAGS_KEY] = count_flags
         for count_flag in count_flags:
             job_logger.warning("Calibration frame count too low (blocking flag): %s", count_flag)
-        return restored_master_kinds, flat_smoothing_sigma
+        return restored_master_kinds, flat_smoothing_sigma, counts
 
     def _write_script(self, run: SirilStackRun, staged: StagedInputs) -> SirilScript:
         """Write the whole Siril script: preamble, masters and lights.
@@ -540,7 +555,8 @@ class SirilImagingStacker(SirilSpectralStacker):
         """
         request = run.request
         script = list(SIRIL_SCRIPT_PREAMBLE)
-        restored_master_kinds, flat_smoothing_sigma = self._prepare_calibration(run, staged)
+        restored_master_kinds, flat_smoothing_sigma, counts = self._prepare_calibration(run, staged)
+        staged = dataclasses.replace(staged, counts=counts)
 
         # Automated Master Calibration Generation
         script += build_master_calibration_commands(
@@ -611,8 +627,9 @@ class SirilImagingStacker(SirilSpectralStacker):
                 process=launch.process,
             )
 
-        writer = threading.Thread(target=write_commands)
-        writer.daemon = True
+        # The writer runs in the run's log context, so its lines reach
+        # only this run's log file.
+        writer = threading.Thread(target=contextvars.copy_context().run, args=(write_commands,), daemon=True)
         writer.start()
 
         result = self.read_output(

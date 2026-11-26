@@ -27,6 +27,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch
 from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import PROCESSING_QUALITY_GATE_NAME
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 from astrometricslib.utilities import parallel_batch
 
 
@@ -79,13 +80,24 @@ def isolated_config(tmp_path: Path) -> Iterator[AppConfiguration]:
     config_loader._instance = original_instance
 
 
-def _make_wcs_header(ra_center=279.0, dec_center=38.0, scale_deg_per_px=0.0001):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
-    w = WCS(naxis=2)
-    w.wcs.crpix = [128, 128]
-    w.wcs.cdelt = [-scale_deg_per_px, scale_deg_per_px]
-    w.wcs.crval = [ra_center, dec_center]
-    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    return w.to_header()
+def _make_wcs_header(
+    ra_center: float = 279.0, dec_center: float = 38.0, scale_deg_per_px: float = 0.0001
+) -> fits.Header:
+    """Give the header cards of a plain sky map centered on the frame.
+
+    Parameters
+    ----------
+    ra_center, dec_center : `float`
+        The sky position of the frame's middle, in degrees.
+    scale_deg_per_px : `float`
+        The pixel size on the sky, in degrees.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header`
+        The sky-map cards.
+    """
+    return tan_sky_map(ra_center, dec_center, (128, 128), degrees_per_pixel=scale_deg_per_px).to_header()
 
 
 def _write_frame_fits(path, date_obs, with_own_wcs=False) -> None:  # ruff: ignore[missing-type-function-argument]
@@ -725,3 +737,144 @@ class TestSelectTemporalTrackingStars:
         chosen = batch.select_temporal_tracking_stars(stars, None, None)
 
         assert [star.id for star in chosen] == ["HD 1", "HD 2"]
+
+
+class TestFollowOnlyMode:
+    """Unit tests for the spectral variation mode (``follow_only``)."""
+
+    def test_worker_skips_a_frame_with_no_session_stars_and_saves_nothing(
+        self, tmp_path: Path, isolated_config: AppConfiguration
+    ) -> None:
+        """Verify a frame is skipped, so the stack's spectra stay."""
+        frame_path = tmp_path / "frame.fits"
+        _write_frame_fits(frame_path, "2026-01-01T00:00:00")
+
+        result = batch._process_single_spectroscopy_frame_worker_v2(
+            str(frame_path), "FollowOnlyTarget", [], None, True
+        )
+
+        assert result["status"] == "skipped"
+        assert result["error"]
+        assert not CatalogAccess(config=isolated_config).get("stellar_catalog", {})
+
+    def test_worker_measures_a_frame_without_saving_its_stars(
+        self, tmp_path: Path, isolated_config: AppConfiguration
+    ) -> None:
+        """Verify spectra are measured but not written to the catalog."""
+        frame_path = tmp_path / "frame.fits"
+        _write_frame_fits(frame_path, "2026-01-01T00:00:00", with_own_wcs=True)
+
+        result = batch._process_single_spectroscopy_frame_worker_v2(
+            str(frame_path), "FollowOnlyTarget2", [_make_seed_star()], None, True
+        )
+
+        assert result["status"] == "success"
+        assert result["stars_processed"] == 1
+        assert not CatalogAccess(config=isolated_config).get("stellar_catalog", {})
+
+    def test_a_session_of_one_frame_is_skipped_with_a_reason_and_the_summary_is_kept_apart(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify short sessions are skipped and the stack summary stays."""
+        monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+
+        import datetime as datetime_module
+
+        frame_records = []
+        for session_index, (day, frame_count) in enumerate([(1, 2), (5, 1)]):
+            for frame_index in range(frame_count):
+                moment = datetime_module.datetime(2026, 1, day, 22, 0, 0) + datetime_module.timedelta(
+                    minutes=5 * frame_index
+                )
+                frame_path = tmp_path / f"s{session_index}_f{frame_index}.fits"
+                _write_frame_fits(frame_path, moment.isoformat())
+                frame_records.append(
+                    FrameRecord(path=str(frame_path), role="LIGHT", timestamp=moment.timestamp())
+                )
+
+        target = Target(id="FollowOnlyBatchTarget", frames=frame_records)
+        stack_summary = SimpleNamespace(marker="from the stack")
+        target.quality.spectroscopy = stack_summary
+
+        from astrometricslib.pipelines.shared import session_identification
+
+        identify_calls = []
+
+        def _fake_identify(reference_image: object, *_args: object, **_kw: object) -> object:
+            identify_calls.append(reference_image.path)
+            return session_identification.SessionIdentificationResult(
+                wcs=None,
+                stellar_objects=[],
+                reused_existing_header_wcs=False,
+                solve_attempted=True,
+                plate_solve_succeeded=False,
+                simbad_matched_count=0,
+                sources_detected=0,
+            )
+
+        monkeypatch.setattr(session_identification, "identify_session_stars", _fake_identify)
+
+        def _fake_run_parallel_batch(item_ids, worker_function, worker_arguments=(), **_kw):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument, missing-type-kwargs]
+            assert worker_arguments[-1] is True
+            summary = parallel_batch.BatchRunSummary()
+            for item_id in item_ids:
+                summary.succeeded.append(item_id)
+                summary.results[item_id] = {"status": "success", "stars_processed": 1}
+            return summary
+
+        monkeypatch.setattr(parallel_batch, "run_parallel_batch", _fake_run_parallel_batch)
+
+        summary, session_results = batch.process_spectroscopy_frames_by_session(
+            config, target, frame_records, follow_only=True
+        )
+
+        assert len(identify_calls) == 1
+        assert len(session_results) == 1
+        assert [path for path, _reason in summary.skipped] == [str(tmp_path / "s1_f0.fits")]
+        assert "fewer than 2 frames" in summary.skipped[0][1]
+        assert target.quality.spectroscopy is stack_summary
+        assert target.quality.spectroscopy_variation is not None
+        assert target.quality.spectroscopy_variation.upstream_quality_summary_reference == "raw_frames"
+
+
+class TestSelectBrightestStars:
+    """Unit tests for select_brightest_stars and the named/unnamed split."""
+
+    def _star(self, star_id: str, flux: float, named: bool = True) -> StellarObject:
+        """Build a star with a sky position and a detection flux.
+
+        Returns
+        -------
+        star : `StellarObject`
+            The star.
+        """
+        star = _make_seed_star(star_id=star_id, name=star_id)
+        star.is_catalog_identified = named
+        star.flux = flux
+        return star
+
+    def test_picks_the_brightest_whether_or_not_they_are_named(self) -> None:
+        """Verify position-named stars are chosen and the order is by flux."""
+        stars = [
+            self._star("A", 10.0),
+            self._star("FIELD_J1.0+2.0", 500.0, named=False),
+            self._star("C", 100.0),
+        ]
+
+        chosen = batch.select_brightest_stars(stars, limit=2)
+
+        assert [star.id for star in chosen] == ["FIELD_J1.0+2.0", "C"]
+        assert batch._is_named(chosen[1]) and not batch._is_named(chosen[0])
+
+    def test_caps_the_count_and_skips_stars_with_no_position(self) -> None:
+        """Verify position-named stars are chosen, ordered by flux."""
+        stars = [self._star(f"S{index}", float(index)) for index in range(15)]
+        no_position = self._star("NoPos", 1e9)
+        no_position.right_ascension = None
+
+        chosen = batch.select_brightest_stars([*stars, no_position])
+
+        assert len(chosen) == batch.MAXIMUM_TRACKED_STARS_PER_FRAME
+        assert "NoPos" not in [star.id for star in chosen]

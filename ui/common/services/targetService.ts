@@ -4,7 +4,7 @@
  * Aligns with the Google TypeScript Style Guide.
  */
 
-import { callBackend, TargetCameraIndex } from './backendApi';
+import { callBackend, FrameHeaderAnswer, TargetCameraIndex } from './backendApi';
 import { reportError } from '../utils/reportError';
 import { emitToast } from '../utils/emitToast';
 import {
@@ -84,10 +84,10 @@ async function loadFrameStatsGrouped(targetId: string, camera?: string): Promise
 export async function getTargets(targetId?: string): Promise<any> {
     try {
         if (targetId) {
-            const data = await callBackend("target:get_targets", { target_id: targetId });
+            const data = await callBackend("target:get", { target_id: targetId });
             return data as TargetObject | null;
         } else {
-            const data = await callBackend("target:get_targets", { detail: "summary" });
+            const data = await callBackend("target:get", { detail: "summary" });
             return Array.isArray(data) ? data : [];
         }
     } catch (err: unknown) {
@@ -98,7 +98,7 @@ export async function getTargets(targetId?: string): Promise<any> {
 
 // All six top-level mode displays mount at once at app boot and each calls
 // fetchTargetList() independently via useTargetListLogic; without coalescing,
-// that's N simultaneous, identical "target:get_targets" requests contending
+// that's N simultaneous, identical "target:get" requests contending
 // for the same backend round trip instead of one shared result.
 let inFlightTargetListRequest: ReturnType<typeof getTargets> | null = null;
 
@@ -108,7 +108,7 @@ let inFlightTargetListRequest: ReturnType<typeof getTargets> | null = null;
  * All six top-level mode displays mount at once at app boot and each calls this
  * independently via useTargetListLogic; concurrent calls are coalesced into a
  * single shared in-flight request so N simultaneous callers issue only one
- * "target:get_targets" backend round trip instead of N identical ones.
+ * "target:get" backend round trip instead of N identical ones.
  *
  * @return List of target summary objects.
  */
@@ -243,12 +243,11 @@ export async function addTargetData(
 
 /**
  * Sends the target's JPEG picture to the user's phone. The backend uses
- * GSConnect to send it straight to a connected phone, or opens LocalSend
- * with the picture queued when no phone is connected. The backend reports a
- * missing picture or phone link as an error toast.
+ * GSConnect to send it straight to a connected phone. The backend reports a
+ * missing picture or no connected phone as an error toast.
  *
  * @param targetId Unique identifier of the target.
- * @return How it was sent, with the phone's name for GSConnect.
+ * @return How it was sent, with the phone's name.
  */
 export async function sendTargetToPhone(
     targetId: string
@@ -302,6 +301,33 @@ export async function fetchVisibleTargets(): Promise<ObjectVisibility[]> {
 
 
 /**
+ * Asks the backend for a frame's header and the turn that shows it the same way round as the stack.
+ * @param targetId The identifier of the target.
+ * @param framePath The system file path to the FITS frame.
+ * @param options Set `silent` for an optional lookup: a failure is thrown without a toast or an error report.
+ * @return The backend's answer.
+ */
+async function fetchFrameHeaderAnswer(
+    targetId: string,
+    framePath: string,
+    options?: { silent?: boolean }
+): Promise<FrameHeaderAnswer> {
+    try {
+        const data = await callBackend(
+            "target:get_frame_header",
+            { target_id: targetId, frame_path: framePath },
+            options?.silent ? { silent: true } : undefined
+        );
+        return data ?? { entries: [], displayTurn: 0 };
+    } catch (err: unknown) {
+        if (!options?.silent) {
+            reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        }
+        throw err;
+    }
+}
+
+/**
  * Fetches the FITS header info for a specific frame of a target.
  * @param targetId The identifier of the target.
  * @param framePath The system file path to the FITS frame.
@@ -314,19 +340,21 @@ export async function fetchTargetFrameHeader(
     framePath: string,
     options?: { silent?: boolean }
 ): Promise<FitsHeaderEntry[]> {
-    try {
-        const data = await callBackend(
-            "target:get_frame_header",
-            { target_id: targetId, frame_path: framePath },
-            options?.silent ? { silent: true } : undefined
-        );
-        return (data || []) as FitsHeaderEntry[];
-    } catch (err: unknown) {
-        if (!options?.silent) {
-            reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        }
-        throw err;
-    }
+    const answer = await fetchFrameHeaderAnswer(targetId, framePath, options);
+    return answer.entries ?? [];
+}
+
+/**
+ * Fetches the quarter turn that shows a frame the same way round as the target's stack. The backend
+ * (the library) decides it from the frame's and the stack's headers; frames from the two sides of a
+ * meridian flip are upside down from each other.
+ * @param targetId The identifier of the target.
+ * @param framePath The system file path to the FITS frame.
+ * @return 0, 90, 180 or 270 degrees, clockwise. A failure is thrown without a toast.
+ */
+export async function fetchFrameDisplayTurn(targetId: string, framePath: string): Promise<number> {
+    const answer = await fetchFrameHeaderAnswer(targetId, framePath, { silent: true });
+    return answer.displayTurn ?? 0;
 }
 
 /**

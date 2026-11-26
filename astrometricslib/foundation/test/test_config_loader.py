@@ -174,9 +174,9 @@ def test_cosmic_clarity_is_off_unless_a_program_is_configured(config_in_tmp_path
 def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(
     config_in_tmp_path: AppConfiguration,
 ) -> None:
-    """A fresh install uses 0.9; out-of-range values are clipped."""
+    """A fresh install uses 0.5; out-of-range values are clipped."""
     config = config_in_tmp_path
-    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.5)
 
     config.update_config({"Processing.CosmicClarity": {"denoise_strength": "0.4"}})
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.4)
@@ -185,7 +185,7 @@ def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(1.0)
 
     config.update_config({"Processing.CosmicClarity": {"denoise_strength": "not a number"}})
-    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.5)
 
 
 def test_get_stacks_path_defaults_to_the_frames_path(config_in_tmp_path: AppConfiguration) -> None:
@@ -241,6 +241,16 @@ def test_star_toning_of_the_preview_can_be_turned_off(config_in_tmp_path: AppCon
     assert config.get_preview_star_tone_enabled() is False
 
 
+def test_star_width_matching_of_the_preview_is_on_by_default_and_can_be_turned_off(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """The star width matching setting is on until it is turned off."""
+    config = config_in_tmp_path
+    assert config.get_preview_star_width_match_enabled() is True
+    config.app_config.set("Processing.Siril", "preview_star_width_match_enabled", "false")
+    assert config.get_preview_star_width_match_enabled() is False
+
+
 def test_green_removal_of_the_preview_is_on_by_default_and_can_be_turned_off(
     config_in_tmp_path: AppConfiguration,
 ) -> None:
@@ -249,6 +259,30 @@ def test_green_removal_of_the_preview_is_on_by_default_and_can_be_turned_off(
     assert config.get_preview_remove_green_noise_enabled() is True
     config.app_config.set("Processing.Siril", "preview_remove_green_noise_enabled", "false")
     assert config.get_preview_remove_green_noise_enabled() is False
+
+
+def test_the_preferred_simbad_server_is_harvard_unless_told_otherwise(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """Harvard is the default, CDS can be chosen, bad values give Harvard."""
+    config = config_in_tmp_path
+    assert config.get_simbad_preferred_server() == "simbad.harvard.edu"
+    config.app_config.set("Catalogs", "simbad_preferred_server", "SIMBAD.CDS.unistra.fr")
+    assert config.get_simbad_preferred_server() == "simbad.cds.unistra.fr"
+    config.app_config.set("Catalogs", "simbad_preferred_server", "example.org")
+    assert config.get_simbad_preferred_server() == "simbad.harvard.edu"
+
+
+def test_the_preferred_vizier_server_is_harvard_unless_told_otherwise(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """Harvard is the default, CDS can be chosen, bad values give Harvard."""
+    config = config_in_tmp_path
+    assert config.get_vizier_preferred_server() == "vizier.cfa.harvard.edu"
+    config.app_config.set("Catalogs", "vizier_preferred_server", "VIZIER.cds.unistra.fr")
+    assert config.get_vizier_preferred_server() == "vizier.cds.unistra.fr"
+    config.app_config.set("Catalogs", "vizier_preferred_server", "example.org")
+    assert config.get_vizier_preferred_server() == "vizier.cfa.harvard.edu"
 
 
 def test_the_colour_calibration_method_is_pcc_unless_told_otherwise(

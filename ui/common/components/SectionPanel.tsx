@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/panels.css';
+import { Button } from './Button';
 import { Skeleton, UpdatingBar, SkeletonProps } from './Skeleton';
 
 export interface SectionPanelProps {
@@ -7,6 +8,8 @@ export interface SectionPanelProps {
     children: React.ReactNode;
     className?: string;
     headerContent?: React.ReactNode;
+    /** Optional small control shown before the title, at the left end of the title row, such as a Back button. */
+    headerStart?: React.ReactNode;
     id?: string;
     style?: React.CSSProperties;
     fullHeight?: boolean;
@@ -16,6 +19,19 @@ export interface SectionPanelProps {
     refreshing?: boolean;
     /** The placeholder to show while `loading`. Required when `loading` can be true. */
     skeleton?: SkeletonProps;
+    /** When set, the title becomes a button that calls this to fold the panel away. */
+    onTitleClick?: () => void;
+    /** Hover text for the title button. */
+    titleButtonLabel?: string;
+    /**
+     * Folds the panel away. `down` leaves only the title row; `right` leaves a thin rail with the
+     * title running down it. Clicking the title (`onTitleClick`) opens the panel again.
+     */
+    collapsed?: 'down' | 'right';
+    /** A short muted note beside the title while the panel is folded (down or right), such as a count or a selection. */
+    collapsedNote?: string;
+    /** Accessible name of the title button while the panel is folded, when it should say more than the shown title. */
+    collapsedAriaLabel?: string;
 }
 
 /**
@@ -29,19 +45,49 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
     children,
     className = '',
     headerContent,
+    headerStart,
     id,
     style,
     fullHeight = false,
     loading = false,
     refreshing = false,
-    skeleton
+    skeleton,
+    onTitleClick,
+    titleButtonLabel,
+    collapsed,
+    collapsedNote,
+    collapsedAriaLabel
 }) => {
     const fullHeightClass = fullHeight ? 'panel--full-height' : '';
+    if (collapsed) {
+        return (
+            <div id={id} className={`panel panel--collapsed panel--collapsed-${collapsed} ${className}`} style={style}>
+                <div className="panel__header">
+                    <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-label={collapsedAriaLabel} aria-expanded={false}>
+                        {title}
+                    </Button>
+                    {collapsedNote && <span className="panel__collapsed-note">{collapsedNote}</span>}
+                </div>
+            </div>
+        );
+    }
+    const titleNode = onTitleClick ? (
+        <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-expanded={true}>
+            {title}
+        </Button>
+    ) : (
+        <span className="panel__title-text">{title}</span>
+    );
     return (
         <div id={id} className={`panel ${fullHeightClass} ${className}`} style={style}>
             {(title || headerContent) && (
                 <div className="panel__header">
-                    <span>{title}</span>
+                    {headerStart ? (
+                        <span className="panel__header-start">
+                            {headerStart}
+                            {titleNode}
+                        </span>
+                    ) : titleNode}
                     {headerContent}
                 </div>
             )}

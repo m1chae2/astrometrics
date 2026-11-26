@@ -25,11 +25,12 @@ import { GridOverlay } from '../layers/GridOverlay';
 import { FovOverlay } from '../layers/FovOverlay';
 import { TelescopeOverlay } from '../layers/TelescopeOverlay';
 import { CompassOverlay } from '../layers/CompassOverlay';
-import { HudOverlay } from '../layers/HudOverlay';
 import { ConstellationOverlay } from '../layers/ConstellationOverlay';
 import { AlignmentOverlay } from '../layers/AlignmentOverlay';
 import { TrackingRiskOverlay } from '../layers/TrackingRiskOverlay';
 import { FramingOverlay, FramingPanelCorners } from '../layers/FramingOverlay';
+import { StackPictureOverlay } from '../layers/StackPictureOverlay';
+import type { StackPictureLayerInput } from '../layers/overlayTypes';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
 import { perfEnd, perfStart } from '../utils/perfMarks';
 import { useTimeController } from '../hooks/useTimeController';
@@ -40,6 +41,7 @@ import { trackingCameraStep, TrackingState } from '../utils/trackingView';
 import { FovNotifyGate, easeFovTowardTarget } from '../utils/zoomEasing';
 import { Button } from '../../common/components/Button';
 import { Slider } from '../../common/components/Slider';
+import { StatusChip } from '../../common/components/StatusChip';
 
 /**
  * Props for CelestialSkyMap.
@@ -114,6 +116,10 @@ interface Props {
   sensorFovHeightDeg?: number;
   /** Framing panels to outline, as corners in RA and Dec degrees. */
   framingPanels?: FramingPanelCorners[];
+  /** The Images layer: the stack pictures to lay on the sky (see StackPictureOverlay). */
+  stackPictures?: StackPictureLayerInput;
+  /** Goes up when a stack picture finishes loading, so the map draws again. */
+  stackPicturesVersion?: number;
 }
 
 /** The speeds the time controller offers for the accelerated sky rotation. */
@@ -164,6 +170,8 @@ export const CelestialSkyMap: React.FC<Props> = ({
   sensorFovWidthDeg,
   sensorFovHeightDeg,
   framingPanels,
+  stackPictures,
+  stackPicturesVersion = 0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const starCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -217,7 +225,10 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const overlays = useMemo(() => [
     new BackgroundOverlay(),
     new TrackingRiskOverlay(),
+    // The grid goes under the stack pictures, so a picture hides the lines it covers; the
+    // constellation lines, markers, labels and stars stay above the pictures.
     new GridOverlay(),
+    new StackPictureOverlay(),
     new ConstellationOverlay(),
     new CompassOverlay(),
     new TargetOverlay(),
@@ -226,8 +237,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     new FovOverlay(),
     new FramingOverlay(),
     new TelescopeOverlay(),
-    new EnvironmentOverlay(),
-    new HudOverlay()
+    new EnvironmentOverlay()
   ], [starRenderMode]);
 
   // Projection state refs to bypass React state re-renders during high-frequency cycles
@@ -601,6 +611,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
         polarAlignment,
         selectedSessionId,
         framingPanels,
+        stackPictures,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
         sensorFovHeightDeg: sensorFovHeightDegRef.current,
         projectCoords: (ra: number, dec: number) => {
@@ -653,6 +664,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     showConstellations, constellationLines,
     showAlignment, showTrackingRisk, alignmentTargets, trackingRisk, polarAlignment, selectedSessionId,
     framingPanels,
+    stackPictures, stackPicturesVersion,
     simulationDate,
     trackingMode, observerLat, observerLon, overlays, getOffsetMinutesAt
   ]);
@@ -761,6 +773,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
         <span className="celestial-time-label">
           {timeOffsetMinutes === 0 ? 'Live Time' : `${(timeOffsetMinutes / 60).toFixed(1)}h Offset`}
         </span>
+        {/* While the view turns with the sky (the 't' key or a list pick), say so here in the time bar. */}
+        {trackingMode && (
+          <StatusChip
+            status="info"
+            label="Tracking equatorial"
+            title="The view follows the sky as it turns. Drag the sky or press T to stop."
+          />
+        )}
       </div>
     </div>
   );

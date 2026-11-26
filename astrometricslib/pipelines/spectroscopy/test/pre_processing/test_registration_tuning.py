@@ -109,7 +109,8 @@ def test_offset_pair_count_shares_the_control_point_declaration() -> None:
 
 def test_tune_skips_with_no_targets() -> None:
     """A library with no spectral target gives a skip, not a guess."""
-    astrometrics = SimpleNamespace(targets=SimpleNamespace(list=list))
+    no_targets = SimpleNamespace(objects=[])
+    astrometrics = SimpleNamespace(targets=SimpleNamespace(query=lambda **_kwargs: no_targets))
     setup = SetupConfig(name="s", camera_name="cam", optic_name="optic")
     inputs = TuningInputs(setup, None, None, {"astrometrics": astrometrics})
     with pytest.raises(TuningSkippedError):

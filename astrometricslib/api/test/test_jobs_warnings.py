@@ -171,3 +171,35 @@ def test_warnings_need_a_job_id(jobs: Jobs) -> None:
     """The detail refuses a call that names no job."""
     with pytest.raises(InvalidArgumentError):
         jobs.query(detail="warnings")
+
+
+def test_the_defaults_a_job_used_are_listed_for_result_and_warnings(tmp_path: Path) -> None:
+    """Give the stored default notices, or an empty list if none."""
+    logs = tmp_path / "log.db"
+    job_store = JobStore(str(logs))
+    for job_id, metrics in (
+        ("job-d", {"parameter_defaults": ["a.value: no equipment profile value; using the default 1"]}),
+        ("job-e", {}),
+    ):
+        job_store.upsert_job(
+            ProcessingJob(
+                id=job_id,
+                target_id="M 13",
+                job_type="stacking",
+                status="completed",
+                progress_current=1,
+                progress_total=1,
+                created_at=MEASURED_AT.isoformat(),
+                updated_at=MEASURED_AT.isoformat(),
+                outputMetrics=metrics,
+            )
+        )
+    (tmp_path / "library").mkdir()
+    configuration = SimpleNamespace(
+        get_logs_db_path=lambda: str(logs), get_library_path=lambda: str(tmp_path / "library")
+    )
+    interface = Jobs(configuration, None)
+    for detail in ("result", "warnings"):
+        answer = interface.query(job_id="job-d", detail=detail)
+        assert answer.parameter_defaults == ["a.value: no equipment profile value; using the default 1"]
+        assert interface.query(job_id="job-e", detail=detail).parameter_defaults == []

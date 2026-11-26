@@ -38,7 +38,6 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity
 from astrometricslib._internal.drivers.fits_access import read_header
-from astrometricslib._internal.drivers.tuning_support import robust_sigma
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.tuning import Tuner, TuningInputs, TuningResult, TuningSkippedError
 from astrometricslib.models.tuned_parameter import (
@@ -47,7 +46,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+from astrometricslib.pipelines.astrometry.processing.simbad_matching import (
     CENTRE_STAR_SEARCH_RADIUS_FRACTION,
     HINT_MATCH_WARNING_ARCSEC,
     POINTING_ERROR_SEARCH_RADIUS_ARCSEC,
@@ -56,6 +55,7 @@ from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ def tune_pointing_limits(inputs: TuningInputs) -> TuningResult:
     errors: list[float] = []
     scales: list[float] = []
     sides: list[float] = []
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
         path = target.spectral_stacking.stacked_image
         if not path or not os.path.exists(path):
             continue

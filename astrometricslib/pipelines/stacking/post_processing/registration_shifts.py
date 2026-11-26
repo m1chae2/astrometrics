@@ -95,9 +95,9 @@ from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     ALREADY_REGISTERED_REASON,
     UNMATCHED_REASON,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.observing_night import observing_night_id
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 

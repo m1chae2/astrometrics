@@ -113,7 +113,8 @@ def output_quality_gates(
         gates.append(
             unchecked_gate(
                 SHARPNESS_GATE_NAME,
-                "the stack's or its input frames' star width could not be measured",
+                "the stack's star width, or the input frames' widths for enough of the stack, "
+                "could not be measured",
                 sharpness_source,
             )
         )

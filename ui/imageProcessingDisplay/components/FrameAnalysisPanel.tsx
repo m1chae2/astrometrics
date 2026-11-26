@@ -1,23 +1,25 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { TabView } from '../../common/components/TabView';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { CollapsibleColumn } from '../../common/components/CollapsibleColumn';
 import { Tabs } from '../../common/components/Tabs';
-import { PopoverSelect } from '../../common/components/PopoverSelect';
 
-import { useCalibrationStats } from '../../common/hooks/useCalibrationStats';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { ProcessingStatus } from './ProcessingStatus';
 import { AnalysisResults } from '../analysisResults/AnalysisResults';
 import { StackedImagePanel } from './StackedImagePanel';
-import { UnifiedFrameAnalysis } from './FrameCountTable';
+import { CalibrationLine } from './CalibrationLine';
 import { ImageDetailsManager } from '../imageDetailsManager/ImageDetailsManager';
 import { JobHistoryList } from './JobHistoryList';
+import { StarShapesSummary } from './StarShapesSummary';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
-import { GroupedFrameStat } from '../../common/types/backendTypes';
+import { chooseCalibrationScope } from '../utils/calibrationLine';
+import { FrameStatusReport, GroupedFrameStat, StackChoice, StackConfigurationRef, StarShapeReview } from '../../common/types/backendTypes';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
-import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
+import { chooseAnalysisSelection, chooseStageSelection, NO_SOURCE_TO_ANALYZE_REASON, type AnalysisStage } from '../utils/analysisSelection';
 
 interface FrameAnalysisPanelProps {
   // Data Tab Props
@@ -26,14 +28,39 @@ interface FrameAnalysisPanelProps {
   checkedFiles: Set<string>;
   stackedImage: string | null;
   stackedSpectralTarget: string | null;
-  totalExposure: number;
   handleSelectFile: (path: string | null) => void;
+  /** The camera and optic of the target's current stack, if it has one. */
+  stackConfiguration?: StackConfigurationRef | null;
+  /** The File Browser's camera, or "All". */
+  fileBrowserCamera?: string;
+  /** The File Browser's optic in whole millimeters as text, or "". */
+  fileBrowserOptic?: string;
+  /** Every stack of the target by camera and optic, the main one first. */
+  stackChoices?: readonly StackChoice[];
+  /** The stack being looked at: the chosen one, or the main stack. Analysis still uses `stackedImage`. */
+  viewedStack?: string | null;
+  /** The configuration key of `viewedStack`, or null when it is not known. */
+  viewedStackKey?: string | null;
+  /** Called with the configuration key of the stack the person picked. */
+  onChooseStack?: (configurationKey: string) => void;
 
   // Control Props
   handleAddImages: () => void;
   setIsAddModalOpen: (open: boolean) => void;
   selectedFile: string | null;
   onShowHeader?: (path: string) => void;
+  /** The stored star-shape verdicts of the target, or `null` when not available. */
+  starShapeReview?: StarShapeReview | null;
+  /** The backend's per-frame statuses, including set-aside frames, or `null` until read. */
+  frameReport?: FrameStatusReport | null;
+  /** The File Browser's status of each frame by path. */
+  frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
+
+  // Fold state, held by the screen because the Image Controls tab can sit in the viewer's bottom bar.
+  analysisCollapsed: boolean;
+  setAnalysisCollapsed: (collapsed: boolean) => void;
+  controlsCollapsed: boolean;
+  setControlsCollapsed: (collapsed: boolean) => void;
 }
 
 /**
@@ -41,10 +68,12 @@ interface FrameAnalysisPanelProps {
  * Handles frame analysis results, exposure statistics, and image controls.
  */
 export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
-  allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
-  handleSelectFile,
+  allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget,
+  handleSelectFile, stackConfiguration = null, fileBrowserCamera = 'All', fileBrowserOptic = '',
+  stackChoices = [], viewedStack, viewedStackKey = null, onChooseStack,
   handleAddImages, setIsAddModalOpen,
-  selectedFile, onShowHeader
+  selectedFile, onShowHeader, starShapeReview = null, frameReport = null, frameStatuses,
+  analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
 }) => {
   const {
     selectedTarget, commonName, catalogId,
@@ -53,29 +82,37 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   } = useTargetContext();
 
     const {
-      analysisResults, isProcessing, logLines, cancelProcessingJob, clearLogs,
-      startProcessing, isAnalyzing, startAnalysis,
+      analysisResults, isProcessing, logLines, cancelProcessingJob, cancelAnalysisJob, clearLogs,
+      startProcessing, isAnalyzing, startAnalysis, jobError,
       jobHistory, loadingHistory, onSelectJob, targetActiveJobs, activeJobId,
       openSiril, requestJobHistory
     } = useImageProcessingContext();
 
-  const { stats: calStats, loading: calLoading } = useCalibrationStats(reloadKey);
+  // The exposure of each frame in seconds: the File Browser's list, then the set-aside frames' records.
+  const exposureSeconds = useMemo(() => {
+    const seconds = new Map<string, number>();
+    const add = (path: string, text: string | undefined) => {
+      const value = Number.parseFloat(text ?? '');
+      if (Number.isFinite(value) && value > 0) seconds.set(path, value);
+    };
+    for (const file of allFiles ?? []) add(file.path, file.exposure);
+    for (const frame of frameReport?.frames ?? []) if (!seconds.has(frame.path)) add(frame.path, frame.exposure);
+    return seconds;
+  }, [allFiles, frameReport]);
+
+  // The selected job's own record decides the log panel's header; a running job is looked up live first.
+  const selectedJobStatus = useMemo(() => {
+    if (!activeJobId) return null;
+    const record = [...(targetActiveJobs ?? []), ...(jobHistory ?? [])].find(job => job.id === activeJobId);
+    return record?.status ?? null;
+  }, [activeJobId, targetActiveJobs, jobHistory]);
+
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('data');
   // The job history only shows on the Analysis tab, so it is read when that tab is first opened.
   useEffect(() => {
     if (activeAnalysisTab === 'analysis') requestJobHistory?.();
   }, [activeAnalysisTab, requestJobHistory]);
-  const [dataTabCamera, setDataTabCamera] = useState('All');
   const [lightStats, setLightStats] = useState<GroupedFrameStat[]>([]);
-
-  // Compute unique cameras for the Data tab dropdown
-  const uniqueCameras = useMemo(() => {
-    const cams = new Set<string>();
-    if (allFiles) {
-      allFiles.forEach(f => cams.add(f.camera));
-    }
-    return Array.from(cams).sort();
-  }, [allFiles]);
 
   // Fetch grouped stats from backend
   useEffect(() => {
@@ -83,29 +120,16 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       setLightStats([]);
       return;
     }
-    fetchFrameStatsGrouped(selectedTarget, dataTabCamera === 'All' ? undefined : dataTabCamera)
+    fetchFrameStatsGrouped(selectedTarget)
       .then(setLightStats)
       .catch(err => console.error("Failed to fetch grouped stats", err));
-  }, [selectedTarget, dataTabCamera, reloadKey]);
+  }, [selectedTarget, reloadKey]);
 
-  // Filter darks/biases/flats based on selected camera
-  const filteredDarks = useMemo(() => {
-    if (!calStats?.darks) return [];
-    if (dataTabCamera === 'All') return calStats.darks;
-    return calStats.darks.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
-
-  const filteredBiases = useMemo(() => {
-    if (!calStats?.biases) return [];
-    if (dataTabCamera === 'All') return calStats.biases;
-    return calStats.biases.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
-
-  const filteredFlats = useMemo(() => {
-    if (!calStats?.flats) return [];
-    if (dataTabCamera === 'All') return calStats.flats;
-    return calStats.flats.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
+  // Calibration follows the one camera and optic a stack or analysis uses.
+  const calibrationScope = useMemo(
+    () => chooseCalibrationScope(fileBrowserCamera, fileBrowserOptic, stackConfiguration),
+    [fileBrowserCamera, fileBrowserOptic, stackConfiguration],
+  );
 
   const multiCameraStatus = useMemo(() => {
     const filesToConsider = checkedFiles.size > 0
@@ -138,8 +162,12 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     };
   }, [checkedFiles, allFiles, filteredFiles]);
 
-  // What the two Analyze actions would send right now. Stage one analyzes the
-  // master stacked spectral image; stage two follows the raw spectral frames.
+  // The frames the Stack Frames click sends: the ticked frames, or every listed frame when none is
+  // ticked. Check Frames checks the same frames.
+  const framesToStack = (): string[] =>
+    checkedFiles.size > 0 ? Array.from(checkedFiles) : filteredFiles.map(f => f.path);
+
+  // What the Analyze actions would send right now.
   const selectionInput = {
     filterType: filterStatus.filterType,
     stackedImage,
@@ -147,14 +175,33 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     checkedFiles,
     selectedFile,
     filteredFilePaths: filteredFiles.map(f => f.path),
+    selectedFileFilter: selectedFile
+      ? (allFiles?.find(f => f.path === selectedFile)?.filter ?? null)
+      : null,
   };
   const analysisSelection = chooseAnalysisSelection(selectionInput);
-  const temporalVariationSelection = chooseTemporalVariationSelection(selectionInput);
+
+  // Frame Analysis folded: the whole right column, Image Controls too, is just a strip on the right edge.
+  if (analysisCollapsed) {
+    return (
+      <CollapsibleColumn
+        collapsed
+        side="right"
+        onCollapsedChange={setAnalysisCollapsed}
+        stripTitle="Frame Analysis"
+        showLabel="Expand Frame Analysis"
+      >
+        {null}
+      </CollapsibleColumn>
+    );
+  }
 
   return (
     <div className="image-processing-display__right panel-group">
       <SectionPanel
         title="Frame Analysis"
+        onTitleClick={() => setAnalysisCollapsed(true)}
+        titleButtonLabel="Collapse to the right"
         className="image-processing-display__analysis-section frame-analysis-panel flex-fill"
         headerContent={
           <Tabs
@@ -182,8 +229,9 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
 
                   <ProcessingStatus
                     isProcessing={isProcessing || isAnalyzing}
+                    jobStatus={selectedJobStatus}
                     logLines={logLines}
-                    onCancel={isProcessing ? cancelProcessingJob : undefined}
+                    onCancel={isProcessing ? cancelProcessingJob : (isAnalyzing ? cancelAnalysisJob : undefined)}
                     onClear={clearLogs}
                   />
                   <JobHistoryList
@@ -203,59 +251,64 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
               content: (
                 <>
                   <StackedImagePanel
-                    path={stackedImage || ''}
+                    path={(viewedStack ?? stackedImage) || ''}
                     spectralPath={stackedSpectralTarget || ''}
-                    exposureTime={totalExposure}
                     targetId={selectedTarget}
                     selectedFile={selectedFile}
                     onView={handleSelectFile}
                     onShowHeader={onShowHeader}
                     depthGoalRefreshKey={`${reloadKey}-${isProcessing ? 'busy' : 'idle'}`}
+                    stackChoices={stackChoices}
+                    viewedStackKey={viewedStackKey}
+                    onChooseStack={onChooseStack}
                   />
                   <AnalysisResults results={analysisResults} />
-                  <UnifiedFrameAnalysis
-                    lightFrames={lightStats}
-                    darkFrames={filteredDarks}
-                    biasFrames={filteredBiases}
-                    flatFrames={filteredFlats}
-                    isLoading={calLoading}
-                    selectedCamera={dataTabCamera}
-                    cameraSelector={
-                      <div className="data-tab-filter" style={{ margin: 0 }}>
-                        <PopoverSelect
-                          label="Camera"
-                          options={uniqueCameras.map((camera: string) => ({ id: camera, label: camera }))}
-                          selectedId={dataTabCamera === 'All' ? null : dataTabCamera}
-                          onSelect={(id) => setDataTabCamera(id ?? 'All')}
-                          emptyLabel="All Cameras"
-                          size="compact"
-                        />
-                      </div>
-                    }
+                  <StarShapesSummary
+                    review={starShapeReview}
+                    frameReport={frameReport}
+                    frameStatuses={frameStatuses}
+                    exposureSeconds={exposureSeconds}
+                    selectedPath={selectedFile}
+                    onSelectFrame={handleSelectFile}
                   />
+                  <CalibrationLine lightFrames={lightStats} scope={calibrationScope} />
                 </>
               )
             }
           ]}
         />
       </SectionPanel>
-      <SectionPanel title="Image Controls" className="flex-auto">
+      {controlsCollapsed ? (
+        <SectionPanel
+          title="Image Controls"
+          collapsed="down"
+          onTitleClick={() => setControlsCollapsed(false)}
+          titleButtonLabel="Expand Image Controls"
+        >
+          {null}
+        </SectionPanel>
+      ) : (
+      <SectionPanel
+        title="Image Controls"
+        className="flex-auto"
+        onTitleClick={() => setControlsCollapsed(true)}
+        titleButtonLabel="Collapse down"
+      >
         <ImageDetailsManager
           selectedTarget={selectedTarget}
           commonName={commonName}
           catalogId={catalogId}
           setPendingTarget={setPendingTarget}
           setReloadKey={forceReload}
-          onProcess={filteredFiles.length > 0 ? () => {
-            const filesToProcess = checkedFiles.size > 0
-              ? Array.from(checkedFiles)
-              : filteredFiles.map(f => f.path);
-            startProcessing(filesToProcess);
-          } : undefined}
+          onProcess={filteredFiles.length > 0 ? () => startProcessing(framesToStack()) : undefined}
+          framesToStack={filteredFiles.length > 0 ? framesToStack : undefined}
           onCancel={cancelProcessingJob}
+          onCancelAnalysis={cancelAnalysisJob}
+          onShowPicture={handleSelectFile}
           onAddImages={handleAddImages}
           onAddTarget={() => setIsAddModalOpen(true)}
           isProcessing={isProcessing}
+          jobError={jobError}
           hasMultipleCameras={multiCameraStatus.hasMultiple}
           selectedCameras={multiCameraStatus.cameras}
           hasMultipleOptics={multiOpticStatus.hasMultiple}
@@ -263,10 +316,15 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           hasNoFiles={checkedFiles.size === 0 && filteredFiles.length === 0}
           hasMultipleFilters={filterStatus.hasMultiple}
           selectedFilters={filterStatus.filters}
-          onAnalyze={analysisSelection ? () => startAnalysis(analysisSelection.paths, analysisSelection.filterType) : undefined}
-          onAnalyzeTemporalVariation={temporalVariationSelection
-            ? () => startAnalysis(temporalVariationSelection.paths, temporalVariationSelection.filterType)
-            : undefined}
+          onAnalyze={() => {
+            if (analysisSelection) startAnalysis(analysisSelection.paths, analysisSelection.filterType, analysisSelection.stages);
+          }}
+          analyzeDisabledReason={analysisSelection ? undefined : NO_SOURCE_TO_ANALYZE_REASON}
+          analysisSelectionInput={selectionInput}
+          onAnalyzeStage={(stage: AnalysisStage) => {
+            const stageSelection = chooseStageSelection(selectionInput, stage);
+            if (stageSelection) startAnalysis(stageSelection.paths, stageSelection.filterType, [stage]);
+          }}
           isAnalyzing={isAnalyzing}
           onOpenSiril={() => {
             openSiril();
@@ -287,6 +345,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           }}
         />
       </SectionPanel>
+      )}
     </div>
   );
 };

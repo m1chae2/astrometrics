@@ -22,6 +22,19 @@ PREVIEW_SETTINGS_SUFFIX = "_preview_settings.json"
 """Added to the stack's file name, in place of ``.fits``, for the small record
 of what made its preview."""
 
+BACKGROUND_MODEL_SUFFIX = "_background_model.fits"
+"""Added to the stack's file name, in place of ``.fits``, for the small FITS
+that holds the sky background model measured while the preview was made."""
+
+COLOR_PREVIEW_SUFFIX = "_color_preview"
+"""Added to the stack's file name, before the extension, for the color picture
+made from a monochrome stack and a color stack of the same target (see
+`stacking/post_processing/color_from_other_stack.py`)."""
+
+COLOR_PREVIEW_RECORD_SUFFIX = "_color_preview.json"
+"""Added to the stack's file name, in place of ``.fits``, for the small record
+of how the color picture was made."""
+
 # JPEG quality, in percent, for the saved picture. Tested once, on the M 13
 # luminosity stack (3008 x 3008 pixels): 90 gave a 3.3 MB file with the faint
 # stars, the cluster core and a small background galaxy all visible. Not tuned
@@ -122,3 +135,61 @@ def preview_settings_path_for(stacked_path: str) -> str:
     """
     stem, _ = os.path.splitext(stacked_path)
     return f"{stem}{PREVIEW_SETTINGS_SUFFIX}"
+
+
+def background_model_path_for(stacked_path: str) -> str:
+    """Name the small FITS that holds a stack's binned background model.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stacked FITS file.
+
+    Returns
+    -------
+    model_path : `str`
+        The same folder and file name, with `BACKGROUND_MODEL_SUFFIX` in
+        place of the extension.
+    """
+    stem, _ = os.path.splitext(stacked_path)
+    return f"{stem}{BACKGROUND_MODEL_SUFFIX}"
+
+
+def color_preview_path_for(stacked_path: str) -> str:
+    """Name the color picture of a monochrome stack.
+
+    The picture takes its brightness from the monochrome stack and its color
+    from a color stack of the same target. It sits beside the monochrome
+    preview and does not replace it.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the monochrome stacked FITS file.
+
+    Returns
+    -------
+    color_preview_path : `str`
+        The same folder and file name, with `COLOR_PREVIEW_SUFFIX` added and
+        a ``.jpg`` extension.
+    """
+    stem, _ = os.path.splitext(stacked_path)
+    return f"{stem}{COLOR_PREVIEW_SUFFIX}.jpg"
+
+
+def color_preview_record_path_for(stacked_path: str) -> str:
+    """Name the record of how a monochrome stack's color picture was made.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the monochrome stacked FITS file.
+
+    Returns
+    -------
+    record_path : `str`
+        The same folder and file name, with `COLOR_PREVIEW_RECORD_SUFFIX` in
+        place of the extension.
+    """
+    stem, _ = os.path.splitext(stacked_path)
+    return f"{stem}{COLOR_PREVIEW_RECORD_SUFFIX}"

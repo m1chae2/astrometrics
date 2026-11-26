@@ -50,9 +50,13 @@ Now look at the result.
 2. Find the Final Stack row. Click View.
 3. If the image looks dark, look at the button above the viewer. If it reads Linear, click it to switch to the stretched view. A stretch brightens faint detail.
 
-**What you should see.** The Final Stack row names the stack file, and its button now reads Viewing. A Total Exposure line shows the exposure time of the stack. The FITS Viewer shows the stack. It has less noise than a single frame, and faint stars stand out. Scroll to zoom in and drag to move around.
+**What you should see.** The Final Stack row names the stack file, and its button now reads Viewing. Below that row, a Total Exposure line shows the exposure time of that stack, followed by its Plate Scale and Rotation when the stack has a plate solution, and its stack summary. The FITS Viewer shows the stack. It has less noise than a single frame, and faint stars stand out. Scroll to zoom in and drag to move around.
 
-Below Total Exposure is an Integration Goal row. Pick how deep you want the image: Quick look, Standard or Deep. The line under it says whether you have reached the goal and, if not, about how much more integration time it needs. The time appears once the app has checked its estimate against a second night of this target; until then the line asks you to image the target on another night. Hover over the small info mark to see the goal and your current depth in magnitudes. Some objects, such as planets, have no integration goal, and the row says so.
+The last row of the Final Stack block, Enhance, sets which object gets its own, gentler stretch in the preview. This keeps a small bright nebula or galaxy core from turning into a flat white disc. Target uses the target itself when it is a nebula or a galaxy. Nothing never uses it. The menu also lists the nebulae and galaxies that SIMBAD places inside your stack, such as the Bubble Nebula in the picture of the open cluster M 52. If the stack has no plate solution, the row says to run Astrometry first. If the list cannot be made for another reason, the row says why. After an update, it may ask you to restart the app. The row saves your choice only. The new choice is used the next time you stack or post-process the target.
+
+If the target also has a spectral stack, a Spectral Stack block follows with its own Total Exposure and stack summary. Each block shows only the values of its own stack. The Integration Goal row comes last, because it covers the whole target.
+
+Pick how deep you want the image: Quick look, Standard or Deep. The line under it says whether you have reached the goal and, if not, about how much more integration time it needs. The time appears once the app has checked its estimate against a second night of this target; until then the line asks you to image the target on another night. Hover over the small info mark to see the goal and your current depth in magnitudes. Some objects, such as planets, have no integration goal, and the row says so.
 
 Below the goal is a Stack Summary. It starts closed and shows one line, such as "Imaging stack summary: 42 of 45 frames, made on a date". Open it to see how the stack was made. It lists the frames used out of those submitted, the frames set aside before stacking, and the frames left out while stacking, with the reason for each. It also shows the share of pixels rejected and the star width in pixels against the width the input frames predict. The Warnings line lists each check of the stacking job that failed. Each warning has a plain title, the number measured, the limit it was checked against, and the outcome, which is always failed. Examples are a split in the sky background, calibration frames that do not match, wider stars, many rejected pixels, or a calibration check that failed. A warning also says what the stacking step did about it, when it did something. A stack made before the app recorded its job shows the failed checks stored for that stack instead. The line says that none was raised when there are none. A table lists each exposure length: how many of its frames were used, whether it clipped, how far it was moved to line up in pixels, and why it was left out of the final image, if it was. A target with no saved summary shows a short note instead. The summary only reports; it does not rate the stack beyond those failed checks.
 
@@ -60,34 +64,39 @@ Under the Set aside before stacking count, open Why they were set aside to see e
 
 Under the summary is a Compare with the previous stack section. Open it and press Compare to measure the current stack and the stack that came before it, the one a restack kept. Each number gets one sentence: the sky level, the noise in empty sky (the same noise number the target report uses), the flatness of the sky across the frame, the star width, and a fine-grain pixel noise. The run is a background job. If a stack has no sky coordinates, the app plate solves it first, which can take about ten minutes when the solve fails. A number that could not be measured says so and gives the reason. The section does not say which stack is better, because that depends on what changed: new flats should change the flatness and leave the noise alone, and more frames should lower the noise. A target that was never restacked says there is no previous stack.
 
-At the bottom of the Stack Summary is a Make the picture again section. Open it to make the stack's preview picture again without stacking. Choose noise removal (on, off or the app setting), its strength from 0 to 1, and star toning (on, off or the app setting). Your choices apply to this one run and are not saved to the settings. The stack is not changed. While it runs, the section says so. It can take a minute. When it ends, the section says when the new picture was made and what made it: whether noise removal and star toning were on, the strength, and whether the choices were only for that run. If the picture has no saved record, the section says what made it is unknown. It does not guess. The FITS Viewer then shows the new picture. If you attached your own picture to the target, the section says the new picture was made but your picture is still on display.
+The Frame status timeline further down the Data tab shows every frame of the target as one small square. The rows are the frame's status: Included, Flagged, or Set aside with the reason (cloud, trailed, off field, other). The time axis has one section for each night, labeled with the date and the number of frames, and a dotted line marks each break between nights. The days between nights are not drawn. Within a section the squares sit at the times the frames were taken. Hover over a square to see the file name, time, status and reason, and click it to pick that frame in the file list.
+
+To make the stack's picture again without stacking, open the menu arrow on the Stack Frames button in the Image Controls panel and choose Post Process Target. The app makes the picture again from the stack that is there, for the imaging stack and then for the spectral stack, whichever the target has. It uses your current settings, and the stack is not changed. While it runs, the button shows Post Processing and cannot be pressed. Press Cancel to stop it. The old picture stays as it was. It can take a minute. When it ends, the Image Viewer shows the new picture. If you attached your own picture to the target, the viewer keeps showing that one. The menu entry is off, and its tooltip says why, when the target has no stack.
+
+To see what stacking would do before you start it, open the same menu and choose Check Frames. The app does not stack, move or save anything. It checks the same frames the Stack Frames button would send: the frames you ticked, or every listed frame when none is ticked. The check reads every frame, so it can take a minute. The report shows how many frames would be stacked, how many would be set aside, and how many are kept with a warning. Open the lists to see each set-aside frame and the reason: clouds, trailed stars, a frame off the field, a different gain or a different sky background. A frame with an uneven sky but normal stars is kept and flagged. A table shows, for each exposure length, the darks, bias and flats the library would use, with the folder they come from and a warning chip when the frames are only a near match, such as flats taken at another offset. If every frame would be set aside, or the choice matches no frames, an error message says so.
 
 ## Step 4: Plate solve and measure the stars
 
 The next job plate solves your frames and then measures the brightness of every star in each frame.
 
 1. In the File Browser, click the check box in the table header. This ticks every frame.
-2. In the Image Controls panel, click Analyze Target.
+2. In the Image Controls panel, click Analyze Target. When the target has both an imaging stack and a spectral stack, the click measures the stars of the imaging stack and the spectra of the spectral stack in one job, whatever filter is in view. The arrow beside it opens a menu that runs only Astrometry, Photometry, Spectroscopy or Spectral Variation. Photometry and Spectroscopy run astrometry first when the stack has no solve or the solve is older than the stack. Spectral Variation follows each star's spectrum across the raw spectral frames, so it is on only while the spectral filter is in view. It runs Spectroscopy first when that result is missing or older than the spectral stack. The main Analyze Target click does not run it.
 3. Click the Analysis tab and watch the log until the job ends.
 4. Click the Data tab.
 
-**What you should see.** The log shows the job running, and the button changes to Cancel until the job ends. The Data tab then shows three counts: Total Images, Stars Found and Frames Processed. Stars Found is above zero.
+**What you should see.** The log shows the job running, and the button changes to Cancel until the job ends. The Frame status timeline on the Data tab shows the frames the job processed.
 
 Now check the plate solve.
 
-1. Click the Astrometry button above the viewer.
+1. Click the Astrometry button above the viewer, with the stack shown.
 
-**What you should see.** Small labels appear on the image. Each label sits on a star and carries the star's catalog name. The labels exist because the plate solve worked. If a message says no stars were identified, the solve did not work. Check your plate solver in Settings > Processing and run Analyze Target again.
+**What you should see.** The first time, a line beside the button shows the progress while the stars are named, and Analyze Target shows the job as running. Then small labels appear on the image. Each label sits on a star and carries its most familiar name. A dashed circle marks a star with no catalog name, and a cross marks a catalog star that was not detected. If the line says the stack could not be plate solved, check your plate solver in Settings > Processing.
 
 ## Step 5: Read a light curve
 
-1. In the viewer, click the label of a bright star.
-2. A message says that the star is opening in the Astronomy Manager. The view changes to the Astronomy Manager.
-3. Look at the star list on the left. Rows with a P badge have photometry. Photometry means brightness measurements. If you see the note No photometry has been recorded for this star, click another star with a P badge.
-4. Look at the Photometry panel in the middle.
-5. Look at the Stellar Analysis panel on the right. Under Light Curve, read Measurements and Time span.
-6. Drag the two Timeline sliders to look at part of the time range.
-7. If a Run period analysis button shows under Period Search, click it. The search looks for brightness that rises and falls on a regular schedule.
+1. In the File Browser, click one of your frames, then click Astrometry. The labels now show the target's own catalog stars.
+2. In the viewer, click the label of a bright star.
+3. A message says that the star is opening in the Astronomy Manager. The view changes to the Astronomy Manager.
+4. Look at the star list on the left. Rows with a P badge have photometry. Photometry means brightness measurements. If you see the note No photometry has been recorded for this star, click another star with a P badge.
+5. Look at the Photometry panel in the middle.
+6. Look at the Stellar Analysis panel on the right. Under Light Curve, read Measurements and Time span.
+7. Drag the two Timeline sliders to look at part of the time range.
+8. If a Run period analysis button shows under Period Search, click it. The search looks for brightness that rises and falls on a regular schedule.
 
 **What you should see.** The Photometry panel plots brightness against time, with one point for each frame. For most stars the points scatter around a flat line. That is normal, because most stars do not change. After a period search, a Repeating Patterns section appears. It gives Detected period or Possible period, and Chance of noise. A low Chance of noise is more convincing.
 

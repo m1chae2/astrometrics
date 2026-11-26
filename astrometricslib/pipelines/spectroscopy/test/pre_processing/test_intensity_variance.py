@@ -17,6 +17,12 @@ import numpy as np
 import pytest
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib.models.camera_profile import (
+    CameraProfile,
+    ProvenancedValue,
+    SensorSettingNoise,
+    ValueProvenance,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
     ExtinctionCorrection,
     extinction_correction_factor,
@@ -727,3 +733,55 @@ def test_a_rejection_map_is_found_beside_the_stack_and_its_processed_picture(tmp
     assert find_rejection_map(str(tmp_path / "M_13_L_Stacked_processed.fits")) == str(
         tmp_path / "M_13_L_Stacked_RejMap.fits"
     )
+
+
+def _profile_with_offset_ten_noise() -> CameraProfile:
+    """Build a profile whose only noise entry is gain 0, offset 10, 1x1.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        A profile with gain 0.783 e-/ADU and read noise 3.8 e- at offset 10.
+    """
+    measured = ValueProvenance(kind="measured", source="test")
+    assumed = ValueProvenance(kind="assumed", source="test")
+    entry = SensorSettingNoise(
+        gain_setting="0",
+        offset="10",
+        binning="1x1",
+        gain_e_per_adu=ProvenancedValue(value=0.783, provenance=measured),
+        read_noise_e=ProvenancedValue(value=3.8, provenance=measured),
+    )
+    return CameraProfile(
+        camera_name="Test camera",
+        clip_ceiling_adu=ProvenancedValue(value=65535.0, provenance=assumed),
+        saturation_threshold_adu=ProvenancedValue(value=65000.0, provenance=assumed),
+        sensor_noise=(entry,),
+    )
+
+
+OFFSET_ZERO_FRAME_HEADER = {"GAIN": 0.0, "OFFSET": 0, "XBINNING": 1, "YBINNING": 1}
+
+
+def test_an_unclipped_offset_zero_frame_uses_the_offset_ten_noise() -> None:
+    """A frame with no exact zeros gets the profile's other-offset numbers."""
+    model = build_pixel_noise_model(
+        _profile_with_offset_ten_noise(), OFFSET_ZERO_FRAME_HEADER, np.full((8, 8), 500.0)
+    )
+
+    assert (model.gain_e_per_adu, model.read_noise_e) == (0.783, 3.8)
+    assert not model.gain_is_assumed and not model.read_noise_is_assumed
+    assert model.profile_gap_reason is None
+    assert "offset 10" in (model.offset_fallback_note or "")
+
+
+def test_a_clipped_offset_zero_frame_keeps_the_gap_and_the_assumed_flags() -> None:
+    """A frame with many exact zeros gets only the gap reason."""
+    clipped = np.zeros((8, 8))
+    clipped[:2] = 500.0
+
+    model = build_pixel_noise_model(_profile_with_offset_ten_noise(), OFFSET_ZERO_FRAME_HEADER, clipped)
+
+    assert model.gain_is_assumed and model.read_noise_is_assumed
+    assert "cannot stand in" in (model.profile_gap_reason or "")
+    assert model.offset_fallback_note is None

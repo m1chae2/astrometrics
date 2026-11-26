@@ -29,7 +29,7 @@ from astrometricslib._internal.drivers.siril_interface.script_builders import (
     StagedFrameCounts,
     build_master_calibration_commands,
 )
-from astrometricslib._internal.drivers.siril_interface.staging import FLAT_MASTER_RECIPE, _master_recipe
+from astrometricslib._internal.drivers.siril_interface.staging import FLAT_MASTER_RECIPE, master_recipe
 
 CAMERA = "ZWO ASI 533MM Pro"
 LIGHT_OFFSET = 0
@@ -250,28 +250,28 @@ def test_the_flat_cache_key_follows_the_bias(tmp_path: Path) -> None:
     mismatched = stage(mismatched_directory, mismatched_library)
     matching = stage(matching_directory, matching_library)
 
-    mismatched_recipe = _master_recipe("flat", os.path.join(mismatched.workdir, "target"))
-    matching_recipe = _master_recipe("flat", os.path.join(matching.workdir, "target"))
+    mismatched_recipe = master_recipe("flat", os.path.join(mismatched.workdir, "target"))
+    matching_recipe = master_recipe("flat", os.path.join(matching.workdir, "target"))
 
     assert mismatched_recipe.startswith(f"{FLAT_MASTER_RECIPE}|bias=")
     assert matching_recipe.startswith(f"{FLAT_MASTER_RECIPE}|bias=")
     assert mismatched_recipe != matching_recipe
     # The same staging gives the same key again.
-    assert _master_recipe("flat", os.path.join(mismatched.workdir, "target")) == mismatched_recipe
+    assert master_recipe("flat", os.path.join(mismatched.workdir, "target")) == mismatched_recipe
 
 
 def test_the_recipe_is_version_six_and_other_kinds_have_none() -> None:
     """Raising the recipe retires every older flat master."""
-    assert FLAT_MASTER_RECIPE == "flat-recipe-6"
-    assert _master_recipe("flat_bias") == ""
-    assert _master_recipe("flat") == FLAT_MASTER_RECIPE
+    assert FLAT_MASTER_RECIPE == "flat-recipe-7"
+    assert master_recipe("flat_bias") == ""
+    assert master_recipe("flat") == FLAT_MASTER_RECIPE
 
 
 def test_a_flat_with_no_bias_at_all_has_a_key_that_says_so(tmp_path: Path) -> None:
     """With no bias staged, the key holds the word none, not an empty gap."""
     target = tmp_path / "target"
     (target / "biases").mkdir(parents=True)
-    assert _master_recipe("flat", str(target)) == f"{FLAT_MASTER_RECIPE}|bias=none"
+    assert master_recipe("flat", str(target)) == f"{FLAT_MASTER_RECIPE}|bias=none"
 
 
 def test_the_flat_is_calibrated_with_the_named_bias_master() -> None:
@@ -313,3 +313,54 @@ def test_flat_bias_is_used_even_without_a_lights_bias(lone_flat: bool) -> None:
     counts = StagedFrameCounts(0, 0, 1 if lone_flat else 3, 5, flat_biases=2)
     commands = build_master_calibration_commands("/w", counts, set(), False, None)
     assert any("-bias=flat_bias_stacked" in command for command in commands)
+
+
+def select_flats(library: CalibrationLibrary, light_filter: str = "Luminance") -> object:
+    """Choose the flats for offset-0 lights at gain 100.
+
+    Returns
+    -------
+    selection : `CalibrationSelection`
+        The library's flat selection.
+    """
+    return library.select_flat_frames(
+        telescope="T",
+        camera=CAMERA,
+        filter_type=light_filter,
+        iso="100",
+        offset=str(LIGHT_OFFSET),
+        binning="1x1",
+    )
+
+
+def test_flats_at_another_offset_with_their_own_bias_are_not_flagged(tmp_path: Path) -> None:
+    """A flat bias at the flats' offset makes a full match."""
+    library = make_library(tmp_path)
+    paths = add_frames(tmp_path, library, [LIGHT_OFFSET, FLAT_OFFSET], FLAT_OFFSET)
+
+    selection = select_flats(library)
+
+    assert sorted(selection.frames) == sorted(paths["flats"])
+    assert selection.flags == []
+    assert selection.blocking_flags == []
+
+
+def test_flats_at_another_offset_without_their_own_bias_stay_flagged(tmp_path: Path) -> None:
+    """With no bias at the flats' offset the flag stays."""
+    library = make_library(tmp_path)
+    add_frames(tmp_path, library, [LIGHT_OFFSET], FLAT_OFFSET)
+
+    selection = select_flats(library)
+
+    assert len(selection.flags) == 1
+    assert "offset 10" in selection.flags[0]
+
+
+def test_flats_at_another_offset_stay_flagged_when_the_library_has_no_bias(tmp_path: Path) -> None:
+    """With no bias frames at all the flag stays."""
+    library = make_library(tmp_path)
+    add_frames(tmp_path, library, [], FLAT_OFFSET)
+
+    selection = select_flats(library)
+
+    assert len(selection.flags) == 1

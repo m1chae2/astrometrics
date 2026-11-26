@@ -339,7 +339,8 @@ def _measure_star_fluxes(plane: np.ndarray, usable: np.ndarray, stars: np.ndarra
             cutout_radius=reach + 1,
             saturation_threshold_adu=math.inf,
         )
-        fluxes[index] = measurement.net_flux_adu
+        # The gain fit uses a flux of zero for anything below the sky.
+        fluxes[index] = max(0.0, measurement.net_flux_adu)
     return fluxes
 
 
@@ -355,10 +356,10 @@ def _measure_empty_aperture_noise(
     structure and faint stars that both groups show cancel, and what is left is
     the noise that is not shared, which is what makes a star's ratio uncertain.
     The flux of an empty aperture is noise with a mean of zero (the ring's
-    median is subtracted), but `measure_aperture_photometry` reports negative
-    fluxes as 0, so the spread is read from the 84.13th percentile of the
-    fluxes, which is one standard deviation above the mean of a bell curve and
-    is not touched by the zeros.
+    median is subtracted), and `_measure_star_fluxes` sets a negative flux
+    to 0, so the spread is read from the 84.13th percentile of the fluxes,
+    which is one standard deviation above the mean of a bell curve and does
+    not depend on the values below the mean.
 
     Parameters
     ----------
@@ -489,6 +490,7 @@ def measure_group_gains_with_stars(
     trusted_masks: list[np.ndarray],
     reference_index: int,
     tolerance: float | None = None,
+    near_clip_masks: list[np.ndarray] | None = None,
 ) -> list[GroupGainMeasurement]:
     """Measure each group's brightness scale from its stars, else its pixels.
 
@@ -500,7 +502,9 @@ def measure_group_gains_with_stars(
     the larger distance of the two quarter ratios from the gain. A group with
     too few clean stars is measured with the pixel ratios of
     `measure_group_gains` instead. A gain outside `PLAUSIBLE_GAIN_RANGE` is
-    not believed and the group keeps a gain of 1, as in that function. Every
+    not believed: the group keeps a gain of 1, records the ratio it measured
+    in `measured_gain` and is marked `gain_rejected`, as in that function.
+    Every
     group also gets its sky level relative to the reference's (see
     `SKY_RATIO_LIMIT`).
 
@@ -519,6 +523,13 @@ def measure_group_gains_with_stars(
     tolerance : `float`, optional
         How far the faint-star or bright-star ratio may be from the gain, as
         a fraction of the gain.
+    near_clip_masks : `list` [`numpy.ndarray`], optional
+        For each group, `True` where its stack is at or above
+        `star_clip_level`. They go to the pixel fallback. When they are
+        given, a group measured with stars gets
+        `GroupGainMeasurement.clipping_seen` set to `False`, because a star
+        with a pixel at or above that level is never measured (`star_masks`),
+        so no measured star is clipped.
 
     Returns
     -------
@@ -543,6 +554,7 @@ def measure_group_gains_with_stars(
             tolerance,
             only=fallback_indices,
             sky_levels=sky_levels,
+            near_clip_masks=near_clip_masks,
         )
     else:
         measurements = [GroupGainMeasurement(sky_level=sky_level) for sky_level in sky_levels]
@@ -559,7 +571,7 @@ def measure_group_gains_with_stars(
             continue
         if not is_plausible_gain(ratios.gain):
             logger.warning(
-                "Exposure group %d measured a star-flux gain of %.3g, outside %s; using 1 instead.",
+                "Exposure group %d measured a star-flux gain of %.3g, outside %s; its scale is unknown.",
                 index,
                 ratios.gain,
                 plausible_gain_range,
@@ -570,6 +582,8 @@ def measure_group_gains_with_stars(
                 method="stars",
                 stars_used=ratios.stars_used,
                 faint_ratio=ratios.faint_ratio,
+                measured_gain=ratios.gain,
+                gain_rejected=True,
             )
             continue
         disagreement = (
@@ -585,6 +599,8 @@ def measure_group_gains_with_stars(
             method="stars",
             stars_used=ratios.stars_used,
             faint_ratio=ratios.faint_ratio,
+            measured_gain=ratios.gain,
+            clipping_seen=None if near_clip_masks is None else False,
         )
     record_sky_ratios(measurements, reference_index)
     return measurements

@@ -21,6 +21,7 @@ from collections.abc import Generator
 from typing import Any
 
 from astrometricslib._internal.drivers.siril_interface import pipes
+from astrometricslib._internal.drivers.siril_interface.run_models import SIRIL_COMMUNICATION_ERROR_KEY
 from astrometricslib._internal.drivers.siril_output_parsing import (
     parse_negative_pixel_percentage,
     parse_registration_totals,
@@ -43,6 +44,26 @@ logger = logging.getLogger(__name__)
 _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 
 
+class SirilStatusQueue(queue.Queue[str]):
+    """The status lines of one Siril run, plus a flag for Siril's "ready" line.
+
+    `read_output` puts each "status:" line in the queue and sets `ready`
+    when Siril prints its "ready" line. `send_commands` waits for `ready`
+    before it writes the first command, because a command sent before Siril
+    has opened its output pipe reports its status to nobody.
+
+    Attributes
+    ----------
+    ready : `threading.Event`
+        Set once Siril has printed "ready".
+    """
+
+    def __init__(self) -> None:
+        """Make an empty queue whose `ready` flag is not set."""
+        super().__init__()
+        self.ready = threading.Event()
+
+
 # A file lock is used to make sure only one Siril process runs at a time
 # across the whole computer. Siril uses a lot of CPU power, so running
 # multiple at once would overload the machine and cause tasks to time out.
@@ -61,6 +82,23 @@ SIRIL_PROCESS_LOCK_PATH = os.path.join(scratch_directory(), "astrometricslib-sir
 # comfortably minutes. Five minutes is far above that while still
 # bounding a Siril that has died without closing the output pipe.
 SIRIL_COMMAND_TIMEOUT_SECONDS = 300
+
+
+# How long to wait for a quick setup command (see `QUICK_COMMAND_WORDS`)
+# to report its status. These commands only set a Siril option or change
+# its working folder, so a healthy Siril answers in milliseconds. 30 s is
+# the same budget as the connect handshake above: far above any healthy
+# answer, yet 10 times shorter than the 300 s a long command gets, so a
+# lost status line costs half a minute and not five minutes. The command
+# is sent once more after this wait, because each one is safe to repeat.
+SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS = 30
+
+
+# The first word of each setup command that is quick and safe to send twice
+# (setting an option twice, or changing to the same folder twice, changes
+# nothing). Every other command gets the full timeout and is never resent:
+# sending `convert` or `stack` again could run it twice.
+QUICK_COMMAND_WORDS = frozenset({"setext", "set32bits", "cd", "setfindstar", "setcompress", "set16bits"})
 
 
 # How long to wait for Siril to open its end of a command/output FIFO
@@ -112,6 +150,10 @@ def _record_siril_lock_wait(wait_seconds: float) -> None:
         Seconds spent blocked on this acquisition.
     """
     add_to_bound_tally(_bound_lock_wait, wait_seconds)
+
+
+# Seconds a run waits for a Siril slot before it logs that it is queued.
+_SIRIL_WAIT_ANNOUNCE_SECONDS = 1.0
 
 
 @contextlib.contextmanager
@@ -183,9 +225,18 @@ def siril_process_lock(
     waiting_message = (
         f"Waiting for a free Siril slot ({slot_count} allowed concurrently) before starting this run..."
     )
-    logger.info(waiting_message)
-    if job_logger:
-        job_logger.info(waiting_message)
+
+    def _announce_wait() -> None:
+        """Log that the run is queued, after the wait lasted long enough."""
+        logger.info(waiting_message)
+        if job_logger:
+            job_logger.info(waiting_message)
+
+    # A free slot is taken at once, so the message only appears when the
+    # wait lasts past a second. Otherwise every run would read as queued.
+    wait_announcer = threading.Timer(_SIRIL_WAIT_ANNOUNCE_SECONDS, _announce_wait)
+    wait_announcer.daemon = True
+    wait_announcer.start()
 
     wait_started_at = time.monotonic()
     # A stack's timeout reads this tally from another thread while this one
@@ -202,6 +253,7 @@ def siril_process_lock(
             # to protect the CPU must not convert into a cascade of
             # timeouts for the targets waiting their turn.
             # A run given up on while it waited gives the slot back at once.
+            wait_announcer.cancel()
             raise_if_abandoned()
             waited_seconds = time.monotonic() - wait_started_at
             _record_siril_lock_wait(waited_seconds)
@@ -214,6 +266,7 @@ def siril_process_lock(
                     job_logger.info(acquired_message)
             yield
     finally:
+        wait_announcer.cancel()
         if stop_open_wait is not None:
             stop_open_wait()
 
@@ -508,7 +561,14 @@ class SirilSession:
             errors are silently swallowed.
         status_queue : `queue.Queue` [`str`], optional
             Queue that the paired `read_output` call publishes each
-            command's Siril status line to. If `None` (default), falls
+            command's Siril status line to. A `SirilStatusQueue` also
+            makes the first command wait for Siril's "ready" line (at
+            most `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS`). Quick setup
+            commands wait `SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS` and are
+            sent once more if no status comes; other commands wait
+            `SIRIL_COMMAND_TIMEOUT_SECONDS`. A command that gets no answer
+            is recorded in ``last_run_diagnostics`` under
+            `SIRIL_COMMUNICATION_ERROR_KEY`. If `None` (default), falls
             back to a blind fixed delay between commands, which is only
             safe when every command is known to complete faster than
             it -- pass a queue for any real frame.
@@ -526,6 +586,10 @@ class SirilSession:
             else:
                 pipe_context = _open_pipe_or_die(command_pipe, "w", process)
             with pipe_context as pipe:
+                if not self._wait_until_siril_is_ready(status_queue, process, job_logger):
+                    pipe.write("exit\n")
+                    pipe.flush()
+                    return
                 for cmd in commands:
                     pipe.write(cmd + "\n")
                     pipe.flush()
@@ -534,13 +598,24 @@ class SirilSession:
                         time.sleep(0.05)
                         continue
 
-                    try:
-                        result_line = status_queue.get(timeout=SIRIL_COMMAND_TIMEOUT_SECONDS)
-                    except queue.Empty:
-                        result_line = None
-                    if result_line is None:
+                    is_quick = cmd.split(None, 1)[0].lower() in QUICK_COMMAND_WORDS if cmd.strip() else False
+                    timeout = (
+                        SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS if is_quick else SIRIL_COMMAND_TIMEOUT_SECONDS
+                    )
+                    result_line = self._wait_for_status(status_queue, timeout)
+                    if result_line is None and is_quick:
+                        # The status line may have been lost; the command is
+                        # safe to repeat, so send it once more.
                         if job_logger:
-                            job_logger.error("Timed out waiting for Siril to finish command: %r", cmd)
+                            job_logger.warning(
+                                "No status for Siril command %r within %s s; sending it again.", cmd, timeout
+                            )
+                        pipe.write(cmd + "\n")
+                        pipe.flush()
+                        result_line = self._wait_for_status(status_queue, timeout)
+                    if result_line is None:
+                        message = f"Siril did not answer the command {cmd!r} within {timeout} s."
+                        self._record_communication_error(message, job_logger)
                         break
 
                     if "status: error" in result_line:
@@ -554,6 +629,79 @@ class SirilSession:
         except ExternalServiceError, OSError:
             if job_logger:
                 job_logger.exception("Pipe write error")
+
+    @staticmethod
+    def _wait_for_status(status_queue: queue.Queue[str], timeout: float) -> str | None:
+        """Wait for the next status line.
+
+        Parameters
+        ----------
+        status_queue : `queue.Queue` [`str`]
+            Queue that `read_output` fills with status lines.
+        timeout : `float`
+            Seconds to wait.
+
+        Returns
+        -------
+        line : `str` or `None`
+            The status line, or `None` if none came in time.
+        """
+        try:
+            return status_queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def _wait_until_siril_is_ready(
+        self,
+        status_queue: queue.Queue[str] | None,
+        process: subprocess.Popen | None,
+        job_logger: logging.Logger | None,
+    ) -> bool:
+        """Wait for Siril's "ready" line before the first command is written.
+
+        Parameters
+        ----------
+        status_queue : `queue.Queue` [`str`] or `None`
+            The run's status queue. Only a `SirilStatusQueue` carries the
+            ready flag; with any other queue, or none, there is nothing to
+            wait for and the call returns at once.
+        process : `subprocess.Popen` or `None`
+            The Siril process; if it exits while we wait, the wait ends.
+        job_logger : `logging.Logger` or `None`
+            Logger for the failure.
+
+        Returns
+        -------
+        ready : `bool`
+            `True` if Siril is ready (or there is no flag to wait for).
+        """
+        ready = getattr(status_queue, "ready", None)
+        if ready is None:
+            return True
+        deadline = time.monotonic() + SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS
+        while not ready.wait(timeout=min(0.5, max(0.0, deadline - time.monotonic()))):
+            if time.monotonic() >= deadline or (process is not None and process.poll() is not None):
+                message = (
+                    f"Siril did not report that it was ready within {SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS} s "
+                    "of opening its command pipe."
+                )
+                self._record_communication_error(message, job_logger)
+                return False
+        return True
+
+    def _record_communication_error(self, message: str, job_logger: logging.Logger | None) -> None:
+        """Log a lack of answer from Siril and keep it in the run diagnostics.
+
+        Parameters
+        ----------
+        message : `str`
+            What Siril did not answer.
+        job_logger : `logging.Logger` or `None`
+            Logger for the error.
+        """
+        if job_logger:
+            job_logger.error(message)
+        self.last_run_diagnostics[SIRIL_COMMUNICATION_ERROR_KEY] = message
 
     def read_output(
         self,
@@ -627,6 +775,9 @@ class SirilSession:
             with pipe_context as pipe:
                 for line in pipe:
                     log(line.strip())
+                    ready = getattr(status_queue, "ready", None)
+                    if ready is not None and line.strip().lower().startswith("ready"):
+                        ready.set()
                     registration_totals = parse_registration_totals(line)
                     if registration_totals is not None:
                         self.last_run_diagnostics["registration_failed_frames"] = registration_totals[0]

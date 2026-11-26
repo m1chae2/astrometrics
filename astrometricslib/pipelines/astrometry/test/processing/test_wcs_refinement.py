@@ -21,9 +21,9 @@ from astropy.table import Table
 from astropy.wcs import WCS, Sip
 
 from astrometricslib._internal.drivers.driver_set import Drivers
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
-from astrometricslib.pipelines.astrometry.processing import wcs_refinement
+from astrometricslib.pipelines.astrometry.processing import plate_solution_steps, wcs_refinement
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
 CENTRE_RA_DEG = 250.445
 CENTRE_DEC_DEG = 36.157
@@ -161,6 +161,67 @@ def test_a_solution_off_by_a_pixel_and_a_half_is_brought_back_to_the_truth() -> 
     assert refinement.rms_after_arcsec < 0.4
 
 
+def test_a_solution_whose_reference_pixel_is_far_from_the_center_is_refit() -> None:
+    """A reference pixel off the image center (as on M 13) still refits.
+
+    The solver of M 13 put the reference pixel at (1632, 2077) of a 3004 by
+    3004 image. A fit that started from that sky point stopped in a wrong
+    answer about 8,000 arcseconds away, and the refit was refused. Fitting
+    around the middle of the stars finds the right answer.
+    """
+    shape = (3004, 3004)
+    generator = np.random.default_rng(11)
+    truth = make_wcs(CENTRE_RA_DEG, CENTRE_DEC_DEG)
+    truth.wcs.crpix = [1632.0, 2077.0]
+    truth.sip = None
+    truth.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    true_pixels = generator.uniform(30, shape[0] - 30, (800, 2))
+    sky = truth.all_pix2world(true_pixels, 0)
+    gaia = SkyCoord(sky[:, 0] * u.deg, sky[:, 1] * u.deg)
+    measured = true_pixels + generator.normal(0, 0.1, true_pixels.shape)
+    solver = truth.deepcopy()
+    solver.wcs.crval = [
+        CENTRE_RA_DEG + 2.0 / 3600.0 / np.cos(np.radians(CENTRE_DEC_DEG)),
+        CENTRE_DEC_DEG - 2.0 / 3600.0,
+    ]
+
+    refinement = wcs_refinement.refine_wcs_with_gaia(solver, measured, gaia, shape)
+
+    assert refinement.applied, refinement.reason
+    assert refinement.shift_arcsec < 4.0
+    assert refinement.rms_after_arcsec < 0.3
+
+
+def test_the_refit_fits_around_the_middle_of_the_stars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fit projects about the stars' middle, not the old reference point.
+
+    On the real M 13 stack the off-center reference point sent the fit to a
+    wrong answer. A synthetic field does not always reproduce that, so this
+    test checks the choice itself.
+    """
+    chosen: list[object] = []
+    real_fit = wcs_refinement.fit_wcs_from_points
+
+    def spy(*arguments: object, **keywords: object) -> WCS:
+        """Record the projection point and run the real fit.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS`
+            The fitted solution.
+        """
+        chosen.append(keywords.get("proj_point"))
+        return real_fit(*arguments, **keywords)
+
+    monkeypatch.setattr(wcs_refinement, "fit_wcs_from_points", spy)
+    measured, gaia, _ = make_field()
+
+    wcs_refinement.refine_wcs_with_gaia(alnath_like_solution(), measured, gaia, IMAGE_SHAPE)
+
+    assert chosen
+    assert all(point == "center" for point in chosen)
+
+
 def test_the_refit_reports_the_distance_it_moved_the_field() -> None:
     """The shift is the largest move over the image: about the error."""
     measured, gaia, _ = make_field()
@@ -262,24 +323,20 @@ def test_the_identifier_refits_the_solution_and_records_the_flag(monkeypatch: py
     """With Gaia stars for the field, the refit replaces the solution."""
     measured, gaia, truth = make_field()
     identifier = make_identifier()
-    monkeypatch.setattr(
-        StarIdentifier,
-        "_query_gaia_region",
-        staticmethod(lambda *a, **k: (gaia_table_for(gaia), gaia)),
-    )
+    use_field_stars(monkeypatch, gaia_table_for(gaia), gaia)
     sources = [{"x_centroid": x, "y_centroid": y} for x, y in measured]
 
     refined = identifier._refine_wcs_against_gaia(alnath_like_solution(), sources, *IMAGE_SHAPE)
 
     assert np.median(error_against_truth_arcsec(refined, truth)) < 0.05
-    assert star_identifier_module.FLAG_WCS_REFINED in identifier.astrometry_flags
+    assert plate_solution_steps.FLAG_WCS_REFINED in identifier.astrometry_flags
     assert identifier.wcs_refinement is not None and identifier.wcs_refinement.applied
 
 
 def test_a_failed_gaia_download_keeps_the_solver_solution(monkeypatch: pytest.MonkeyPatch) -> None:
     """With no Gaia stars the solution is returned as it came, with a flag."""
     identifier = make_identifier()
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (None, None)))
+    use_field_stars(monkeypatch)
     solver = alnath_like_solution()
 
     result = identifier._refine_wcs_against_gaia(
@@ -287,7 +344,7 @@ def test_a_failed_gaia_download_keeps_the_solver_solution(monkeypatch: pytest.Mo
     )
 
     assert result is solver
-    assert star_identifier_module.FLAG_WCS_REFINEMENT_SKIPPED in identifier.astrometry_flags
+    assert plate_solution_steps.FLAG_WCS_REFINEMENT_SKIPPED in identifier.astrometry_flags
     assert identifier.wcs_refinement is None
 
 
@@ -329,9 +386,7 @@ def _refit_with_peaks(
     identifier = make_identifier()
     identifier.detector.last_background_noise = noise
     identifier._detected_on_binned_copy = binned
-    monkeypatch.setattr(
-        StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (gaia_table_for(gaia), gaia))
-    )
+    use_field_stars(monkeypatch, gaia_table_for(gaia), gaia)
     sources = [
         {"x_centroid": x, "y_centroid": y, "peak": peak_of(index)} for index, (x, y) in enumerate(measured)
     ]

@@ -2,6 +2,7 @@ import React from 'react';
 import { SelectableList, SelectableItem } from '../components/SelectableList';
 import { RadioListFiltering } from './RadioListFiltering';
 import { SectionPanel } from '../components/SectionPanel';
+import { CollapsibleColumn } from '../components/CollapsibleColumn';
 import '../styles/manager.css';
 import { Button } from '../components/Button';
 
@@ -19,6 +20,8 @@ export interface RadioListManagerProps {
     filterText?: string;
     onFilterTextChange?: (text: string) => void;
     filterPlaceholder?: string;
+    /** Optional row of small controls shown under the search box, such as filter and sort pickers. */
+    filterRow?: React.ReactNode;
 
     // Actions
     actions?: React.ReactNode;
@@ -43,6 +46,10 @@ export interface RadioListManagerProps {
     legend?: React.ReactNode;
     noWrapper?: boolean;
     title?: string;
+    /** Optional small control shown at the right end of the list panel's title row, such as a filter checkbox. */
+    headerContent?: React.ReactNode;
+    /** Optional small control shown before the list panel's title, such as a Back button. */
+    headerStart?: React.ReactNode;
     actionsTitle?: string;
 
     /** Whether `items` is still being fetched, for the empty-state message. */
@@ -57,9 +64,22 @@ export interface RadioListManagerProps {
     errorMessage?: React.ReactNode;
     /** Called by the "Try again" button. */
     onRetry?: () => void;
+
+    /**
+     * Whether the whole column is folded to a thin strip at the left edge. Folding is offered only
+     * when `onCollapsedChange` is also given.
+     */
+    collapsed?: boolean;
+    /** Called with the new folded state when the user clicks the first panel's title or the strip. */
+    onCollapsedChange?: (collapsed: boolean) => void;
+    /** Hover text of the first panel's title button, which folds the column. */
+    hideLabel?: string;
+    /** Hover text of the strip that shows the column again. */
+    showLabel?: string;
 }
 
 const noopOptionChange = (): void => {};
+const noopCollapsedChange = (): void => {};
 
 /**
  * Generic Manager component that orchestrates filtering, list display, and actions.
@@ -76,6 +96,7 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     filterText = '',
     onFilterTextChange,
     filterPlaceholder,
+    filterRow,
     actions,
     topPanel,
     topPanelTitle = 'Filter',
@@ -88,6 +109,8 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     legend,
     noWrapper = false,
     title = 'List',
+    headerContent,
+    headerStart,
     actionsTitle = 'Controls',
     isLoading,
     loadingMessage,
@@ -95,6 +118,10 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     isError,
     errorMessage,
     onRetry,
+    collapsed = false,
+    onCollapsedChange,
+    hideLabel = 'Hide list',
+    showLabel = 'Show list',
 }) => {
     const content = (
         <>
@@ -107,6 +134,7 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                     filterText={filterText}
                     onFilterTextChange={onFilterTextChange}
                     placeholder={filterPlaceholder}
+                    filterRow={filterRow}
                 />
             )}
 
@@ -170,25 +198,48 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
         );
     }
 
+    const stripTitle = topPanel ? topPanelTitle : title;
+    const selectedLabel = items.find((item) => item.id === selectedId)?.label;
     return (
-        <div className={`manager panel-group ${className}`}>
-            {topPanel && (
-                <SectionPanel title={topPanelTitle} className="flex-auto manager__top-panel">
-                    {topPanel}
-                </SectionPanel>
-            )}
+        <CollapsibleColumn
+            collapsed={!!onCollapsedChange && collapsed}
+            onCollapsedChange={onCollapsedChange ?? noopCollapsedChange}
+            stripTitle={stripTitle}
+            selectedLabel={selectedLabel}
+            showLabel={showLabel}
+            className={className}
+        >
+            <div className={`manager panel-group ${className}`}>
+                {topPanel && (
+                    <SectionPanel
+                        title={topPanelTitle}
+                        className="flex-auto manager__top-panel"
+                        onTitleClick={onCollapsedChange ? () => onCollapsedChange(true) : undefined}
+                        titleButtonLabel={hideLabel}
+                    >
+                        {topPanel}
+                    </SectionPanel>
+                )}
 
-            <SectionPanel title={title} className="flex-fill flex-col manager__list-panel">
-                {content}
-            </SectionPanel>
-
-            {actions && (
-                <SectionPanel title={actionsTitle} className="flex-auto manager__actions-panel">
-                    <div className="manager__actions">
-                        {actions}
-                    </div>
+                <SectionPanel
+                    title={title}
+                    className="flex-fill flex-col manager__list-panel"
+                    onTitleClick={onCollapsedChange && !topPanel ? () => onCollapsedChange(true) : undefined}
+                    titleButtonLabel={hideLabel}
+                    headerContent={headerContent}
+                    headerStart={headerStart}
+                >
+                    {content}
                 </SectionPanel>
-            )}
-        </div>
+
+                {actions && (
+                    <SectionPanel title={actionsTitle} className="flex-auto manager__actions-panel">
+                        <div className="manager__actions">
+                            {actions}
+                        </div>
+                    </SectionPanel>
+                )}
+            </div>
+        </CollapsibleColumn>
     );
 };

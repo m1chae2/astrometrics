@@ -141,3 +141,49 @@ def test_a_picture_rewritten_at_the_same_path_is_drawn_again(tmp_path: Path) -> 
     second = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False)
 
     assert first[0] != second[0]
+
+
+def test_a_frame_with_no_saved_jpeg_draws_quietly(stack: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Verify a missing preview picture is a quiet status, not a warning."""
+    with caplog.at_level("WARNING"):
+        result = render_data_url(str(stack), stretch=True)
+
+    assert result.image_data.startswith(_PNG_PREFIX)
+    assert not [record for record in caplog.records if "preview picture" in record.getMessage()]
+
+
+def test_a_processed_fits_never_looks_for_a_jpeg(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Verify a stack's stretched FITS is drawn as it is, with no warning."""
+    processed = tmp_path / "M_13_L_Stacked_processed.fits"
+    fits.writeto(processed, np.random.default_rng(2).random((30, 40)).astype(np.float32))
+
+    with caplog.at_level("WARNING"):
+        result = render_data_url(str(processed), stretch=True)
+
+    assert result.image_data.startswith(_PNG_PREFIX)
+    assert not caplog.records
+
+
+def test_a_frame_set_aside_is_drawn_from_its_quarantine_folder(tmp_path: Path) -> None:
+    """Verify the old path of a quarantined frame still draws the frame."""
+    excluded = tmp_path / "_excluded"
+    excluded.mkdir()
+    moved = excluded / "M_13_Light_001.fits"
+    fits.writeto(moved, np.random.default_rng(3).random((30, 40)).astype(np.float32))
+
+    result = render_data_url(str(tmp_path / "M_13_Light_001.fits"), stretch=True)
+
+    assert result.path == str(moved)
+    assert result.image_data.startswith(_PNG_PREFIX)
+
+
+def test_an_unreadable_preview_warns_once_per_path(stack: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Verify a corrupt saved JPEG is reported once, not at every redraw."""
+    preview = _save_preview(stack, (40, 30), age_seconds=5)
+    preview.write_bytes(b"not a jpeg")
+
+    with caplog.at_level("WARNING"):
+        render_data_url(str(stack), stretch=True)
+        render_data_url(str(stack), stretch=True)
+
+    assert len([record for record in caplog.records if "preview picture" in record.getMessage()]) == 1

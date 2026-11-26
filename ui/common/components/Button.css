@@ -80,7 +80,22 @@
 }
 
 .btn--danger:hover {
-  filter: brightness(1.2);
+  background-color: var(--color-danger-hover);
+  filter: none;
+}
+
+.btn--danger:active {
+  background-color: var(--accent-red);
+}
+
+.btn--danger:focus-visible {
+  outline: 2px solid var(--accent-red);
+  outline-offset: 2px;
+}
+
+.btn--danger:disabled,
+.btn--danger:disabled:hover {
+  background-color: var(--grey-medium);
 }
 
 /* A button that is switched on, or that stands for the view now shown. */

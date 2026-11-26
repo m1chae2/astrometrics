@@ -41,6 +41,7 @@ FRAME_STAR_WIDTH_MOFFAT_PX = "frame.star_width_moffat_px"
 FRAME_STAR_WIDTH_MOFFAT_ARCSEC = "frame.star_width_moffat_arcsec"
 FRAME_STAR_ELONGATION = "frame.star_elongation"
 FRAME_STAR_ELONGATION_ANGLE_DEG = "frame.star_elongation_angle_deg"
+FRAME_STAR_ELONGATION_COHERENCE = "frame.star_elongation_coherence"
 FRAME_STAR_WIDTH_EFFECTIVE_PX = "frame.star_width_effective_px"
 FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC = "frame.star_width_effective_arcsec"
 FRAME_STAR_WIDTH_CENTER_PX = "frame.star_width_center_px"
@@ -74,6 +75,12 @@ FRAME_BLOCK_RANGE = "frame.block_range_adu"
 FRAME_NEIGHBOR_NOISE = "frame.neighbor_noise_adu"
 FRAME_PIXEL_CHECKSUM = "frame.pixel_checksum"
 FRAME_VALUE_STEP = "frame.value_step_adu"
+# The metrics that only dark frames get, measured against the dark's own set
+# (`DARK_DEFECT_METRICS`).
+FRAME_DARK_HIT_COUNT = "frame.dark_hit_count"
+FRAME_DARK_LONGEST_STREAK = "frame.dark_longest_streak_px"
+FRAME_DARK_EDGE_STREAK = "frame.dark_edge_to_edge_streak"
+FRAME_DARK_OUTLIER_COUNT = "frame.dark_outlier_pixel_count"
 
 _FRAME_ONLY = (SubjectLevel.FRAME,)
 
@@ -204,7 +211,10 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "The frame's own filter. A color image is first collapsed to the mean of its color planes; "
             "an undebayered one-shot-color mosaic is measured as it is, with its color pixels mixed."
         ),
-        computed_by="pipelines.shared.quality.background_measurement.measure_frame_background_level",
+        # The stacking check's own level (`FrameMeasurements.background_level`)
+        # is a different estimator for a raw color mosaic: 2 x 2 super-pixels
+        # (`background_measurement.measure_frame_background_level`, STK-04).
+        computed_by="pipelines.shared.quality.frame_measurement._clipped_median",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         purpose=MetricPurpose.DECISION,
@@ -265,7 +275,9 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
-        definition_version=1,
+        # Version 2: saturated stars no longer use up the candidates, so a
+        # crowded frame whose brightest stars are all saturated gets a width.
+        definition_version=2,
         unit="px",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -495,16 +507,44 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
-            "Standard deviation of the direction over 1000 bootstrap resamples of the stars. The "
-            "measurement's reason gives the coherence (0 to 1: the length of the mean ellipticity "
-            "vector divided by the mean ellipticity of the stars); a low value means the stars do not "
-            "share a direction."
+            "Standard deviation of the direction over 1000 bootstrap resamples of the stars. How well "
+            "the stars agree on the direction is its own metric, `frame.star_elongation_coherence`."
         ),
         register_entry="AST-17",
         purpose=MetricPurpose.CONTEXT,
         purpose_reason=(
             "The direction of the stretch separates a right-ascension drift from a declination one, "
             "which explains an elongation value."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_STAR_ELONGATION_COHERENCE,
+        definition_version=1,
+        unit="",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning=(
+            "How well the stars agree on the direction of their stretch, from 0 (no shared direction, "
+            "so `frame.star_elongation_angle_deg` means little) to 1 (every star stretched the same way)."
+        ),
+        decisions=("guiding", "tracking"),
+        estimator=(
+            "The length of the average ellipticity vector of the stars divided by the average length of "
+            "the stars' ellipticity vectors. The vectors are the ones `frame.star_elongation_angle_deg` "
+            "averages."
+        ),
+        sample_definition=_MOFFAT_SAMPLE,
+        band=_PER_PLANE_BAND,
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported.",
+        register_entry="AST-17",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "It explains an elongation value: the star-shape review reads it to say whether stretched "
+            "stars share one direction, which points at tracking, guiding, wind or flexure rather than "
+            "seeing or focus."
         ),
     ),
     MetricSpec(
@@ -874,3 +914,121 @@ CALIBRATION_FRAME_METRIC_NAMES: tuple[str, ...] = (
     FRAME_SENSOR_TEMPERATURE,
     *(spec.name for spec in CALIBRATION_FRAME_METRICS),
 )
+
+_DARK_DEFECT_SAMPLE = (
+    "Every pixel of the dark frame, after the per-pixel median of the frames of its own set (same "
+    "camera, gain, offset, binning, temperature slot and exposure) is subtracted."
+)
+_DARK_DEFECT_MODULE = "pipelines.shared.quality.dark_defect_measurement"
+_DARK_DEFECT_ESTIMATOR = (
+    "The set's per-pixel median of up to 7 frames is subtracted. Pixels more than 16 noise widths "
+    "above it are outliers (the noise width is the larger of the profile's read noise and the "
+    "frame's own spread). Outliers within 2 pixels of each other form one group."
+)
+
+# These four are measured together, in one pass over a dark frame and its
+# set's reference. They are stored under a separate stamp of their own, so
+# adding them does not measure every dark again.
+DARK_DEFECT_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=FRAME_DARK_HIT_COUNT,
+        definition_version=1,
+        unit="count",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The number of small bright groups (single pixels and short tracks) in a dark frame, "
+            "away from its set's median."
+        ),
+        decisions=("dark defect check",),
+        estimator=(
+            f"{_DARK_DEFECT_ESTIMATOR} The value is the number of groups shorter than the long-track limit."
+        ),
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "Ordinary hits are expected (about one a frame) and never leave a dark out; the count shows "
+            "how busy the frame was."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_DARK_LONGEST_STREAK,
+        definition_version=1,
+        unit="px",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning="The length of the longest bright track in a dark frame, away from its set's median.",
+        decisions=("dark defect check",),
+        estimator=(
+            f"{_DARK_DEFECT_ESTIMATOR} The value is the longer side of the box around the longest group."
+        ),
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A long track inside the frame is a particle or a meteor; the median master ignores it, so "
+            "the dark is kept with a warning."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_DARK_EDGE_STREAK,
+        definition_version=1,
+        unit="",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "1 when a bright track in a dark frame runs from one frame edge to another, 0 when none does."
+        ),
+        decisions=("dark defect check",),
+        estimator=(
+            f"{_DARK_DEFECT_ESTIMATOR} The value is 1 when one group touches two different frame edges and "
+            "is at least half the short side of the frame long."
+        ),
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A straight track across the whole frame is a satellite or aircraft: light reached the "
+            "sensor, so the dark is left out of the master."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_DARK_OUTLIER_COUNT,
+        definition_version=1,
+        unit="count",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning="The number of pixels of a dark frame that are far above its set's median.",
+        decisions=("dark defect check",),
+        estimator=_DARK_DEFECT_ESTIMATOR + " The value is the number of outlier pixels.",
+        sample_definition=_DARK_DEFECT_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_DARK_DEFECT_MODULE}.measure_dark_defects",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-D77",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A light leak, a warm sensor or a damaged file lifts a large share of the pixels at once; "
+            "such a dark is left out of the master."
+        ),
+    ),
+)
+DARK_DEFECT_METRIC_NAMES: tuple[str, ...] = tuple(spec.name for spec in DARK_DEFECT_METRICS)

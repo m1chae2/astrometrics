@@ -85,6 +85,11 @@ class ExposureGroupSummary(BaseModel):
     # (`exposure_group_gain_tolerance`). The group is then left out of the
     # combined image and `left_out_reason` names both ratios.
     gain_nonlinear: bool = Field(default=False, alias="gainNonlinear")
+    # Set when the brightness check could not judge the group because the
+    # reference group's bright end is clipped (the group reads higher than its
+    # scale factor there): "not judged: the reference group's bright end is
+    # clipped (N near-clip pixels vs M)". The group is kept. `None` otherwise.
+    gain_not_judged_reason: str | None = Field(default=None, alias="gainNotJudgedReason")
     # Why the group is not in the combined image, or `None` if it is.
     left_out_reason: str | None = Field(default=None, alias="leftOutReason")
     # How close the brightest star is to the camera's ceiling at this exposure
@@ -271,6 +276,11 @@ class StackingPipelineQualityMetrics(BaseModel):
     # Frames with clouds or trailed stars that the stage moved into the
     # `_excluded` folder before stacking.
     frames_quarantined: int = Field(default=0, alias="framesQuarantined")
+    # Why the stage cropped the stack's edges, in one sentence with the rule's
+    # numbers, and the share of the image area the crop removed (0 to 1).
+    # Both are `None` when the stack was not cropped.
+    stack_crop_reason: str | None = Field(default=None, alias="stackCropReason")
+    stack_crop_area_fraction: float | None = Field(default=None, alias="stackCropAreaFraction")
 
     rejected_pixel_fraction: float | None = Field(default=None, alias="rejectedPixelFraction")
 
@@ -315,8 +325,9 @@ class StackingPipelineQualityMetrics(BaseModel):
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
     # The star width the stack should have given its input frames: the root
-    # mean square of a sample of their widths. The sharpness gate compares
-    # the stack with this, not with the median.
+    # mean square of the widths of every frame in the stack, each weighted as
+    # the stack weighted it. The sharpness gate compares the stack with this,
+    # not with the median.
     expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
 
     # Spectral-only.
@@ -495,14 +506,20 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     gaia_fit_star_count: int | None = Field(default=None, alias="gaiaFitStarCount")
     wcs_refinement_shift_arcsec: float | None = Field(default=None, alias="wcsRefinementShiftArcsec")
     # Short stable keys for conditions that limit how far the results can be
-    # trusted: ``gaia_row_limit_reached`` (the Gaia search returned as many
-    # rows as it may, so faint stars may be missing),
-    # ``gaia_proper_motion_unknown`` (cached Gaia rows had no proper motion,
-    # so positions stay at epoch 2016.0), ``gaia_epoch_unknown`` (the frame has
-    # no observation date, so positions stay at epoch 2016.0) and
+    # trusted: ``gaia_tiles_missing`` (some Gaia cache tiles under the image
+    # were not complete to the query depth, so stars there have no Gaia
+    # name), ``gaia_depth_exceeded`` (the image shows stars fainter than the
+    # Gaia query depth), ``gaia_proper_motion_unknown`` (cached Gaia rows had
+    # no proper motion, so positions stay at epoch 2016.0),
+    # ``gaia_epoch_unknown`` (the frame has no observation date, so positions
+    # stay at epoch 2016.0) and
     # ``scale_hint_binning_mismatch`` (the header's X and Y pixel sizes, or X
     # and Y binning, differ). They do not flag the run.
     astrometry_flags: list[str] = Field(default_factory=list, alias="astrometryFlags")
+    # How many Gaia cache tiles lie under the image, and how many were not
+    # complete to the query depth (their detections got no Gaia name).
+    gaia_tiles_count: int = Field(default=0, alias="gaiaTilesCount")
+    gaia_tiles_missing_count: int = Field(default=0, alias="gaiaTilesMissingCount")
 
     # The size of one pixel on the sky, in arcseconds, from the solved
     # coordinates, and the width (FWHM) of the stars in the image, in pixels.
@@ -543,7 +560,7 @@ class AstrometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever PhotometryPipelineQualityMetrics's shape changes
 # meaningfully.
-PHOTOMETRY_PIPELINE_VERSION = "1.3.0"
+PHOTOMETRY_PIPELINE_VERSION = "1.5.0"
 
 
 class FrameEnsembleComposition(BaseModel):
@@ -559,6 +576,78 @@ class FrameEnsembleComposition(BaseModel):
     frame_path: str = Field(alias="framePath")
     ensemble_size: int = Field(alias="ensembleSize")
     excluded_comparison_star_ids: list[str] = Field(default_factory=list, alias="excludedComparisonStarIds")
+
+
+class SessionTieRecord(BaseModel):
+    """How one observing session was put on the field's brightness scale.
+
+    Each session divides a star's flux by its own comparison stars, so two
+    sessions can place the same constant star at different normalized
+    levels. Before the sessions are joined, every session but the reference
+    one is multiplied by one factor found from the stars both sessions
+    measured. This record keeps that factor and what it rests on, so a
+    reader can judge it. See `pipelines.photometry.session_tie`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(alias="sessionId")
+    # The session every other session is scaled onto: the one with the most
+    # measured stars (the earliest, when several tie).
+    reference_session_id: str = Field(alias="referenceSessionId")
+    # "reference" for the reference session itself, "tied" for a session
+    # that was scaled, "untied" for one that was left as measured.
+    status: str = Field(alias="status")
+    # The multiplier applied to the session's normalized levels, no units.
+    # `None` unless the session is "tied". 1 would mean the two ensembles
+    # agree.
+    factor: float | None = Field(default=None, alias="factor")
+    # The standard error of the factor as a fraction of the level, and the
+    # robust standard deviation of the tie stars' level ratios as a fraction
+    # of the level. `None` unless the session is "tied" (the spread is also
+    # kept when the session is untied for want of stars and some ratios exist).
+    uncertainty: float | None = Field(default=None, alias="uncertainty")
+    spread: float | None = Field(default=None, alias="spread")
+    # How many stars the factor was found from, after clipping.
+    tie_star_count: int = Field(default=0, alias="tieStarCount")
+    # Why the session is "untied", in plain words. `None` otherwise.
+    reason: str | None = Field(default=None, alias="reason")
+
+
+class SessionScintillationRecord(BaseModel):
+    """The scintillation term that one session's flux errors carry.
+
+    The CCD equation has no term for scintillation (the twinkling of a star
+    in the air), so a bright star scatters more than its error says. Each
+    session adds one term to every point's error: Young's prediction for the
+    frame times a coefficient. The coefficient is measured from the session's
+    comparison stars when there are enough of them, and is a documented
+    factor otherwise. This record keeps both and the reason. See
+    `pipelines.photometry.processing.scintillation_term`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(default="", alias="sessionId")
+    # "measured": the coefficient was fitted and kept. "measured_limited":
+    # it was fitted but lay outside the plausible range and was moved to the
+    # nearest end. "fallback": too little data to fit, so the documented
+    # factor was used. "none": no term was added (the reason says why).
+    source: str = Field(alias="source")
+    # The multiplier on Young's prediction that was applied, no units.
+    # `None` when no term was added.
+    coefficient: float | None = Field(default=None, alias="coefficient")
+    # The fitted multiplier before any limiting. `None` unless fitted.
+    measured_coefficient: float | None = Field(default=None, alias="measuredCoefficient")
+    # The median over the session's frames of Young's prediction, and of the
+    # term that was added (prediction times coefficient), in millimagnitudes.
+    predicted_young_mmag: float | None = Field(default=None, alias="predictedYoungMmag")
+    used_mmag: float | None = Field(default=None, alias="usedMmag")
+    # The comparison stars and frames the fit rests on.
+    member_count: int = Field(default=0, alias="memberCount")
+    frame_count: int = Field(default=0, alias="frameCount")
+    # Why the source is not "measured", in plain words. `None` otherwise.
+    reason: str | None = Field(default=None, alias="reason")
 
 
 class NoiseModelPoint(BaseModel):
@@ -612,6 +701,15 @@ class PhotometryPipelineQualityMetrics(StarIdentificationMetrics):
     # track sessions where that map was missing, already correct and
     # reused as-is, or wrong and had to be recalculated.
     sessions_missing_wcs: list[str] = Field(default_factory=list, alias="sessionsMissingWcs")
+    # One record for each session of a run that joined several sessions: the
+    # factor that put it on the reference session's brightness scale, or the
+    # reason it was left as measured.
+    session_ties: list[SessionTieRecord] = Field(default_factory=list, alias="sessionTies")
+    # One record for each session: the scintillation term its flux errors
+    # carry, how its size was found and the reason when it was not measured.
+    session_scintillation: list[SessionScintillationRecord] = Field(
+        default_factory=list, alias="sessionScintillation"
+    )
     long_term_variable_candidate_count: int = Field(default=0, alias="longTermVariableCandidateCount")
     astrometry_identified_star_count: int = Field(default=0, alias="astrometryIdentifiedStarCount")
     sessions_with_reused_header_wcs: list[str] = Field(

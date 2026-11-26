@@ -197,6 +197,11 @@ export const useSpectrumList = (
         setPendingId?.(starId);
     }, [targetId, setPendingId]);
 
+    /** Records the star shown in a target (for example one opened from the image), so the target's default does not replace it. */
+    const rememberPickedStar = useCallback((pickedTargetId: string, starId: string) => {
+        if (pickedTargetId && starId) pickedStarByTarget.current.set(pickedTargetId, starId);
+    }, []);
+
     // Choose the default star once, when a target's first page of stars has loaded.
     useEffect(() => {
         if (!targetId || !setPendingId || astronomyListQuery.isLoading || !astronomyListQuery.data) return;
@@ -218,6 +223,7 @@ export const useSpectrumList = (
         page,
         setPage,
         selectStar,
+        rememberPickedStar,
         hasMore,
         totalPages,
         isLoading: astronomyListQuery.isLoading,

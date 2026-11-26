@@ -514,7 +514,7 @@ def frames_lost_statements(
                     if total_known
                     else (
                         f"{count} of your frames were left out of the final picture ({reason_text}). "
-                        "We expect clearer skies or better guiding to save more of them."
+                        "Clearer skies or better guiding are expected to save more of them."
                     )
                 ),
             )
@@ -809,7 +809,7 @@ def guiding_limits_statements(
         )
     if supported is not None and supported_fraction is not None:
         supported_sentence = (
-            f" Try {supported:g} s frames: we expect about {supported_fraction * 100:.0f}% to stay sharp."
+            f" Try {supported:g} s frames: about {supported_fraction * 100:.0f}% are expected to stay sharp."
         )
     else:
         supported_sentence = " Check the guiding first."

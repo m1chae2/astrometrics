@@ -224,3 +224,70 @@ def test_no_primary_optic_means_no_optic_filter() -> None:
         _mixed_frames_target(), _Config(primary_focal_length_mm=None), "nikon"
     )
     assert len(selection.frames) == 2
+
+
+def _target_with_stack(target_id: str, frames: list, camera: str, focal_length_mm: float) -> SimpleNamespace:
+    """Build a stand-in target whose imaging stack is recorded but not on disk.
+
+    Returns
+    -------
+    target : `types.SimpleNamespace`
+        A target with frames and one recorded stack of the given optic.
+    """
+    stack_path = f"/no/such/{target_id}_{round(focal_length_mm)}mm_Stacked.fits"
+    recorded = SimpleNamespace(stacked_image=stack_path, camera=camera, focal_length_mm=focal_length_mm)
+    stacking = SimpleNamespace(
+        stacked_image=stack_path, stacks_by_configuration={f"{camera}@{round(focal_length_mm)}mm": recorded}
+    )
+    return SimpleNamespace(
+        id=target_id, frames=frames, stacking=stacking, spectral_stacking=SimpleNamespace(stacked_image=None)
+    )
+
+
+def test_a_300mm_only_target_uses_its_300mm_stack_not_the_primary_optic() -> None:
+    """Check a Nikkor-only target (M 16) keeps its 300 mm frames."""
+    frames = [_frame(NIKON, 300.0), _frame(NIKON, 300.0)]
+    selection = resolve_processing_frames(_target_with_stack("M16", frames, NIKON, 300.0), _Config())
+    assert selection.camera_name == NIKON
+    assert selection.focal_length_mm == pytest.approx(300.0)
+    assert len(selection.frames) == 2
+
+
+def test_a_target_with_two_optics_uses_the_optic_of_its_stack() -> None:
+    """Check a target with stacks at both optics follows its stack."""
+    frames = [_frame(NIKON, 405.0), _frame(NIKON, 300.0)]
+    for focal_length in (300.0, 405.0):
+        selection = resolve_processing_frames(
+            _target_with_stack("N7023", frames, NIKON, focal_length), _Config()
+        )
+        assert [frame.focal_length_mm for frame in selection.frames] == [focal_length]
+
+
+def test_an_explicit_optic_still_replaces_the_stack_optic() -> None:
+    """Check the caller's optic wins over the stack's."""
+    frames = [_frame(NIKON, 405.0), _frame(NIKON, 300.0)]
+    target = _target_with_stack("N7023", frames, NIKON, 300.0)
+    selection = resolve_processing_frames(target, _Config(), focal_length_mm=405.0)
+    assert [frame.focal_length_mm for frame in selection.frames] == [405.0]
+
+
+def test_a_named_stack_of_another_configuration_decides_the_frames() -> None:
+    """Check the stack being analyzed is the one read, not the main stack.
+
+    The target's recorded stack is the ASI533 at 405 mm; the analysis of its
+    Nikon 300 mm stack must take the Nikon 300 mm frames.
+    """
+    frames = [_frame(ASI, 405.0), _frame(NIKON, 300.0), _frame(NIKON, 405.0)]
+    target = _target_with_stack("M27", frames, ASI, 405.0)
+    nikon_stack = "/no/such/M27_nikon_300mm_Stacked.fits"
+    target.stacking.stacks_by_configuration["nikon@300mm"] = SimpleNamespace(
+        stacked_image=nikon_stack, camera=NIKON, focal_length_mm=300.0
+    )
+
+    main = resolve_processing_frames(target, _Config())
+    named = resolve_processing_frames(target, _Config(), stack_path=nikon_stack)
+
+    assert [(frame.camera, frame.focal_length_mm) for frame in main.frames] == [(ASI, 405.0)]
+    assert [(frame.camera, frame.focal_length_mm) for frame in named.frames] == [(NIKON, 300.0)]
+    assert named.stack_path == nikon_stack
+    assert main.stack_path is None

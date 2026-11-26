@@ -118,9 +118,9 @@ describe('StarSummaryCard Target Navigation', () => {
 
     // Verify localStorage updated
     expect(window.localStorage.getItem('selectedTarget')).toBe('M 13');
-    expect(window.localStorage.getItem('appMode')).toBe('Image Processing');
-    expect(window.localStorage.getItem('astrometrics:enableAstrometryOverlay')).toBe('true');
-    expect(window.localStorage.getItem('astrometrics:imageProcessingSelectedStar')).toBe('CI* NGC 6205 KAD 656');
+    // The overlay and the star travel in the hand-off above, not in raw storage keys.
+    expect(window.localStorage.getItem('astrometrics:enableAstrometryOverlay')).toBeNull();
+    expect(window.localStorage.getItem('astrometrics:imageProcessingSelectedStar')).toBeNull();
 
     // Verify TargetContext updated
     expect(screen.getByTestId('selected-target-value').textContent).toBe('M 13');

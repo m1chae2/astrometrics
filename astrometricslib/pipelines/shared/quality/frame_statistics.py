@@ -7,6 +7,7 @@ also holds the seeded bootstrap error of a median, which the frame
 measurement and the photometry zero point both use.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -142,6 +143,7 @@ def measure_frame_input_quality(
         or "failed" (because they couldn't be read).
     """
     from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+    from astrometricslib.pipelines.shared.quality.background_measurement import BACKGROUND_LEVEL_METHOD
     from astrometricslib.pipelines.shared.quality.quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
     )
@@ -151,7 +153,13 @@ def measure_frame_input_quality(
     for frame in target.frames:
         if camera_name and camera_name.lower() not in (frame.camera or "").lower():
             continue
-        if not remeasure and frame.measurements.background_level is not None:
+        # A level of an older method is measured again: it must not be
+        # compared with a newer one (`BACKGROUND_LEVEL_METHOD`).
+        if (
+            not remeasure
+            and frame.measurements.background_level is not None
+            and frame.measurements.background_level_method == BACKGROUND_LEVEL_METHOD
+        ):
             counts["skipped"] += 1
             continue
 
@@ -164,6 +172,7 @@ def measure_frame_input_quality(
             continue
 
         frame.measurements.background_level = metrics["background_level"]
+        frame.measurements.background_level_method = BACKGROUND_LEVEL_METHOD
         if metrics["saturated_pixel_fraction"] is not None:
             frame.measurements.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
         if metrics["fwhm_px"] is not None:
@@ -186,12 +195,86 @@ def measure_frame_input_quality(
     return counts
 
 
-def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
-    """Group image statistics and check if there are matching dark frames.
+def _selection_to_match(selection: Any, kind: str, setting_text: str) -> dict[str, Any]:
+    """Turn one calibration selection into the match record a screen shows.
 
-    This groups the images by filter, ISO, and exposure time. For each group,
-    it also checks the calibration library to see if there are dark frames
-    that match those exact settings.
+    Parameters
+    ----------
+    selection : `CalibrationSelection`
+        What the library chose for the lights (frames and flags).
+    kind : `str`
+        ``"dark"``, ``"bias"`` or ``"flat"``.
+    setting_text : `str`
+        The light settings in words, such as ``"gain 100, offset 10"``.
+
+    Returns
+    -------
+    match : `dict`
+        The `CalibrationGroupMatch` fields (``count``, ``fallbacks``,
+        ``problem``). A blocking flag or an empty choice gives a ``problem``.
+    """
+    count = len(selection.frames)
+    blocking = list(selection.blocking_flags)
+    problem = ""
+    if blocking:
+        problem = "; ".join(blocking)
+    elif count == 0:
+        problem = f"no {kind} frames at {setting_text}"
+    return {"count": count, "fallbacks": [] if problem else list(selection.flags), "problem": problem}
+
+
+def _group_match(
+    calibration: Any, frames: list[Any], camera: str, exposure: float
+) -> dict[str, dict[str, Any]]:
+    """Run the stacker's own calibration selection for one group of lights.
+
+    This calls the same library selections as the stacking stage
+    (``_stack_one_batch`` in the Siril staging code), with the same inputs:
+    the camera, telescope, filter, exposure, gain, offset, binning and mean
+    sensor temperature of the lights. No matching rule is repeated here.
+
+    Parameters
+    ----------
+    calibration : `CalibrationLibrary`
+        The library of calibration frames.
+    frames : `list` [`FrameRecord`]
+        The light frames of one group.
+    camera : `str`
+        The camera name.
+    exposure : `float`
+        The exposure of the group in seconds.
+
+    Returns
+    -------
+    matches : `dict` [`str`, `dict`]
+        ``darkMatch``, ``flatMatch`` and ``biasMatch``, each a
+        `CalibrationGroupMatch` as a dictionary.
+    """
+    from astrometricslib._internal.drivers.batch_calibration import choose_batch_calibration
+
+    # This only shows the choice, and returns its fallbacks to the caller,
+    # so the flag sentences are not logged as warnings on every call.
+    chosen = choose_batch_calibration(calibration, frames, [], flag_log_level=logging.DEBUG)
+    gain, offset, binning = chosen.gain, chosen.offset, chosen.binning
+    filter_name = chosen.filter_name
+    setting_text = f"gain {gain}, offset {offset}, binning {binning}"
+    darks, biases, flats = chosen.dark, chosen.bias, chosen.flat
+    return {
+        "darkMatch": _selection_to_match(darks, "dark", f"{exposure:g} s, {setting_text}"),
+        "flatMatch": _selection_to_match(flats, "flat", f"filter {filter_name}, {setting_text}"),
+        "biasMatch": _selection_to_match(biases, "bias", setting_text),
+        "binning": binning,
+    }
+
+
+def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
+    """Group the light frames and say which calibration the stacker would use.
+
+    The lights are grouped by camera, optic, filter, gain, offset and exposure.
+    For each group, the calibration library runs the same dark, flat and bias
+    selection that the stacking stage runs, so a match here is a match when
+    stacking. A group says why when nothing matches (for example "no bias
+    frames at gain 100, offset 10, binning 1x1").
 
     Parameters
     ----------
@@ -205,14 +288,16 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
     Returns
     -------
     grouped_stats : `list` of `dict`
-        A list where each dictionary represents a group of images with the
-        same settings, and includes a count of matching dark frames.
+        One dictionary per group: ``filter``, ``iso``, ``offset``,
+        ``exposure``, ``count``, ``camera``, ``focalLengthMm`` (the optic in
+        whole millimeters, or ``None``), ``binning``, ``darks`` (the dark
+        count as text, or ``"Missing"``) and the ``darkMatch``, ``flatMatch``
+        and ``biasMatch`` records.
     """
     if not target:
         return []
 
-    aggregates = {}
-    cameras_by_group = {}
+    groups: dict[tuple[str, str, str, str, float, int | None], list[Any]] = {}
 
     for frame in target.frames:
         if frame.role != "LIGHT":
@@ -223,36 +308,33 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
         filter_str = frame.filter.name if hasattr(frame.filter, "name") else str(frame.filter)
         if filter_str == "NONE":
             filter_str = "None"
-        iso_str = str(frame.iso)
 
         try:
             exp_float = float(frame.exposure)
         except ValueError, TypeError:
             exp_float = 1.0
 
-        key = (filter_str, iso_str, exp_float)
-        aggregates[key] = aggregates.get(key, 0) + 1
-
-        if key not in cameras_by_group:
-            cameras_by_group[key] = frame.camera
+        focal_length = getattr(frame, "focal_length_mm", None)
+        optic = None if focal_length is None else round(float(focal_length))
+        key = (frame.camera, filter_str, str(frame.iso), str(frame.offset), exp_float, optic)
+        groups.setdefault(key, []).append(frame)
 
     results = []
-    sorted_keys = sorted(aggregates.keys(), key=lambda x: (x[0], x[1]))
-
-    for key in sorted_keys:
-        f, iso, e = key
-        count = aggregates[key]
-        cam = cameras_by_group.get(key, camera or "Unknown")
-
-        darks = calibration.get_dark_frames(camera=cam, exposure=e)
-
+    for key in sorted(groups, key=lambda item: (item[1], item[2], item[3], item[4], item[5] or 0)):
+        cam, filter_str, iso, offset, exposure, optic = key
+        frames = groups[key]
+        matches = _group_match(calibration, frames, cam or camera or "Unknown", exposure)
+        dark_count = matches["darkMatch"]["count"]
         results.append({
-            "filter": f,
+            "filter": filter_str,
             "iso": iso,
-            "exposure": f"{e:g}",
-            "count": count,
-            "darks": f"{len(darks)}" if darks else "Missing",
-            "camera": cam,
+            "offset": offset,
+            "exposure": f"{exposure:g}",
+            "count": len(frames),
+            "darks": f"{dark_count}" if dark_count else "Missing",
+            "camera": cam or camera or "Unknown",
+            "focalLengthMm": optic,
+            **matches,
         })
 
     return results

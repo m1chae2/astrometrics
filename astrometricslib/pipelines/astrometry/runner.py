@@ -41,12 +41,16 @@ from astrometricslib.pipelines.pipeline_base import (
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
+from astrometricslib.pipelines.shared.solved_star_list import save_solved_stars
 from astrometricslib.pipelines.shared.star_recording import (
-    _drop_unresolved_stars,
+    drop_unresolved_stars,
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
+from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_known_target,
+    resolve_target_center_hint,
+)
 from astrometricslib.pipelines.shared.target_position import (
     fill_target_position,
     has_no_fixed_position,
@@ -92,7 +96,9 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
     in SIMBAD. The solved image's center is only a fallback for a name
     SIMBAD cannot resolve or whose answer lies outside the image, and the
     target is then marked unverified (see `fill_target_position`). A
-    position already set is never changed. Moving bodies and calibration
+    position already set is never changed, but a target with a set position
+    and no SIMBAD object type gets that type (and a missing major axis)
+    from the same lookup. Moving bodies and calibration
     targets never get a fixed position. A SIMBAD failure never stops the
     run: it is logged and the fallback applies.
 
@@ -108,7 +114,11 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
     """
     if has_no_fixed_position(target.id):
         return
-    if parse_target_position(target) is not None and not target.position_unverified:
+    if (
+        parse_target_position(target) is not None
+        and not target.position_unverified
+        and (target.simbad_object_type or "").strip()
+    ):
         return
     frame_center = None
     footprint_radius = None
@@ -131,7 +141,7 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
         logger.warning("Could not look up the position of target %s: %s", target.id, lookup_error)
 
 
-def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
+def _write_solved_wcs_to_fits_header(path: str | None, context: Any, refit_applied: bool = False) -> None:
     """Write a solved WCS back into the source FITS file's header.
 
     So the next tool that opens this file (Siril, another astrometry
@@ -140,6 +150,12 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
     and replaces any sky-map keywords from an earlier solve. See
     `write_wcs_to_fits_header` for how.
 
+    A solution refit to Gaia is saved through
+    `stage.save_refit_stack_plate_solution`, which also marks the header and
+    updates the stack's viewer copy, and only when the file does not already
+    hold a refit one. A solution that was not refit never replaces one that
+    was.
+
     Parameters
     ----------
     path : `str` or `None`
@@ -147,9 +163,27 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
     context : `Any`
         The finished pipeline context. Its `wcs` attribute is the solved
         sky map, or `None` when the image was not solved.
+    refit_applied : `bool`, optional
+        True when the Gaia refit of this run was accepted, so `context.wcs`
+        is the refit solution.
     """
     if context.wcs is None or not path:
         return
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import header_is_refit_to_gaia
+    from astrometricslib.pipelines.stacking.stage import save_refit_stack_plate_solution
+
+    if refit_applied:
+        save_refit_stack_plate_solution(path, context.wcs)
+        return
+    try:
+        if header_is_refit_to_gaia(read_header(path)):
+            logger.info(
+                "The file already holds a solution refit to Gaia; this run's solver solution is not saved."
+            )
+            return
+    except (OSError, *DATA_ERRORS):
+        pass
     write_wcs_to_fits_header(path, context.wcs)
 
 
@@ -271,6 +305,29 @@ def _measure_star_fwhm_px(image: Any, target: Any = None) -> float | None:
         return None
 
 
+def _save_stack_detections(path: str, star_identifier: Any) -> None:
+    """Save the viewing star list of a stack, for the viewer's overlay.
+
+    The list goes next to the stack (see `save_run_detections`), so the
+    Detections overlay opens at once. It keeps close pairs, unlike the run's
+    own list. A failure is ignored: the viewer finds the stars itself when
+    there is no file.
+
+    Parameters
+    ----------
+    path : `str`
+        The analyzed image.
+    star_identifier : `StarIdentifier`
+        The identifier that did the run; only used to check it found stars.
+    """
+    from astrometricslib.pipelines.astrometry.processing.detections import save_run_detections
+
+    sources = getattr(star_identifier, "detected_unique_sources", None)
+    if not path or not isinstance(sources, list) or not sources:
+        return
+    save_run_detections(path)
+
+
 class AstrometryPipelineAdapter(AnalysisPipeline):
     """Adapts `AstrometryPipeline` to the shared `AnalysisPipeline`."""
 
@@ -312,7 +369,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         from astrometricslib.pipelines.astrometry.pipeline import (
             AstrometryPipeline,
         )
-        from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+        from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import (
             get_gaia_query_statistics,
             reset_gaia_query_statistics,
         )
@@ -331,10 +388,14 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         pipeline = AstrometryPipeline(drivers=request.options.get("drivers"))
         with bind_plate_solve_attempts(plate_solve_attempt_tally):
             context = pipeline.process(
-                path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
+                path,
+                attempt_plate_solving=True,
+                target_ra=target.ra,
+                target_dec=target.dec,
+                known_target=resolve_known_target(target),
             )
 
-        context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+        context.stellar_objects, star_id_breakdown = drop_unresolved_stars(
             context.stellar_objects, target_id=target.id, pipeline_name="astrometry"
         )
         # The Gaia counts are read from the identification module rather
@@ -353,7 +414,10 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         target_center_deg = resolve_target_center_hint(target)
 
         _fill_target_position(target, context, request.options.get("drivers"))
-        _write_solved_wcs_to_fits_header(path, context)
+        refinement = getattr(getattr(pipeline, "star_identifier", None), "wcs_refinement", None)
+        _write_solved_wcs_to_fits_header(path, context, bool(refinement and refinement.applied))
+        # After the header write, so the saved file's stamp is the final one.
+        _save_stack_detections(path, getattr(pipeline, "star_identifier", None))
 
         context.stellar_objects, _ = record_pipeline_stars(
             context.stellar_objects,
@@ -362,10 +426,14 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             merge_function=merge_astrometry_stellar_object,
             already_dropped=True,
         )
+        # Astrometry measures no light curve or spectrum, so the catalog
+        # keeps only the names it adds to stars already saved. Spectroscopy
+        # names its stars from this list instead (see `solved_star_list`).
+        save_solved_stars(path, context.stellar_objects)
 
-        # The stars solved and saved from the stacked image are the ones
-        # this target "has"; photometry later finds more, but only from
-        # per-frame detection, so they do not describe the stack.
+        # The stars solved from the stacked image are the ones this target
+        # "has"; photometry later finds more, but only from per-frame
+        # detection, so they do not describe the stack.
         target.number_of_stars = len(context.stellar_objects)
 
         return Result(
@@ -401,6 +469,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,
                 **_refinement_metrics(result.context.wcs_refinement),
                 astrometry_flags=list(result.context.astrometry_flags),
+                gaia_tiles_count=result.context.gaia_tiles_count,
+                gaia_tiles_missing_count=result.context.gaia_tiles_missing_count,
                 plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
                 star_fwhm_px=_measure_star_fwhm_px(result.context.image, request.target),
                 plate_solve_succeeded=result.context.wcs is not None,

@@ -310,8 +310,8 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.state == DepthGoalState.WILL_NOT_HELP
     assert result.message == (
-        "More integration won't help much here. "
-        "The noise has a fixed part we can't place yet. Retake flats first."
+        "Additional integration will reduce noise only slightly. "
+        "Part of the noise is fixed, from an unidentified source. Retake flats first."
     )
     assert result.seconds_to_goal is None
 
@@ -319,26 +319,25 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
 @pytest.mark.parametrize(
     ("cause", "sentence"),
     [
-        (FixedPatternCause.FLATS, "The flats no longer match the optics; new flats should help."),
+        (FixedPatternCause.FLATS, "The flats no longer match the optics. New flats should reduce it."),
         (
             FixedPatternCause.NEAR_TARGET,
-            "Faint light from the object itself fills the sky around it, "
-            "so the noise there won't average away.",
+            "Faint light from the target fills the surrounding sky and does not average away.",
         ),
-        (FixedPatternCause.BANDING, "The frames carry a fixed stripe pattern."),
+        (FixedPatternCause.BANDING, "The frames share a fixed stripe pattern."),
         (
             FixedPatternCause.GRADIENT,
-            "The sky brightness has a slope across the frame that stays in every frame.",
+            "A sky brightness gradient is present in every frame.",
         ),
         (
             FixedPatternCause.CALIBRATION_MASTERS,
-            "Noise in the calibration frames is the same in every frame.",
+            "Noise from the calibration masters repeats in every frame.",
         ),
         (
             FixedPatternCause.SKY_STRUCTURE,
-            "The sky has fixed structure, likely faint light in the background.",
+            "The sky has fixed structure, likely faint background light.",
         ),
-        (FixedPatternCause.UNPLACED, "The noise has a fixed part we can't place yet."),
+        (FixedPatternCause.UNPLACED, "Part of the noise is fixed, from an unidentified source."),
     ],
 )
 def test_each_cause_gives_its_one_sentence(
@@ -352,7 +351,7 @@ def test_each_cause_gives_its_one_sentence(
     ]
     first = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
     second = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
-    assert first.message == f"More integration won't help much here. {sentence}"
+    assert first.message == f"Additional integration will reduce noise only slightly. {sentence}"
     assert first.message == second.message
 
 
@@ -369,7 +368,7 @@ def test_the_practical_limit_statement_also_carries_the_cause(
         )
     ])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
-    assert result.message.endswith("The frames carry a fixed stripe pattern.")
+    assert result.message.endswith("The frames share a fixed stripe pattern.")
 
 
 def test_the_practical_limit_also_means_frames_will_not_help(

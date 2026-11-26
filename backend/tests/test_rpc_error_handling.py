@@ -232,7 +232,7 @@ async def test_the_request_id_tags_the_log_lines_of_the_call(
     registered_methods["test:tagged"] = handler
     # `configure_logging` puts this filter on the handlers it installs.
     caplog.handler.addFilter(ContextFilter())
-    with caplog.at_level("WARNING", logger="backend.routers.rpc_router"):
+    with caplog.at_level("INFO", logger="backend.routers.rpc_router"):
         response = await rpc_router.handle_rpc(
             RPCRequest(method="test:tagged", id=4, params={"target": "M 99"})
         )
@@ -245,7 +245,7 @@ async def test_the_request_id_tags_the_log_lines_of_the_call(
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "error",
-    [ConfigurationError("Real host refused."), InvalidArgumentError("bad"), NotFoundError("gone")],
+    [ConfigurationError("Real host refused."), InvalidArgumentError("bad")],
 )
 async def test_a_client_error_is_logged_as_one_warning_line(
     registered_methods: dict, caplog: pytest.LogCaptureFixture, error: Exception
@@ -260,6 +260,33 @@ async def test_a_client_error_is_logged_as_one_warning_line(
     with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
         await rpc_router.handle_rpc(RPCRequest(method="test:client", id=5))
     assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert caplog.records[0].exc_info is None
+
+
+@pytest.mark.anyio
+async def test_a_not_found_answer_is_logged_as_one_info_line(
+    registered_methods: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Log a lookup of something that is not there at INFO, not as a warning.
+
+    The screen asks for a job or stack that may be gone; the caller gets the
+    `not_found` code and decides what to show, so it is not a problem.
+    """
+
+    def handler() -> None:
+        """Raise a not-found error.
+
+        Raises
+        ------
+        NotFoundError
+            Always.
+        """
+        raise NotFoundError("No job with id 'gone'.")
+
+    registered_methods["test:missing"] = handler
+    with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
+        await rpc_router.handle_rpc(RPCRequest(method="test:missing", id=7))
+    assert [record.levelname for record in caplog.records] == ["INFO"]
     assert caplog.records[0].exc_info is None
 
 

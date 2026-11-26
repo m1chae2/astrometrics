@@ -13,13 +13,18 @@ import numpy as np
 
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.measurement import QualityMeasurement
-from astrometricslib.models.quality.quality_summary import PhotometryPipelineQualityMetrics
+from astrometricslib.models.quality.quality_summary import (
+    PhotometryPipelineQualityMetrics,
+    SessionScintillationRecord,
+    SessionTieRecord,
+)
 from astrometricslib.pipelines.photometry.post_processing.record_noise_budget import noise_budget_measurements
 from astrometricslib.pipelines.photometry.post_processing.record_period_sensitivity import (
     window_alias_measurements,
 )
 from astrometricslib.pipelines.photometry.post_processing.record_quality import (
     PhotometryRunInputs,
+    TargetCrowding,
     photometry_run_gates,
     photometry_run_measurements,
 )
@@ -139,6 +144,44 @@ def photometry_fixture_inputs() -> PhotometryRunInputs:
         centroid_shift_summaries=FIXTURE_CENTROID_SUMMARIES,
         stars_with_scatter=80,
         noise_model_star_count=60,
+        saturated_points_removed=12,
+        stars_with_saturated_points=3,
+        session_ties=(
+            SessionTieRecord(
+                session_id="night-1", reference_session_id="night-1", status="reference", tie_star_count=60
+            ),
+            SessionTieRecord(
+                session_id="night-2",
+                reference_session_id="night-1",
+                status="tied",
+                factor=1.96,
+                uncertainty=0.004,
+                spread=0.03,
+                tie_star_count=45,
+            ),
+        ),
+        session_scintillation=(
+            SessionScintillationRecord(
+                session_id="night-1",
+                source="measured",
+                coefficient=1.4,
+                measured_coefficient=1.4,
+                predicted_young_mmag=2.6,
+                used_mmag=3.6,
+                member_count=20,
+                frame_count=50,
+            ),
+            SessionScintillationRecord(
+                session_id="night-2",
+                source="fallback",
+                coefficient=1.5,
+                predicted_young_mmag=3.2,
+                used_mmag=4.8,
+                member_count=3,
+                frame_count=50,
+                reason="3 comparison star(s) are usable and 5 are needed",
+            ),
+        ),
         median_flux_error_mag=0.02,
         errors_assume_unit_gain=False,
         session_zero_points=(
@@ -149,7 +192,7 @@ def photometry_fixture_inputs() -> PhotometryRunInputs:
 
 
 def photometry_fixture_gates() -> list[GateResult]:
-    """Build the eleven gates of the healthy run.
+    """Build the twelve gates of the healthy run.
 
     Returns
     -------
@@ -174,6 +217,7 @@ def photometry_fixture_gates() -> list[GateResult]:
         noise_model_stars=60,
         noise_floor_mag=0.01,
         median_flux_error_mag=0.02,
+        target_crowding=TargetCrowding("Star_1", False, 40.0, 0.01),
     )
 
 

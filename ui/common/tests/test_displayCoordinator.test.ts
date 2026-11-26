@@ -84,7 +84,8 @@ describe('displayCoordinator', () => {
     expect(waiting).toHaveLength(1);
     expect(waiting[0].payload).toBe('HD 151023');
     expect(waiting[0].element).toBe('spectrumViewer');
-    expect(window.localStorage.getItem('appMode')).toBe('Astronomy Manager');
+    // The app saves the display it switched to; the coordinator writes no storage key itself.
+    expect(window.localStorage.getItem('appMode')).toBeNull();
 
     window.removeEventListener('astrometrics:modeChange', modeChangeSpy);
   });

@@ -60,9 +60,8 @@
 }
 
 .popover-select__menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
+  /* Drawn in a portal on document.body; PopoverSelect.tsx sets top, left and width from the button. */
+  position: fixed;
   min-width: 240px;
   max-height: 320px;
   overflow-y: auto;
@@ -74,7 +73,7 @@
   border: 1px solid var(--border-control);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card-lifted);
-  z-index: 110;
+  z-index: var(--z-popover);
 }
 
 .popover-select__option {
@@ -129,14 +128,54 @@
   font-size: var(--button-font-size-small);
 }
 
-/* Above: the menu opens upward, for pickers at the bottom of a panel. */
-.popover-select--above .popover-select__menu {
-  top: auto;
-  bottom: calc(100% + 8px);
+/* Compact menu: the look of the toolbars' other menus (such as the Planetarium's Layers menu):
+   small text, tight rows, a small highlight, as wide as its longest entry, and it scrolls when long. */
+.popover-select__menu--compact {
+  min-width: 0;
+  max-height: var(--compact-menu-max-height);
+  padding: var(--space-2) var(--space-2);
+  gap: 1px;
+  border-radius: var(--radius-md);
 }
 
-/* fill: the picker takes the whole width of its container, and the menu matches the button. */
-.popover-select--fill,
+.popover-select__menu--compact .popover-select__option {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--compact-font-size);
+  line-height: 1.3;
+  border-radius: var(--radius-sm);
+}
+
+.popover-select__menu--compact .popover-select__detail {
+  font-size: var(--small-font-size);
+}
+
+/* A small heading over a group of entries, like the Layers menu's "Sky Background". */
+.popover-select__group {
+  padding: var(--space-1) var(--space-2) 2px;
+  color: var(--text-dim);
+  font-size: var(--tiny-font-size);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.popover-select__menu--compact .popover-select__group {
+  font-size: var(--small-font-size);
+}
+
+.popover-select__group:not(:first-child) {
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--border-control);
+  padding-top: var(--space-2);
+}
+
+/* fill: the picker takes the whole width of its container; the portaled menu is sized in code. */
+.popover-select--fill {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
 .popover-select--fill .popover-select__popover-container {
   flex: 1;
   min-width: 0;
@@ -148,8 +187,7 @@
   min-width: 0;
 }
 
-.popover-select--fill .popover-select__menu {
+.popover-select__menu--fill {
   min-width: 0;
-  width: 100%;
   box-sizing: border-box;
 }

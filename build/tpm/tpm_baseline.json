@@ -335,7 +335,7 @@
           "breach_ratio": 1.5,
           "slack": 150.0
         },
-        "rpc_p95[target:get_targets]": {
+        "rpc_p95[target:get]": {
           "unit": "ms",
           "baseline": 224.44999999925494,
           "watch_ratio": 1.25,
@@ -733,7 +733,7 @@
           "breach_ratio": 1.5,
           "slack": 50.0
         },
-        "rpc_p95[target:get_targets]": {
+        "rpc_p95[target:get]": {
           "unit": "ms",
           "baseline": 164.62500000000728,
           "watch_ratio": 1.25,
@@ -1131,7 +1131,7 @@
           "breach_ratio": 1.5,
           "slack": 50.0
         },
-        "rpc_p95[target:get_targets]": {
+        "rpc_p95[target:get]": {
           "unit": "ms",
           "baseline": 315.5499999999738,
           "watch_ratio": 1.25,
@@ -1304,7 +1304,7 @@
           "breach_ratio": 1.5,
           "slack": 50.0
         },
-        "first_rpc[target:get_targets]": {
+        "first_rpc[target:get]": {
           "unit": "ms",
           "baseline": 37.100000001490116,
           "watch_ratio": 1.25,
@@ -1599,7 +1599,7 @@
           "breach_ratio": 1.5,
           "slack": 50.0
         },
-        "rpc_p95[target:get_targets]": {
+        "rpc_p95[target:get]": {
           "unit": "ms",
           "baseline": 162.69999999552965,
           "watch_ratio": 1.25,
@@ -2074,7 +2074,7 @@
           "breach_ratio": 1.5,
           "slack": 50.0
         },
-        "first_rpc[target:get_targets]": {
+        "first_rpc[target:get]": {
           "unit": "ms",
           "baseline": 138.20000000298023,
           "watch_ratio": 1.25,
@@ -2369,7 +2369,7 @@
           "breach_ratio": 1.5,
           "slack": 50.0
         },
-        "rpc_p95[target:get_targets]": {
+        "rpc_p95[target:get]": {
           "unit": "ms",
           "baseline": 855.7249999996275,
           "watch_ratio": 1.25,

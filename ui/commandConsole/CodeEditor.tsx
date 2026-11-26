@@ -1,96 +1,83 @@
 /**
  * @file CodeEditor.tsx
- * @description Code editor component built on CodeMirror 6 with Python syntax support and action toolbar.
+ * @description The Command Console's code editor, built on CodeMirror 6 with Python colors.
+ * Ctrl+Enter (Cmd+Enter on a Mac) runs the script. The Run and Save buttons live in the
+ * console's toolbar, not here. Long lines wrap onto the next line, so a narrow window
+ * needs no sideways scrolling.
  */
 import React from 'react';
-import CodeMirror from '@uiw/react-codemirror';
+import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
-import { Button } from '../common/components/Button';
 
+/** The editor's extensions: Python colors, and long lines wrapped to the editor's width. */
+const EDITOR_EXTENSIONS = [python(), EditorView.lineWrapping];
+
+/** Props for CodeEditor. */
 interface CodeEditorProps {
+  /** The code shown in the editor. */
   value: string;
+  /** Called with the new code after each change. */
   onChange: (value: string) => void;
+  /** Called when you press Ctrl+Enter, to run the script. */
   onRun: () => void;
-  onSave?: () => void;
-  onClear?: () => void;
-  filename?: string;
-  isRunning?: boolean;
 }
 
-export const CodeEditor: React.FC<CodeEditorProps> = ({
-  value,
-  onChange,
-  onRun,
-  onSave,
-  onClear,
-  filename = 'untitled.py',
-  isRunning = false,
-}) => {
-  return (
-    <div className="code-editor-pane">
-      <div className="code-editor-toolbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-            {filename}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {onClear && (
-            <Button variant="secondary" size="small" onClick={onClear}>
-              Clear
-            </Button>
-          )}
-          {onSave && (
-            <Button variant="secondary" size="small" onClick={onSave}>
-              Save Script
-            </Button>
-          )}
-          <Button
-            variant="primary"
-            size="small"
-            onClick={onRun}
-            disabled={isRunning}
-          >
-            {isRunning ? 'Running...' : 'Run Script (Ctrl+Enter)'}
-          </Button>
-        </div>
-      </div>
+/**
+ * Shows the code editor.
+ *
+ * @param props See `CodeEditorProps`.
+ * @returns The editor, filling its panel.
+ */
+export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, onRun }) => {
+  /**
+   * Runs the script on Ctrl+Enter (Cmd+Enter on a Mac). The key is caught on its way down to
+   * the editor, so CodeMirror does not also add a blank line.
+   *
+   * @param event The key press.
+   */
+  const handleKeyDownCapture = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      onRun();
+    }
+  };
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        <CodeMirror
-          value={value}
-          height="100%"
-          theme="dark"
-          extensions={[python()]}
-          onChange={(val) => onChange(val)}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            highlightSpecialChars: true,
-            history: true,
-            foldGutter: true,
-            drawSelection: true,
-            dropCursor: true,
-            allowMultipleSelections: true,
-            indentOnInput: true,
-            syntaxHighlighting: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
-            rectangularSelection: true,
-            crosshairCursor: true,
-            highlightActiveLine: true,
-            highlightSelectionMatches: true,
-            closeBracketsKeymap: true,
-            defaultKeymap: true,
-            searchKeymap: true,
-            historyKeymap: true,
-            foldKeymap: true,
-            completionKeymap: true,
-            lintKeymap: true,
-          }}
-        />
-      </div>
+  return (
+    <div className="code-editor-pane" onKeyDownCapture={handleKeyDownCapture}>
+      <CodeMirror
+        value={value}
+        height="100%"
+        theme="dark"
+        extensions={EDITOR_EXTENSIONS}
+        onChange={(val) => onChange(val)}
+        basicSetup={{
+          lineNumbers: true,
+          highlightActiveLineGutter: true,
+          highlightSpecialChars: true,
+          history: true,
+          foldGutter: true,
+          drawSelection: true,
+          dropCursor: true,
+          allowMultipleSelections: true,
+          indentOnInput: true,
+          syntaxHighlighting: true,
+          bracketMatching: true,
+          closeBrackets: true,
+          autocompletion: true,
+          rectangularSelection: true,
+          crosshairCursor: true,
+          highlightActiveLine: true,
+          highlightSelectionMatches: true,
+          closeBracketsKeymap: true,
+          defaultKeymap: true,
+          searchKeymap: true,
+          historyKeymap: true,
+          foldKeymap: true,
+          completionKeymap: true,
+          lintKeymap: true,
+        }}
+      />
     </div>
   );
 };

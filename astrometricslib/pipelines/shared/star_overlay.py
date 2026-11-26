@@ -15,8 +15,9 @@ column and row. Only a plate solution counts: the sky-map keywords a capture
 program writes are the position the mount was told to point at, and stars
 placed with them can sit tens of pixels off. Such an image is treated as
 having no WCS, with a reason that says so. Stars that land outside the image
-are left out. Files ending in ``.fits``, ``.fit`` or ``.fts`` (any case) are
-read.
+are left out. The pixels are worked out from 0 (as Astropy and the saved
+detection centers count) and given 1-based, as in FITS and DS9. Files ending
+in ``.fits``, ``.fit`` or ``.fts`` (any case) are read.
 
 Two passes find the stars:
 
@@ -42,10 +43,14 @@ Star clusters and ``Star_<n>`` field detections are never labeled.
 import logging
 from typing import Any
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    header_is_plate_solved,
+    read_header,
+)
 from astrometricslib.models.catalog_queries import OverlayStar
 from astrometricslib.models.stellar_source import StellarObject, has_catalog_magnitude
-from astrometricslib.pipelines.shared.session_identification import header_is_plate_solved
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.star_catalog_queries import (
     POSITION_ONLY_STAR_ID_PREFIX,
     StarQuery,
@@ -143,8 +148,6 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
     """
     if not image_path or not str(image_path).lower().endswith(FITS_SUFFIXES):
         return None, None, None, None
-    from astropy.wcs import WCS
-
     width = height = wcs = None
     try:
         header = read_header(image_path)
@@ -156,14 +159,11 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
     if header.get("NAXIS2") is not None:
         height = int(header["NAXIS2"])
     reason = None
-    try:
-        candidate = WCS(header)
-        if candidate.is_celestial and header_is_plate_solved(header):
-            wcs = candidate
-        elif candidate.is_celestial:
-            reason = POINTING_ONLY_REASON
-    except DATA_ERRORS:
-        wcs = None
+    candidate = celestial_wcs(header)
+    if candidate is not None and header_is_plate_solved(header):
+        wcs = candidate
+    elif candidate is not None:
+        reason = POINTING_ONLY_REASON
     return width, height, wcs, reason
 
 
@@ -243,8 +243,8 @@ def _summary_pass(
             OverlayStar(
                 id=star_id,
                 name=str(row["name"] or star_id),
-                x=round(pixel[0], 1),
-                y=round(pixel[1], 1),
+                x=round(pixel[0] + 1.0, 1),
+                y=round(pixel[1] + 1.0, 1),
                 spectral_type=spectral_type,
                 is_catalog_identified=True,
                 reference_width=width,
@@ -337,8 +337,8 @@ def _record_pass(
         OverlayStar(
             id=star.id,
             name=str(star.name or star.id),
-            x=round(pixel[0], 1),
-            y=round(pixel[1], 1),
+            x=round(pixel[0] + 1.0, 1),
+            y=round(pixel[1] + 1.0, 1),
             spectral_type=str(star.stellar_spectral_type or star.spectral_type or ""),
             is_catalog_identified=bool(star.is_catalog_identified),
             reference_width=width,
@@ -354,7 +354,9 @@ def _saved_centers_fit(target: Any, image_path: str | None, reference_path: str 
 
     The centers carry no tag of the image they were measured on. They are
     trusted only when the image is the target's current stack and that is
-    the target's only stack, so no other image could have supplied them.
+    the target's only stack, so no other image could have supplied them. A
+    stack saved turned by a quarter turn (header card ``QTURN`` not 0) is not
+    trusted: the centers may have been saved before the turn.
 
     Returns
     -------
@@ -365,6 +367,14 @@ def _saved_centers_fit(target: Any, image_path: str | None, reference_path: str 
     if not image_path:
         return True
     if image_path != reference_path:
+        return False
+    # The centers were saved on the stack's pixels before it was turned by a
+    # quarter turn to put north near the top, so they do not fit the turned
+    # file. The stars are then placed from the plate solution instead.
+    try:
+        if read_header(image_path).get("QTURN"):
+            return False
+    except FITS_READ_ERRORS:
         return False
     stacking = getattr(target, "stacking", None)
     configurations = getattr(stacking, "stacks_by_configuration", None) or {}
@@ -416,8 +426,8 @@ def build_overlay(
         if rows:
             placed = _summary_pass(rows, wcs, width, height, limit)
             if placed:
-                records = storage.get_by_ids("stellar_catalog", [star.id for star in placed])
-                radii = {record.id: record.radius_px for record in records}
+                # Only the radius is read, never the stars' full records.
+                radii = storage.read_star_radii([star.id for star in placed])
                 for star in placed:
                     star.radius_px = radii.get(star.id)
                 return placed, None

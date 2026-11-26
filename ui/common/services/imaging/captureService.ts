@@ -43,7 +43,7 @@ export interface CaptureRequest {
  *
  * Returns the backend's job identifier rather than waiting for the frames:
  * the sequence runs asynchronously and its progress is polled through
- * `imaging:get_active_jobs`.
+ * `jobs:query` (the app-wide active-jobs feed).
  *
  * @param request Capture parameters.
  * @return The job id, or null if the request could not be started.

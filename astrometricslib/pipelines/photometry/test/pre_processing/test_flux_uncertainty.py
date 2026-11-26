@@ -33,6 +33,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     aperture_flux_error_adu,
     measure_aperture_photometry,
 )
+from astrometricslib.pipelines.shared.quality.clipped_frames import frame_is_clipped_at_zero
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits, make_photometry_frame
 
 SATURATION_ADU = 65535.0
@@ -343,3 +344,44 @@ def test_existing_profiles_without_gain_still_load() -> None:
 
     assert profile.sensor_noise == ()
     assert profile.has_unkeyed_noise_values is False
+
+
+OFFSET_ZERO_HEADER = {**SETTING_HEADER, "OFFSET": 0}
+
+
+def test_an_unclipped_offset_zero_frame_uses_the_offset_ten_entry_and_says_so() -> None:
+    """A frame with no zeros gets the nearby offset's numbers, with a note."""
+    profile = _profile_with_noise_at_gain_zero()
+    sky_frame = np.full((20, 20), 400.0)
+
+    noise = resolve_detector_noise(
+        profile, OFFSET_ZERO_HEADER, clipped_at_zero=frame_is_clipped_at_zero(sky_frame)
+    )
+
+    assert (noise.gain_e_per_adu, noise.read_noise_e) == (1.1, 3.2)
+    assert not noise.gain_is_assumed and not noise.read_noise_is_assumed
+    assert noise.profile_gap_reason is None
+    assert "offset 10" in (noise.offset_fallback_note or "")
+    assert "offset 0" in (noise.offset_fallback_note or "")
+
+
+def test_a_frame_clipped_at_zero_still_gets_the_gap_and_no_note() -> None:
+    """A frame with many exact zeros gets only the gap reason."""
+    profile = _profile_with_noise_at_gain_zero()
+    clipped_frame = np.zeros((20, 20))
+    clipped_frame[:5] = 400.0
+
+    noise = resolve_detector_noise(
+        profile, OFFSET_ZERO_HEADER, clipped_at_zero=frame_is_clipped_at_zero(clipped_frame)
+    )
+
+    assert noise.gain_is_assumed and noise.read_noise_is_assumed
+    assert "cannot stand in" in (noise.profile_gap_reason or "")
+    assert noise.offset_fallback_note is None
+
+
+def test_an_exact_entry_gives_no_fallback_note() -> None:
+    """A frame at the entry's own offset has nothing to explain."""
+    noise = resolve_detector_noise(_profile_with_noise_at_gain_zero(), SETTING_HEADER, clipped_at_zero=False)
+
+    assert noise.offset_fallback_note is None

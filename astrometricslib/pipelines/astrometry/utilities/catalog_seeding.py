@@ -3,11 +3,13 @@
 Attempting to download star data while processing 6 images at
 once overwhelms the online database and causes disconnects. This tool
 looks at all photos, figures out where they are pointing, and
-downloads the stars for those areas one by one before starting the
-heavy lifting.
+downloads the Gaia sky tiles around those places one field at a time
+before starting the heavy lifting. Each field is filled to the depth its
+frames' equipment predicts (see `gaia_depth.predict_gaia_depth_from_header`).
 """
 
 import logging
+import math
 import sqlite3
 import time
 from collections.abc import Callable
@@ -17,35 +19,32 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
-from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.errors import AstrometricsError, ExternalServiceError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
-    HardcodedKind,
     ParameterRole,
     ParameterSource,
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.astrometry.processing.gaia_depth import predict_gaia_depth_from_header
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_FIELD_RADIUS_DEGREES",
-    "DEFAULT_MAGNITUDE_LIMIT",
     "derive_field_centers",
+    "seed_field_tiles",
     "seed_local_gaia_catalog",
 ]
 
 
 # A 0.8-degree radius covers the widest field this library is used with:
 # the ASI533MM's 3008 pixels at 1.9153 arcsec/pixel span 1.6 degrees, so
-# a half-diagonal of 0.8 degrees reaches every corner. It also matches
-# the radius already present in every `cached_regions` row written by
-# `astrometry_pipeline`, so seeded regions share the existing key format
-# rather than creating a second, near-duplicate set.
+# a half-diagonal of 0.8 degrees reaches every corner.
 # Stands for the radius of the catalog download around a field center. It
 # follows the field of view: the value is a factor times the field of view
 # the run measured (0.8 on the reference setup).
@@ -59,22 +58,6 @@ DEFAULT_FIELD_RADIUS_DEGREES = TunedParameter(
     basis=RunBasis.FIELD_OF_VIEW_DEG,
     reference_value=0.8,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
-    register_entry="AST-D20",
-)
-
-# Gaia DR3 is essentially complete to G=20, but sources fainter than the
-# stacks' own detection limit only inflate the cache. G=18 is the
-# threshold `star_identifier._seed_gaia_cache_for_field` has always
-# used; keeping it identical means a seeded region and an
-# opportunistically cached one hold the same population.
-DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
-    name="astrometry.default_magnitude_limit",
-    default=18.0,
-    unit="magnitude",
-    description="Faintest Gaia G magnitude stored for a seeded field.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D20",
 )
 
@@ -213,7 +196,9 @@ def derive_field_centers(
     Returns
     -------
     field_centers : `list` [`dict`]
-        A clean list of the unique sky coordinates needed to download.
+        A clean list of the unique sky coordinates needed to download. Each
+        also has ``gaia_depth``: the deepest Gaia G magnitude its frames'
+        equipment predicts.
     """
     if separation_threshold_degrees is None:
         separation_threshold_degrees = default_deduplication_separation_degrees()
@@ -239,10 +224,11 @@ def derive_field_centers(
 
             # A pointing of exactly (0, 0) is the placeholder written
             # when a mount reports nothing, not a real field in Cetus.
-            # `_seed_gaia_cache_for_field` rejects it too.
-            # ruff: ignore[float-equality-comparison]
-            if right_ascension_degrees == 0.0 and declination_degrees == 0.0:
+            if math.isclose(right_ascension_degrees, 0.0, abs_tol=1e-9) and math.isclose(
+                declination_degrees, 0.0, abs_tol=1e-9
+            ):
                 continue
+            gaia_depth = float(predict_gaia_depth_from_header(header).query_depth)
 
             for existing_center in field_centers:
                 if (
@@ -255,6 +241,7 @@ def derive_field_centers(
                     <= separation_threshold_degrees
                 ):
                     existing_center["frames_examined"] += 1
+                    existing_center["gaia_depth"] = max(existing_center["gaia_depth"], gaia_depth)
                     if target_id not in existing_center["target_ids"]:
                         existing_center["target_ids"].append(target_id)
                     break
@@ -264,6 +251,7 @@ def derive_field_centers(
                     "declination_deg": declination_degrees,
                     "target_ids": [target_id],
                     "frames_examined": 1,
+                    "gaia_depth": gaia_depth,
                 })
 
     return field_centers
@@ -291,8 +279,8 @@ def seed_local_gaia_catalog(
         How wide of an area to download around each spot. Defaults to
         `DEFAULT_FIELD_RADIUS_DEGREES`.
     magnitude_limit : `float`, optional
-        How dim of a star we care about (ignore the super faint ones).
-        Defaults to `DEFAULT_MAGNITUDE_LIMIT`.
+        How dim of a star to store. Defaults to each field's predicted
+        depth (``gaia_depth`` of `derive_field_centers`).
     request_delay_seconds : `float`, optional
         How long to wait between downloads so we don't overwhelm the server.
     max_attempts : `int`, optional
@@ -310,8 +298,6 @@ def seed_local_gaia_catalog(
 
     if radius_degrees is None:
         radius_degrees = resolve(DEFAULT_FIELD_RADIUS_DEGREES).value
-    if magnitude_limit is None:
-        magnitude_limit = resolve(DEFAULT_MAGNITUDE_LIMIT).value
 
     field_centers = derive_field_centers(targets)
     report: dict[str, Any] = {
@@ -327,7 +313,8 @@ def seed_local_gaia_catalog(
     sources_before = coverage_before["source_count"]
 
     for field_index, field_center in enumerate(field_centers):
-        field_result = _seed_one_field(field_center, radius_degrees, magnitude_limit, max_attempts)
+        depth = field_center.get("gaia_depth") if magnitude_limit is None else magnitude_limit
+        field_result = _seed_one_field(field_center, radius_degrees, depth, max_attempts)
 
         if field_result["status"] == "seeded":
             report["fields_seeded"] += 1
@@ -354,10 +341,58 @@ def seed_local_gaia_catalog(
     return report
 
 
+def seed_field_tiles(
+    right_ascension_degrees: float, declination_degrees: float, radius_degrees: float, depth: float | None
+) -> int:
+    """Fill the Gaia tiles of one circle of sky in the local cache.
+
+    Parameters
+    ----------
+    right_ascension_degrees, declination_degrees : `float`
+        The circle's center, in degrees.
+    radius_degrees : `float`
+        The circle's radius, in degrees.
+    depth : `float` or `None`
+        The Gaia G magnitude to fill to. `None` uses the offline default
+        depth of the star identifier.
+
+    Returns
+    -------
+    star_count : `int`
+        How many cached stars the circle's complete tiles hold.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the run may not go online, or some tiles are still not complete.
+    """
+    from astrometricslib._internal.drivers import catalog_store
+    from astrometricslib._internal.drivers.sky_tiles import tiles_for_cone
+    from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import load_field_gaia_stars
+    from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import (
+        GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        make_gaia_tile_fetcher,
+    )
+
+    if depth is None:
+        depth = float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value)
+    level = int(resolve(catalog_store.GAIA_TILE_LEVEL).value)
+    tiles = tiles_for_cone(right_ascension_degrees, declination_degrees, radius_degrees, level)
+    fetch, reason = make_gaia_tile_fetcher()
+    if fetch is None:
+        raise ExternalServiceError(f"No Gaia download: {reason}.")
+    field = load_field_gaia_stars(None, tiles, depth, fetch)
+    if field.missing_tiles:
+        raise ExternalServiceError(
+            f"{len(field.missing_tiles)} of {len(tiles)} Gaia tiles are not complete to G < {depth:.1f}."
+        )
+    return 0 if field.table is None else len(field.table)
+
+
 def _seed_one_field(
     field_center: dict[str, Any],
     radius_degrees: float,
-    magnitude_limit: float,
+    magnitude_limit: float | None,
     max_attempts: int,
 ) -> dict[str, Any]:
     """Try to seed the Gaia cache for one field, retrying on failure.
@@ -368,8 +403,6 @@ def _seed_one_field(
         The outcome for this field: its coordinates, target ids,
         `status` ("seeded" or "failed"), source count, and any error.
     """
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-
     right_ascension_degrees = field_center["right_ascension_deg"]
     declination_degrees = field_center["declination_deg"]
     field_result: dict[str, Any] = {
@@ -383,11 +416,8 @@ def _seed_one_field(
 
     for attempt_number in range(1, max_attempts + 1):
         try:
-            cached_count = StarIdentifier._seed_gaia_cache_for_field(
-                right_ascension_degrees,
-                declination_degrees,
-                radius_deg=radius_degrees,
-                max_magnitude=magnitude_limit,
+            cached_count = seed_field_tiles(
+                right_ascension_degrees, declination_degrees, radius_degrees, magnitude_limit
             )
             field_result["status"] = "seeded"
             field_result["sources"] = int(cached_count or 0)

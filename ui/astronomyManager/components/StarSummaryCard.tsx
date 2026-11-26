@@ -6,8 +6,7 @@
 import React from 'react';
 import '../styles/astronomyManager.css';
 import {
-    describePatternBadges,
-    describeStarTypeBadges,
+    describeAliases,
     formatCatalogMagnitude,
     formatDeclinationSexagesimal,
     formatRightAscensionSexagesimal,
@@ -17,12 +16,18 @@ import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { Button } from '../../common/components/Button';
 import { Badge } from '../../common/components/Badge';
+import { StarBadges } from '../../common/components/StarBadges';
+import { useArrivedFromImage } from '../../common/hooks/useArrivedFromImage';
+import { loadImageView, RETURN_TO_IMAGE_ACTION } from '../../common/utils/imageViewStore';
+import { planBackToImage } from '../utils/backToImage';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
     astronomyData?: any;
     /** Currently selected star identifier. */
     starId?: string;
+    /** The target selected in the Targets list, used by "Back to image" when the star belongs to several targets. */
+    selectedTargetId?: string;
 }
 
 /**
@@ -50,6 +55,10 @@ function formatCoordinates(ra?: any, dec?: any): string {
  * @param dec Declination in degrees.
  * @param hasSpectra Whether spectroscopy data exists for this star.
  * @param hasPhotometry Whether photometry data exists for this star.
+ * @param card The star's card fields this display already holds (magnitude, whether it is a
+ *   catalog magnitude, and spectral type), so the Planetarium's card opens complete at once, and
+ *   the target picked in the Targets list (`targetId`), so the Planetarium opens that target's
+ *   star list with the star picked in it.
  * @returns {void}
  */
 function locateInPlanetarium(
@@ -58,12 +67,13 @@ function locateInPlanetarium(
     ra: number,
     dec: number,
     hasSpectra: boolean,
-    hasPhotometry: boolean
+    hasPhotometry: boolean,
+    card: { magnitude?: number; hasCatalogMagnitude?: boolean; spectralType?: string; targetId?: string } = {}
 ): void {
     navigateToElement({
         targetDisplay: 'Planetarium',
         action: 'locateStar',
-        payload: { id, name, ra, dec, hasSpectra, hasPhotometry },
+        payload: { id, name, ra, dec, hasSpectra, hasPhotometry, type: 'star', ...card },
     });
 }
 
@@ -85,17 +95,13 @@ function navigateToTarget(
     if (!targetId) return;
     try {
         window.localStorage.setItem('selectedTarget', targetId);
-        if (selectedStarId) {
-            window.localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectedStarId);
-        }
-        window.localStorage.setItem('astrometrics:enableAstrometryOverlay', 'true');
     } catch {
         // Ignore localStorage access failures (e.g. in private browsing)
     }
     setSelectedTarget?.(targetId);
     setPendingTarget?.(targetId);
 
-    navigateToElement({
+    void navigateToElement({
         targetDisplay: 'Image Processing',
         targetElement: 'fitsViewer',
         action: 'targetSelected',
@@ -105,14 +111,6 @@ function navigateToTarget(
             type: 'info',
             title: 'Targets',
         },
-    }).then((result) => {
-        if (!result.handledRemotely) {
-            try {
-                window.localStorage.setItem('appMode', 'Image Processing');
-            } catch {
-                // Ignore
-            }
-        }
     });
 }
 
@@ -122,8 +120,11 @@ function navigateToTarget(
 export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     astronomyData,
     starId,
+    selectedTargetId = '',
 }) => {
     const targetContext = useOptionalTargetContext();
+    // Set when the person came here by clicking a star in the Image Processing picture.
+    const arrivedFromImage = useArrivedFromImage();
 
     if (!starId && !astronomyData) {
         return null;
@@ -138,28 +139,37 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
     const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
     const catalogMagnitudeText = formatCatalogMagnitude(astronomyData ?? {});
-    const typeBadges = describeStarTypeBadges(spectralType, astronomyData?.spectroscopy);
-    const patternBadges = describePatternBadges(astronomyData?.photometry);
+    const aliasList = describeAliases(astronomyData?.aliases, String(name));
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
 
     return (
         <div className="star-summary-card">
             <div className="star-summary-card__header">
-                <span className="star-summary-card__title">{name}</span>
-                {typeBadges.map((badge) => (
-                    <span
-                        key={badge.text}
-                        className={`badge spectral-badge spectral-badge--${badge.tone}`}
-                        title={badge.title}
+                {arrivedFromImage !== null && (
+                    <Button
+                        variant="secondary"
+                        size="small"
+                        title="Show this star in its target's Image Processing picture"
+                        onClick={() => {
+                            const plan = planBackToImage(
+                                loadImageView(),
+                                String(astronomyData?.id || starId || ''),
+                                String(name),
+                                targetIds,
+                                selectedTargetId,
+                            );
+                            if (plan.kind === 'restore') {
+                                void navigateToElement({ targetDisplay: 'Image Processing', action: RETURN_TO_IMAGE_ACTION, payload: null });
+                            } else {
+                                void navigateToElement({ targetDisplay: 'Image Processing', targetElement: 'fitsViewer', action: 'targetSelected', payload: plan.handoff });
+                            }
+                        }}
                     >
-                        {badge.text}
-                    </span>
-                ))}
-                {patternBadges.map((badge) => (
-                    <span key={badge.text} className="badge variability-badge" title={badge.title}>
-                        {badge.text}
-                    </span>
-                ))}
+                        Back to image
+                    </Button>
+                )}
+                <span className="star-summary-card__title">{name}</span>
+                <StarBadges star={astronomyData ? { ...astronomyData, spectralType } : null} />
                 {canLocate && (
                     <Button
                         variant="secondary"
@@ -171,7 +181,13 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                             raNum,
                             decNum,
                             !!(astronomyData?.hasSpectra ?? astronomyData?.has_spectra),
-                            !!(astronomyData?.hasPhotometry ?? astronomyData?.has_photometry)
+                            !!(astronomyData?.hasPhotometry ?? astronomyData?.has_photometry),
+                            {
+                                magnitude: typeof astronomyData?.magnitude === 'number' ? astronomyData.magnitude : undefined,
+                                hasCatalogMagnitude: astronomyData?.hasCatalogMagnitude,
+                                spectralType: spectralType || undefined,
+                                targetId: selectedTargetId || undefined,
+                            }
                         )}
                     >
                         Locate in Planetarium
@@ -188,6 +204,19 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                 {catalogMagnitudeText !== null && (
                     <span className="star-summary-card__item" title="Brightness in magnitudes. A smaller number is brighter.">
                         <span className="item-label">Mag:</span> {catalogMagnitudeText}
+                    </span>
+                )}
+                {aliasList.shown.length > 0 && (
+                    <span className="star-summary-card__item" data-testid="star-aliases">
+                        <span className="item-label">Also known as:</span> {aliasList.shown.join(', ')}
+                        {aliasList.hidden.length > 0 && (
+                            <>
+                                {', '}
+                                <span title={aliasList.hidden.join(', ')} data-testid="star-aliases-more">
+                                    +{aliasList.hidden.length} more
+                                </span>
+                            </>
+                        )}
                     </span>
                 )}
                 {targetIds.length > 0 && (

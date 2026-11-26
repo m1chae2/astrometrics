@@ -105,6 +105,7 @@ from astrometricslib.pipelines.shared.registration_record import (
     read_registration_record,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -222,9 +223,6 @@ SKY_RING_MINIMUM_PIXELS = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="AST-D16",
 )
-
-# Converts the median absolute deviation of Gaussian noise to its sigma.
-MAD_TO_SIGMA = 1.4826
 
 _SPEC_BY_NAME = {spec.name: spec for spec in ASTROMETRY_METRICS}
 _METRIC_ORDER = (ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION, ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION)
@@ -661,7 +659,7 @@ def target_clipping_measurements(
         record,
         frames,
         context,
-        stack_reference=(row_on_stack + record.crop_offset[1], column + record.crop_offset[0]),
+        stack_reference=_registered_stack_reference(row_on_stack, column, record, height, width),
         radius_px=radius_px,
         position_note=position_note,
         configuration=configuration,
@@ -669,6 +667,38 @@ def target_clipping_measurements(
         clock=clock,
         maximum_read_seconds=maximum_read_seconds,
     )
+
+
+def _registered_stack_reference(
+    row_on_stack: float, column: float, record: RegistrationRecord, height: int, width: int
+) -> tuple[float, float]:
+    """Move a pixel of the saved stack onto the registration reference's grid.
+
+    The saved stack may have been turned by a quarter turn after Siril
+    registered it (see `quarter_turn`), and then trimmed at the edges before
+    the turn. The transforms of the record are on the registration
+    reference's grid, so the turn is taken back first and the trim added.
+
+    Parameters
+    ----------
+    row_on_stack, column : `float`
+        The pixel on the saved stack, counted from 0.
+    record : `RegistrationRecord`
+        The stack's registration record.
+    height, width : `int`
+        The size of the saved stack.
+
+    Returns
+    -------
+    pixel : `tuple` [`float`, `float`]
+        The (row, column) on the registration reference's grid.
+    """
+    from astrometricslib.pipelines.shared.registration_record import to_registration_grid
+
+    row, registered_column = to_registration_grid(
+        row_on_stack, column, record.quarter_turn_degrees, height, width
+    )
+    return row + record.crop_offset[1], registered_column + record.crop_offset[0]
 
 
 def _frame_measurements(

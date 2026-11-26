@@ -21,8 +21,10 @@ from astropy.table import Table
 from astropy.time import Time
 
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.astrometry.processing import gaia_field_matching
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
 # A star near M 13 that moves 1 arcsecond per year, in right ascension.
 START_RA_DEG = 250.42
@@ -33,7 +35,7 @@ TEN_YEARS_AFTER_2016 = Time("J2026.0")
 
 def test_one_arcsecond_per_year_moves_a_star_ten_arcseconds_in_ten_years() -> None:
     """A 1 arcsec/yr eastward star observed in 2026.0 sits 10 arcsec east."""
-    ra_deg, dec_deg = star_identifier_module.propagate_gaia_positions(
+    ra_deg, dec_deg = gaia_field_matching.propagate_gaia_positions(
         [START_RA_DEG], [START_DEC_DEG], [ARCSEC_PER_YEAR_IN_MAS], [0.0], TEN_YEARS_AFTER_2016
     )
 
@@ -46,7 +48,7 @@ def test_one_arcsecond_per_year_moves_a_star_ten_arcseconds_in_ten_years() -> No
 
 def test_a_northward_proper_motion_changes_only_the_declination() -> None:
     """A 1 arcsec/yr northward star gains 10 arcsec of declination."""
-    ra_deg, dec_deg = star_identifier_module.propagate_gaia_positions(
+    ra_deg, dec_deg = gaia_field_matching.propagate_gaia_positions(
         [START_RA_DEG], [START_DEC_DEG], [0.0], [ARCSEC_PER_YEAR_IN_MAS], TEN_YEARS_AFTER_2016
     )
 
@@ -56,7 +58,7 @@ def test_a_northward_proper_motion_changes_only_the_declination() -> None:
 
 def test_a_star_without_a_proper_motion_stays_where_it_is() -> None:
     """A missing (NaN) proper motion leaves that star at its Gaia position."""
-    ra_deg, dec_deg = star_identifier_module.propagate_gaia_positions(
+    ra_deg, dec_deg = gaia_field_matching.propagate_gaia_positions(
         [START_RA_DEG, START_RA_DEG + 0.1],
         [START_DEC_DEG, START_DEC_DEG],
         [np.nan, ARCSEC_PER_YEAR_IN_MAS],
@@ -73,13 +75,13 @@ def test_the_observation_time_is_read_from_date_obs() -> None:
     """``DATE-OBS`` gives a UTC time; a bad or missing card gives `None`."""
     header = fits.Header({"DATE-OBS": "2026-05-24T04:58:30.570"})
 
-    observed = star_identifier_module.read_observation_time(header)
+    observed = gaia_field_matching.read_observation_time(header)
 
     assert observed is not None
     assert observed.utc.isot == "2026-05-24T04:58:30.570"
-    assert star_identifier_module.read_observation_time(fits.Header()) is None
-    assert star_identifier_module.read_observation_time(fits.Header({"DATE-OBS": "not a date"})) is None
-    assert star_identifier_module.read_observation_time(None) is None
+    assert gaia_field_matching.read_observation_time(fits.Header()) is None
+    assert gaia_field_matching.read_observation_time(fits.Header({"DATE-OBS": "not a date"})) is None
+    assert gaia_field_matching.read_observation_time(None) is None
 
 
 def make_identifier() -> StarIdentifier:
@@ -148,17 +150,13 @@ def match_one_detection(
     still_unmatched : `list` [`StellarObject`]
         The detections no Gaia star matched.
     """
-    monkeypatch.setattr(
-        StarIdentifier, "_query_gaia_region", staticmethod(lambda *args, **kwargs: (table, coords))
-    )
+    use_field_stars(monkeypatch, table, coords)
     detection = StellarObject(id="Star_1", name="Star_1")
     shifted = SkyCoord(START_RA_DEG * u.deg, START_DEC_DEG * u.deg).directional_offset_by(
         90 * u.deg, 20 * u.arcsec
     )
     sky_positions = {id(detection): (float(shifted.ra.deg), float(shifted.dec.deg))}
-    return identifier._match_stars_against_gaia(
-        [detection], sky_positions, START_RA_DEG, START_DEC_DEG, None, 1000, 1000, 0.05
-    )
+    return identifier._match_stars_against_gaia([detection], sky_positions, None, 1000, 1000)
 
 
 def test_a_fast_star_matches_only_after_it_is_moved_to_the_observation_epoch(
@@ -173,8 +171,8 @@ def test_a_fast_star_matches_only_after_it_is_moved_to_the_observation_epoch(
 
     assert still_unmatched == []
     assert identifier.catalog_match_separations_arcsec[0] < 0.1
-    assert star_identifier_module.FLAG_GAIA_PROPER_MOTION_UNKNOWN not in identifier.astrometry_flags
-    assert star_identifier_module.FLAG_GAIA_EPOCH_UNKNOWN not in identifier.astrometry_flags
+    assert gaia_field_matching.FLAG_GAIA_PROPER_MOTION_UNKNOWN not in identifier.astrometry_flags
+    assert gaia_field_matching.FLAG_GAIA_EPOCH_UNKNOWN not in identifier.astrometry_flags
 
 
 def test_without_proper_motions_positions_stay_at_2016_and_a_flag_says_so(
@@ -188,7 +186,7 @@ def test_without_proper_motions_positions_stay_at_2016_and_a_flag_says_so(
     still_unmatched = match_one_detection(identifier, monkeypatch, table, coords)
 
     assert len(still_unmatched) == 1
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_GAIA_PROPER_MOTION_UNKNOWN]
+    assert identifier.astrometry_flags == [gaia_field_matching.FLAG_GAIA_PROPER_MOTION_UNKNOWN]
 
 
 def test_a_table_whose_proper_motions_are_all_missing_raises_the_same_flag(
@@ -202,7 +200,7 @@ def test_a_table_whose_proper_motions_are_all_missing_raises_the_same_flag(
     still_unmatched = match_one_detection(identifier, monkeypatch, table, coords)
 
     assert len(still_unmatched) == 1
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_GAIA_PROPER_MOTION_UNKNOWN]
+    assert identifier.astrometry_flags == [gaia_field_matching.FLAG_GAIA_PROPER_MOTION_UNKNOWN]
 
 
 def test_an_image_without_a_date_keeps_positions_at_2016_and_a_flag_says_so(
@@ -216,4 +214,29 @@ def test_an_image_without_a_date_keeps_positions_at_2016_and_a_flag_says_so(
     still_unmatched = match_one_detection(identifier, monkeypatch, table, coords)
 
     assert len(still_unmatched) == 1
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_GAIA_EPOCH_UNKNOWN]
+    assert identifier.astrometry_flags == [gaia_field_matching.FLAG_GAIA_EPOCH_UNKNOWN]
+
+
+def test_use_image_header_sets_the_observation_time_and_resets_it(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """DATE-OBS moves the stars with no warning; without it, it warns."""
+    monkeypatch.setattr(star_identifier_module, "predict_gaia_depth_from_header", lambda header, config: None)
+    identifier = make_identifier()
+    table, coords = make_gaia_table(ARCSEC_PER_YEAR_IN_MAS, 0.0)
+
+    identifier.use_image_header(fits.Header({"DATE-OBS": "2026-10-03T04:20:52.448"}))
+    with caplog.at_level("WARNING"):
+        moved = identifier._move_gaia_coords_to_observation_epoch(table, coords)
+
+    assert identifier.observation_time is not None
+    assert "no usable DATE-OBS" not in caplog.text
+    assert moved.ra.deg[0] > START_RA_DEG
+
+    caplog.clear()
+    identifier.use_image_header(fits.Header())
+    with caplog.at_level("WARNING"):
+        identifier._move_gaia_coords_to_observation_epoch(table, coords)
+
+    assert identifier.observation_time is None
+    assert "no usable DATE-OBS" in caplog.text

@@ -8,12 +8,16 @@ does not average it away unless the frames are dithered (moved a few pixels
 between exposures). A master flat with 4% noise puts a 4% fixed pattern into
 a stack whose own noise is only 3-6% of the sky level.
 
-This module has two jobs.
+This module has three jobs.
 
-1. Measure the flat set: how many frames, how bright they are, and how
-   noisy the master flat will be. A set that is too faint, too bright or too
-   noisy is reported as an issue.
-2. Choose how much to blur a noisy master flat. Vignetting and dust
+1. Find the flat frames that are clipped (see `find_clipped_channels`) so
+   the stacker can leave them out of the master flat. A frame whose pixels
+   sit at the sensor's ceiling no longer shows the vignette, so averaging it
+   in flattens the master and, on a colour sensor, tints the corners.
+2. Measure the flat set that is left: how many frames, how bright they are,
+   and how noisy the master flat will be. A set that is too faint, too
+   bright or too noisy is reported as an issue.
+3. Choose how much to blur a noisy master flat. Vignetting and dust
    shadows are many pixels wide, so a light Gaussian blur keeps them. The
    blur width is the smallest that brings the master flat's noise down to
    `MAXIMUM_FLAT_NOISE_FRACTION`. Siril applies the blur (its ``gauss``
@@ -44,6 +48,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +164,30 @@ _SATURATED_FRACTION_OF_FULL_SCALE = TunedParameter(
     register_entry="STK-D18",
 )
 
+# A flat frame is clipped when more than this share of the pixels of any one
+# colour channel (of the whole frame, for a monochrome sensor) are saturated.
+# This is the limit `assess_flats` has always used for a bright flat, now
+# applied to each frame and each channel: one pixel in a thousand at the
+# ceiling. Not measured; on the Nikon D5300 flats of 2024-02-01 the clipped
+# frames have 100% of their green and blue pixels at the ceiling and the kept
+# ones none, so any limit between the two gives the same split.
+_CLIPPED_SHARE_LIMIT = TunedParameter(
+    name="stacking.flat_clipped_share_limit",
+    default=0.001,
+    unit="fraction of pixels",
+    description=(
+        "Largest share of saturated pixels in any one colour channel of a flat frame before it is left out."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D18",
+)
+
+# The names of the Bayer letters, for the sentence that reports clipping.
+_CHANNEL_NAMES = {"R": "red", "G": "green", "B": "blue"}
+_CHANNEL_ORDER = "RGB"
+
 
 @dataclass(frozen=True)
 class FlatAssessment:
@@ -167,10 +196,10 @@ class FlatAssessment:
     Attributes
     ----------
     frame_count : `int`
-        The number of flat frames in the set.
+        The number of flat frames in the set, clipped ones included.
     level_fraction : `float` or `None`
-        The mean brightness of a flat frame as a fraction of `full_scale`.
-        `None` if no frame could be read.
+        The mean brightness of the flat frames that are used, as a fraction
+        of `full_scale`. `None` if no frame could be read.
     full_scale : `float` or `None`
         The pixel value that counts as full scale (100%) for the level and
         saturation checks. `None` if no frame could be read.
@@ -189,6 +218,11 @@ class FlatAssessment:
         `MAXIMUM_FLAT_NOISE_FRACTION`. `None` if no smoothing is needed.
     issues : `list` [`str`]
         One plain-language sentence for each problem found.
+    left_out_paths : `list` [`str`]
+        The frames that are clipped and so left out of the master flat, in
+        the order they were given. Empty when no frame is clipped, and also
+        when every frame is clipped (no frame is left out then, because
+        there would be no flat).
     """
 
     frame_count: int
@@ -198,6 +232,7 @@ class FlatAssessment:
     issues: list[str] = field(default_factory=list)
     full_scale: float | None = None
     full_scale_source: str | None = None
+    left_out_paths: list[str] = field(default_factory=list)
 
     @property
     def needs_smoothing(self) -> bool:
@@ -223,7 +258,51 @@ class FlatAssessment:
             "noise_fraction": self.noise_fraction,
             "smoothing_sigma_pixels": self.smoothing_sigma_pixels,
             "issues": list(self.issues),
+            "left_out_frame_count": len(self.left_out_paths),
         }
+
+
+def _read_frame_and_pattern(path: str) -> tuple[np.ndarray, str] | None:
+    """Read one calibration frame and the colour layout of its pixels.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the FITS file.
+
+    Returns
+    -------
+    frame_and_pattern : `tuple` or `None`
+        The pixel values as a 2-D float array, and the Bayer layout of the
+        four pixels of the top-left 2 by 2 block in row order, for example
+        ``"RGGB"``. The layout is empty for a monochrome frame. `None` if
+        the file cannot be read or is not a single-plane image.
+    """
+    try:
+        image = AstrometricsImage(path)
+        data = np.asarray(image.data, dtype=np.float64)
+        header = image.header
+    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
+        logger.debug("Could not read calibration frame '%s': %s", path, error)
+        return None
+    if data.ndim == 3 and data.shape[0] == 1:
+        data = data[0]
+    if data.ndim != 2:
+        return None
+    pattern = str(header.get("BAYERPAT", "")).strip().upper()
+    if len(pattern) != 4 or not pattern.isalpha():
+        return data, ""
+    # Shift the layout by the header's Bayer offsets, so it names the pixels
+    # as stored. The offsets are 0 or 1.
+    try:
+        x_offset = int(header.get("XBAYROFF", 0)) % 2
+        y_offset = int(header.get("YBAYROFF", 0)) % 2
+    except TypeError, ValueError:
+        x_offset = y_offset = 0
+    shifted = "".join(
+        pattern[((row + y_offset) % 2) * 2 + (column + x_offset) % 2] for row in (0, 1) for column in (0, 1)
+    )
+    return data, shifted
 
 
 def _read_frame(path: str) -> np.ndarray | None:
@@ -240,14 +319,88 @@ def _read_frame(path: str) -> np.ndarray | None:
         The pixel values, or `None` if the file cannot be read or is not a
         single-plane image.
     """
-    try:
-        data = np.asarray(AstrometricsImage(path).data, dtype=np.float64)
-    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
-        logger.debug("Could not read calibration frame '%s': %s", path, error)
-        return None
-    if data.ndim == 3 and data.shape[0] == 1:
-        data = data[0]
-    return data if data.ndim == 2 else None
+    read = _read_frame_and_pattern(path)
+    return None if read is None else read[0]
+
+
+def find_clipped_channels(frame: np.ndarray, pattern: str, saturation_level: float) -> list[str]:
+    """List the colour channels of a flat frame that are clipped.
+
+    A channel is clipped when more than `_CLIPPED_SHARE_LIMIT` of its pixels
+    are at or above `saturation_level`. On a colour sensor the test is made
+    for each channel on its own. A share taken over the whole frame can
+    miss a frame whose green pixels are all clipped while its red pixels are
+    not, because the clipped channel is only part of the frame. Dividing
+    by such a frame's master flat tints the corners.
+
+    Parameters
+    ----------
+    frame : `numpy.ndarray`
+        One flat frame, 2-D.
+    pattern : `str`
+        The Bayer layout of the top-left 2 by 2 block in row order (for
+        example ``"RGGB"``), or an empty string for a monochrome sensor.
+    saturation_level : `float`
+        The pixel value at or above which a pixel counts as saturated.
+
+    Returns
+    -------
+    channels : `list` [`str`]
+        The letters of the clipped channels (``"R"``, ``"G"``, ``"B"``) in
+        that order, sorted otherwise. For a monochrome frame, ``[""]`` when
+        it is clipped. Empty when the frame is not clipped.
+    """
+    if not pattern:
+        saturated_share = float(np.mean(frame >= saturation_level))
+        return [""] if saturated_share > resolve(_CLIPPED_SHARE_LIMIT).value else []
+    saturated_count: dict[str, int] = {}
+    pixel_count: dict[str, int] = {}
+    for position, letter in enumerate(pattern):
+        block = frame[position // 2 :: 2, position % 2 :: 2]
+        saturated_count[letter] = saturated_count.get(letter, 0) + int(
+            np.count_nonzero(block >= saturation_level)
+        )
+        pixel_count[letter] = pixel_count.get(letter, 0) + block.size
+    clipped = [
+        letter
+        for letter in saturated_count
+        if saturated_count[letter] > resolve(_CLIPPED_SHARE_LIMIT).value * pixel_count[letter]
+    ]
+    return sorted(clipped, key=lambda letter: (_CHANNEL_ORDER.find(letter) % 4, letter))
+
+
+def _clipped_flats_sentence(left_out: int, total: int, channels: set[str], all_clipped: bool) -> str:
+    """Write the issue sentence about clipped flat frames.
+
+    Parameters
+    ----------
+    left_out : `int`
+        The number of clipped frames.
+    total : `int`
+        The number of frames in the set.
+    channels : `set` [`str`]
+        The clipped channels over all of those frames (letters, with ``""``
+        for a monochrome sensor).
+    all_clipped : `bool`
+        Whether every frame is clipped, so none could be left out.
+
+    Returns
+    -------
+    sentence : `str`
+        One plain-language sentence.
+    """
+    ordered = sorted(channels - {""}, key=lambda letter: (_CHANNEL_ORDER.find(letter) % 4, letter))
+    names = [_CHANNEL_NAMES.get(letter, letter) for letter in ordered]
+    where = f"{' and '.join(names)} at the sensor's ceiling" if names else "at the sensor's ceiling"
+    if all_clipped:
+        return (
+            f"all {total} flat frames are clipped ({where}), so none could be left out "
+            "and the master flat has lost its vignette shape in the clipped channels"
+        )
+    verb, tail = ("is", "was") if left_out == 1 else ("are", "were")
+    return (
+        f"{left_out} of {total} flat frames {verb} clipped ({where}) and {tail} left out of the master flat"
+    )
 
 
 def _full_scale(frame: np.ndarray, camera: str | None = None) -> tuple[float, str]:
@@ -317,7 +470,7 @@ def measure_frame_noise_fraction(frame: np.ndarray) -> float | None:
         return None
     differences = frame[:, 1:] - frame[:, :-1]
     mad = float(np.nanmedian(np.abs(differences - np.nanmedian(differences))))
-    return 1.4826 * mad / math.sqrt(2.0) / median
+    return MAD_TO_SIGMA * mad / math.sqrt(2.0) / median
 
 
 def smoothing_sigma_for_noise(noise_fraction: float) -> float | None:
@@ -382,11 +535,22 @@ def _unique_files(paths: list[str]) -> list[str]:
 def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssessment:
     """Measure a set of flat frames and list what is wrong with it.
 
-    The first frame gives the brightness. The noise of one frame comes from
-    the first frame alone when the set has one frame, and from the
-    difference of the first two frames when it has more. The difference
-    cancels the vignette, dust and the pixel-to-pixel sensitivity pattern
-    exactly, so it measures only the noise.
+    Every frame is first checked for clipping (see `find_clipped_channels`).
+    A clipped frame is named in `FlatAssessment.left_out_paths`, so the
+    stacker leaves it out of the master flat, and the measurements below
+    describe the frames that are kept. If every frame is clipped, none is
+    left out (a master flat from them is still better than none, and the
+    level check reports them as bright).
+
+    The brightness is the mean over the kept frames. The noise of one frame
+    comes from the first kept frame alone when one frame is kept, and from
+    the difference of the first two kept frames when more are. The
+    difference cancels the vignette, dust and the pixel-to-pixel sensitivity
+    pattern exactly, so it measures only the noise.
+
+    Each frame is read once to check it. The first two kept frames are read
+    a second time for the noise measurement, so only two frames are held in
+    memory at once.
 
     Parameters
     ----------
@@ -409,20 +573,57 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
     minimum_flat_level_fraction = resolve(MINIMUM_FLAT_LEVEL_FRACTION).value
     flat_paths = _unique_files(flat_paths)
     frame_count = len(flat_paths)
-    first = _read_frame(flat_paths[0]) if flat_paths else None
-    if first is None:
+
+    full_scale = 0.0
+    full_scale_source = ""
+    readable: list[tuple[str, float, list[str]]] = []
+    for path in flat_paths:
+        read = _read_frame_and_pattern(path)
+        if read is None:
+            continue
+        frame, pattern = read
+        if not readable:
+            full_scale, full_scale_source = _full_scale(frame, camera)
+        saturation_level = resolve(_SATURATED_FRACTION_OF_FULL_SCALE).value * full_scale
+        readable.append((
+            path,
+            float(np.nanmean(frame)),
+            find_clipped_channels(frame, pattern, saturation_level),
+        ))
+    if not readable:
         return FlatAssessment(frame_count, issues=[UNREADABLE_FLATS_ISSUE])
 
     issues: list[str] = []
-    full_scale, full_scale_source = _full_scale(first, camera)
-    level_fraction = float(np.nanmean(first)) / full_scale
+    clipped = [entry for entry in readable if entry[2]]
+    all_clipped = len(clipped) == len(readable)
+    left_out_paths: list[str] = []
+    if clipped:
+        issues.append(
+            _clipped_flats_sentence(
+                len(clipped),
+                frame_count,
+                {letter for _, _, channels in clipped for letter in channels},
+                all_clipped,
+            )
+        )
+        if not all_clipped:
+            left_out_paths = [path for path, _, _ in clipped]
+    left_out = set(left_out_paths)
+    kept = [entry for entry in readable if entry[0] not in left_out]
+    kept_count = len(kept)
+
+    first = _read_frame(kept[0][0])
+    if first is None:
+        return FlatAssessment(frame_count, issues=[UNREADABLE_FLATS_ISSUE])
+    level_fraction = float(np.mean([mean for _, mean, _ in kept])) / full_scale
     if level_fraction < minimum_flat_level_fraction:
         issues.append(
             f"{FAINT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale ({full_scale:g}, "
             f"{full_scale_source}), below {minimum_flat_level_fraction:.0%}, so their noise is high"
         )
     saturated = float(np.mean(first >= resolve(_SATURATED_FRACTION_OF_FULL_SCALE).value * full_scale))
-    if level_fraction > resolve(MAXIMUM_FLAT_LEVEL_FRACTION).value or saturated > 0.001:
+    clipped_share_limit = resolve(_CLIPPED_SHARE_LIMIT).value
+    if level_fraction > resolve(MAXIMUM_FLAT_LEVEL_FRACTION).value or saturated > clipped_share_limit:
         issues.append(
             f"{BRIGHT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale ({full_scale:g}, "
             f"{full_scale_source}) with {saturated:.2%} of pixels saturated, so the response may "
@@ -430,7 +631,7 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         )
 
     single_frame_noise = None
-    second = _read_frame(flat_paths[1]) if frame_count > 1 else None
+    second = _read_frame(kept[1][0]) if kept_count > 1 else None
     if second is not None and second.shape == first.shape:
         # Scale the second frame to the first, so a lamp that drifted
         # between exposures does not look like noise.
@@ -442,7 +643,7 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         # listing of it), not two exposures. Their difference is zero, which
         # would read as a noiseless flat.
         if mad > 0.0 and median > 0.0:
-            single_frame_noise = 1.4826 * mad / math.sqrt(2.0) / median
+            single_frame_noise = MAD_TO_SIGMA * mad / math.sqrt(2.0) / median
     if single_frame_noise is None:
         single_frame_noise = measure_frame_noise_fraction(first)
 
@@ -450,12 +651,12 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
     sigma = None
     if single_frame_noise is not None:
         noise_fraction = single_frame_noise / math.sqrt(
-            max(1, min(frame_count, resolve(MAXIMUM_FRAMES_AVERAGED).value))
+            max(1, min(kept_count, resolve(MAXIMUM_FRAMES_AVERAGED).value))
         )
         sigma = smoothing_sigma_for_noise(noise_fraction)
         if sigma is not None:
             issues.append(
-                f"{NOISY_FLAT_ISSUE_PREFIX} {noise_fraction:.2%} from {frame_count} frame(s), above the "
+                f"{NOISY_FLAT_ISSUE_PREFIX} {noise_fraction:.2%} from {kept_count} frame(s), above the "
                 f"{resolve(MAXIMUM_FLAT_NOISE_FRACTION).value:.1%} limit"
             )
     return FlatAssessment(
@@ -466,4 +667,5 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         issues,
         full_scale=full_scale,
         full_scale_source=full_scale_source,
+        left_out_paths=left_out_paths,
     )

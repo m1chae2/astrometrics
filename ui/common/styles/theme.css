@@ -9,7 +9,7 @@
   --control-btn-height: 38px;   /* inputs (.entry) */
   --button-height: 36px;        /* regular buttons */
   --button-height-small: 24px;  /* small (btn--tiny) buttons */
-  --button-font-size-small: 11px;
+  --button-font-size-small: 12px; /* small buttons, compact dropdowns and compact fields */
   --table-font-size: 14px;
   --panel-header-size: 15px;
   --label-font-size: 14px;
@@ -101,12 +101,15 @@
 
   --list-green: #26a269;
   --list-orange: #e95420;
+  /* Background of the muted "Below" badge on a target under the horizon: plain grey, not a warning. */
+  --list-badge-below-horizon: #54545c;
 
   --toast-green: #26a269;
   --toast-red: #e01b24;
   --black: #000;
 
   --accent-red: #e01b24;
+  --color-danger-hover: #e73c43;  /* danger button on hover: +7.8 points of lightness, as slate-blue-hover is over slate-blue */
   --frame-padding: 6px;
   --grey-darkest: #1e1e20;
   /* RGB token for use with rgba(var(--grey-darkest-rgb), alpha) so overlays can
@@ -155,9 +158,39 @@
   --warning-amber: #f6d32d;
   --warning-orange: #ff9800;      /* caution, one step worse than amber */
   --accent-sky: #4fc1ff;          /* light blue for sky-map overlays, links and selections */
+  --sky-target-marker: rgba(79, 193, 255, 0.45);  /* Planetarium library target, faint (--accent-sky at part opacity) */
+  --sky-target-marker-selected: #8fd8ff;          /* Planetarium selected target, bright (a lighter --accent-sky) */
   --detection-marker-color: #ffd54a;         /* circle on a star the star finder detected */
   --detection-merged-color: #ff6ec7;         /* diamond on a star reported twice and merged */
   --danger-red: #e01b24;
+
+  /* Star colors by spectral class, for the Planetarium's "By spectral class"
+     mode. They follow the order of real star colors (Mitchell Charity's
+     blackbody table: blue, white, yellow, orange), but the hues are stretched
+     evenly so each class can be told apart in a small dot on the dark sky.
+     Real stars show far less color: these are exaggerated for visibility,
+     not true colors. Wolf-Rayet stars get their own violet. */
+  --star-color-o: #6b7dff;       /* O: deep blue */
+  --star-color-b: #8fb0ff;       /* B: blue */
+  --star-color-a: #cfe0ff;       /* A: blue-white */
+  --star-color-f: #ffffff;       /* F: white */
+  --star-color-g: #ffe98a;       /* G: yellow */
+  --star-color-k: #ffb054;       /* K: orange */
+  --star-color-m: #ff7a45;       /* M: red-orange */
+  --star-color-c: #e8392f;       /* C: carbon stars, deep red */
+  --star-color-w: #b07cff;       /* W: Wolf-Rayet stars, violet */
+  --star-color-none: #9a9a9a;    /* no type known: neutral gray */
+
+  /* A child section joined under a floating card, one step lighter than the card
+     (the Planetarium's framing section under the selected object's card). */
+  --surface-subcard: color-mix(in srgb, var(--term-bg-light) 92%, transparent);
+  --framing-table-max-height: 168px;   /* the framing panel's panel list; a bigger grid scrolls inside it */
+  --compact-menu-max-height: 280px;    /* a compact picker's menu (toolbars); a longer list scrolls */
+
+  /* Motion: a section that extends down from a card, and folds back up. */
+  --motion-duration-panel: 240ms;
+  --motion-ease-panel: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-panel-reverse: cubic-bezier(1, 0, 0.8, 1);   /* the same curve run backward, for the fold back */
 
   /* ------------------------------------------------------------------
      Shared design tokens (issue #96, step L0).
@@ -196,6 +229,14 @@
   --heading-font-size: 22px;   /* dialog and page headings */
   --title-font-size: 24px;     /* view titles */
   --display-font-size: 28px;   /* the largest numbers and titles */
+  --star-card-label-width: 84px;   /* the label column of the star card's slider rows */
+  --collapsed-strip-width: 36px;     /* a folded column's strip (CollapsibleColumn) */
+  --console-name-field-width: 160px; /* the script name field in the Command Console toolbar */
+  --console-name-field-min-width: 80px; /* the narrowest the script name field gets in a narrow window */
+  --console-workspace-min-width: 360px; /* the Command Console Workspace table scrolls sideways below this */
+  --console-running-dot-size: 8px; /* the pulsing dot of the Command Console's running line */
+  --console-script-column-width: 300px; /* the open script list in the Command Console, wider for long recipe names */
+  --star-card-plot-height: 150px;  /* the preferred height of the star card's plot */
 
   /* Named translucent surfaces (white or black over the panel color). */
   --surface-subtle: rgba(255, 255, 255, 0.04);    /* card header at rest */
@@ -207,6 +248,7 @@
   --surface-overlay: rgba(0, 0, 0, 0.4);          /* image area, dimming layer */
   --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);    /* panel and card shadow */
   --shadow-card-lifted: 0 8px 16px rgba(0, 0, 0, 0.5); /* a card being dragged */
+  --z-popover: 3000; /* menus drawn in a portal on document.body: above every panel and dialog */
   --surface-floating: rgba(10, 14, 22, 0.95);     /* panel floating over the sky map (not for menus) */
   --surface-menu: var(--grey-medium);             /* dropdown, popover and context menu: neutral grey, a step above the panels */
   --surface-control: rgba(255, 255, 255, 0.08);   /* button on a floating panel */
@@ -220,6 +262,7 @@
   --skeleton-pulse-duration: 1.8s;                 /* one fade from the resting to the lighter shade */
   --skeleton-row-height: 16px;                     /* one table row or text line */
   --skeleton-chart-height: 180px;                  /* plot area */
+  --star-shape-chart-height: 170px;                /* the star stretch by frame chart in Frame Analysis */
   --updating-bar-height: 2px;                      /* thin bar at a panel's top edge */
   --updating-bar-opacity: 0.55;                    /* understated accent segment of the bar */
   --updating-bar-duration: 2.4s;                   /* one slow slide of the segment */

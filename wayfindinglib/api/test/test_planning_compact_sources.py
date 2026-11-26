@@ -197,3 +197,10 @@ def test_an_unknown_name_raises_the_lookup_error() -> None:
     """A failed lookup raises; it is not turned into an error reply."""
     with pytest.raises(ValueError, match="cannot resolve"):
         make_planning().lookup_coordinates("Nowhere")
+
+
+@pytest.mark.parametrize("limit", [0, 301])
+def test_a_star_limit_outside_its_range_is_refused(limit: int) -> None:
+    """A star limit below 1 or above 300 raises; it is never clamped."""
+    with pytest.raises(InvalidArgumentError, match="limit"):
+        make_planning().query_sources(284.0, 32.6, 1.0, limit=limit)

@@ -9,6 +9,9 @@ move with no first guess: for a small turn, a half turn, a large offset, and
 with stars missing or added. They also check that too few stars, or two
 unrelated fields, are refused, that `align_images_to_reference` falls back to
 star patterns only for imaging stacks, and that the spectral path is unchanged.
+A long-exposure stack that saturates its brightest stars (NGC 6992, a 300 s
+group against a 180 s group) shares too few of its brightest 150 stars with the
+other stack; the search must retry with more stars.
 """
 
 import numpy as np
@@ -23,6 +26,7 @@ from astrometricslib.pipelines.stacking.processing.group_alignment import (
 )
 from astrometricslib.pipelines.stacking.processing.star_pattern_candidates import (
     candidate_similarity_transforms,
+    pattern_star_counts,
 )
 
 FIELD_SIZE = 1200
@@ -214,7 +218,7 @@ def test_the_spectral_path_never_tries_star_patterns(monkeypatch: pytest.MonkeyP
         """
         raise AssertionError("star patterns must not be tried on this path")
 
-    monkeypatch.setattr(group_alignment, "find_alignment_from_star_patterns", fail)
+    monkeypatch.setattr(group_alignment, "search_star_patterns", fail)
     reference, _ = make_pair(1.0, 0j, seed=41)
     _, unrelated = make_pair(1.0, 0j, seed=42)
 
@@ -237,10 +241,51 @@ def test_a_shift_the_stars_agree_with_is_not_second_guessed(monkeypatch: pytest.
         """
         raise AssertionError("star patterns must not be tried here")
 
-    monkeypatch.setattr(group_alignment, "find_alignment_from_star_patterns", fail)
+    monkeypatch.setattr(group_alignment, "search_star_patterns", fail)
     reference, image = make_pair(1.0, 6 + 4j, seed=51)
 
     aligned, _, results = align_images_to_reference([reference, image], 0, refine_with_stars=True)
 
     assert aligned[1] is not None
     assert not results[1].is_star_pattern
+
+
+def test_a_stack_missing_its_brightest_stars_is_found_by_retrying_with_more_stars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A half-turned stack missing its 300 brightest stars lines up.
+
+    The reference list holds 900 stars, brightest first. The image list holds
+    the same stars turned by 180 degrees, without the brightest 300 (a longer
+    exposure saturates them, and `detect_star_centroids` skips saturated
+    stars). The top 150 of the two lists then share no star, so the first
+    search fails; the retry with 600 stars shares 300 and succeeds.
+    """
+    a, b = np.exp(1j * np.radians(179.53)), 1150 + 1100j
+    count = 900
+    positions = make_positions(21, count)
+    # Index order is brightness order, brightest first.
+    reference_stars = np.column_stack([positions.imag, positions.real])
+    image_positions = ((positions - b) / a)[300:]
+    image_stars = np.column_stack([image_positions.imag, image_positions.real])
+    blank = np.zeros((FIELD_SIZE, FIELD_SIZE), dtype=np.float32)
+
+    single_count = [150]
+    monkeypatch.setattr(group_alignment, "pattern_star_counts", lambda: single_count)
+    assert find_alignment_from_star_patterns(blank, blank, reference_stars, image_stars) is None
+
+    monkeypatch.undo()
+    result = find_alignment_from_star_patterns(blank, blank, reference_stars, image_stars)
+
+    assert result is not None
+    assert result.trusted
+    assert result.rotation_degrees == pytest.approx(179.53, abs=0.01)
+    assert result.star_pairs >= 300
+    shift = expected_centre_shift(a, b)
+    assert result.shift_columns_pixels == pytest.approx(shift.real, abs=0.3)
+    assert result.shift_rows_pixels == pytest.approx(shift.imag, abs=0.3)
+
+
+def test_the_star_counts_to_try_grow_from_the_first_count_to_the_maximum() -> None:
+    """The counts are 150, 300 and 600 with the shipped values."""
+    assert pattern_star_counts() == [150, 300, 600]

@@ -1,10 +1,11 @@
 """Tests for the post-processing values that follow a basis measured each run.
 
 The stack measurements (noise apertures, flat match, half pattern, shifts,
-sky level, comparison, star tone and colour calibration) have sizes written as
-a factor times a basis (the star width, the plate scale or the image size).
-With no basis measured they must give their old absolute values, and once the
-run records a basis they must scale with it.
+sky level, comparison, star tone and the white point of stars like the
+Sun) have sizes written as a factor times a basis (the star width, the
+plate scale or the image size). With no basis measured they must give their
+old absolute values, and once the run records a basis they must scale with
+it.
 """
 
 import importlib
@@ -18,7 +19,6 @@ from astrometricslib.models.tuned_parameter import TunedParameter
 MODULE_NAMES = [
     "astrometricslib.pipelines.stacking.odd_even_bias",
     "astrometricslib.pipelines.stacking.post_processing.aperture_placement",
-    "astrometricslib.pipelines.stacking.post_processing.colour_calibration",
     "astrometricslib.pipelines.stacking.post_processing.depth_limits",
     "astrometricslib.pipelines.stacking.post_processing.half_pattern",
     "astrometricslib.pipelines.stacking.post_processing.registration_shifts",
@@ -27,6 +27,7 @@ MODULE_NAMES = [
     "astrometricslib.pipelines.stacking.post_processing.stack_image",
     "astrometricslib.pipelines.stacking.post_processing.stack_noise",
     "astrometricslib.pipelines.stacking.post_processing.star_tone",
+    "astrometricslib.pipelines.stacking.post_processing.sun_like_balance",
 ]
 
 

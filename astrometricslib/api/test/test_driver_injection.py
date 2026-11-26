@@ -21,10 +21,9 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from astrometricslib import Astrometrics, FilterType, FrameRecord, Target
+from astrometricslib import FilterType, FrameRecord, Target
 from astrometricslib._internal.drivers import (
     PlateSolveDriver,
-    SimbadDriver,
     StackingDriver,
     StackRunResult,
     StackSettings,
@@ -36,6 +35,8 @@ from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 # The picture is this many pixels on a side.
 IMAGE_SIZE = 256
@@ -56,11 +57,9 @@ def make_field_wcs() -> WCS:
     wcs : `astropy.wcs.WCS`
         A flat sky map, 2 arcseconds per pixel, centred on the field.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [FIELD_RA_DEG, FIELD_DEC_DEG]
-    wcs.wcs.crpix = [IMAGE_SIZE / 2, IMAGE_SIZE / 2]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(
+        FIELD_RA_DEG, FIELD_DEC_DEG, (IMAGE_SIZE / 2, IMAGE_SIZE / 2), degrees_per_pixel=2.0 / 3600.0
+    )
     return wcs
 
 
@@ -95,55 +94,44 @@ class FakePlateSolver(PlateSolveDriver):
         return make_field_wcs().to_header()
 
 
-class FakeSimbad(SimbadDriver):
-    """A SIMBAD client that knows one named star under each test star.
+def field_star_rows(coordinates: Any, radius: str) -> Table:
+    """Answer a region question with one catalog row per test star.
 
-    Attributes
+    Parameters
     ----------
-    region_calls, object_calls, tap_calls : `list`
-        The arguments of each call to the matching method.
+    coordinates : `Any`
+        The center asked about, ignored.
+    radius : `str`
+        The radius asked about, ignored.
+
+    Returns
+    -------
+    table : `astropy.table.Table`
+        Rows named ``"Fake Star 0"``, ``"Fake Star 1"`` and so on, at the
+        sky positions of the test stars.
     """
+    wcs = make_field_wcs()
+    x_pixels, y_pixels = zip(*STAR_PIXELS, strict=True)
+    ra_deg, dec_deg = wcs.wcs_pix2world(np.array(x_pixels), np.array(y_pixels), 0)
+    return Table({
+        "main_id": [f"Fake Star {index}" for index in range(len(STAR_PIXELS))],
+        "ra": ra_deg,
+        "dec": dec_deg,
+        "otype": ["*"] * len(STAR_PIXELS),
+        "sp_type": ["G2V"] * len(STAR_PIXELS),
+    })
 
-    def __init__(self) -> None:
-        self.region_calls: list[tuple[Any, ...]] = []
-        self.object_calls: list[str] = []
-        self.tap_calls: list[str] = []
 
-    def query_region(
-        self,
-        coordinates: Any,
-        radius: str,
-        *,
-        votable_fields: tuple[str, ...] = (),
-        row_limit: int | None = None,
-    ) -> Table:
-        """Record the call and answer with one catalog row per test star.
+def field_simbad() -> FakeSimbad:
+    """Build a SIMBAD stand-in that knows one named star under each test star.
 
-        Returns
-        -------
-        table : `astropy.table.Table`
-            Rows named ``"Fake Star 0"``, ``"Fake Star 1"`` and so on, at
-            the sky positions of the test stars.
-        """
-        self.region_calls.append((coordinates, radius))
-        wcs = make_field_wcs()
-        x_pixels, y_pixels = zip(*STAR_PIXELS, strict=True)
-        ra_deg, dec_deg = wcs.wcs_pix2world(np.array(x_pixels), np.array(y_pixels), 0)
-        return Table({
-            "main_id": [f"Fake Star {index}" for index in range(len(STAR_PIXELS))],
-            "ra": ra_deg,
-            "dec": dec_deg,
-            "otype": ["*"] * len(STAR_PIXELS),
-            "sp_type": ["G2V"] * len(STAR_PIXELS),
-        })
-
-    def query_object(self, object_name: str, *, votable_fields: tuple[str, ...] = ()) -> None:
-        """Record the call and report that the name did not resolve."""
-        self.object_calls.append(object_name)
-
-    def query_tap(self, adql_query: str) -> None:
-        """Record the call and report that nothing came back."""
-        self.tap_calls.append(adql_query)
+    Returns
+    -------
+    simbad : `FakeSimbad`
+        Region questions get `field_star_rows`; names and table questions
+        get no answer.
+    """
+    return FakeSimbad(region=field_star_rows, tap=None)
 
 
 class FakeStacker(StackingDriver):
@@ -259,7 +247,7 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     monkeypatch: pytest.MonkeyPatch, field_image: str
 ) -> None:
     """The stage uses the fake solver and the fake SIMBAD."""
-    solver, simbad = FakePlateSolver(), FakeSimbad()
+    solver, simbad = FakePlateSolver(), field_simbad()
     # Saving stars to the shared test database is not under test here.
     monkeypatch.setattr(
         "astrometricslib.pipelines.astrometry.runner.record_pipeline_stars", lambda stars, **_: (stars, None)
@@ -319,7 +307,7 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
         )
         for index, frame_path in enumerate(frame_paths)
     ]
-    solver, simbad = FakePlateSolver(), FakeSimbad()
+    solver, simbad = FakePlateSolver(), field_simbad()
     # Saving stars to the shared test database is not under test here.
     monkeypatch.setattr(
         "astrometricslib.pipelines.photometry.runner.record_pipeline_stars",
@@ -333,6 +321,7 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
     result = astrometrics.processing.process_target(
         target,
         stages=["photometry"],
+        run_prerequisites=False,
         photometry={"frames": frames, "max_workers": 1},
         register_job=False,
     )
@@ -345,16 +334,17 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
 
 def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:
     """`processing.plate_solve` uses the fake solver and the fake SIMBAD."""
-    solver, simbad = FakePlateSolver(), FakeSimbad()
+    solver, simbad = FakePlateSolver(), field_simbad()
     astrometrics = astrometrics_with_drivers(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
 
-    wcs = astrometrics.processing.plate_solve(field_image)
+    solution = astrometrics.processing.plate_solve(field_image)
 
     assert len(solver.calls) == 1
     assert simbad.region_calls
-    assert wcs.wcs.crval[1] == pytest.approx(FIELD_DEC_DEG)
+    assert solution.dec_deg == pytest.approx(FIELD_DEC_DEG, abs=0.5)
+    assert solution.width > 0 and solution.pixel_scale_arcsec > 0
 
 
 def make_stacking_target(tmp_path: Path) -> Target:
@@ -449,7 +439,7 @@ def test_the_spectroscopy_helpers_pass_the_drivers_on(
         SpectroscopyCalibrationTuner,
     )
 
-    drivers = Drivers(plate_solve=FakePlateSolver(), simbad=FakeSimbad())
+    drivers = Drivers(plate_solve=FakePlateSolver(), simbad=field_simbad())
     astrometry_seen = record_pipeline_drivers(monkeypatch, AstrometryPipeline)
     spectroscopy_seen = record_pipeline_drivers(monkeypatch, SpectroscopyPipeline)
 
@@ -469,7 +459,7 @@ def test_the_stack_noise_plate_solve_uses_the_injected_solver(field_image: str) 
     # The fixture `no_stack_plate_solve` replaces the function; the real
     # one is kept on it.
     real_solve = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
-    solver, simbad = FakePlateSolver(), FakeSimbad()
+    solver, simbad = FakePlateSolver(), field_simbad()
 
     wcs, reason, wcs_source = real_solve(field_image, Drivers(plate_solve=solver, simbad=simbad))
 
@@ -507,7 +497,7 @@ def test_defaults_build_the_real_drivers() -> None:
     assert isinstance(drivers.stacking_or_default(), SirilStackingDriver)
     assert isinstance(drivers.simbad_or_default(), AstroquerySimbadDriver)
 
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
     assert isinstance(identifier.solver, AstrometryNetPlateSolveDriver)
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)

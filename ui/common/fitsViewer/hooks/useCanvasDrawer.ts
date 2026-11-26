@@ -2,6 +2,23 @@ import React, { useEffect } from 'react';
 import { ParsedFitsData } from './useFitsLoader';
 import { StretchParameters } from '../../types/backendTypes';
 import { drawBitmapSafely, isBitmapUsable } from '../utils/bitmapGuard';
+import { turnedSize } from '../displayTurn';
+
+/**
+ * Sets the canvas transform that draws a picture turned clockwise by a quarter turn, with the
+ * turned picture's top-left corner at the canvas corner. Quarter turns lose nothing.
+ *
+ * @param ctx The canvas to draw on.
+ * @param width Width of the picture before the turn, in pixels.
+ * @param height Height of the picture before the turn, in pixels.
+ * @param turn The turn: 0, 90, 180 or 270 degrees.
+ */
+export const setQuarterTurnTransform = (ctx: CanvasRenderingContext2D, width: number, height: number, turn: number): void => {
+    if (turn === 90) ctx.setTransform(0, 1, -1, 0, height, 0);
+    else if (turn === 180) ctx.setTransform(-1, 0, 0, -1, width, height);
+    else if (turn === 270) ctx.setTransform(0, -1, 1, 0, 0, width);
+    else ctx.setTransform(1, 0, 0, 1, 0, 0);
+};
 
 /** Source of ids that tie each draw request to its reply, so a late reply for an old image is ignored. */
 let nextRenderRequestId = 1;
@@ -22,6 +39,9 @@ let nextRenderRequestId = 1;
  * `onDrawn` is called after each draw with the object that was drawn (the
  * `ParsedFitsData` or the `ImageBitmap`), so the viewer knows when a picture
  * is really on the canvas. Pass a stable function.
+ *
+ * `turn` (0, 90, 180 or 270) shows a FITS image, or a picture the backend drew, turned clockwise by that many degrees; the drawn
+ * size is then the file's width and height swapped for 90 and 270. The file is not changed.
  */
 export const useCanvasDrawer = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -32,7 +52,8 @@ export const useCanvasDrawer = (
     stretch: boolean = true,
     displayRange?: readonly [number, number],
     stretchParameters?: StretchParameters | null,
-    onDrawn?: (drawn: ParsedFitsData | ImageBitmap) => void
+    onDrawn?: (drawn: ParsedFitsData | ImageBitmap) => void,
+    turn: number = 0
 ) => {
 
     // Initial draw for Bitmaps (Processed Backend Images)
@@ -52,11 +73,13 @@ export const useCanvasDrawer = (
         // top-left part of the canvas whenever the display scaling was not
         // 100%: 0.8 of the canvas at 125%.)
         const dpr = window.devicePixelRatio || 1;
-        const logicalW = Math.round(bitmap.width / dpr);
-        const logicalH = Math.round(bitmap.height / dpr);
+        // A turned picture has its width and height swapped for a quarter turn.
+        const shown = turnedSize(bitmap.width, bitmap.height, turn);
+        const logicalW = Math.round(shown.w / dpr);
+        const logicalH = Math.round(shown.h / dpr);
 
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
+        canvas.width = shown.w;
+        canvas.height = shown.h;
         canvas.style.width = `${logicalW}px`;
         canvas.style.height = `${logicalH}px`;
         // Ensure no leftover filters
@@ -64,12 +87,14 @@ export const useCanvasDrawer = (
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        setQuarterTurnTransform(ctx, bitmap.width, bitmap.height, turn);
         const drawn = drawBitmapSafely(ctx, bitmap);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         if (!drawn) return;
 
         setDrawnSize({ w: logicalW, h: logicalH });
         onDrawn?.(bitmap);
-    }, [canvasRef, bitmap, parsedData, setDrawnSize, onDrawn]);
+    }, [canvasRef, bitmap, parsedData, setDrawnSize, onDrawn, turn]);
 
     // FITS Rendering Effect
     useEffect(() => {
@@ -77,7 +102,9 @@ export const useCanvasDrawer = (
         const worker = workerRef.current;
         if (!canvas || !worker || !parsedData) return;
 
-        const { w, h, channels, imageId } = parsedData;
+        const { channels, imageId } = parsedData;
+        // The picture is drawn turned, so its width and height may be the file's swapped.
+        const { w, h } = turnedSize(parsedData.w, parsedData.h, turn);
 
         // Logical Size calculation
         const maxDim = 3000;
@@ -128,10 +155,11 @@ export const useCanvasDrawer = (
             displayRange,
             stretchParameters,
             channels,
+            turn,
         });
 
         return () => {
             worker.removeEventListener('message', handleMessage);
         };
-    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters, onDrawn]);
+    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters, onDrawn, turn]);
 };

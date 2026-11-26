@@ -293,6 +293,26 @@ describe('useSpectrumList default star', () => {
         expect(setPendingId).toHaveBeenLastCalledWith('a-other');
     });
 
+    /**
+     * A star opened from the image is shown under its own target. The target's default star must not
+     * replace it when that target's list loads.
+     */
+    it('keeps a handed-off star over the default of the target it is shown under', () => {
+        mockStars([{ id: 'a-spectrum', name: 'a-spectrum', has_spectra: true }] as Spectrum[]);
+        const setPendingId = vi.fn();
+        const { result, rerender } = renderHook(
+            ({ target }) => useSpectrumList(target, undefined, '', '', setPendingId),
+            { initialProps: { target: 'Albireo' } }
+        );
+        act(() => result.current.rememberPickedStar('NGC 7331', 'Gaia DR3 904'));
+        mockStars([
+            { id: 'Gaia DR3 999', name: 'Gaia DR3 999', has_spectra: true },
+            { id: 'Gaia DR3 904', name: 'HD 214181' },
+        ] as Spectrum[]);
+        rerender({ target: 'NGC 7331' });
+        expect(setPendingId).toHaveBeenLastCalledWith('Gaia DR3 904');
+    });
+
     /** A target with no stars selects nothing, so the list shows its empty message. */
     it('selects nothing for a target with no stars', () => {
         mockStars([]);

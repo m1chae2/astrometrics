@@ -431,7 +431,10 @@ def test_discover_unassociated_remote_targets_fuzzy_matches() -> None:
     driver = Mock()
     driver.list_remote_targets.return_value = ["M_81", "NGC 7000", "Unassociated Target"]
     context = _FakeObservatory(driver)
-    context.astrometrics.targets.list.return_value = [_FakeTarget("M 81", []), _FakeTarget("NGC-7000", [])]
+    context.astrometrics.targets.query.return_value.objects = [
+        _FakeTarget("M 81", []),
+        _FakeTarget("NGC-7000", []),
+    ]
 
     result = remote_operations.discover_unassociated_remote_targets(context)
     assert result == ["Unassociated Target"]
@@ -624,8 +627,15 @@ def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_
 class _EmptyTargetCatalog:
     """Stands in for the target catalog, with nothing in it."""
 
-    def list(self) -> list[Any]:
-        return []
+    def query(self, **_kwargs: object) -> SimpleNamespace:
+        """Answer a target query with no targets.
+
+        Returns
+        -------
+        answer : `SimpleNamespace`
+            An answer whose ``objects`` list is empty.
+        """
+        return SimpleNamespace(objects=[])
 
 
 class _EmptyAstrometrics:

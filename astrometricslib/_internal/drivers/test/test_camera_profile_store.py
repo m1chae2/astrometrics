@@ -116,7 +116,8 @@ def test_the_shipped_asi533_profile_carries_its_detector_noise_terms() -> None:
     """Gain and read noise load per setting as provenanced values.
 
     The photometric error budget needs both. The shipped example records
-    them for the setting they were measured at (gain 0, offset 10, 1x1).
+    them for the setting they were measured at (gain 0, offset 10, 1x1), and
+    the D5300's for ISO 800 only.
     """
     profiles = {profile.camera_name: profile for profile in load_camera_profiles(_shipped_config())}
     asi533 = profiles["ZWO ASI533MM Pro"]
@@ -131,7 +132,12 @@ def test_the_shipped_asi533_profile_carries_its_detector_noise_terms() -> None:
     assert entry.gain_e_per_adu.provenance.kind.value == "measured"
     assert entry.temperature_c == pytest.approx(-10.0)
     assert asi533.sensor_noise_for("100", "10", "1x1") is None
-    assert profiles["Nikon D5300"].sensor_noise == ()
+    nikon = profiles["Nikon D5300"]
+    nikon_iso_800 = nikon.sensor_noise_for("800", "0", "1x1")
+    assert nikon_iso_800 is not None
+    assert nikon_iso_800.gain_e_per_adu is not None
+    assert nikon_iso_800.gain_e_per_adu.value == pytest.approx(0.237)
+    assert nikon.sensor_noise_for("200", "0", "1x1") is None
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,7 @@ stacking, measuring and review code runs on real data.
 How a delivery works:
 
 1. The real frames of the target are listed once through the running
-   backend (``target:get_files``, then ``images:get_fits_header`` for each
+   backend (``target:get_files``, then ``target:get_frame_header`` for each
    file). The library files and databases are never opened here, because the
    backend owns them while it runs.
 2. The frames that match the simulated capture are put in the order they
@@ -449,7 +449,8 @@ class FrameSource:
         listing = self.call("target:get_files", {"target_id": target})
         for entry in (listing or {}).get("files", []) if isinstance(listing, dict) else []:
             path = str(entry.get("path", ""))
-            cards = self.call("images:get_fits_header", {"path": path})
+            answer = self.call("target:get_frame_header", {"frame_path": path, "target_id": target})
+            cards = answer.get("entries") if isinstance(answer, dict) else None
             header = {str(card["key"]): card["value"] for card in cards or [] if card.get("key")}
             if DELIVERED_KEYWORD in header or SYNTHETIC_KEYWORD in header:
                 continue

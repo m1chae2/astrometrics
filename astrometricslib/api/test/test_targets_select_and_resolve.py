@@ -1,9 +1,9 @@
-"""Purpose: Test `TargetCatalog.select_frames` and `TargetCatalog.resolve`.
+"""Purpose: Test `TargetCatalog.select_frames` and `TargetCatalog.get`.
 
 Description: Builds a catalog holding one target with a few timed light
 frames, a dark and a spectroscopy frame, then checks that the frame choice
-follows the filter, file range, time range and limit rules, and that
-`resolve` turns ids into targets and refuses unknown ones.
+follows the filter, file range, time range and limit rules, and that `get`
+turns ids into targets and, with ``required``, refuses unknown ones.
 """
 
 from datetime import UTC, datetime, timedelta, timezone
@@ -111,6 +111,16 @@ def test_select_frames_time_range_with_offset_and_utc() -> None:
     assert _names(catalog.select_frames("M13", since=offset_text, until=offset_text)) == ["002"]
 
 
+def test_select_frames_takes_a_datetime_and_an_astropy_time() -> None:
+    """A `datetime` and an astropy `Time` bound the start time as text does."""
+    from astropy.time import Time
+
+    catalog, _ = _catalog()
+    start = datetime.fromtimestamp(_START + 120.0, tz=UTC)
+    chosen = catalog.select_frames("M13", since=start, until=Time(start + timedelta(seconds=180)))
+    assert _names(chosen) == ["002", "003", "005"]
+
+
 def test_select_frames_limit_takes_newest_without_bounds_and_first_with() -> None:
     """Without a bound the newest frames are kept; with one, the first."""
     catalog, _ = _catalog()
@@ -130,12 +140,15 @@ def test_select_frames_accepts_target_object_and_checks_arguments() -> None:
         catalog.select_frames("nope")
 
 
-def test_resolve_returns_target_for_id_and_object() -> None:
-    """An id and a `Target` both resolve; an unknown id raises."""
+def test_get_returns_target_for_id_and_object_and_can_require_one() -> None:
+    """An id and a `Target` are found; ``required`` refuses an unknown id."""
     catalog, target = _catalog()
-    assert catalog.resolve("M13") is target
-    assert catalog.resolve(target) is target
+    assert catalog.get("M13", required=True) is target
+    assert catalog.get(target) is target
+    assert catalog.get("M99") is None
     with pytest.raises(NotFoundError):
-        catalog.resolve("M99")
+        catalog.get("M99", required=True)
     with pytest.raises(InvalidArgumentError):
-        catalog.resolve("  ")
+        catalog.get("  ")
+    with pytest.raises(InvalidArgumentError):
+        catalog.get("M13", refresh="disk")

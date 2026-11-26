@@ -1,7 +1,8 @@
-"""Tests of the ``images:measure_star_profile`` call.
+"""Tests of the ``images:measure_star_profile`` call and the image folder rule.
 
 The call is declared, wired to the image service, passes the library
-arguments, and refuses an image outside the library folders.
+arguments, and refuses an image outside the library folders. Drawing a FITS
+file (``images:convert_fits``) follows the same folder rule.
 """
 
 from pathlib import Path
@@ -45,6 +46,21 @@ def test_outside_path_is_refused(tmp_path: Path) -> None:
     service = _service(library, MagicMock())
     with pytest.raises(InvalidArgumentError):
         service.measure_star_profile("/etc/hostname", 10.0, 10.0)
+
+
+def test_drawing_a_file_follows_the_same_folder_rule(tmp_path: Path) -> None:
+    """``convert_fits`` draws a library file and refuses one from elsewhere."""
+    library = tmp_path / "library"
+    library.mkdir()
+    astrometrics = MagicMock()
+    astrometrics.visualization.render_fits.return_value = None
+    service = _service(library, astrometrics)
+    with pytest.raises(InvalidArgumentError):
+        service.convert_fits("/etc/hostname")
+    astrometrics.visualization.render_fits.assert_not_called()
+    assert service.convert_fits(str(library / "frame.fits")) is None
+    drawn = astrometrics.visualization.render_fits.call_args.args[0]
+    assert drawn == str((library / "frame.fits").resolve())
 
 
 def test_measures_a_star_in_the_library(tmp_path: Path) -> None:

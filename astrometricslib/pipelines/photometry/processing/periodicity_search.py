@@ -18,7 +18,10 @@ from three checks:
    same settings. The false-alarm probability is the fraction of shuffles
    whose best result is at least as strong. Shuffling keeps the real
    sampling (gaps between nights included) and so pays for having tried
-   many periods.
+   many periods. Once enough shuffles have matched the real result to
+   put the probability above the "possible" cutoff, the verdict can no
+   longer change, so the search stops there and reports the probability
+   from the shuffles it ran (see `_count_stronger_noise_versions`).
 3. Were enough repeats seen? A pattern seen fewer than three times is at
    most ``possible``.
 
@@ -52,16 +55,28 @@ stages, so the noise-only distribution is built the same way as the real
 result. The result's ``note`` says when the grid was thinned and gives the
 coarse and fine steps in peak widths; `describe_frequency_grid` returns the
 same numbers.
+
+A light curve is cleaned before it is searched: a measurement whose time
+or brightness is not a finite number is left out (see
+`clean_light_curve`). A brightness that never changes gives an
+``insufficient_data`` result with a note that says why, not a made-up cycle.
+
+The shuffled versions are searched on several threads at once. Their orders
+are drawn first, in the same sequence as a one-thread run, and their results
+are read in that sequence, so the answer does not depend on the thread count.
 """
 
 import math
+import os
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
 from astropy.timeseries import BoxLeastSquares, LombScargle
-from scipy.stats import median_abs_deviation
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.stellar_source import PeriodogramResult, TransitCandidate
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
@@ -69,6 +84,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 VERDICT_DETECTED = "detected"
 VERDICT_POSSIBLE = "possible"
@@ -226,6 +242,40 @@ _SHUFFLE_COUNT = TunedParameter(
 # cutoff for "detected", and take about half as long.
 _SLOW_SEARCH_WORK_LIMIT = 400_000
 _REDUCED_SHUFFLE_COUNT = 150
+
+# The noise-only versions are searched on several threads at once. The
+# astropy searches release Python's global lock while they work, so threads
+# share the light curve and need no copies. Measured on this computer (12
+# cores) with 24 noise-only versions of two real light curves (a 53-point,
+# 756-day one on 20,000-point grids and a 40-point, 3-day one on 14,500-point
+# grids), the time fell as follows (design estimate; see PHO-D39):
+#
+#   threads          1     2     4     8     11
+#   box search     1.0x  1.5x  2.4x  3.3x  3.2x
+#   cycle search   1.0x  1.5x  1.7x  1.4x  1.2x
+#
+# (the mean of the two light curves' speedups)
+#
+# The box search keeps gaining up to 8 threads. The cycle search spends part
+# of each version in Python code that holds the lock, so it gains up to 4
+# threads and loses beyond. Each search also stops one core short of the
+# computer's count, because the user's other work needs cores.
+_MAXIMUM_DIP_SEARCH_THREADS = 8
+_MAXIMUM_CYCLE_SEARCH_THREADS = 4
+
+# A search whose (measurements x grid points) is below this runs on one
+# thread, because starting threads would cost more than it saves. One
+# noise-only version of a 40-point, 14,500-point-grid search (580,000) took
+# 21 ms and one of a 40-point, 140-point-grid search (5,600) took 0.5 ms, so
+# 100,000 is about 3 ms per version, several times the cost of starting a
+# thread (a design estimate; see PHO-D39).
+_THREADED_WORK_LIMIT = 100_000
+
+# How many noise-only versions are searched in one round, per thread. The
+# search looks for the stopping point (see `_count_stronger_noise_versions`)
+# and for a cancel between rounds, so a round must be short: two versions
+# per thread is under a second even for the slowest light curves.
+_VERSIONS_PER_THREAD_ROUND = 2
 
 # The autocorrelation (how much each measurement resembles the one `lag`
 # steps later) below which the correlation is called gone. 0.2 is a common
@@ -505,7 +555,7 @@ class _FrequencyPlan:
         )
 
 
-def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan:
+def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan | None:
     """Build the frequency grids for a Lomb-Scargle search.
 
     Parameters
@@ -520,13 +570,17 @@ def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan
     plan : `_FrequencyPlan`
         The full-resolution grid and the stride that thins it to at most
         `_MAXIMUM_SEARCH_GRID_POINTS` points. A grid already within the limit
-        has a stride of 1 and is used unchanged.
+        has a stride of 1 and is used unchanged. `None` when the period
+        range is so narrow that the grid holds fewer than two frequencies,
+        so there is no step to work with and nothing to search.
     """
     frequency = model.autofrequency(
         minimum_frequency=1.0 / grid.maximum_period_days,
         maximum_frequency=1.0 / grid.minimum_period_days,
         samples_per_peak=_SAMPLES_PER_PEAK,
     )
+    if frequency.size < 2:
+        return None
     stride = max(1, math.ceil(frequency.size / _MAXIMUM_SEARCH_GRID_POINTS))
     return _FrequencyPlan(frequency=frequency, stride=stride, span_days=grid.span_days)
 
@@ -549,7 +603,8 @@ def describe_frequency_grid(time_days: np.ndarray) -> GridResolution | None:
     grid = build_search_grid(time_days)
     if grid is None:
         return None
-    return _plan_frequency_grid(LombScargle(time_days, np.zeros_like(time_days)), grid).resolution
+    plan = _plan_frequency_grid(LombScargle(time_days, np.zeros_like(time_days)), grid)
+    return None if plan is None else plan.resolution
 
 
 def _strongest_peak_indices(power: np.ndarray, count: int) -> np.ndarray:
@@ -756,6 +811,7 @@ def null_flux(flux: np.ndarray, random_generator: np.random.Generator, block_len
 
 
 FALSE_ALARM_FOR_DETECTION = resolve(_FALSE_ALARM_FOR_DETECTION).value
+FALSE_ALARM_FOR_POSSIBLE = resolve(_FALSE_ALARM_FOR_POSSIBLE).value
 
 
 def verdict_from_false_alarm(
@@ -858,12 +914,234 @@ def _grid_note(resolution: GridResolution) -> str:
     )
 
 
+def clean_light_curve(
+    time_days: np.ndarray, flux: np.ndarray, flux_errors: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, int]:
+    """Leave out the measurements that cannot be searched.
+
+    A measurement is left out when its time or brightness is not a finite
+    number. Otherwise a single missing value turns the whole periodogram into
+    "not a number", and every comparison with it is false. The uncertainties
+    of the kept measurements go with them. Whether they are usable as weights
+    is decided later (see `_usable_flux_errors`): one that is missing or not
+    above zero makes the search ignore all of them.
+
+    Parameters
+    ----------
+    time_days : `numpy.ndarray`
+        The measurement times, in days.
+    flux : `numpy.ndarray`
+        The brightness at each time.
+    flux_errors : `numpy.ndarray`, optional
+        The 1-sigma uncertainty of each brightness value.
+
+    Returns
+    -------
+    time_days, flux, flux_errors, dropped : `tuple`
+        The kept times, brightness and uncertainties (`None` when none were
+        given or they could not be one per measurement), and how many
+        measurements were left out.
+    """
+    time_days = np.asarray(time_days, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    errors = None if flux_errors is None else np.asarray(flux_errors, dtype=float)
+    if errors is not None and errors.shape != flux.shape:
+        errors = None  # not one per measurement; the searches ignore it anyway
+    keep = np.isfinite(time_days) & np.isfinite(flux)
+    dropped = int(keep.size - np.count_nonzero(keep))
+    if dropped == 0:
+        return time_days, flux, errors, 0
+    return time_days[keep], flux[keep], None if errors is None else errors[keep], dropped
+
+
+def _unchanging_note() -> str:
+    """Say why a light curve that never changes cannot be searched.
+
+    Returns
+    -------
+    note : `str`
+        A sentence for the result's ``note``.
+    """
+    return "The brightness is the same in every measurement, so there is no pattern to search for."
+
+
+def _early_stop_note(versions: int, planned_versions: int, stop_above: float | None) -> str:
+    """Say in a sentence that the noise comparison stopped early, if it did.
+
+    Parameters
+    ----------
+    versions : `int`
+        How many noise-only versions were searched.
+    planned_versions : `int`
+        How many were planned.
+    stop_above : `float` or `None`
+        The probability above which the search was allowed to stop.
+
+    Returns
+    -------
+    note : `str`
+        An empty string when every planned version was searched. Otherwise a
+        sentence with the counts and the cutoff.
+    """
+    if stop_above is None or versions >= planned_versions:
+        return ""
+    return (
+        f"The noise comparison stopped after {versions} of {planned_versions} versions, "
+        f"because the false-alarm probability was then certain to be above {stop_above:.2g}."
+    )
+
+
+def _noise_thread_count(work: int, maximum_threads: int) -> int:
+    """Choose how many threads search the noise-only versions.
+
+    Parameters
+    ----------
+    work : `int`
+        The measurements times the grid points, which sets how long one
+        noise-only version takes.
+    maximum_threads : `int`
+        The most threads the kind of search gains from
+        (`_MAXIMUM_CYCLE_SEARCH_THREADS` or `_MAXIMUM_DIP_SEARCH_THREADS`).
+
+    Returns
+    -------
+    thread_count : `int`
+        1 for a small search; otherwise the computer's cores less one, at
+        most `maximum_threads`.
+    """
+    if work < _THREADED_WORK_LIMIT:
+        return 1
+    return max(1, min(maximum_threads, (os.cpu_count() or 1) - 1))
+
+
+def _count_stronger_noise_versions(
+    strongest_power_of_order: Callable[[np.ndarray], float],
+    measurement_count: int,
+    random_generator: np.random.Generator,
+    block_length: int,
+    planned_versions: int,
+    best_power: float,
+    stop_above: float | None,
+    thread_count: int,
+) -> tuple[int, int]:
+    """Count how many noise-only versions are at least as strong as the data.
+
+    The false-alarm probability is ``(1 + stronger) / (1 + versions)``. The
+    count can only grow as more versions are searched, so once
+    ``(1 + stronger) / (1 + planned_versions)`` is above ``stop_above`` the
+    final probability is above it too. A caller that only needs to know
+    that (the probability is over the "possible" cutoff, so the verdict is
+    "not detected" whatever the rest of the versions say) can stop there.
+    That saves most of the work for the many light curves that show nothing.
+
+    The orders are drawn from the generator in the same sequence however many
+    threads are used, and the results are read in that sequence, so the
+    stopping point and the counts do not depend on the thread count. Before
+    each round the search checks whether the job was cancelled
+    (`raise_if_abandoned` stops it with `RunAbandonedError`).
+
+    Parameters
+    ----------
+    strongest_power_of_order : `Callable`
+        Takes the indices of one noise-only order and returns the strongest
+        power found when the measurements are put in that order.
+    measurement_count : `int`
+        The number of measurements.
+    random_generator : `numpy.random.Generator`
+        The source of randomness.
+    block_length : `int`
+        How many consecutive measurements move together.
+    planned_versions : `int`
+        How many versions to search if nothing stops the search.
+    best_power : `float`
+        The strongest power of the real light curve.
+    stop_above : `float` or `None`
+        Stop once the probability is certain to be above this. `None` runs
+        every planned version.
+    thread_count : `int`
+        How many threads search versions at once.
+
+    Returns
+    -------
+    stronger, versions : `tuple` [`int`, `int`]
+        How many versions were at least as strong as the data, and how many
+        versions were searched.
+    """
+    stronger = 0
+    versions = 0
+    round_size = 1 if thread_count == 1 else thread_count * _VERSIONS_PER_THREAD_ROUND
+    pool = ThreadPoolExecutor(max_workers=thread_count) if thread_count > 1 else None
+    try:
+        while versions < planned_versions:
+            # A cancelled job stops here instead of finishing the versions.
+            raise_if_abandoned()
+            orders = [
+                _null_order(measurement_count, random_generator, block_length)
+                for _ in range(min(round_size, planned_versions - versions))
+            ]
+            powers = (
+                [strongest_power_of_order(order) for order in orders]
+                if pool is None
+                else list(pool.map(strongest_power_of_order, orders))
+            )
+            for power in powers:
+                stronger += int(power >= best_power)
+                versions += 1
+                if stop_above is not None and (1 + stronger) / (1 + planned_versions) > stop_above:
+                    return stronger, versions
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
+    return stronger, versions
+
+
+def _count_dip_events(
+    time_days: np.ndarray, period_days: float, duration_days: float, epoch_days: float
+) -> tuple[int, int]:
+    """Count the separate dips and the points in them for one box fit.
+
+    The box covers ``duration`` around each ``epoch + n * period``. Its left
+    edge is inclusive and its right edge is not, like the box search's own
+    bins; with a small tolerance for rounding, a point that sits exactly on
+    the left edge (the first measurement is at time zero, and the best box
+    often starts on it) counts as inside.
+
+    Parameters
+    ----------
+    time_days : `numpy.ndarray`
+        The measurement times, in days.
+    period_days : `float`
+        The period of the best box.
+    duration_days : `float`
+        The duration of the best box.
+    epoch_days : `float`
+        The middle of one dip.
+
+    Returns
+    -------
+    events, points : `tuple` [`int`, `int`]
+        How many different dips hold a measurement, and how many
+        measurements fall inside dips. Both are 0 when no measurement does.
+    """
+    half_period = 0.5 * period_days
+    offset = (time_days - epoch_days + half_period) % period_days - half_period
+    half_duration = 0.5 * duration_days
+    tolerance = 1e-9 * duration_days
+    inside = (offset >= -half_duration - tolerance) & (offset < half_duration - tolerance)
+    points = int(np.count_nonzero(inside))
+    if points == 0:
+        return 0, 0
+    event_numbers = np.round((time_days[inside] - epoch_days) / period_days).astype(int)
+    return int(np.unique(event_numbers).size), points
+
+
 def lomb_scargle_search(
     time_days: np.ndarray,
     flux: np.ndarray,
     shuffle_count: int | None = None,
     block_length: int | None = None,
     flux_errors: np.ndarray | None = None,
+    stop_above: float | None = FALSE_ALARM_FOR_POSSIBLE,
 ) -> PeriodogramResult:
     """Search a light curve for a smooth repeating cycle.
 
@@ -884,6 +1162,12 @@ def lomb_scargle_search(
         as `flux`. When given and usable (see the module notes), the
         periodogram weights the points by it. By default all points count
         equally.
+    stop_above : `float` or `None`, optional
+        Stop searching noise-only versions once the false-alarm probability
+        is certain to be above this value. By default the "possible" cutoff,
+        above which the verdict is "not detected" whatever the remaining
+        versions show. The result then reports the versions actually
+        searched in `shuffle_count`. `None` searches every version.
 
     Returns
     -------
@@ -892,34 +1176,58 @@ def lomb_scargle_search(
         or an ``insufficient_data`` result carrying a note and no period.
     """
     shuffle_count_value = resolve(_SHUFFLE_COUNT).value
-    time_days = np.asarray(time_days, dtype=float)
-    flux = np.asarray(flux, dtype=float)
+    time_days, flux, flux_errors, _ = clean_light_curve(time_days, flux, flux_errors)
+    if time_days.size == 0:
+        return PeriodogramResult(verdict=VERDICT_INSUFFICIENT_DATA, note="There are no usable measurements.")
     grid = build_search_grid(time_days)
     if grid is None:
         return PeriodogramResult(verdict=VERDICT_INSUFFICIENT_DATA, note=_insufficient_note(time_days))
+    if not float(np.ptp(flux)) > 0.0:
+        return PeriodogramResult(verdict=VERDICT_INSUFFICIENT_DATA, note=_unchanging_note())
 
     errors = _usable_flux_errors(flux_errors, flux.size)
     model = LombScargle(time_days, flux, errors)
     plan = _plan_frequency_grid(model, grid)
+    if plan is None:
+        return PeriodogramResult(verdict=VERDICT_INSUFFICIENT_DATA, note=_insufficient_note(time_days))
     best_frequency, best_power = _strongest_peak(model, plan)
+    if not (math.isfinite(best_power) and best_frequency > 0.0):
+        return PeriodogramResult(
+            verdict=VERDICT_INSUFFICIENT_DATA, note="The periodogram has no finite power at any period."
+        )
     best_period = 1.0 / best_frequency
 
     # A fixed seed makes repeated searches of the same data agree.
     random_generator = np.random.default_rng(time_days.size)
-    shuffles = shuffle_count or (
+    planned = shuffle_count or (
         shuffle_count_value
         if time_days.size * plan.coarse_frequency.size <= _SLOW_SEARCH_WORK_LIMIT
         else _REDUCED_SHUFFLE_COUNT
     )
     block = block_length or correlation_block_length(flux)
-    at_least_as_strong = 0
-    for _ in range(shuffles):
-        order = _null_order(flux.size, random_generator, block)
+
+    def strongest_power_of_order(order: np.ndarray) -> float:
+        """Find the strongest power of the measurements in a noise-only order.
+
+        Returns
+        -------
+        power : `float`
+            The same two-stage search as the real data, so the noise-only
+            strongest peaks come from the same procedure as the real one.
+        """
         shuffled_model = LombScargle(time_days, flux[order], None if errors is None else errors[order])
-        # The same two-stage search as the real data, so the noise-only
-        # strongest peaks come from the same procedure as the real one.
-        _, shuffled_power = _strongest_peak(shuffled_model, plan)
-        at_least_as_strong += int(shuffled_power >= best_power)
+        return _strongest_peak(shuffled_model, plan)[1]
+
+    at_least_as_strong, shuffles = _count_stronger_noise_versions(
+        strongest_power_of_order,
+        flux.size,
+        random_generator,
+        block,
+        planned,
+        best_power,
+        stop_above,
+        _noise_thread_count(time_days.size * plan.coarse_frequency.size, _MAXIMUM_CYCLE_SEARCH_THREADS),
+    )
     false_alarm = (1 + at_least_as_strong) / (1 + shuffles)
 
     cycles = grid.span_days / best_period
@@ -933,7 +1241,11 @@ def lomb_scargle_search(
         cycles_observed=float(cycles),
         searched_min_period_days=grid.minimum_period_days,
         searched_max_period_days=grid.maximum_period_days,
-        note=_grid_note(plan.resolution),
+        note=" ".join(
+            part
+            for part in (_grid_note(plan.resolution), _early_stop_note(shuffles, planned, stop_above))
+            if part
+        ),
     )
 
 
@@ -950,7 +1262,7 @@ def _robust_point_scatter(flux: np.ndarray) -> float:
         The estimated noise of one measurement, never zero.
     """
     differences = np.diff(flux)
-    spread = 1.4826 * float(median_abs_deviation(differences, scale=1.0))
+    spread = robust_sigma(differences)
     # A difference of two independent measurements has sqrt(2) times the
     # noise of one, so divide it out.
     return max(spread / math.sqrt(2.0), 1e-6)
@@ -962,6 +1274,7 @@ def box_search(
     shuffle_count: int | None = None,
     block_length: int | None = None,
     flux_errors: np.ndarray | None = None,
+    stop_above: float | None = FALSE_ALARM_FOR_POSSIBLE,
 ) -> TransitCandidate:
     """Search a light curve for a repeating flat-bottomed dip.
 
@@ -985,6 +1298,12 @@ def box_search(
         weight of each point. By default one scatter, estimated from the
         differences between neighboring measurements, is used for all
         points.
+    stop_above : `float` or `None`, optional
+        Stop searching noise-only versions once the false-alarm probability
+        is certain to be above this value. By default the "possible" cutoff,
+        above which the verdict is "not detected" whatever the remaining
+        versions show. The result then reports the versions actually
+        searched in `shuffle_count`. `None` searches every version.
 
     Returns
     -------
@@ -997,8 +1316,15 @@ def box_search(
     duration_count = resolve(_DURATION_COUNT).value
     shuffle_count_value = resolve(_SHUFFLE_COUNT).value
     events_for_possible = resolve(_EVENTS_FOR_POSSIBLE).value
-    time_days = np.asarray(time_days, dtype=float)
-    flux = np.asarray(flux, dtype=float)
+    time_days, flux, flux_errors, _ = clean_light_curve(time_days, flux, flux_errors)
+    if time_days.size == 0:
+        return TransitCandidate(verdict=VERDICT_INSUFFICIENT_DATA, note="There are no usable measurements.")
+    if not np.median(flux) > 0:
+        # Depths are fractions of the median brightness, so a median at or
+        # below zero (a faint star lost in the noise) has no depth to give.
+        return TransitCandidate(
+            verdict=VERDICT_INSUFFICIENT_DATA, note="the median brightness is not above zero"
+        )
     normalized = flux / np.median(flux)
     grid = build_search_grid(time_days)
     if grid is None:
@@ -1035,33 +1361,61 @@ def box_search(
         periods = np.geomspace(minimum_period, grid.maximum_period_days, _MAXIMUM_SEARCH_GRID_POINTS)
     periods = _cap_grid_size(periods)
     results = model.power(periods, durations, objective="snr")
-    best_index = int(np.argmax(results.power))
+    # A box with no measurement inside it has no signal-to-noise ratio (the
+    # search gives it minus infinity or "not a number"); it can never be the
+    # best box.
+    powers = np.where(np.isfinite(results.power), results.power, -np.inf)
+    best_index = int(np.argmax(powers))
+    best_power = float(powers[best_index])
+    if not math.isfinite(best_power):
+        return TransitCandidate(
+            verdict=VERDICT_NOT_DETECTED,
+            note="No box of any width held a measurement, so no dip was found.",
+            searched_min_period_days=minimum_period,
+            searched_max_period_days=grid.maximum_period_days,
+        )
     best_period = float(results.period[best_index])
     best_duration = float(results.duration[best_index])
     best_epoch = float(results.transit_time[best_index])
-    best_power = float(results.power[best_index])
     best_depth = float(results.depth[best_index])
 
-    statistics = model.compute_stats(best_period, best_duration, best_epoch)
-    points_per_event = np.asarray(statistics["per_transit_count"])
-    event_count = int(np.sum(points_per_event > 0))
-    dip_points = int(np.sum(points_per_event))
+    # The dips are counted here, not with `BoxLeastSquares.compute_stats`.
+    # That method also fits a sine wave, and the fit stops with "Singular
+    # matrix" when the measurements fall at too few phases of the period; it
+    # also stops on a box that holds no measurement, and on a period that
+    # does not exceed the box width. None of that is needed for the count.
+    event_count, dip_points = _count_dip_events(time_days, best_period, best_duration, best_epoch)
 
     random_generator = np.random.default_rng(time_days.size)
     periods = results.period
-    shuffles = shuffle_count or (
+    planned = shuffle_count or (
         shuffle_count_value
         if time_days.size * periods.size <= _SLOW_SEARCH_WORK_LIMIT
         else _REDUCED_SHUFFLE_COUNT
     )
     block = block_length or correlation_block_length(normalized)
-    at_least_as_strong = 0
-    for _ in range(shuffles):
-        order = _null_order(normalized.size, random_generator, block)
+
+    def strongest_power_of_order(order: np.ndarray) -> float:
+        """Find the strongest box power of a noise-only order.
+
+        Returns
+        -------
+        power : `float`
+            The same search as the real data.
+        """
         shuffled = BoxLeastSquares(time_days, normalized[order], dy=point_errors[order])
-        at_least_as_strong += int(
-            np.max(shuffled.power(periods, durations, objective="snr").power) >= best_power
-        )
+        return float(np.max(shuffled.power(periods, durations, objective="snr").power))
+
+    at_least_as_strong, shuffles = _count_stronger_noise_versions(
+        strongest_power_of_order,
+        normalized.size,
+        random_generator,
+        block,
+        planned,
+        best_power,
+        stop_above,
+        _noise_thread_count(time_days.size * periods.size, _MAXIMUM_DIP_SEARCH_THREADS),
+    )
     false_alarm = (1 + at_least_as_strong) / (1 + shuffles)
 
     cycles = grid.span_days / best_period
@@ -1070,9 +1424,10 @@ def box_search(
         if best_depth > 0
         else VERDICT_NOT_DETECTED
     )
-    note = ""
+    note_parts = [_early_stop_note(shuffles, planned, stop_above)]
     if event_count < events_for_possible:
-        note = "The dip was seen only once, which is a single event, not a repeating pattern."
+        note_parts.insert(0, "The dip was seen only once, which is a single event, not a repeating pattern.")
+    note = " ".join(part for part in note_parts if part)
     return TransitCandidate(
         period_days=best_period,
         transit_depth_mag=best_depth * 1.0857,

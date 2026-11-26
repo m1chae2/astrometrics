@@ -142,6 +142,7 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
 from astrometricslib.foundation.parameter_context import run_basis_value
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, raise_if_abandoned
 from astrometricslib.foundation.run_bases import REFERENCE_SETUP_BASES, factor_for
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.tuned_parameter import (
@@ -170,10 +171,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_LIGHT_DUST_SPLIT_HALF_CORRELATION,
     STACKING_METRICS,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
-    robust_sigma,
-)
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -1419,6 +1417,8 @@ def _read_flat_cells(
     maximum_flat_frames = resolve(MAXIMUM_FLAT_FRAMES).value
     frames: list[np.ndarray] = []
     for path in _evenly_spaced(sorted(flat_paths), maximum_flat_frames):
+        # A cancelled job stops between two flat frames.
+        raise_if_abandoned()
         frame = reader.read_cells(path)
         if frame is None or frame.cells is None or (frames and frame.cells.shape != frames[0].shape):
             continue
@@ -2399,6 +2399,11 @@ def flat_match_rows(
     measurements : `list` of `QualityMeasurement`
         The ten rows. A failure while measuring becomes a not-measured row
         for each, with the reason.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled. That is not a failure of the measurement.
     """
     subject = context.stack_subject(stack_file_name)
     started = time.monotonic()
@@ -2439,6 +2444,9 @@ def flat_match_rows(
                 sky_requirement=requirement,
                 time_limit_seconds=_time_limit_from(configuration),
             )
+    except RunAbandonedError:
+        # A cancel is not a measurement failure.
+        raise
     except Exception as error:  # a by-product: no failure here may fail the stack
         logger.exception("The flat-to-light match of the stack %s could not be measured", stack_file_name)
         outcome = _all_metrics_missing(f"the flat-to-light match failed: {type(error).__name__}")

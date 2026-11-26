@@ -10,16 +10,48 @@ import math
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.star_profile import RingHarmonic, StarProfileMeasurement
 from astrometricslib.pipelines.astrometry.processing.detections import find_star_centers
-from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
+from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    APERTURE_RADIUS_PX,
+    CROWDING_MARGIN_PX,
+    CROWDING_NEIGHBOR_PEAK_FRACTION,
+    SKY_ANNULUS_INNER_RADIUS_PX,
+    SKY_ANNULUS_OUTER_RADIUS_PX,
+)
+from astrometricslib.pipelines.shared.quality.star_profile import PhotometryGeometry
+from astrometricslib.pipelines.shared.quality.star_profile import (
+    measure_star_profile_in_file as _measure_profile,
+)
 
 SIZE = 201
+
+
+def measure_star_profile_in_file(*args: Any, **kwargs: Any) -> StarProfileMeasurement:
+    """Measure a star, passing the photometry geometry the API passes.
+
+    Returns
+    -------
+    measurement : `StarProfileMeasurement`
+        What `measure_star_profile_in_file` returns.
+    """
+    geometry = PhotometryGeometry(
+        aperture_radius_px=float(resolve(APERTURE_RADIUS_PX).value),
+        sky_inner_px=float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value),
+        sky_outer_px=float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value),
+        crowding_margin_px=float(resolve(CROWDING_MARGIN_PX).value),
+        crowding_neighbor_peak_fraction=float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value),
+    )
+    return _measure_profile(*args, photometry_geometry=geometry, **kwargs)
+
+
 SKY = 0.007
 NOISE = 5e-5
 CENTER = 100.0

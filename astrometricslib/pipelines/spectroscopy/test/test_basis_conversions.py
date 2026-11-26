@@ -5,21 +5,19 @@ The areas are spectroscopy and asteroid detection.
 Each converted value is a factor times a basis (trail width, dispersion,
 spectral resolution, star width, plate scale or field of view). With no basis
 measured, it must resolve to the absolute value it had before the conversion.
-When the run records a basis, the value must scale with it. The runner records
-the run's typical trail width, dispersion and line spread once, from the
-spectra the extraction produced.
+When the run records a basis, the value must scale with it. The extraction
+records the run's typical trail width, dispersion and line spread once, from
+the spectra it read (see ``test_measured_bases_ordering``).
 """
 
 import importlib
-from types import SimpleNamespace
 
 import pytest
 
 from astrometricslib.foundation.parameter_context import parameter_context, record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import REFERENCE_SETUP_BASES
-from astrometricslib.models.tuned_parameter import RunBasis, TunedParameter
-from astrometricslib.pipelines.spectroscopy.runner import record_measured_spectral_bases
+from astrometricslib.models.tuned_parameter import TunedParameter
 
 MODULES = (
     "astrometricslib.pipelines.asteroid_detection.pipeline",
@@ -84,36 +82,3 @@ def test_value_follows_a_recorded_basis(parameter: TunedParameter) -> None:
     if isinstance(parameter.reference_value, int):
         expected = max(1, round(expected))
     assert value == pytest.approx(expected)
-
-
-def _spectrum(wavelengths: list[float], sigma: float) -> SimpleNamespace:
-    """Build a stand-in star with a spectrum of constant trail width.
-
-    Returns
-    -------
-    star : `SimpleNamespace`
-        A star whose ``spectroscopy`` has wavelengths and trail widths.
-    """
-    return SimpleNamespace(
-        spectroscopy=SimpleNamespace(
-            wavelengths_angstrom=wavelengths, trail_width_px=[sigma] * len(wavelengths)
-        )
-    )
-
-
-def test_runner_records_the_run_trail_width_dispersion_and_resolution() -> None:
-    """The median trail FWHM, pixel step and line spread are recorded."""
-    wavelengths = [4000.0 + 10.0 * step for step in range(200)]
-    stars = [_spectrum(wavelengths, 2.0), _spectrum(wavelengths, 2.0), SimpleNamespace(spectroscopy=None)]
-    with parameter_context() as context:
-        record_measured_spectral_bases(stars)
-    assert context.bases[RunBasis.TRAIL_WIDTH_PX] == pytest.approx(2.355 * 2.0)
-    assert context.bases[RunBasis.DISPERSION_ANGSTROM_PER_PX] == pytest.approx(10.0)
-    assert context.bases[RunBasis.SPECTRAL_RESOLUTION_ANGSTROM] == pytest.approx(2.355 * 2.0 * 10.0)
-
-
-def test_runner_records_nothing_without_spectra() -> None:
-    """A run with no spectra measures no basis."""
-    with parameter_context() as context:
-        record_measured_spectral_bases([SimpleNamespace(spectroscopy=None)])
-    assert context.bases == {}

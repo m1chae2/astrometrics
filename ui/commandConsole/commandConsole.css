@@ -1,167 +1,101 @@
 /* commandConsole.css - Styling for Command Console workbench */
 
-.command-console {
-  display: flex;
-  flex-direction: column;
+/* commandConsole.css - Styles of the Command Console display. The layout, panels, list and
+   toolbar come from the shared components; this file styles only the console's own parts. */
+
+/* The center column: the resizable editor, Workspace and tab panels. */
+.command-console__work-area {
   height: 100%;
-  width: 100%;
-  background-color: var(--cmd-bg-darkest, var(--cmd-bg-darkest));
-  color: var(--text-primary, var(--text-primary));
-  overflow: hidden;
-  box-sizing: border-box;
-  font-family: var(--font-family-base);
+  min-height: 0;
+  display: flex;
 }
 
-.command-console__container {
+/* Each panel fills its resizable cell. */
+.command-console__panel {
+  height: 100%;
+}
+
+.command-console__panel > .panel__content {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The script toolbar sits in the Editor panel's header, after the title. It stays on one row:
+   in a narrow window the name field gets narrower instead. */
+.command-console__toolbar {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  margin-left: var(--space-2);
+}
+
+.command-console__toolbar > :first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The box that sets the width of the script name field; it shrinks down to a smaller width. */
+.command-console__name-field {
+  display: inline-flex;
+  width: var(--console-name-field-width);
+  min-width: var(--console-name-field-min-width);
+  flex: 0 1 auto;
+}
+
+/* A toolbar row at the top of a tab (the documentation topic and search). */
+.command-console__tab-toolbar {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--term-border);
+}
+
+.command-console__tab-body {
   flex: 1;
   min-height: 0;
   display: flex;
-  height: 100%;
-  width: 100%;
+  flex-direction: column;
 }
 
 /* Resizable panel dividers */
-.console-resize-handle {
-  background-color: var(--term-border, var(--term-border));
+.command-console__resize-handle {
+  background-color: transparent;
   transition: background-color 0.15s ease;
   position: relative;
   z-index: 10;
 }
 
-.console-resize-handle:hover,
-.console-resize-handle[data-resize-handle-state="drag"] {
-  background-color: var(--adwaita-blue-light, var(--adwaita-blue-light));
+.command-console__resize-handle:hover,
+.command-console__resize-handle[data-resize-handle-state="drag"] {
+  background-color: var(--adwaita-blue-light);
 }
 
-.console-resize-handle--vertical {
-  width: 4px;
+.command-console__resize-handle--vertical {
+  width: var(--layout-gap);
   cursor: col-resize;
 }
 
-.console-resize-handle--horizontal {
-  height: 4px;
+.command-console__resize-handle--horizontal {
+  height: var(--layout-gap);
   cursor: row-resize;
 }
 
-/* Generic Panel Frame */
-.console-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background-color: var(--cmd-bg-dark, var(--term-bg-dark));
-  overflow: hidden;
-  box-sizing: border-box;
-}
-
-.console-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
-  border-bottom: 1px solid var(--term-border, var(--term-border));
-  font-size: var(--panel-header-size, 13px);
-  font-weight: 600;
-  user-select: none;
-  min-height: 34px;
-}
-
-.console-panel__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-light, var(--text-light));
-}
-
-.console-panel__actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.console-panel__body {
+/* The Documentation tab: toolbar, then the search matches or the page. */
+.documentation-pane {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  position: relative;
-}
-
-/* Sidebar Styles */
-.console-sidebar {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  border-right: 1px solid var(--term-border, var(--term-border));
 }
 
-/* The tab strip sits on a darker bar and keeps the shared underline-tab look. */
-.console-sidebar__tabs {
-  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
-}
-
-/* In the right-hand panel header the header's own border is the line under the tabs. */
-.console-panel__header .console-sidebar__tabs {
-  width: 100%;
-  border-bottom: none;
-}
-
-.console-sidebar__list {
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.console-sidebar__item {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
-}
-
-.console-sidebar__item:hover {
-  background-color: var(--cmd-bg-light, var(--term-bg-light));
-  border-color: var(--term-border, var(--term-border));
-}
-
-.console-sidebar__item--active {
-  background-color: color-mix(in srgb, var(--adwaita-blue-light) 15%, transparent);
-  border-color: var(--adwaita-blue-light, var(--adwaita-blue-light));
-}
-
-.console-sidebar__item-title {
-  font-size: var(--compact-font-size);
-  font-weight: 500;
-  color: var(--text-primary, var(--text-primary));
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.console-sidebar__item-sub {
-  font-size: var(--small-font-size);
-  color: var(--text-dim, var(--text-dim));
-  margin-top: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.documentation-pane__matches {
+  flex: 1;
 }
 
 /* Workspace Table */
-.workspace-table-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 .workspace-table {
   width: 100%;
+  min-width: var(--console-workspace-min-width);
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: var(--section-label-size);
   font-family: var(--font-family-mono);
@@ -186,74 +120,82 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
+}
+
+/* Fixed shares of the width, so a long value does not squeeze the name and type. The value
+   column takes the rest. */
+.workspace-table__col--name {
+  width: 26%;
+}
+
+.workspace-table__col--type {
+  width: 20%;
+}
+
+.workspace-table__col--size {
+  width: 18%;
 }
 
 .workspace-table tr:hover td {
   background-color: var(--cmd-bg-light, var(--term-bg-light));
 }
 
-.workspace-table tr.pinned td {
-  color: var(--term-cyan, var(--ubuntu-cyan));
+.workspace-table__row--preloaded td {
+  color: var(--term-cyan);
+}
+
+.workspace-table__row--unavailable td {
+  opacity: 0.5;
+}
+
+.workspace-table td.workspace-table__name {
+  font-weight: 600;
+}
+
+.workspace-table td.workspace-table__type {
+  color: var(--term-yellow);
+}
+
+.workspace-table td.workspace-table__muted {
+  color: var(--text-dim);
 }
 
 /* Code Editor */
 .code-editor-pane {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background-color: var(--term-bg-dark, var(--term-bg-dark));
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background-color: var(--term-bg-dark);
 }
 
-.code-editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
-  border-bottom: 1px solid var(--term-border, var(--term-border));
+/* CodeMirror's outer box fills the pane, so the editor (and its line gutter) runs to the bottom
+   and a click anywhere below the last line still lands in it. */
+.code-editor-pane > * {
+  height: 100%;
 }
 
 /* REPL Terminal */
 .terminal-pane {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   background-color: var(--cmd-bg-darkest);
   font-family: var(--font-family-mono);
   font-size: var(--compact-font-size);
   color: var(--term-fg, var(--text-dark));
 }
 
-.terminal-banner {
-  padding: 12px 14px;
-  background-color: color-mix(in srgb, var(--adwaita-blue) 25%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--adwaita-blue-light) 30%, transparent);
-  font-size: var(--section-label-size);
-  line-height: 1.5;
-  color: var(--term-fg-bright, var(--white));
-}
-
-.terminal-banner__title {
-  font-weight: 700;
-  color: var(--term-cyan, var(--ubuntu-cyan));
-  margin-bottom: 4px;
-}
-
-.terminal-banner__cheatsheet {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 4px;
-  margin-top: 6px;
+/* The one dim line at the top of the terminal: the Python version and the terminal's commands. */
+.terminal-intro {
+  flex: 0 0 auto;
+  padding: var(--space-1) 14px;
+  color: var(--text-dim);
   font-size: var(--small-font-size);
-}
-
-.terminal-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 6px 14px;
-  border-bottom: 1px solid var(--term-border, var(--term-border));
+  border-bottom: 1px solid var(--term-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .terminal-history {
@@ -295,16 +237,68 @@
   margin-right: 4px;
 }
 
+/* The line under the history while code runs: a pulsing dot, what runs, the time and the hint. */
+.terminal-running {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 14px;
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  border-top: 1px solid var(--term-border);
+  color: var(--term-fg-bright);
+  font-size: var(--small-font-size);
+  min-width: 0;
+}
+
+.terminal-running__dot {
+  flex: 0 0 auto;
+  width: var(--console-running-dot-size);
+  height: var(--console-running-dot-size);
+  border-radius: 50%;
+  background-color: var(--term-cyan);
+  animation: terminal-running-pulse 1.2s ease-in-out infinite;
+}
+
+.terminal-running__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-running__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--term-yellow);
+}
+
+.terminal-running__hint {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--text-dim);
+}
+
+@keyframes terminal-running-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-running__dot {
+    animation: none;
+  }
+}
+
 .terminal-entry__stdout {
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   color: var(--term-fg, var(--text-dark));
   padding-left: 18px;
 }
 
 .terminal-entry__stderr {
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   color: var(--btn-red-pending);
   padding-left: 18px;
 }
@@ -335,6 +329,9 @@
 
 .terminal-input-bar {
   display: flex;
+  font-family: var(--font-family-mono);
+  font-size: var(--compact-font-size);
+  color: var(--term-fg-bright);
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
@@ -348,24 +345,11 @@
   user-select: none;
 }
 
-.terminal-input-bar .terminal-input-bar__input {
-  flex: 1;
-  min-width: 0;
-  width: auto;
-  height: auto;
-  padding: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  font-family: var(--font-family-mono);
-  font-size: var(--compact-font-size);
-  color: var(--term-fg-bright, var(--white));
-}
-
 /* Documentation Viewer */
 .doc-viewer-container {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   width: 100%;
   overflow-y: auto;
   background-color: var(--cmd-bg-dark, var(--term-bg-dark));
@@ -380,6 +364,13 @@
   color: var(--text-lighter, var(--text-lighter));
   font-size: var(--control-font-size);
   box-sizing: border-box;
+}
+
+.doc-viewer__empty {
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 60px;
+  width: 100%;
 }
 
 .doc-viewer h1 {
@@ -510,13 +501,52 @@
   background-color: color-mix(in srgb, var(--white) 2%, transparent);
 }
 
-/* The documentation filter box in the console sidebar: a dark, compact entry field. */
-.console-sidebar__list .console-sidebar__filter {
-  height: auto;
-  padding: 5px 8px;
+/* The script list: tabs, search box, then the groups, which scroll together. */
+.command-console__script-groups {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.command-console__script-group + .command-console__script-group {
+  margin-top: var(--space-2);
+}
+
+/* The small heading over a group of recipes, such as "Astrometrics". */
+.command-console__script-group-heading {
+  padding: var(--space-1) var(--space-2);
   font-size: var(--small-font-size);
-  background: var(--cmd-bg-dark, var(--term-bg-dark));
-  border: 1px solid var(--term-border, var(--text-darkest));
-  border-radius: var(--radius-sm);
-  color: var(--text-primary, var(--white));
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* The console's script names are long, so its open left column is wider than the other
+   displays'. The script column is drawn only while open, so a folded column still narrows to
+   the strip (collapsibleColumn.css). */
+.command-console:has(.command-console__script-column) {
+  --layout-left-col-width: var(--console-script-column-width);
+}
+
+/* The tabs under a panel title (My scripts / Examples, Terminal / Documentation): a gap before what follows. */
+.command-console__panel-tabs {
+  margin-bottom: var(--space-2);
+}
+
+/* The Editor and the folded Workspace bar, when the Workspace is folded. */
+.command-console__editor-stack {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-gap);
+}
+
+.command-console__editor-stack > .command-console__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.command-console__editor-stack > .panel--collapsed {
+  flex: 0 0 auto;
 }

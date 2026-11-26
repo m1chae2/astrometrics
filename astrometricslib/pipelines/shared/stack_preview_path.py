@@ -6,10 +6,16 @@ module keeps the old import path working.
 """
 
 from astrometricslib.utilities.stack_preview_path import (
+    BACKGROUND_MODEL_SUFFIX,
+    COLOR_PREVIEW_RECORD_SUFFIX,
+    COLOR_PREVIEW_SUFFIX,
     PREVIEW_JPEG_QUALITY,
     PREVIEW_SETTINGS_SUFFIX,
     PREVIEW_SUFFIX,
     PROCESSED_FITS_SUFFIX,
+    background_model_path_for,
+    color_preview_path_for,
+    color_preview_record_path_for,
     is_preview_path,
     is_processed_fits_path,
     preview_path_for,
@@ -18,10 +24,16 @@ from astrometricslib.utilities.stack_preview_path import (
 )
 
 __all__ = [
+    "BACKGROUND_MODEL_SUFFIX",
+    "COLOR_PREVIEW_RECORD_SUFFIX",
+    "COLOR_PREVIEW_SUFFIX",
     "PREVIEW_JPEG_QUALITY",
     "PREVIEW_SETTINGS_SUFFIX",
     "PREVIEW_SUFFIX",
     "PROCESSED_FITS_SUFFIX",
+    "background_model_path_for",
+    "color_preview_path_for",
+    "color_preview_record_path_for",
     "is_preview_path",
     "is_processed_fits_path",
     "preview_path_for",

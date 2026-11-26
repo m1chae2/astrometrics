@@ -79,10 +79,10 @@ from astrometricslib.pipelines.spectroscopy.spectrum_tuning_data import (
     load_stored_star_spectra,
     reference_label,
     require_spectral_filter,
-    robust_sigma,
     symmetric_limit_from_spread,
     upper_limit_from_spread,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 # --- Usable range (SPE-D31, SPE-13) -----------------------------------------
 

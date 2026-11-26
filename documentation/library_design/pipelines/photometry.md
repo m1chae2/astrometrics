@@ -209,7 +209,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 - **Stage 1 (`process_input`).** Keeps frames in the requested filter, leaves out spectral frames, and groups frames with a capture time into sessions. With no frame or no session it returns `has_work=False`, and `photometry_work` fails.
 - **Stage 2 (`run`).** Runs one `VariabilityAnalyzer` pass per session, merges sessions, labels candidates, saves the stars, and runs the period search in a step whose failure cannot cost the light curves.
-- **Stage 3 (`validate_output`).** Fits the run's noise model and records the run gates from `photometry_run_gates`. The period checks were already recorded on each period result in stage 2. The package defines 11 run gates + 2 period checks. It then stores the run's counts, four run measurements and the gates as quality measurements next to the summary (`record_photometry_quality`).
+- **Stage 3 (`validate_output`).** Fits the run's noise model and records the run gates from `photometry_run_gates`. The period checks were already recorded on each period result in stage 2. The package defines 12 run gates + 2 period checks. It then stores the run's counts, four run measurements and the gates as quality measurements next to the summary (`record_photometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns run counts, the rejected frames, the short-term and long-term variable candidates and the cross-session match count.
 
 ### 4.1 Quality gates
@@ -231,6 +231,7 @@ Run gates are recorded on the quality summary. Period checks are recorded on eac
 | `variability_discrimination` | run gate | `post_processing/record_quality.py` | Fails when the variability score does not rank cataloged variables above unlisted stars (AUC against catalog labels: the chance that a random cataloged variable scores above a random unlisted star). Not checked with too few of either. |
 | `detectable_amplitude` | run gate | `post_processing/record_quality.py` | Fails when a sinusoidal variable would need more than `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` peak to peak to clear the run's noise, so the run is blind to smaller variables. |
 | `flux_uncertainty` | run gate | `post_processing/record_quality.py` | Cannot fail. Reports the median per-point error. Not checked when the errors assumed a gain of 1 e-/ADU (electrons per camera count), because the camera's gain was unknown. |
+| `target_crowding` | run gate | `post_processing/record_quality.py` | Fails when a neighbor with at least `CROWDING_NEIGHBOR_PEAK_FRACTION` of the target star's peak lies within the aperture radius plus `CROWDING_MARGIN_PX`, so the target's light curve may carry the neighbor's light. Not checked without a single target star. |
 | `holdout_nights` | period check | `processing/period_checks.py` | Period check. Leaves each night out in turn and asks whether the period found from the other nights predicts it. A failure lowers the period verdict one level. |
 | `alias_ambiguity` | period check | `processing/period_checks.py` | Period check. Fails when an alias of the best period (a false period created by observing only at night, once a day) is nearly as strong as the best peak. A failure lowers the period verdict one level. |
 
@@ -312,6 +313,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `cross_session_match_count` | `int` | Number of stars matched across sessions from different nights. |
 | `noise_model_curve` | `list[astrometricslib.models.quality.quality_summary.NoiseModelPoint]` | The noise model: typical measured scatter (RMS) against instrumental magnitude (-2.5 log10 of the mean raw flux in ADU per second), in brightness bins. |
 | `sessions_missing_wcs` | `list[str]` | Sessions with no plate-solved WCS (pixel-to-sky map). |
+| `session_ties` | `list[astrometricslib.models.quality.quality_summary.SessionTieRecord]` | Quality metric attribute. |
+| `session_scintillation` | `list[astrometricslib.models.quality.quality_summary.SessionScintillationRecord]` | Quality metric attribute. |
 | `long_term_variable_candidate_count` | `int` | Number of stars flagged as long-term variable candidates. |
 | `astrometry_identified_star_count` | `int` | Stars matched to a SIMBAD or Gaia DR3 catalog star on each session's reference frame, summed over sessions (a star seen in two sessions counts twice). 0 when catalog identification is turned off. |
 | `sessions_with_reused_header_wcs` | `list[str]` | Sessions whose existing header WCS (pixel-to-sky map) was checked and used. |

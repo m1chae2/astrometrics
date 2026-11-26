@@ -197,8 +197,9 @@ def classify_gaia_variable_flag(flag: str | None) -> KnownVariability:
     Parameters
     ----------
     flag : `str` or `None`
-        ``"VARIABLE"``, ``"CONSTANT"``, ``"NOT_AVAILABLE"``, `NO_GAIA_MATCH`,
-        or empty when Gaia was never asked.
+        ``"VARIABLE"`` (or ``"VARIABLE:<class>"``, the class from Gaia's
+        variability classification), ``"CONSTANT"``, ``"NOT_AVAILABLE"``,
+        `NO_GAIA_MATCH`, or empty when Gaia was never asked.
 
     Returns
     -------
@@ -210,7 +211,7 @@ def classify_gaia_variable_flag(flag: str | None) -> KnownVariability:
     flag = (flag or "").strip()
     if not flag:
         return KnownVariability.UNKNOWN
-    if flag == GAIA_VARIABLE_FLAG:
+    if flag == GAIA_VARIABLE_FLAG or flag.startswith(GAIA_VARIABLE_FLAG + ":"):
         return KnownVariability.KNOWN_VARIABLE
     return KnownVariability.NOT_LISTED
 
@@ -368,4 +369,6 @@ def describe_known_variability(status: KnownVariability, catalogs: Sequence[str]
         if not_asked:
             sentence += f" {_join_names(not_asked)} not checked."
         return sentence
-    return "No catalog has been asked about this star, so nothing is known."
+    not_asked = [catalog for catalog in ALL_CATALOGS if catalog not in asked]
+    unreached = _join_names(not_asked or ALL_CATALOGS)
+    return f"Unverified: {unreached} could not be asked about this star, so nothing is known."

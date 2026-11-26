@@ -1,12 +1,15 @@
 /**
  * @fileoverview Decides which files an "Analyze" click sends to the backend.
  *
- * Spectral analysis has two stages. Stage one measures the master stacked
- * spectral image, which has the best signal-to-noise ratio, and sets the
- * baseline for the target's dispersion geometry, wavelengths, absorption
- * features and spectral type. Stage two follows the raw spectral frames
- * over time. Keeping the stages separate stops a leftover checkbox
- * selection of raw frames from replacing the master stack analysis.
+ * The main click analyzes both master stacks when both exist. A master stack of the needed kind is
+ * always used when it exists. With no such stack, the file
+ * selected in the file browser (the previewed file) is used.
+ *
+ * Spectroscopy measures the master stacked spectral image, which has the best signal-to-noise
+ * ratio, and sets the baseline for the target's dispersion geometry, wavelengths, absorption
+ * features and spectral type. Spectral Variation is a separate menu stage that follows the raw
+ * spectral frames over time. Keeping them separate stops a leftover checkbox selection of raw
+ * frames from replacing the master stack analysis.
  */
 
 /** Filter names that mean the frames are spectroscopy frames. */
@@ -18,6 +21,8 @@ export interface AnalysisSelection {
     paths: string[];
     /** Filter type to tell the backend, or undefined to let it decide. */
     filterType?: string;
+    /** Stages to run by name. Left out to let the backend choose from the files. */
+    stages?: AnalysisStage[];
 }
 
 /** Everything the choice depends on. */
@@ -34,6 +39,8 @@ export interface AnalysisSelectionInput {
     selectedFile: string | null;
     /** Paths of every file in the current view. */
     filteredFilePaths: readonly string[];
+    /** The filter of the previewed file, or null when it is unknown. */
+    selectedFileFilter?: string | null;
 }
 
 /**
@@ -45,50 +52,165 @@ export function isSpectralFilter(filterType: string | null | undefined): boolean
     return filterType !== null && filterType !== undefined && SPECTRAL_FILTER_TYPES.includes(filterType);
 }
 
+/** The analysis stages the Analyze Target menu can run by name. */
+export type AnalysisStage = 'astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation';
+
+/** The kind of frame an analysis stage works on. */
+export type AnalysisFrameKind = 'imaging' | 'spectral';
+
+/** Whether one menu stage can run now, and why not when it cannot. */
+export interface StageAvailability {
+    /** True when the stage can be started. */
+    enabled: boolean;
+    /** The reason the stage is off, for a tooltip. Empty when the stage is on. */
+    reason: string;
+}
+
+/** The reason shown when the main Analyze Target click has no stack and no selected file. */
+export const NO_SOURCE_TO_ANALYZE_REASON = 'Stack the frames or select a file in the file list first';
+
+/** The reason shown when astrometry or photometry has nothing to work on. */
+export const NO_IMAGING_SOURCE_REASON = 'Stack the luminance frames or select a frame first';
+
+/** The reason shown when spectroscopy has no spectral image to work on. */
+export const NO_SPECTRAL_SOURCE_REASON = 'Stack the spectral frames or select a spectral frame first';
+
+/** The reason shown when spectroscopy cannot get the astrometry it needs first. */
+export const NO_ASTROMETRY_SOURCE_REASON =
+    'Spectroscopy needs astrometry first. Stack the luminance frames or select a frame first';
+
+/** The reason shown when Spectral Variation has no raw spectral frames to follow. */
+export const NO_RAW_SPECTRAL_FRAMES_REASON =
+    'Spectral Variation follows the raw spectral frames. Pick the spectral filter in the file list first';
+
 /**
- * Chooses the files for the main "Analyze Target" action.
+ * Chooses the raw spectral frames Spectral Variation follows.
  *
- * With a spectral filter and a master stacked spectral image, the master
- * stack is always analyzed first, even when raw frames are ticked. Otherwise
- * the order is: ticked files, the master stacked image, the previewed file,
- * then every file in view.
+ * It uses the ticked frames, or every frame in view when none are ticked. It is offered only
+ * while the spectral filter is in view.
+ *
+ * @param input The current selection state.
+ * @returns The raw frames to follow over time, or an empty list when none can be chosen.
+ */
+function chooseRawSpectralFrames(input: AnalysisSelectionInput): string[] {
+    if (!isSpectralFilter(input.filterType)) return [];
+    return input.checkedFiles.size > 0 ? Array.from(input.checkedFiles) : [...input.filteredFilePaths];
+}
+
+/**
+ * Says what kind of frame the selected file is.
+ *
+ * The selected file is the one the user picked in the file browser (the file in the viewer).
+ * It is a spectral frame when it is the master spectral stack or its filter is a spectral filter.
+ *
+ * @param input The current selection state.
+ * @returns 'spectral', 'imaging', or null when no file is selected.
+ */
+export function selectedFileKind(input: AnalysisSelectionInput): AnalysisFrameKind | null {
+    if (!input.selectedFile) return null;
+    if (input.selectedFile === input.stackedSpectralTarget) return 'spectral';
+    if (input.selectedFile === input.stackedImage) return 'imaging';
+    return isSpectralFilter(input.selectedFileFilter) ? 'spectral' : 'imaging';
+}
+
+/**
+ * Picks the one file an analysis of a given kind should be given.
+ *
+ * A master stack of the needed kind always wins, whatever is ticked or previewed.
+ * With no such stack, the selected file is used, but only when it is the right kind.
+ *
+ * @param input The current selection state.
+ * @param kind The kind of frame the analysis works on.
+ * @returns The path to send, or null when there is nothing to analyze.
+ */
+export function chooseSourceFile(input: AnalysisSelectionInput, kind: AnalysisFrameKind): string | null {
+    const stack = kind === 'spectral' ? input.stackedSpectralTarget : input.stackedImage;
+    if (stack) return stack;
+    return selectedFileKind(input) === kind ? input.selectedFile : null;
+}
+
+/**
+ * Says which menu stages can run now.
+ *
+ * Astrometry and photometry need an imaging stack or a selected imaging frame. Spectroscopy needs
+ * a spectral stack or a selected spectral frame, and also needs astrometry to be able to run.
+ * Spectral Variation needs raw spectral frames in view.
+ *
+ * @param input The current selection state.
+ * @returns For each stage, whether it is on and the reason when it is off.
+ */
+export function describeStageAvailability(input: AnalysisSelectionInput): Record<AnalysisStage, StageAvailability> {
+    const canRunAstrometry = chooseSourceFile(input, 'imaging') !== null;
+    const hasSpectralSource = chooseSourceFile(input, 'spectral') !== null;
+    const imagingState: StageAvailability = canRunAstrometry
+        ? { enabled: true, reason: '' }
+        : { enabled: false, reason: NO_IMAGING_SOURCE_REASON };
+    let spectroscopyState: StageAvailability = { enabled: true, reason: '' };
+    if (!hasSpectralSource) {
+        spectroscopyState = { enabled: false, reason: NO_SPECTRAL_SOURCE_REASON };
+    } else if (!canRunAstrometry) {
+        spectroscopyState = { enabled: false, reason: NO_ASTROMETRY_SOURCE_REASON };
+    }
+    const variationState: StageAvailability =
+        chooseRawSpectralFrames(input).length > 0
+            ? { enabled: true, reason: '' }
+            : { enabled: false, reason: NO_RAW_SPECTRAL_FRAMES_REASON };
+    return {
+        astrometry: imagingState,
+        photometry: imagingState,
+        spectroscopy: spectroscopyState,
+        spectral_variation: variationState,
+    };
+}
+
+/**
+ * Chooses the file for one named stage of the Analyze Target menu.
+ *
+ * @param input The current selection state.
+ * @param stage The stage the user picked.
+ * @returns The file and filter type to send, or null when the stage cannot run.
+ */
+export function chooseStageSelection(input: AnalysisSelectionInput, stage: AnalysisStage): AnalysisSelection | null {
+    if (!describeStageAvailability(input)[stage].enabled) return null;
+    if (stage === 'spectral_variation') {
+        return { paths: chooseRawSpectralFrames(input), filterType: 'SPEC' };
+    }
+    if (stage === 'spectroscopy') {
+        const path = chooseSourceFile(input, 'spectral');
+        return path ? { paths: [path], filterType: 'SPEC' } : null;
+    }
+    const path = chooseSourceFile(input, 'imaging');
+    const filterType = isSpectralFilter(input.filterType) ? undefined : input.filterType || undefined;
+    return path ? { paths: [path], filterType } : null;
+}
+
+/** The tooltip of the main Analyze Target button when it has something to analyze. */
+export const ANALYZE_TARGET_TOOLTIP =
+    'Analyze Target: measures the stars of the imaging stack and, when there is one, the spectra of the spectral stack';
+
+/**
+ * Chooses the files for the main "Analyze Target" click. It names no stages: the backend chooses them.
+ *
+ * When the target has both an imaging stack and a spectral stack, both are sent, and the backend runs
+ * photometry on the imaging stack and spectroscopy on the spectral stack in one job, whatever filter
+ * is in view. With only one of the two stacks, that stack is sent, following the filter in view.
+ * With neither, the selected file is used. With no file either, nothing is returned and the action
+ * is off. The backend reports a stage it had to skip in the job message.
  *
  * @param input The current selection state.
  * @returns The files and filter type to analyze, or null when there is nothing to analyze.
  */
 export function chooseAnalysisSelection(input: AnalysisSelectionInput): AnalysisSelection | null {
-    const filterType = input.filterType || undefined;
-    if (isSpectralFilter(input.filterType) && input.stackedSpectralTarget) {
-        return { paths: [input.stackedSpectralTarget], filterType: 'SPEC' };
+    if (input.stackedImage && input.stackedSpectralTarget) {
+        return {
+            paths: [input.stackedImage, input.stackedSpectralTarget],
+            filterType: isSpectralFilter(input.filterType) ? undefined : input.filterType || undefined,
+        };
     }
-    if (input.checkedFiles.size > 0) {
-        return { paths: Array.from(input.checkedFiles), filterType };
+    if (isSpectralFilter(input.filterType)) {
+        const path = chooseSourceFile(input, 'spectral');
+        return path ? { paths: [path], filterType: 'SPEC' } : null;
     }
-    if (input.stackedImage) {
-        return { paths: [input.stackedImage], filterType };
-    }
-    if (input.selectedFile) {
-        return { paths: [input.selectedFile], filterType };
-    }
-    if (input.filteredFilePaths.length > 0) {
-        return { paths: [...input.filteredFilePaths], filterType };
-    }
-    return null;
-}
-
-/**
- * Chooses the raw frames for the "Analyze Temporal Variation" action.
- *
- * This is stage two, so it is only offered for spectral frames once a
- * master stacked spectral image exists. It uses the ticked frames, or
- * every frame in view when none are ticked.
- *
- * @param input The current selection state.
- * @returns The raw frames to follow over time, or null when the action is not available.
- */
-export function chooseTemporalVariationSelection(input: AnalysisSelectionInput): AnalysisSelection | null {
-    if (!isSpectralFilter(input.filterType) || !input.stackedSpectralTarget) return null;
-    const paths =
-        input.checkedFiles.size > 0 ? Array.from(input.checkedFiles) : [...input.filteredFilePaths];
-    return paths.length > 0 ? { paths, filterType: 'SPEC' } : null;
+    const path = chooseSourceFile(input, 'imaging');
+    return path ? { paths: [path], filterType: input.filterType || undefined } : null;
 }

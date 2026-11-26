@@ -252,7 +252,7 @@ The `data_size` block in `tpm.json` holds the counts the table uses.
 | `processing_stage_cpu_seconds`, `_peak_rss_mb`, `_disk_read_mb`, `_disk_write_mb`, `_nvidia_util_percent_mean`, `_nvidia_memory_mb_peak` (each `[<stage>]`), `analysis_cpu_seconds[<step>]`, `analysis_peak_rss_mb[<step>]` | Only with `--processing`. What the backend's process tree and the NVIDIA card used in that stage or step. | Lower |
 | `processing_frame_count`, `processing_failed_jobs` | Only with `--processing`. The number of frames stacked (the input size) and the number of jobs that failed or timed out. | information |
 | `rpc_count_load`, `rpc_count_per_visit[<display>]` | Backend calls at load, and per visit to each display. | Lower |
-| `rpc_p95[history:night_quality]`, `rpc_p95[target:get_targets]`, `rpc_p95[processing:stack_summary]` | Round-trip time of the night review, the target list and the stack summary. | Lower |
+| `rpc_p95[history:night_quality]`, `rpc_p95[target:get]`, `rpc_p95[processing:stack_summary]` | Round-trip time of the night review, the target list and the stack summary. | Lower |
 | `idle_rpc_per_minute` | Backend calls per minute the page makes while nobody uses it. | Lower |
 
 The backend does not log how long each RPC call takes, so the per-method times are the page's round trips (the time from sending a request to receiving the reply). They include the preview server's forwarding, which adds a small, steady amount.
@@ -469,8 +469,8 @@ build/tpm/run_tpm.sh --real-snapshot --processing "M 31" --processing-dry-run   
 **What it runs.**
 
 1. `target:get_files` lists the target's frames. Frames of the chosen camera are kept (spectroscopy frames are left out) and sorted by path. The script stops with exit code 3 if there are none or a file is missing.
-2. `processing:stack` (the Process button) starts the stack job. The script polls `processing:get_job` every half second.
-3. The job log (`processing:job_log_tail`) holds a line `Stage N of 7: ...` at the start of each stage, with a time to the millisecond. A stage runs to the next stage's line; the last one to the end of the job. The stages are `choose_frames`, `screen_frames`, `prepare`, `stacking`, `summarize`, `quality` and `preview`. A skipped stage gives no TPM.
+2. `processing:stack` (the Process button) starts the stack job. The script polls `jobs:query` (`detail="full"`) every half second.
+3. The job log (`jobs:query` with `detail="log_tail"`, every line, uncut) holds a line `Stage N of 7: ...` at the start of each stage, with a time to the millisecond. A stage runs to the next stage's line; the last one to the end of the job. The stages are `choose_frames`, `screen_frames`, `prepare`, `stacking`, `summarize`, `quality` and `preview`. A skipped stage gives no TPM.
 4. The analysis steps then run one after another, each as a button of the display does: `photometry` (`analysis:analyze_image` on the new stack, the Analyze Target button), `frame_measurements` (`quality:record_frame_measurements`) and `stack_comparison` (`quality:measure_stack`). The last two do not return their job's number, so the script waits until every job that is new for the target has ended.
 5. For each window (stage or step) the CPU time, peak memory and disk bytes are cut out of the half-second samples, and the NVIDIA rows (every 2 seconds) inside the window are summarized. A window shorter than 2 seconds has no NVIDIA value.
 

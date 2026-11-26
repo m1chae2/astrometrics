@@ -21,6 +21,11 @@ Center column: `TargetViewerManager` — displays the processed image. The
   image is shown the same way. The viewer parts live in `ui/common/fitsViewer/`
   because the Image Processing view uses them too. `FitsViewerManager` picks
   `FitsRenderer` for FITS data and `imageViewer/ImageViewer` for a plain picture.
+  `FitsRenderer` puts the viewer together from hooks in `fitsViewer/hooks/`:
+  `useViewPlacement` places the view on each picture (a focus star, a saved view),
+  `useStarOverlay` and `StarLabelLayer` draw the star overlay, `useStarMeasurement`
+  and `ProfileMarkerLayer` run click-to-measure, and `useDetectionsOverlay` runs
+  the Detections overlay.
 
 Pixel readout: the line with the pixel position, value and sky position floats over the
   bottom-left corner of the picture on a translucent dark background (`--surface-overlay`),
@@ -96,7 +101,11 @@ Detections: the Detections button in the viewer header (here and in the Image Pr
   run uses (`find_unique_stars`), on any image. For a stack's stretched `_processed` picture the
   backend searches the linear stack beside it, as the run does. The backend keeps the answer for the file's
   modified time, so turning the overlay off and on is quick. A single star is a circle and a star
-  reported twice and merged is a diamond (a different shape, not only a different color); the
+  reported twice and merged is a diamond (a different shape, not only a different color). Each
+  circle is the circle photometry measures every star in (`aperture_radius_px`, in image pixels),
+  sized from the star width measured on this image (`star_width_px`), so it grows and shrinks with the zoom and shows the light photometry would count. It is the same
+  size for every star, because all stars in one image share one shape. Zoomed far out, a circle
+  never draws smaller than 3 screen pixels, so it stays visible. The
   colors are the `--detection-marker-color` and `--detection-merged-color` tokens. Positions are
   1-based file pixels placed like the star profile marker (`utils/detectionMarkers.ts`), drawn as
   two SVG paths, and only markers in view are drawn. A note in the corner of the picture says
@@ -166,6 +175,22 @@ canvas is not cleared between the two, and the zoom is rescaled by the size rati
 so the picture does not jump. A target with no preview file shows the spinner until
 the FITS image is drawn. Star overlays use FITS pixel positions, so they wait for
 the full image and are never drawn on the preview.
+
+Black and white or color
+
+A black-and-white stack can also have a color picture, made from the colors of
+another stack of the same target (`<stack>_color_preview.jpg`). The target record
+names it in `stacking.colorPreviewImage`. `hooks/useColorPreview.ts` reads that
+name with `target:get`. Only when the name is set does the viewer header show a
+"Black and white" / "Color" switch (`Tabs`). The app never asks for the file
+without the name, so a target without a color picture makes no failed request.
+The picture is read from the backend's `/static` folders, like the stack preview,
+and only while Color is picked. It is kept in `targetImageCache` by path, so a
+pause does not free it. The switch starts on "Color", so a target with a color
+picture opens in color; "Black and white" is one click away. The choice is kept
+while the app runs. A target without a color picture shows the black-and-white
+picture whatever the choice is. A frame opened from the Evidence list hides the
+switch.
 
 `hooks/useNeighborPrefetch.ts` prepares the two targets directly above and below
 the selected one in the list (as filtered and sorted). It starts only when the

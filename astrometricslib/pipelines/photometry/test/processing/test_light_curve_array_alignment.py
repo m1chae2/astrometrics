@@ -150,11 +150,12 @@ def test_a_pre_existing_length_mismatch_is_not_silently_reindexed() -> None:
     assert light_curve.airmasses == []
 
 
-def test_the_surviving_saturation_flag_belongs_to_its_own_frame() -> None:
-    """Verify filtering preserves which frame each flag describes.
+def test_a_saturated_frame_is_removed_and_the_arrays_stay_aligned() -> None:
+    """Verify the saturated frame leaves and the arrays stay aligned.
 
-    Checks that the saturation flag stays with the correct frame after
-    alignment.
+    A saturated point is removed from the star's light curve (see
+    `VariabilityAnalyzer._remove_saturated_points`), so no flag remains and
+    each surviving airmass still belongs to its own frame.
     """
     timestamps = [datetime(2026, 7, 20, 22, 0) + timedelta(minutes=5 * i) for i in range(_FRAME_COUNT)]
     stars = [_build_star(f"Star_{i}", [1000.0 + i] * _FRAME_COUNT, timestamps) for i in range(40)]
@@ -167,6 +168,7 @@ def test_the_surviving_saturation_flag_belongs_to_its_own_frame() -> None:
     _run(stars, timestamps)
 
     light_curve = marked.photometry
-    surviving = dict(zip(light_curve.timestamps, light_curve.is_saturated, strict=True))
-    assert surviving.get(saturated_timestamp) is True
-    assert sum(1 for flag in light_curve.is_saturated if flag) == 1
+    assert saturated_timestamp not in light_curve.timestamps
+    assert len(light_curve.is_saturated) == len(light_curve.timestamps)
+    assert not any(light_curve.is_saturated)
+    assert light_curve.saturated_points_removed == 1

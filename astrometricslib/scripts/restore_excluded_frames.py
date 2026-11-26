@@ -71,7 +71,9 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging("restore_excluded_frames", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
-    target_ids = arguments.targets or [target.id for target in astrometrics.targets.list()]
+    target_ids = arguments.targets or [
+        target.id for target in astrometrics.targets.query(detail="objects", limit=None).objects
+    ]
 
     total = 0
     touched = []

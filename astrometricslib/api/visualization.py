@@ -2,14 +2,17 @@
 
 Astronomical data is stored in FITS files, which hold raw measurements that
 an ordinary image viewer cannot show well. `Visualization` turns them into
-pictures: `render_fits` draws one frame or stack, stretched so faint detail
-shows, and `plot` draws the charts of a target's or a star's results. The
-work happens in `pipelines/shared/image_conversions.py` and in the
-`visualization/` package.
+pictures: `render_fits` draws one frame, stack or array, stretched so faint
+detail shows, as a PNG, a data URL for the app's viewer, or a Matplotlib
+figure for a script or notebook, optionally with the detected and the named
+stars marked on it; and `plot` draws the charts of a target's or a star's
+results. The work happens in `pipelines/shared/image_conversions.py` and in
+the `visualization/` package.
 """
 
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 from matplotlib.figure import Figure
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
@@ -23,13 +26,27 @@ from astrometricslib.pipelines.shared.api_arguments import (
     reject_unused_arguments,
     resolve_target,
 )
+from astrometricslib.visualization.sky_placement import (
+    SkyPicturePlacement,
+    place_picture_on_sky,
+    sky_picture_files,
+)
 
 if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
 
 __all__ = ["Visualization"]
 
-RENDER_KINDS = ("image", "data_url")
+RENDER_KINDS = ("image", "data_url", "figure")
+
+_RENDER_ARGUMENTS = {
+    "image": ("crop", "overlays", "pixels"),
+    "data_url": (),
+    "figure": ("crop", "overlays", "pixels", "figsize"),
+}
+
+DEFAULT_IMAGE_FIGURE_SIZE = (10.0, 8.0)
+"""Size of a ``render_fits(kind="figure")`` figure, in inches."""
 PLOT_KINDS = ("dashboard", "star", "astrometry", "photometry", "spectroscopy", "focus", "asteroids")
 
 _PLOT_ARGUMENTS = {
@@ -92,7 +109,7 @@ class Visualization:
         path: str | None = None,
         target: str | Target | None = None,
         file_name: str | None = None,
-        kind: Literal["image", "data_url"] = "image",
+        kind: Literal["image", "data_url", "figure"] = "image",
         iso: str | None = None,
         exposure: str | None = None,
         index: int = 0,
@@ -103,26 +120,42 @@ class Visualization:
         crop_center_x: int | None = None,
         crop_center_y: int | None = None,
         crop_size: int | None = None,
-    ) -> ViewableImage | RenderedImage:
-        """Draw a FITS frame or stack as a picture. Nothing is saved.
+        overlays: list[str] | tuple[str, ...] | str | None = None,
+        pixels: np.ndarray | None = None,
+        figsize: tuple[float, float] | None = None,
+    ) -> ViewableImage | RenderedImage | Figure:
+        """Draw a frame, a stack or an array as a picture. Nothing is saved.
 
-        The frame is named in one of three ways: ``path``; ``target`` and
-        ``file_name``; or ``target``, ``iso`` and ``exposure`` (and
-        ``index``). Use it to judge a frame by eye: star trailing, clouds,
-        gradients or a bad stack.
+        The image is named in one of four ways: ``path``; ``target`` and
+        ``file_name``; ``target``, ``iso`` and ``exposure`` (and ``index``);
+        or ``pixels``. Use it to judge a frame by eye: star trailing,
+        clouds, gradients or a bad stack. With ``overlays`` it marks what
+        Image Processing marks: the stars the astrometry run detects and
+        the named stars that have photometry.
 
         Arguments used by each kind (any other argument is refused):
 
-        - ``"image"``: all of them. ``crop_center_x``, ``crop_center_y`` and
-          ``crop_size`` zoom in on one place.
-        - ``"data_url"``: all except the three crop arguments.
+        - ``"image"``: all except ``figsize``. ``crop_center_x``,
+          ``crop_center_y`` and ``crop_size`` zoom in on one place.
+        - ``"data_url"``: all except the crop arguments, ``overlays``,
+          ``pixels`` and ``figsize``.
+        - ``"figure"``: all except ``max_dimensions``.
+
+        The brightness works the same way for every kind: ``stretch=True``
+        (default) is the app's automatic stretch, ``stretch=False`` is a
+        straight line from the darkest to the brightest pixel, and
+        ``center`` with ``width`` is a straight line over that fixed range
+        of pixel values (it replaces the other two).
 
         Parameters
         ----------
         path : `str`, optional
             Path to the FITS file.
         target : `str` or `Target`, optional
-            The target whose frame to draw.
+            The target whose frame to draw, with ``file_name`` or with
+            ``iso`` and ``exposure``. With ``path`` alone, the target the
+            file belongs to: the ``"stars"`` overlay then names only that
+            target's stars, as Image Processing does.
         file_name : `str`, optional
             Which of the target's frames: its file name, or the number at
             the end of the name, such as ``"013"``. It must match one frame.
@@ -132,6 +165,9 @@ class Visualization:
             image. ``"data_url"``: the picture as a data URL with its
             brightness range and FITS header, as the app's viewer shows it;
             a stretched stack uses the preview the stacking stage saved.
+            ``"figure"``: a Matplotlib figure at full resolution, for a
+            script or notebook. A notebook shows it in the page; the app's
+            Command Console opens it in a figure window.
         iso : `str`, optional
             With ``target`` and ``exposure``: the gain or ISO of the frame.
         exposure : `str`, optional
@@ -142,9 +178,10 @@ class Visualization:
             Longest side of the picture in pixels, from 100 to 2000.
             Defaults to 1200 for ``"image"`` and 2000 for ``"data_url"``.
         stretch : `bool`, optional
-            Brighten faint detail automatically. Defaults to `True`. A
-            stack's ``_processed.fits`` file is already stretched, so it is
-            drawn as it is for ``"image"``.
+            Brighten faint detail automatically. Defaults to `True`.
+            `False` draws a straight line from the darkest to the brightest
+            pixel. A stack's ``_processed.fits`` file is already stretched,
+            so it is drawn as it is for ``"image"`` and ``"figure"``.
         center : `float`, optional
             Middle of a manual brightness range, in pixel values. Needs
             ``width``.
@@ -158,30 +195,70 @@ class Visualization:
         crop_size : `int`, optional
             Side of the zoomed square in pixels. The piece is not shrunk
             below its own size.
+        overlays : `list` [`str`], `str` or `None`, optional
+            What to mark on a FITS file. None by default. ``"detections"``:
+            the stars the astrometry run's star finder detects (small cyan
+            circles), from the stack's ``<stack>_detections.json`` file
+            when it is still valid. ``"stars"``: the stack's named stars
+            that have photometry (yellow circles with names), from its
+            ``<stack>_identification.json`` file, which `identify_stack`
+            writes. Give one name or a list, such as
+            ``["detections", "stars"]``. The description (``"image"``) or
+            the title (``"figure"``) counts what each overlay drew, or
+            says why it drew nothing.
+        pixels : `numpy.ndarray`, optional
+            A 2-D or color array to draw instead of a file. It has no saved
+            detections or names, so it takes no ``overlays``.
+        figsize : `tuple` [`float`, `float`], optional
+            For ``"figure"``: the figure size in inches. Defaults to 10 by 8.
 
         Returns
         -------
-        picture : `ViewableImage` or `RenderedImage`
+        picture : `ViewableImage`, `RenderedImage` or `Figure`
             A `ViewableImage` for ``"image"``, a `RenderedImage` for
-            ``"data_url"``.
+            ``"data_url"``, and a `Figure` for ``"figure"``, with the
+            first row of pixels at the top and axes in full-frame pixels.
 
         Raises
         ------
         InvalidArgumentError
-            If the kind is unknown, an argument the kind does not use is
-            given, only one of ``center`` and ``width`` is given, only some
-            crop values are given, or the frame is named in no way or in
-            more than one way.
+            If the kind or an overlay is unknown, an argument the kind does
+            not use is given, only one of ``center`` and ``width`` is
+            given, only some crop values are given, overlays are asked for
+            on ``pixels``, or the image is named in no way or in more than
+            one way.
+
+        Examples
+        --------
+        >>> target = astrometrics.targets.get("M 13")  # doctest: +SKIP
+        >>> figure = astrometrics.visualization.render_fits(
+        ...     target.stacking.stacked_image,
+        ...     target=target,
+        ...     kind="figure",
+        ...     overlays=["detections", "stars"],
+        ... )  # doctest: +SKIP
         """
         from astrometricslib.pipelines.shared import image_conversions
+        from astrometricslib.visualization import image_display
 
         check_choice("kind", kind, RENDER_KINDS)
+        overlay_names = image_display.check_overlays(overlays)
         crop_values = (crop_center_x, crop_center_y, crop_size)
         reject_unused_arguments(
             kind,
-            {"image": ("crop",), "data_url": ()},
-            {"crop": any(value is not None for value in crop_values)},
+            _RENDER_ARGUMENTS,
+            {
+                "crop": any(value is not None for value in crop_values),
+                "overlays": bool(overlay_names),
+                "pixels": pixels is not None,
+                "figsize": figsize is not None,
+            },
         )
+        if kind == "figure" and max_dimensions is not None:
+            raise InvalidArgumentError(
+                "kind='figure' does not use: max_dimensions. Give figsize instead.",
+                details={"kind": kind, "unused": ["max_dimensions"]},
+            )
         if (center is None) != (width is None):
             raise InvalidArgumentError(
                 "Give both center and width for a manual brightness range, or neither."
@@ -190,14 +267,41 @@ class Visualization:
             raise InvalidArgumentError(
                 "Give crop_center_x, crop_center_y and crop_size together, or none of them."
             )
-        resolved, frame_path = self._frame_path(path, target, file_name, iso, exposure, index)
+        crop = (crop_center_x, crop_center_y, crop_size) if crop_size is not None else None
+        if pixels is not None:
+            if path is not None or target is not None or file_name is not None or iso is not None:
+                raise InvalidArgumentError("Give pixels, or a path or a target frame, not both.")
+            if overlay_names:
+                raise InvalidArgumentError(
+                    "An array has no saved detections or names, so it takes no overlays.",
+                    details={"overlays": list(overlay_names)},
+                )
+            resolved, frame_path = None, None
+        else:
+            resolved, frame_path = self._frame_path(path, target, file_name, iso, exposure, index)
+        marks: list[image_display.OverlayMark] = []
+        notes: list[str] = []
+        if overlay_names and frame_path is not None:
+            target_id = resolved.id if resolved is not None else None
+            marks, notes = image_display.collect_overlay_marks(
+                frame_path, overlay_names, self._stars, target_id
+            )
+
+        if kind == "figure":
+            display = image_conversions.scale_for_display(frame_path, pixels, stretch, center, width, crop)
+            size = tuple(figsize) if figsize is not None else DEFAULT_IMAGE_FIGURE_SIZE
+            return image_display.draw_image_figure(
+                display, image_display.figure_name(frame_path), marks, notes, size
+            )
         default_size = 1200 if kind == "image" else 2000
         size = max(100, min(int(max_dimensions or default_size), 2000))
         if kind == "data_url":
             image_id = resolved.id if resolved is not None else ""
             return image_conversions.render_data_url(frame_path, image_id, size, stretch, center, width)
-        crop = (crop_center_x, crop_center_y, crop_size) if crop_size is not None else None
-        return image_conversions.render_viewable_image(frame_path, size, stretch, center, width, crop)
+        picture = image_conversions.render_viewable_image(
+            frame_path, size, stretch, center, width, crop, pixels
+        )
+        return image_display.draw_marks_on_picture(picture, marks, notes) if overlay_names else picture
 
     def _frame_path(
         self,
@@ -209,6 +313,9 @@ class Visualization:
         index: int,
     ) -> tuple[Target | None, str]:
         """Find the file a `render_fits` call names.
+
+        A ``target`` given with ``path`` names the target the file belongs
+        to; it is returned with the path.
 
         Returns
         -------
@@ -231,11 +338,13 @@ class Visualization:
 
         by_settings = iso is not None or exposure is not None
         if path is not None:
-            if target is not None or file_name is not None or by_settings:
+            if file_name is not None or by_settings:
                 raise InvalidArgumentError(
                     "Give a path, or a target with a file_name or iso and exposure, not both."
                 )
-            return None, path
+            # A target given with a path only says which target the file
+            # belongs to.
+            return (resolve_target(self._targets, target) if target is not None else None), path
         if target is None or (file_name is None) == (not by_settings):
             raise InvalidArgumentError("Give a path, or a target with a file_name or with iso and exposure.")
         resolved = resolve_target(self._targets, target)
@@ -275,6 +384,56 @@ class Visualization:
         from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_last_captured_image(self._config, stretch)
+
+    def stack_sky_picture_files(self, target: str | Target) -> tuple[str, str]:
+        """Name the files that place a target's stack picture on the sky.
+
+        A sky chart lays the picture over the sky. The picture is the color
+        picture when the target has one, else the stack's preview. Where it
+        lies comes from the stretched stack's plate solution. Pass the two
+        paths, once they exist, to `place_stack_picture_on_sky`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+
+        Returns
+        -------
+        processed, picture : `tuple` [`str`, `str`]
+            The stretched stack's path and the picture's path, each an empty
+            string when the target has none.
+        """
+        return sky_picture_files(resolve_target(self._targets, target).stacking)
+
+    def place_stack_picture_on_sky(
+        self, processed_path: str, picture_path: str
+    ) -> SkyPicturePlacement | None:
+        """Work out where a stack picture lies on the sky.
+
+        Only the stretched stack's header is read. A grid of points across
+        the picture (17 along each side, edges included) is mapped to the sky
+        with the full plate solution, distortion terms included. A pixel of
+        the picture is the same pixel of the stretched stack, first row at
+        the top.
+
+        Parameters
+        ----------
+        processed_path : `str`
+            The stretched stack, as `stack_sky_picture_files` names it.
+        picture_path : `str`
+            The picture, given back in the answer.
+
+        Returns
+        -------
+        placement : `SkyPicturePlacement` or `None`
+            ``picture_path``, ``width``, ``height``, ``grid_size`` and
+            ``grid`` (``[ra, dec]`` pairs in degrees, row by row from the
+            picture's top-left corner). `None` when the header cannot be read
+            or has no real plate solution (only the mount's pointing does not
+            count); that is a status, not an error.
+        """
+        return place_picture_on_sky(processed_path, picture_path)
 
     def plot(
         self,

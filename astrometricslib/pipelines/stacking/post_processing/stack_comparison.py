@@ -37,7 +37,12 @@ from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_d
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import StarWidthEstimator, factor_for, record_star_width
+from astrometricslib.foundation.run_bases import (
+    StarWidthEstimator,
+    factor_for,
+    record_star_width,
+    star_width_on_scale,
+)
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -49,12 +54,9 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
-from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
-    robust_sigma,
-    sky_level_of_plane,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_image import sky_level_of_plane
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseOutcome
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +412,10 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
         measurements.not_measured["fwhm_px"] = "too few stars could be fitted"
     else:
         record_star_width(measurements.fwhm_px, StarWidthEstimator.STACK_GAUSSIAN)
+        measurements.fwhm_estimator = StarWidthEstimator.STACK_GAUSSIAN.value
+        measurements.fwhm_on_scale_px = float(
+            star_width_on_scale(measurements.fwhm_px, StarWidthEstimator.STACK_GAUSSIAN)
+        )
     return measurements
 
 

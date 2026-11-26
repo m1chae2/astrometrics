@@ -29,6 +29,7 @@ from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from astrometricslib.parameters import TuningReport
+from wayfindinglib._internal.arguments import TimeInput, check_limit, to_epoch_seconds
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.focus_temperature_fit import FocusSource, FocusTemperatureFit
@@ -43,6 +44,7 @@ from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
 from wayfindinglib.models.session.review_query import ReviewQueryResult
 from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
+from wayfindinglib.models.session.star_shape_review import StarShapeReview
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionsResult,
@@ -182,13 +184,14 @@ class ObservationReview(ControlChild):
     ) -> TuningReport:
         """Work out this library's tuned values from the observatory's records.
 
-        The wayfinding tuners (see `astrometricslib.parameters.collect_tuners`)
-        read the stored guiding, alignment and session records of one setup
-        and derive one family of values each. Each value is checked against
-        its allowed range and smallest sample. Nothing is saved unless
-        ``save`` is set; then the config is backed up and each value is
-        written with where it came from. The image-processing values are
-        tuned by `Astrometrics.quality.measure_tuned_parameters`.
+        A thin wrapper of `astrometricslib.parameters.tune` over the
+        wayfinding tuners. They read the stored guiding, alignment and
+        session records of one setup and derive one family of values each.
+        Each value is checked against its allowed range and smallest
+        sample. Nothing is saved unless ``save`` is set; then the config is
+        backed up and each value is written with where it came from. The
+        image-processing values are tuned by
+        `Astrometrics.quality.measure_tuned_parameters`.
 
         Parameters
         ----------
@@ -205,34 +208,20 @@ class ObservationReview(ControlChild):
             The values that would be set or moved, and those skipped,
             refused or unchanged.
 
-        Raises
-        ------
-        NotFoundError
-            If the setup is not in the config, or there is no active setup.
-        InvalidArgumentError
-            If ``only`` names a tuner that does not exist.
+        Notes
+        -----
+        The core raises `NotFoundError` if the setup is not in the config,
+        or there is no active setup, and `InvalidArgumentError` if ``only``
+        names a tuner that does not exist.
         """
-        import datetime
+        from astrometricslib.parameters import tune
 
-        from astrometricslib.parameters import collect_tuners, run_tuning
-
-        tuners = collect_tuners(("wayfindinglib",))
-        if only:
-            unknown = sorted(set(only) - {tuner.name for tuner in tuners})
-            if unknown:
-                raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
-            tuners = [tuner for tuner in tuners if tuner.name in set(only)]
-        configuration = self._context.config
-        setups = configuration.get_observatory_setups()
-        chosen = setups.setup_named(setup) if setup else setups.active_setup()
-        if chosen is None:
-            raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
         services: dict[str, Any] = {}
         if self._owner_provider is not None:
             wayfinder = self._owner_provider()
             services = {"wayfinder": wayfinder, "astrometrics": wayfinder.astrometrics}
-        return run_tuning(
-            tuners, chosen, configuration, services=services, today=datetime.date.today(), write=save
+        return tune(
+            ("wayfindinglib",), self._context.config, setup=setup, only=only, save=save, services=services
         )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
@@ -357,7 +346,7 @@ class ObservationReview(ControlChild):
         night_history.refuse_unused_arguments(
             kind, night_history.TYPED_KIND_ARGUMENTS[kind], session_id, ekos_file_id, include
         )
-        limit = night_history.clamp_limit(limit)
+        limit = night_history.checked_limit(limit)
         match kind:
             case "nights":
                 return night_history.build_night_list(self._context, limit)
@@ -445,8 +434,8 @@ class ObservationReview(ControlChild):
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: str | None = None,
-        until: str | None = None,
+        since: TimeInput = None,
+        until: TimeInput = None,
         limit: int = 60,
         include: list[str] | None = None,
     ) -> FrameGuidingReport:
@@ -469,14 +458,16 @@ class ObservationReview(ControlChild):
             ``"013"`` means the frame numbered 013.
         last_file : `str`, optional
             Only frames up to this file or number.
-        since : `str`, optional
-            Only frames taken at or after this ISO 8601 time. No offset
-            means UTC.
-        until : `str`, optional
-            Only frames taken at or before this ISO 8601 time.
+        since : `str`, `datetime` or `astropy.time.Time`, optional
+            Only frames taken at or after this time. A string is ISO 8601;
+            no time zone means UTC.
+        until : `str`, `datetime` or `astropy.time.Time`, optional
+            Only frames taken at or before this time.
         limit : `int`, optional
             How many frames to cover, from 1 to 200. With a range or time
             these are the first frames inside it; otherwise the newest.
+            Defaults to 60. A value outside the range raises
+            `InvalidArgumentError`.
         include : `list` [`str`], optional
             ``["quality"]`` also puts each frame's image measurements on
             its row: star count, star width, roundness, longest trail, sky
@@ -488,12 +479,13 @@ class ObservationReview(ControlChild):
         report : `FrameGuidingReport`
             ``frames`` (one row per frame) and ``group`` (the median error
             and the frames well above it). An unknown target raises
-            `NotFoundError`. A `since` or `until` that is not an ISO 8601
+            `NotFoundError`. A `since` or `until` that cannot be read as a
             time, or an `include` that names an unknown section, raises
             `InvalidArgumentError`.
         """
         from wayfindinglib.tasks.control_tasks import frame_guiding, hardware_operations
 
+        check_limit(limit, 1, frame_guiding.MAXIMUM_FRAMES, allow_none=False)
         sections = hardware_operations.check_sections(include or [], FRAME_GUIDING_SECTIONS)
         selection = frame_guiding.FrameRange(
             filter_name=filter_name, first_file=first_file, last_file=last_file, since=since, until=until
@@ -553,7 +545,7 @@ class ObservationReview(ControlChild):
         self,
         session_id: str | None = None,
         limit: int = 50,
-        since: float | None = None,
+        since: TimeInput = None,
         targets: list[Target] | None = None,
     ) -> AlignmentRecords:
         """Read the stored alignment attempts, grouped by target.
@@ -572,9 +564,10 @@ class ObservationReview(ControlChild):
         limit : `int`, optional
             Most attempts to read when `session_id` is `None`. Defaults
             to 50.
-        since : `float`, optional
-            When `session_id` is `None`, drop attempts older than this Unix
-            time. For a night view it is ignored.
+        since : `str`, `datetime` or `astropy.time.Time`, optional
+            When `session_id` is `None`, drop attempts older than this time
+            (a string is ISO 8601; no time zone means UTC). For a night view
+            it is ignored.
         targets : `list` [`Target`], optional
             The library targets whose frames show when each was tracked.
             Used only with a `session_id`.
@@ -584,13 +577,15 @@ class ObservationReview(ControlChild):
         records : `AlignmentRecords`
             The attempts, their grouping by target, and the polar run.
             A status the attempt model does not know reads as ``aligned``.
-            Nothing is returned for records that cannot be read.
+            Nothing is returned for records that cannot be read. A `since`
+            that cannot be read as a time raises `InvalidArgumentError`.
         """
+        since_seconds = to_epoch_seconds(since, "since")
         records = self._context.records
         if session_id is None:
             rows = list(reversed(records.get_alignment_attempts(limit=limit)))
-            if since is not None:
-                rows = [row for row in rows if (row.get("timestamp") or 0) >= since]
+            if since_seconds is not None:
+                rows = [row for row in rows if (row.get("timestamp") or 0) >= since_seconds]
             attempts = [_attempt_from_row(row, with_session=False) for row in rows]
             polar = None
         else:
@@ -787,9 +782,11 @@ class ObservationReview(ControlChild):
         epoch_seconds : `float`
             The time, in seconds since the Unix epoch.
         ra_deg : `float`
-            Right ascension the telescope points at, in degrees.
+            Right ascension the telescope points at, in ICRS (J2000)
+            degrees (as catalogs and plate solutions give it, not the
+            mount's current-epoch reading).
         dec_deg : `float`
-            Declination the telescope points at, in degrees.
+            Declination the telescope points at, in ICRS (J2000) degrees.
         filter_name : `str`, optional
             The filter. The setting with the most fitted nights when omitted.
         exclude_nights : `list` [`str`], optional
@@ -811,6 +808,45 @@ class ObservationReview(ControlChild):
         return sky_rate_tasks.get_sky_rate_prediction(
             self._context, epoch_seconds, ra_deg, dec_deg, filter_name, exclude_nights
         )
+
+    def get_star_shape_review(
+        self,
+        target: str | Target,
+        night: str | None = None,
+        frame_paths: list[str] | None = None,
+    ) -> StarShapeReview:
+        """Say in plain words how round a target's stars are and why.
+
+        Reads the star-shape measurements already stored for the target's
+        light frames (and its stack, when the stack has its own). Nothing is
+        measured or stored. The verdicts are suggestions: whether the stars
+        are round against this equipment's own history (WAY-42), whether the
+        stretch points one way (tracking, guiding, wind or flexing) or many
+        ways (seeing or focus), and which frames stand out as candidates to
+        set aside. The corner widths are reported but are not validated
+        (AST-18), so no tilt verdict is made.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        night : `str`, optional
+            Judge only this observing night, such as ``"2026-09-24"``.
+        frame_paths : `list` [`str`], optional
+            Judge only these frames.
+
+        Returns
+        -------
+        review : `StarShapeReview`
+            The verdicts, each with a plain sentence and its numbers, the
+            standout frames, and the per-frame series for a chart. A target
+            with no stored star shapes gets "not measured yet" verdicts, not
+            an error.
+        """
+        from wayfindinglib.tasks.control_tasks import star_shape_tasks
+
+        target_id = target if isinstance(target, str) else target.id
+        return star_shape_tasks.get_star_shape_review(self._context, target_id, night, frame_paths)
 
     def get_advisory(
         self,

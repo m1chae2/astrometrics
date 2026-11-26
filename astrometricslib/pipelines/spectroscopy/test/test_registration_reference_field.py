@@ -243,3 +243,143 @@ def test_a_solved_position_is_preferred_over_the_header(tmp_path: Path) -> None:
     assert _field_center_for_registration(str(stack), 1.5, 2.5) == (1.5, 2.5)
     assert _field_center_for_registration(str(stack), None, None) == (10.0, 20.0)
     assert _field_center_for_registration(str(tmp_path / "missing.fits"), None, None) is None
+
+
+class _CountingCatalog(_Catalog):
+    """A stand-in that remembers every id whose full record was read."""
+
+    def __init__(self, stars: list[StellarObject]) -> None:
+        """Keep the stars and start with no ids read."""
+        super().__init__(stars)
+        self.read_ids: list[str] = []
+
+    def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[StellarObject]:
+        """Note the ids asked for, then return those stars.
+
+        Returns
+        -------
+        stars : `list` [`StellarObject`]
+            The stars found.
+        """
+        self.read_ids.extend(ids)
+        return super().get_by_ids(dataset_type, ids)
+
+
+def test_position_only_rows_are_never_read_in_full() -> None:
+    """A FIELD_J row can never be a reference, so its record is not loaded."""
+    named = _star("Gaia DR3 1", 292.7, 28.0, ["Albireo"])
+    position_only = StellarObject(id="FIELD_J292.7000+28.0000", name="FIELD_J292.7000+28.0000")
+    position_only.right_ascension = 292.7
+    position_only.declination = 28.0
+    position_only.target_ids = ["Albireo"]
+
+    for field_center in (FIELD_CENTER, None):
+        catalog = _CountingCatalog([named, position_only])
+        candidates = _registration_reference_candidates(SimpleNamespace(id="Albireo"), catalog, field_center)
+        assert [star.id for star in candidates] == ["Gaia DR3 1"]
+        assert position_only.id not in catalog.read_ids
+
+
+def _write_stack(path: Path) -> str:
+    """Write a small stack that says it holds five frames.
+
+    Returns
+    -------
+    stack_path : `str`
+        The stack's path.
+    """
+    import numpy as np
+    from astropy.io import fits
+
+    header = fits.Header()
+    header["STACKCNT"] = 5
+    fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32), header=header).writeto(path)
+    return str(path)
+
+
+def test_the_stars_astrometry_named_on_the_stack_are_references(tmp_path: Path) -> None:
+    """Verify the stack's solved star list joins the saved stars of the target.
+
+    Astrometry no longer saves star records, so the named stars of the
+    target's imaging stack come from the list kept next to the stack.
+    """
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+
+    stack_path = _write_stack(tmp_path / "Albireo_Stacked.fits")
+    named = _star("HD 183912", FIELD_CENTER[0], FIELD_CENTER[1] + 0.01, ["Albireo"])
+    far = _star("HD 1", FIELD_CENTER[0] + 5.0, FIELD_CENTER[1], ["Albireo"])
+    assert save_solved_stars(stack_path, [named, far])
+    assert [star.id for star in read_solved_stars(stack_path)] == ["HD 183912", "HD 1"]
+    saved = _star("Gaia DR3 7", FIELD_CENTER[0], FIELD_CENTER[1] - 0.01, ["Albireo"])
+    target = SimpleNamespace(
+        id="Albireo", stacking=SimpleNamespace(stacked_image=stack_path, stacks_by_configuration={})
+    )
+
+    candidates = _registration_reference_candidates(target, _Catalog([saved]), FIELD_CENTER)
+
+    assert sorted(star.id for star in candidates) == ["Gaia DR3 7", "HD 183912"]
+
+
+def test_a_single_frame_gets_no_solved_star_list(tmp_path: Path) -> None:
+    """Verify nothing is written next to an image that is not a stack."""
+    import numpy as np
+    from astropy.io import fits
+
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+
+    frame_path = tmp_path / "frame.fits"
+    fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(frame_path)
+
+    assert not save_solved_stars(str(frame_path), [_star("HD 1", 1.0, 1.0, ["Albireo"])])
+    assert read_solved_stars(str(frame_path)) == []
+
+
+def test_a_restacked_stack_drops_its_old_solved_star_list(tmp_path: Path) -> None:
+    """Verify a list written before the stack changed is not read.
+
+    A restack writes a new stack; until astrometry solves it again, the stars
+    named on the old stack must not stand for the new one.
+    """
+    import os
+
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+
+    stack_path = _write_stack(tmp_path / "Albireo_Stacked.fits")
+    assert save_solved_stars(stack_path, [_star("HD 183912", FIELD_CENTER[0], FIELD_CENTER[1], ["Albireo"])])
+    assert [star.id for star in read_solved_stars(stack_path)] == ["HD 183912"]
+
+    status = os.stat(stack_path)
+    os.utime(stack_path, ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000_000))
+
+    assert read_solved_stars(stack_path) == []
+
+
+def test_a_list_saved_before_stamps_is_read_while_the_stack_is_not_newer(tmp_path: Path) -> None:
+    """Verify a list with no stamp is read unless the stack changed after it.
+
+    Lists written before the stack's stamp was added have none. Such a list
+    is kept while its file is not older than the stack, and dropped once the
+    stack is newer (a restack that astrometry has not solved yet).
+    """
+    import json
+    import os
+
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+    from astrometricslib.pipelines.shared.stack_sidecar import sidecar_path
+
+    stack_path = _write_stack(tmp_path / "Albireo_Stacked.fits")
+    assert save_solved_stars(stack_path, [_star("HD 183912", FIELD_CENTER[0], FIELD_CENTER[1], ["Albireo"])])
+    saved_path = sidecar_path(stack_path, "_solved_stars.json")
+    with open(saved_path, encoding="utf-8") as handle:
+        record = json.load(handle)
+    del record["stack_stamp"]
+    with open(saved_path, "w", encoding="utf-8") as handle:
+        json.dump(record, handle)
+    stack_time = os.stat(stack_path).st_mtime_ns
+    os.utime(saved_path, ns=(stack_time, stack_time + 1_000_000_000))
+
+    assert [star.id for star in read_solved_stars(stack_path)] == ["HD 183912"]
+
+    os.utime(stack_path, ns=(stack_time, stack_time + 2_000_000_000))
+
+    assert read_solved_stars(stack_path) == []

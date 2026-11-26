@@ -320,6 +320,35 @@ class JobLogRouter(logging.Handler):
             _, handlers, _ = self._sinks.pop(sink_key, ("", [], ()))
             return handlers
 
+    def stores_job_records(self, record: logging.LogRecord) -> bool:
+        """Say whether a job-scoped log handler already stores a record.
+
+        A job-scoped handler is one that has a ``job_id`` attribute, such as
+        the database handler the job runner registers. Use this to keep a
+        second, unscoped handler from storing the same record again.
+
+        Parameters
+        ----------
+        record : `logging.LogRecord`
+            The record to check.
+
+        Returns
+        -------
+        stored : `bool`
+            `True` if the record names a job that has a registered handler
+            bound to that job id.
+        """
+        job_ids = set(getattr(record, "job_ids", ()))
+        if not job_ids:
+            return False
+        with self._sinks_lock:
+            return any(
+                getattr(handler, "job_id", None) in job_ids
+                for job_id, handlers, _ in self._sinks.values()
+                if job_id in job_ids
+                for handler in handlers
+            )
+
     def emit(self, record: logging.LogRecord) -> None:
         """Pass a record to the handlers of each job it belongs to.
 
@@ -378,6 +407,32 @@ def get_job_log_router() -> JobLogRouter:
         if _router not in root.handlers:
             root.addHandler(_router)
         return _router
+
+
+class SkipJobStoredRecords(logging.Filter):
+    """Drop records that a job's own log handler already stores.
+
+    Put it on a handler that stores every record without a job id. A record
+    logged inside a job is stored with its job id by the job's handler, so
+    the unscoped copy would be a duplicate. Records outside any job pass.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Decide whether the unscoped handler should keep a record.
+
+        Parameters
+        ----------
+        record : `logging.LogRecord`
+            The record being logged.
+
+        Returns
+        -------
+        keep : `bool`
+            `False` if a job-scoped handler stores the record.
+        """
+        if not hasattr(record, "job_ids"):
+            record.job_ids = _job_ids.get()
+        return not get_job_log_router().stores_job_records(record)
 
 
 def configure_logging(

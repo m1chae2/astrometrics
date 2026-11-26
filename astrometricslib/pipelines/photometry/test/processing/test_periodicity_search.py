@@ -352,7 +352,12 @@ def test_the_two_stage_peak_matches_the_full_grid_when_the_grid_is_thinned() -> 
 
 
 def test_the_noise_only_versions_use_the_same_two_stage_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the real data and every shuffle go through `_strongest_peak`."""
+    """Verify the real data and every shuffle go through `_strongest_peak`.
+
+    The early stop is turned off (`stop_above=None`): with it on, how many
+    shuffles run depends on how many come out strong, which can differ by a
+    last-digit rounding change from one platform to another.
+    """
     times = _long_baseline_times(nights=8, spacing_days=2.0, cadence_minutes=15.0)
     flux = _long_baseline_flux(times, seed=6)
     calls: list[int] = []
@@ -371,7 +376,7 @@ def test_the_noise_only_versions_use_the_same_two_stage_search(monkeypatch: pyte
 
     monkeypatch.setattr(search_module, "_strongest_peak", counting_peak)
 
-    lomb_scargle_search(times, flux, shuffle_count=7)
+    lomb_scargle_search(times, flux, shuffle_count=7, stop_above=None)
 
     assert len(calls) == 1 + 7
 
@@ -403,3 +408,27 @@ def test_noise_on_a_thinned_long_baseline_keeps_its_nominal_false_alarm_rate(
 
     assert sum(value <= 0.1 for value in false_alarms) <= 5
     assert float(np.mean(false_alarms)) > 0.3
+
+
+def test_a_period_range_too_narrow_for_two_frequencies_is_insufficient_data() -> None:
+    """Verify five very close points give a verdict, not an IndexError.
+
+    These times leave a searchable period range so narrow that the
+    frequency grid holds one value. That once raised "index 1 is out of
+    bounds for axis 0 with size 1" from the grid-step calculation.
+    """
+    import numpy as np
+
+    from astrometricslib.pipelines.photometry.processing.periodicity_search import (
+        VERDICT_INSUFFICIENT_DATA,
+        describe_frequency_grid,
+        lomb_scargle_search,
+    )
+
+    times = np.array([0.00019175, 0.00089375, 0.00104722, 0.00126478, 0.00131742])
+    fluxes = np.array([1.0, 1.01, 0.99, 1.0, 1.02])
+
+    result = lomb_scargle_search(times, fluxes, shuffle_count=3)
+
+    assert result.verdict == VERDICT_INSUFFICIENT_DATA
+    assert describe_frequency_grid(times) is None

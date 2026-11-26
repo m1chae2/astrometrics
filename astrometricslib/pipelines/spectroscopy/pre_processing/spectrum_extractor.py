@@ -115,12 +115,14 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.neighbor_masking import clipped_median_and_sigma
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
     PixelNoiseModel,
     combine_neighbour_variances,
     median_variance_factor,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -624,7 +626,7 @@ def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
         return values.copy()
     baseline = median_filter(values, size=resolve(CONTAMINANT_BASELINE_WIDTH_PX).value, mode="nearest")
     residual = values - baseline
-    noise_width = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    noise_width = robust_sigma(residual)
     is_spike = residual > resolve(CONTAMINANT_THRESHOLD_SIGMA).value * noise_width
     if not is_spike.any():
         return values.copy()
@@ -846,27 +848,12 @@ def _clipped_band_statistics(band: np.ndarray) -> tuple[float, float, int] | Non
         pixels kept, or `None` when fewer than `SKY_BAND_MINIMUM_SAMPLE_COUNT`
         finite pixels exist.
     """
-    sky_band_minimum_sample_count = resolve(SKY_BAND_MINIMUM_SAMPLE_COUNT).value
-    sky_clip_max_passes = resolve(SKY_CLIP_MAX_PASSES).value
-    sky_clip_sigma = resolve(SKY_CLIP_SIGMA).value
-    pixels = band.astype(float)
-    pixels = pixels[np.isfinite(pixels)]
-    if pixels.size < sky_band_minimum_sample_count:
-        return None
-    for _ in range(sky_clip_max_passes):
-        median = float(np.median(pixels))
-        # 1.4826 times the median absolute deviation is the sigma of normal
-        # data, and a bright pixel cannot inflate it the way it inflates a
-        # plain standard deviation.
-        robust_sigma = 1.4826 * float(np.median(np.abs(pixels - median)))
-        if robust_sigma <= 0.0:
-            break
-        kept = pixels[np.abs(pixels - median) <= sky_clip_sigma * robust_sigma]
-        if kept.size == pixels.size or kept.size < sky_band_minimum_sample_count:
-            break
-        pixels = kept
-    noise = float(np.std(pixels, ddof=1)) if pixels.size > 1 else 0.0
-    return float(np.median(pixels)), noise, int(pixels.size)
+    return clipped_median_and_sigma(
+        band,
+        minimum_count=resolve(SKY_BAND_MINIMUM_SAMPLE_COUNT).value,
+        maximum_passes=resolve(SKY_CLIP_MAX_PASSES).value,
+        clip_sigma=resolve(SKY_CLIP_SIGMA).value,
+    )
 
 
 def _sky_level_variance(bands: list[tuple[float, float, int]], noise_model: PixelNoiseModel | None) -> float:

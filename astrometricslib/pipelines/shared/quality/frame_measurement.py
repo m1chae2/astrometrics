@@ -65,7 +65,12 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    collapse_to_2d,
+    header_card_is_true,
+    open_primary_hdu,
+)
 from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
@@ -100,6 +105,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE,
     FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
     FRAME_STAR_WIDTH_EFFECTIVE_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
@@ -404,6 +410,7 @@ def _emit_star_profile_measurements(
         FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
         FRAME_STAR_ELONGATION,
         FRAME_STAR_ELONGATION_ANGLE_DEG,
+        FRAME_STAR_ELONGATION_COHERENCE,
         FRAME_STAR_WIDTH_EFFECTIVE_PX,
         FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
         *FRAME_STAR_WIDTH_REGION_PX.values(),
@@ -455,10 +462,14 @@ def _emit_star_profile_measurements(
         value=result.angle_deg,
         uncertainty=result.angle_uncertainty_deg,
         sample_count=result.star_count,
-        reason=(
-            f"{fit_note}; angles agree with a coherence of {result.angle_coherence:.2f} "
-            "(0 means no preferred direction, so the angle means little)"
-        ),
+        reason=f"{fit_note}; see {FRAME_STAR_ELONGATION_COHERENCE} for how well the stars agree",
+        channel=channel,
+    )
+    context.add(
+        FRAME_STAR_ELONGATION_COHERENCE,
+        value=result.angle_coherence,
+        sample_count=result.star_count,
+        reason=fit_note,
         channel=channel,
     )
     _emit_effective_width_measurements(context, result, channel, fit_note)
@@ -711,6 +722,7 @@ def measure_frame(
         FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
         FRAME_STAR_ELONGATION,
         FRAME_STAR_ELONGATION_ANGLE_DEG,
+        FRAME_STAR_ELONGATION_COHERENCE,
         FRAME_STAR_WIDTH_EFFECTIVE_PX,
         FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
         *FRAME_STAR_WIDTH_REGION_PX.values(),
@@ -789,6 +801,115 @@ def measure_frame(
     return context.measurements
 
 
+def measure_image_star_profiles(
+    path: str, top_level_adu: float | None = None
+) -> list[tuple[str | None, StarProfileResult, str]]:
+    """Measure the star profiles of every plane of an image file.
+
+    This is the star-shape step of `measure_frame`, made available for an
+    image that is not a frame, such as a stack. It reads the pixels the same
+    way (a color image is split into planes, a raw color mosaic is one plane
+    measured on 2 x 2 super-pixels) and calls `measure_star_profiles` for each
+    plane, so a frame and a stack share one definition of every star-shape
+    number.
+
+    Parameters
+    ----------
+    path : `str`
+        Path to the FITS file.
+    top_level_adu : `float` or `None`, optional
+        The pixel value above which the sensor is not trusted. `None` makes
+        `measure_star_profiles` use the plane's own plateau of equal brightest
+        pixels, which suits a stack (it has no single camera limit).
+
+    Returns
+    -------
+    planes : `list` of `tuple`
+        ``(channel name or None, result, mosaic note)`` for each plane. The
+        note is text for a raw mosaic's reasons, else empty. A plane that
+        cannot be measured holds a result with no values and a reason.
+
+    Notes
+    -----
+    An unreadable file raises one of `FITS_READ_ERRORS`; the caller decides
+    what that means.
+    """
+    planes, _collapsed, header = _read_planes(path)
+    is_mosaic = bool(str(header.get("BAYERPAT", "")).strip()) and len(planes) == 1
+    mosaic_note = (
+        f"; raw color mosaic: the star shapes use {BAYER_CELL_SIZE_PX} x {BAYER_CELL_SIZE_PX} "
+        "super-pixels (widths given back in original pixels)"
+        if is_mosaic
+        else ""
+    )
+    results: list[tuple[str | None, StarProfileResult, str]] = []
+    for channel, plane in planes:
+        try:
+            result = measure_star_profiles(plane, top_level_adu, bayer_mosaic=is_mosaic)
+        except DATA_ERRORS as error:
+            logger.warning("Moffat star profiles failed for %s: %s", path, error)
+            result = StarProfileResult(reason=f"the star fits failed: {error}")
+        results.append((channel, result, mosaic_note))
+    return results
+
+
+def star_profile_measurements(
+    star_profiles: list[tuple[str | None, StarProfileResult, str]],
+    frame: FrameRecord,
+    target_id: str,
+    *,
+    run_id: str,
+    job_id: str | None,
+    measured_at: datetime,
+    capture_setting_id: int | None,
+) -> list[QualityMeasurement]:
+    """Turn star profiles measured outside `measure_frame` into quality rows.
+
+    The frame quarantine step measures each frame's star shape itself, with
+    `measure_image_star_profiles`. This function writes that result with the
+    code `measure_frame` uses (`_emit_star_profile_measurements`), so the rows
+    have the same metrics, units, definitions and reasons as the rows of a full
+    frame measurement, and a later read of ``frame.star_elongation`` finds
+    them. A frame measured both ways has equal values, because both call
+    `measure_star_profiles` with the same pixels and the same top level.
+
+    Parameters
+    ----------
+    star_profiles : `list` of `tuple`
+        What `measure_image_star_profiles` returned for the frame's file.
+    frame : `FrameRecord`
+        The frame the profiles describe.
+    target_id : `str`
+        The target the frame belongs to.
+    run_id : `str`
+        The run the rows belong to.
+    job_id : `str` or `None`
+        The job, if any.
+    measured_at : `datetime`
+        When the profiles were measured (with a time zone).
+    capture_setting_id : `int` or `None`
+        The frame's capture setting row.
+
+    Returns
+    -------
+    measurements : `list` [`QualityMeasurement`]
+        The star width, elongation, angle, effective width and field-region
+        width rows of every plane, in the order `measure_frame` writes them.
+    """
+    context = _Context(
+        frame=frame,
+        target_id=target_id,
+        run_id=run_id,
+        job_id=job_id,
+        measured_at=measured_at,
+        capture_setting_id=capture_setting_id,
+        path=frame.path,
+    )
+    for channel, result, mosaic_note in star_profiles:
+        _emit_star_profile_measurements(context, result, channel, mosaic_note)
+    return context.measurements
+
+
 def _emit_synthetic_notice(context: _Context, header: fits.Header) -> None:
     """Add a warning when the header says the frame was drawn, not taken.
 
@@ -803,8 +924,7 @@ def _emit_synthetic_notice(context: _Context, header: fits.Header) -> None:
     header : `astropy.io.fits.Header`
         The header of the frame's pixels.
     """
-    flag = header.get(SYNTHETIC_FRAME_KEYWORD, False)
-    if str(flag).strip().upper() not in ("T", "TRUE"):
+    if not header_card_is_true(header.get(SYNTHETIC_FRAME_KEYWORD, False)):
         return
     pipeline_context = PipelineRunContext(
         target_id=context.target_id,
@@ -962,9 +1082,11 @@ def _emit_background_and_saturation(
 ) -> float:
     """Emit the background level and saturated fraction of the collapsed frame.
 
-    The background uses the same call as `measure_frame_background_level`
-    (sigma-clipped median at 3 sigma), applied to the pixels already in memory
-    so the file is not read again.
+    The background is the sigma-clipped median at 3 sigma of every pixel,
+    applied to the pixels already in memory so the file is not read again. For
+    a raw color mosaic this mixes the color pixels, which is not the estimator
+    of `measure_frame_background_level` (it uses 2 x 2 super-pixels for the
+    stacking check's own level, STK-04); the two numbers are not compared.
 
     Parameters
     ----------

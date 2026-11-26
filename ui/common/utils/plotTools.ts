@@ -1,6 +1,7 @@
 // Lightweight Plot utilities used by multiple viewers
 // Exported to keep Plotly-related plumbing in one place.
 import { themedHoverLabel } from './plotHoverLabel';
+import { readThemeToken, readThemeTokenNumber } from './themeToken';
 
 export type PlotlyTrace = {
   x: number[];
@@ -12,10 +13,18 @@ export type PlotlyTrace = {
   // -- the trace silently falls back to Plotly's "WebGL is not supported"
   // placeholder instead of rendering. Use 'scatter' (SVG) for everything.
   type?: 'scatter' | 'scattergl' | 'bar';
+  /** Bar direction, for a bar trace. */
+  orientation?: 'h' | 'v';
+  /** The thickness of each bar (y units for a horizontal bar), or one per bar. */
+  width?: number | number[];
+  /** Where the trace's text is drawn on the plot; 'none' keeps it for the hover label only. */
+  textposition?: string;
+  /** Where each bar starts, for a bar trace. */
+  base?: number[];
   mode?: 'lines' | 'markers' | 'lines+markers';
   line?: { color?: string; width?: number; shape?: string; dash?: string };
   /** One color for the trace, or one per point. */
-  marker?: { color?: string | string[]; size?: number; symbol?: string };
+  marker?: { color?: string | string[]; size?: number; symbol?: string; line?: { color?: string; width?: number } };
   /** Error bars along y, from a list of half-lengths. */
   error_y?: { type: 'data'; array: number[]; visible?: boolean; color?: string; thickness?: number; width?: number };
   hoverinfo?: string;
@@ -132,23 +141,6 @@ export function loadPlotly(): Promise<PlotlyStatic> {
   return plotlyLoadPromise;
 }
 
-export const getVar = (name: string, fallback: string) => {
-  try {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
-    const v = (raw || '').trim();
-    return v || fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-export const getVarAsNum = (name: string, fallback: number) => {
-  const val = getVar(name, '');
-  if (!val) return fallback;
-  const parsed = parseInt(val, 10);
-  return isNaN(parsed) ? fallback : parsed;
-};
-
 // Shared layout builder matching "Guiding Trends" / "Control Panel" dark style
 export const buildLayout = (overrides?: {
   xTitle?: string;
@@ -158,7 +150,7 @@ export const buildLayout = (overrides?: {
   margin?: any;
   autosize?: boolean;
 }): PlotlyLayout => {
-  const commonFontSize = getVarAsNum('--label-font-size', 12);
+  const commonFontSize = readThemeTokenNumber('--label-font-size', 12);
   const titleFontSize = commonFontSize;
   const tickFontSize = commonFontSize - 1;
 
@@ -166,10 +158,10 @@ export const buildLayout = (overrides?: {
     autosize: overrides?.autosize ?? true,
     paper_bgcolor: 'rgba(0,0,0,0)', // Transparent to blend with panel
     plot_bgcolor: 'rgba(0,0,0,0)',
-    font: { color: getVar('--plot-font', '#eaeaea'), size: commonFontSize },
+    font: { color: readThemeToken('--plot-font', '#eaeaea'), size: commonFontSize },
     xaxis: {
       title: { text: overrides?.xTitle ?? 'Val', font: { size: titleFontSize, ...overrides?.xTitleFont } },
-      color: getVar('--plot-font', '#eaeaea'),
+      color: readThemeToken('--plot-font', '#eaeaea'),
       gridcolor: 'rgba(255, 255, 255, 0.06)',
       zerolinecolor: 'rgba(255, 255, 255, 0.1)',
       tickfont: { size: tickFontSize },
@@ -177,7 +169,7 @@ export const buildLayout = (overrides?: {
     },
     yaxis: {
       title: { text: overrides?.yTitle ?? 'Val', font: { size: titleFontSize, ...overrides?.yTitleFont } },
-      color: getVar('--plot-font', '#eaeaea'),
+      color: readThemeToken('--plot-font', '#eaeaea'),
       gridcolor: 'rgba(255, 255, 255, 0.06)',
       zerolinecolor: 'rgba(255, 255, 255, 0.1)',
       tickfont: { size: tickFontSize },

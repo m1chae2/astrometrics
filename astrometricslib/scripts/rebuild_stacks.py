@@ -153,7 +153,7 @@ def find_candidates(astrometrics: Astrometrics, names: list[str] | None) -> list
     """
     frames_path = astrometrics.config.get_frames_path()
     candidates = []
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
         name = target.id
         if names and name not in names:
             continue

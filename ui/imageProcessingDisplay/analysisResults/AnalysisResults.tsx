@@ -8,32 +8,27 @@ export interface AnalysisResultsProps {
 }
 
 /**
- * Component to display the results of a variability analysis.
- * Shows statistics and a list of top candidates.
+ * Component to display the results of an analysis job: the saved-to-registry note for spectroscopy.
+ *
+ * @param props See {@link AnalysisResultsProps}.
+ * @returns The results, or nothing when there are none.
  */
 export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => {
     if (!results) return null;
+    return <AnalysisResultsBody results={results} />;
+};
 
-    const total = results.totalImages ?? '-';
-    const mode = results.analysisMode;
+/**
+ * Draws the note for one analysis result; only spectroscopy has one.
+ *
+ * @param props See {@link AnalysisResultsProps}. The results are never null here.
+ * @returns The note, or nothing for other modes.
+ */
+const AnalysisResultsBody: React.FC<{ results: AnalysisResult }> = ({ results }) => {
 
-    if (mode === 'spectroscopy') {
+    if (results.analysisMode === 'spectroscopy') {
         return (
             <div className="analysis-results-content">
-                <div className="metrics-grid">
-                    <div className="metric-box">
-                        <div className="metric-label">Total Images</div>
-                        <div className="metric-value">{total}</div>
-                    </div>
-                    <div className="metric-box">
-                        <div className="metric-label">Stars Processed</div>
-                        <div className="metric-value success">{results.starsProcessed ?? 0}</div>
-                    </div>
-                    <div className="metric-box">
-                        <div className="metric-label">Spectra Extracted</div>
-                        <div className="metric-value success">{results.spectraExtracted ?? 0}</div>
-                    </div>
-                </div>
                 <div className="analysis-header analysis-results__header">Spectroscopy Results</div>
                 <div className="analysis-results__message">
                     Star data and extracted spectra have been saved to the global StellarObject registry.
@@ -42,47 +37,5 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => 
         );
     }
 
-    if (mode === 'photometry') {
-        return (
-            <div className="analysis-results-content">
-                <div className="metrics-grid">
-                    <div className="metric-box">
-                        <div className="metric-label">Total Images</div>
-                        <div className="metric-value">{total}</div>
-                    </div>
-                    <div className="metric-box">
-                        <div className="metric-label">Stars Found</div>
-                        <div className="metric-value success">{results.starsFound ?? 0}</div>
-                    </div>
-                    <div className="metric-box">
-                        <div className="metric-label">Frames Processed</div>
-                        <div className="metric-value success">{results.framesProcessed ?? 0}</div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    const rejected = results.rejectedCount ?? 0;
-    const accepted = typeof total === 'number' ? total - rejected : '-';
-    const candidates = results.variableCandidates || [];
-
-    return (
-        <div className="analysis-results-content">
-            <div className="metrics-grid">
-                <div className="metric-box">
-                    <div className="metric-label">Total Images</div>
-                    <div className="metric-value">{total}</div>
-                </div>
-                <div className="metric-box">
-                    <div className="metric-label">Unusual brightness</div>
-                    <div className="metric-value error">{rejected}</div>
-                </div>
-                <div className="metric-box">
-                    <div className="metric-label">Accepted</div>
-                    <div className="metric-value success">{accepted}</div>
-                </div>
-            </div>
-        </div>
-    );
+    return null;
 };

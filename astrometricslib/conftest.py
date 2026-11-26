@@ -186,6 +186,37 @@ def synthetic_test_library(test_directories: SimpleNamespace, isolate_config_sin
 
 
 @pytest.fixture(autouse=True)
+def isolated_outside_services(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Give each test its own outside-service state and stop it sleeping.
+
+    The gateway keeps request times and pauses in a file shared by every
+    process. A test must neither read the pauses another test left nor wait
+    for a rate limit, so it gets a private file and a wait that does nothing.
+    """
+    from astrometricslib._internal.drivers.outside_services import gateway, host_state
+
+    monkeypatch.setattr(host_state, "outside_state_path", lambda: tmp_path / "outside_services.db")
+    monkeypatch.setattr(gateway, "_sleep", lambda seconds: None)
+
+
+@pytest.fixture(autouse=True)
+def headless_matplotlib() -> None:
+    """Draw each test's plots with the headless Agg backend.
+
+    The backend's script console switches Matplotlib, for the whole process,
+    to the browser backend (WebAgg) when it builds its workspace. The backend
+    tests build that workspace once for the session, so a library test run
+    after them in the same process would get browser figures with a toolbar,
+    whose default click handler fails on a made-up mouse event. Setting Agg
+    once at import is not enough; this puts it back before each test.
+    """
+    import matplotlib.pyplot as plt
+
+    if matplotlib.get_backend().lower() != "agg":
+        plt.switch_backend("Agg")
+
+
+@pytest.fixture(autouse=True)
 def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stop tests from plate-solving a stack that has no coordinate solution.
 
@@ -228,15 +259,20 @@ def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Stacking writes a picture of each finished stack by running GraXpert and
     Siril. Tests that stack with a fake driver must not launch the real
-    programs. Tests of the preview code replace these stand-ins with their
-    own.
+    programs, and the white-balance check must not ask the Gaia archive.
+    Tests of the preview code replace these stand-ins with their own.
     """
+    for module in ("stack_preview", "starnet_stretch"):
+        monkeypatch.setattr(
+            f"astrometricslib.pipelines.stacking.post_processing.{module}.run_preview_script",
+            lambda directory, commands, siril_executable: False,
+        )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.post_processing.stack_preview.run_preview_script",
-        lambda directory, commands, siril_executable: False,
+        "astrometricslib.pipelines.stacking.post_processing.sun_like_balance.gaia_star_colors_in_footprint",
+        lambda corners, margin_degrees, **options: None,
     )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.post_processing.stack_preview.flatten_background",
+        "astrometricslib.pipelines.stacking.post_processing.preview_graxpert.flatten_background",
         lambda graxpert_executable, input_path, output_stem: False,
     )
     monkeypatch.setattr(

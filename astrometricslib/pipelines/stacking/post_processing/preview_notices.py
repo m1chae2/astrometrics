@@ -1,4 +1,4 @@
-"""Purpose: Record a notice when the preview of a stack skips a step.
+"""Purpose: Record a notice when a stack preview skips a step or warns.
 
 Description: The preview picture of a stack runs optional cleanup steps
 (GraXpert, the colour calibration, StarNet, Cosmic Clarity and the star
@@ -26,7 +26,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_METRICS,
     STACKING_NOTICE_PREVIEW_STEP_SKIPPED,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 
 __all__ = [
     "SkippedPreviewStep",
@@ -54,19 +54,32 @@ def preview_step_skipped_measurements(
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        One row whose value is the number of skipped steps and whose reason
-        joins their sentences, or an empty list when no step was skipped.
+        One row whose value is the number of skipped steps and steps with a
+        warning, and whose reason joins their sentences, or an empty list when
+        there are none.
     """
     if not skipped_steps:
         return []
+    left_out = [step for step in skipped_steps if not step.still_used]
+    kept = [step for step in skipped_steps if step.still_used]
+    parts = []
+    if left_out:
+        parts.append("the preview skipped a step: " + "; ".join(step.reason for step in left_out))
+    if kept:
+        parts.append("the preview used a step with a warning: " + "; ".join(step.reason for step in kept))
+    action = (
+        "the preview picture was made without the skipped step"
+        if left_out
+        else "the preview picture used the step's result"
+    )
     return [
         notice_measurement(
             _SPEC,
             float(len(skipped_steps)),
             context,
             context.stack_subject(stack_file_name),
-            "the preview skipped a step: " + "; ".join(step.reason for step in skipped_steps),
-            action_taken="the preview picture was made without the skipped step",
+            "; ".join(parts),
+            action_taken=action,
         )
     ]
 

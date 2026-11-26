@@ -216,6 +216,15 @@ bias_levels = [
     { gain_setting = "100", offset = "0", binning = "1x1", bias_level_adu = { value = 597.93, kind = "measured", source = "Mean of 22 bias frames (ISO 100); frame-to-frame spread 0.12 ADU. Measured 2026-10-31 (validation register STK-48)." } },
     { gain_setting = "800", offset = "0", binning = "1x1", bias_level_adu = { value = 599.08, kind = "measured", source = "Mean of 89 bias frames (ISO 800) from two sessions 5 months apart (599.01 and 599.15); frame-to-frame spread 0.21 ADU. Measured 2026-10-31 (validation register STK-48)." } },
 ]
+# Gain and read noise per ISO (see the ZWO section below for what each field
+# means). Only ISO 800 is measured: the library holds flats only at ISO 800,
+# and bias frames only at ISO 100 and 800, so ISO 200 has no entry and frames
+# at ISO 200 fall back to the header. The gain is in raw 14-bit ADU, all four
+# Bayer channels together (the green channels alone give 0.242). Derived by
+# photon transfer with measure_sensor_noise; validation register PHO-22.
+sensor_noise = [
+    { gain_setting = "800", offset = "0", binning = "1x1", gain_e_per_adu = { value = 0.237, kind = "measured", source = "Photon transfer on 26 pairs of 0.04 s sky flats (Nikkor 300mm, 2022-11-26), central 1000 x 1000 pixels, signal about 1000 ADU; pair-to-pair spread 0.010. The 16 pairs of 0.01 s flats of 2022-11-13 give 0.250 (spread 0.059). Measured 2026-11-25 (validation register PHO-22)." }, read_noise_e = { value = 1.70, kind = "measured", source = "Root-mean-square noise of 44 bias pairs (ISO 800, sessions 2023-10-07 and 2024-03-18), 7.19 ADU times the gain of 0.237; the median-based estimate is 6.29 ADU (1.49 e-). Measured 2026-11-25 (validation register PHO-22)." } },
+]
 
 ["Observatory.Camera.ZWO ASI533MM Pro"]
 name = "ZWO ASI533MM Pro"
@@ -236,9 +245,11 @@ photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source =
 # Optional. Detector noise terms, used for the photometric error budget (the
 # CCD equation), recorded for each camera setting they were measured at: the
 # gain setting, the offset and the binning. A frame uses the entry for its own
-# setting only. A frame whose setting has no entry gets no gain or read noise
-# from this profile (the pipeline then tries the image header, then assumes 1
-# e-/ADU and no read noise, and says so). It never borrows a nearby setting.
+# setting. A frame whose setting has no entry gets no gain or read noise from
+# this profile (the pipeline then tries the image header, then assumes 1
+# e-/ADU and no read noise, and says so), except that a frame not clipped at
+# zero may use the entry at another offset (see "offset" below). It never
+# borrows any other nearby setting.
 # Each entry is one inline table:
 #   gain_setting   the camera's gain setting (or the ISO of a DSLR), as the
 #                  header's GAIN card writes it; 0.0 and 0 are the same
@@ -350,14 +361,24 @@ graxpert_executable = ""
 # writes the "input" and "output" folders next to itself, so keep those
 # folders free of other files. The stack file is never changed either way.
 denoise_executable = ""
-# How strongly to remove noise, from 0 (none) to 1 (full). On the M 101, M 57,
-# NGC 4438 and M 81 stacks, 0.9 cut the sky grain by 14-39% compared with
-# 0.75, raised the ratio of structure to grain by 17-63%, and left the peak
-# brightness of 300 mid-bright stars unchanged. On the M 13 stack, 0.5 left
-# visible grain. Judged by eye on M 13 and by measurement on the four others,
-# with the denoise run after the stretch. Not tested above 0.9 on more than
-# one target.
-denoise_strength = "0.9"
+# Whether previews are denoised when the program above is set. "true" is the
+# default; "false" skips the step.
+denoise_enabled = "true"
+# How strongly to remove noise, from 0 (none) to 1 (full). The default, 0.5,
+# halved the sky noise on the NGC 7331 and M 31 stacks (14.5 to 7.4 and 8.4
+# to 4.3 display units) and did not widen the stars. 0.7 cut the noise more
+# but flattened a faint diffuse galaxy (NGC 7320, in Stephan's Quintet) by
+# about half; 0.9 smeared the Quintet on 2026-10-04. Measured on a copy of the
+# library, with the denoise run after the stretch (see STK-30 in the
+# validation register).
+denoise_strength = "0.5"
+# How strongly to remove color speckle, from 0 (none) to 1 (full). Only a
+# color stack, such as one from the Nikon DSLR, uses it; a single-channel
+# stack keeps the brightness-only denoise. On one Nikon stack (NGC 6992), 0.3
+# cut the red-minus-blue sky speckle from 6.81 to 2.92 display units and kept
+# about 85 percent of the stars' color; 0.5 left the stars gray (see STK-D81
+# in the validation register).
+color_denoise_strength = "0.3"
 
 ["Processing.Siril"]
 # Match this to whichever --siril-source you passed to
@@ -425,6 +446,20 @@ preview_star_tone_enabled = "true"
 # touched, and the stack file itself is never changed. Set "false" to leave
 # the colour balance alone.
 preview_remove_green_noise_enabled = "true"
+# "true" (the default): when a target has a monochrome stack (the ZWO camera)
+# and also a color stack from another camera or optic (the Nikon DSLR), the
+# preview step makes a second picture beside the monochrome one. Its
+# brightness and detail come from the monochrome stack and its color from the
+# color stack. The monochrome picture and both stacks are never changed. Set
+# "false" to make only the monochrome picture.
+preview_color_from_other_stack_enabled = "true"
+# "true" (the default): the stack preview of a color stack measures the star
+# width of each color channel on the linear data. A channel whose stars are
+# clearly wider than the green channel's (red behind a camera lens, for
+# example) is sharpened to green's width, so stars do not get a colored ring.
+# The stack itself is never changed. Set "false" to leave the channels as they
+# are.
+preview_star_width_match_enabled = "true"
 # "true" (the default): the stack preview of a colour stack first balances its
 # colours from its own stars: each channel's sky level is subtracted, and red
 # and blue are scaled so the median star comes out neutral. Without it, stars
@@ -436,8 +471,10 @@ preview_colour_calibration_enabled = "true"
 # photometric colour calibration: Siril solves the field, matches the stars to
 # the Gaia catalogue over the network, and scales the channels. It takes about
 # 10 to 30 seconds per stack. If Siril or the catalogue lookup fails, the
-# preview falls back to "stars", which measures the stars in the stack itself,
-# needs no network, and takes a few seconds. Set "stars" to use only that.
+# preview falls back to "stars": the stars whose Gaia colours are like the
+# Sun's are made white. It needs a plate solution and the field's Gaia colours
+# (stored after the first lookup); without them the colours are left
+# uncalibrated. Set "stars" to use only that.
 preview_colour_calibration_method = "pcc"
 # "true" (the default): before a restack replaces a stack, move the old stack
 # and its pictures into a folder named "_previous" beside it, so the two can be
@@ -463,6 +500,19 @@ skip_unchanged_stacks_enabled = "true"
 # is stored as "not measured" with the number of frames read. The stack itself is
 # not affected.
 flat_match_time_limit_seconds = "300"
+
+["Catalogs"]
+# Which SIMBAD server to ask first. SIMBAD has two servers with the same data:
+# "simbad.harvard.edu" (the Harvard mirror, the default) and
+# "simbad.cds.unistra.fr" (Strasbourg). If the first cannot be reached, the
+# other is asked. Any other value is ignored with a warning.
+simbad_preferred_server = "simbad.harvard.edu"
+# Which VizieR server to ask first (it serves the Gaia star tiles). VizieR has
+# two servers with the same catalogs: "vizier.cfa.harvard.edu" (the Harvard
+# mirror, the default) and "vizier.cds.unistra.fr" (Strasbourg). If the first
+# cannot be reached, the other is asked. Any other value is ignored with a
+# warning.
+vizier_preferred_server = "vizier.cfa.harvard.edu"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

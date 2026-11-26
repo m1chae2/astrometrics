@@ -36,7 +36,9 @@ def _sky(tmp_path: Path, stars: list[StellarObject], targets: list[Target]) -> S
     catalog = StellarCatalog(config, CatalogAccess(config))
     if stars:
         catalog._catalog_access.put(stars, "stellar_catalog", {})
-    astrometrics = SimpleNamespace(stars=catalog, targets=SimpleNamespace(list=lambda: targets))
+    astrometrics = SimpleNamespace(
+        stars=catalog, targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=targets))
+    )
     return SimpleNamespace(_astrometrics=astrometrics)
 
 
@@ -183,6 +185,7 @@ def test_a_star_source_uses_the_planetarium_keys(tmp_path: Path, monkeypatch: py
         "catalogSource": None,
         "stackedImage": None,
         "fieldOfView": None,
+        "majorAxisArcmin": None,
         "hasCatalogMagnitude": True,
     }
 
@@ -213,6 +216,20 @@ def test_a_target_without_a_stack_shows_its_longest_light_frame(
     assert source.has_photometry is True
     assert source.is_global is False
     assert source.ra == pytest.approx(283.396, abs=0.01)
+
+
+def test_a_target_carries_its_catalog_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A target's SIMBAD major axis reaches the map; a star has none."""
+    galaxy = Target(id="M 81", ra="09 55 33", dec="69 03 55", major_axis_arcmin=21.38)
+    star = Target(id="Vega", ra="18 36 56", dec="38 47 01")
+    sky = _sky(tmp_path, [], [galaxy, star])
+    _found(monkeypatch, [galaxy, star])
+
+    sources = sky_sources.collect_sky_sources(sky, 0.0, 0.0, 180.0, False, False, None, True)
+    by_id = {source.id: source.model_dump(by_alias=True) for source in sources}
+
+    assert by_id["M 81"]["majorAxisArcmin"] == pytest.approx(21.38)
+    assert by_id["Vega"]["majorAxisArcmin"] is None
 
 
 def test_online_objects_are_global_and_never_repeat_library_ids(

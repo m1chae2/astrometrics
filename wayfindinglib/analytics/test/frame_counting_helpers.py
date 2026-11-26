@@ -170,7 +170,7 @@ class FakeLibrary:
         self.object_types = object_types or {}
         self.read_failures: set[str] = set()
         self.targets = SimpleNamespace(
-            get=self._get_target, list=self._list_targets, resolve=self._resolve_target
+            get=self._get_target, query=lambda **_k: SimpleNamespace(objects=self._list_targets())
         )
         self.processing = no_camera_profiles_processing()
         self.quality = SimpleNamespace(
@@ -179,40 +179,19 @@ class FakeLibrary:
             capture_settings=lambda ids=None: {},
         )
 
-    def _resolve_target(self, target: str | Target) -> Target:
-        """Turn a target id into its `Target`, as the library does.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            A target id or a target.
-
-        Returns
-        -------
-        resolved : `Target`
-            The target.
-
-        Raises
-        ------
-        NotFoundError
-            If no target has the id.
-        """
-        if isinstance(target, Target):
-            return target
-        found = self._get_target(target, refresh=True)
-        if found is None:
-            raise NotFoundError(f"No target with id {target!r} in the library.")
-        return found
-
-    def _get_target(self, target_id: str, refresh: bool = False) -> Target | None:
+    def _get_target(
+        self, target_id: str | Target, refresh: bool | str = False, *, required: bool = False
+    ) -> Target | None:
         """Give a target holding the frames, or `None` for an unknown id.
 
         Parameters
         ----------
-        target_id : `str`
-            The target.
-        refresh : `bool`, optional
+        target_id : `str` or `Target`
+            The target. A `Target` is given back as it is, as the library does.
+        refresh : `bool` or `str`, optional
             Ignored.
+        required : `bool`, optional
+            Raise `NotFoundError` instead of giving `None`.
 
         Returns
         -------
@@ -223,10 +202,16 @@ class FakeLibrary:
         ------
         OSError
             For a target listed in `read_failures`.
+        NotFoundError
+            For an unknown id when ``required`` is set.
         """
+        if isinstance(target_id, Target):
+            return target_id
         if target_id in self.read_failures:
             raise OSError("disk unreadable")
         if target_id not in self.frames_by_target:
+            if required:
+                raise NotFoundError(f"No target with id {target_id!r} in the library.")
             return None
         return Target(
             id=target_id,

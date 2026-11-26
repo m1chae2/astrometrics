@@ -9,11 +9,15 @@ data (the provenance, or lineage).
 This module gives read-only access to both. It opens the logs database
 read-only and never creates or changes a table, so a caller can look at the
 history without any chance of altering it.
+
+The default answers are short, for an AI tool. The app's own screens ask for
+more: ``detail="full"`` gives each job's whole record (its input and output
+numbers as data), and a log tail can hold every line, uncut.
 """
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
@@ -21,6 +25,7 @@ from astrometricslib._internal.drivers.quality_store import QualityStore, qualit
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
+from astrometricslib.foundation.jobs.runner import PARAMETER_DEFAULTS_KEY
 from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.models.job_queries import (
     JobLogLine,
@@ -31,10 +36,11 @@ from astrometricslib.models.job_queries import (
 )
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.pipelines.shared.api_arguments import check_limit
 
 __all__ = ["Jobs"]
 
-DETAILS = ("summary", "log_tail", "result", "lineage", "warnings")
+DETAILS = ("summary", "full", "log_tail", "result", "lineage", "warnings")
 """The kinds of answer `Jobs.query` can give."""
 
 LINEAGE_NEEDS_A_TARGET = "detail='lineage' needs a target_id, or a job_id of a job that has one."
@@ -52,11 +58,14 @@ finishes well inside this time. A row that has not changed for an hour was
 left behind by a process that was stopped or crashed.
 """
 
-MAXIMUM_JOBS = 50
-"""Most jobs one call returns."""
+MAXIMUM_JOBS = 500
+"""Most jobs one call returns. The app's job history asks for up to 200
+jobs of a target at once; an AI tool keeps its own lower cap."""
 
-MAXIMUM_LOG_LINES = 200
-"""Most log lines one call returns."""
+MAXIMUM_LOG_LINES = 100_000
+"""Most log lines one call returns. The app's log viewer reads a few
+thousand lines and the timing harness reads a whole stack log; an AI tool
+keeps its own lower cap."""
 
 MAXIMUM_LINEAGE_RUNS = 50
 """Most pipeline runs one lineage answer lists."""
@@ -66,7 +75,7 @@ MAXIMUM_WARNINGS = 500
 below this; the cap only guards the reply size."""
 
 MAXIMUM_TEXT_LENGTH = 500
-"""Longest message or log line returned, in characters."""
+"""Longest message or log line returned by default, in characters."""
 
 MAXIMUM_RESULT_LENGTH = 30_000
 """Longest result text returned for one job, in characters. A slow tool
@@ -80,15 +89,15 @@ UNTRUSTED_TEXT_NOTE = (
 """Reminder attached to every answer that contains log or message text."""
 
 
-def _shorten(text: Any, limit: int = MAXIMUM_TEXT_LENGTH) -> str:
+def _shorten(text: Any, limit: int | None = MAXIMUM_TEXT_LENGTH) -> str:
     """Cut text to a limit, marking the cut.
 
     Parameters
     ----------
     text : `Any`
         The value to show. `None` becomes an empty string.
-    limit : `int`, optional
-        Longest result in characters.
+    limit : `int` or `None`, optional
+        Longest result in characters. `None` keeps the whole text.
 
     Returns
     -------
@@ -96,7 +105,7 @@ def _shorten(text: Any, limit: int = MAXIMUM_TEXT_LENGTH) -> str:
         The text, ending in an ellipsis if it was cut.
     """
     shown = "" if text is None else str(text)
-    return shown if len(shown) <= limit else shown[: limit - 1] + "…"
+    return shown if limit is None or len(shown) <= limit else shown[: limit - 1] + "…"
 
 
 def _minutes_since(timestamp: str | None) -> float | None:
@@ -122,6 +131,24 @@ def _minutes_since(timestamp: str | None) -> float | None:
         return (now - then).total_seconds() / 60.0
     except ValueError:
         return None
+
+
+def _parameter_defaults(job: ProcessingJob) -> list[str]:
+    """List the parameters that used their defaults during a job.
+
+    Parameters
+    ----------
+    job : `ProcessingJob`
+        The stored job.
+
+    Returns
+    -------
+    notices : `list` [`str`]
+        One line for each parameter with no tuned or equipment value. Empty
+        when none did or the job did not record any.
+    """
+    stored = (job.output_metrics or {}).get(PARAMETER_DEFAULTS_KEY, [])
+    return [str(notice) for notice in stored]
 
 
 def _warning_from_row(row: QualityMeasurement) -> JobWarning:
@@ -179,13 +206,16 @@ class Jobs:
         self._storage = storage
         self._database_path = str(config.get_logs_db_path())
 
-    def _summarize(self, job: ProcessingJob) -> JobSummary:
-        """Describe one job in a few fields.
+    def _summarize(self, job: ProcessingJob, full: bool = False) -> JobSummary:
+        """Describe one job in a few fields, or in full.
 
         Parameters
         ----------
         job : `ProcessingJob`
             The job record.
+        full : `bool`, optional
+            Also give the stored input and output numbers and the log file
+            path, and keep the whole message. Defaults to `False`.
 
         Returns
         -------
@@ -204,14 +234,18 @@ class Jobs:
             job_type=job.job_type,
             target_id=job.target_id,
             status=job.status,
-            progress=f"{job.progress_current}/{job.progress_total}",
-            message=_shorten(job.message),
+            progress_done=job.progress_current,
+            progress_total=job.progress_total,
+            message=_shorten(job.message, None if full else MAXIMUM_TEXT_LENGTH),
             created_at=job.created_at,
             updated_at=job.updated_at,
             completed_at=job.completed_at,
             is_active=unfinished and not looks_stale,
             looks_stale=looks_stale,
             idle_minutes=None if idle_minutes is None else round(idle_minutes),
+            input_metrics=dict(job.input_metrics or {}) if full else None,
+            output_metrics=dict(job.output_metrics or {}) if full else None,
+            log_file_path=job.log_file_path if full else None,
         )
 
     def query(
@@ -221,16 +255,18 @@ class Jobs:
         job_type: str | None = None,
         status: str | None = None,
         active_only: bool = False,
-        detail: str = "summary",
+        detail: Literal["summary", "full", "log_tail", "result", "lineage", "warnings"] = "summary",
         lines: int = 50,
         limit: int = 20,
         offset: int = 0,
+        before: str | None = None,
+        max_line_chars: int | None = MAXIMUM_TEXT_LENGTH,
     ) -> JobQueryResult:
         """List jobs, read one job, tail its log, or show a target's lineage.
 
-        Everything here only reads. The answers are short on purpose: a job
-        list holds at most 50 jobs, a log tail at most 200 lines, and long
-        messages are cut.
+        Everything here only reads. The default answers are short: a job
+        list holds 20 jobs, a log tail 50 lines, and long messages and log
+        lines are cut to 500 characters.
 
         Parameters
         ----------
@@ -252,17 +288,31 @@ class Jobs:
             says so once it has been idle for an hour.
         detail : `str`, optional
             ``"summary"`` (default): a list of jobs, or one job.
+            ``"full"``: the same, with each job's whole record: the stored
+            input and output numbers as data, the log file path and the
+            whole message.
             ``"log_tail"``: the last log lines of ``job_id``.
-            ``"result"``: the stored input and output numbers of ``job_id``.
+            ``"result"``: the stored input and output numbers of ``job_id``,
+            as text cut to 30,000 characters.
             ``"lineage"``: the pipeline runs that produced a target's data.
             ``"warnings"``: the warnings ``job_id`` detected (see Notes).
         lines : `int`, optional
-            How many log lines to return, from 1 to 200. Defaults to 50.
+            How many log lines to return, from 1 to 100,000. Defaults to 50.
         limit : `int`, optional
-            How many jobs or runs to return, from 1 to 50. Defaults to 20.
+            How many jobs or runs to return, from 1 to 500. Defaults to 20.
+            `None` is not accepted: a job list is always capped. A lineage
+            answer lists at most 50 runs.
         offset : `int`, optional
             For a job list, how many of the newest matching jobs to skip, so
             ``limit=20, offset=20`` gives the next 20. Defaults to 0.
+        before : `str`, optional
+            For a job list, only jobs created strictly before this time: the
+            ``created_at`` of the oldest job of the page before, as the app
+            wrote it. It pages back through the history even while new jobs
+            start. Defaults to `None` (no cutoff).
+        max_line_chars : `int` or `None`, optional
+            Longest log line returned, in characters, at least 1. Defaults
+            to 500. `None` returns every line whole.
 
         Returns
         -------
@@ -274,7 +324,8 @@ class Jobs:
         ------
         InvalidArgumentError
             If the detail is unknown, a detail lacks the job or target it
-            needs, or ``offset`` is negative.
+            needs, or ``limit``, ``lines``, ``offset`` or
+            ``max_line_chars`` is out of range.
         NotFoundError
             If the job does not exist, or there is no logs database yet for
             a question about one job or one target. For
@@ -299,40 +350,39 @@ class Jobs:
         if detail in ("log_tail", "result", "warnings") and not job_id:
             raise InvalidArgumentError(f"detail={detail!r} needs a job_id.")
         if detail == "lineage" and not (target_id or job_id):
-            raise InvalidArgumentError(
-                "detail='lineage' needs a target_id, or a job_id of a job that has one."
-            )
-        if offset < 0:
-            raise InvalidArgumentError("offset must be 0 or more.", details={"offset": offset})
-        limit = max(1, min(int(limit), MAXIMUM_JOBS))
-        lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
+            raise InvalidArgumentError(LINEAGE_NEEDS_A_TARGET)
+        check_limit(limit, 1, MAXIMUM_JOBS, allow_none=False)
+        check_limit(lines, 1, MAXIMUM_LOG_LINES, name="lines", allow_none=False)
+        check_limit(offset, 0, None, name="offset", allow_none=False)
+        check_limit(max_line_chars, 1, None, name="max_line_chars")
         if detail == "warnings":
             return self._warnings(job_id)
         if not Path(self._database_path).is_file():
-            if detail == "summary" and not job_id:
-                return JobQueryResult(detail="summary", count=0, jobs=[], note=UNTRUSTED_TEXT_NOTE)
+            if detail in ("summary", "full") and not job_id:
+                return JobQueryResult(detail=detail, count=0, jobs=[], note=UNTRUSTED_TEXT_NOTE)
             raise NotFoundError("The logs database does not exist yet, so no jobs are recorded.")
         job_store = JobStore(self._database_path, read_only=True)
 
         if detail == "lineage":
             return self._lineage(job_store, job_id, target_id, limit)
-        if detail in ("log_tail", "result"):
-            return self._one_job(job_store, job_id, detail, lines)
         if job_id:
-            return self._one_job(job_store, job_id, "summary", lines)
+            return self._one_job(job_store, job_id, detail, lines, max_line_chars)
+        full = detail == "full"
         # One more than asked for, to tell whether the list goes on.
-        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit + 1, offset)
+        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit + 1, offset, before)
         return JobQueryResult(
-            detail="summary",
+            detail=detail,
             count=min(len(jobs), limit),
             offset=offset,
             truncated=len(jobs) > limit,
-            jobs=[self._summarize(job) for job in jobs[:limit]],
+            jobs=[self._summarize(job, full) for job in jobs[:limit]],
             note=UNTRUSTED_TEXT_NOTE,
         )
 
-    def _one_job(self, job_store: JobStore, job_id: str, detail: str, lines: int) -> JobQueryResult:
-        """Answer for one job: its summary, log tail or stored result.
+    def _one_job(
+        self, job_store: JobStore, job_id: str, detail: str, lines: int, max_line_chars: int | None
+    ) -> JobQueryResult:
+        """Answer for one job: its summary, record, log tail or stored result.
 
         Parameters
         ----------
@@ -341,9 +391,11 @@ class Jobs:
         job_id : `str`
             The job to read.
         detail : `str`
-            ``"summary"``, ``"log_tail"`` or ``"result"``.
+            ``"summary"``, ``"full"``, ``"log_tail"`` or ``"result"``.
         lines : `int`
             Most log lines to return.
+        max_line_chars : `int` or `None`
+            Longest log line returned, or `None` for whole lines.
 
         Returns
         -------
@@ -358,11 +410,17 @@ class Jobs:
         job = job_store.get_job(job_id)
         if job is None:
             raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
-        answer = JobQueryResult(detail=detail, job=self._summarize(job), note=UNTRUSTED_TEXT_NOTE)
+        answer = JobQueryResult(
+            detail=detail, job=self._summarize(job, detail == "full"), note=UNTRUSTED_TEXT_NOTE
+        )
         if detail == "log_tail":
             entries, total = job_store.get_recent_log_entries_for_job(job_id, lines)
             answer.log_lines = [
-                JobLogLine(time=entry["created_at"], level=entry["level"], text=_shorten(entry["message"]))
+                JobLogLine(
+                    time=entry["created_at"],
+                    level=entry["level"],
+                    text=_shorten(entry["message"], max_line_chars),
+                )
                 for entry in entries
             ]
             answer.log_lines_total = total
@@ -370,6 +428,7 @@ class Jobs:
         elif detail == "result":
             answer.input_metrics = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
             answer.output_metrics = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
+            answer.parameter_defaults = _parameter_defaults(job)
         return answer
 
     def _warnings(self, job_id: str | None) -> JobQueryResult:
@@ -408,6 +467,7 @@ class Jobs:
             warnings=warnings,
             measurement_count=len(rows),
             checks_not_run_count=sum(1 for row in rows if row.check_outcome == GateStatus.NOT_CHECKED),
+            parameter_defaults=None if job is None else _parameter_defaults(job),
             truncated=len(failed) > MAXIMUM_WARNINGS,
             note=UNTRUSTED_TEXT_NOTE,
         )
@@ -442,9 +502,7 @@ class Jobs:
             job = job_store.get_job(job_id)
             target_id = job.target_id if job else None
         if not target_id:
-            raise InvalidArgumentError(
-                "detail='lineage' needs a target_id, or a job_id of a job that has one."
-            )
+            raise InvalidArgumentError(LINEAGE_NEEDS_A_TARGET)
         activities = ProvenanceStore(self._database_path, read_only=True).get_lineage(target_id)
         runs = [
             LineageRun(

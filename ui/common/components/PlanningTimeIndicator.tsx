@@ -23,17 +23,38 @@ export function formatPlanningTime(planningTime: string, now: Date = new Date())
     return `${moment.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${clock}`;
 }
 
+/** Props for PlanningTimeIndicator. */
+export interface PlanningTimeIndicatorProps {
+    /**
+     * "regular" (the default) reads "Planning time: Now". "compact" is for a
+     * toolbar: a small muted "Planning time" label, then the value, in the
+     * toolbar's small text.
+     */
+    size?: 'regular' | 'compact';
+}
+
 /**
  * The planning time indicator.
+ * @param props The size.
  * @return The indicator with its "Back to Now" button.
  */
-export const PlanningTimeIndicator: React.FC = () => {
+export const PlanningTimeIndicator: React.FC<PlanningTimeIndicatorProps> = ({ size = 'regular' }) => {
     const { planningTime, returnToNow } = usePlanningTime();
+    const value = planningTime === null ? 'Now' : `fixed at ${formatPlanningTime(planningTime)}`;
+    const isCompact = size === 'compact';
     return (
-        <span className="planning-time-indicator" data-testid="planning-time-indicator">
-            <span className="planning-time-indicator__label">
-                Planning time: {planningTime === null ? 'Now' : `fixed at ${formatPlanningTime(planningTime)}`}
-            </span>
+        <span
+            className={`planning-time-indicator${isCompact ? ' planning-time-indicator--compact' : ''}`}
+            data-testid="planning-time-indicator"
+        >
+            {isCompact ? (
+                <>
+                    <span className="planning-time-indicator__name" aria-hidden="true">Planning time</span>
+                    <span className="planning-time-indicator__label" aria-label={`Planning time: ${value}`}>{value}</span>
+                </>
+            ) : (
+                <span className="planning-time-indicator__label">Planning time: {value}</span>
+            )}
             {planningTime !== null && (
                 <Button variant="secondary" size="small" onClick={returnToNow}>
                     Back to Now

@@ -16,7 +16,10 @@ a pass. The failed gates' sentences are the run's warnings.
 The same module turns the run's counts, measurements and gates into quality
 measurements (`photometry_run_measurements`) and stores them
 (`record_photometry_quality`). The gates and the summary stay as they are;
-the measurements are written next to them.
+the measurements are written next to them. Two notice rows carry the
+warnings that are not gates: the sessions that had no comparison stars
+(`session_without_comparison_stars_notice_measurement`) and every other
+warning the run logged (`logged_warnings_notice_measurement`).
 """
 
 from collections.abc import Sequence
@@ -34,7 +37,11 @@ from astrometricslib.models.quality.gate_result import (
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.models.quality.metric_spec import MetricSpec
-from astrometricslib.models.quality.quality_summary import PhotometryPipelineQualityMetrics
+from astrometricslib.models.quality.quality_summary import (
+    PhotometryPipelineQualityMetrics,
+    SessionScintillationRecord,
+    SessionTieRecord,
+)
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
@@ -61,14 +68,25 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_GATE_SCATTER_POPULATION,
     PHOTOMETRY_GATE_SESSION_CONTENT,
     PHOTOMETRY_GATE_SESSION_PLATE_SOLVE,
+    PHOTOMETRY_GATE_TARGET_CROWDING,
     PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION,
     PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,
     PHOTOMETRY_LONG_TERM_VARIABLE_CANDIDATE_COUNT,
     PHOTOMETRY_METRICS,
     PHOTOMETRY_NOISE_MODEL_STAR_COUNT,
+    PHOTOMETRY_NOTICE_LOGGED_WARNINGS,
+    PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS,
     PHOTOMETRY_POSITION_ONLY_STAR_COUNT,
+    PHOTOMETRY_SATURATED_POINTS_REMOVED_COUNT,
+    PHOTOMETRY_SCINTILLATION_COEFFICIENT,
+    PHOTOMETRY_SCINTILLATION_NOT_MEASURED_COUNT,
+    PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG,
+    PHOTOMETRY_SESSION_TIE_SPREAD_FRACTION,
+    PHOTOMETRY_SESSIONS_TIED_COUNT,
+    PHOTOMETRY_SESSIONS_UNTIED_COUNT,
     PHOTOMETRY_STARS_FOUND,
     PHOTOMETRY_STARS_PROCESSED,
+    PHOTOMETRY_STARS_WITH_SATURATED_POINTS_COUNT,
     PHOTOMETRY_STARS_WITH_SCATTER,
     PHOTOMETRY_UNRESOLVED_STAR_COUNT,
     PHOTOMETRY_VARIABLE_CANDIDATE_COUNT,
@@ -87,6 +105,7 @@ from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality im
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     ANCHOR_RULE_RANK_BAND,
+    CROWDING_NEIGHBOR_PEAK_FRACTION,
     CentroidShiftSummary,
 )
 from astrometricslib.pipelines.photometry.processing.catalog_zero_point import SessionZeroPoints
@@ -94,9 +113,17 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     MINIMUM_COMPARISON_STARS,
     ComparisonSetResult,
 )
+from astrometricslib.pipelines.photometry.processing.scintillation_term import SOURCE_MEASURED
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
     MINIMUM_STARS_FOR_NOISE_MODEL,
 )
+from astrometricslib.pipelines.photometry.run_warnings import LoggedWarning, SessionWithoutComparisonStars
+from astrometricslib.pipelines.photometry.session_tie import (
+    TIE_STATUS_REFERENCE,
+    TIE_STATUS_TIED,
+    TIE_STATUS_UNTIED,
+)
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -104,6 +131,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     build_measurement,
     gate_measurement,
 )
+from astrometricslib.utilities.robust_statistics import median_or_none
 
 # The percentage of rejected frames needed to trigger a quality warning flag.
 # Normal processing naturally rejects a small number of frames (around 7.2%
@@ -258,6 +286,7 @@ SCATTER_POPULATION_GATE_NAME = "scatter_population"
 VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
 DETECTABLE_AMPLITUDE_GATE_NAME = "detectable_amplitude"
 FLUX_UNCERTAINTY_GATE_NAME = "flux_uncertainty"
+TARGET_CROWDING_GATE_NAME = "target_crowding"
 
 # How the comparison_ensemble gate words the limit on the size of a set. The
 # stored measurement of that gate always uses it, whichever test failed.
@@ -290,6 +319,7 @@ def photometry_run_gates(
     median_flux_error_mag: float | None = None,
     errors_assume_unit_gain: bool = False,
     errors_assume_zero_read_noise: bool = False,
+    target_crowding: TargetCrowding | None = None,
 ) -> list[GateResult]:
     """Build the gates for one photometry run.
 
@@ -360,11 +390,14 @@ def photometry_run_gates(
     errors_assume_zero_read_noise : `bool`, optional
         Whether those errors assumed no read noise because the camera's read
         noise was unknown.
+    target_crowding : `TargetCrowding`, optional
+        What the reference frame says about the run's target star. `None`
+        when the run has no single target star.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        Eleven gates, in a fixed order.
+        Twelve gates, in a fixed order.
     """
     minimum_ensemble_rejection_count_to_flag = resolve(MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG).value
     minimum_ensemble_rejection_fraction_to_flag = resolve(MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG).value
@@ -596,6 +629,7 @@ def photometry_run_gates(
     gates.append(
         _flux_uncertainty_gate(median_flux_error_mag, errors_assume_unit_gain, errors_assume_zero_read_noise)
     )
+    gates.append(_target_crowding_gate(target_crowding))
     return gates
 
 
@@ -852,6 +886,73 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
     )
 
 
+@dataclass(frozen=True)
+class TargetCrowding:
+    """What the reference frame says about how crowded the target star is.
+
+    Parameters
+    ----------
+    star_id : `str`
+        The target star's id.
+    crowded : `bool` or `None`
+        Whether a bright neighbor lies close enough to add to its light.
+        `None` when crowding was not recorded for it.
+    nearest_neighbor_distance_px : `float` or `None`
+        The distance to the nearest other detection, in pixels.
+    nearest_neighbor_flux_ratio : `float` or `None`
+        That neighbor's peak over the target's.
+    """
+
+    star_id: str
+    crowded: bool | None
+    nearest_neighbor_distance_px: float | None = None
+    nearest_neighbor_flux_ratio: float | None = None
+
+
+def _target_crowding_gate(target: TargetCrowding | None) -> GateResult:
+    """Say whether a bright neighbor sits on the target star.
+
+    Parameters
+    ----------
+    target : `TargetCrowding` or `None`
+        The target star's crowding, or `None` when the run has no single
+        target star.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``not_checked`` without a recorded crowding, ``failed`` when the
+        target is crowded, otherwise ``passed``.
+    """
+    fraction = resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value
+    source = (
+        f"a neighbor with at least {fraction:g} of the star's peak within the aperture radius plus "
+        "1.5 star widths (design estimate)"
+    )
+    if target is None or target.crowded is None:
+        return unchecked_gate(
+            TARGET_CROWDING_GATE_NAME,
+            "the run has no single target star with a recorded crowding",
+            source,
+        )
+    ratio = target.nearest_neighbor_flux_ratio
+    if target.crowded:
+        distance = target.nearest_neighbor_distance_px
+        where = f" {distance:.1f} px away" if distance is not None else ""
+        return failed_gate(
+            TARGET_CROWDING_GATE_NAME,
+            f"the target star {target.star_id} has a bright neighbor{where} (peak {ratio:.2f} of its own), "
+            "so its light curve may carry the neighbor's light and its brightness changes are less certain"
+            if ratio is not None
+            else f"the target star {target.star_id} has a bright neighbor close enough to add to its light, "
+            "so its light curve may carry the neighbor's light and its brightness changes are less certain",
+            ratio,
+            fraction,
+            source,
+        )
+    return passed_gate(TARGET_CROWDING_GATE_NAME, ratio, fraction, source)
+
+
 def _flux_uncertainty_gate(
     median_error_mag: float | None, assumes_unit_gain: bool, assumes_zero_read_noise: bool
 ) -> GateResult:
@@ -936,6 +1037,12 @@ class PhotometryRunInputs:
     noise_model_star_count : `int` or `None`
         Stars the noise model could be fitted from, or `None` when it was
         not counted.
+    saturated_points_removed : `int` or `None`
+        Saturated points removed from the stars' light curves, or `None`
+        when they were not counted.
+    stars_with_saturated_points : `int` or `None`
+        Stars that lost at least one saturated point, or `None` when they
+        were not counted.
     median_flux_error_mag : `float` or `None`
         The median per-point error of the run's light curves, in magnitudes.
     errors_assume_unit_gain : `bool`
@@ -944,6 +1051,20 @@ class PhotometryRunInputs:
         The catalog zero point of every measured frame, for each session.
         Empty when none was found (for example, a run with no catalog
         stars), in which case no zero point measurement is stored.
+    sessions_without_comparison_stars : `Sequence`
+        The sessions whose light curves kept raw flux, as
+        `SessionWithoutComparisonStars` records.
+    session_ties : `Sequence` [`SessionTieRecord`]
+        One record per session of a run that joined several sessions: the
+        factor that tied it to the reference session, or why it was left
+        untied. Empty for a run with one session.
+    session_scintillation : `Sequence` [`SessionScintillationRecord`]
+        One record per session: the scintillation term its flux errors
+        carry, and whether the coefficient was measured.
+    logged_warnings : `Sequence` [`LoggedWarning`]
+        The other warnings the run logged, grouped.
+    dropped_logged_warning_count : `int`
+        Warnings logged after the collector was full, counted only.
     """
 
     comparison_sets: Sequence[ComparisonSetResult] = field(default_factory=tuple)
@@ -951,9 +1072,16 @@ class PhotometryRunInputs:
     centroid_shift_summaries: Sequence[CentroidShiftSummary] = field(default_factory=tuple)
     stars_with_scatter: int | None = None
     noise_model_star_count: int | None = None
+    saturated_points_removed: int | None = None
+    stars_with_saturated_points: int | None = None
     median_flux_error_mag: float | None = None
     errors_assume_unit_gain: bool = False
     session_zero_points: Sequence[SessionZeroPoints] = field(default_factory=tuple)
+    sessions_without_comparison_stars: Sequence[SessionWithoutComparisonStars] = field(default_factory=tuple)
+    session_ties: Sequence[SessionTieRecord] = field(default_factory=tuple)
+    session_scintillation: Sequence[SessionScintillationRecord] = field(default_factory=tuple)
+    logged_warnings: Sequence[LoggedWarning] = field(default_factory=tuple)
+    dropped_logged_warning_count: int = 0
 
 
 # The metric that stands for each gate, and how its limit was obtained. The
@@ -993,6 +1121,9 @@ GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
         PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE, LimitTier.DESIGN_ESTIMATE, "PHO-D15"
     ),
     FLUX_UNCERTAINTY_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_FLUX_UNCERTAINTY, LimitTier.PHYSICAL_BUDGET),
+    TARGET_CROWDING_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_TARGET_CROWDING, LimitTier.DESIGN_ESTIMATE, "PHO-D35"
+    ),
 }
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in PHOTOMETRY_METRICS}
@@ -1177,6 +1308,21 @@ def photometry_run_measurements(
     }
     counts[PHOTOMETRY_STARS_WITH_SCATTER] = inputs.stars_with_scatter
     counts[PHOTOMETRY_NOISE_MODEL_STAR_COUNT] = inputs.noise_model_star_count
+    counts[PHOTOMETRY_SATURATED_POINTS_REMOVED_COUNT] = inputs.saturated_points_removed
+    counts[PHOTOMETRY_STARS_WITH_SATURATED_POINTS_COUNT] = inputs.stars_with_saturated_points
+    # The reference session is neither tied nor untied: in neither count.
+    scaled_ties = [tie for tie in inputs.session_ties if tie.status != TIE_STATUS_REFERENCE]
+    counts[PHOTOMETRY_SESSIONS_TIED_COUNT] = (
+        sum(tie.status == TIE_STATUS_TIED for tie in scaled_ties) if inputs.session_ties else None
+    )
+    counts[PHOTOMETRY_SESSIONS_UNTIED_COUNT] = (
+        sum(tie.status == TIE_STATUS_UNTIED for tie in scaled_ties) if inputs.session_ties else None
+    )
+    counts[PHOTOMETRY_SCINTILLATION_NOT_MEASURED_COUNT] = (
+        sum(record.source != SOURCE_MEASURED for record in inputs.session_scintillation)
+        if inputs.session_scintillation
+        else None
+    )
     for metric_name, count in counts.items():
         measurements.append(
             build_measurement(
@@ -1199,6 +1345,32 @@ def photometry_run_measurements(
             PHOTOMETRY_COMPARISON_SCATTER_OVER_PREDICTED,
             worst_comparison_scatter_ratio(inputs.comparison_sets),
             "No session had both a comparison-star scatter and a predicted error.",
+        ),
+        (
+            PHOTOMETRY_SESSION_TIE_SPREAD_FRACTION,
+            max(
+                (
+                    tie.spread
+                    for tie in inputs.session_ties
+                    if tie.status == TIE_STATUS_TIED and tie.spread is not None
+                ),
+                default=None,
+            ),
+            "The run had no session tied to the reference session.",
+        ),
+        (
+            PHOTOMETRY_SCINTILLATION_COEFFICIENT,
+            median_or_none(record.coefficient for record in inputs.session_scintillation),
+            "No session had a scintillation term added.",
+        ),
+        (
+            PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG,
+            median_or_none([
+                record.used_mmag / 1000.0
+                for record in inputs.session_scintillation
+                if record.used_mmag is not None
+            ]),
+            "No session had a scintillation term added.",
         ),
         (
             PHOTOMETRY_CORNER_DISPLACEMENT_P95_PX,
@@ -1244,7 +1416,109 @@ def photometry_run_measurements(
             # The gate's own detail names the assumed gain as the source.
             measurement = measurement.model_copy(update={"status": MeasurementStatus.ASSUMED})
         measurements.append(measurement)
+    if inputs.sessions_without_comparison_stars:
+        measurements.append(
+            session_without_comparison_stars_notice_measurement(
+                inputs.sessions_without_comparison_stars, context
+            )
+        )
+    if inputs.logged_warnings or inputs.dropped_logged_warning_count:
+        measurements.append(
+            logged_warnings_notice_measurement(
+                inputs.logged_warnings, context, inputs.dropped_logged_warning_count
+            )
+        )
     return measurements
+
+
+# The longest text kept for one logged warning in the notice's reason. The
+# job list shows at most 500 characters of a reason, so this keeps room for
+# several warnings.
+_LOGGED_WARNING_TEXT_LENGTH = 160
+
+
+def session_without_comparison_stars_notice_measurement(
+    sessions: Sequence[SessionWithoutComparisonStars], context: PipelineRunContext
+) -> QualityMeasurement:
+    """Build the row that says some sessions had no comparison stars.
+
+    Parameters
+    ----------
+    sessions : `Sequence` [`SessionWithoutComparisonStars`]
+        The sessions whose light curves kept raw flux. Not empty.
+    context : `PipelineRunContext`
+        The run's shared facts.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of sessions. The reason
+        names each session and why it had no comparison stars; the action
+        says what was done with its light curves.
+    """
+    excluded = [session for session in sessions if session.excluded_from_merge]
+    dropped = sum(session.dropped_candidate_count for session in sessions)
+    reason = "; ".join(f"session {session.session_id}: {session.reason}" for session in sessions)
+    if excluded:
+        action = (
+            f"left {len(excluded)} session(s) out of the merged light curves and dropped their "
+            f"{dropped} variable-star candidate(s)"
+        )
+    else:
+        action = (
+            f"kept the raw light curves, dropped {dropped} variable-star candidate(s) and searched for no "
+            "change between sessions"
+        )
+    return notice_measurement(
+        _SPEC_BY_NAME[PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS],
+        float(len(sessions)),
+        context,
+        context.run_subject(),
+        f"{len(sessions)} session(s) had no usable comparison stars, so their light curves are raw flux: "
+        f"{reason}",
+        action_taken=action,
+    )
+
+
+def logged_warnings_notice_measurement(
+    warnings: Sequence[LoggedWarning], context: PipelineRunContext, dropped_count: int = 0
+) -> QualityMeasurement:
+    """Build the row that lists the other warnings the run logged.
+
+    Parameters
+    ----------
+    warnings : `Sequence` [`LoggedWarning`]
+        The warnings, grouped, in the order they were first logged.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    dropped_count : `int`, optional
+        Warnings logged after the collector was full; counted only.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of different warnings.
+        The reason lists each one with its module and how often it was
+        logged.
+    """
+    shown = []
+    for warning in warnings:
+        text = warning.message.strip().splitlines()[0] if warning.message.strip() else warning.message
+        if len(text) > _LOGGED_WARNING_TEXT_LENGTH:
+            text = text[: _LOGGED_WARNING_TEXT_LENGTH - 1] + "…"
+        module = warning.logger_name.rsplit(".", 1)[-1]
+        repeats = f" ({warning.count} times)" if warning.count > 1 else ""
+        shown.append(f"{module}: {text}{repeats}")
+    reason = f"the run logged {len(warnings)} different warning(s): " + "; ".join(shown)
+    if dropped_count:
+        reason += f"; and {dropped_count} more not kept"
+    return notice_measurement(
+        _SPEC_BY_NAME[PHOTOMETRY_NOTICE_LOGGED_WARNINGS],
+        float(len(warnings) + dropped_count),
+        context,
+        context.run_subject(),
+        reason,
+    )
 
 
 def record_photometry_quality(

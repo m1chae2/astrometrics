@@ -122,19 +122,20 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 
 **Purpose.** Look at the finished image of a target and keep its catalog details up to date.
 
-**Layout.** Three columns. The left column is the [target list](#target-list). The center column shows the image. The right column shows target details and actions.
+**Layout.** Three columns. The left column is the [target list](#target-list). The center column shows the image. The right column shows target details and actions. Click the Filter Targets title to hide the left column, or the Information title to hide the whole right column (Target Controls too); click the thin strip that remains to bring it back, and the image grows to use the space. Both choices are remembered.
 
 **Controls.**
 
 | Control | What it does |
 | --- | --- |
 | Image Viewer panel, center | Shows the processed image of the selected target. The image is already stretched, so the viewer does not stretch it again. Drag to move the image. Scroll the mouse wheel to zoom |
+| Black and white / Color switch | Shows only for a target with a color picture, made from the colors of another stack of the same target. Color is shown first. Click Black and white to see the black-and-white picture |
 | + and - | Zoom in and zoom out |
 | Fit | Fits the whole image in the panel |
 | 1:1 | Shows the image at actual size |
 | Image Processing button | Opens the same target in the Image Processing view |
 | Information panel, right | Shows Catalog ID, Common Name, Coordinates, Exposure Time, the camera and telescope, and the frame count for each filter and exposure length. Catalog ID and Common Name can be edited |
-| Send to Phone | Opens LocalSend with the target's JPEG image ready to send |
+| Send to Phone | Sends the target's JPEG image to your phone through GSConnect. Your phone must be paired and connected in KDE Connect |
 | Save Target | Saves your edits to the target's Catalog ID and Common Name |
 | Delete Target | Deletes the target after you confirm in the Delete Target dialog |
 
@@ -152,7 +153,7 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 
 **Controls.**
 
-The left column has two buttons under Target Controls.
+The left column has two buttons under Target Controls. Click the Filter Targets title to hide the whole left column, so the viewer gets more width. Click the thin strip that remains to show it again. Frame Analysis works the same way on the right: clicking its title also hides Image Controls, and clicking the strip brings both back. Both choices are remembered.
 
 | Control | What it does |
 | --- | --- |
@@ -165,7 +166,7 @@ The FITS Viewer header has these controls.
 | --- | --- |
 | FWHM and Rejected badge | Appears after analysis. FWHM is the width of a star's image at half its peak brightness, in pixels. The badge also shows how many frames were rejected |
 | Stretch or Linear | Switches between the auto-stretched view and the linear view. The label shows the view in use. A stretch brightens faint detail |
-| Astrometry | Shows or hides star labels drawn over the image. The labels exist only after a plate solve. If none exist, a message tells you to run plate solving first |
+| Astrometry | Shows or hides star names drawn over the image. On the stack, the first click names every star the star finder detected, as a job: Analyze Target shows it as running, and its Cancel button stops it. The stack is plate solved first if it has no solution. A circle marks a named star (its most familiar name, from SIMBAD when online and from Gaia otherwise), a dashed circle a detection with no catalog star, and a cross a catalog star the finder missed. The line beside the button gives the counts and any note. On a raw frame, it shows the target's catalog stars, and only when the frame has a plate solution; otherwise the line says why. Clicking a star then opens the star profile, with the star's name at the top |
 | + and - | Zoom in and zoom out |
 | Fit and 1:1 | Fit the image to the panel, or show actual size |
 | Image Viewer button | Opens the same target in the Image Viewer |
@@ -195,6 +196,7 @@ The Frame Analysis panel has two tabs, Analysis and Data.
 | Analysis tab, status box | Reads Idle, Processing Active, Processing Successful or Processing Complete. It streams the log of the running job. Cancel stops a running stack |
 | Analysis tab, Recent Jobs | Lists earlier jobs for the target with a type, a status and a date. Click a job to read its log. Console opens the Command Console. × dismisses the job after you confirm |
 | Data tab, Final Stack and Spectral Stack | One row for each stack that exists. Header Info opens its header. View shows it in the FITS Viewer, and the button then reads Viewing |
+| Data tab, Camera and lens | Shows only for a target with stacks from more than one camera or lens. Pick one to show that stack in the FITS Viewer. Picking a stack also sets the File Browser's camera and optic filters to that stack's camera and lens. You can change those filters again, and that does not change the stack you picked. The main stack stays the main stack, and Analyze Target, Post Process Target and the stack summary still use it |
 | Data tab, Total Exposure | The exposure time of the stack |
 | Data tab, analysis results | Counts from the last analysis. A star analysis shows Total Images, Stars Found and Frames Processed. A spectrum analysis shows Total Images, Stars Processed and Spectra Extracted |
 | Data tab, Session Frames | One row for each filter and exposure length. Session is the number of light frames. Library Match is the number of matching dark frames in the library, or Missing. The camera box narrows the table |
@@ -203,8 +205,7 @@ The Image Controls panel has these buttons.
 
 | Control | What it does |
 | --- | --- |
-| Analyze Target | Starts a star analysis. It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
-| Analyze Temporal Variation | Appears only for spectral frames that already have a spectral stack. It follows how each star's spectrum changes across the raw frames |
+| Analyze Target | Starts a star analysis. The arrow opens a menu that runs one stage: Astrometry, Photometry, Spectroscopy or Spectral Variation (it follows how each star's spectrum changes across the raw spectral frames, and is on only while the spectral filter is in view). It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
 | Cancel | Replaces Analyze Target while an analysis runs |
 | Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. It is also off when the frames come from more than one optic, such as with All optics. The label then reads Pick one optic to stack, and the tooltip names the focal lengths. |
 | Open Siril | Opens Siril for the target. Siril is the outside program that does the stacking |
@@ -216,26 +217,47 @@ The Image Controls panel has these buttons.
 
 ## Command Console
 
-**Purpose.** Run Python commands and scripts against the app's data and hardware, and read the documentation.
+**Purpose.** Try the Python API by hand or with an AI. Write and run scripts, run one line at a time, and read the documentation.
 
-**Layout.** Three resizable columns. The left column holds a tab panel and the Workspace table. The center column is a code editor. The right column holds the Terminal and Documentation tabs.
+**Layout.** The left column lists your scripts and the examples. Click the Scripts title to fold the column to a thin strip, which shows the name of the open script; click the strip to open it again. The center holds the Editor with its toolbar, the Workspace table under it, and the Terminal and Documentation tabs to the right. Drag the dividers to resize them. Figures open in their own windows.
 
 **Controls.**
 
 | Control | What it does |
 | --- | --- |
-| Scripts & Recipes tab | Lists your saved User Scripts and the built-in recipes. Click one to load it in the editor. + New starts a new script |
-| Docs tab | Lists the documentation topics, with a filter box that reads Filter documentation & APIs... |
-| Workspace table | Lists the variables in the console: Name, Type, Shape / Size and Value / Description. The refresh button reads them again. Built-in objects are pinned at the top |
-| Editor toolbar: Clear | Empties the editor |
-| Editor toolbar: Save Script | Saves the script under its file name |
-| Editor toolbar: Run Script (Ctrl+Enter) | Runs the script. The button reads Running... until it ends |
-| Terminal tab | Runs one Python line at a time. Press Enter to run. Tab completes a name. Up and Down recall earlier lines |
-| Terminal: Clear | Clears the history on screen. Variables are kept |
-| Terminal: Reset Workspace | Discards your variables and restores the built-in objects. History is kept |
-| Documentation tab | Shows the selected topic. Links between topics open inside the tab |
+| My scripts tab | Lists the scripts you saved, newest first. Click one to open it in the editor |
+| Examples tab | Lists the tutorial notebooks and example scripts, grouped by library (Astrometrics, Wayfinding). A badge shows each file's type: *.ipynb* for a Jupyter notebook, *.py* for a Python script. Long names wrap onto two lines. Click one to open it in the editor as a script |
+| Search box | Filters the tab that is shown |
+| Toolbar: Name | The file name the script is saved under. An example gets its own name with .py. In a narrow window the field gets narrower, so the toolbar stays on one row |
+| Toolbar: Run | Runs the whole script. Ctrl+Enter in the editor does the same. Run is off while code runs |
+| Toolbar: Save | Saves the script under the name. For an example the button reads Save as My Script and saves your own copy. Saving over another script asks first |
+| Toolbar: New | Starts a new, empty script |
+| Editor | Long lines wrap onto the next line, so you never scroll sideways |
+| Workspace | Lists the preloaded names first, then your variables: Name, Type, Shape / Size and Value / Description. It updates after each run. A cut-off cell shows its full text when you point at it. Click the Workspace title to fold it to its title bar, so the editor gets the height |
+| Terminal tab | Runs one Python line at a time. Press Enter to run. Tab completes a name. Up and Down recall earlier lines. The commands below run in the terminal itself |
+| Running line | While code runs, a line at the bottom of the terminal names the script (or *command* for a typed line), shows how long it has run, and says Ctrl+C to stop |
+| Documentation tab | Shows a topic. Pick one from Topic. The search box searches every topic and lists the ones that hold the text. Ctrl+F finds text in the topic shown. Links between topics open inside the tab. `doc name` in the terminal opens a name's entry here |
 
-The terminal starts with these names ready: `targets` (target catalog), `stars` (star catalog), `jobs` (job logs), `telescope` (mount control), `imaging` (camera sequencer), `np` (NumPy), `plt` (Matplotlib), and `help` and `doc(obj)` for help.
+**Terminal commands.** Type these alone on a line. A variable with the same name still works in Python, because only the exact line counts.
+
+| Command | What it does |
+| --- | --- |
+| `clear` or `clear()` | Clears the terminal screen. Your variables stay |
+| `clear('workspace')` | Clears your variables. The preloaded names stay |
+| `doc name` or `doc(name)` | Opens the Documentation tab at the entry for that name, such as `doc delete_images`, `doc TargetCatalog.delete_images` or `doc astrometrics.targets.delete_images`. When the name fits several entries, the terminal lists their full names. When it fits none, it suggests close names |
+| Ctrl+C | Stops the code that is running. The terminal prints *Stopped.* and keeps every variable set before the stop. Code waiting inside one long call, such as a long `time.sleep`, stops when that call returns |
+
+The top line of the terminal gives the Python version and these commands. Type `help` for the preloaded names, or `help(obj)` for help on a name.
+
+**Preloaded names.** The console starts with these names ready:
+
+| Name | What it is |
+| --- | --- |
+| `astrometrics`, `wayfinder` | The two libraries: processing and quality, and telescope control and planning |
+| `np`, `plt`, `fits` | NumPy, Matplotlib and the FITS module of Astropy |
+| `selection` | What is picked in Image Processing now. It is read-only and always current, also when Image Processing is in another window. It holds `target`, `path` (the stack or frame shown), `kind` (*stack* or *frame*), `star` and `set_at` (when it was picked). The star is the one picked with the Astrometry overlay: `name`, `ra` and `dec` in degrees (often empty on a raw frame), and `x` and `y`, the column and row of its center counted from 0, as NumPy counts. The Star Profile panel counts pixels from 1. Type `selection` for a short summary. Fields are empty (`None`) when nothing is picked |
+| `show(...)` | Opens something in the app when the run ends: `show(target="M 31")` opens the target in Image Processing, `show(target="M 31", star="Vega")` opens its stack with the star selected, `show(target="M 31", path=...)` shows that stack or frame (with no target, the target picked in Image Processing is used), and `show(star="Vega")` opens the star in the Astronomy Manager. `display="Astronomy Manager"` or `display="Image Processing"` picks the view. If another window shows that view, it shows the result; otherwise this window switches to it |
+| `doc(...)` | Opens the Documentation tab at a name's entry, as the `doc name` command does. It also takes an object, such as `doc(astrometrics.targets.delete_images)` |
 
 **Related settings.** The Displays box for Command Console in Settings > General turns this view on or off.
 

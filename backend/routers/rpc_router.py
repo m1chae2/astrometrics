@@ -43,7 +43,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "system:health": ("maintenance_service", "check_health"),
     "system:static_mounts": ("settings_service", "get_static_mounts"),
     "system:frontend_log": log_frontend_message,
-    "system:completions": ("scripting_service", "get_completions"),
     "system:get_config": ("config_service", "get_all_config"),
     "system:save_config": ("settings_service", "save_config"),
     "system:introspection": ("scripting_service", "get_introspection_tree"),
@@ -55,6 +54,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Python terminal and its documentation
     "terminal:execute": ("scripting_service", "execute_structured"),
     "terminal:get_workspace": ("scripting_service", "get_workspace_manifest"),
+    # The public objects the console preloads (astrometrics, np, ...).
+    "terminal:get_preloaded_objects": ("scripting_service", "get_preloaded_objects"),
     # The last few console runs (text and figure files), read-only.
     "terminal:get_recent_runs": ("scripting_service", "get_recent_runs"),
     "terminal:completions": ("scripting_service", "get_completions"),
@@ -64,6 +65,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "terminal:read_script": ("scripting_service", "read_user_script"),
     "terminal:save_script": ("scripting_service", "save_user_script"),
     "terminal:reset_workspace": ("scripting_service", "reset_workspace"),
+    # Ctrl+C in the terminal: stops the console code running now.
+    "terminal:stop": ("scripting_service", "stop_runs"),
     "docs:list_topics": ("scripting_service", "list_doc_topics"),
     "docs:search_topics": ("scripting_service", "search_doc_topics"),
     "docs:get_topic": ("scripting_service", "get_doc_topic"),
@@ -71,6 +74,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "ui:editor_get": ("scripting_service", "get_editor_buffer"),
     "ui:editor_set": ("scripting_service", "set_editor_buffer"),
     "ui:navigate": ("handoff_service", "navigate"),
+    # What is picked in Image Processing, read by the console's `selection`.
+    "ui:set_selection": ("app_selection_service", "set_selection"),
     "ui:inspect_variable": ("handoff_service", "inspect_variable"),
     # Hand-off of the workspace to a paired phone
     "handoff:get_state": ("handoff_service", "get_state"),
@@ -117,11 +122,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:get_session_alignment": ("alignment_service", "get_session_data"),
     "telescope:get_cumulative_tracking_data": ("alignment_service", "get_cumulative_tracking_data"),
     "telescope:sync_logs": ("sync_service", "sync_telescope_logs"),
-    "telescope:get_pointing_model": ("alignment_service", "compute_pointing_model"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
     "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
-    "telescope:get_guiding_spectrum": ("guiding_service", "analyze_guiding_spectrum"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),
@@ -142,16 +145,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "ingestion:list_files": ("ingestion_service", "list_remote_files"),
     "ingestion:reindex": ("ingestion_service", "start_reindex"),
     # Stacking and the job list
-    "processing:stack": ("image_processing_service", "process_target"),
+    "processing:stack": ("image_processing_service", "stack_target"),
     "processing:siril_open": ("image_processing_service", "open_siril"),
     "processing:cancel": ("image_processing_service", "cancel_processing_jobs"),
     "processing:status": ("image_processing_service", "get_processing_status"),
-    "processing:list_jobs": ("job_service", "list_jobs"),
-    "processing:active_jobs": ("job_service", "get_active_jobs"),
-    "processing:get_job": ("job_service", "get_job"),
     "processing:delete_job": ("job_service", "delete_job"),
-    "processing:jobs_for_target": ("job_service", "get_jobs_for_target"),
-    "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
     # A short answer about a target's current stack, read from the numbers the
     # stacking stage saved with it. Nothing is measured and nothing is written.
     # A target with no saved stack summary raises `NotFoundError`.
@@ -162,9 +160,26 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # and the target's processed-image pointer), so the AI's read-only
     # profile withholds it.
     "processing:remake_preview": ("stack_review_service", "start_preview_remake"),
+    # The nebulae and galaxies SIMBAD lists inside the target's stack, from
+    # its plate solution. A read: the answer is kept beside the stack, so
+    # only the first call per stack file asks SIMBAD. SIMBAD out of reach or
+    # a stack with no plate solution is a message in the answer, not an error.
+    "processing:list_bright_objects": ("astrometrics.processing", "list_preview_bright_objects"),
+    # Saves the user's choice of the object the masked stretch protects on
+    # the target. It makes no picture: the choice is read the next time the
+    # target is stacked or its preview is made.
+    "processing:set_bright_object": ("astrometrics.processing", "set_preview_bright_object"),
+    # What a stack would do with its frames: which it would set aside and why,
+    # and which darks, flats and bias each exposure group would use. It reads
+    # every frame, so the service runs it as a background job. Nothing is
+    # stacked, moved, stored or saved.
+    "processing:check_stack": ("stack_review_service", "start_stack_check"),
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
     "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    # A typical frame and a reference star for the viewer's Blink button
+    # (a read).
+    "quality:choose_blink_pair": ("astrometrics.quality", "choose_blink_pair"),
     # Compares a target's stack with the previous one. A failed plate solve can
     # take about ten minutes, so the service starts it as a background job.
     "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),
@@ -188,13 +203,14 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # job detected, from the stored quality rows that carry its id.
     "jobs:query": ("astrometrics.jobs", "query"),
     # Photometry and spectroscopy analysis
-    "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
+    "analysis:analyze_image": ("analysis_orchestrator", "run_analysis"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
     "analysis:cancel": ("analysis_orchestrator", "cancel_analysis"),
+    "analysis:identify_stack": ("analysis_orchestrator", "identify_stack"),
+    "analysis:get_stack_identification": ("analysis_orchestrator", "get_stack_identification"),
     # Target library
     "target:list": ("target_service", "get_all_targets_list"),
     "target:get": ("target_service", "get_targets"),
-    "target:get_targets": ("target_service", "get_targets"),
     "target:create": ("target_service", "create_target"),
     "target:update": ("target_service", "update_target"),
     "target:delete": ("target_service", "delete_target"),
@@ -202,6 +218,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "target:send_to_phone": ("target_service", "send_to_phone"),
     "target:refresh": ("target_service", "refresh_target_images_by_id"),
     "target:get_files": ("target_service", "get_file_list"),
+    # Each frame's state (included, not stacked yet, set aside), with reasons.
+    "target:get_frame_statuses": ("target_service", "get_frame_statuses"),
+    # Moves chosen set-aside frames back into the target (a user action).
+    "target:put_back_frames": ("target_service", "put_back_frames"),
     "target:get_camera_index": ("target_service", "get_camera_index"),
     "target:get_frames": ("target_service", "get_frame_stats"),
     "target:get_frames_grouped": ("target_service", "get_frame_stats_grouped"),
@@ -216,7 +236,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "astronomy:save": ("stellar_service", "save_objects"),
     "astronomy:delete": ("stellar_service", "delete_object"),
     "astronomy:analyze_periodicity": ("stellar_service", "analyze_periodicity"),
-    "astronomy:get_stellar_objects": ("stellar_service", "get_stellar_objects"),
     "astronomy:get_overlay_stars": ("stellar_service", "get_astrometry_overlay_stars"),
     "astronomy:get_status": ("stellar_service", "get_target_status"),
     "astronomy:visible": ("stellar_service", "list_visible_targets"),
@@ -229,22 +248,21 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "planetarium:list_catalog_drivers": ("stellar_service", "list_catalog_drivers"),
     "planetarium:get_deep_catalog_status": ("stellar_service", "deep_catalog_status"),
     "planetarium:get_constellation_lines": ("stellar_service", "get_constellation_lines"),
+    "planetarium:get_class_stars": ("stellar_service", "get_class_star_colors"),
+    "planetarium:get_stack_pictures": ("stellar_service", "get_stack_sky_pictures"),
     # Camera capture
     "imaging:capture": ("imaging_service", "capture_sequence"),
-    "imaging:get_active_jobs": ("imaging_service", "get_active_capture_jobs"),
     "imaging:stop_capture": ("imaging_service", "stop_capture"),
     # Images and FITS files
     "images:get_target_frame": ("image_service", "get_target_frame_by_id"),
     "images:get_light_frame_data": ("image_service", "get_light_frame_data_by_id"),
     "images:convert_fits": ("image_service", "convert_fits"),
-    "images:get_fits_header": ("image_service", "get_fits_header_data"),
     "images:measure_star_profile": ("image_service", "measure_star_profile"),
     "images:map_position": ("image_service", "map_position"),
     "images:measure_detections": ("image_service", "measure_detections"),
     "images:delete": ("image_service", "delete_images"),
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames
-    "calibration:get_stats": ("image_processing_service", "get_calibration_stats"),
     # Measures a camera setting's gain and read noise from the library's
     # flat and bias frames. With `save` true it writes the camera profile in
     # the config (after a backup), so the AI's read-only profile withholds it.
@@ -263,21 +281,17 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
     "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
-    # Night plan and observation packages. `plan:get` reads (no `session_id`
-    # lists all), `plan:list_packages` lists the package library and
-    # `plan:current_session` reads tonight's session. `plan:edit` and
-    # `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # Night plan and observation packages. `plan:list_packages` lists the
+    # package library and `plan:current_session` reads tonight's session.
+    # `plan:tick_checklist_item` writes and sends the `plan:changed` event;
     # `plan:edit_package` and `plan:create_package` send `packages:changed`;
     # a stale `expected_revision` answers with the `conflict` error and the
     # current revision in its details. Writes, so the AI's read-only profile
     # withholds them.
-    "plan:get": ("plan_service", "get_plan"),
     "plan:current_session": ("plan_service", "current_session"),
     "plan:list_packages": ("plan_service", "list_packages"),
     "plan:package_for_target": ("plan_service", "package_for_target"),
-    "plan:create": ("plan_service", "create_plan"),
     "plan:create_package": ("plan_service", "create_package"),
-    "plan:edit": ("plan_service", "edit_plan"),
     "plan:edit_package": ("plan_service", "edit_package"),
     "plan:refresh_suggestions": ("plan_service", "refresh_suggestions"),
     "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
@@ -286,6 +300,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "advisory:target_report": ("advisory_service", "get_target_report"),
     "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
     "advisory:result": ("advisory_service", "get_result_statements"),
+    "advisory:star_shapes": ("advisory_service", "get_star_shape_review"),
     "advisory:depth_goal": ("advisory_service", "get_depth_goal"),
     "advisory:set_depth_goal": ("advisory_service", "set_depth_goal"),
     "history:nights": ("advisory_service", "list_nights"),
@@ -324,13 +339,19 @@ HEAVY_METHODS = frozenset({
     "advisory:target_report",
     "advisory:tonight",
     "advisory:depth_goal",
+    "advisory:star_shapes",
     "astronomy:list",
     "astronomy:visible",
-    "target:get_targets",
+    "target:get",
     "target:get_frames_grouped",
     "planetarium:get_sources",
     "planetarium:get_catalog_sources",
 })
+
+#: Heavy methods that are light when they name one record: the parameter
+#: that names it. ``target:get`` lists every target when no ``target_id`` is
+#: given, and reads one target record when it is.
+LIGHT_WHEN_NAMED = {"target:get": "target_id"}
 
 
 async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -350,7 +371,7 @@ async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **k
     result : `~typing.Any`
         What `function` returns.
     """
-    if method in HEAVY_METHODS:
+    if method in HEAVY_METHODS and not kwargs.get(LIGHT_WHEN_NAMED.get(method, "")):
         return await run_heavy(function, *args, **kwargs)
     return await run_in_threadpool(function, *args, **kwargs)
 
@@ -524,7 +545,11 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
     info : `ErrorInfo`
         The error as reported to the caller.
     """
-    if info.code in _EXPECTED_CODES:
+    if info.code == "not_found":
+        # Asking for something that is not there is an answer, not a
+        # problem: the caller gets the code and decides what to show.
+        logger.info("RPC %s failed (%s): %s", method, info.code, info.message)
+    elif info.code in _EXPECTED_CODES:
         logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
     elif info.code == "internal":
         logger.error("RPC %s raised an unexpected error", method, exc_info=exc)

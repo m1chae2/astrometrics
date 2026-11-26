@@ -2,11 +2,13 @@
  * @file stackReviewService.ts
  * @description Calls the backend for the checks a person can run on a finished stack: making the
  * preview picture again, reading why frames were set aside, and reading the warnings a stack
- * raised. The two slow checks start a background job; the answer is the result, or the job to
- * follow.
+ * raised. The slow checks (the preview remake, the stack comparison and the frame check) start a
+ * background job; the answer is the result, or the job to follow.
  */
 
 import { callBackend } from '../backendApi';
+import { BackendError } from '../backendError';
+import { toProcessingJob } from './jobRecords';
 import { GateStatus, SubjectLevel } from '../../types/backendTypes';
 import type {
     JobWarning,
@@ -14,7 +16,9 @@ import type {
     ProcessingJob,
     QualityMeasurement,
     SetAsideFrameRecord,
+    StackPrediction,
     StackReviewStart,
+    StackSummary,
 } from '../../types/backendTypes';
 
 /** The event the image viewer listens for, so it reads a rewritten picture again. */
@@ -60,12 +64,34 @@ export async function startPreviewRemake(
 }
 
 /**
- * Reads one background job.
+ * Reads the saved summary of a target's imaging or spectral stack: how it was made, its path
+ * and the job that made it. A target with no saved summary is a normal case.
+ * @param targetId The target.
+ * @param kind The imaging or spectral stack.
+ * @return The summary, or `null` when the target has no such stack.
+ */
+export async function fetchStackSummary(targetId: string, kind: StackKind): Promise<StackSummary | null> {
+    try {
+        return await callBackend('processing:stack_summary', { target: targetId, kind }, { silent: true });
+    } catch (error) {
+        if (error instanceof BackendError && error.code === 'not_found') return null;
+        throw error;
+    }
+}
+
+/**
+ * Reads one background job's whole record (`jobs:query` with `detail: 'full'`).
  * @param jobId The job's id.
  * @return The job, or `null` if the backend has no such job.
  */
 export async function fetchJob(jobId: string): Promise<ProcessingJob | null> {
-    return callBackend('processing:get_job', { job_id: jobId }, { silent: true });
+    try {
+        const answer = await callBackend('jobs:query', { job_id: jobId, detail: 'full' }, { silent: true });
+        return answer?.job ? toProcessingJob(answer.job) : null;
+    } catch (error) {
+        if (error instanceof BackendError && error.code === 'not_found') return null;
+        throw error;
+    }
 }
 
 /**
@@ -128,12 +154,19 @@ const stackWarningFromRow = (row: QualityMeasurement): StackWarning => ({
 /**
  * Lists the warnings a stacking job detected.
  * @param jobId The id of the stacking job that made the stack.
- * @return One warning for each failed check of the job; empty when there are none.
+ * @return One warning for each failed check of the job; empty when there are none, or when the
+ *     job is no longer on record. A missing job is an answer, not a failure, so the caller does
+ *     not ask again and falls back to the checks stored for the stack.
  */
 export async function fetchStackJobWarnings(jobId: string): Promise<StackWarning[]> {
-    const answer = await callBackend(
-        'jobs:query', { job_id: jobId, detail: 'warnings' }, { silent: true });
-    return (answer.warnings ?? []).map(stackWarningFromJob);
+    try {
+        const answer = await callBackend(
+            'jobs:query', { job_id: jobId, detail: 'warnings' }, { silent: true });
+        return (answer.warnings ?? []).map(stackWarningFromJob);
+    } catch (error) {
+        if (error instanceof BackendError && error.code === 'not_found') return [];
+        throw error;
+    }
 }
 
 /**
@@ -211,4 +244,26 @@ export async function startStackComparison(targetId: string, kind: StackKind): P
 export function stackComparisonReportOf(job: ProcessingJob): StackComparisonReportView | null {
     const stored = job.outputMetrics?.result;
     return stored ? (stored as StackComparisonReportView) : null;
+}
+
+/**
+ * Starts checking what stacking would do with some frames. Nothing is stacked or changed.
+ * @param targetId The target.
+ * @param imageFiles The frames the Stack Frames click would send, as file paths.
+ * @return The prediction when it finished at once, or the job to follow.
+ */
+export async function startStackCheck(targetId: string, imageFiles: string[]): Promise<StackReviewStart> {
+    // Silent: the panel shows the error beside the button, so no second message pops up.
+    return callBackend(
+        'processing:check_stack', { target_id: targetId, image_files: imageFiles }, { silent: true });
+}
+
+/**
+ * Reads the stack prediction out of a finished job.
+ * @param job The job.
+ * @return The prediction the job stored, or `null` if it has none.
+ */
+export function stackPredictionOf(job: ProcessingJob): StackPrediction | null {
+    const stored = job.outputMetrics?.result;
+    return stored ? (stored as StackPrediction) : null;
 }

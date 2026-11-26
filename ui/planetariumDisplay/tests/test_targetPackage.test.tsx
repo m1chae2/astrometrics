@@ -142,9 +142,8 @@ describe('Send framing to package', () => {
    */
   async function openPanel() {
     const user = renderWithProviders(
-      <FramingPanel targetName="M 81" center={{ ra: 148.9, dec: 69.1 }} onFramingPanelsChange={vi.fn()} />,
+      <FramingPanel targetName="M 81" center={{ ra: 148.9, dec: 69.1 }} onFramingPanelsChange={vi.fn()} isOpen onClose={vi.fn()} />,
     );
-    await user.click(screen.getByRole('button', { name: 'Framing' }));
     await screen.findByText('P0_0');
     return user;
   }
@@ -185,5 +184,77 @@ describe('Send framing to package', () => {
     expect(alert.textContent).toContain('changed in another window');
     await user.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('Framing on the info card', () => {
+  /** The card of the selected object holds the Framing button, which opens and closes framing for it. */
+  it('shows a Framing button that toggles the framing panel', async () => {
+    setBackend();
+    const onToggleFraming = vi.fn();
+    const user = renderWithProviders(
+      <PlanetariumInfoCard source={source} observerLocation={null} onClose={vi.fn()} onToggleFraming={onToggleFraming} />,
+    );
+    const framing = screen.getByRole('button', { name: 'Framing' });
+    expect(framing.getAttribute('aria-expanded')).toBe('false');
+    // The same shared Button and variant as the card's other secondary action.
+    expect(framing.className).toContain('btn--secondary');
+    await user.click(framing);
+    expect(onToggleFraming).toHaveBeenCalledTimes(1);
+  });
+
+  /** All of a star's actions are in one container, in order, the same size, with no own margins. */
+  it('keeps every action in one evenly spaced container', () => {
+    setBackend();
+    const star = { ...source, type: 'star', hasSpectra: true, hasPhotometry: false } as unknown as PlanetariumSource;
+    renderWithProviders(
+      <PlanetariumInfoCard source={star} observerLocation={null} onClose={vi.fn()} onToggleFraming={vi.fn()} />,
+    );
+    const actions = screen.getByTestId('planetarium-info-card-actions');
+    const buttons = Array.from(actions.children) as HTMLElement[];
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      'Add to observation package', 'Framing', 'View in Astronomy Manager',
+    ]);
+    for (const button of buttons) {
+      expect(button.className).toContain('btn--full-width');
+      expect(button.className).not.toMatch(/planetarium-info-card__/);
+    }
+  });
+
+  /** With framing open the card keeps its details and actions; framing extends below it. */
+  it('keeps its details while framing is open', () => {
+    setBackend();
+    renderWithProviders(
+      <PlanetariumInfoCard source={source} observerLocation={null} onClose={vi.fn()} onToggleFraming={vi.fn()} isFramingOpen />,
+    );
+    expect(screen.getByText('RA/Dec (Dec)')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Framing' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  /** Before the backend answers, Alt/Az and hour angle are worked out at once; rise and set show a loading bar. */
+  it('shows the sky position at once and a loading bar for rise and set', () => {
+    setBackend();
+    const star = { id: 'Schedar', name: 'Schedar', type: 'star', ra: 10.13, dec: 56.54, hasSpectra: false, hasPhotometry: false } as unknown as PlanetariumSource;
+    renderWithProviders(
+      <PlanetariumInfoCard
+        source={star}
+        observerLocation={{ latitude: 45.68, longitude: -111.04, elevation: 1500 }}
+        onClose={vi.fn()}
+        atTime={new Date('2026-11-25T04:00:00Z')}
+        visibilityPending
+      />,
+    );
+    const altAzRow = screen.getByText('Alt/Az').closest('tr') as HTMLElement;
+    expect(altAzRow.textContent).not.toContain('--');
+    const hourAngleRow = screen.getByText('Hour Angle').closest('tr') as HTMLElement;
+    expect(hourAngleRow.textContent).not.toContain('--');
+    expect(screen.getByText('Working out rise and set')).toBeTruthy();
+  });
+
+  /** Without a framing handler the card shows no Framing button. */
+  it('shows no Framing button without a handler', () => {
+    setBackend();
+    renderWithProviders(<PlanetariumInfoCard source={source} observerLocation={null} onClose={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Framing' })).toBeNull();
   });
 });

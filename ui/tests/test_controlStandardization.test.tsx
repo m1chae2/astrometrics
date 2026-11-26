@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tests for the shared controls that replaced one-off ones: the camera filter of the
  * file browser (a PopoverSelect), the sort order of the target list (compact Tabs), the "Hide Feature
- * Lines" toggle of the spectrum chart (a pressed-state button) and the console sidebar tabs.
+ * Lines" toggle of the spectrum chart (a pressed-state button).
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,6 @@ import { render, screen } from '@testing-library/react';
 import { FileBrowserToolbar } from '../imageProcessingDisplay/fileBrowser/FileBrowser';
 import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { SpectrumViewer } from '../astronomyManager/components/SpectrumViewer';
-import { ConsoleSidebar } from '../commandConsole/ConsoleSidebar';
 
 vi.mock('../common/components/plotting/BasePlot', () => ({ BasePlot: () => <div data-testid="plot" /> }));
 vi.mock('../common/services/backendApi', () => ({ callBackend: vi.fn().mockResolvedValue([]) }));
@@ -87,21 +86,5 @@ describe('SpectrumViewer Hide Feature Lines', () => {
         expect(screen.queryByRole('tab', { name: 'Hide Feature Lines' })).toBeNull();
         await user.click(toggle);
         expect(toggle.getAttribute('aria-pressed')).toBe('true');
-    });
-});
-
-describe('ConsoleSidebar tabs', () => {
-    /** The sidebar tabs are shared Tabs, and the Docs tab shows its count. */
-    it('shows the Scripts and Docs tabs with the Docs count', () => {
-        render(<ConsoleSidebar
-                recipes={[]}
-                userScripts={[]}
-                docTopics={[{ id: 'a', title: 'A', path: 'a', category: 'General' }, { id: 'b', title: 'B', path: 'b', category: 'General' }]}
-                onSelectRecipe={() => {}}
-                onSelectUserScript={() => {}}
-                onNewScript={() => {}}
-            />);
-        expect(screen.getByRole('tab', { name: 'Scripts & Recipes' }).getAttribute('aria-selected')).toBe('true');
-        expect(screen.getByRole('tab', { name: 'Docs (2)' })).toBeTruthy();
     });
 });

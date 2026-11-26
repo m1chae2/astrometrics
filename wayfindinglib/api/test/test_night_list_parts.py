@@ -38,8 +38,8 @@ TONIGHT_DAY = 5
 NOW = FIRST_NIGHT + TONIGHT_DAY * 86400.0 + 3600.0
 """A moment during the night in progress."""
 
-LIMIT = 400
-"""A limit large enough to list every night."""
+LIMIT = night_history.MAXIMUM_LIMIT
+"""The largest limit the night list takes, enough to list every test night."""
 
 
 class Rig:

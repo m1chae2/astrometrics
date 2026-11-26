@@ -22,8 +22,12 @@ export interface SessionPickerProps {
     onSelect: (id: string | null) => void;
     /** The text of the live choice. Defaults to "Live". */
     liveLabel?: string;
+    /** The heading the live choice is listed under, when the options have groups. Optional. */
+    liveGroup?: string;
     /** Makes the picker fill the width of its container. */
     fill?: boolean;
+    /** "regular" (the default), or "compact": a small button for toolbars. */
+    size?: 'regular' | 'compact';
     /** Extra class names for the outer element, for layout. */
     className?: string;
 }
@@ -34,6 +38,6 @@ export interface SessionPickerProps {
  * @param props See {@link SessionPickerProps}.
  * @returns The picker.
  */
-export const SessionPicker: React.FC<SessionPickerProps> = ({ liveLabel = 'Live', ...rest }) => (
-    <PopoverSelect {...rest} emptyLabel={liveLabel} />
+export const SessionPicker: React.FC<SessionPickerProps> = ({ liveLabel = 'Live', liveGroup, ...rest }) => (
+    <PopoverSelect {...rest} emptyLabel={liveLabel} emptyGroup={liveGroup} />
 );

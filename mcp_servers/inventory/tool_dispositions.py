@@ -114,7 +114,7 @@ DECISIONS = {
     ),
     "terminal_add_script": ToolDecision(
         "keep",
-        "Built 2026-11-15. Saves a new script to the Command Console's User Scripts for the person to "
+        "Built 2026-11-15. Saves a new script to the Command Console's My scripts list for the person to "
         "review and run. It cannot run it or replace a script.",
     ),
     "terminal_get_workspace": ToolDecision("withhold", "Console only. Has no use without the code runner."),
@@ -147,20 +147,32 @@ DECISIONS = {
     "star_get_spectrum": ToolDecision(
         "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     ),
-    "target_get_stars": ToolDecision(
-        "withhold", "A script convenience, uncapped. The AI reads a target's stars through star_query."
-    ),
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
     ),
     "processing_plate_solve": ToolDecision(
-        "fix",
-        "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale.",
+        "keep",
+        "Since 2026-11-26 (#199) returns a PlateSolution: the image center, pixel scale, rotation and the "
+        "sky map's header cards. Solves one image in memory and writes nothing.",
+        tool_class="compute",
     ),
-    "processing_run_spectroscopy_by_session": ToolDecision(
-        "fix",
-        "Needs Python objects, so it cannot be called through MCP. Consider making it a stage "
-        "of pipeline_run.",
+    "processing_list_preview_bright_objects": ToolDecision(
+        "withhold",
+        "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves "
+        "the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, "
+        "which the astrometrics-backend server serves; this library tool stays withheld.",
+    ),
+    "processing_find_stack_configuration": ToolDecision(
+        "keep",
+        "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why "
+        "none or several match and lists the target's configurations. Reads the target record only.",
+        tool_class="observe",
+    ),
+    "processing_set_preview_bright_object": ToolDecision(
+        "withhold",
+        "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. "
+        "The AI reaches it through processing_enhance, which the astrometrics-backend server serves; "
+        "this library tool stays withheld.",
     ),
     # ---- Drop ----
     "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
@@ -190,14 +202,17 @@ DECISIONS = {
     # ---- Not offered yet: parts of the old sync set not built ----
     "observatory_remote_sync_frames": ToolDecision(
         "keep",
-        "Built 2026-10-03; since 2026-10-05 it also copies calibration folders, every folder, chosen files "
-        "and a local folder. The AI may ingest frames from the telescope: adds, never deletes.",
+        "Built 2026-10-03. The AI may ingest frames from the telescope: adds, never deletes. Since "
+        "2026-11-21 the astrometrics-backend server serves it through telescope:sync, so it is the app's "
+        "own sync of one target (or Bias, Dark, Flat) and a remote_sync job in the job list; dry_run "
+        "reports the plan. Copying every folder, chosen files or a local folder is no longer offered.",
         "ingest",
     ),
     "observatory_remote_sync_logs": ToolDecision(
         "keep",
         "Built 2026-10-03. The AI may ingest the guide and Ekos logs: adds or updates records, "
-        "never deletes.",
+        "never deletes. Since 2026-11-21 the astrometrics-backend server serves it through "
+        "telescope:sync_logs, the app's own log sync, recorded as a remote_sync job named logs.",
         "ingest",
     ),
     "quality_measure_frames": ToolDecision(
@@ -205,14 +220,16 @@ DECISIONS = {
         "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral "
         "measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along "
         "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
-        "replaces quality_check_spectral_frames.",
+        "replaces quality_check_spectral_frames. Since 2026-11-26 it takes a target only: a folder goes "
+        "to quality_measure_folder, and the set-aside preview to processing_predict_stack.",
     ),
     "quality_measure_folder": ToolDecision(
         "keep",
         "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, "
         "sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About "
-        "12 seconds a frame, so the limit defaults to 20. It reads any folder path it is given, as "
-        "quality_measure_frames does with folder_path; it only reads.",
+        "12 seconds a frame, so the limit defaults to 20. It is the one tool for a folder of frames "
+        "(quality_measure_frames takes a target only); it reads any folder path it is given and only "
+        "reads.",
     ),
     "review_get_live_session_status": ToolDecision(
         "keep",
@@ -224,8 +241,19 @@ DECISIONS = {
     ),
     "visualization_render_fits": ToolDecision(
         "keep",
-        "Built 2026-10-03. Returns a real image of a frame, with a stretch and an optional zoom. "
-        "Saves nothing.",
+        "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the "
+        "optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts "
+        "and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing.",
+    ),
+    "visualization_stack_sky_picture_files": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the Planetarium's Images layer: names the picture and stretched stack that "
+        "place a target's picture on the sky. Of no use to an AI client.",
+    ),
+    "visualization_place_stack_picture_on_sky": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the Planetarium's Images layer: a grid of sky positions for drawing a "
+        "picture on a sky chart. Of no use to an AI client.",
     ),
     "visualization_get_last_captured_image": ToolDecision(
         "fix",
@@ -270,10 +298,40 @@ DECISIONS = {
     "app_controls": ToolDecision(
         "keep", "Built 2026-10-03. Navigate only; pause, resume and notify are not offered."
     ),
-    "observatory_remote_frame_status": ToolDecision(
+    "observatory_remote_frame_locations": ToolDecision(
         "keep",
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
+    ),
+    "processing_analyze": ToolDecision(
+        "keep",
+        "Built 2026-11-22 from gap report #5. Starts the Analyze Target button's own analysis job through "
+        "analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no "
+        "stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's "
+        "stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the "
+        "raw spectrum frames). Writes the analysis results; raw frames are never written. Since 2026-11-25 "
+        "camera_id and focal_length_mm analyze the target's stack of that camera and optic "
+        "(stacks_by_configuration) instead of the main stack; an unknown or ambiguous one is refused with "
+        "the target's configurations, and another configuration gets only astrometry and photometry.",
+        "process",
+    ),
+    "processing_cancel": ToolDecision(
+        "keep",
+        "Built 2026-11-22. Cancels a target's running or waiting stacking, analysis or picture remake "
+        "(preview) job as the app's Cancel button does, through processing:cancel or analysis:cancel. "
+        "It reads the active jobs through jobs:query to pick the kind (or the job given by job_id) and "
+        "refuses when two kinds run and none was named. A cancelled picture remake puts the old pictures "
+        "back. Changes app jobs only; nothing is deleted.",
+        "process",
+    ),
+    "processing_enhance": ToolDecision(
+        "keep",
+        "Built 2026-11-22. Reads or saves the Final Stack's Enhance choice (target, nothing, or an object "
+        "in the frame) through processing:list_bright_objects and processing:set_bright_object, as the "
+        "app's menu does. Without a choice it lists the saved choice and the objects in the frame, or why "
+        "there are none. The choice is used at the next stack or Post Process Target; no picture is made. "
+        "Writes only the target's saved choice.",
+        "process",
     ),
     "processing_remake_preview": ToolDecision(
         "keep",
@@ -281,16 +339,23 @@ DECISIONS = {
         "stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and "
         "never reach the configuration. The old pictures are copied into _previous_preview first and put "
         "back if the run fails. The stack file is never written. Writes only the preview JPEG, the "
-        "processed FITS and the target's processed-image pointer.",
+        "processed FITS and the target's processed-image pointer. Since 2026-11-21 the "
+        "astrometrics-backend server serves it through processing:remake_preview, so the app runs the job. "
+        "Since 2026-11-25 camera_id and focal_length_mm remake the target's stack of that camera and optic "
+        "(stacks_by_configuration, sent as stack_path) instead of the main stack; an unknown or ambiguous "
+        "one is refused with the target's configurations, and the main stack and processed-image pointer "
+        "stay as they were.",
         "process",
     ),
     "processing_stack": ToolDecision(
         "keep",
         "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack "
         "button does, choosing imaging or spectral frames, a filter and a file or time range. "
-        "plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad "
-        "frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since "
-        "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
+        "A choice that matches no frame is refused before a job starts. It runs the app's own stage: "
+        "sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the "
+        "target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to "
+        "stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the "
+        "Stack button's own job, so it shows in the job list and the app's Cancel reaches it.",
         "process",
     ),
     "target_imaged_field_centers": ToolDecision(
@@ -312,6 +377,20 @@ DECISIONS = {
     "planning_lookup_coordinates": ToolDecision(
         "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
     ),
+    "processing_get_stack_identification": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution "
+        "it came from. Writes nothing.",
+    ),
+    "processing_identify_stack": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected "
+        "stars, as a background job. Writes the solution into the stack and its viewer copy and saves the "
+        "identification; raw frames are never written. Since 2026-11-21 the astrometrics-backend server "
+        "serves it through analysis:identify_stack, the Astrometry button's own analysis job, so it shows "
+        "in the job list and the app's Cancel stops it.",
+        "process",
+    ),
     "processing_stack_summary": ToolDecision(
         "keep",
         "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "
@@ -331,10 +410,81 @@ DECISIONS = {
         "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
         "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
     ),
+    "quality_blocks_measure_sky": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Measures the empty sky's level and noise "
+        "of a FITS file. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_blocks_find_stars": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Runs the astrometry star finder (default) "
+        "or the plain DAOStarFinder on a FITS file. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_blocks_star_widths": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Measures the star width of each color "
+        "channel of a FITS file. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_blocks_measure_sky_gradient": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Measures the sky's tilt across a FITS file "
+        "as the preview does. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_blocks_sky_corners": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Gives a plate-solved FITS file's corners on "
+        "the sky from its header, with RADESYS and EQUINOX; none for an unsolved file. Reads the header "
+        "only.",
+        tool_class="compute",
+    ),
+    "quality_blocks_measure_aperture": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Aperture photometry of given pixel "
+        "positions of a FITS file, with flux uncertainties from the camera profile's gain and read noise. "
+        "Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_map_position": ToolDecision(
+        "keep",
+        "Built 2026-11-26 from the backend's images:map_position. Follows a pixel of one FITS file to "
+        "another through their plate solutions and the stacks' registration records. Reads headers and "
+        "records only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_blocks_solved_stars": ToolDecision(
+        "withhold",
+        "A Command Console building block, uncapped. The AI reads a target's named stars through star_query.",
+    ),
+    "quality_blocks_robust_sigma": ToolDecision(
+        "drop",
+        "A Command Console building block: a spread of numbers the caller already has. Of no use to an AI "
+        "client.",
+    ),
+    "quality_blocks_sigma_clip": ToolDecision(
+        "drop",
+        "A Command Console building block: clips numbers the caller already has. Of no use to an AI client.",
+    ),
     "quality_measure_detections": ToolDecision(
         "keep",
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
+    ),
+    "quality_choose_blink_pair": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Picks a typical frame of a frame's session and one reference star in both, "
+        "for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is "
+        "stored.",
+        tool_class="compute",
+    ),
+    "quality_match_frame_positions": ToolDecision(
+        "keep",
+        "Built 2026-11-20. Says where positions of one frame lie in another frame of the same field, "
+        "allowing for drift and a meridian flip. Reads the files only; nothing is stored.",
+        tool_class="compute",
     ),
     "quality_measure_tuned_parameters": ToolDecision(
         "withhold",
@@ -413,7 +563,8 @@ DECISIONS = {
         "keep",
         "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the "
         "warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at "
-        "'started' after the app stopped still shows as active.",
+        "'started' after the app stopped still shows as active. The AI gets at most 50 jobs and 200 log "
+        "lines, and not detail=full.",
     ),
     "quality_query": ToolDecision(
         "keep",
@@ -439,6 +590,12 @@ DECISIONS = {
         "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with "
         "a plain reason when a picture cannot be found, and lists the ids no row has. Reads only.",
         tool_class="observe",
+    ),
+    "quality_frame_statuses": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest "
+        "stack file's time itself; the reply is one row per frame, sized for a table on screen. "
+        "quality_set_aside_frames and review_get_star_shape_review serve an AI client.",
     ),
     "quality_set_aside_frames": ToolDecision(
         "keep",
@@ -497,6 +654,13 @@ DECISIONS = {
         "keep",
         "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's "
         "own frames. Reads only; nothing is stored. The first call fits the model and is slow.",
+        "observe",
+    ),
+    "review_get_star_shape_review": ToolDecision(
+        "keep",
+        "Built 2026-11-20 (#199). Says in plain words how round a target's stars are, whether the stretch "
+        "points one way, and which frames stand out, from the stored star-shape measurements. Reads only; "
+        "nothing is measured or stored. Corner widths are reported as not validated (AST-18).",
         "observe",
     ),
     "observatory_mount_get_centering_exposure": ToolDecision(
@@ -571,14 +735,16 @@ DECISIONS = {
         "With save on, it writes a measured gain and read noise into the camera profile in the "
         "configuration file. The AI is read-only.",
     ),
-    "target_get_header": ToolDecision("keep", "Reads one FITS header."),
-    "target_read_frame_header": ToolDecision(
+    "target_display_turn": ToolDecision(
         "drop",
-        "Reads a header from any path with typed values. target_get_header already serves an AI client.",
+        "Built 2026-11-26 for the image viewer: the quarter turn that shows a raw frame the same way round "
+        "as its stack, for display only. Of no use to an AI client.",
     ),
-    "target_read_saved": ToolDecision(
-        "drop",
-        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
+    "target_read_frame_header": ToolDecision(
+        "keep",
+        "Reads one FITS header. Since 2026-11-26 (#199) it is the one header reader (target_get_header "
+        "is gone); an AI client passes as_cards=true for key, value and comment text.",
+        tool_class="observe",
     ),
     "target_select_frames": ToolDecision(
         "drop",
@@ -604,13 +770,16 @@ DECISIONS = {
         "Reads a file from any path and returns every aperture, which can overflow the reply. "
         "Scripts and wayfindinglib use it.",
     ),
+    "processing_predict_stack": ToolDecision(
+        "drop",
+        "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app "
+        "runs it as the background job processing:check_stack for its Check Frames button. A library "
+        "call would hold the tool open. An AI lists the frames already set aside with "
+        "quality_set_aside_frames.",
+    ),
     "processing_predict_stack_weights": ToolDecision(
         "drop",
         "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",
-    ),
-    "target_resolve": ToolDecision(
-        "drop",
-        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
     ),
     "docs_get": ToolDecision("keep", "Reads documentation."),
     "ui_run_tests": ToolDecision("keep", "Developer check."),
@@ -642,6 +811,13 @@ DECISIONS = {
         "withhold",
         "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules "
         "trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status.",
+        "change-data",
+    ),
+    "quality_put_back_set_aside_frames": ToolDecision(
+        "withhold",
+        "Moves chosen set-aside frames out of a target's _excluded folder back into the target and "
+        "rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File "
+        "Browser. The AI lists them with quality_set_aside_frames.",
         "change-data",
     ),
     "quality_forget": ToolDecision(
@@ -734,7 +910,6 @@ DECISIONS = {
     ),
     # ---- Replaced by a broader tool ----
     "target_get": ToolDecision("drop", "Replaced by target_query."),
-    "target_list": ToolDecision("drop", "Replaced by target_query."),
     "backend_health_check": ToolDecision("drop", "Replaced by app_status."),
     "ui_navigate_mode": ToolDecision("drop", "Replaced by app_controls."),
 }

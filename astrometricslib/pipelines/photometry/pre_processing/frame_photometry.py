@@ -54,10 +54,26 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
+from astrometricslib.pipelines.shared.neighbor_masking import (
+    NeighborField,
+    clipped_median_and_sigma,
+    neighbor_mask,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
+    MOFFAT_BETA_START,
+    detect_stars_without_shape_cut,
+)
+from astrometricslib.pipelines.shared.quality.star_ring import (
+    STAR_RING_NEIGHBOR_MASK_NOISE_MULTIPLE,
+    STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE,
+    STAR_RING_NEIGHBOR_SEARCH_MARGIN_PX,
+    STAR_RING_TARGET_MATCH_RADIUS_PX,
+)
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +248,7 @@ def locate_star_centroid(
     # count. The noise width is the median absolute deviation (MAD, a spread
     # that ignores the star) scaled to match a standard deviation. On a
     # noise-free window the MAD is zero and nothing changes.
-    noise_width = 1.4826 * np.median(np.abs(cutout - background_level))
+    noise_width = MAD_TO_SIGMA * np.median(np.abs(cutout - background_level))
     weights = np.clip(cutout - background_level - 3.0 * noise_width, 0.0, None)
     if weights.sum() <= 0:
         return None
@@ -426,6 +442,29 @@ class FrameAlignment:
             y + self.shift_y + self.rotation * relative_x + self.scale_change * relative_y,
         )
 
+    def predict_many(self, positions: np.ndarray) -> np.ndarray:
+        """Say where many reference-frame stars should sit in this frame.
+
+        The same arithmetic as `predict`, for an array.
+
+        Parameters
+        ----------
+        positions : `numpy.ndarray`
+            Shape ``(stars, 2)``: each star's ``(x, y)`` in the reference
+            frame, in pixels.
+
+        Returns
+        -------
+        moved : `numpy.ndarray`
+            The expected ``(x, y)`` of each star in this frame.
+        """
+        relative_x = positions[:, 0] - self.centre_x
+        relative_y = positions[:, 1] - self.centre_y
+        return np.column_stack([
+            positions[:, 0] + self.shift_x + self.scale_change * relative_x - self.rotation * relative_y,
+            positions[:, 1] + self.shift_y + self.rotation * relative_x + self.scale_change * relative_y,
+        ])
+
     @property
     def corner_displacement_px(self) -> float:
         """Give how far the rotation and scale move a corner, in pixels.
@@ -515,7 +554,7 @@ def fit_frame_alignment(
         residual = np.hypot(
             displacement[:, 0] - rows_x @ parameters, displacement[:, 1] - rows_y @ parameters
         )
-        scatter = 1.4826 * float(np.median(residual[keep]))
+        scatter = MAD_TO_SIGMA * float(np.median(residual[keep]))
         if scatter <= 0:
             break
         updated = residual <= alignment_clip_sigmas * max(scatter, 1e-3)
@@ -748,7 +787,7 @@ def estimate_pixel_noise(data: np.ndarray) -> float:
         return 0.0
     rows = data[::4, :]
     differences = rows[:, 3:] - rows[:, :-3]
-    return float(1.4826 * np.median(np.abs(differences - np.median(differences))) / math.sqrt(2.0))
+    return robust_sigma(differences) / math.sqrt(2.0)
 
 
 def select_alignment_anchors(
@@ -1325,6 +1364,95 @@ SKY_ANNULUS_OUTER_RADIUS_PX = TunedParameter(
 )
 
 
+# The star width the neighbor mask draws a star's profile with. It is one
+# star width (the FWHM, full width at half maximum) of the measured frames, so
+# it follows the run's star width.
+NEIGHBOR_PROFILE_WIDTH_PX = TunedParameter(
+    name="photometry.neighbor_profile_width_px",
+    default=factor_for(2.33, RunBasis.STAR_WIDTH_PX),
+    reference_value=2.33,
+    unit="× star width",
+    description="Width of the star profile used to size the mask of a neighbor star in the sky ring.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D35",
+)
+# A star is crowded when a bright neighbor's center lies within the aperture
+# radius plus this margin. At 1.5 star widths beyond the circle's edge, a
+# Gaussian star has fallen to 0.2 percent of its peak at the edge, and a
+# Moffat star with beta = 3 (wider wings) to about 1 percent, so a neighbor
+# farther than that adds under 1 percent of its own peak to the circle. The
+# margin follows the star width (3.5 px at the reference setup's 2.33 px).
+CROWDING_MARGIN_PX = TunedParameter(
+    name="photometry.crowding_margin_px",
+    default=factor_for(3.5, RunBasis.STAR_WIDTH_PX),
+    reference_value=3.5,
+    unit="× star width",
+    description="How far beyond the aperture's edge a neighbor's center can lie and still crowd the star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D35",
+)
+# A neighbor only crowds a star when it is bright enough to matter. A
+# neighbor with a tenth of the star's peak, at the edge of the crowding
+# margin, adds about 0.1 percent of the star's peak to the circle (the 1
+# percent wing level above times 0.1), well under the 1 percent flux error
+# that photometry aims at. Closer neighbors add more, so the margin and this
+# fraction together hold the flux bias near 1 percent.
+CROWDING_NEIGHBOR_PEAK_FRACTION = TunedParameter(
+    name="photometry.crowding_neighbor_peak_fraction",
+    default=0.1,
+    unit="fraction of the star's peak",
+    description="Smallest neighbor peak, as a share of the star's own peak, that makes a star crowded.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D35",
+)
+
+# The sky ring's clipping, the same as the ring of the star-ring analysis and
+# the sky bands of the spectrum extractor: pixels more than 3 robust sigmas
+# from the median are dropped, over at most 5 passes. The ring needs at
+# least 10 pixels, as the star-ring analysis does.
+_SKY_CLIP_SIGMA = 3.0
+_SKY_CLIP_MAXIMUM_PASSES = 5
+_SKY_MINIMUM_PIXELS = 10
+
+
+def detect_neighbor_field(data: np.ndarray) -> NeighborField | None:
+    """List the stars of a frame, including close pairs.
+
+    The run's own star list keeps stars at least 2.5 star widths (about 10 px)
+    apart, which hides the faint partner of a close pair, the neighbor that
+    matters most for a star's aperture. This runs the same star finder as the
+    astrometry stage, with the minimum separation lowered to one star width.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The 2-D frame, in ADU.
+
+    Returns
+    -------
+    field : `NeighborField` or `None`
+        The stars with their peaks above the local background. `None` when no
+        star was found.
+    """
+    star_width = float(resolve(NEIGHBOR_PROFILE_WIDTH_PX).value)
+    sources = detect_stars_without_shape_cut(data, expected_fwhm_px=star_width, min_separation=star_width)
+    if not sources:
+        return None
+    return NeighborField(
+        np.array([[source["x_centroid"], source["y_centroid"]] for source in sources], dtype=float),
+        np.array([source["peak"] for source in sources], dtype=float),
+        np.array([source["flux"] for source in sources], dtype=float),
+    )
+
+
 def aperture_flux_error_adu(
     net_flux_adu: float,
     sky_adu_per_pixel: float,
@@ -1402,8 +1530,10 @@ class ApertureMeasurement:
     Attributes
     ----------
     net_flux_adu : `float`
-        The sky-subtracted sum of the aperture, in ADU. It is never
-        negative and is not divided by the exposure time.
+        The sky-subtracted sum of the aperture, in ADU. It can be below zero
+        for a faint star in a noisy frame (the sky estimate is a little too
+        high); its error says how far below zero is expected. It is not
+        divided by the exposure time.
     flux_error_adu : `float`
         The 1-sigma uncertainty of `net_flux_adu`, in ADU. It is 0.0 when
         the star was too close to the frame edge to measure.
@@ -1414,12 +1544,31 @@ class ApertureMeasurement:
         included). It is NaN when the star was too close to the frame edge to
         measure. The catalog zero point leaves out a star whose peak lies
         above the camera's photometric linearity limit.
+    nearest_neighbor_distance_px : `float`
+        The distance to the nearest other detected star within the search
+        radius, in pixels. NaN when no detections were given or none lies
+        within it.
+    nearest_neighbor_flux_ratio : `float`
+        That neighbor's peak height divided by the star's own peak height
+        (peaks stand in for fluxes, because stars of one frame share a
+        shape). NaN when `nearest_neighbor_distance_px` is NaN.
+    masked_sky_fraction : `float`
+        The share of the sky ring's pixels left out because a bright
+        neighbor lights them. 0.0 when no detections were given.
+    crowded : `bool`
+        Whether a neighbor with at least `CROWDING_NEIGHBOR_PEAK_FRACTION` of
+        the star's peak lies within the aperture radius plus
+        `CROWDING_MARGIN_PX`. Its light may add to the star's flux.
     """
 
     net_flux_adu: float
     flux_error_adu: float
     is_saturated: bool
     peak_adu: float = math.nan
+    nearest_neighbor_distance_px: float = math.nan
+    nearest_neighbor_flux_ratio: float = math.nan
+    masked_sky_fraction: float = 0.0
+    crowded: bool = False
 
 
 def measure_aperture_photometry(
@@ -1435,6 +1584,7 @@ def measure_aperture_photometry(
     saturation_threshold_adu: float,
     noise: DetectorNoise | None = None,
     dark_current_e_per_pixel: float = 0.0,
+    neighbors: NeighborField | None = None,
 ) -> ApertureMeasurement:
     """Measure the brightness of a star inside a small circle, with its error.
 
@@ -1451,8 +1601,15 @@ def measure_aperture_photometry(
     with the fractional part kept. Callers that want the circle on the
     star's own center pass the position from `refine_star_centroid`.
 
+    The sky level is the median of the ring after clipping outlying pixels
+    (see `clipped_median_and_sigma`). With `neighbors`, the pixels that a
+    bright neighbor lights are first left out of the ring (see
+    `neighbor_mask`), so a neighbor does not lift the sky and make the star
+    read too faint. A neighbor inside the circle cannot be removed, so the
+    star is flagged `crowded` instead.
+
     The uncertainty comes from `aperture_flux_error_adu`. It uses the
-    aperture's true area, the number of pixels in the sky ring, and the
+    aperture's true area, the number of pixels kept in the sky ring, and the
     median sky level. It does not change the flux.
 
     Parameters
@@ -1479,11 +1636,16 @@ def measure_aperture_photometry(
         noise.
     dark_current_e_per_pixel : `float`, optional
         Dark current per pixel over the exposure, in electrons.
+    neighbors : `NeighborField`, optional
+        The frame's detected stars, at their positions in this frame. When
+        given, the sky ring leaves out the pixels lit by bright neighbors,
+        and the result says how crowded the star is. Without it, the ring is
+        used whole and the crowding fields keep their defaults.
 
     Returns
     -------
     measurement : `ApertureMeasurement`
-        The flux, its uncertainty and the saturation flag.
+        The flux, its uncertainty, the saturation flag and the crowding.
     """
     if radius is None:
         radius = resolve(APERTURE_RADIUS_PX).value
@@ -1527,13 +1689,32 @@ def measure_aperture_photometry(
     # area-weighted fractions above, so it uses its own unweighted mask.
     star_raw_values = aperture.to_mask(method="center").get_values(data)
 
-    # The background level is a median, which (per photutils' own
-    # ApertureStats) comes out the same regardless of which masking
-    # method is used, so the plain unweighted mask is enough here.
-    annulus_values = annulus.to_mask(method="center").get_values(data)
-
+    # The sky ring's pixels, with where they sit in the frame, so the pixels
+    # lit by neighbor stars can be left out.
+    annulus_mask = annulus.to_mask(method="center")
+    annulus_values = annulus_mask.get_values(data)
+    peak_adu = float(np.max(star_raw_values)) if star_raw_values.size else math.nan
     sky_pixel_count = 0
-    if annulus_values is not None and annulus_values.size > 0:
+    masked_sky_fraction = 0.0
+    ring_selection: np.ndarray = annulus_values
+    if neighbors is not None and annulus_values is not None and annulus_values.size > 0:
+        ring_selection, masked_sky_fraction = _unmasked_ring_values(
+            data, annulus_mask, (x, y), annulus_outer, peak_adu, neighbors
+        )
+    sky_statistics = (
+        clipped_median_and_sigma(
+            ring_selection,
+            minimum_count=_SKY_MINIMUM_PIXELS,
+            maximum_passes=_SKY_CLIP_MAXIMUM_PASSES,
+            clip_sigma=_SKY_CLIP_SIGMA,
+        )
+        if ring_selection is not None
+        else None
+    )
+    if sky_statistics is not None:
+        background_level = sky_statistics[0]
+        sky_pixel_count = sky_statistics[2]
+    elif annulus_values is not None and annulus_values.size > 0:
         background_level = np.median(annulus_values)
         sky_pixel_count = int(annulus_values.size)
     elif fallback_background is not None:
@@ -1545,7 +1726,11 @@ def measure_aperture_photometry(
         ]
         background_level = np.median(local_cutout)
 
-    net_flux = max(0.0, float(star_flux_sum - aperture.area * background_level))
+    # The measured value is kept even when it is below zero. Faint stars in a
+    # noisy frame measure a little below zero about half the time, and
+    # clamping them to zero would bias their mean upward and hide the frames
+    # from every later step. The error below already allows for it.
+    net_flux = float(star_flux_sum - aperture.area * background_level)
     saturated_fraction = compute_saturated_pixel_fraction(star_raw_values, saturation_threshold_adu)
     is_saturated = is_saturation_significant(saturated_fraction)
     flux_error = aperture_flux_error_adu(
@@ -1557,8 +1742,213 @@ def measure_aperture_photometry(
         dark_current_e_per_pixel,
     )
 
-    peak_adu = float(np.max(star_raw_values)) if star_raw_values.size else math.nan
-    return ApertureMeasurement(net_flux, flux_error, is_saturated, peak_adu)
+    distance_px, flux_ratio, crowded = (
+        _crowding(neighbors, (x, y), radius, annulus_outer, peak_adu - float(background_level))
+        if neighbors is not None
+        else (math.nan, math.nan, False)
+    )
+    return ApertureMeasurement(
+        net_flux,
+        flux_error,
+        is_saturated,
+        peak_adu,
+        nearest_neighbor_distance_px=distance_px,
+        nearest_neighbor_flux_ratio=flux_ratio,
+        masked_sky_fraction=masked_sky_fraction,
+        crowded=crowded,
+    )
+
+
+def crowding_fields(measurement: ApertureMeasurement) -> dict[str, float | bool | None]:
+    """Turn a measurement's crowding numbers into the fields of a light curve.
+
+    Parameters
+    ----------
+    measurement : `ApertureMeasurement`
+        A measurement made with the frame's detections.
+
+    Returns
+    -------
+    fields : `dict`
+        ``nearest_neighbor_distance_px``, ``nearest_neighbor_flux_ratio``,
+        ``masked_sky_fraction`` and ``crowded`` for `PhotometryResult`. The
+        first two are `None` when no neighbor was near. An infinite ratio
+        (the star has no peak above the sky) is stored as `None` too, because
+        JSON cannot hold it; ``crowded`` still tells the story.
+    """
+    ratio = measurement.nearest_neighbor_flux_ratio
+    return {
+        "nearest_neighbor_distance_px": (
+            None
+            if math.isnan(measurement.nearest_neighbor_distance_px)
+            else measurement.nearest_neighbor_distance_px
+        ),
+        "nearest_neighbor_flux_ratio": ratio if math.isfinite(ratio) else None,
+        "masked_sky_fraction": measurement.masked_sky_fraction,
+        "crowded": measurement.crowded,
+    }
+
+
+def _own_peak_above_sky(neighbors: NeighborField, center: tuple[float, float], measured_peak: float) -> float:
+    """Give the star's own peak above the sky, for sizing neighbors against it.
+
+    The finder's peak for the detection at the star's position is used when
+    there is one. A neighbor inside the circle can raise the largest pixel of
+    the circle, so the finder's value is the steadier one.
+
+    Parameters
+    ----------
+    neighbors : `NeighborField`
+        The frame's detections.
+    center : `tuple` [`float`, `float`]
+        The star's position, 0-based ``(column, row)``.
+    measured_peak : `float`
+        The largest pixel of the circle above the sky, used when no detection
+        sits at the star's position.
+
+    Returns
+    -------
+    peak : `float`
+        The star's peak above the sky, in ADU.
+    """
+    own = neighbors.around(center[0], center[1], resolve(STAR_RING_TARGET_MATCH_RADIUS_PX).value)
+    if own.size and math.isfinite(float(neighbors.peaks[own[0]])):
+        return float(neighbors.peaks[own[0]])
+    return measured_peak
+
+
+def _unmasked_ring_values(
+    data: np.ndarray,
+    annulus_mask: Any,
+    center: tuple[float, float],
+    annulus_outer: float,
+    peak_adu: float,
+    neighbors: NeighborField,
+) -> tuple[np.ndarray, float]:
+    """Pick the sky ring's pixels that no bright neighbor lights.
+
+    The first sky and noise come from the clipped ring. They size the mask of
+    each neighbor (see `neighbor_mask`). If the mask would leave fewer than
+    `_SKY_MINIMUM_PIXELS` pixels, the whole ring is used.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The frame.
+    annulus_mask : `photutils.aperture.ApertureMask`
+        The ring's mask, from ``CircularAnnulus.to_mask``.
+    center : `tuple` [`float`, `float`]
+        The star's position, 0-based ``(column, row)``.
+    annulus_outer : `float`
+        The ring's outer radius, in pixels.
+    peak_adu : `float`
+        The largest raw pixel of the circle.
+    neighbors : `NeighborField`
+        The frame's detections.
+
+    Returns
+    -------
+    values, masked_fraction : `numpy.ndarray`, `float`
+        The ring pixels left after masking, and the share of the ring that
+        was masked.
+    """
+    overlap = annulus_mask.get_overlap_slices(data.shape)
+    if overlap is None or overlap[0] is None:
+        return annulus_mask.get_values(data), 0.0
+    large, small = overlap
+    window = data[large]
+    in_ring = annulus_mask.data[small] > 0
+    ring_values = window[in_ring]
+    first = clipped_median_and_sigma(
+        ring_values,
+        minimum_count=_SKY_MINIMUM_PIXELS,
+        maximum_passes=_SKY_CLIP_MAXIMUM_PASSES,
+        clip_sigma=_SKY_CLIP_SIGMA,
+    )
+    if first is None:
+        return ring_values, 0.0
+    sky, noise, _ = first
+    margin = resolve(STAR_RING_NEIGHBOR_SEARCH_MARGIN_PX).value
+    nearby = neighbors.around(
+        center[0], center[1], annulus_outer + margin, resolve(STAR_RING_TARGET_MATCH_RADIUS_PX).value
+    )
+    listed = [
+        (
+            float(neighbors.positions[index, 0]),
+            float(neighbors.positions[index, 1]),
+            float(neighbors.peaks[index]),
+        )
+        for index in nearby
+    ]
+    mask, _ = neighbor_mask(
+        window.shape,
+        center,
+        listed,
+        star_width_px=resolve(NEIGHBOR_PROFILE_WIDTH_PX).value,
+        target_peak=_own_peak_above_sky(neighbors, center, peak_adu - sky),
+        sky_noise=noise,
+        minimum_signal_to_noise=resolve(STAR_RING_NEIGHBOR_MINIMUM_SIGNAL_TO_NOISE).value,
+        mask_noise_multiple=resolve(STAR_RING_NEIGHBOR_MASK_NOISE_MULTIPLE).value,
+        beta=MOFFAT_BETA_START,
+        target_match_radius_px=resolve(STAR_RING_TARGET_MATCH_RADIUS_PX).value,
+        offset=(large[1].start, large[0].start),
+    )
+    kept = in_ring & ~mask
+    masked_fraction = 1.0 - float(kept.sum()) / float(in_ring.sum())
+    if int(kept.sum()) < _SKY_MINIMUM_PIXELS:
+        return ring_values, masked_fraction
+    return window[kept], masked_fraction
+
+
+def _crowding(
+    neighbors: NeighborField,
+    center: tuple[float, float],
+    radius: float,
+    annulus_outer: float,
+    measured_peak: float,
+) -> tuple[float, float, bool]:
+    """Say how crowded a star is by the detections around it.
+
+    Parameters
+    ----------
+    neighbors : `NeighborField`
+        The frame's detections.
+    center : `tuple` [`float`, `float`]
+        The star's position, 0-based ``(column, row)``.
+    radius : `float`
+        The aperture radius, in pixels.
+    annulus_outer : `float`
+        The sky ring's outer radius, in pixels. The nearest neighbor is looked
+        for out to this plus the neighbor search margin.
+    measured_peak : `float`
+        The largest pixel of the circle above the sky, used when no
+        detection sits at the star's position.
+
+    Returns
+    -------
+    distance_px, flux_ratio, crowded : `float`, `float`, `bool`
+        The distance to the nearest neighbor and its peak over the star's,
+        both NaN when none is near, and whether a neighbor of at least
+        `CROWDING_NEIGHBOR_PEAK_FRACTION` of the star's peak lies within
+        `radius` plus `CROWDING_MARGIN_PX`.
+    """
+    match_radius = resolve(STAR_RING_TARGET_MATCH_RADIUS_PX).value
+    margin = resolve(STAR_RING_NEIGHBOR_SEARCH_MARGIN_PX).value
+    nearby = neighbors.around(center[0], center[1], annulus_outer + margin, match_radius)
+    if nearby.size == 0:
+        return math.nan, math.nan, False
+    own_peak = _own_peak_above_sky(neighbors, center, measured_peak)
+    peaks = neighbors.peaks[nearby]
+    distances = np.hypot(
+        neighbors.positions[nearby, 0] - center[0], neighbors.positions[nearby, 1] - center[1]
+    )
+    nearest_peak = float(peaks[0])
+    ratio = nearest_peak / own_peak if own_peak > 0.0 else math.inf
+    within = distances <= radius + resolve(CROWDING_MARGIN_PX).value
+    bright = np.isfinite(peaks) & (
+        peaks >= resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value * max(own_peak, 0.0)
+    )
+    return float(distances[0]), float(ratio), bool(np.any(within & bright))
 
 
 def _measure_aperture_flux(
@@ -1619,7 +2009,7 @@ class FrameRejection:
 
 
 def _process_single_frame_worker(
-    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float, DetectorNoise],
+    args: tuple[Any, ...],
 ) -> tuple[str, tuple[Any, ...] | FrameRejection | None]:
     """Analyze a single picture.
 
@@ -1646,7 +2036,9 @@ def _process_single_frame_worker(
         The picture's path, the reference stars as (id, x, y), the
         brightest reference stars used to line the picture up, the
         camera's saturation threshold in ADU, and the camera's
-        `DetectorNoise` (gain and read noise).
+        `DetectorNoise` (gain and read noise). An optional sixth item is the
+        reference frame's `NeighborField`; with it, each star's sky ring
+        leaves out the pixels lit by bright neighbors.
 
     Returns
     -------
@@ -1668,7 +2060,8 @@ def _process_single_frame_worker(
         * A `FrameRejection` when the picture has no usable ``DATE-OBS``.
         * `None` when the picture could not be read or measured.
     """
-    path, reference_stars_list, reference_top_refs_minimal, saturation_threshold_adu, noise = args
+    path, reference_stars_list, reference_top_refs_minimal, saturation_threshold_adu, noise, *optional = args
+    reference_neighbors: NeighborField | None = optional[0] if optional else None
 
     try:
         # 1. Load Header & Data
@@ -1692,7 +2085,13 @@ def _process_single_frame_worker(
             data, reference_top_refs_minimal, saturation_threshold_adu=saturation_threshold_adu
         )
 
-        # 3. Forced Photometry
+        # 3. Forced Photometry. The neighbors sit where the alignment moves
+        # them to in this frame.
+        frame_neighbors = (
+            reference_neighbors.moved(alignment.predict_many(reference_neighbors.positions))
+            if reference_neighbors is not None and len(reference_neighbors.positions)
+            else None
+        )
         fluxes_dict = {}
         positions_dict = {}
         peaks_dict = {}
@@ -1721,6 +2120,7 @@ def _process_single_frame_worker(
                 fallback_background=global_background,
                 saturation_threshold_adu=saturation_threshold_adu,
                 noise=noise,
+                neighbors=frame_neighbors,
             )
             fluxes_dict[reference_id] = (
                 measurement.net_flux_adu / exposure_seconds,

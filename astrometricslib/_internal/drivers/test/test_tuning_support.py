@@ -1,6 +1,6 @@
 """Tests for the helpers that tuners share.
 
-The statistics get numbers with a known answer. The colour check gets a small
+The gap finder gets numbers with a known answer. The colour check gets a small
 stand-in library, and the frame header reader is replaced so no file is read.
 """
 
@@ -9,24 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib._internal.drivers import tuning_support
-from astrometricslib._internal.drivers.tuning_support import (
-    camera_is_colour,
-    finite_values,
-    robust_sigma,
-    widest_gap,
-)
-
-
-def test_robust_sigma_ignores_a_stray_value() -> None:
-    """A single wild value does not change the spread of the others."""
-    clean = [0.0, 1.0, -1.0, 2.0, -2.0]
-    with_stray = [*clean, 1000.0]
-    assert robust_sigma(with_stray) < 2 * robust_sigma(clean)
-
-
-def test_robust_sigma_of_identical_values_is_zero() -> None:
-    """Numbers that are all alike have no spread."""
-    assert robust_sigma([3.0, 3.0, 3.0]) == pytest.approx(0.0)
+from astrometricslib._internal.drivers.tuning_support import camera_is_colour, finite_values, widest_gap
 
 
 def test_widest_gap_finds_the_biggest_stretch() -> None:
@@ -51,10 +34,10 @@ def _library(*frames: SimpleNamespace) -> SimpleNamespace:
     Returns
     -------
     library : `SimpleNamespace`
-        An object whose ``targets.list()`` gives that one target.
+        An object whose ``targets.query`` gives that one target.
     """
     target = SimpleNamespace(frames=list(frames))
-    return SimpleNamespace(targets=SimpleNamespace(list=lambda: [target]))
+    return SimpleNamespace(targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[target])))
 
 
 def _frame(camera: str, path: str, role: str = "LIGHT") -> SimpleNamespace:

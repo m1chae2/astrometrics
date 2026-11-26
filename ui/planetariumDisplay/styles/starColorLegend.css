@@ -1,0 +1,58 @@
+/* The color key the Planetarium shows at the bottom right of the sky map in its "By spectral
+   class" mode. Each swatch uses its class's star color token from theme.css. */
+
+.star-color-legend {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 90;
+  max-width: 260px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--grey-darkest) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
+  color: var(--text-primary);
+  font-size: var(--small-font-size);
+}
+
+.star-color-legend__title {
+  margin-bottom: var(--space-1);
+  color: var(--text-dim);
+}
+
+.star-color-legend__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.star-color-legend__entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.star-color-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.star-color-legend__swatch--o { background: var(--star-color-o); }
+.star-color-legend__swatch--b { background: var(--star-color-b); }
+.star-color-legend__swatch--a { background: var(--star-color-a); }
+.star-color-legend__swatch--f { background: var(--star-color-f); }
+.star-color-legend__swatch--g { background: var(--star-color-g); }
+.star-color-legend__swatch--k { background: var(--star-color-k); }
+.star-color-legend__swatch--m { background: var(--star-color-m); }
+.star-color-legend__swatch--c { background: var(--star-color-c); }
+.star-color-legend__swatch--w { background: var(--star-color-w); }
+.star-color-legend__swatch--none { background: var(--star-color-none); }
+
+.star-color-legend__note {
+  margin-top: var(--space-1);
+  color: var(--text-dim);
+}

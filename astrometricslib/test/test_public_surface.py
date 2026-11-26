@@ -33,6 +33,7 @@ import importlib
 from pathlib import Path
 
 import astrometricslib
+from astrometricslib._internal.testing import astrometrics_with_drivers
 
 # The public surface. Changing this set on purpose -- adding, removing, or
 # renaming an export -- is a real, visible change to the library's contract
@@ -91,7 +92,6 @@ EXPECTED_MODULE_NAMES = {
         "MeasurementStatus",
         "QualityLimit",
         "QualityMeasurement",
-        "QuarantinePreview",
         "RawFrameCheckReport",
         "SetAsideFrame",
         "SetAsideFrameRecord",
@@ -107,14 +107,22 @@ EXPECTED_MODULE_NAMES = {
         "JobStore",
         "Jobs",
         "ProcessingJob",
+        "RunAbandonedError",
+        "RunAbandonment",
+        "SkipJobStoredRecords",
         "background_job",
         "background_log_context",
+        "bind_abandonment",
         "capture_job_logs",
         "close_interrupted_jobs",
+        "current_process_identity",
         "get_current_job",
         "log_context",
         "new_request_id",
+        "process_is_alive",
+        "raise_if_abandoned",
         "registered_job",
+        "report_started_jobs",
         "run_as_background_job",
         "running_as_job",
     }),
@@ -137,6 +145,7 @@ EXPECTED_MODULE_NAMES = {
         "LOW_STAR_FRACTION",
         "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
         "NO_GOOD_MATCH_RMS",
+        "STRETCHED_STAR_WARNING_ELONGATION",
         "ParameterContext",
         "TYPICAL_GUIDE_CYCLE_SECONDS",
         "SetupEquipmentValues",
@@ -149,6 +158,7 @@ EXPECTED_MODULE_NAMES = {
         "collect_tuners",
         "read_tuned_record",
         "run_tuning",
+        "tune",
         "collect_parameters",
         "current_parameter_context",
         "equipment_values_to_write",
@@ -169,22 +179,30 @@ EXPECTED_MODULE_NAMES = {
         "LaunchIdentity",
         "LibraryFolders",
         "VersionedCache",
+        "build_pixel_query",
         "bump_data_version",
         "connect_db",
+        "existing_stack_path",
         "file_lock",
         "get_camera_data_versions",
         "get_frame_metric_signs",
+        "get_gaia_archive",
         "get_library_data_version",
+        "get_simbad_driver",
         "get_stack_quality_data_version",
         "get_target_camera_names",
         "get_target_data_version",
         "get_target_document_signs",
+        "header_is_plate_solved",
+        "healpix_pixels_of_points",
         "is_loopback_host",
         "is_path_inside",
         "launch_identity_from_settings",
         "library_folders",
         "locks_directory",
         "network_is_offline",
+        "pixel_source_id_range",
+        "pixels_near_circles",
         "read_data_versions",
         "read_launch_identity",
         "require_local_host",
@@ -193,6 +211,9 @@ EXPECTED_MODULE_NAMES = {
         "resolve_mounted_path",
         "scratch_directory",
         "stop_process_group",
+        "tile_of_source_id",
+        "tiles_for_cone",
+        "tiles_for_footprint",
     }),
 }
 """Names each public module of astrometricslib offers (its `__all__`)."""
@@ -252,18 +273,14 @@ SUB_API_MEMBERS = {
         "sessions",
         "create",
         "delete",
+        "display_turn",
         "delete_images",
         "get",
         "get_frame",
-        "get_header",
-        "get_stars",
         "imaged_field_centers",
-        "list",
         "query",
         "read_frame_header",
-        "read_saved",
         "reindex_frames",
-        "resolve",
         "save",
         "select_frames",
     },
@@ -279,15 +296,23 @@ SUB_API_MEMBERS = {
         "update",
     },
     "processing": {
+        "ANALYSIS_STAGES",
+        "DEFAULT_ANALYSIS_STAGES",
+        "SELECTABLE_ANALYSIS_STAGES",
         "acquire_job_slot",
         "calibration",
+        "find_stack_configuration",
+        "get_stack_identification",
+        "identify_stack",
+        "list_preview_bright_objects",
         "process_target",
         "remake_preview",
-        "run_spectroscopy_by_session",
         "measure_noise",
         "open_in_siril",
         "plate_solve",
+        "predict_stack",
         "predict_stack_weights",
+        "set_preview_bright_object",
         "stack",
         "stack_summary",
         "stop_stacking_programs",
@@ -303,10 +328,15 @@ SUB_API_MEMBERS = {
         "save",
     },
     "quality": {
+        "blocks",
         "calibration_identities",
+        "choose_blink_pair",
+        "frame_statuses",
         "get_aperture_record",
         "capture_settings",
         "forget",
+        "map_position",
+        "match_frame_positions",
         "measure_detections",
         "measure_folder",
         "measure_frames",
@@ -314,12 +344,30 @@ SUB_API_MEMBERS = {
         "measure_star_profile",
         "measure_tuned_parameters",
         "metrics",
+        "put_back_set_aside_frames",
         "query",
         "record_frame_measurements",
         "resolve_rows",
         "set_aside_frames",
     },
-    "visualization": {"get_last_captured_image", "plot", "render_fits"},
+    "quality.blocks": {
+        "find_stars",
+        "measure_aperture",
+        "measure_sky",
+        "measure_sky_gradient",
+        "robust_sigma",
+        "sigma_clip",
+        "sky_corners",
+        "solved_stars",
+        "star_widths",
+    },
+    "visualization": {
+        "get_last_captured_image",
+        "place_stack_picture_on_sky",
+        "plot",
+        "render_fits",
+        "stack_sky_picture_files",
+    },
     "jobs": {"query"},
 }
 """Each sub-API of `Astrometrics`, by attribute path, and its members."""
@@ -345,7 +393,7 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
     """`Astrometrics` has no methods: only settings, storage and sub-APIs."""
     from unittest.mock import MagicMock
 
-    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert _public_members(astrometrics) == {
         "config",
         "jobs",
@@ -361,7 +409,7 @@ def test_each_sub_api_offers_exactly_its_pinned_members() -> None:
     """Every sub-API's public members match the pinned list."""
     from unittest.mock import MagicMock
 
-    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     for path, expected in SUB_API_MEMBERS.items():
         instance = astrometrics
         for part in path.split("."):
@@ -369,11 +417,18 @@ def test_each_sub_api_offers_exactly_its_pinned_members() -> None:
         assert _public_members(instance) == expected, path
 
 
+def test_the_root_takes_only_the_settings() -> None:
+    """`Astrometrics(config)` exposes no private storage or driver type."""
+    import inspect
+
+    assert list(inspect.signature(astrometricslib.Astrometrics).parameters) == ["config"]
+
+
 def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
     """The sub-APIs share the children they are built with."""
     from unittest.mock import MagicMock
 
-    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert astrometrics.processing._targets is astrometrics.targets
     assert astrometrics.quality._targets is astrometrics.targets
     assert astrometrics.processing.calibration._targets is astrometrics.targets

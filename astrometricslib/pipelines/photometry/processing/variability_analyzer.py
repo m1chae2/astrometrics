@@ -44,15 +44,23 @@ from scipy.stats import median_abs_deviation
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
+from astrometricslib.foundation.parameter_context import bind_equipment_key, current_equipment_key
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.foundation.run_bases import RunBasis, factor_for
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
-from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
+from astrometricslib.models.quality.quality_summary import (
+    ExcludedFrame,
+    FrameEnsembleComposition,
+    SessionScintillationRecord,
+)
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     MINIMUM_POINTS_FOR_TRANSIT_SEARCH,
+    PeriodogramResult,
     PhotometryResult,
     StellarObject,
+    TransitCandidate,
 )
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -81,6 +89,8 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     _read_exposure_seconds,
     centroid_offsets_px,
     compute_frame_airmass,
+    crowding_fields,
+    detect_neighbor_field,
     measure_aperture_photometry,
     read_observation_time,
     select_alignment_anchors,
@@ -100,9 +110,28 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     ComparisonSetResult,
     build_ensemble_signal,
     build_flux_table,
+    describe_comparison_pool,
+    describe_missing_comparison_stars,
     fractional_to_magnitudes,
+    levels_for_frames_outside_the_fit,
     select_comparison_set,
     set_result,
+)
+from astrometricslib.pipelines.photometry.processing.instrumental_artifacts import (
+    coverage_reason,
+    edge_reason,
+    field_step_summary,
+    registration_step_threshold_px,
+    step_artifact_reason,
+)
+from astrometricslib.pipelines.photometry.processing.periodicity_search import (
+    FALSE_ALARM_FOR_POSSIBLE,
+    VERDICT_INSUFFICIENT_DATA,
+    clean_light_curve,
+)
+from astrometricslib.pipelines.photometry.processing.scintillation_term import (
+    add_scintillation_in_quadrature,
+    build_scintillation_term,
 )
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
     MINIMUM_POINTS_FOR_INDICES,
@@ -111,6 +140,8 @@ from astrometricslib.pipelines.photometry.processing.variability_indices import 
     VariabilityThresholds,
     assess_variability,
 )
+from astrometricslib.pipelines.photometry.run_warnings import SESSION_NOTICE_LOG_EXTRA
+from astrometricslib.pipelines.shared.quality.clipped_frames import frame_is_clipped_at_zero
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -197,8 +228,10 @@ def flux_mean_and_coefficient_of_variation(photometry: Any) -> tuple[float, floa
     """Measure the mean brightness and the scatter of a star's light curve.
 
     The values are the detrended flux when there is one, else the normalized
-    flux, keeping only positive values. The coefficient of variation (CV) is
-    the standard deviation over the mean.
+    flux, keeping every finite value. A faint star measured at or below zero
+    in a noisy frame keeps that point, because leaving it out would raise the
+    mean. The coefficient of variation (CV) is the standard deviation over
+    the mean.
 
     Parameters
     ----------
@@ -208,12 +241,13 @@ def flux_mean_and_coefficient_of_variation(photometry: Any) -> tuple[float, floa
     Returns
     -------
     statistics : `tuple` [`float`, `float`] or `None`
-        The mean and the CV, or `None` when fewer than 3 positive values
-        remain or the mean is not positive.
+        The mean and the CV, or `None` when fewer than 3 finite values
+        remain or the mean is not positive (the CV is a fraction of the
+        mean).
     """
     raw_fluxes = photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized
-    fluxes = np.array(raw_fluxes)
-    fluxes = fluxes[fluxes > 0]
+    fluxes = np.array(raw_fluxes, dtype=float)
+    fluxes = fluxes[np.isfinite(fluxes)]
     if len(fluxes) < 3:
         return None
     mean_flux, std_flux = np.mean(fluxes), np.std(fluxes)
@@ -305,7 +339,7 @@ def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> floa
         if light_curve is None:
             continue
         fluxes = light_curve.fluxes_detrended or light_curve.fluxes_normalized or light_curve.fluxes or []
-        usable = [float(flux) for flux in fluxes if flux and flux > 0]
+        usable = [float(flux) for flux in fluxes if flux is not None and math.isfinite(flux)]
         if len(usable) < 3:
             continue
         mean_flux = statistics.fmean(usable)
@@ -356,7 +390,7 @@ def median_flux_error_mag(stellar_objects: list[StellarObject]) -> float | None:
         errors_mag.extend(
             MAGNITUDES_PER_FRACTIONAL_FLUX_ERROR * error / flux
             for flux, error in zip(fluxes, errors, strict=True)
-            if flux > 0
+            if flux > 0  # a point at or below zero has no magnitude
         )
     return float(np.median(errors_mag)) if errors_mag else None
 
@@ -482,6 +516,7 @@ def flag_variable_stars(
         and star.photometry.coefficient_of_variation > cutoff_stats.cutoff
         and len(star.photometry.fluxes_detrended or star.photometry.fluxes_normalized)
         >= minimum_points_for_indices
+        and not star.photometry.not_judged_reason
     ]
     return variable_candidates, assessment
 
@@ -579,11 +614,14 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
     """Measure how much a star's level changed from one session to another.
 
     Uses the per-session summaries recorded when the sessions were merged.
-    Takes the session with the highest median normalized flux and the one
-    with the lowest. Their difference, divided by the combined expected
-    error of the two medians, is the significance. The expected error of
-    one session's median is 1.2533 x scatter / sqrt(points), where scatter
-    is the robust within-session standard deviation of the normalized flux.
+    Sessions that were not tied to the field (`tie_status` "untied") are
+    left out, because their level is on a different scale. Takes the session
+    with the highest median normalized flux and the one with the lowest.
+    Their difference, divided by the combined expected error of the two
+    medians, is the significance. The expected error of one session's median
+    is 1.2533 x scatter / sqrt(points), where scatter is the robust
+    within-session standard deviation of the normalized flux, added in
+    quadrature to the uncertainty of the session's tie factor.
 
     Parameters
     ----------
@@ -604,10 +642,13 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
     minimum_sessions_for_long_term_search = resolve(MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH).value
     if star.photometry is None:
         return None
+    # A session that could not be tied to the field has its own level scale,
+    # so its median cannot be compared with another session's.
     usable = [
         summary
         for summary in star.photometry.session_summaries
-        if summary.median_normalized_flux is not None
+        if summary.tie_status != "untied"
+        and summary.median_normalized_flux is not None
         and summary.median_normalized_flux > 0
         and summary.normalized_flux_scatter is not None
         and summary.point_count >= minimum_points_per_session_for_long_term_search
@@ -628,7 +669,12 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
             Unitless, on the scale of the normalized flux.
         """
         scatter = summary.normalized_flux_scatter
-        return _MEDIAN_STANDARD_ERROR_FACTOR * scatter / math.sqrt(summary.point_count)
+        median_error = _MEDIAN_STANDARD_ERROR_FACTOR * scatter / math.sqrt(summary.point_count)
+        # The tie factor has its own uncertainty, a fraction of the level,
+        # shared by every point of the session. It adds in quadrature to the
+        # median's.
+        tie_error = (summary.tie_uncertainty or 0.0) * summary.median_normalized_flux
+        return math.hypot(median_error, tie_error)
 
     combined_error = math.hypot(_median_error(brightest), _median_error(faintest))
     difference = brightest.median_normalized_flux - faintest.median_normalized_flux
@@ -648,8 +694,10 @@ def identify_long_term_variable_candidates(
     The search needs light curves merged across sessions, with the
     per-session summaries that the merge records. For each star it:
 
-    1. Takes each session's median normalized flux. The merge does not
-       rescale sessions, so these medians keep the between-night level.
+    1. Takes each session's median normalized flux. The sessions were tied
+       to the field before the merge (`session_tie`), so these medians are
+       on one scale and keep the between-night level. A session left
+       untied is skipped.
     2. Finds the highest and the lowest of those medians and converts the
        ratio to an amplitude in magnitudes: ``2.5 log10(highest / lowest)``.
     3. Divides the difference of the two medians by their combined
@@ -669,12 +717,13 @@ def identify_long_term_variable_candidates(
     within-session scatter measured per session, so this search compares
     two separate quantities and does not mix them.
 
-    The normalized levels of two sessions are only a fair comparison when
-    their comparison ensembles behave alike. The ensembles are chosen per
-    session, so a shift shared by every star in the field points to the
-    ensemble, not the star. Compare the star's amplitude with the other
-    stars' amplitudes and with the `session_summaries` ensemble fields
-    before treating a flag as a real variable.
+    The ensembles are chosen per session, so a shift shared by every star
+    in the field would point to the ensemble, not the star. The tie to the
+    field removes that shared shift before the merge. What is left is the
+    star's own change relative to the other stars, plus the tie's
+    uncertainty, which the significance includes. Compare the star's
+    amplitude with the other stars' amplitudes before treating a flag as a
+    real variable.
 
     Parameters
     ----------
@@ -789,6 +838,28 @@ def _keep_where(values: list[Any], keep: Any) -> list[Any]:
     return [value for value, valid in zip(values, keep, strict=True) if valid]
 
 
+def _too_few_usable_note(usable: int, needed: int, dropped: int) -> str:
+    """Say why a star's light curve has too few measurements to search.
+
+    Parameters
+    ----------
+    usable : `int`
+        How many measurements have a finite time and brightness.
+    needed : `int`
+        The fewest measurements the search accepts.
+    dropped : `int`
+        How many measurements were left out for not being finite.
+
+    Returns
+    -------
+    note : `str`
+        A sentence for the result's ``note``.
+    """
+    plural = "s" if usable != 1 else ""
+    left_out = f" ({dropped} left out for having no finite time or brightness)" if dropped else ""
+    return f"Not searched: only {usable} usable measurement{plural}{left_out}; {needed} are needed."
+
+
 class VariabilityAnalyzer:
     """Analyzes a sequence of images to detect variable stars."""
 
@@ -860,6 +931,10 @@ class VariabilityAnalyzer:
         # `_apply_frame_normalization` to build each star's
         # `input_quality`.
         self.frame_registration_drift: dict[datetime, tuple[float, float]] = {}
+        # The reference frame's ``(height, width)`` in pixels, set during
+        # `process()`. `None` before. `_judge_light_curves` reads it to find
+        # the stars that lie near the frame edge.
+        self.reference_frame_shape: tuple[int, int] | None = None
         # The number of frames in this session, set at the top of
         # `process()`. `input_quality.coverage_fraction`'s denominator.
         self.total_frames = 0
@@ -882,6 +957,12 @@ class VariabilityAnalyzer:
         # The comparison set chosen for this session, or `None` before
         # `normalize_light_curves()` has run on stars with light curves.
         self.comparison_set: ComparisonSetResult | None = None
+        # Why the session's light curves could not be divided by a
+        # comparison ensemble, or `None` when they were (or when
+        # `normalize_light_curves()` has not run). When it is set the light
+        # curves hold raw flux, which must not be mixed with another
+        # session's normalized flux.
+        self.normalization_failure_reason: str | None = None
         # The airmass slope the optional correction removed, as a fractional
         # change of flux per unit of airmass. `None` when it was not applied.
         self.ensemble_airmass_slope: float | None = None
@@ -903,6 +984,19 @@ class VariabilityAnalyzer:
         # field was too small for a noise model.
         self.noise_model: NoiseModel | None = None
         self.variability_thresholds: VariabilityThresholds | None = None
+        # What the scintillation term needs, set by the caller before
+        # `normalize_light_curves()`: the telescope's aperture (and why it is
+        # missing) and the site's height. Without an aperture no term is
+        # added and the record says so.
+        self.aperture_diameter_mm: float | None = None
+        self.aperture_reason: str | None = "the telescope's aperture was not given"
+        self.site_elevation_m = 0.0
+        # The scintillation term added to the flux errors by
+        # `normalize_light_curves()`: the record (session id left empty) and
+        # the term of each frame as a fraction of a star's flux. `None` and
+        # empty before it runs.
+        self.scintillation: SessionScintillationRecord | None = None
+        self.scintillation_fraction_by_frame: dict[datetime, float] = {}
 
     def load_target_images(self, target_id: str) -> list[str]:
         """Not used anymore, kept only so older code doesn't break.
@@ -957,6 +1051,7 @@ class VariabilityAnalyzer:
 
         reference_header, reference_raw_data = read_header_and_data(reference_path, first_hdu_only=True)
         reference_data = collapse_to_2d(reference_raw_data.astype(float))
+        self.reference_frame_shape = (int(reference_data.shape[0]), int(reference_data.shape[1]))
         # Every later frame is lined up with this one pixel for pixel,
         # so they are assumed to come from the same camera. That makes
         # the reference frame's camera decide the saturation threshold.
@@ -973,7 +1068,18 @@ class VariabilityAnalyzer:
         # frame's own gain, offset and binning. Every later frame is
         # assumed to come from the same camera at the same settings, like
         # the saturation threshold above.
-        self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
+        # A frame with almost no exact zeros is not cut off at zero, so the
+        # profile's entry from another offset may stand in (the offset
+        # changes neither gain nor read noise).
+        self.detector_noise = resolve_detector_noise(
+            camera_profile,
+            reference_header,
+            clipped_at_zero=frame_is_clipped_at_zero(reference_raw_data),
+        )
+        if self.detector_noise.offset_fallback_note:
+            logger.info(
+                "The reference frame's gain and read noise: %s.", self.detector_noise.offset_fallback_note
+            )
         if self.detector_noise.profile_gap_reason:
             logger.warning(
                 "The camera profile gave no gain or read noise for the reference frame: %s.",
@@ -1034,6 +1140,12 @@ class VariabilityAnalyzer:
             reference_data, reference_stars_detected, saturation_threshold_adu=saturation_threshold_adu
         )
         reference_top_refs_minimal = list(anchors.stars)
+        # The stars of the reference frame, found with a finder that also
+        # lists close pairs (the run's own detections keep stars about 10 px
+        # apart), so each star's sky ring can leave out its bright neighbors
+        # and each star can be checked for crowding. The same list, moved by
+        # each frame's alignment, serves every frame.
+        reference_neighbors = detect_neighbor_field(reference_data)
         self.alignment_anchor_rule = anchors.rule
         self.alignment_anchor_count = len(anchors.stars)
         logger.info("  Alignment anchors: %s stars (%s).", len(anchors.stars), anchors.rule)
@@ -1046,12 +1158,11 @@ class VariabilityAnalyzer:
             # accepted here re-enters the per-frame parallel worker's
             # per-star cutout loop for every frame in the session. A
             # seed star with no detectable signal above local background
-            # on the reference frame (net_flux clamped to 0.0 by
-            # `_measure_aperture_flux`) will never contribute a usable
-            # measurement in any frame either, so tracking it is pure
-            # cost with no photometric benefit. Excluding it here only
-            # decides whether this call gives it a light curve -- it
-            # stays fully present in the catalog, since astrometry
+            # on the reference frame (net flux of zero or below) will
+            # never contribute a usable measurement in any frame either, so
+            # tracking it is pure cost with no photometric benefit. Excluding
+            # it here only decides whether this call gives it a light curve
+            # -- it stays fully present in the catalog, since astrometry
             # identification and recording are separate and untouched.
             #
             # On 2026-08-25, NGC 6888 seeded 2,439 stars this way across
@@ -1077,6 +1188,7 @@ class VariabilityAnalyzer:
                     y_ref,
                     saturation_threshold_adu=saturation_threshold_adu,
                     noise=self.detector_noise,
+                    neighbors=reference_neighbors,
                 )
                 flux = reference_measurement.net_flux_adu / reference_exposure_seconds
                 if flux <= 0:
@@ -1091,6 +1203,7 @@ class VariabilityAnalyzer:
                     errors_assume_zero_read_noise=self.detector_noise.read_noise_is_assumed,
                     is_saturated=[reference_measurement.is_saturated],
                     airmasses=[reference_airmass],
+                    **crowding_fields(reference_measurement),
                 )
                 self.stellar_objects.append(seed_star)
                 self.star_peak_adu[seed_star.id] = [reference_measurement.peak_adu]
@@ -1119,6 +1232,7 @@ class VariabilityAnalyzer:
                     y_ref,
                     saturation_threshold_adu=saturation_threshold_adu,
                     noise=self.detector_noise,
+                    neighbors=reference_neighbors,
                 )
                 flux = reference_measurement.net_flux_adu / reference_exposure_seconds
                 new_star.flux = flux
@@ -1130,6 +1244,7 @@ class VariabilityAnalyzer:
                     errors_assume_zero_read_noise=self.detector_noise.read_noise_is_assumed,
                     is_saturated=[reference_measurement.is_saturated],
                     airmasses=[reference_airmass],
+                    **crowding_fields(reference_measurement),
                 )
                 self.stellar_objects.append(new_star)
                 self.star_peak_adu[new_star.id] = [reference_measurement.peak_adu]
@@ -1153,6 +1268,7 @@ class VariabilityAnalyzer:
                     reference_top_refs_minimal,
                     saturation_threshold_adu,
                     self.detector_noise,
+                    reference_neighbors,
                 )
                 for path in image_paths[1:]
             ]
@@ -1165,10 +1281,28 @@ class VariabilityAnalyzer:
             # can be sent to a fresh process. A script that reaches this
             # pool needs an ``if __name__ == "__main__":`` guard, because
             # "spawn" imports the script again in each worker.
+            # A spawned worker starts with no parameter context, so the
+            # equipment values of this run (for example the aperture sizes)
+            # are bound again in each worker.
             with ProcessPoolExecutor(
-                max_workers=max_workers, mp_context=multiprocessing.get_context("spawn")
+                max_workers=max_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=bind_equipment_key,
+                initargs=(current_equipment_key(),),
             ) as executor:
-                results = list(executor.map(_process_single_frame_worker, worker_arguments))
+                frame_futures = [
+                    executor.submit(_process_single_frame_worker, arguments) for arguments in worker_arguments
+                ]
+                results = []
+                try:
+                    for frame_future in frame_futures:
+                        # A cancelled job schedules no more frames.
+                        raise_if_abandoned()
+                        results.append(frame_future.result())
+                except BaseException:
+                    for frame_future in frame_futures:
+                        frame_future.cancel()
+                    raise
 
             # 3. Aggregate Results back into the StellarObjects
             stellar_object_map = {star.id: star for star in self.stellar_objects}
@@ -1325,6 +1459,30 @@ class VariabilityAnalyzer:
             light_curve.time_bjd_tdb = [bjd_by_start[stamp] for stamp in light_curve.timestamps]
             light_curve.time_basis = basis
 
+    def _listed_variable_sources(self, table: Any, selection: Any) -> str:
+        """Say which catalogs listed the stars left out as variable.
+
+        Parameters
+        ----------
+        table : `FluxTable`
+            The flux table the comparison set was chosen from.
+        selection : `ComparisonSelection`
+            The choice, with the rows left out as listed variable.
+
+        Returns
+        -------
+        text : `str`
+            ``" (SIMBAD 3, VSX 2, Gaia DR3 1)"``, or an empty string when
+            none was left out. A star two catalogs list counts under each.
+        """
+        left_out = {table.star_ids[row] for row in selection.listed_variable_rows}
+        if not left_out:
+            return ""
+        from astrometricslib.pipelines.shared.stored_variability import count_listed_by_source
+
+        counts = count_listed_by_source(star for star in self.stellar_objects if star.id in left_out)
+        return f" (SIMBAD {counts['SIMBAD']}, VSX {counts['VSX']}, Gaia DR3 {counts['Gaia DR3']})"
+
     def normalize_light_curves(self) -> None:
         """Perform differential photometry against a fixed comparison set.
 
@@ -1343,7 +1501,9 @@ class VariabilityAnalyzer:
         if not self.stellar_objects:
             return
 
+        self._add_scintillation_term()
         self.comparison_set = None
+        self.normalization_failure_reason = None
         self.frame_reference_flux = {}
         self.frame_reference_flux_error = {}
         self._member_references = {}
@@ -1351,26 +1511,34 @@ class VariabilityAnalyzer:
 
         table = build_flux_table(self.stellar_objects)
         if table is None:
-            logger.warning("  Normalization: no star has a positive flux in any frame.")
+            self.normalization_failure_reason = "no star has a positive flux in any frame"
+            logger.warning(
+                "  Normalization: %s.", self.normalization_failure_reason, extra=SESSION_NOTICE_LOG_EXTRA
+            )
             self._apply_frame_normalization()
             return
         selection = select_comparison_set(table, self.maximum_comparison_stars)
         self.comparison_set = set_result(table, selection)
+        logger.info("  Comparison pool: %s.", describe_comparison_pool(table, selection))
         member_count = len(selection.member_rows)
         logger.info(
             "  Comparison set: %s of %s candidates kept (%s dropped as not constant, %s left out as "
-            "listed variable), %s frames, errors %s.",
+            "listed variable%s), %s frames, errors %s.",
             member_count,
             selection.candidate_count,
             len(selection.vetted_out_rows),
             len(selection.listed_variable_rows),
+            self._listed_variable_sources(table, selection),
             len(table.timestamps),
             "from the CCD equation" if selection.uses_errors else "estimated from the light curves",
         )
         if member_count < 2:
+            self.normalization_failure_reason = describe_missing_comparison_stars(table, selection)
             logger.warning(
-                "  Normalization: %s usable comparison star(s); leaving raw light curves intact.",
+                "  Normalization: %s usable comparison star(s) (%s); leaving raw light curves intact.",
                 member_count,
+                self.normalization_failure_reason,
+                extra=SESSION_NOTICE_LOG_EXTRA,
             )
             self._apply_frame_normalization()
             return
@@ -1380,23 +1548,180 @@ class VariabilityAnalyzer:
         member_errors = table.errors[member_rows] if selection.uses_errors else None
         every_frame = np.ones(len(table.timestamps), dtype=bool)
         signal = build_ensemble_signal(member_fluxes, member_errors, every_frame)
+        # A member can be missing from a frame (no error, as at the frame
+        # edge). A frame in which fewer than two members were measured has no
+        # trustworthy level, so it leaves the light curves like a rejected one.
+        measured_members = np.isfinite(member_fluxes).sum(axis=0)
         self.frame_ensemble_composition = [
             FrameEnsembleComposition(
                 frame_path=self.timestamp_to_path.get(timestamp, "Unknown"),
-                ensemble_size=member_count,
-                excluded_comparison_star_ids=[],
+                ensemble_size=int(measured_members[column]),
+                excluded_comparison_star_ids=[
+                    table.star_ids[row]
+                    for position, row in enumerate(member_rows)
+                    if not np.isfinite(member_fluxes[position, column])
+                ],
             )
-            for timestamp in table.timestamps
+            for column, timestamp in enumerate(table.timestamps)
         ]
-        kept = self._reject_outlier_frames(dict(zip(table.timestamps, signal.level.tolist(), strict=True)))
+        too_few = measured_members < 2
+        if too_few.any():
+            self._record_frames_with_too_few_members([
+                stamp for stamp, thin in zip(table.timestamps, too_few.tolist(), strict=True) if thin
+            ])
+        kept = self._reject_outlier_frames({
+            timestamp: level
+            for timestamp, level, thin in zip(
+                table.timestamps, signal.level.tolist(), too_few.tolist(), strict=True
+            )
+            if not thin
+        })
         frame_mask = np.array([timestamp in kept for timestamp in table.timestamps])
         if not frame_mask.all() and frame_mask.sum() >= 2:
             signal = build_ensemble_signal(member_fluxes, member_errors, frame_mask)
         self._record_ensemble_signal(
             table.timestamps, frame_mask, signal, [table.star_ids[row] for row in member_rows]
         )
+        self._record_levels_outside_the_fit(
+            table, member_rows, selection.uses_errors, frame_mask, member_fluxes, member_errors
+        )
         self._apply_frame_normalization()
         self._record_comparison_scatter()
+
+    def _record_frames_with_too_few_members(self, timestamps: list[datetime]) -> None:
+        """Name the frames that leave the light curves for lack of stars.
+
+        Parameters
+        ----------
+        timestamps : `list` [`datetime.datetime`]
+            The frames in which fewer than two comparison stars were measured.
+        """
+        for timestamp in timestamps:
+            path = self.timestamp_to_path.get(timestamp, "Unknown")
+            if path not in self.rejected_files:
+                self.rejected_files.append(path)
+        logger.warning(
+            "  Comparison set: %s frame(s) measured fewer than 2 of the comparison stars and leave the "
+            "light curves: %s.",
+            len(timestamps),
+            ", ".join(stamp.isoformat() for stamp in timestamps),
+            extra=SESSION_NOTICE_LOG_EXTRA,
+        )
+
+    def _add_scintillation_term(self) -> None:
+        """Add the scintillation term to every point's flux error, once.
+
+        The CCD equation has no scintillation term, so a bright star scatters
+        more than its error says. The term is Young's prediction for each
+        frame times a coefficient measured from this session's comparison
+        stars (see `scintillation_term`). The comparison selection and
+        weights that follow therefore see the larger errors. A second call
+        changes nothing, so the term is never added twice.
+        """
+        if self.scintillation is not None:
+            return
+        term = build_scintillation_term(
+            self.stellar_objects,
+            self.frame_exposure_seconds,
+            self.aperture_diameter_mm,
+            self.aperture_reason,
+            self.site_elevation_m,
+            self.maximum_comparison_stars,
+        )
+        self.scintillation = term.record
+        self.scintillation_fraction_by_frame = term.fraction_by_timestamp
+        add_scintillation_in_quadrature(self.stellar_objects, term.fraction_by_timestamp)
+        if term.record.reason is not None:
+            logger.info("  Scintillation term: %s.", term.record.reason)
+        if term.record.coefficient is not None:
+            logger.info(
+                "  Scintillation term: coefficient %.2f (%s), %.1f mmag per point at the median.",
+                term.record.coefficient,
+                term.record.source,
+                term.record.used_mmag or 0.0,
+            )
+
+    def _record_levels_outside_the_fit(
+        self,
+        table: Any,
+        member_rows: list[int],
+        uses_errors: bool,
+        frame_mask: np.ndarray,
+        member_fluxes: np.ndarray,
+        member_errors: np.ndarray | None,
+    ) -> None:
+        """Give the frames that did not take part in the fit their own level.
+
+        These frames measured few stars (a lost field, cloud, or a short
+        exposure), so they were left out of choosing the comparison set. Their
+        measurements stay in the light curves, normalized with the comparison
+        stars that were measured in them. A frame with fewer than two such
+        stars is not normalized and drops out of the light curves. One warning
+        names every frame that was left out of the fit and says which of them
+        could not be normalized.
+
+        Parameters
+        ----------
+        table : `FluxTable`
+            The session's fluxes.
+        member_rows : `list` [`int`]
+            The rows of the comparison stars.
+        uses_errors : `bool`
+            Whether the CCD-equation errors set the weights.
+        frame_mask : `numpy.ndarray`
+            One `bool` per fit frame, `True` for a frame that was kept.
+        member_fluxes, member_errors : `numpy.ndarray`
+            The members' fluxes and errors in the fit frames.
+        """
+        if not table.unusable_timestamps:
+            return
+        levels = levels_for_frames_outside_the_fit(
+            member_fluxes,
+            member_errors,
+            frame_mask,
+            table.unusable_fluxes[member_rows],
+            table.unusable_errors[member_rows] if uses_errors else None,
+        )
+        member_ids = [table.star_ids[row] for row in member_rows]
+        not_normalized: list[datetime] = []
+        for column, timestamp in enumerate(table.unusable_timestamps):
+            if not np.isfinite(levels.level[column]):
+                not_normalized.append(timestamp)
+                continue
+            self.frame_reference_flux[timestamp] = float(levels.level[column])
+            if levels.level_error is not None:
+                self.frame_reference_flux_error[timestamp] = float(levels.level_error[column])
+            for row, star_id in enumerate(member_ids):
+                value = float(levels.member_levels[row, column])
+                if np.isfinite(value):
+                    error = (
+                        float(levels.member_level_errors[row, column])
+                        if levels.member_level_errors is not None
+                        else None
+                    )
+                    self._member_references.setdefault(star_id, {})[timestamp] = (value, error)
+            self.frame_ensemble_composition.append(
+                FrameEnsembleComposition(
+                    frame_path=self.timestamp_to_path.get(timestamp, "Unknown"),
+                    ensemble_size=int(levels.member_counts[column]),
+                    excluded_comparison_star_ids=[
+                        star_id
+                        for row, star_id in enumerate(member_ids)
+                        if not np.isfinite(levels.member_levels[row, column])
+                    ],
+                )
+            )
+        logger.warning(
+            "  Comparison set: %s frame(s) measured too few stars to help choose it and were left out of "
+            "the fit; each is still normalized with the comparison stars measured in it%s: %s.",
+            len(table.unusable_timestamps),
+            (
+                f" ({len(not_normalized)} had fewer than 2 and leave the light curves)"
+                if not_normalized
+                else ""
+            ),
+            ", ".join(stamp.isoformat() for stamp in table.unusable_timestamps),
+        )
 
     def _record_ensemble_signal(
         self, timestamps: tuple[datetime, ...], frame_mask: np.ndarray, signal: Any, member_ids: list[str]
@@ -1453,7 +1778,7 @@ class VariabilityAnalyzer:
             if star.id not in member_ids or star.photometry is None:
                 continue
             fluxes = np.array(star.photometry.fluxes_normalized, dtype=float)
-            if fluxes.size < 3 or np.any(fluxes <= 0):
+            if fluxes.size < 3 or not np.all(np.isfinite(fluxes)) or np.mean(fluxes) <= 0:
                 continue
             scatters.append(fractional_to_magnitudes(float(np.std(fluxes, ddof=1) / np.mean(fluxes))))
             errors = np.array(star.photometry.fluxes_normalized_errors, dtype=float)
@@ -1546,6 +1871,66 @@ class VariabilityAnalyzer:
             return None
         return self.frame_reference_flux[timestamp], self.frame_reference_flux_error.get(timestamp)
 
+    def _remove_saturated_points(self) -> None:
+        """Remove every star's saturated points from its light curve.
+
+        A frame in which a star's aperture held saturated pixels gives a
+        flux that no longer rises with the star's brightness (see
+        `compute_saturated_pixel_fraction` and `is_saturation_significant`
+        in `pipelines.shared.quality.saturation`). Such a point would look
+        like a dip or a flat top, so it is taken out before the
+        normalization, the variability indices, the scatter figures and the
+        period and dip searches, and it is not stored as a normal point.
+
+        Every per-frame array is cut with the same mask, so they stay
+        aligned, and each star's count is kept in `saturated_points_removed`.
+        A star with no point left gets `light_curve_withheld_reason`. The
+        removal is logged as one warning that names the totals, so the run's
+        warning list shows it. A star whose saturation flags do not line up
+        with its points (an older, truncated record) is left as it is,
+        because pairing them by position would be a guess.
+        """
+        stars_affected = 0
+        points_removed = 0
+        saturated_in_every_frame: list[str] = []
+        for star in self.stellar_objects:
+            photometry = star.photometry
+            if photometry is None:
+                continue
+            flags = photometry.is_saturated or []
+            if not any(flags) or len(flags) != len(photometry.timestamps):
+                continue
+            keep = np.array([not flag for flag in flags], dtype=bool)
+            removed = int(len(keep) - keep.sum())
+            photometry.timestamps = _keep_where(photometry.timestamps, keep)
+            photometry.fluxes = _keep_where(photometry.fluxes, keep)
+            photometry.is_saturated = _keep_where(photometry.is_saturated, keep)
+            photometry.airmasses = _keep_where(photometry.airmasses, keep)
+            photometry.flux_errors = _keep_where(photometry.flux_errors, keep)
+            photometry.time_bjd_tdb = _keep_where(photometry.time_bjd_tdb, keep)
+            if not photometry.time_bjd_tdb:
+                photometry.time_basis = None
+            photometry.saturated_points_removed += removed
+            stars_affected += 1
+            points_removed += removed
+            if not photometry.timestamps:
+                photometry.light_curve_withheld_reason = (
+                    f"saturated in every frame it was measured in ({removed} frames)"
+                )
+                saturated_in_every_frame.append(star.id)
+        if stars_affected:
+            every_frame_ids = ", ".join(saturated_in_every_frame[:5])
+            if len(saturated_in_every_frame) > 5:
+                every_frame_ids += ", ..."
+            logger.warning(
+                "  Saturation: removed %s saturated point(s) from the light curves of %s star(s); "
+                "%s star(s) were saturated in every frame and have no light curve%s.",
+                points_removed,
+                stars_affected,
+                len(saturated_in_every_frame),
+                f" ({every_frame_ids})" if saturated_in_every_frame else "",
+            )
+
     def _apply_frame_normalization(self) -> bool:
         """Divide each star's flux by its frame's normalization factor.
 
@@ -1561,6 +1946,12 @@ class VariabilityAnalyzer:
             star's raw (unnormalized) light curve is left untouched
             rather than destroying its measured photometry.
         """
+        # A saturated point is not a brightness measurement, so it leaves
+        # every star's light curve before any statistic or search reads it.
+        # It runs here, after the comparison set was chosen from the full
+        # frame table and before the table-free steps below.
+        self._remove_saturated_points()
+
         # Safety net: if ensemble normalization couldn't establish a
         # usable per-frame factor for *any* frame (frame_reference_flux
         # empty), the loop below would previously wipe every star's raw
@@ -1570,9 +1961,12 @@ class VariabilityAnalyzer:
         # star's raw measurements intact, so a caller/UI can still show
         # (unnormalized) photometry rather than nothing at all.
         if not self.frame_reference_flux:
+            if self.normalization_failure_reason is None:
+                self.normalization_failure_reason = "no frame kept a comparison-ensemble level"
             logger.warning(
                 "  Ensemble normalization produced no usable per-frame factors; "
-                "leaving raw (unnormalized) light curves intact."
+                "leaving raw (unnormalized) light curves intact.",
+                extra=SESSION_NOTICE_LOG_EXTRA,
             )
             for star in self.stellar_objects:
                 star.photometry.fluxes_normalized = list(star.photometry.fluxes)
@@ -1679,8 +2073,13 @@ class VariabilityAnalyzer:
             See that class for what each field means.
         """
         timestamps = star.photometry.timestamps
+        # The saturated points were removed, so the fraction counts them
+        # against the points the star was measured at: those removed and
+        # those that remain.
+        removed = star.photometry.saturated_points_removed
         saturation_flags = star.photometry.is_saturated or []
-        saturated_fraction = sum(saturation_flags) / len(saturation_flags) if saturation_flags else 0.0
+        measured_points = len(saturation_flags) + removed
+        saturated_fraction = (sum(saturation_flags) + removed) / measured_points if measured_points else 0.0
         drifts = [
             math.hypot(*self.frame_registration_drift[timestamp])
             for timestamp in timestamps
@@ -1758,6 +2157,116 @@ class VariabilityAnalyzer:
                     if not star.photometry.time_bjd_tdb:
                         star.photometry.time_basis = None
 
+    def _judge_light_curves(self) -> None:
+        """Mark the stars whose light curves cannot be judged for variability.
+
+        Each star gets a `not_judged_reason` when one of three checks fails
+        (see `instrumental_artifacts`): it was saturated in too many frames
+        (`coverage_reason`), it lies too near the frame edge for its sky
+        ring to fit in every frame (`edge_reason`), or its brightness
+        changes with the steps of the field's registration instead of on its
+        own (`step_artifact_reason`). The star keeps its light curve and its
+        indices. It is only left out of the candidates, and the reason is
+        stored on the light curve. The reasons are counted in one warning,
+        so the run's warning list shows them.
+
+        The step check needs the frame shifts, which only the analyzer
+        holds, so it is skipped for a star whose points have no shift.
+        """
+        shifts_by_time = self.frame_registration_drift
+        ordered_shifts = [shifts_by_time[timestamp] for timestamp in sorted(shifts_by_time)]
+        step_threshold_px = registration_step_threshold_px(ordered_shifts)
+        largest_shift_px = max((math.hypot(*shift) for shift in ordered_shifts), default=0.0)
+        counts = {"saturation": 0, "edge": 0, "step": 0}
+        # The field's own jump at each step, so that a star is judged against
+        # the field and not against zero (see `field_step_summary`).
+        ordered_curves = []
+        for star in self.stellar_objects:
+            photometry = star.photometry
+            if photometry is None:
+                continue
+            values = photometry.fluxes_detrended or photometry.fluxes_normalized
+            if (
+                values
+                and len(values) == len(photometry.timestamps)
+                and all(timestamp in shifts_by_time for timestamp in photometry.timestamps)
+            ):
+                order = sorted(range(len(values)), key=lambda index: photometry.timestamps[index])
+                ordered_curves.append((
+                    [values[index] for index in order],
+                    [photometry.timestamps[index] for index in order],
+                    [shifts_by_time[photometry.timestamps[index]] for index in order],
+                ))
+        field_steps = field_step_summary(ordered_curves, step_threshold_px)
+        field_effects = [
+            (timestamp, median)
+            for timestamp, (median, spread) in field_steps.items()
+            if abs(median) >= spread
+        ]
+        if field_effects:
+            logger.warning(
+                "  Variability: the whole field changes brightness at %s registration step(s), by up to "
+                "%.1f%% (the median jump of all stars is larger than their spread). This is a field effect; "
+                "each star is judged for steps against it, and the light curves are not corrected.",
+                len(field_effects),
+                100.0 * max(abs(median) for _, median in field_effects),
+            )
+        for star in self.stellar_objects:
+            photometry = star.photometry
+            if photometry is None:
+                continue
+            photometry.not_judged_reason = None
+            if not (photometry.fluxes_detrended or photometry.fluxes_normalized):
+                continue
+            kept_points = len(photometry.is_saturated or [])
+            measured_points = kept_points + photometry.saturated_points_removed
+            saturated_points = sum(photometry.is_saturated or [])
+            unsaturated_fraction = (
+                (kept_points - saturated_points) / measured_points if measured_points else None
+            )
+            star_data = star.star_data if isinstance(star.star_data, dict) else {}
+            reasons: list[tuple[str, str]] = []
+            reason = coverage_reason(unsaturated_fraction)
+            if reason:
+                reasons.append(("saturation", reason))
+            reason = edge_reason(
+                star_data.get("x_centroid", star_data.get("xcentroid")),
+                star_data.get("y_centroid", star_data.get("ycentroid")),
+                self.reference_frame_shape,
+                largest_shift_px,
+            )
+            if reason:
+                reasons.append(("edge", reason))
+            values = photometry.fluxes_detrended or photometry.fluxes_normalized
+            if len(values) == len(photometry.timestamps) and all(
+                timestamp in shifts_by_time for timestamp in photometry.timestamps
+            ):
+                order = sorted(range(len(values)), key=lambda index: photometry.timestamps[index])
+                reason = step_artifact_reason(
+                    [values[index] for index in order],
+                    [shifts_by_time[photometry.timestamps[index]] for index in order],
+                    step_threshold_px,
+                    timestamps=[photometry.timestamps[index] for index in order],
+                    field_steps=field_steps,
+                )
+                if reason:
+                    reasons.append(("step", reason))
+            if reasons:
+                photometry.not_judged_reason = "Not judged for variability: " + "; ".join(
+                    text for _, text in reasons
+                )
+                for kind, _ in reasons:
+                    counts[kind] += 1
+        if any(counts.values()):
+            logger.warning(
+                "  Variability: %s star(s) were not judged because they were saturated in too many frames, "
+                "%s because they lie near the frame edge and %s because their brightness changes with the "
+                "field's registration steps. They keep their light curves; the reason is on each star.",
+                counts["saturation"],
+                counts["edge"],
+                counts["step"],
+            )
+
     def identify_variable_stars(self, sigma_threshold: float | None = None) -> list[StellarObject]:
         """Find the stars that vary more than their noise explains.
 
@@ -1778,6 +2287,7 @@ class VariabilityAnalyzer:
         """
         if sigma_threshold is None:
             sigma_threshold = resolve(DEFAULT_VARIABILITY_SIGMA_THRESHOLD).value
+        self._judge_light_curves()
         candidates, assessment = flag_variable_stars(self.stellar_objects, sigma_threshold)
         self.noise_model = assessment.noise_model
         self.variability_thresholds = assessment.thresholds
@@ -1892,7 +2402,12 @@ class VariabilityAnalyzer:
         self.ensemble_airmass_slope = slope
         return factor
 
-    def run_bls_transit_search(self, star: StellarObject, shuffle_count: int | None = None) -> Any | None:
+    def run_bls_transit_search(
+        self,
+        star: StellarObject,
+        shuffle_count: int | None = None,
+        stop_above: float | None = FALSE_ALARM_FOR_POSSIBLE,
+    ) -> Any | None:
         """Look for a repeating, box-shaped dip in brightness.
 
         A planet passing in front of its star and one star of an
@@ -1902,6 +2417,10 @@ class VariabilityAnalyzer:
         judged: the strongest dip always exists, so the returned candidate
         carries a verdict saying whether it stands out from noise.
 
+        Measurements whose time or brightness is not a finite number are left
+        out first. When fewer than the fewest points are left, the star gets
+        an ``insufficient_data`` result whose note says how many were usable.
+
         Parameters
         ----------
         star : `StellarObject`
@@ -1909,12 +2428,16 @@ class VariabilityAnalyzer:
         shuffle_count : `int`, optional
             How many noise-only versions to compare with; the search picks
             a default when omitted.
+        stop_above : `float` or `None`, optional
+            Stop searching noise-only versions once the false-alarm
+            probability is certain to be above this value (see
+            `periodicity_search.box_search`). `None` searches every version.
 
         Returns
         -------
         candidate : `TransitCandidate` or `None`
-            The search result (check its ``verdict``), or `None` if there
-            were fewer than 8 measurements.
+            The search result (check its ``verdict``), or `None` if the star
+            had fewer than 8 measurements to begin with.
         """
         minimum_points_for_transit_search = resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
         if not star.can_run_transit_search:
@@ -1923,22 +2446,37 @@ class VariabilityAnalyzer:
         from astrometricslib.pipelines.photometry.processing.periodicity_search import box_search
 
         time_days, fluxes = self._light_curve_arrays(star)
-        if fluxes.size < minimum_points_for_transit_search or np.mean(fluxes) <= 0:
+        errors = self.light_curve_errors(star)
+        time_days, fluxes, errors, dropped = clean_light_curve(time_days, fluxes, errors)
+        if fluxes.size < minimum_points_for_transit_search:
+            candidate = TransitCandidate(
+                verdict=VERDICT_INSUFFICIENT_DATA,
+                note=_too_few_usable_note(fluxes.size, minimum_points_for_transit_search, dropped),
+            )
+        elif np.mean(fluxes) <= 0:
             return None
-        candidate = box_search(
-            time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
-        )
+        else:
+            candidate = box_search(
+                time_days, fluxes, shuffle_count=shuffle_count, flux_errors=errors, stop_above=stop_above
+            )
         star.photometry.transit_candidate = candidate
         return candidate
 
     def run_lomb_scargle_periodogram(
-        self, star: StellarObject, shuffle_count: int | None = None
+        self,
+        star: StellarObject,
+        shuffle_count: int | None = None,
+        stop_above: float | None = FALSE_ALARM_FOR_POSSIBLE,
     ) -> Any | None:
         """Look for regular repeating patterns in the star's brightness.
 
         See `periodicity_search` for how the result is judged: the
         strongest cycle always exists, so the returned result carries a
         verdict saying whether it stands out from noise.
+
+        Measurements whose time or brightness is not a finite number are left
+        out first. When fewer than the fewest points are left, the star gets
+        an ``insufficient_data`` result whose note says how many were usable.
 
         Parameters
         ----------
@@ -1947,12 +2485,17 @@ class VariabilityAnalyzer:
         shuffle_count : `int`, optional
             How many noise-only versions to compare with; the search picks
             a default when omitted.
+        stop_above : `float` or `None`, optional
+            Stop searching noise-only versions once the false-alarm
+            probability is certain to be above this value (see
+            `periodicity_search.lomb_scargle_search`). `None` searches every
+            version.
 
         Returns
         -------
         periodogram : `PeriodogramResult` or `None`
-            The search result (check its ``verdict``), or `None` if there
-            were fewer than 5 measurements.
+            The search result (check its ``verdict``), or `None` if the star
+            had fewer than 5 measurements to begin with.
         """
         minimum_points_for_period_search = resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
         if not star.can_run_period_search:
@@ -1961,11 +2504,17 @@ class VariabilityAnalyzer:
         from astrometricslib.pipelines.photometry.processing.periodicity_search import lomb_scargle_search
 
         time_days, fluxes = self._light_curve_arrays(star)
+        errors = self.light_curve_errors(star)
+        time_days, fluxes, errors, dropped = clean_light_curve(time_days, fluxes, errors)
         if fluxes.size < minimum_points_for_period_search:
-            return None
-        result = lomb_scargle_search(
-            time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
-        )
+            result = PeriodogramResult(
+                verdict=VERDICT_INSUFFICIENT_DATA,
+                note=_too_few_usable_note(fluxes.size, minimum_points_for_period_search, dropped),
+            )
+        else:
+            result = lomb_scargle_search(
+                time_days, fluxes, shuffle_count=shuffle_count, flux_errors=errors, stop_above=stop_above
+            )
         star.photometry.periodogram = result
         return result
 

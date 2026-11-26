@@ -1,8 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { EmptyState } from '../../common/components/EmptyState';
 import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { Button } from '../../common/components/Button';
+import { ConfirmDialog } from '../../common/components/ConfirmDialog';
+import { StatusChip } from '../../common/components/StatusChip';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { Checkbox } from '../../common/components/Checkbox';
 import { TextInput } from '../../common/components/TextInput';
 import { buildOpticOptions, filterFilesByCamera } from '../utils/opticSelection';
@@ -40,7 +43,24 @@ export interface FileBrowserProps {
     onToggleAll: (files?: FileItem[]) => void;
     // Lifted Camera State
     selectedCamera: string;
+    /** Each frame's status by file path. A frame with none reads "Included". */
+    frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
+    /** Frames the stacker set aside. They are listed after the target's own frames and cannot be ticked. */
+    setAsideFiles?: FileItem[];
+    /** Called after the person confirms putting a set-aside frame back. */
+    onPutBackFrame?: (path: string) => void;
 }
+
+/** The status shown for a frame the backend has not described. */
+const DEFAULT_STATUS: FrameStatusInfo = {
+    kind: 'included',
+    label: 'Included',
+    tone: 'ok',
+    tooltip: 'This frame is in the last stack.',
+    filterText: 'included',
+    restorable: false,
+    restoreNote: '',
+};
 
 type SortField = 'name' | 'camera' | 'exposure' | 'iso' | 'date' | 'filter';
 type SortDirection = 'asc' | 'desc';
@@ -177,6 +197,7 @@ export const FileBrowserToolbar: React.FC<{
                             <li><code>iso {'>'} 800</code> (ISO greater than 800)</li>
                             <li><code>exp {'>='} 30</code> (Exposure &ge; 30s)</li>
                             <li><code>name includes dark</code></li>
+                            <li><code>status:set-aside</code> (also <code>flagged</code>, <code>included</code>, <code>not-stacked</code>)</li>
                             <li><code>(iso {'>'} 100 && exp {'>'} 60)</code></li>
                         </ul>
                         <div className="file-browser__help-close-container">
@@ -212,13 +233,21 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     checkedFiles,
     onToggleFile,
     onToggleAll,
-    selectedCamera
+    selectedCamera,
+    frameStatuses,
+    setAsideFiles = [],
+    onPutBackFrame
 }) => {
     const [sortField, setSortField] = useState<SortField>('date'); // Default sort by date
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc'); // Newer first
 
     // State for shift-click multi-selection
     const [lastActionIndex, setLastActionIndex] = useState<number | null>(null);
+
+    // The set-aside frame the person asked to put back, until they confirm or cancel.
+    const [putBackPath, setPutBackPath] = useState<string | null>(null);
+
+    const statusOf = (path: string): FrameStatusInfo => frameStatuses?.get(path) ?? DEFAULT_STATUS;
 
     // State for user-flagged outlier frames (cosmic rays, satellite trails)
     const [outlierFrames, setOutlierFrames] = useState<Set<string>>(new Set());
@@ -254,9 +283,15 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             result = result.filter(file => file.camera === selectedCamera);
         }
 
+        // Set-aside frames follow the target's own frames, whatever camera is picked.
+        // Their file names carry no camera, so the camera filter would hide them all.
+        if (setAsideFiles.length > 0) {
+            result = [...result, ...setAsideFiles];
+        }
+
         // Filter
         if (searchTerm) {
-            result = result.filter(file => matchesQuery(file, searchTerm));
+            result = result.filter(file => matchesQuery({ ...file, status: (frameStatuses?.get(file.path) ?? DEFAULT_STATUS).filterText }, searchTerm));
         }
 
         // Clone for sorting to avoid mutating props if it was a direct reference (though filter returns new array)
@@ -277,13 +312,55 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         }
 
         return result;
-    }, [files, searchTerm, sortField, sortDirection, selectedCamera]);
+    }, [files, setAsideFiles, frameStatuses, searchTerm, sortField, sortDirection, selectedCamera]);
 
     const isRejected = (path: string) => rejectedFiles.includes(path);
 
+    const listRef = useRef<HTMLDivElement>(null);
+    const rowId = (path: string) => `file-browser-row-${path.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    const selectedInList = selectedFile !== null && sortedFiles.some(file => file.path === selectedFile);
+
+    useEffect(() => {
+        // Any change of the selected file (arrow key, row click or a mark clicked in the timeline) brings its row into view.
+        if (selectedFile === null) return;
+        document.getElementById(rowId(selectedFile))?.scrollIntoView?.({ block: 'nearest' });
+    }, [selectedFile]);
+
+    /** Up and Down open the file above or below the selected one, in the order the list shows. They stop at the ends. */
+    const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        // Leave keys alone when a control inside the list (a checkbox or button) has the focus.
+        if (event.target !== event.currentTarget) return;
+        const current = sortedFiles.findIndex(file => file.path === selectedFile);
+        if (current < 0) return;
+        event.preventDefault();
+        const next = current + (event.key === 'ArrowDown' ? 1 : -1);
+        if (next < 0 || next >= sortedFiles.length) return;
+        onSelectFile(sortedFiles[next].path);
+    };
+
     return (
         <div className="file-browser">
-            <div className="file-browser__list">
+            <ConfirmDialog
+                open={putBackPath !== null}
+                title="Put frame back"
+                message="Move this frame out of the set-aside folder and back into the target? The next stack may set it aside again."
+                confirmLabel="Put back"
+                onConfirm={() => {
+                    if (putBackPath !== null) onPutBackFrame?.(putBackPath);
+                    setPutBackPath(null);
+                }}
+                onCancel={() => setPutBackPath(null)}
+            />
+            <div
+                className="file-browser__list"
+                ref={listRef}
+                tabIndex={0}
+                role="group"
+                aria-label="Files. Use the up and down arrow keys to move between files."
+                aria-activedescendant={selectedInList ? rowId(selectedFile as string) : undefined}
+                onKeyDown={handleListKeyDown}
+            >
                 <table className="data-table">
                     <thead>
                         <tr>
@@ -324,10 +401,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             const rejected = isRejected(file.path);
                             const isOutlier = outlierFrames.has(file.path);
                             const isChecked = checkedFiles.has(file.path);
+                            const status = statusOf(file.path);
+                            const isSetAside = status.kind === 'set-aside';
                             const key = `${file.path}-${index}`; // Ensure uniqueness even if path duplicates exist
                             return (
                                 <tr
                                     key={key}
+                                    id={rowId(file.path)}
                                     className={`${selectedFile === file.path ? 'selected' : ''} ${isOutlier ? 'row-outlier' : ''}`}
                                     onContextMenu={(e) => {
                                         e.preventDefault();
@@ -352,6 +432,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                                     <td onClick={(e) => e.stopPropagation()}>
                                         <Checkbox
                                             aria-label={`Select ${file.name}`}
+                                            disabled={isSetAside}
                                             checked={isChecked}
                                             onChange={() => {}}
                                             onClick={(e) => {
@@ -372,13 +453,36 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                                     <td>{file.camera}</td>
                                     <td>{file.filter}</td>
                                     <td>{file.exposure}</td>
-                                    {/* The variable-star search can leave a frame out. That says nothing
-                                        about stacking, so the text names what was unusual, not "Rejected". */}
-                                    <td
-                                        className={rejected ? 'status-rejected' : isOutlier ? 'status-warning' : 'status-included'}
-                                        title={rejected ? UNUSUAL_BRIGHTNESS_TOOLTIP : undefined}
-                                    >
-                                        {rejected ? 'Unusual brightness' : isOutlier ? '⚠️ Outlier' : 'Included'}
+                                    {/* The chip says where the frame stands in the stack; its hover text is the
+                                        reason. The variable-star search can also leave a frame out. That says
+                                        nothing about stacking, so it is a second chip that names what was unusual. */}
+                                    <td>
+                                      <div className="file-browser__status-cell">
+                                        <StatusChip
+                                            status={status.tone}
+                                            label={status.label}
+                                            title={isSetAside && !status.restorable && status.restoreNote
+                                                ? `${status.tooltip} ${status.restoreNote}`
+                                                : status.tooltip}
+                                        />
+                                        {rejected && (
+                                            <StatusChip status="warning" label="Unusual brightness" title={UNUSUAL_BRIGHTNESS_TOOLTIP} />
+                                        )}
+                                        {isOutlier && <StatusChip status="warning" label="Outlier" title="You marked this frame as an outlier." />}
+                                        {isSetAside && status.restorable && onPutBackFrame && (
+                                            <Button
+                                                size="small"
+                                                variant="secondary"
+                                                title="Move this frame back into the target"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setPutBackPath(file.path);
+                                                }}
+                                            >
+                                                Put back
+                                            </Button>
+                                        )}
+                                      </div>
                                     </td>
                                 </tr>
                             );

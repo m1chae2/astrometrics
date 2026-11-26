@@ -7,9 +7,12 @@ are the one place that writes them.
 
 __all__ = [
     "exposure_group_left_out_reason",
+    "exposure_group_not_judged_reason",
     "flat_calibration_issue_reason",
     "frames_moved_to_excluded_reason",
     "single_frame_stack_reason",
+    "stack_cropped_reason",
+    "stack_turned_reason",
     "uncovered_flat_calibration_issues",
 ]
 
@@ -59,6 +62,24 @@ def exposure_group_left_out_reason(exposure_seconds: float, left_out_reason: str
     return f"the {exposure_seconds:g} s exposure group {left_out_reason}"
 
 
+def exposure_group_not_judged_reason(exposure_seconds: float, not_judged_reason: str) -> str:
+    """Write the sentence for a group the brightness check did not judge.
+
+    Parameters
+    ----------
+    exposure_seconds : `float`
+        The exposure length of the group.
+    not_judged_reason : `str`
+        Why it was not judged, as the gain measurement wrote it.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"the {exposure_seconds:g} s exposure group {not_judged_reason}"
+
+
 def flat_calibration_issue_reason(issue: str) -> str:
     """Write the sentence for one flat calibration issue.
 
@@ -106,3 +127,37 @@ def uncovered_flat_calibration_issues(issues: list[str]) -> list[str]:
     noise_issues = [issue for issue in issues if issue.startswith(NOISY_FLAT_ISSUE_PREFIX)]
     covered = {UNREADABLE_FLATS_ISSUE, *level_issues[:1], *noise_issues[:1]}
     return [issue for issue in issues if issue not in covered]
+
+
+def stack_cropped_reason(crop_reason: str) -> str:
+    """Write the sentence for a stack whose edges were cropped.
+
+    Parameters
+    ----------
+    crop_reason : `str`
+        The crop's own reason, with the sides, pixels, frame counts and the
+        rule's numbers.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"stack cropped at the edges: {crop_reason}"
+
+
+def stack_turned_reason(turn_reason: str) -> str:
+    """Write the sentence for a stack that was turned by a quarter turn.
+
+    Parameters
+    ----------
+    turn_reason : `str`
+        The turn's own reason, with the degrees turned and where the top of
+        the picture pointed before and after.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"stack turned so that north is near the top: {turn_reason}"

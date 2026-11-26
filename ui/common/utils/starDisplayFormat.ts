@@ -313,9 +313,11 @@ const SPECTRAL_CLASS_ALIASES: Record<string, string> = { R: 'C', N: 'C' };
 
 /**
  * Reduces a catalog spectral type string to its primary class letter, the
- * same way the backend's `_spectral_class_letter` does, so the Planetarium
+ * same way the backend's `spectral_class_letter` does, so the Planetarium
  * can filter its rendered star field to match a chosen spectral-class
- * browser selection without a round trip.
+ * browser selection without a round trip. This is a copy of that rule:
+ * `spectral_class_letter` in `astrometricslib/pipelines/shared/star_analysis.py`
+ * owns it, so change both together.
  *
  * @param spectralType The star's catalog spectral type, e.g. "G2V".
  * @returns The class letter (e.g. "G", "R2" -> "C"), or an empty string when the type is empty, "Unknown", or not one of the classes the browser shows.
@@ -847,4 +849,39 @@ export function emissionLineMarks(emissionLines: EmissionLineResult[] | null | u
                 significance: entry.significance,
             } as SpectralFeatureResult;
         });
+}
+
+/** How many other names the star card shows before the rest go behind "+N more". */
+export const SHOWN_ALIAS_COUNT = 3;
+
+/** The other names of a star, split into the few shown and the rest. */
+export interface AliasList {
+    /** The names to show, most familiar first. */
+    shown: string[];
+    /** The names behind "+N more". */
+    hidden: string[];
+}
+
+/**
+ * Picks which other names of a star to show.
+ *
+ * The library already lists them most familiar first. This drops a name that repeats the star's own name or an
+ * earlier alias (ignoring case and extra spaces), and the "NAME " prefix SIMBAD puts before a proper name.
+ *
+ * @param aliases The other names, from the star's record.
+ * @param starName The name the card already shows.
+ * @returns The first few names, and the rest.
+ */
+export function describeAliases(aliases: readonly string[] | null | undefined, starName: string): AliasList {
+    const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase();
+    const seen = new Set<string>([normalize(starName)]);
+    const names: string[] = [];
+    for (const alias of aliases ?? []) {
+        const cleaned = alias.replace(/^NAME\s+/i, '').replace(/\s+/g, ' ').trim();
+        const key = normalize(cleaned);
+        if (key === '' || seen.has(key)) continue;
+        seen.add(key);
+        names.push(cleaned);
+    }
+    return { shown: names.slice(0, SHOWN_ALIAS_COUNT), hidden: names.slice(SHOWN_ALIAS_COUNT) };
 }

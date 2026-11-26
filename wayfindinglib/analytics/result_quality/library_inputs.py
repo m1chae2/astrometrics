@@ -600,7 +600,10 @@ class LibraryInputs:
             The targets by id.
         """
         if self._targets is None:
-            self._targets = {target.id: target for target in self.astrometrics.targets.list()}
+            self._targets = {
+                target.id: target
+                for target in self.astrometrics.targets.query(detail="objects", limit=None).objects
+            }
         return self._targets
 
     def target(self, target_id: str) -> Target | None:
@@ -662,7 +665,7 @@ class LibraryInputs:
                 try:
                     rows.extend(
                         self.astrometrics.quality.query(
-                            metric=metric, level="frame", camera=camera, library_only=True
+                            metric=metric, level="frame", camera_id=camera, library_only=True
                         ).rows
                     )
                 except (AstrometricsError, sqlite3.Error) as error:

@@ -25,7 +25,17 @@ class ProfileFit(BaseModel):
     reason : `str` or `None`
         Why the fit failed.
     fwhm_px : `float` or `None`
-        Full width at half maximum, in pixels.
+        Full width at half maximum of this one-star fit, in pixels.
+    estimator : `str` or `None`
+        The `StarWidthEstimator` whose ratio puts ``fwhm_px`` on the
+        library's one star-width scale: ``"frame Moffat"`` for the Moffat
+        fit, ``"frame Gaussian"`` for the Gaussian fit. The frame estimators
+        are medians over many stars, so for one star the scaled width is an
+        estimate.
+    fwhm_on_scale_px : `float` or `None`
+        ``fwhm_px`` on the one star-width scale (the per-frame Gaussian of
+        the brightest stars), in pixels, comparable with every other width
+        the library records.
     fwhm_arcsec : `float` or `None`
         The same width in arcseconds, when the header gives a pixel scale.
     peak : `float` or `None`
@@ -44,6 +54,8 @@ class ProfileFit(BaseModel):
     fitted: bool
     reason: str | None = None
     fwhm_px: float | None = None
+    estimator: str | None = None
+    fwhm_on_scale_px: float | None = None
     fwhm_arcsec: float | None = None
     peak: float | None = None
     beta: float | None = None
@@ -131,6 +143,14 @@ class StarProfileMeasurement(BaseModel):
 
     Pixel positions are 1-based, as in FITS and DS9: the center of the first
     pixel is (1, 1). ``x`` runs along the columns and ``y`` along the rows.
+
+    Every direction on the image in this result (the cut, the ring bins,
+    the ring harmonics and the long axis of the star's core) is one angle
+    convention: degrees from +y (increasing row) toward +x (increasing
+    column). So a cut at ``star_elongation_angle_deg`` runs along the long
+    axis. The stored frame metric ``frame.star_elongation_angle_deg`` is
+    measured the other way, from +x toward +y; the two are related by
+    ``profile angle = (90 - frame angle) mod 180``.
 
     Parameters
     ----------
@@ -234,6 +254,49 @@ class StarProfileMeasurement(BaseModel):
         The fraction of the ring's pixels that the neighbor masks removed.
     ring_note : `str` or `None`
         A sentence that says why the ring could not be analyzed, or `None`.
+    peak_over_sky_noise : `float`
+        The brightest pixel above the sky divided by the sky noise (one
+        standard deviation of a sky pixel). It is the peak's height in noise
+        levels, not the signal-to-noise ratio of the star's total light,
+        which `QualityBlocks.measure_aperture` gives.
+    edge_distance_px : `float`
+        How far the star's center is from the nearest image edge, in pixels.
+    coverage_fraction : `float`
+        The share of the sky ring's area (the outer radius of the photometry
+        sky ring) that lies inside the image and holds a real value.
+    aperture_radius_px, sky_inner_px, sky_outer_px : `float`
+        The photometry circle and the radii of its sky ring, in pixels.
+    circle_neighbor_count : `int`
+        How many bright neighbors crowd the photometry circle.
+    sky_ring_neighbor_count : `int`
+        How many neighbors lie in the photometry sky ring.
+    star_elongation : `float` or `None`
+        The star's core elongation, long axis divided by short axis (1 is
+        round), from the second moments of its light. It is the one-star form
+        of the estimator that makes the frame's `frame.star_elongation`. `None`
+        when ``star_shape_judgeable`` is `False`.
+    star_elongation_angle_deg : `float` or `None`
+        The direction of the long axis, from 0 up to but not including 180
+        degrees, from +y (increasing row) toward +x (increasing column), the
+        convention of the cut. It is set by noise for a round star. `None`
+        when the shape is not judgeable.
+    star_elongation_position_angle_deg : `float` or `None`
+        The same direction on the sky: the position angle from north toward
+        east, 0 up to but not including 180 degrees, from the image's plate
+        solution. `None` when the shape is not judgeable or the image has no
+        plate solution.
+    star_shape_judgeable : `bool`
+        `True` when the frame measurement would accept this star: bright
+        enough, not clipped, no close neighbor, inside the image, and a
+        Moffat fit within its limits.
+    star_shape_note : `str` or `None`
+        The short reason the shape is not judgeable (for example "a neighbor
+        is too close"), or `None`.
+    star_shape_detail : `str` or `None`
+        The same reason as a full sentence, or `None`.
+    trailing_elongation_limit : `float` or `None`
+        The elongation above which stacking sets a frame aside as trailed.
+        The library fills it in; `None` when it is not known.
     """
 
     path: str
@@ -282,3 +345,18 @@ class StarProfileMeasurement(BaseModel):
     ring_masked_neighbor_count: int
     ring_masked_fraction: float
     ring_note: str | None = None
+    peak_over_sky_noise: float = 0.0
+    edge_distance_px: float = 0.0
+    coverage_fraction: float = 1.0
+    aperture_radius_px: float = 0.0
+    sky_inner_px: float = 0.0
+    sky_outer_px: float = 0.0
+    circle_neighbor_count: int = 0
+    sky_ring_neighbor_count: int = 0
+    star_elongation: float | None = None
+    star_elongation_angle_deg: float | None = None
+    star_elongation_position_angle_deg: float | None = None
+    star_shape_judgeable: bool = False
+    star_shape_note: str | None = None
+    star_shape_detail: str | None = None
+    trailing_elongation_limit: float | None = None

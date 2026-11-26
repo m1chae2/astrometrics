@@ -361,7 +361,7 @@ def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
 def test_camera_without_a_profile_or_entries_reports_none(shipped_config: AppConfiguration) -> None:
     """An unknown camera, or one with no entries, gives an empty list."""
     assert list_camera_noise(library_with_camera_profiles(shipped_config), "No Such Camera") == []
-    assert list_camera_noise(library_with_camera_profiles(shipped_config), "Nikon D5300") == []
+    assert list_camera_noise(library_with_camera_profiles(shipped_config), "ZWO ASI120MC-S") == []
 
 
 def test_camera_profiles_carry_the_noise_in_camel_case(shipped_config: AppConfiguration) -> None:

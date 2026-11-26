@@ -9,6 +9,8 @@ checks live here, in one place:
 
 * `resolve_target` turns a name into the `Target` it names;
 * `check_choice` and `check_include` refuse values a method does not know;
+* `check_limit` holds the one ``limit`` rule: a count outside the documented
+  range is refused, never quietly moved into it;
 * `reject_unused_arguments` refuses an argument that the chosen ``kind``
   does not use, so a caller learns about a mistake instead of having the
   argument silently ignored;
@@ -39,6 +41,7 @@ __all__ = [
     "TimeInput",
     "check_choice",
     "check_include",
+    "check_limit",
     "make_frame_selection",
     "reject_unused_arguments",
     "resolve_target",
@@ -173,6 +176,53 @@ def check_include(include: Iterable[str] | None, allowed: Collection[str]) -> fr
             details={"unknown": unknown, "choices": list(allowed)},
         )
     return sections
+
+
+def check_limit(
+    value: int | None,
+    minimum: int,
+    maximum: int | None,
+    *,
+    name: str = "limit",
+    allow_none: bool = True,
+) -> None:
+    """Refuse a count (``limit``, ``offset``, ``lines``) outside its range.
+
+    This is the one ``limit`` rule of the public methods: a value outside
+    the documented range raises, it is never clamped. `None` is accepted
+    when ``allow_none`` is set; each method says what `None` means.
+
+    Parameters
+    ----------
+    value : `int` or `None`
+        The count the caller gave.
+    minimum : `int`
+        The smallest allowed value.
+    maximum : `int` or `None`
+        The largest allowed value, or `None` for no upper bound.
+    name : `str`, optional
+        The argument's name, for the message. Defaults to ``"limit"``.
+    allow_none : `bool`, optional
+        Accept `None`. Defaults to `True`.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``value`` is not a whole number (or `None` when allowed), or is
+        outside ``minimum`` to ``maximum``.
+    """
+    if value is None and allow_none:
+        return
+    upper = "" if maximum is None else f" and at most {maximum}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidArgumentError(
+            f"{name} must be a whole number of at least {minimum}{upper}.", details={name: value}
+        )
+    if value < minimum or (maximum is not None and value > maximum):
+        raise InvalidArgumentError(
+            f"{name} must be at least {minimum}{upper}; got {value}.",
+            details={name: value, "minimum": minimum, "maximum": maximum},
+        )
 
 
 def reject_unused_arguments(

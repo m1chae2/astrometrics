@@ -5,8 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import {
     AnalysisSelectionInput,
+    NO_ASTROMETRY_SOURCE_REASON,
+    NO_IMAGING_SOURCE_REASON,
+    NO_SPECTRAL_SOURCE_REASON,
     chooseAnalysisSelection,
-    chooseTemporalVariationSelection,
+    chooseStageSelection,
+    describeStageAvailability,
+    NO_RAW_SPECTRAL_FRAMES_REASON,
 } from '../utils/analysisSelection';
 
 const baseInput: AnalysisSelectionInput = {
@@ -19,58 +24,151 @@ const baseInput: AnalysisSelectionInput = {
 };
 
 describe('chooseAnalysisSelection', () => {
-    it('analyzes the master spectral stack first, even when raw frames are ticked', () => {
+    it('sends both stacks and no stages, whichever filter is in view, so the backend chooses', () => {
+        for (const filterType of ['SPEC', 'L']) {
+            const selection = chooseAnalysisSelection({
+                ...baseInput,
+                filterType,
+                stackedImage: '/lights/Vega/Vega_L_Stacked.fits',
+            });
+            expect(selection).toEqual({
+                paths: ['/lights/Vega/Vega_L_Stacked.fits', '/lights/Vega/Vega_SPEC_Stacked.fits'],
+                filterType: filterType === 'L' ? 'L' : undefined,
+            });
+        }
+    });
+
+    it('analyzes the master spectral stack alone, even when raw frames are ticked or previewed', () => {
         const selection = chooseAnalysisSelection({
             ...baseInput,
             checkedFiles: new Set(['/lights/Vega/raw_001.fits']),
+            selectedFile: '/lights/Vega/raw_002.fits',
+            selectedFileFilter: 'SPEC',
         });
         expect(selection).toEqual({ paths: ['/lights/Vega/Vega_SPEC_Stacked.fits'], filterType: 'SPEC' });
     });
 
-    it('uses ticked files when there is no master spectral stack', () => {
-        const selection = chooseAnalysisSelection({
-            ...baseInput,
-            stackedSpectralTarget: null,
-            checkedFiles: new Set(['/lights/Vega/raw_001.fits']),
-        });
-        expect(selection?.paths).toEqual(['/lights/Vega/raw_001.fits']);
-    });
-
-    it('does not prefer the spectral stack for a non-spectral filter', () => {
+    it('uses the imaging stack over ticked and previewed files', () => {
         const selection = chooseAnalysisSelection({
             ...baseInput,
             filterType: 'L',
             stackedImage: '/lights/Vega/Vega_L_Stacked.fits',
+            stackedSpectralTarget: null,
+            checkedFiles: new Set(['/lights/Vega/raw_001.fits']),
+            selectedFile: '/lights/Vega/raw_002.fits',
+            selectedFileFilter: 'L',
         });
-        expect(selection?.paths).toEqual(['/lights/Vega/Vega_L_Stacked.fits']);
+        expect(selection).toEqual({ paths: ['/lights/Vega/Vega_L_Stacked.fits'], filterType: 'L' });
     });
 
-    it('falls back to every file in view, and to nothing when the view is empty', () => {
-        expect(chooseAnalysisSelection({ ...baseInput, stackedSpectralTarget: null })?.paths).toHaveLength(2);
-        expect(
-            chooseAnalysisSelection({ ...baseInput, stackedSpectralTarget: null, filteredFilePaths: [] })
-        ).toBeNull();
+    it('uses the selected file, not the ticked files, when there is no stack', () => {
+        const selection = chooseAnalysisSelection({
+            ...baseInput,
+            filterType: 'L',
+            stackedSpectralTarget: null,
+            checkedFiles: new Set(['/lights/Vega/raw_001.fits']),
+            selectedFile: '/lights/Vega/raw_002.fits',
+            selectedFileFilter: 'L',
+        });
+        expect(selection?.paths).toEqual(['/lights/Vega/raw_002.fits']);
+    });
+
+    it('is off with no stack and no selected file, even when files are in view', () => {
+        expect(chooseAnalysisSelection({ ...baseInput, filterType: 'L', stackedSpectralTarget: null })).toBeNull();
+    });
+
+    it('does not use a selected frame of the wrong kind', () => {
+        const selection = chooseAnalysisSelection({
+            ...baseInput,
+            stackedSpectralTarget: null,
+            selectedFile: '/lights/Vega/raw_001.fits',
+            selectedFileFilter: 'L',
+        });
+        expect(selection).toBeNull();
     });
 });
 
-describe('chooseTemporalVariationSelection', () => {
-    it('offers the raw frames once a master spectral stack exists', () => {
-        expect(chooseTemporalVariationSelection(baseInput)).toEqual({
+describe('describeStageAvailability', () => {
+    const imagingStack = '/lights/Vega/Vega_L_Stacked.fits';
+
+    it('turns everything on when both stacks exist', () => {
+        const availability = describeStageAvailability({ ...baseInput, stackedImage: imagingStack });
+        expect(Object.values(availability).every((stage) => stage.enabled)).toBe(true);
+    });
+
+    it('turns astrometry and photometry off with no imaging stack and no selected imaging frame', () => {
+        const availability = describeStageAvailability(baseInput);
+        expect(availability.astrometry).toEqual({ enabled: false, reason: NO_IMAGING_SOURCE_REASON });
+        expect(availability.photometry.enabled).toBe(false);
+    });
+
+    it('turns spectroscopy off when astrometry cannot run, with its own reason', () => {
+        const availability = describeStageAvailability(baseInput);
+        expect(availability.spectroscopy).toEqual({ enabled: false, reason: NO_ASTROMETRY_SOURCE_REASON });
+    });
+
+    it('turns spectroscopy off with no spectral stack and no selected spectral frame', () => {
+        const availability = describeStageAvailability({
+            ...baseInput,
+            stackedImage: imagingStack,
+            stackedSpectralTarget: null,
+        });
+        expect(availability.spectroscopy).toEqual({ enabled: false, reason: NO_SPECTRAL_SOURCE_REASON });
+        expect(availability.photometry.enabled).toBe(true);
+    });
+
+    it('accepts a selected frame when there is no stack of that kind', () => {
+        const availability = describeStageAvailability({
+            ...baseInput,
+            stackedSpectralTarget: null,
+            selectedFile: '/lights/Vega/raw_001.fits',
+            selectedFileFilter: 'L',
+        });
+        expect(availability.astrometry.enabled).toBe(true);
+        expect(availability.spectroscopy.enabled).toBe(false);
+    });
+});
+
+describe('chooseStageSelection', () => {
+    it('sends the stack of the needed kind for each stage', () => {
+        const input = { ...baseInput, stackedImage: '/lights/Vega/Vega_L_Stacked.fits', filterType: 'L' };
+        expect(chooseStageSelection(input, 'astrometry')).toEqual({
+            paths: ['/lights/Vega/Vega_L_Stacked.fits'],
+            filterType: 'L',
+        });
+        expect(chooseStageSelection(input, 'spectroscopy')).toEqual({
+            paths: ['/lights/Vega/Vega_SPEC_Stacked.fits'],
+            filterType: 'SPEC',
+        });
+    });
+
+    it('returns null for a stage that is off', () => {
+        expect(chooseStageSelection(baseInput, 'photometry')).toBeNull();
+    });
+});
+
+describe('the Spectral Variation stage', () => {
+    it('follows every raw frame in view when none is ticked', () => {
+        expect(chooseStageSelection(baseInput, 'spectral_variation')).toEqual({
             paths: ['/lights/Vega/raw_001.fits', '/lights/Vega/raw_002.fits'],
             filterType: 'SPEC',
         });
     });
 
     it('prefers the ticked frames', () => {
-        const selection = chooseTemporalVariationSelection({
-            ...baseInput,
-            checkedFiles: new Set(['/lights/Vega/raw_002.fits']),
-        });
+        const selection = chooseStageSelection(
+            { ...baseInput, checkedFiles: new Set(['/lights/Vega/raw_002.fits']) },
+            'spectral_variation'
+        );
         expect(selection?.paths).toEqual(['/lights/Vega/raw_002.fits']);
     });
 
-    it('is not offered without a master stack or for a non-spectral filter', () => {
-        expect(chooseTemporalVariationSelection({ ...baseInput, stackedSpectralTarget: null })).toBeNull();
-        expect(chooseTemporalVariationSelection({ ...baseInput, filterType: 'L' })).toBeNull();
+    it('is off, with a reason, for a non-spectral filter', () => {
+        const input = { ...baseInput, filterType: 'L' };
+        expect(describeStageAvailability(input).spectral_variation).toEqual({
+            enabled: false,
+            reason: NO_RAW_SPECTRAL_FRAMES_REASON,
+        });
+        expect(chooseStageSelection(input, 'spectral_variation')).toBeNull();
     });
 });

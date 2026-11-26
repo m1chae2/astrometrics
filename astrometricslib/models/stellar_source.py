@@ -57,6 +57,8 @@ __all__ = [
     "PhotometryResult",
     "PlotData",
     "SpectralExtractionDiagnostics",
+    "StackChoice",
+    "StackConfigurationRef",
     "StellarObject",
     "StellarSessionMatch",
     "TargetFilesResponse",
@@ -541,6 +543,21 @@ class SessionPhotometrySummary(BaseModel):
     # scatter exceeded what their errors allow, and stars a catalog lists as
     # variable. `None` for a session recorded before the set was vetted.
     comparison_rejected_count: int | None = Field(default=None, alias="comparisonRejectedCount")
+    # How the session was put on the field's brightness scale before the
+    # sessions were joined (see `pipelines.photometry.session_tie`): the
+    # reference session ("reference", scaled by nothing), a session scaled by
+    # the field's factor ("tied") or a session left as measured ("untied",
+    # because too few stars were shared). `None` for a light curve saved
+    # before sessions were tied. When "tied", `median_normalized_flux`,
+    # `normalized_flux_scatter` and the light curve's normalized fluxes are
+    # already multiplied by `tie_factor` (no units).
+    tie_status: str | None = Field(default=None, alias="tieStatus")
+    tie_factor: float | None = Field(default=None, alias="tieFactor")
+    # The uncertainty of the tie factor, as a fraction of the level (0.02 is
+    # 2%). The same for every star of the session, because it is a property of
+    # the session. The between-session significance adds it to the error of
+    # the session's median.
+    tie_uncertainty: float | None = Field(default=None, alias="tieUncertainty")
 
 
 class PhotometryResult(BaseModel):
@@ -558,6 +575,26 @@ class PhotometryResult(BaseModel):
     airmasses: list[float] = Field(default_factory=list, alias="airmasses")
     magnitudes: list[float] = Field(default_factory=list, alias="magnitudes")
     is_saturated: list[bool] = Field(default_factory=list, alias="isSaturated")
+    # How many of this star's measurements were removed from the light curve
+    # because the star was saturated in that frame (a saturated star's flux
+    # no longer follows its brightness). The removed points are in none of
+    # the arrays above, so every array holds only unsaturated points. For a
+    # light curve merged from several sessions this is the sum of the
+    # sessions' counts. 0 when nothing was removed, and for a light curve
+    # saved before saturated points were removed.
+    saturated_points_removed: int = Field(default=0, alias="saturatedPointsRemoved")
+    # Why this star has no light curve although it was measured, in plain
+    # words (for example, that it was saturated in every frame). `None`
+    # when the star has a light curve, or when it was saved before this was
+    # recorded.
+    light_curve_withheld_reason: str | None = Field(default=None, alias="lightCurveWithheldReason")
+    # Why this star's variability was not judged although it has a light
+    # curve, in plain words (for example, that it changes brightness exactly
+    # when the field moved between frames, or that it was saturated in too
+    # many frames). The light curve and its indices are kept; the star is
+    # only never a candidate. `None` when the star was judged, and for a
+    # light curve saved before this was recorded.
+    not_judged_reason: str | None = Field(default=None, alias="notJudgedReason")
     # The 1-sigma uncertainty of each entry of `fluxes`, in ADU per second
     # (the same units), from the CCD equation (see
     # `pre_processing.frame_photometry.aperture_flux_error_adu`). Empty, or
@@ -592,6 +629,21 @@ class PhotometryResult(BaseModel):
     # Earth's center (see `pre_processing.observation_times`). `None` when
     # `time_bjd_tdb` is empty.
     time_basis: str | None = Field(default=None, alias="timeBasis")
+    # How crowded the star is, measured on the reference frame from the
+    # frame's detected stars (see `pre_processing.frame_photometry`). The
+    # distance to the nearest other detection, in pixels, and its peak over
+    # this star's. `None` when no neighbor lies within the search radius or
+    # the light curve was saved before crowding was recorded.
+    nearest_neighbor_distance_px: float | None = Field(default=None, alias="nearestNeighborDistancePx")
+    nearest_neighbor_flux_ratio: float | None = Field(default=None, alias="nearestNeighborFluxRatio")
+    # The share of the sky ring's pixels left out because a bright neighbor
+    # lights them. `None` when crowding was not recorded.
+    masked_sky_fraction: float | None = Field(default=None, alias="maskedSkyFraction")
+    # `True` when a neighbor bright enough to matter lies within the aperture
+    # radius plus the crowding margin, so its light may add to this star's
+    # flux. Comparison stars are never chosen from crowded stars. `None` when
+    # crowding was not recorded.
+    crowded: bool | None = Field(default=None, alias="crowded")
     periodogram: PeriodogramResult | None = Field(default=None, alias="periodogram")
     transit_candidate: TransitCandidate | None = Field(default=None, alias="transitCandidate")
     mean_flux: float | None = Field(default=None, alias="meanFlux")
@@ -1142,6 +1194,11 @@ class StellarObject(BaseModel):
 
     id: str = Field(default="", alias="id")
     name: str = Field(default="", alias="name")
+    # Other names of the star, most familiar first, such as its SIMBAD main
+    # identifier and its HD or HIP number. A star matched in Gaia DR3 is
+    # saved under its Gaia id ("Gaia DR3 <number>"), so the names people
+    # know it by are kept here and in `name`. Empty when the star has none.
+    aliases: list[str] = Field(default_factory=list, alias="aliases")
     # Where the star is in the sky (right ascension is like longitude,
     # declination is like latitude, but for the sky instead of Earth).
     # `None` until identification/resolution sets it -- e.g. the
@@ -1157,9 +1214,22 @@ class StellarObject(BaseModel):
     # just the "not yet known" default, not the field's only valid shape.
     flux: Any = Field(default=None, alias="flux")
     # The star's brightness on the standard astronomical scale, where
-    # LOWER numbers mean a BRIGHTER star (the opposite of most scales).
-    # `None` means not yet known, not "magnitude zero" -- same `Any`
-    # tolerance as flux above.
+    # LOWER numbers mean a BRIGHTER star (the opposite of most scales). One
+    # field holds the value of whichever catalog named the star:
+    # - SIMBAD's V (visual band) magnitude for a star SIMBAD names;
+    # - Gaia DR3's G (broad optical band) mean magnitude for a star named
+    #   from Gaia only;
+    # - `None` when the catalog gave none or the star is not identified;
+    # - 0 on records saved by older versions for "the catalog gave none";
+    # - an instrumental magnitude (-2.5 log10 of the raw counts, about -10
+    #   to -17) on records an earlier photometry version overwrote.
+    # Only the first two are catalog magnitudes. `has_catalog_magnitude`
+    # tells them apart (a finite value of at least
+    # `BRIGHTEST_CATALOG_MAGNITUDE` that is not 0), and
+    # `StellarCatalog.query(has_catalog_magnitude=True)` filters on it.
+    # The band is not stored with the value: it is V when SIMBAD matching
+    # wrote the record and G when Gaia matching did.
+    # Same `Any` tolerance as flux above.
     magnitude: Any = Field(default=None, alias="magnitude")
     # The star's catalog colour: its blue (B) magnitude minus its visual (V)
     # magnitude, from SIMBAD. Bluer (hotter) stars have lower values. It comes
@@ -1180,8 +1250,13 @@ class StellarObject(BaseModel):
     photometry: PhotometryResult | None = Field(default_factory=PhotometryResult, alias="photometry")
     # The star's raw pixel position and shape info from source detection
     # (e.g. its centroid coordinates), used to relocate it in later
-    # pictures. Defaults to an empty dict, not a list -- every real
-    # consumer treats this as a dict (`.get("xcentroid", ...)`).
+    # pictures. It is the star finder's own row, stored as found: its
+    # ``xcentroid`` and ``ycentroid`` count pixels from 0 (the finder's and
+    # astropy's convention), unlike the 1-based positions the public calls
+    # return. The astrometry stage writes it from the finder; spectroscopy
+    # rewrites the centroid from the plate solution (also 0-based).
+    # Defaults to an empty dict, not a list -- every real consumer treats
+    # this as a dict (`.get("xcentroid", ...)`).
     star_data: Any = Field(default_factory=dict, alias="starData")
     # How big the star looks in the image it was detected in, as a radius in
     # pixels (measured by source detection). Used to size the on-screen
@@ -1486,6 +1561,26 @@ class FileItem(BaseModel):
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
 
 
+class CalibrationGroupMatch(BaseModel):
+    """What the stacker would use of one calibration kind for a light group.
+
+    The numbers come from the same selection the stacking stage runs
+    (`CalibrationLibrary.select_dark_frames`, `select_bias_frames` and
+    `select_flat_frames`), so a count above zero with no notes means stacking
+    finds an exact match.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    count: int = Field(default=0, ge=0, alias="count")
+    # Plain sentences for a mismatch the stacker works around (frames of
+    # another gain, offset or temperature were chosen, so the frames are used).
+    fallbacks: list[str] = Field(default_factory=list, alias="fallbacks")
+    # Why no frame is used, as one sentence such as "no bias at gain 100,
+    # offset 10". Empty when frames were found.
+    problem: str = Field(default="", alias="problem")
+
+
 class GroupedFrameStat(BaseModel):
     """A count of how many images share the same filter and exposure time."""
 
@@ -1500,6 +1595,47 @@ class GroupedFrameStat(BaseModel):
     # camera sensor's own background noise.
     darks: str | None = Field(default=None, alias="darks")
     camera: str | None = Field(default=None, alias="camera")
+    # The optic of the group: its focal length in whole millimeters.
+    focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
+    # The camera offset and binning of the group, as the stacker matches them.
+    offset: str | None = Field(default=None, alias="offset")
+    binning: str | None = Field(default=None, alias="binning")
+    # What the stacker would use for this group, per calibration kind.
+    dark_match: CalibrationGroupMatch | None = Field(default=None, alias="darkMatch")
+    flat_match: CalibrationGroupMatch | None = Field(default=None, alias="flatMatch")
+    bias_match: CalibrationGroupMatch | None = Field(default=None, alias="biasMatch")
+
+
+class StackConfigurationRef(BaseModel):
+    """The camera and optic of a target's current stack.
+
+    ``label`` is the stack's configuration key, such as
+    ``ZWO ASI 533MM Pro@405mm``.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    camera: str = Field(default="", alias="camera")
+    focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
+    label: str = Field(default="", alias="label")
+
+
+class StackChoice(BaseModel):
+    """One stack of a target, made from the frames of one camera and optic.
+
+    A target imaged with two setups has one stack for each. The file list
+    names every one whose file is on disk, so a viewer can open any of them
+    without changing which stack is the target's main one.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    configuration_key: str = Field(alias="configurationKey")
+    camera: str = Field(default="", alias="camera")
+    focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
+    frames_stacked: int = Field(default=0, alias="framesStacked")
+    stacked_image: str = Field(alias="stackedImage")
+    is_main: bool = Field(default=False, alias="isMain")
 
 
 class TargetFilesResponse(BaseModel):
@@ -1512,3 +1648,6 @@ class TargetFilesResponse(BaseModel):
     stacked_spectral_target: str | None = Field(None, alias="stackedSpectralTarget")
     total_exposure: float = Field(default=0.0, alias="totalExposure", ge=0.0)
     exposure_counts: dict[str, int] = Field(default_factory=dict, alias="exposureCounts")
+    stack_configuration: StackConfigurationRef | None = Field(default=None, alias="stackConfiguration")
+    # Every stack of the target by camera and optic, the main one first.
+    stacks: list[StackChoice] = Field(default_factory=list, alias="stacks")

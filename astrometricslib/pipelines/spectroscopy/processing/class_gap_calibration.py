@@ -64,6 +64,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier impor
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     estimate_spectrum_signal_to_noise,
 )
+from astrometricslib.utilities.table_cells import optional_float
 
 __all__ = [
     "CAMERA_NAME",
@@ -299,8 +300,8 @@ def classify_sample(
     steps = ladder_steps_between(own_type, sample.catalog_type)
     known_class = own_class if own_class and own_class != "U" else None
     return SampleOutcome(
-        gap_to_next_class=_optional_float(result.get("rms_gap_to_next_class")),
-        gap_to_second_best=_optional_float(result.get("rms_gap_to_second_best")),
+        gap_to_next_class=optional_float(result.get("rms_gap_to_next_class")),
+        gap_to_second_best=optional_float(result.get("rms_gap_to_second_best")),
         class_matches_catalog=(own_class == catalog_class) if known_class else None,
         steps_from_catalog=None if steps is None else abs(float(steps)),
         own_class=known_class,
@@ -308,20 +309,6 @@ def classify_sample(
             (known_class == undegraded_class) if known_class and undegraded_class else None
         ),
     )
-
-
-def _optional_float(value: object) -> float | None:
-    """Read a classifier output as a finite float, or `None`.
-
-    Returns
-    -------
-    number : `float` or `None`
-        The value, or `None` when it is missing or not finite.
-    """
-    if value is None:
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
 
 
 def degrade_to_snr(

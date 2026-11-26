@@ -33,6 +33,12 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.simbad_object_types import (
+    index_rows_by_name,
+    name_variants,
+    normalize_name,
+    quote_adql,
+)
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from astrometricslib.utilities.target_classification import classify_target_name
@@ -42,6 +48,7 @@ logger = logging.getLogger(__name__)
 # What `fill_target_position` did, for the caller's log and for tests.
 FILL_CATALOG = "catalog"
 FILL_FRAME_CENTER = "frame_center"
+FILL_TYPE_ONLY = "type_only"
 FILL_NONE = "none"
 
 # Kinds of target that never get a fixed position: they move across the sky
@@ -327,6 +334,61 @@ def resolve_catalog_position(
         return None
 
 
+# The SIMBAD columns a one-request lookup of several names can return: the
+# position, the object type and the size, which all sit in SIMBAD's ``basic``
+# table. A lookup that asks for other columns goes name by name.
+_ONE_REQUEST_FIELDS = frozenset({"otype", "galdim_majaxis", "ra", "dec"})
+
+
+def resolve_catalog_positions_in_one_request(
+    names: Sequence[str], simbad: SimbadDriver
+) -> dict[str, CatalogPosition]:
+    """Look several names up in SIMBAD with one request.
+
+    One question about all the names (each in the spellings SIMBAD may store
+    it under) takes one request through the outside-service gateway, where a
+    loop of `resolve_catalog_position` calls takes one request for each name.
+    A name SIMBAD's identifier table does not hold is simply missing from the
+    answer; the caller asks for it by name.
+
+    Parameters
+    ----------
+    names : `list` [`str`]
+        The names to look up.
+    simbad : `SimbadDriver`
+        The SIMBAD driver to ask.
+
+    Returns
+    -------
+    positions : `dict` [`str`, `CatalogPosition`]
+        The position of each name SIMBAD knows, under the name as given. The
+        nearest-listed row is not chosen: the first row of the name is used,
+        as `resolve_catalog_position` does.
+    """
+    id_list = ", ".join(quote_adql(variant) for name in names for variant in name_variants(name))
+    # ADQL for a web service, not SQL for a database of ours; every name is
+    # passed through `quote_adql`.
+    query = (
+        "SELECT ident.id AS queried_id, basic.ra AS ra, basic.dec AS dec, "  # ruff: ignore[hardcoded-sql-expression] -- ADQL, quoted
+        "basic.otype AS otype, basic.galdim_majaxis AS galdim_majaxis "
+        "FROM ident JOIN basic ON basic.oid = ident.oidref "
+        f"WHERE ident.id IN ({id_list})"
+    )
+    answer = simbad.query_tap(query)
+    rows = index_rows_by_name(answer)
+    positions: dict[str, CatalogPosition] = {}
+    for name in names:
+        matches = rows.get(normalize_name(name))
+        if not matches:
+            continue
+        single = answer[[matches[0].index]]
+        coordinate = SkyCoord(
+            ra=float(single["ra"][0]) * u.deg, dec=float(single["dec"][0]) * u.deg, frame="icrs"
+        )
+        positions[name] = CatalogPosition(coordinate, _read_major_axis(single), read_object_type(single))
+    return positions
+
+
 def resolve_names(
     names: Sequence[str], simbad: SimbadDriver, votable_fields: tuple[str, ...] = ()
 ) -> NameResolution:
@@ -352,8 +414,21 @@ def resolve_names(
         The first name's answer when the names agree or only one resolves.
     """
     answers: list[tuple[str, CatalogPosition]] = []
-    for name in dict.fromkeys(str(n).strip() for n in names if n and str(n).strip()):
-        position = resolve_catalog_position(name, simbad, votable_fields)
+    unique_names = list(dict.fromkeys(str(n).strip() for n in names if n and str(n).strip()))
+    one_request: dict[str, CatalogPosition] = {}
+    if (
+        len(unique_names) > 1
+        and set(votable_fields) <= _ONE_REQUEST_FIELDS
+        and callable(getattr(simbad, "query_tap", None))
+    ):
+        try:
+            one_request = resolve_catalog_positions_in_one_request(unique_names, simbad)
+        except (ExternalServiceError, NotImplementedError, *ONLINE_QUERY_ERRORS, *DATA_ERRORS) as batch_error:
+            # Each name is then asked for by itself, below, and its own
+            # failure is logged there.
+            logger.debug("The one-request SIMBAD lookup of %s failed: %s", unique_names, batch_error)
+    for name in unique_names:
+        position = one_request.get(name) or resolve_catalog_position(name, simbad, votable_fields)
         if position is not None:
             answers.append((name, position))
     if not answers:
@@ -420,7 +495,11 @@ def fill_target_position(
     """Set a target's RA/Dec from the catalog, else from a frame center.
 
     Only an empty position, or one marked unverified, is changed. A
-    position that is set and not marked unverified is never touched. A
+    position that is set and not marked unverified is never touched. When
+    such a target has no SIMBAD object type (or it is empty), the name is
+    looked up once to fill the missing type, and the major axis if that is
+    missing too; the position stays as it is. A target that has a type is
+    not looked up again. A
     moving body or calibration target is never given a position. The
     catalog answer is tried first. The frame center is the fallback, and
     it marks the target `position_unverified`. The frame center is also used
@@ -446,13 +525,15 @@ def fill_target_position(
     Returns
     -------
     action : `str`
-        `FILL_CATALOG`, `FILL_FRAME_CENTER` or `FILL_NONE`.
+        `FILL_CATALOG`, `FILL_FRAME_CENTER`, `FILL_TYPE_ONLY` (only the
+        missing object type, and perhaps the major axis, was filled) or
+        `FILL_NONE`.
     """
     if has_no_fixed_position(target.id):
         return FILL_NONE
     had_position = parse_target_position(target) is not None
     if had_position and not target.position_unverified:
-        return FILL_NONE
+        return _fill_missing_object_type(target, simbad, frame_center, footprint_radius_arcmin)
 
     resolution = resolve_target_catalog_position(target, simbad)
     catalog = resolution.position
@@ -504,3 +585,62 @@ def fill_target_position(
         target.dec,
     )
     return FILL_FRAME_CENTER
+
+
+def _fill_missing_object_type(
+    target: Any,
+    simbad: SimbadDriver,
+    frame_center: SkyCoord | None,
+    footprint_radius_arcmin: float | None,
+) -> str:
+    """Fill only the missing SIMBAD object type of a confirmed target.
+
+    The position is never changed. SIMBAD is not asked when the target
+    already has a type. A catalog position that lies outside the solved
+    frame plus the margin is distrusted, as in `fill_target_position`, and
+    its type is not taken. A SIMBAD failure is logged and changes nothing.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to update.
+    simbad : `SimbadDriver`
+        The SIMBAD driver to ask.
+    frame_center : `astropy.coordinates.SkyCoord`, optional
+        The center of a solved image of the target.
+    footprint_radius_arcmin : `float`, optional
+        Half the diagonal of the solved image in arcminutes.
+
+    Returns
+    -------
+    action : `str`
+        `FILL_TYPE_ONLY` when a type was filled, else `FILL_NONE`.
+    """
+    if (target.simbad_object_type or "").strip():
+        return FILL_NONE
+    try:
+        catalog = resolve_target_catalog_position(target, simbad).position
+    except (ExternalServiceError, *ONLINE_QUERY_ERRORS) as lookup_error:
+        logger.info("Could not look up the object type of target %s: %s", target.id, lookup_error)
+        return FILL_NONE
+    if catalog is None or not catalog.object_type:
+        return FILL_NONE
+    if frame_center is not None and footprint_radius_arcmin is not None:
+        distance = float(catalog.coordinate.separation(frame_center).to("arcmin").value)
+        if distance > footprint_radius_arcmin + FOOTPRINT_MARGIN_ARCMIN:
+            logger.warning(
+                "The catalog position of target %s (%s) is %.1f arcmin from the center of its solved frame, "
+                "outside the frame (%.1f arcmin) plus a %.0f arcmin margin; the name may have resolved to "
+                "another object. Not taking its object type.",
+                target.id,
+                format_position(catalog.coordinate),
+                distance,
+                footprint_radius_arcmin,
+                FOOTPRINT_MARGIN_ARCMIN,
+            )
+            return FILL_NONE
+    target.simbad_object_type = catalog.object_type
+    if not target.major_axis_arcmin and catalog.major_axis_arcmin:
+        target.major_axis_arcmin = catalog.major_axis_arcmin
+    logger.info("Set the object type of target %s to %s from SIMBAD.", target.id, catalog.object_type)
+    return FILL_TYPE_ONLY

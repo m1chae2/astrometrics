@@ -5,7 +5,7 @@
 Each check returns one of these structures. A check never saves anything, so
 these only describe; they never change a target.
 
-- `RawFrameCheckReport` is the batch check of a folder or of a target's
+- `RawFrameCheckReport` is the batch check of a target's
   frames: star count, width and roundness, trailing, sky level and jumps,
   with the frames that stand out flagged.
 - `InputQualityReport` holds the sky level, saturation and (if asked) star
@@ -39,11 +39,21 @@ __all__ = [
 
 
 class RawFrameCheckReport(BaseModel):
-    """The batch check of a folder of frames, or of a target's frames."""
+    """The batch check of a target's raw light frames.
+
+    The star width of each row (``fwhm_px``) and of the batch
+    (``median_fwhm_px``) is the check's own quick estimate,
+    ``fwhm_estimator`` (``"raw check second moment"``): the second moment of
+    the brightest stars' boxes, given as the FWHM of a Gaussian of that
+    spread. It has no value on the
+    library's one star-width scale, and ``fwhm_not_on_scale_reason`` says
+    why; compare it only with other raw checks.
+    """
 
     kind: Literal["raw_check"] = "raw_check"
+    fwhm_estimator: str | None = None
+    fwhm_not_on_scale_reason: str | None = None
     target_id: str | None = None
-    folder_path: str | None = None
     # How many frames matched the selection, and how many of them were read.
     frames_matching: int = 0
     frames_checked: int = 0
@@ -61,6 +71,12 @@ class InputQualityReport(BaseModel):
 
     The frames are measured on a copy of the target, so the saved catalog
     never changes. Frames that were already measured keep their stored values.
+    A row's star width, ``measured_fwhm_px``, comes from the estimator
+    ``fwhm_estimator`` (``"frame Gaussian"``, `None` when no row has a
+    width); the row's
+    ``measured_fwhm_on_scale_px`` is the same width on the library's one
+    star-width scale (the per-frame Gaussian of the brightest stars). Both
+    widths are `None` for a frame with no measured width.
     """
 
     kind: Literal["input_quality"] = "input_quality"
@@ -69,6 +85,7 @@ class InputQualityReport(BaseModel):
     spectral_light_frames_in_target: int
     frames_matching: int
     frames_measured: int
+    fwhm_estimator: str | None = None
     # How many frames were measured, skipped (already measured) or failed.
     counts: dict[str, int] = Field(default_factory=dict)
     # For each number: how many frames had it, and its minimum, median and
@@ -148,11 +165,22 @@ class StackQualityReport(BaseModel):
     included: list[str] = Field(default_factory=list)
     # Median star width (FWHM) of the brightest stars, in pixels.
     fwhm_px: float | None = None
+    # The `StarWidthEstimator` of ``fwhm_px``: ``"stack Gaussian"``. `None`
+    # with no width.
+    fwhm_estimator: str | None = None
+    # ``fwhm_px`` on the library's one star-width scale (the per-frame
+    # Gaussian of the brightest stars), in pixels, with the stack Gaussian's
+    # ratio. `None` with no width.
+    fwhm_on_scale_px: float | None = None
     # Mean share of frames rejected per pixel, from the stack's rejection map.
     rejected_fraction: float | None = None
     # One row per registered frame, from the ``_Registration.seq`` file Siril
     # wrote beside the stack.
     registration: list[RegistrationRow] | None = None
+    # The estimator of the rows' ``fwhm_px`` and ``weighted_fwhm_px``:
+    # ``"Siril registration"``, with the rows. No ratio of Siril's width to the
+    # one star-width scale has been measured, so the rows have no value on it.
+    registration_fwhm_estimator: str | None = None
     # The comparison with the previous stack or another stack, when asked for.
     comparison: StackComparison | None = None
     # Sentences about sections that could not be measured, and why.

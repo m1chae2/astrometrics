@@ -1,6 +1,7 @@
 """Purpose: Unit tests for stack_quality_tasks's pure decision logic.
 
-Description: Verifies is_stacked_fwhm_degraded's ratio comparison and
+Description: Verifies expected_stack_fwhm (plain and weighted RMS),
+is_stacked_fwhm_degraded's ratio comparison and
 is_rejected_fraction_significant's threshold comparison.
 """
 
@@ -40,6 +41,33 @@ def test_expected_stack_fwhm_is_the_root_mean_square_of_the_inputs() -> None:
     assert expected_stack_fwhm([2.0, 2.0, 2.0]) == pytest.approx(2.0)
     assert expected_stack_fwhm([2.0, 4.0]) == pytest.approx(10.0**0.5)
     assert expected_stack_fwhm([]) is None
+
+
+def test_expected_stack_fwhm_of_equal_widths_is_that_width_whatever_the_weights() -> None:
+    """Verify frames of one width predict that width for any weights."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import expected_stack_fwhm
+
+    assert expected_stack_fwhm([2.5, 2.5, 2.5], [0.1, 1.0, 1.9]) == pytest.approx(2.5)
+
+
+def test_expected_stack_fwhm_weights_favor_the_sharp_frames() -> None:
+    """Verify the weighted RMS by hand; heavier sharp frames lower it."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import expected_stack_fwhm
+
+    # sqrt((3 * 4 + 1 * 16) / 4) = sqrt(7)
+    assert expected_stack_fwhm([2.0, 4.0], [3.0, 1.0]) == pytest.approx(7.0**0.5)
+    assert expected_stack_fwhm([2.0, 4.0], [3.0, 1.0]) < expected_stack_fwhm([2.0, 4.0])
+    # A frame of weight 0 (the blurriest under -weight=wfwhm) does not count.
+    assert expected_stack_fwhm([2.0, 4.0], [1.0, 0.0]) == pytest.approx(2.0)
+
+
+def test_expected_stack_fwhm_refuses_mismatched_or_zero_weights() -> None:
+    """Verify bad weight lengths raise and zero weights give no width."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import expected_stack_fwhm
+
+    with pytest.raises(ValueError, match="weights"):
+        expected_stack_fwhm([2.0, 3.0], [1.0])
+    assert expected_stack_fwhm([2.0, 3.0], [0.0, 0.0]) is None
 
 
 def test_a_stack_of_nights_with_different_seeing_is_not_called_degraded() -> None:

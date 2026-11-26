@@ -16,11 +16,13 @@ import pytest
 
 from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     PhotometryResult,
     StellarObject,
 )
+from astrometricslib.pipelines.photometry import batch
 from astrometricslib.pipelines.photometry.batch import (
     MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
     search_periods_and_save,
@@ -186,3 +188,120 @@ def test_nothing_is_saved_when_no_star_can_be_searched(catalog_access: CatalogAc
     stars = [_star("HD 1", mean_flux=50.0, points=2)]
 
     assert search_periods_and_save(stars, _TARGET, catalog_access) == 0
+
+
+@pytest.mark.parametrize("points_left", [0, 1, 2])
+def test_a_star_cut_short_by_saturation_is_skipped_and_the_slot_goes_on(points_left: int) -> None:
+    """Verify a star left with 0, 1 or 2 points is skipped for the next star.
+
+    Saturated-point removal can leave a star with almost no light curve; it
+    must not be searched, and the next-brightest star takes its place.
+    """
+    short = _star("HD 1", mean_flux=100.0, points=12)
+    short.photometry.timestamps = short.photometry.timestamps[:points_left]
+    short.photometry.fluxes_normalized = short.photometry.fluxes_normalized[:points_left]
+    short.photometry.fluxes_detrended = short.photometry.fluxes_detrended[:points_left]
+    stars = [short, _star("HD 2", mean_flux=50.0), _star("HD 3", mean_flux=10.0)]
+
+    chosen = select_period_search_stars(stars, None, None, limit=2)
+
+    assert [star.id for star in chosen] == ["HD 2", "HD 3"]
+    analyzer = VariabilityAnalyzer()
+    assert analyzer.run_lomb_scargle_periodogram(short) is None
+    assert analyzer.run_bls_transit_search(short) is None
+
+
+class _RecordingJob:
+    """A stand-in for a running job that keeps the progress it is told."""
+
+    def __init__(self) -> None:
+        """Start with no reports."""
+        self.reports: list[tuple[int, int, str]] = []
+
+    def report_count(self, done: int, total: int, message: str) -> None:
+        """Keep one progress report.
+
+        Parameters
+        ----------
+        done : `int`
+            How many items are finished.
+        total : `int`
+            How many items there are.
+        message : `str`
+            The status line.
+        """
+        self.reports.append((done, total, message))
+
+
+def test_each_star_is_reported_to_the_running_job(
+    catalog_access: CatalogAccess, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the job hears which star is searched, then a final count."""
+    stars = [_star("HD 1", mean_flux=50.0, arcseconds_from_center=2.0), _star("HD 2", mean_flux=40.0)]
+    catalog_access.merge_and_record("stellar_catalog", stars, lambda _existing, updated: updated)
+    job = _RecordingJob()
+    monkeypatch.setattr(batch, "get_current_job", lambda: job)
+
+    search_periods_and_save(stars, _TARGET, catalog_access)
+
+    assert [(done, total) for done, total, _ in job.reports[:2]] == [(0, 2), (1, 2)]
+    assert "Searching star 1 of 2 for repeating patterns (HD 1)" in job.reports[0][2]
+    assert "M 13" in job.reports[0][2]
+    assert job.reports[-1][:2] == (2, 2)
+    assert "Searched 2 star(s)" in job.reports[-1][2]
+
+
+def test_a_cancelled_job_stops_the_period_searches(
+    catalog_access: CatalogAccess, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a cancel is not swallowed as one star's failed search."""
+    stars = [_star("HD 1", mean_flux=50.0, arcseconds_from_center=2.0), _star("HD 2", mean_flux=40.0)]
+    catalog_access.merge_and_record("stellar_catalog", stars, lambda _existing, updated: updated)
+    checks: list[int] = []
+
+    def cancel_on_second_check() -> None:
+        """Raise on the second check, as a cancel during star 2 would.
+
+        Raises
+        ------
+        RunAbandonedError
+            From the second call on.
+        """
+        checks.append(1)
+        if len(checks) >= 2:
+            raise RunAbandonedError("cancelled")
+
+    monkeypatch.setattr(batch, "raise_if_abandoned", cancel_on_second_check)
+
+    with pytest.raises(RunAbandonedError):
+        search_periods_and_save(stars, _TARGET, catalog_access)
+
+    (first,) = catalog_access.get_by_ids("stellar_catalog", ["HD 1"])
+    assert first.photometry.periodogram is None  # nothing was saved after the cancel
+
+
+@pytest.mark.parametrize(
+    ("search_name", "points_needed"),
+    [("run_lomb_scargle_periodogram", 5), ("run_bls_transit_search", 8)],
+)
+def test_a_star_with_too_few_finite_points_gets_a_reason_not_silence(
+    search_name: str, points_needed: int
+) -> None:
+    """Verify non-finite points are left out and the note counts the rest."""
+    star = _star("HD 1", mean_flux=50.0, points=12)
+    usable = points_needed - 1
+    for index in range(usable, 12):
+        star.photometry.fluxes_detrended[index] = float("nan")
+
+    result = getattr(VariabilityAnalyzer(), search_name)(star)
+
+    assert result.verdict == "insufficient_data"
+    assert f"only {usable} usable measurements" in result.note
+    assert f"{12 - usable} left out" in result.note
+    assert f"{points_needed} are needed" in result.note
+    saved = (
+        star.photometry.periodogram
+        if search_name == "run_lomb_scargle_periodogram"
+        else (star.photometry.transit_candidate)
+    )
+    assert saved is result

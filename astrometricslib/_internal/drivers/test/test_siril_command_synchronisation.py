@@ -16,12 +16,15 @@ that point (a crash inside a sandbox, a version too old to understand
 no way for the caller to notice.
 """
 
+import contextvars
+import logging
 import os
 import pathlib
 import queue
 import subprocess
 import threading
 import time
+import types
 
 import pytest
 
@@ -43,7 +46,9 @@ def processor(monkeypatch: pytest.MonkeyPatch) -> siril_interface.ImageProcessin
         methods alone.
     """
     monkeypatch.setattr(siril_interface.ImageProcessing, "__init__", lambda self: None, raising=False)
-    return siril_interface.ImageProcessing()
+    instance = siril_interface.ImageProcessing()
+    instance.last_run_diagnostics = {}
+    return instance
 
 
 def _read_lines(path: str, count: int, out: list[str]) -> None:
@@ -225,3 +230,186 @@ def test_send_commands_uses_the_bounded_open_when_given_a_process(
     elapsed = time.monotonic() - started_at
 
     assert elapsed < 5
+
+
+def test_first_command_waits_for_siril_to_be_ready(
+    tmp_path: pathlib.Path, processor: siril_interface.ImageProcessing
+) -> None:
+    """A "ready" line that arrives late holds back the first command."""
+    command_pipe = str(tmp_path / "siril_command.in")
+    os.mkfifo(command_pipe)
+    status_queue = session.SirilStatusQueue()
+    received: list[str] = []
+    reader = threading.Thread(target=_read_lines, args=(command_pipe, 2, received), daemon=True)
+    reader.start()
+    writer = threading.Thread(
+        target=processor.send_commands,
+        args=(command_pipe, ["setext fits"]),
+        kwargs={"status_queue": status_queue},
+        daemon=True,
+    )
+    writer.start()
+
+    reader.join(timeout=0.5)
+    assert received == []
+
+    status_queue.ready.set()
+    status_queue.put("status: success setext\n")
+    reader.join(timeout=5)
+    writer.join(timeout=5)
+    assert received == ["setext fits", "exit"]
+
+
+def test_a_siril_that_is_never_ready_gives_a_clear_error(
+    tmp_path: pathlib.Path,
+    processor: siril_interface.ImageProcessing,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no "ready" line, no command is sent and the error is recorded."""
+    monkeypatch.setattr(session, "SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS", 0.2)
+    command_pipe = str(tmp_path / "siril_command.in")
+    os.mkfifo(command_pipe)
+    received: list[str] = []
+    reader = threading.Thread(target=_read_lines, args=(command_pipe, 1, received), daemon=True)
+    reader.start()
+
+    processor.send_commands(command_pipe, ["setext fits"], status_queue=session.SirilStatusQueue())
+    reader.join(timeout=5)
+
+    assert received == ["exit"]
+    assert "ready" in processor.last_run_diagnostics[session.SIRIL_COMMUNICATION_ERROR_KEY]
+
+
+def test_read_output_sets_the_ready_flag(
+    tmp_path: pathlib.Path, processor: siril_interface.ImageProcessing
+) -> None:
+    """The "ready" line from Siril sets the queue's ready flag."""
+    output_pipe = str(tmp_path / "siril_command.out")
+    os.mkfifo(output_pipe)
+    status_queue = session.SirilStatusQueue()
+
+    def write_output() -> None:
+        with open(output_pipe, "w") as pipe:
+            pipe.write("ready\nstatus: error stack\n")
+
+    threading.Thread(target=write_output, daemon=True).start()
+    processor.read_output(output_pipe, str(tmp_path), "M 13", status_queue=status_queue)
+
+    assert status_queue.ready.is_set()
+
+
+def test_a_lost_status_on_a_setup_command_is_resent_once(
+    tmp_path: pathlib.Path,
+    processor: siril_interface.ImageProcessing,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A setup command with no status is sent again, then the run goes on."""
+    monkeypatch.setattr(session, "SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS", 0.5)
+    command_pipe = str(tmp_path / "siril_command.in")
+    os.mkfifo(command_pipe)
+    status_queue = session.SirilStatusQueue()
+    status_queue.ready.set()
+    received: list[str] = []
+    reader = threading.Thread(target=_read_lines, args=(command_pipe, 4, received), daemon=True)
+    reader.start()
+    writer = threading.Thread(
+        target=processor.send_commands,
+        args=(command_pipe, ["setext fits", "stack seq"]),
+        kwargs={"status_queue": status_queue},
+        daemon=True,
+    )
+    writer.start()
+
+    # The first status is lost; the resend arrives after the short wait.
+    reader.join(timeout=0.6)
+    status_queue.put("status: success setext\n")
+    status_queue.put("status: success stack\n")
+    reader.join(timeout=5)
+    writer.join(timeout=5)
+
+    assert received == ["setext fits", "setext fits", "stack seq", "exit"]
+    assert session.SIRIL_COMMUNICATION_ERROR_KEY not in processor.last_run_diagnostics
+
+
+def test_a_silent_long_command_is_not_resent_and_is_recorded(
+    tmp_path: pathlib.Path,
+    processor: siril_interface.ImageProcessing,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long command with no answer is sent once and then reported."""
+    monkeypatch.setattr(session, "SIRIL_COMMAND_TIMEOUT_SECONDS", 0.1)
+    command_pipe = str(tmp_path / "siril_command.in")
+    os.mkfifo(command_pipe)
+    status_queue = session.SirilStatusQueue()
+    status_queue.ready.set()
+    received: list[str] = []
+    reader = threading.Thread(target=_read_lines, args=(command_pipe, 2, received), daemon=True)
+    reader.start()
+
+    processor.send_commands(command_pipe, ["stack seq"], status_queue=status_queue)
+    reader.join(timeout=5)
+
+    assert received == ["stack seq", "exit"]
+    message = processor.last_run_diagnostics[session.SIRIL_COMMUNICATION_ERROR_KEY]
+    assert "did not answer the command 'stack seq'" in message
+
+
+def test_a_writer_thread_error_reaches_only_the_running_jobs_log(
+    tmp_path: pathlib.Path,
+    processor: siril_interface.ImageProcessing,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A line logged by the command writer thread stays in its own job's log.
+
+    Two jobs log at once. The writer thread must carry the log context of
+    the job that started it; a thread without it is copied into every job's
+    log, which put one target's Siril errors into other targets' logs.
+    """
+    from astrometricslib._internal.drivers.siril_interface import imaging_stacker
+    from astrometricslib.foundation.jobs.runner import capture_job_logs
+
+    stacker_logger = logging.getLogger(imaging_stacker.__name__)
+    writer_done = threading.Event()
+
+    def fake_send_commands(*_args: object, **_kwargs: object) -> None:
+        """Log a Siril error from the writer thread, like a failed command."""
+        stacker_logger.error("status: error seqapplyreg")
+        writer_done.set()
+
+    def fake_read_output(*_args: object, **_kwargs: object) -> None:
+        """Wait for the writer, then report that nothing was stacked."""
+        writer_done.wait(timeout=5)
+
+    monkeypatch.setattr(processor, "send_commands", fake_send_commands, raising=False)
+    monkeypatch.setattr(processor, "read_output", fake_read_output, raising=False)
+    monkeypatch.setattr(processor, "_kill_process_tree", lambda *_args, **_kwargs: None, raising=False)
+
+    run = types.SimpleNamespace(
+        job_logger=stacker_logger,
+        request=types.SimpleNamespace(id="request-a", output_file=None),
+        library_dest=None,
+        generate_rejmap=False,
+    )
+    staged = types.SimpleNamespace(
+        command_pipe="unused", output_pipe="unused", status_queue=None, target_folder=str(tmp_path)
+    )
+    launch = types.SimpleNamespace(process=None)
+    script = types.SimpleNamespace(
+        commands=["seqapplyreg"], sequence_name="r_light", uses_phase_correlation=False
+    )
+
+    running_log = tmp_path / "running.log"
+    other_log = tmp_path / "other.log"
+    # The other job's capture is entered in a separate context, as it would
+    # be on another job's own thread.
+    other_context = contextvars.Context()
+    other_capture = capture_job_logs(job_id="job-other", log_file_path=str(other_log))
+    other_context.run(other_capture.__enter__)
+    try:
+        with capture_job_logs(job_id="job-running", log_file_path=str(running_log)):
+            processor._stack(run, staged, launch, script)
+    finally:
+        other_context.run(other_capture.__exit__, None, None, None)
+
+    assert "status: error seqapplyreg" in running_log.read_text()
+    assert "status: error seqapplyreg" not in other_log.read_text()

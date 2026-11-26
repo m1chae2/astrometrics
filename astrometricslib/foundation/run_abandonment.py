@@ -24,26 +24,45 @@ Two rules follow from this:
 
 A thread the run starts must bind the same object itself, because a new
 thread does not inherit a context variable.
+
+Work spread over a pool of worker threads or processes needs one more piece:
+the thread that waits for the workers must notice a cancel while every worker
+is busy. `completed_unless_abandoned` waits for results in short steps and
+checks the flag each time, and `stopping_on_abandonment` shuts the pool down
+without waiting for the frames still in progress. So a cancel is seen within
+`CANCEL_POLL_SECONDS`, no new item starts, and only the items that were
+already running finish, with their results thrown away.
 """
 
 import contextlib
 import contextvars
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- stopping the run's own processes is the point
 import threading
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Iterable, Sequence
+from concurrent.futures import FIRST_COMPLETED, Executor, Future, wait
 
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.system import child_process_options, stop_process_tree
 
 __all__ = [
+    "CANCEL_POLL_SECONDS",
     "RunAbandonedError",
     "RunAbandonment",
     "bind_abandonment",
+    "completed_unless_abandoned",
     "launch_registered",
     "raise_if_abandoned",
     "run_registered",
     "stop_process_group",
+    "stopping_on_abandonment",
 ]
+
+# How often a thread that waits for pool workers looks at the cancel flag.
+# Half a second is the same step the slot wait uses (`acquire_resource_slot`).
+# It is short enough that Cancel feels immediate and long enough that the
+# check costs nothing next to frames that take seconds each. A chosen value,
+# not a measured one.
+CANCEL_POLL_SECONDS = 0.5
 
 # How long a stopped process group gets to exit after SIGTERM before SIGKILL.
 # Siril closes its pipes and exits at once on SIGTERM when it is responsive,
@@ -270,3 +289,84 @@ def run_registered(arguments: Sequence[str], timeout_seconds: float) -> subproce
         raise
     raise_if_abandoned()
     return subprocess.CompletedProcess(arguments, process.returncode, standard_output, standard_error)
+
+
+def completed_unless_abandoned(
+    futures: Iterable[Future], poll_seconds: float = CANCEL_POLL_SECONDS
+) -> Generator[Future]:
+    """Give each future as it finishes, stopping when the run is given up on.
+
+    Like `concurrent.futures.as_completed`, except that the wait is cut into
+    steps of ``poll_seconds`` and the cancel flag is checked at each one and
+    after each result, so a cancel is seen even while every worker is busy
+    with a slow item.
+
+    Parameters
+    ----------
+    futures : `collections.abc.Iterable` [`concurrent.futures.Future`]
+        The submitted work.
+    poll_seconds : `float`, optional
+        How long to wait between looks at the flag.
+
+    Yields
+    ------
+    future : `concurrent.futures.Future`
+        A finished future, in the order they finish.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the bound run was given up on. Futures that have not started are
+        cancelled first, so no new item starts. Items already running
+        cannot be interrupted and finish on their own.
+    """
+    pending = set(futures)
+    try:
+        while pending:
+            raise_if_abandoned()
+            finished, pending = wait(pending, timeout=poll_seconds, return_when=FIRST_COMPLETED)
+            for future in finished:
+                yield future
+                raise_if_abandoned()
+    except RunAbandonedError:
+        for future in pending:
+            future.cancel()
+        raise
+
+
+@contextlib.contextmanager
+def stopping_on_abandonment(executor: Executor) -> Generator[Executor]:
+    """Run a block with a pool, and give the pool up quickly on a cancel.
+
+    Works like ``with executor:`` (the pool is shut down and joined when the
+    block ends) except when the block raises `RunAbandonedError`: then the
+    work that has not started is cancelled and the pool is shut down without
+    waiting for the items still running, so the cancel is not held up by the
+    slowest one. Those items finish in the background and their results are
+    dropped.
+
+    Parameters
+    ----------
+    executor : `concurrent.futures.Executor`
+        The pool to manage.
+
+    Yields
+    ------
+    executor : `concurrent.futures.Executor`
+        The same pool.
+
+    Raises
+    ------
+    RunAbandonedError
+        Passed on from the block, after the pool is given up.
+    """
+    try:
+        yield executor
+    except RunAbandonedError:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    except BaseException:
+        executor.shutdown(wait=True)
+        raise
+    else:
+        executor.shutdown(wait=True)

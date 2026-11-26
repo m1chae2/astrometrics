@@ -24,9 +24,12 @@ import {
   isDisplayableStar,
   computeLimitingMagnitude,
   computeSourceBrightness,
-  STAR_MARKER_RADIUS_PX,
+  starMarkerRadius,
+  limitStarDensity,
+  type DrawableStar,
 } from '../layers/StarOverlay';
 import { viewportDipsBelowHorizon } from '../layers/overlayShared';
+import { starColorRgb } from '../utils/starColor';
 import { compileShader, linkProgram, createBuffer, resizeCanvasToDisplaySize } from '../../common/webgl/glUtils';
 import { perfEnd, perfStart } from '../utils/perfMarks';
 
@@ -34,9 +37,11 @@ const VERTEX_SHADER_SOURCE = `#version 300 es
 layout(location = 0) in vec2 aScreenPosition;
 layout(location = 1) in float aRadiusPx;
 layout(location = 2) in float aBrightness;
+layout(location = 3) in vec3 aColor;
 uniform vec2 uCanvasSize;
 out float vRadiusPx;
 out float vBrightness;
+out vec3 vColor;
 
 void main() {
   vec2 normalized = aScreenPosition / uCanvasSize;
@@ -46,6 +51,7 @@ void main() {
   gl_PointSize = aRadiusPx * 2.0;
   vRadiusPx = aRadiusPx;
   vBrightness = aBrightness;
+  vColor = aColor;
 }
 `;
 
@@ -53,6 +59,7 @@ const FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision mediump float;
 in float vRadiusPx;
 in float vBrightness;
+in vec3 vColor;
 out vec4 fragColor;
 
 void main() {
@@ -67,12 +74,15 @@ void main() {
   if (alpha <= 0.0) {
     discard;
   }
-  fragColor = vec4(1.0, 1.0, 1.0, alpha);
+  fragColor = vec4(vColor, alpha);
 }
 `;
 
-/** Floats uploaded per star instance: screenX, screenY, radiusPx, brightness. */
-const FLOATS_PER_STAR = 4;
+/**
+ * Floats uploaded per star instance: screenX, screenY, radiusPx, brightness,
+ * then red, green and blue (0 to 1). Stars without a color class are white.
+ */
+const FLOATS_PER_STAR = 7;
 
 /**
  * WebGL2 renderer drawing the Planetarium star field as anti-aliased point sprites.
@@ -118,6 +128,8 @@ export class StarFieldRenderer {
     gl.vertexAttribPointer(1, 1, gl.FLOAT, false, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
     gl.enableVertexAttribArray(2);
     gl.vertexAttribPointer(2, 1, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
     gl.bindVertexArray(null);
 
     gl.enable(gl.BLEND);
@@ -191,7 +203,7 @@ export class StarFieldRenderer {
 
     const limitingMagnitude = computeLimitingMagnitude(projectionContext.fov);
 
-    let writeIndex = 0;
+    const onScreen: DrawableStar[] = [];
     for (const source of sources) {
       if (
         !isDisplayableStar(
@@ -200,6 +212,7 @@ export class StarFieldRenderer {
           projectionContext.showCatalog,
           limitingMagnitude,
           projectionContext.fov,
+          projectionContext.selectedTargetId,
         )
       )
         continue;
@@ -207,12 +220,21 @@ export class StarFieldRenderer {
       const point = projectionContext.projectCoords(source.ra, source.dec);
       if (!point.visible) continue;
       if (shouldDiscardBelowHorizon && point.alt < 0) continue;
+      onScreen.push({ source, x: point.x, y: point.y });
+    }
+    const drawn = limitStarDensity(onScreen, projectionContext.width, projectionContext.height, projectionContext.selectedTargetId);
 
+    let writeIndex = 0;
+    for (const { source, x, y } of drawn) {
       const offset = writeIndex * FLOATS_PER_STAR;
-      this.starInstanceData[offset] = point.x;
-      this.starInstanceData[offset + 1] = point.y;
-      this.starInstanceData[offset + 2] = STAR_MARKER_RADIUS_PX;
+      this.starInstanceData[offset] = x;
+      this.starInstanceData[offset + 1] = y;
+      this.starInstanceData[offset + 2] = starMarkerRadius(source);
       this.starInstanceData[offset + 3] = computeSourceBrightness(source, projectionContext.fov);
+      const [red, green, blue] = starColorRgb(source.colorClass);
+      this.starInstanceData[offset + 4] = red / 255;
+      this.starInstanceData[offset + 5] = green / 255;
+      this.starInstanceData[offset + 6] = blue / 255;
       writeIndex += 1;
     }
 

@@ -31,7 +31,11 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
-from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
+from astrometricslib.pipelines.stacking.metrics import (
+    FRAME_POINTING_OFFSET_FRACTION,
+    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SKY_UNEVENNESS,
+)
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     MANIFEST_FILE_NAME,
     QuarantineDecision,
@@ -54,7 +58,9 @@ def quality(tmp_path: Path) -> QualityRecords:
         The quality API on a stub configuration.
     """
     configuration = SimpleNamespace(
-        get_frames_path=lambda: tmp_path / "frames", get_library_path=lambda: tmp_path
+        get_frames_path=lambda: tmp_path / "frames",
+        get_library_path=lambda: tmp_path,
+        get_stacks_path=lambda: tmp_path / "stacks",
     )
     return QualityRecords(configuration, None, targets=MagicMock())
 
@@ -92,7 +98,7 @@ def _excluded_folder(folder: Path, names: list[str], manifest_names: list[str]) 
             "reason": REASON,
             "star_count": 203,
             "typical_star_count": 3348.0,
-            "roundness": 0.88,
+            "star_elongation": 1.2,
             "sky_median_adu": 5000.0,
             "moved_at": "2026-10-03T08:00:00+00:00",
         }
@@ -120,17 +126,29 @@ def test_report_gives_an_action_for_each_moved_frame_only() -> None:
 
 
 def test_both_quarantine_rows_of_a_moved_frame_carry_the_action(tmp_path: Path) -> None:
-    """A moved frame's roundness and sky rows store the action taken."""
+    """A moved frame's quarantine rows all store the action taken."""
     frame = FrameRecord(path=str(tmp_path / "lights" / "M 1" / "S" / "C" / "f.fits"), timestamp=1.0e9)
     action = set_aside_action_text("clouded", REASON)
     kwargs = {"run_id": "r", "job_id": None, "measured_at": MEASURED_AT, "capture_setting_id": None}
     moved = quarantine_measurements_for_frame(
-        {"roundness": None, "sky_median_adu": 7000.0}, frame, "M 1", action_taken=action, **kwargs
+        {"sky_unevenness": None, "pointing_offset_fraction": 0.3, "sky_median_adu": 7000.0},
+        frame,
+        "M 1",
+        action_taken=action,
+        **kwargs,
     )
     kept = quarantine_measurements_for_frame(
-        {"roundness": 0.9, "sky_median_adu": 5000.0}, frame, "M 1", **kwargs
+        {"sky_unevenness": 0.001, "pointing_offset_fraction": 0.01, "sky_median_adu": 5000.0},
+        frame,
+        "M 1",
+        **kwargs,
     )
-    assert {row.metric for row in moved} == {FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN}
+    assert {row.metric for row in moved} == {
+        FRAME_QUARANTINE_SKY_MEDIAN,
+        FRAME_SKY_UNEVENNESS,
+        FRAME_POINTING_OFFSET_FRACTION,
+    }
+    assert next(row for row in moved if row.metric == FRAME_SKY_UNEVENNESS).status.value == "not_measured"
     assert all(row.action_taken == action for row in moved)
     assert all(row.action_taken is None for row in kept)
 
@@ -258,7 +276,7 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
     target = Target(id="M 99", frames=frames)
     report = QuarantineReport(
         moved=[QuarantineDecision(frames[0].path, "clouded", REASON, 203, 3348.0, 0.9, 7000.0)],
-        measurements=[{"path": f.path, "roundness": 0.9, "sky_median_adu": 500.0} for f in frames],
+        measurements=[{"path": f.path, "sky_median_adu": 500.0} for f in frames],
     )
     library = SimpleNamespace(
         select_bias_frames=lambda *a, **k: SimpleNamespace(frames=[], flags=[], blocking_flags=[])
@@ -271,3 +289,57 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
     actions = {row.subject.subject_id.split("/")[-1]: row.action_taken for row in rows}
     assert actions["moved.fits"] == set_aside_action_text("clouded", REASON)
     assert actions["kept.fits"] is None
+
+
+def test_frame_statuses_list_the_targets_frames_with_the_flags(
+    quality: QualityRecords, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The status call reads stored elongations and flags a stretched frame."""
+    target = Target(
+        id="M 1",
+        frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
+    )
+    monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
+        lambda target_id: {"M 1/a.fits": 1.6, "M 1/b.fits": 1.7},
+    )
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.frame_status.latest_stack_time", lambda resolved, stacks: 200.0
+    )
+
+    report = quality.frame_statuses(target)
+
+    assert [(status.name, status.state) for status in report.frames] == [
+        ("a.fits", "flagged"),
+        ("b.fits", "not_stacked"),
+    ]
+    assert report.frames[0].elongation == pytest.approx(1.6)
+    assert "too small for the quarantine" in report.frames[0].reason
+
+
+def test_frame_statuses_find_the_stack_time_themselves(
+    quality: QualityRecords, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The newest stack file's time is the stack time."""
+    import os
+
+    stack = tmp_path / "stacks" / "M_1_Stacked.fits"
+    stack.parent.mkdir(parents=True)
+    stack.write_bytes(b"x")
+    os.utime(stack, (200.0, 200.0))
+    target = Target(
+        id="M 1",
+        frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
+    )
+    target.stacking.stacked_image = str(stack)
+    monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
+        lambda target_id: {},
+    )
+
+    report = quality.frame_statuses(target)
+
+    assert report.stacked_at == pytest.approx(200.0)
+    assert [status.state for status in report.frames] == ["included", "not_stacked"]

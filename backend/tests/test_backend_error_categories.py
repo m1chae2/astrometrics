@@ -79,9 +79,10 @@ def test_target_service_refuses_a_missing_name_and_an_unknown_target() -> None:
     with pytest.raises(InvalidArgumentError, match="target_or_id"):
         service.create_target()
 
-    service.astrometrics.targets.get.return_value = None
+    service.astrometrics.targets.get.side_effect = NotFoundError("No target named 'M 99'.")
     with pytest.raises(NotFoundError, match="M 99"):
-        service.get_frame_header("M 99", "/frames/a.fits")
+        service.get_frame_header("/frames/a.fits", target_id="M 99")
+    service.astrometrics.targets.get.assert_called_once_with("M 99", required=True)
 
 
 def test_a_fuzzy_lookup_needs_something_to_search_for() -> None:

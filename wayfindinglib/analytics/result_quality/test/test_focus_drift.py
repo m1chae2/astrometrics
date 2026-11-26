@@ -171,7 +171,7 @@ def test_statement_is_a_session_procedure_recommendation_with_evidence() -> None
     assert len(statement.evidence) == 120
     assert "give or take" in statement.message
     assert_plain_message_is_sound(statement)
-    assert "we expect to refocus roughly every" in statement.plain_message
+    assert "refocus roughly every" in statement.plain_message
 
 
 def test_interval_below_the_width_error_is_insufficient_data() -> None:

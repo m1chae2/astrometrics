@@ -226,3 +226,26 @@ def test_heavy_methods_do_not_delay_a_light_call(
 def test_declared_heavy_methods_exist() -> None:
     """Every method named as heavy is a declared RPC method."""
     assert rpc_router.HEAVY_METHODS <= rpc_router._DECLARED_METHODS
+
+
+def test_one_target_record_is_read_outside_the_heavy_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``target:get`` lists in the heavy lane; one record is read outside."""
+    lanes: list[str] = []
+
+    async def heavy(function: object, *args: object, **kwargs: object) -> str:
+        """Note a call that went to the heavy lane.
+
+        Returns
+        -------
+        lane : `str`
+            Always ``"heavy"``.
+        """
+        lanes.append("heavy")
+        await asyncio.sleep(0)
+        return "heavy"
+
+    monkeypatch.setattr(rpc_router, "run_heavy", heavy)
+    asyncio.run(rpc_router.run_in_lane("target:get", lambda **_: "light", detail="summary"))
+    answer = asyncio.run(rpc_router.run_in_lane("target:get", lambda **_: "light", target_id="M 31"))
+    assert lanes == ["heavy"]
+    assert answer == "light"

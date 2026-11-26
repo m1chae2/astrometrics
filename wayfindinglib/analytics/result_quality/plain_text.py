@@ -136,6 +136,6 @@ def plain_missing_data(rule_name: str) -> str:
     """
     words = rule_name.replace("_", " ")
     return (
-        f"We could not check '{words}' yet because some measurements are missing. "
+        f"'{words}' could not be checked yet because some measurements are missing. "
         "The reason says what to measure."
     )

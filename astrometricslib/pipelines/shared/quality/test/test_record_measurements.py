@@ -93,5 +93,10 @@ def test_an_uncertainty_on_a_metric_without_one_is_refused(store: QualityStore) 
     """A metric that declares no uncertainty refuses one."""
     with pytest.raises(InvalidArgumentError, match="uncertainty"):
         record_measurements(
-            store, [_measurement(metric=FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX, uncertainty=0.1)]
+            store,
+            [
+                _measurement(
+                    metric=FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX, definition_version=2, uncertainty=0.1
+                )
+            ],
         )

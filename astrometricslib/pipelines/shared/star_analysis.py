@@ -200,6 +200,8 @@ def _photometry_summary(photometry: Any) -> dict[str, Any]:
         "first": stamps[0].isoformat() if stamps else None,
         "last": stamps[-1].isoformat() if stamps else None,
         "saturated_points": sum(1 for flag in (photometry.is_saturated or []) if flag),
+        "saturated_points_removed": photometry.saturated_points_removed,
+        "light_curve_withheld_reason": photometry.light_curve_withheld_reason,
         "mean_flux": _round(photometry.mean_flux, 1),
         "scatter_percent": _round(
             None

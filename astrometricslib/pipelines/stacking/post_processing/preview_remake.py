@@ -7,11 +7,18 @@ those settings does not change the stack, but the stacking stage keeps an
 unchanged stack and its old picture, so the only way to a new picture used to
 be a full restack, which takes minutes and moves the current stack aside.
 
-This module runs only the preview step on the stack that is already there. A
+This module runs only the preview step on the stack that is already there,
+followed by the color picture of a monochrome stack when the target has a
+color stack (see `color_from_other_stack`). A
 run can override the denoise and star-toning settings without writing them to
 the configuration. By default the old pictures are copied into a
 ``_previous_preview`` folder first, so the new and old can be compared, and a
 failed run puts them back. The stack file is never opened for writing.
+
+A target stacked with several cameras or optics keeps one imaging stack for
+each (``stacks_by_configuration``). A run can name one of those stacks; its
+own pictures are made again, and the target's main stack and its
+processed-image pointer stay as they were.
 """
 
 import logging
@@ -22,18 +29,32 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from astrometricslib.foundation.errors import NotFoundError, ProcessingError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.processing_results import PreviewRemakeResult, PreviewSettingsRecord
 from astrometricslib.pipelines.shared.stack_preview_path import (
+    background_model_path_for,
+    color_preview_path_for,
+    color_preview_record_path_for,
     preview_path_for,
     preview_settings_path_for,
     processed_fits_path_for,
 )
+from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+    BackgroundGradientOutcome,
+    record_background_gradient,
+)
+from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack import (
+    make_color_preview_for_target,
+)
+from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
 from astrometricslib.pipelines.stacking.post_processing.preview_notices import record_preview_step_notices
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import (
     PreviewSettings,
-    SkippedPreviewStep,
     read_preview_settings,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     record_preview_as_processed_image,
     write_stack_preview,
 )
@@ -64,6 +85,9 @@ def _keep_old_pictures(stacked_path: str) -> list[str]:
         preview_path_for(stacked_path),
         processed_fits_path_for(stacked_path),
         preview_settings_path_for(stacked_path),
+        background_model_path_for(stacked_path),
+        color_preview_path_for(stacked_path),
+        color_preview_record_path_for(stacked_path),
     ):
         if os.path.isfile(picture):
             os.makedirs(folder, exist_ok=True)
@@ -120,6 +144,7 @@ def remake_stack_preview(
     job_id: str | None = None,
     measured_at: datetime | None = None,
     configuration: Any | None = None,
+    stack_path: str | None = None,
 ) -> PreviewRemakeResult:
     """Make the preview of a target's current stack again.
 
@@ -142,6 +167,11 @@ def remake_stack_preview(
         is stored (pipeline code does not read the clock).
     configuration : `AppConfiguration`, optional
         Where the quality store lives. The process-wide one if omitted.
+    stack_path : `str`, optional
+        The stack to make the picture of. It must be the target's main stack
+        or one of its stacks by camera and optic. Left out, the main stack.
+        Another configuration's stack gets its own pictures; the target's
+        processed-image pointer is changed only for the stack it shows.
 
     Returns
     -------
@@ -152,14 +182,35 @@ def remake_stack_preview(
 
     Raises
     ------
+    InvalidArgumentError
+        If ``stack_path`` is not one of the target's stacks of this kind.
     NotFoundError
         If the target has no such stack, or its file is missing.
     ProcessingError
         If no preview was made. The old pictures are put back first.
+    RunAbandonedError
+        If the job was cancelled. The old pictures are put back first.
     """
     stacking = target.spectral_stacking if spectral else target.stacking
-    stacked_path = stacking.stacked_image
     kind = "spectral stack" if spectral else "stack"
+    stacked_path = stacking.stacked_image
+    if stack_path and stack_path != stacked_path:
+        # Spectral stacks are kept only for the main configuration.
+        known = (
+            set()
+            if spectral
+            else {
+                recorded.stacked_image
+                for recorded in stacking.stacks_by_configuration.values()
+                if recorded.stacked_image
+            }
+        )
+        if stack_path not in known:
+            raise InvalidArgumentError(
+                f"'{stack_path}' is not a {kind} of '{target.id}'.",
+                details={"target": target.id, "stack_path": stack_path},
+            )
+        stacked_path = stack_path
     if not stacked_path:
         raise NotFoundError(f"Target '{target.id}' has no {kind}.", details={"target": target.id})
     if not os.path.isfile(stacked_path):
@@ -171,10 +222,38 @@ def remake_stack_preview(
     kept = _keep_old_pictures(stacked_path) if keep_previous else []
     steps: list[str] = []
     skipped_steps: list[SkippedPreviewStep] = []
-    preview_path = write_stack_preview(stacked_path, settings, steps, skipped_steps)
+    # A spectral stack has no sky gradient worth measuring.
+    background_outcomes: list[BackgroundGradientOutcome] | None = None if spectral else []
+    try:
+        preview_path = write_stack_preview(
+            stacked_path,
+            settings,
+            steps,
+            skipped_steps,
+            background_outcomes,
+            # The masked stretch is for imaging stacks of a nebula or a galaxy.
+            object_category=None if spectral else target.object_category,
+            target_anchor=None if spectral else anchor_for_target(target),
+        )
+    except RunAbandonedError:
+        # The user cancelled the remake: the old picture goes back.
+        if kept:
+            _put_old_pictures_back(stacked_path, kept)
+        raise
+    color_outcome = None
+    if preview_path is not None:
+        # A monochrome stack also gets its color picture again (see
+        # `color_from_other_stack`). It never fails the remake. A color stack
+        # is skipped, and only the stack the target shows changes the
+        # target's color-picture pointer.
+        color_outcome = make_color_preview_for_target(target, stacked_path, spectral, skipped_steps)
     record_preview_step_notices(
         skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
     )
+    if background_outcomes is not None:
+        record_background_gradient(
+            background_outcomes, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
+        )
     if preview_path is None:
         if kept:
             _put_old_pictures_back(stacked_path, kept)
@@ -197,4 +276,6 @@ def remake_stack_preview(
         previous_pictures=kept,
         stack_file_unchanged=os.path.getmtime(stacked_path) == modified_before,
         preview_settings=_read_settings_record(stacked_path),
+        color_preview_path=color_outcome.path if color_outcome is not None and color_outcome.made else None,
+        color_preview_note=color_outcome.summary() if color_outcome is not None else None,
     )

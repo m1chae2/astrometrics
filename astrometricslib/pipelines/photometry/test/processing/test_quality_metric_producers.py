@@ -81,11 +81,14 @@ def test_a_star_with_too_few_points_is_skipped() -> None:
     assert median_light_curve_scatter_mag([_Star(_LightCurve([100.0, 101.0]))]) is None
 
 
-def test_non_positive_fluxes_are_ignored() -> None:
-    """A failed measurement must not be treated as a faint one."""
+def test_non_positive_fluxes_are_kept() -> None:
+    """A faint star's measured value at or below zero stays in its scatter."""
     stars = [_Star(_LightCurve([100.0, 0.0, -5.0, 100.0, 100.0, 100.0]))]
 
-    assert median_light_curve_scatter_mag(stars) == pytest.approx(0.0)
+    scatter = median_light_curve_scatter_mag(stars)
+
+    assert scatter is not None
+    assert scatter > 0.0
 
 
 def test_no_stars_yields_no_scatter() -> None:

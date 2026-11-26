@@ -39,7 +39,6 @@ from astrometricslib.pipelines.stacking.post_processing.aperture_placement impor
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSetMismatchError
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     read_stack_plane,
-    robust_sigma,
     sky_level_of_plane,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
@@ -47,6 +46,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseResult,
     measure_noise_in_plane,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 

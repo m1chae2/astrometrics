@@ -7,16 +7,24 @@ into standard pictures (PNGs) that can be shown on a webpage or app.
 import base64
 import logging
 import os
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
-from astrometricslib.foundation.errors import NotFoundError, ProcessingError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, StretchParameters, ViewableImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
-from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
+from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.pipelines.shared.stack_preview_path import (
+    PREVIEW_JPEG_QUALITY,
+    is_preview_path,
+    is_processed_fits_path,
+    preview_path_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +54,36 @@ def _stretch_used(data: Any, auto_stretched: bool) -> StretchParameters | None:
         The stretch, measured the way `ImageScaler.scale_to_uint8` measures
         it, or `None` when none was used.
     """
-    return ImageScaler.autostretch_parameters(data, sample_sky=True) if auto_stretched else None
+    return ImageScaler.autostretch_parameters(data) if auto_stretched else None
+
+
+# Paths whose saved picture could not be read, so the warning is logged once
+# per path and not again each time the viewer redraws it.
+_unreadable_preview_paths: set[str] = set()
+
+
+def _find_moved_frame(path: str) -> str:
+    """Find a frame that stacking set aside after its record was made.
+
+    The frame quarantine moves a frame into an ``_excluded`` folder beside it
+    and keeps the original path on the frame's record, so a list built from the
+    records can still ask for the old path.
+
+    Parameters
+    ----------
+    path : `str`
+        The path that was asked for.
+
+    Returns
+    -------
+    found_path : `str`
+        `path` if that file exists, else the same file name inside the
+        ``_excluded`` folder next to it if that file exists, else `path`.
+    """
+    if os.path.exists(path):
+        return path
+    moved_path = os.path.join(os.path.dirname(path), QUARANTINE_FOLDER_NAME, os.path.basename(path))
+    return moved_path if os.path.exists(moved_path) else path
 
 
 def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
@@ -69,7 +106,13 @@ def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
         The picture as a ``data:image/jpeg;base64,...`` string, or `None` if
         there is no current preview or it cannot be read.
     """
+    if is_processed_fits_path(path) or is_preview_path(path):
+        return None
     preview_path = preview_path_for(path)
+    if not os.path.exists(preview_path):
+        # Only a stack has a saved picture. A single frame, or a stack
+        # saved before previews existed, has none: this is normal.
+        return None
     try:
         if os.path.getmtime(preview_path) < os.path.getmtime(path):
             return None
@@ -85,7 +128,9 @@ def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
                 shrunk.save(buffer, format="JPEG", quality=PREVIEW_JPEG_QUALITY)
                 jpeg_bytes = buffer.getvalue()
     except (OSError, ValueError) as error:
-        logger.warning("Could not use the preview picture for '%s': %s", path, error)
+        if path not in _unreadable_preview_paths:
+            _unreadable_preview_paths.add(path)
+            logger.warning("Could not use the preview picture for '%s': %s", path, error)
         return None
     return f"data:image/jpeg;base64,{base64.b64encode(jpeg_bytes).decode('utf-8')}"
 
@@ -129,11 +174,7 @@ class ImageConverter:
         vmin = (center - width / 2.0) if center is not None and width is not None else None
         vmax = (center + width / 2.0) if center is not None and width is not None else None
 
-        # Measuring the sky from a sample of the pixels gives the same picture
-        # in a fraction of the time on a large frame (see `measure_sky`).
-        img8, vmin, vmax = ImageScaler.scale_to_uint8(
-            data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
-        )
+        img8, vmin, vmax = ImageScaler.scale_to_uint8(data, vmin=vmin, vmax=vmax, stretch=stretch)
         stretch_parameters = _stretch_used(data, stretch and center is None)
 
         pil_image = Image.fromarray(img8)
@@ -277,6 +318,7 @@ def render_data_url(
     ProcessingError
         If the file cannot be drawn.
     """
+    path = _find_moved_frame(path)
     try:
         preview = _siril_preview_picture(path, max_dimensions) if stretch and center is None else None
         if preview is not None:
@@ -304,22 +346,57 @@ def render_data_url(
     )
 
 
-def render_viewable_image(
-    path: str,
-    max_dimensions: int,
+@dataclass
+class DisplayPixels:
+    """An image scaled to 0-255 for display, with how it was scaled.
+
+    Attributes
+    ----------
+    picture : `numpy.ndarray`
+        The 8-bit pixels, cropped when a crop was asked for.
+    black : `float`
+        The pixel value drawn as black.
+    white : `float`
+        The pixel value drawn as white.
+    stretched : `bool`
+        Whether the automatic stretch was used.
+    stretch_parameters : `StretchParameters` or `None`
+        The automatic stretch, or `None` when none was used.
+    full_width : `int`
+        Width of the whole image, in pixels.
+    full_height : `int`
+        Height of the whole image, in pixels.
+    crop_box : `dict` or `None`
+        The ``left``, ``top``, ``width`` and ``height`` of the piece drawn,
+        in full-frame pixels, or `None` for the whole image.
+    """
+
+    picture: np.ndarray
+    black: float
+    white: float
+    stretched: bool
+    stretch_parameters: StretchParameters | None
+    full_width: int
+    full_height: int
+    crop_box: dict[str, int] | None
+
+
+def scale_for_display(
+    path: str | None,
+    pixels: np.ndarray | None,
     stretch: bool,
     center: float | None,
     width: float | None,
     crop: tuple[int, int, int] | None,
-) -> ViewableImage:
-    """Draw a FITS frame or stack as a PNG picture, optionally zoomed.
+) -> DisplayPixels:
+    """Read an image, cut out the zoomed piece and scale it to 0-255.
 
     Parameters
     ----------
-    path : `str`
-        The FITS file.
-    max_dimensions : `int`
-        Longest side of the picture, in pixels.
+    path : `str` or `None`
+        The FITS file, or `None` when ``pixels`` are given.
+    pixels : `numpy.ndarray` or `None`
+        The pixels themselves (2-D, or color), or `None` to read ``path``.
     stretch : `bool`
         Brighten faint detail automatically. A stack's ``_processed.fits``
         file is already stretched, so it is drawn as it is.
@@ -333,14 +410,19 @@ def render_viewable_image(
 
     Returns
     -------
-    picture : `ViewableImage`
-        The PNG and a description of the brightness range and the crop.
-    """
-    from astrometricslib.pipelines.shared.stack_preview_path import is_processed_fits_path
+    display : `DisplayPixels`
+        The scaled pixels and how they were scaled.
 
-    if stretch and is_processed_fits_path(path):
+    Raises
+    ------
+    InvalidArgumentError
+        If the image holds no 2-D pixels.
+    """
+    if stretch and path is not None and is_processed_fits_path(path):
         stretch = False
-    data = AstrometricsImage(path).data
+    data = np.asarray(pixels) if pixels is not None else AstrometricsImage(path).data
+    if data is None or np.asarray(data).ndim not in (2, 3) or np.asarray(data).size == 0:
+        raise InvalidArgumentError("The image has no 2-D pixel data.", details={"path": path})
     full_height, full_width = data.shape[-2:]
     crop_box = None
     if crop is not None:
@@ -349,22 +431,67 @@ def render_viewable_image(
         left = max(0, min(int(crop_center_x) - half, full_width - 2 * half))
         top = max(0, min(int(crop_center_y) - half, full_height - 2 * half))
         data = data[..., top : top + 2 * half, left : left + 2 * half]
-        crop_box = {"left": left, "top": top, "width": 2 * half, "height": 2 * half}
+        crop_box = {"left": left, "top": top, "width": int(data.shape[-1]), "height": int(data.shape[-2])}
 
     vmin = (center - width / 2.0) if center is not None else None
     vmax = (center + width / 2.0) if center is not None else None
-    img8, vmin, vmax = ImageScaler.scale_to_uint8(
-        data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
+    picture, black, white = ImageScaler.scale_to_uint8(data, vmin=vmin, vmax=vmax, stretch=stretch)
+    return DisplayPixels(
+        picture=picture,
+        black=float(black),
+        white=float(white),
+        stretched=bool(stretch),
+        stretch_parameters=_stretch_used(data, stretch and center is None),
+        full_width=int(full_width),
+        full_height=int(full_height),
+        crop_box=crop_box,
     )
-    stretch_parameters = _stretch_used(data, stretch and center is None)
-    picture = Image.fromarray(img8)
+
+
+def render_viewable_image(
+    path: str | None,
+    max_dimensions: int,
+    stretch: bool,
+    center: float | None,
+    width: float | None,
+    crop: tuple[int, int, int] | None,
+    pixels: np.ndarray | None = None,
+) -> ViewableImage:
+    """Draw a FITS frame or stack, or an array, as a PNG picture.
+
+    Parameters
+    ----------
+    path : `str` or `None`
+        The FITS file, or `None` when ``pixels`` are given.
+    max_dimensions : `int`
+        Longest side of the picture, in pixels.
+    stretch : `bool`
+        Brighten faint detail automatically. A stack's ``_processed.fits``
+        file is already stretched, so it is drawn as it is.
+    center : `float` or `None`
+        Middle of a manual brightness range, in pixel values.
+    width : `float` or `None`
+        Width of a manual brightness range, in pixel values.
+    crop : `tuple` [`int`, `int`, `int`] or `None`
+        Column and row of the centre of a zoomed piece, and its side, in
+        full-frame pixels.
+    pixels : `numpy.ndarray`, optional
+        The pixels to draw instead of reading ``path``.
+
+    Returns
+    -------
+    picture : `ViewableImage`
+        The PNG and a description of the brightness range and the crop.
+    """
+    display = scale_for_display(path, pixels, stretch, center, width, crop)
+    picture = Image.fromarray(display.picture)
     if picture.mode != "L":
         picture = picture.convert("L")
     longest_side = max(picture.size)
-    target_side = max_dimensions if crop_box is None else max_dimensions // 2
+    target_side = max_dimensions if display.crop_box is None else max_dimensions // 2
     # A big frame is shrunk to fit. A small zoomed piece is enlarged so
     # single stars are easy to see.
-    if longest_side > target_side or (crop_box is not None and longest_side < target_side):
+    if longest_side > target_side or (display.crop_box is not None and longest_side < target_side):
         scale = target_side / longest_side
         picture = picture.resize(
             (round(picture.size[0] * scale), round(picture.size[1] * scale)),
@@ -376,13 +503,13 @@ def render_viewable_image(
         png_bytes=buffer.getvalue(),
         description={
             "path": path,
-            "full_frame_size": {"width": int(full_width), "height": int(full_height)},
-            "crop": crop_box,
+            "full_frame_size": {"width": display.full_width, "height": display.full_height},
+            "crop": display.crop_box,
             "picture_size": {"width": picture.size[0], "height": picture.size[1]},
-            "brightness_range_shown": {"minimum": float(vmin), "maximum": float(vmax)},
-            "stretched": bool(stretch),
+            "brightness_range_shown": {"minimum": display.black, "maximum": display.white},
+            "stretched": display.stretched,
         },
-        stretch_parameters=stretch_parameters,
+        stretch_parameters=display.stretch_parameters,
     )
 
 

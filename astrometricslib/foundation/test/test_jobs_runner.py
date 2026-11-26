@@ -8,6 +8,7 @@ the runner never changes logging setup, which only a program may do.
 """
 
 import logging
+import threading
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -18,6 +19,14 @@ from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.jobs.runner import JobHandle, registered_job
 from astrometricslib.foundation.logging import get_job_log_router
+from astrometricslib.foundation.parameter_context import parameter_context
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 PACKAGE_LOGGER_NAME = "astrometricslib"
 
@@ -369,6 +378,34 @@ class TestRunAsBackgroundJob:
         assert stored is not None and stored.status == "completed", "background work should keep running"
         assert stored.output_metrics["result"] == {"stackedImage": "Vega_Stacked.fits"}
 
+    def test_job_recorded_after_the_grace_period_still_gets_its_id(self, isolated_logs: str) -> None:
+        """A job that is recorded late (slow disk) is still handed back.
+
+        The work takes longer than the grace period just to start its job,
+        as a slow job-row write does on Windows. The caller must still get
+        the job id to poll, not "no job".
+        """
+        from astrometricslib.foundation.jobs.runner import run_as_background_job
+
+        def slow_to_record() -> dict:
+            """Wait past the grace period, then record a job and finish.
+
+            Returns
+            -------
+            result : `dict`
+                A small result.
+            """
+            time.sleep(0.4)
+            with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+                time.sleep(0.2)
+                return {"ok": True}
+
+        outcome = run_as_background_job(slow_to_record, grace_period_seconds=0.1)
+
+        assert outcome["status"] == "running"
+        assert outcome["jobId"] is not None
+        assert outcome["logFilePath"] is not None
+
     def test_failing_work_reports_the_error(self, isolated_logs: str) -> None:
         """A quick failure is raised to the caller, not swallowed."""
         from astrometricslib.foundation.jobs.runner import run_as_background_job
@@ -571,3 +608,114 @@ def test_running_as_job_makes_an_existing_row_current_and_reports_progress(isola
     assert (stored.status, stored.progress_current) == ("running", 30)
     assert len(store.get_jobs_by_target("Vega")) == 1
     assert not handle.reached_terminal_status
+
+
+def test_a_job_of_any_new_kind_stores_its_log_rows_under_its_id(isolated_logs: str) -> None:
+    """Verify an unknown job type still writes log rows readable by id."""
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    package_logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.test_new_kind")
+    with registered_job(enabled=True, job_type="brand_new_kind", target_id="M 31") as job:
+        package_logger.info("first step of a new kind of job")
+        package_logger.info("second step of a new kind of job")
+        job_id = job.job_id
+
+    messages = [row["message"] for row in JobStore(str(isolated_logs)).get_log_entries_for_job(job_id)]
+    assert any("first step" in message for message in messages)
+    assert any("second step" in message for message in messages)
+
+
+def test_a_job_waiting_for_a_slot_is_listed_with_a_waiting_message(isolated_logs: str) -> None:
+    """Verify the job row and its message exist while the slot is held."""
+    from contextlib import contextmanager
+
+    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    slot_is_free = threading.Event()
+    job_is_listed = threading.Event()
+    seen: dict[str, object] = {}
+
+    @contextmanager
+    def busy_slot() -> Generator[None]:
+        """Stand in for a slot that frees only when the test says so."""
+        assert slot_is_free.wait(timeout=20.0)
+        yield
+
+    def run_job() -> None:
+        """Record a job and wait for the busy slot inside it."""
+        with registered_job(enabled=True, job_type="preview", target_id="NGC 2244") as job:
+            seen["job_id"] = job.job_id
+            with job.holding_slot(busy_slot(), working_message="Making the preview"):
+                seen["working_status"] = JobStore(isolated_logs).get_job(job.job_id).message
+
+    thread = threading.Thread(target=run_job, daemon=True)
+    thread.start()
+    store = JobStore(isolated_logs)
+    for _ in range(200):
+        jobs = store.get_jobs_by_target("NGC 2244")
+        if jobs and jobs[0].message == WAITING_FOR_SLOT_MESSAGE:
+            job_is_listed.set()
+            break
+        time.sleep(0.05)
+    assert job_is_listed.is_set()
+    assert jobs[0].status == "running"
+
+    slot_is_free.set()
+    thread.join(timeout=20.0)
+    assert seen["working_status"] == "Making the preview"
+    assert store.get_job(seen["job_id"]).status == "completed"
+
+
+def _defaulted_parameter(name: str) -> TunedParameter:
+    """Build an equipment-profile parameter that no equipment value sets.
+
+    Returns
+    -------
+    parameter : `TunedParameter`
+        A parameter that falls back to its default with a notice.
+    """
+    return TunedParameter(
+        name=name,
+        default=0.5,
+        unit="fraction",
+        description="A test value.",
+        role=ParameterRole.JUDGMENT,
+        source=ParameterSource.EQUIPMENT_PROFILE,
+        equipment=frozenset({EquipmentKind.CAMERA}),
+    )
+
+
+def test_a_job_records_its_defaulted_parameters_and_logs_one_summary(
+    isolated_logs: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Record both defaults with the job and log one INFO line, no warnings.
+
+    A second job in the same process records its own notices again, which a
+    once-per-process warning would not.
+    """
+    from astrometricslib.foundation.jobs.runner import PARAMETER_DEFAULTS_KEY
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    first = _defaulted_parameter("stacking.first_value")
+    second = _defaulted_parameter("stacking.second_value")
+    stored_by_job = []
+    for _ in range(2):
+        with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+            with parameter_context():
+                resolve(first)
+                resolve(second)
+                resolve(second)
+        stored_by_job.append(JobStore(isolated_logs).get_job(job.job_id))
+    for stored in stored_by_job:
+        notices = stored.output_metrics[PARAMETER_DEFAULTS_KEY]
+        assert [notice.split(":")[0] for notice in notices] == [
+            "stacking.first_value",
+            "stacking.second_value",
+        ]
+        entries = JobStore(isolated_logs).get_log_entries_for_job(stored.id)
+        summaries = [entry for entry in entries if "used their defaults" in entry["message"]]
+        assert [(entry["level"], entry["message"]) for entry in summaries] == [
+            ("INFO", "2 parameters used their defaults (no tuned or equipment value)")
+        ]
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]

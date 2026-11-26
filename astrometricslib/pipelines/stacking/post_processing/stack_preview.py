@@ -2,45 +2,105 @@
 
 A stacked FITS file holds linear data: pixel values proportional to the
 light collected. Most of the sky is far too dark in that form to see
-anything. Up to six steps turn it into a picture.
+anything. Up to eight steps turn it into a picture.
 
-1. GraXpert, if it is configured, removes the sky's brightness gradient.
-   Its AI model learns what the smooth background looks like and subtracts
+1. If GraXpert is configured, the sky's brightness gradient is removed in
+   one of two ways (see `sky_plane`). A stack whose sky tilts by less than
+   the limit gets a fitted plane subtracted: a plane cannot make a ring
+   around a large nebula. A stack with a stronger gradient goes to GraXpert,
+   whose AI model learns what the smooth background looks like and subtracts
    it, so uneven sky glow or vignetting does not wash out the faint parts.
-2. Colour calibration (see `colour_calibration`) balances the colours of a
-   colour stack from its own stars, on the linear data. The setting
-   ``preview_colour_calibration_enabled`` turns it off.
+   The record beside the picture says which ran, with the measured gradient
+   and the limit.
+2. Colour calibration balances the colours of a colour stack, on the linear
+   data: Siril's photometric colour calibration, or, when that is not asked
+   for or fails, the Gaia stars like the Sun (see `sun_like_balance`). With
+   no Gaia colours the colours are left uncalibrated, and the record says
+   so. Just before it, the star widths of the colour channels are matched
+   (see `star_width_match`):
+   a channel whose stars are clearly wider than green's, such as red behind
+   the 300 mm camera lens, is sharpened to green's width, so the stars get no
+   colored ring and the calibration measures stars of one shape. It is
+   skipped, with the reason in the record, when the widths already agree;
+   the setting ``preview_star_width_match_enabled`` turns it off. The setting
+   ``preview_colour_calibration_enabled`` turns it off. A white-balance check
+   follows Siril's calibration (see `sun_like_balance`): stars that look
+   like the Sun, found from their Gaia colours, should come out white, and
+   the red and blue channels are scaled about the sky level if they do not.
+   It is skipped, with the reason in the record, when the stack has no
+   plate solution, the Gaia colours cannot be had, too few stars qualify, or
+   the change it asks for is too large. If Siril says its calibration is
+   imprecise, a notice is stored.
 3. Siril's Remove Green Noise (``rmgreen``) lowers the green in a colour
    stack, such as one from the Nikon DSLR. A colour sensor has twice as many
    green pixels as red or blue, and the sky's glow is often green, so these
-   stacks look green. It runs on the linear data, just before the stretch. A
-   single-channel stack, such as one from the ZWO camera, has no colour to
-   balance and is left alone. The setting
-   ``preview_remove_green_noise_enabled`` turns it off.
-4. Siril's Autostretch command brightens the faint parts the way its own
-   display does. It sets the black point from the image's own background
-   noise, then bends the brightness curve so the typical background lands on
-   a chosen grey level. The level comes from the stack itself (see
-   `sky_level`): faint targets get a lighter sky so their faint structure
-   stays visible, and bright targets get a darker one.
+   stacks look green. It runs on the linear data, just before the stretch,
+   and only when step 2 did not calibrate the colours (see
+   `decide_remove_green`). Calibration already makes the sky equal in the
+   three channels, and the strong stretch turns the small shift that
+   ``rmgreen`` then makes into a magenta sky: green fell to 0.88 to 0.89 of
+   the mean of red and blue on two Nikon stacks, against 1.01 to 1.03 without
+   the step. A single-channel stack, such as one from the ZWO camera, has no
+   colour to balance and is left alone. The setting
+   ``preview_remove_green_noise_enabled`` is the master switch and turns the
+   step off. The record beside the picture says whether it ran and why.
+4. The stretch brightens the faint parts. It sets the black point (the value
+   drawn as pure black) just below the sky, then bends the brightness curve
+   so the sky lands on a chosen grey level. The level comes from the stack
+   itself (see `sky_level`): faint targets get a lighter sky so their faint
+   structure stays visible, and bright targets get a darker one. The sky
+   level and its noise are measured on the empty sky (see `stretch_sky`),
+   for a single-channel stack and for a colour stack with calibrated colours
+   (on the mean of its channels, which one shared stretch treats alike). A
+   colour stack whose calibration failed or is off, and any stack whose sky
+   cannot be measured, is stretched by Siril's own Autostretch, which takes
+   the sky from every pixel. In a crowded star field that spread is several
+   times the real pixel noise, so the black point falls far below the sky and
+   the picture is flat.
 5. Cosmic Clarity, if it is configured, removes noise with an AI model. It
-   runs after the stretch, on the stretched picture. Run before the stretch,
+   runs after the stretch, on the stretched picture. A color stack gets the
+   program's ``full`` mode, which also smooths the color speckle (strength
+   ``preview_color_denoise_strength``); a single-channel stack keeps the
+   brightness-only mode. Run before the stretch,
    it lowers the noise level that Autostretch measures, so the stretch turns
    the contrast back up and the remaining noise looks as strong as before,
    with extra blotchy structure. Measured on the M 13 stack, the visible
    grain fell by only 22 percent that way, against 73 percent when the
    denoise ran after the stretch.
-6. Star toning (see `star_tone`) dims the stars in proportion to their
+6. Sky levelling (see `sky_levelling`) makes the sky of a color picture
+   neutral. The stretch multiplies the small differences between the
+   channels' sky levels that the linear steps leave (a green-cyan sky on the
+   NGC 6992 stack: red 27, green 30, blue 29 of 255). The step measures each
+   channel's empty sky on the stretched picture, adds an offset to red and
+   blue so their sky equals green's, and clips to the range 0 to 1. It runs
+   after Cosmic Clarity, which can also shift the colors, and before the star
+   toning, which leaves the sky alone. It is skipped, with a notice, when the
+   sky cannot be measured or an offset would exceed
+   `SKY_LEVELLING_MAXIMUM_OFFSET`. The offsets are in the record beside the
+   picture. A single-channel stack is not touched.
+7. Star toning (see `star_tone`) dims the stars in proportion to their
    brightness and compresses the brightest values below pure white. The
    stretch makes nearly every star a small white dot of about the same
    brightness. The toning brings back some of their real range. It acts on
    the stretched picture and leaves the background and nebulae alone. The
    setting ``preview_star_tone_enabled`` turns it off.
 
+8. The masked stretch (see `masked_stretch`) protects a small bright smooth
+   object, such as the ring of M 57. The normal stretch pushes such an object
+   to flat white. For a nebula or galaxy target with a smooth bright region,
+   a second stretch, set by the region's own brightness, replaces the picture
+   inside the region and fades out around it. The rest of the picture is left
+   as the earlier steps made it.
+
 A stack of a bright extended object, such as the Moon, takes a different
 route. The normal stretch would push the whole object to white (see
 `bright_object`), so one Siril script applies a stretch scaled to the
 object's own brightness, and GraXpert and Cosmic Clarity are skipped.
+
+The picture is also cropped, to the area covered by at least 85% of the
+frames, before the first step (see `stack_crop`). The crop's place on the
+stack is written in the picture's header (``CROPX0``, ``CROPY0``, ``CROPW``
+and ``CROPH``), and its plate solution is moved with it.
 
 All steps run on a scratch copy of the stack and the result is saved as a
 JPEG beside the stack. The JPEG is only a picture for people to look at. The
@@ -48,86 +108,97 @@ stack itself is never changed, so photometry, spectroscopy and plate solving
 keep reading the linear data. A failed or skipped step never fails the stack:
 if GraXpert, Cosmic Clarity or the star toning fails, the picture is made from
 the result of the step before it, and if Siril fails, there is no picture.
+
+This module runs the steps in order and saves the result. The steps live in
+their own modules: `preview_siril` (the Siril scripts), `preview_graxpert`
+(the gradient removal), `preview_cosmic_clarity` (the denoise),
+`starnet_stretch` (the StarNet stretch) and `preview_color` (the color
+steps). `preview_steps` runs one optional step, and `preview_settings` holds
+the per-run choices and the settings record.
 """
 
-import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
-import numpy as np
-
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
-from astrometricslib._internal.drivers.image import AstrometricsImage
-from astrometricslib._internal.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
-from astrometricslib.foundation.errors import NotFoundError, StorageError
-from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.foundation.run_abandonment import run_registered
-from astrometricslib.foundation.system import split_program_command
-from astrometricslib.models.tuned_parameter import (
-    HardcodedKind,
-    ParameterRole,
-    ParameterSource,
-    TunedParameter,
-)
-from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
+from astrometricslib.pipelines.shared.registration_record import read_registration_record
 from astrometricslib.pipelines.shared.stack_preview_path import (
-    PREVIEW_JPEG_QUALITY,
+    background_model_path_for,
     is_preview_path,
     is_processed_fits_path,
     preview_path_for,
     preview_settings_path_for,
     processed_fits_path_for,
 )
+from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
+    BackgroundGradientOutcome,
+    not_measured_outcome,
+    write_binned_model,
+)
 from astrometricslib.pipelines.stacking.post_processing.bright_object import (
-    BrightObjectStretch,
     choose_bright_object_stretch_for_file,
 )
-from astrometricslib.pipelines.stacking.post_processing.colour_calibration import calibrate_colours_in_file
-from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
-from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
-from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
-    DEFAULT_STAR_STRENGTH,
-    DEFAULT_STAR_STRETCH,
-    STARLESS_NAME,
-    STARS_NAME,
-    blend_files,
-    build_starnet_script,
-    collect_starnet_outputs,
+from astrometricslib.pipelines.stacking.post_processing.cluster_nebula import (
+    CategoryVerdict,
+    refine_object_category,
 )
+from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
+    MaskedStretchPlan,
+    TargetAnchor,
+    apply_masked_stretch_in_file,
+    plan_masked_stretch_for_file,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_color import (
+    build_pcc_script,
+    calibrate_from_sun_like_stars,
+    check_white_balance,
+    decide_remove_green,
+    find_local_gaia_catalog,
+    has_plate_solution,
+    is_colour_image,
+    level_stretched_sky,
+    match_star_widths,
+    online_catalog_reachable,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_cosmic_clarity import (
+    denoise_with_cosmic_clarity,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_graxpert import remove_background
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import (
+    PreviewSettings,
+    write_preview_settings,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_siril import (
+    PROCESSED_STEM,
+    build_bright_object_script,
+    build_picture_script,
+    build_preview_script,
+    build_stretch_script,
+    last_siril_output,
+    run_preview_script,
+    sky_background_for_file,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep, next_source
+from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
+from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
+from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
+from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import stretch_with_starnet
 
 logger = logging.getLogger(__name__)
 
-# The longest a single Siril script may run, in seconds. The M 13 script took
-# 0.7 seconds once Siril had started, so two minutes leaves room for Siril's
-# start-up and for a much larger stack, and still stops a hung process. The
-# wait for a free Siril slot is not counted: the lock is taken before the
-# clock starts.
-PREVIEW_TIMEOUT_SECONDS = 120
 
-# The longest GraXpert may run, in seconds. On the M 13 stack (3008 x 3008
-# pixels) the extraction took 7 seconds including start-up, with the model
-# already on disk. A first run also downloads the AI model, which took 34
-# seconds. Five minutes covers both and a much larger stack, and still stops
-# a hung process. Slot waiting is not counted, as above.
-GRAXPERT_TIMEOUT_SECONDS = 300
-
-# The longest Cosmic Clarity may run, in seconds. A 1024 x 1024 crop took 7.7
-# seconds on the GPU including the model load. The whole preview of the full
-# M 13 stack (3008 x 3008 pixels), with GraXpert and Siril as well, took 54
-# seconds, so Cosmic Clarity took under that. Five minutes leaves room for a
-# larger stack or a slower card, and still stops a hung process.
-COSMIC_CLARITY_TIMEOUT_SECONDS = 300
+# The sentence Siril logs when its photometric color calibration fits the stars
+# poorly. The text follows Siril 1.4.
+_SIRIL_IMPRECISE_PCC_TEXT = "imprecise solution"
 
 # The scratch folder lives on the local disk (~/.cache/astrometrics/siril), not
 # system temp folder: that is often held in RAM, and a Flatpak Siril is
@@ -135,403 +206,11 @@ COSMIC_CLARITY_TIMEOUT_SECONDS = 300
 # its own work (see `ImageProcessing.workdir`).
 _SCRATCH_ROOT = siril_work_directory()
 
-# The share of an image's pixels that must be finite numbers for a cleanup
-# step's result to be used. GraXpert can return not-a-number pixels for a
-# stack with large empty regions. 0.9 allows for blank borders and still
-# rejects an image that is mostly invalid. Not tuned beyond that.
-_MINIMUM_FINITE_FRACTION = TunedParameter(
-    name="stacking.minimum_finite_fraction",
-    default=0.9,
-    unit="fraction",
-    description="Share of pixels that must be finite for a cleanup result to be used.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="STK-D56",
-)
 
 # A scratch folder older than this many seconds belongs to a run that was
 # killed, for example by a reboot, and is removed. A preview takes about a
 # minute, so an hour never touches a run that is still going.
 _STALE_SCRATCH_SECONDS = 3600
-
-# The names this module gives the files it stages in Cosmic Clarity's folders.
-# Only files with these names are ever deleted from those folders.
-_OWN_STAGED_FILE = re.compile(r"^stack_preview_\d+(_denoised)?\.fits$")
-
-# The file name, without extension, under which each final script also saves
-# the stretched picture as FITS. `write_stack_preview` moves it next to the
-# stack.
-_PROCESSED_STEM = "processed"
-
-# Siril's `savejpg` writes the picture upside down compared with the FITS file
-# it was made from (checked on NGC 6888, M 57, M 101 and NGC 7000: the FITS
-# array, which matches the camera's own view, correlates 1.0 with the JPEG only
-# after a vertical flip). `mirrorx` flips the loaded image vertically just
-# before the JPEG is saved, after the FITS copy, so both pictures show the
-# same way up.
-_JPEG_ORIENTATION_COMMAND = "mirrorx"
-
-# The oldest Siril that has the `autostretch` and `savejpg` commands used here.
-_MINIMUM_SIRIL_VERSION = "1.2.0"
-
-
-def _autostretch_command(sky_level: float, linked: bool = False) -> str:
-    """Write the Siril command that stretches the loaded image.
-
-    Parameters
-    ----------
-    sky_level : `float`
-        The brightness, between 0 and 1, the sky should land on.
-    linked : `bool`, optional
-        Whether all colour channels share one stretch. By default Siril
-        stretches each channel on its own, which sets every channel's sky and
-        brightness scale to the same values. That undoes any colour balance
-        made on the linear data, so a picture whose colours were calibrated
-        needs the shared stretch. Default `False`.
-
-    Returns
-    -------
-    command : `str`
-        Siril's ``autostretch`` command with the black-point clip and the
-        sky level written out.
-    """
-    flag = "-linked " if linked else ""
-    return f"autostretch {flag}{AUTOSTRETCH_SHADOWS_CLIP_SIGMA} {sky_level:.3f}"
-
-
-# Siril's Remove Green Noise command. With no options it uses the "average
-# neutral" method, which limits each pixel's green to the average of its red
-# and blue, and it keeps the pixel's lightness.
-_REMOVE_GREEN_COMMAND = "rmgreen"
-
-
-def is_colour_image(path: str) -> bool:
-    """Say whether a FITS file holds a three-channel colour image.
-
-    Only the header is read.
-
-    Parameters
-    ----------
-    path : `str`
-        Path of the FITS file.
-
-    Returns
-    -------
-    is_colour : `bool`
-        `True` if the image has three colour planes. `False` for a
-        single-channel image or a file that cannot be read.
-    """
-    try:
-        header = read_header(path)
-    except OSError, ValueError:
-        return False
-    return header.get("NAXIS", 0) == 3 and header.get("NAXIS3", 0) == 3
-
-
-# Siril's photometric colour calibration needs the 1.4 release for the
-# ``-catalog=gaia`` option used here.
-_PCC_MINIMUM_SIRIL_VERSION = "1.4.0"
-
-
-def has_plate_solution(path: str) -> bool:
-    """Say whether a FITS file already carries a plate solution.
-
-    Only the header is read.
-
-    Parameters
-    ----------
-    path : `str`
-        Path of the FITS file.
-
-    Returns
-    -------
-    solved : `bool`
-        `True` if the header holds world-coordinate keywords (a projection
-        type and a reference sky position). `False` otherwise, or if the file
-        cannot be read.
-    """
-    try:
-        header = read_header(path)
-    except OSError, ValueError:
-        return False
-    return "CTYPE1" in header and "CRVAL1" in header
-
-
-def build_pcc_script(source_file_name: str, output_stem: str, solve: bool) -> list[str]:
-    """Write the Siril commands that calibrate an image's colours with PCC.
-
-    Siril's photometric colour calibration matches the stars of a plate-solved
-    image to the Gaia catalogue and scales the channels, after removing each
-    channel's background.
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the linear colour image, relative to the folder Siril is
-        started in.
-    output_stem : `str`
-        File name for the calibrated copy, relative to that folder and without
-        the ``.fits`` extension (Siril adds it).
-    solve : `bool`
-        Whether Siril must first solve the field. It needs the pointing,
-        focal length and pixel size in the file's header. Pass `False` for an
-        image that already holds a plate solution.
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    return [
-        f"requires {_PCC_MINIMUM_SIRIL_VERSION}",
-        f'load "{source_file_name}"',
-        *(["platesolve -catalog=gaia"] if solve else []),
-        "pcc -catalog=gaia",
-        f'save "{output_stem}"',
-        "close",
-    ]
-
-
-def build_preview_script(
-    stacked_file_name: str,
-    preview_stem: str,
-    sky_level: float,
-    remove_green: bool = False,
-    linked: bool = False,
-) -> list[str]:
-    """Write the Siril commands that stretch one stack and save it.
-
-    The picture is saved twice: as FITS (``processed.fits``, numbers between
-    0 and 1) and as JPEG.
-
-    Names are put in quotes so a file name with a space still works.
-
-    Parameters
-    ----------
-    stacked_file_name : `str`
-        File name of the stack, relative to the folder Siril is started in.
-    preview_stem : `str`
-        File name for the picture, relative to that folder and without the
-        ``.jpg`` extension (Siril adds it).
-    sky_level : `float`
-        The brightness, between 0 and 1, the sky should land on (see
-        `sky_level.choose_sky_level`).
-    remove_green : `bool`, optional
-        Whether to remove excess green before the stretch. Only for a
-        colour image. Default `False`.
-    linked : `bool`, optional
-        Whether the colour channels share one stretch (see
-        `_autostretch_command`). Default `False`.
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    return [
-        f"requires {_MINIMUM_SIRIL_VERSION}",
-        f'load "{stacked_file_name}"',
-        *([_REMOVE_GREEN_COMMAND] if remove_green else []),
-        _autostretch_command(sky_level, linked),
-        f'save "{_PROCESSED_STEM}"',
-        _JPEG_ORIENTATION_COMMAND,
-        f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
-        "close",
-    ]
-
-
-def build_bright_object_script(
-    source_file_name: str, preview_stem: str, stretch: BrightObjectStretch
-) -> list[str]:
-    """Write the Siril commands that stretch a bright object and save it.
-
-    The picture is saved as FITS (``processed.fits``) and as JPEG.
-
-    Siril's ``mtf`` command clips the image between a black and a white
-    point (both between 0 and 1) and applies the midtones curve. A stack with
-    values above 1 is multiplied down first.
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the stack, relative to the folder Siril is started in.
-    preview_stem : `str`
-        File name for the picture, relative to that folder and without the
-        ``.jpg`` extension (Siril adds it).
-    stretch : `BrightObjectStretch`
-        The black point, white point, midtones balance and scale.
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    commands = [f"requires {_MINIMUM_SIRIL_VERSION}", f'load "{source_file_name}"']
-    if stretch.scale < 1.0:
-        commands.append(f"fmul {stretch.scale:.9f}")
-    commands += [
-        f"mtf {stretch.black_point:.6f} {stretch.midtones:.6f} {stretch.white_point:.6f}",
-        f'save "{_PROCESSED_STEM}"',
-        _JPEG_ORIENTATION_COMMAND,
-        f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
-        "close",
-    ]
-    return commands
-
-
-def build_stretch_script(
-    source_file_name: str,
-    stretched_stem: str,
-    sky_level: float,
-    remove_green: bool = False,
-    linked: bool = False,
-) -> list[str]:
-    """Write the Siril commands that stretch an image and save it as FITS.
-
-    The saved file holds the stretched picture as numbers between 0 and 1.
-    Cosmic Clarity then denoises it, and `build_picture_script` turns the
-    result into a JPEG.
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the image to stretch, relative to the folder Siril is
-        started in.
-    stretched_stem : `str`
-        File name for the stretched copy, relative to that folder and without
-        the ``.fits`` extension (Siril adds it).
-    sky_level : `float`
-        The brightness, between 0 and 1, the sky should land on.
-    remove_green : `bool`, optional
-        Whether to remove excess green before the stretch. Only for a
-        colour image. Default `False`.
-    linked : `bool`, optional
-        Whether the colour channels share one stretch (see
-        `_autostretch_command`). Default `False`.
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    return [
-        f"requires {_MINIMUM_SIRIL_VERSION}",
-        f'load "{source_file_name}"',
-        *([_REMOVE_GREEN_COMMAND] if remove_green else []),
-        _autostretch_command(sky_level, linked),
-        f'save "{stretched_stem}"',
-        "close",
-    ]
-
-
-def build_picture_script(source_file_name: str, preview_stem: str) -> list[str]:
-    """Write the Siril commands that save an already stretched image.
-
-    The picture is saved as FITS (``processed.fits``) and as JPEG.
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the stretched image, relative to the folder Siril is
-        started in.
-    preview_stem : `str`
-        File name for the picture, relative to that folder and without the
-        ``.jpg`` extension (Siril adds it).
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry. It does not stretch again.
-    """
-    return [
-        f"requires {_MINIMUM_SIRIL_VERSION}",
-        f'load "{source_file_name}"',
-        f'save "{_PROCESSED_STEM}"',
-        _JPEG_ORIENTATION_COMMAND,
-        f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
-        "close",
-    ]
-
-
-def run_preview_script(directory: str, commands: list[str], siril_executable: str) -> bool:
-    """Run a short Siril script in a folder.
-
-    Waits for a free Siril slot first, so a preview never competes with a
-    stack for the machine's Siril limit.
-
-    Parameters
-    ----------
-    directory : `str`
-        Folder to start Siril in (its ``-d`` option). The script file is
-        written here and removed afterwards.
-    commands : `list` [`str`]
-        The Siril commands to run, in order.
-    siril_executable : `str`
-        The command that starts Siril, as in the configuration. A Flatpak
-        command is given access to the host's files, since the sandbox cannot
-        see most folders by default.
-
-    Returns
-    -------
-    succeeded : `bool`
-        `True` if Siril exited without an error code.
-    """
-    script_path = os.path.join(directory, f"stack_preview{os.getpid()}.ssf")
-    with open(script_path, "w", encoding="utf-8") as script_file:
-        script_file.write("\n".join(commands) + "\n")
-    parts = split_program_command(siril_executable)
-    if "flatpak" in parts[0] and "run" in parts:
-        parts.insert(parts.index("run") + 1, "--filesystem=host")
-    try:
-        with siril_process_lock():
-            # Stoppable: giving up on the stack stops this Siril too.
-            completed = run_registered([*parts, "-d", directory, "-s", script_path], PREVIEW_TIMEOUT_SECONDS)
-    finally:
-        os.remove(script_path)
-    return completed.returncode == 0
-
-
-def flatten_background(graxpert_executable: str, input_path: str, output_stem: str) -> bool:
-    """Remove the sky gradient from an image with GraXpert's AI model.
-
-    Waits for a free slot first, as `run_preview_script` does. GraXpert uses
-    the graphics card when it can and the processor otherwise, so a machine
-    without CUDA still works.
-
-    Parameters
-    ----------
-    graxpert_executable : `str`
-        The command that starts GraXpert, as in the configuration.
-    input_path : `str`
-        The FITS image to flatten. It is not changed.
-    output_stem : `str`
-        Where to write the result, without an extension. GraXpert adds
-        ``.fits``.
-
-    Returns
-    -------
-    succeeded : `bool`
-        `True` if GraXpert exited without an error code.
-    """
-    arguments = [
-        *split_program_command(graxpert_executable),
-        "-cli",
-        "-cmd",
-        "background-extraction",
-        "-gpu",
-        "true",
-        "-correction",
-        "Subtraction",
-        "-smoothing",
-        "0.0",
-        "-output",
-        output_stem,
-        input_path,
-    ]
-    with siril_process_lock():
-        completed = run_registered(arguments, GRAXPERT_TIMEOUT_SECONDS)
-    return completed.returncode == 0
 
 
 def _remove_stale_scratch_folders() -> None:
@@ -546,311 +225,6 @@ def _remove_stale_scratch_folders() -> None:
                 shutil.rmtree(folder, ignore_errors=True)
 
 
-def _remove_own_staged_files(folder: str) -> None:
-    """Delete files this module staged in a Cosmic Clarity folder earlier.
-
-    A run that was killed between staging a file and cleaning up leaves it
-    behind. The caller holds the exclusive lock, so no run of this module is
-    using such a file. Files with any other name are never touched.
-    """
-    for name in os.listdir(folder):
-        if _OWN_STAGED_FILE.match(name):
-            os.remove(os.path.join(folder, name))
-
-
-def denoise_with_cosmic_clarity(
-    cosmic_clarity_executable: str, input_path: str, output_path: str, strength: float
-) -> bool:
-    """Remove noise from an image with Cosmic Clarity's AI model.
-
-    The program takes no folder options. It reads every file in the ``input``
-    folder next to it and writes the results to the ``output`` folder next to
-    it. This function therefore takes an exclusive lock first, so two runs
-    never share the folders. It refuses to run if ``input`` already holds a
-    file it did not put there, because the program would process that file
-    too, and it never deletes files that are not its own.
-
-    Parameters
-    ----------
-    cosmic_clarity_executable : `str`
-        Path of ``SetiAstroCosmicClarity_denoise``.
-    input_path : `str`
-        The FITS image to denoise. It is not changed.
-    output_path : `str`
-        Where to put the denoised FITS image.
-    strength : `float`
-        How strongly to remove noise, from 0 to 1.
-
-    Returns
-    -------
-    succeeded : `bool`
-        `True` if the program exited without an error code and the denoised
-        image is at `output_path`.
-    """
-    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
-
-    program_folder = os.path.dirname(os.path.abspath(cosmic_clarity_executable))
-    input_folder = os.path.join(program_folder, "input")
-    output_folder = os.path.join(program_folder, "output")
-    os.makedirs(input_folder, exist_ok=True)
-    os.makedirs(output_folder, exist_ok=True)
-    file_stem = f"stack_preview_{os.getpid()}"
-    staged_input = os.path.join(input_folder, f"{file_stem}.fits")
-    produced_output = os.path.join(output_folder, f"{file_stem}_denoised.fits")
-    with acquire_resource_slot(get_configuration(), "cosmic_clarity", 1):
-        _remove_own_staged_files(input_folder)
-        _remove_own_staged_files(output_folder)
-        if os.listdir(input_folder):
-            logger.warning(
-                "Cosmic Clarity's input folder '%s' already holds files, so it was not used.", input_folder
-            )
-            return False
-        try:
-            shutil.copyfile(input_path, staged_input)
-            completed = run_registered(
-                [cosmic_clarity_executable, "--denoise_mode=luminance", f"--denoise_strength={strength}"],
-                COSMIC_CLARITY_TIMEOUT_SECONDS,
-            )
-            if completed.returncode != 0 or not os.path.isfile(produced_output):
-                return False
-            shutil.move(produced_output, output_path)
-        finally:
-            for leftover in (staged_input, produced_output):
-                if os.path.exists(leftover):
-                    os.remove(leftover)
-    return True
-
-
-def _is_usable_image(path: str) -> bool:
-    """Tell whether a FITS image is mostly valid numbers with some contrast.
-
-    Parameters
-    ----------
-    path : `str`
-        Path of the FITS image.
-
-    Returns
-    -------
-    usable : `bool`
-        `True` if at least `_MINIMUM_FINITE_FRACTION` of the pixels are
-        finite and the finite pixels are not all one value. A file that
-        cannot be read is not usable.
-    """
-    try:
-        data = AstrometricsImage(path).data
-    except OSError, ValueError, KeyError, NotFoundError, StorageError:
-        return False
-    finite = np.isfinite(data)
-    if finite.mean() < resolve(_MINIMUM_FINITE_FRACTION).value:
-        return False
-    return bool(np.nanmax(data) > np.nanmin(data))
-
-
-@dataclass(frozen=True)
-class SkippedPreviewStep:
-    """One preview step that was skipped, and why.
-
-    The preview is made without the step, so the picture differs from the one
-    the settings describe. The caller stores a notice for it (see
-    `astrometricslib.pipelines.stacking.post_processing.preview_notices`).
-
-    Attributes
-    ----------
-    step_name : `str`
-        The step, such as ``"GraXpert"``.
-    reason : `str`
-        The sentence that says what went wrong, such as
-        ``"GraXpert did not finish"``.
-    """
-
-    step_name: str
-    reason: str
-
-
-def _next_source(
-    step_name: str,
-    current_name: str,
-    new_name: str,
-    scratch: str,
-    run_step: Callable[[str, str], bool],
-    check_result: bool = False,
-    skipped_steps: list[SkippedPreviewStep] | None = None,
-) -> str:
-    """Run one optional cleanup step and choose the file to carry forward.
-
-    Parameters
-    ----------
-    step_name : `str`
-        The step's name, for the warning if it fails.
-    current_name : `str`
-        The file in the scratch folder that the step starts from.
-    new_name : `str`
-        The file the step should create in the scratch folder.
-    scratch : `str`
-        The scratch folder.
-    run_step : `Callable` [[`str`, `str`], `bool`]
-        Runs the step on a full input path and a full output path, and
-        returns whether the program succeeded.
-    check_result : `bool`, optional
-        If `True`, the step's file is used only if `_is_usable_image` accepts
-        it, so a program that exits without an error but writes invalid
-        pixels is treated as a failure.
-    skipped_steps : `list` [`SkippedPreviewStep`], optional
-        If given, a step that is skipped is added to it, so the caller can
-        store a notice that the preview differs from its settings.
-
-    Returns
-    -------
-    file_name : `str`
-        `new_name` if the step worked, otherwise `current_name`.
-    """
-
-    def skip(reason: str) -> str:
-        """Log a skipped step, remember it, and keep the old file.
-
-        Returns
-        -------
-        file_name : `str`
-            `current_name`.
-        """
-        logger.warning("%s; the preview skips that step.", reason)
-        if skipped_steps is not None:
-            skipped_steps.append(SkippedPreviewStep(step_name, reason))
-        return current_name
-
-    try:
-        worked = run_step(os.path.join(scratch, current_name), os.path.join(scratch, new_name))
-    except (OSError, subprocess.SubprocessError) as error:
-        return skip(f"{step_name} could not run ({error})")
-    result_path = os.path.join(scratch, new_name)
-    if not worked or not os.path.isfile(result_path):
-        return skip(f"{step_name} did not finish")
-    if check_result and not _is_usable_image(result_path):
-        return skip(f"{step_name} wrote an image with invalid pixels")
-    logger.info("%s finished; the preview uses its result.", step_name)
-    return new_name
-
-
-@dataclass(frozen=True)
-class PreviewSettings:
-    """Choices for one preview run that replace the saved settings.
-
-    Each field left as `None` uses the app's configured value. The values
-    apply to the run they are given to and are never written to the
-    configuration.
-
-    Attributes
-    ----------
-    denoise : `bool` or `None`
-        `False` skips Cosmic Clarity even if it is configured. `True` runs it
-        even if the settings have it switched off (it cannot run without its
-        program path).
-    denoise_strength : `float` or `None`
-        Cosmic Clarity's denoise strength for this run.
-    star_toning : `bool` or `None`
-        Turn the star toning on or off for this run.
-    starnet : `bool`
-        Stretch the stars and the rest of the picture on their own, using
-        StarNet through Siril (see `starnet_stretch`). Off by default. It is
-        slow, and a failed run falls back to the normal preview. The star
-        toning is not used with it.
-    star_strength : `float` or `None`
-        With StarNet, how much of the stars layer is blended, from 0 to 1.
-        `None` uses `DEFAULT_STAR_STRENGTH`.
-    star_stretch : `float` or `None`
-        With StarNet, the arcsinh strength of the stars' own stretch. `None`
-        uses `DEFAULT_STAR_STRETCH`.
-    """
-
-    denoise: bool | None = None
-    denoise_strength: float | None = None
-    star_toning: bool | None = None
-    starnet: bool = False
-    star_strength: float | None = None
-    star_stretch: float | None = None
-
-
-def _stretch_with_starnet(
-    scratch: str,
-    name: str,
-    siril_executable: str,
-    remove_green: bool,
-    linked: bool,
-    settings: PreviewSettings,
-    skipped_steps: list[SkippedPreviewStep] | None = None,
-) -> str | None:
-    """Stretch the stars and the rest of the image on their own with StarNet.
-
-    StarNet splits the linear image into a starless image and a stars-only
-    image. The starless image gets the usual stretch, the stars get an
-    arcsinh stretch of their own, and the two are blended (see
-    `starnet_stretch`). The result is saved as ``stretched.fits``.
-
-    Parameters
-    ----------
-    scratch : `str`
-        The scratch folder.
-    name : `str`
-        The linear image in the scratch folder to split.
-    siril_executable : `str`
-        The command that starts Siril.
-    remove_green : `bool`
-        Whether the stretch of the starless image removes excess green first.
-    linked : `bool`
-        Whether the colour channels share one stretch.
-    settings : `PreviewSettings`
-        Supplies the strength and the stretch of the stars layer.
-    skipped_steps : `list` [`SkippedPreviewStep`], optional
-        If given, a failure adds a `SkippedPreviewStep` to it.
-
-    Returns
-    -------
-    file_name : `str` or `None`
-        ``"stretched.fits"`` if StarNet and the blend worked, otherwise
-        `None`. The reason is logged.
-    """
-    strength = (
-        resolve(DEFAULT_STAR_STRENGTH).value if settings.star_strength is None else settings.star_strength
-    )
-    stretch = resolve(DEFAULT_STAR_STRETCH).value if settings.star_stretch is None else settings.star_stretch
-
-    def fall_back(reason: str) -> None:
-        """Log that StarNet failed and remember it for the caller."""
-        logger.warning("%s; the preview uses the normal stretch.", reason)
-        if skipped_steps is not None:
-            skipped_steps.append(SkippedPreviewStep("StarNet", reason))
-
-    try:
-        ran = run_preview_script(scratch, build_starnet_script(name), siril_executable)
-    except (OSError, subprocess.SubprocessError) as error:
-        fall_back(f"StarNet could not run ({error})")
-        return None
-    if not ran or not collect_starnet_outputs(scratch):
-        fall_back("StarNet did not give a starless and a stars image")
-        return None
-    level = choose_sky_level_for_file(os.path.join(scratch, STARLESS_NAME)).sky_level
-    logger.info("StarNet: the starless image is stretched to sky level %.2f.", level)
-    try:
-        stretched = run_preview_script(
-            scratch,
-            build_stretch_script(STARLESS_NAME, "starless_stretched", level, remove_green, linked),
-            siril_executable,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        fall_back(f"The starless stretch could not run ({error})")
-        return None
-    if not stretched or not blend_files(
-        os.path.join(scratch, "starless_stretched.fits"),
-        os.path.join(scratch, STARS_NAME),
-        os.path.join(scratch, "stretched.fits"),
-        stretch,
-        strength,
-    ):
-        fall_back("StarNet's stretched pieces could not be blended")
-        return None
-    return "stretched.fits"
-
-
 def _picture_script(
     scratch: str,
     siril_executable: str,
@@ -858,10 +232,14 @@ def _picture_script(
     steps_log: list[str] | None = None,
     settings_used: dict[str, Any] | None = None,
     skipped_steps: list[SkippedPreviewStep] | None = None,
+    background_outcomes: list[BackgroundGradientOutcome] | None = None,
+    object_category: str | None = None,
+    target_anchor: TargetAnchor | None = None,
 ) -> list[str] | None:
     """Run the cleanup steps on the scratch copy and choose the final script.
 
-    The steps run in this order: GraXpert on the linear copy, then Siril's
+    The steps run in this order: the background removal (a fitted plane for a
+    flat sky, otherwise GraXpert) on the linear copy, then Siril's
     green removal (colour stacks only) and stretch, then Cosmic Clarity and
     the star toning on the stretched copy.
     Each of those runs only if configured, and each starts from the result of
@@ -888,10 +266,30 @@ def _picture_script(
         where a step was skipped (a bright object skips the denoise and the
         star toning). The keys are ``denoise``, ``denoise_strength``
         (`None` when the denoise did not run), ``star_toning``, ``starnet``
-        and ``bright_object``.
+        and ``bright_object``, and ``masked_stretch``: whether the masked
+        stretch was used, the number and area of its regions, its white
+        point and, when it was not used, the reason. ``object_category`` says
+        which kind the masked stretch used and, for a cluster inside a nebula,
+        the nebula (see `cluster_nebula`). ``background`` says
+        which background removal ran (``plane``, ``graxpert`` or ``none``),
+        the sky tilt that was measured, the limit it was compared with, the
+        number of sky bins and the reason, and for the plane whether the
+        radial (vignetting) part was used, its fall at the corners and why.
     skipped_steps : `list` [`SkippedPreviewStep`], optional
         If given, each cleanup step that failed and was skipped is added to
         it.
+    background_outcomes : `list` [`BackgroundGradientOutcome`], optional
+        If given, the measurement of GraXpert's background model is added to
+        it: the numbers, or the reason there are none (GraXpert not
+        configured, skipped for a bright object, failed, or no model).
+        GraXpert's full-size model file is deleted either way.
+    object_category : `str` or `None`, optional
+        The target's kind (`Target.object_category`). Only a nebula or a
+        galaxy can get the masked stretch (see `masked_stretch`). `None`,
+        the default, means unknown and never gets it.
+    target_anchor : `TargetAnchor` or `None`, optional
+        The target's catalog position and size, so the masked stretch is
+        kept to the region at the target (see `masked_stretch`).
 
     Returns
     -------
@@ -909,37 +307,51 @@ def _picture_script(
             "using a stretch scaled to the object, without GraXpert or the denoise.",
             100 * bright_object.white_fraction,
         )
+        if background_outcomes is not None:
+            background_outcomes.append(
+                not_measured_outcome("the preview of a bright object skips GraXpert, so there is no model")
+            )
         if steps_log is not None:
             steps_log.append("Bright object: its own stretch, without GraXpert or the denoise")
         if settings_used is not None:
             settings_used.update(
-                denoise=False, denoise_strength=None, star_toning=False, starnet=False, bright_object=True
+                denoise=False,
+                denoise_strength=None,
+                star_toning=False,
+                starnet=False,
+                bright_object=True,
+                background={
+                    "method": "none",
+                    "reason": "the preview of a bright object skips the background step",
+                },
+                masked_stretch=MaskedStretchPlan(
+                    used=False, reason="the bright-object stretch was used", category=object_category
+                ).record(),
             )
         return build_bright_object_script(name, "preview", bright_object)
     steps: list[str] = []
     graxpert_executable = configuration.get_graxpert_executable()
     if graxpert_executable:
-
-        def flatten(input_path: str, output_path: str) -> bool:
-            """Run GraXpert, which adds its own ``.fits`` to the output name.
-
-            Returns
-            -------
-            succeeded : `bool`
-                Whether GraXpert succeeded.
-            """
-            return flatten_background(graxpert_executable, input_path, os.path.splitext(output_path)[0])
-
-        flattened_name = _next_source(
-            "GraXpert", name, "flat.fits", scratch, flatten, check_result=True, skipped_steps=skipped_steps
+        name, background_record = remove_background(
+            scratch, name, graxpert_executable, steps, skipped_steps, background_outcomes
         )
-        steps.append("GraXpert " + ("done" if flattened_name != name else "skipped after a failure"))
-        name = flattened_name
     else:
+        background_record = {"method": "none", "reason": "GraXpert is not configured"}
         steps.append("GraXpert not configured")
+        if background_outcomes is not None:
+            background_outcomes.append(
+                not_measured_outcome("GraXpert is not configured, so there is no model")
+            )
     colour = is_colour_image(os.path.join(scratch, name))
+    if colour and configuration.get_preview_star_width_match_enabled():
+        name = match_star_widths(scratch, name, steps, settings_used, skipped_steps)
+    elif colour:
+        steps.append("Star width matching off")
+        if settings_used is not None:
+            settings_used["star_width_match"] = {"applied": False, "reason": "the setting is off"}
     if colour and configuration.get_preview_colour_calibration_enabled():
         calibrated_name, method = name, ""
+        pcc_imprecise: list[bool] = []
         if configuration.get_preview_colour_calibration_method() == "pcc":
             solve = not has_plate_solution(os.path.join(scratch, name))
 
@@ -950,13 +362,31 @@ def _picture_script(
                 -------
                 succeeded : `bool`
                     Whether Siril exited without an error.
-                """
-                commands = build_pcc_script(
-                    os.path.basename(input_path), os.path.splitext(os.path.basename(output_path))[0], solve
-                )
-                return run_preview_script(scratch, commands, siril_executable)
 
-            calibrated_name = _next_source(
+                Raises
+                ------
+                OSError
+                    If Siril would have to ask a server that does not answer.
+                """
+                local_catalog = find_local_gaia_catalog()
+                if local_catalog is None and not online_catalog_reachable():
+                    # Reported as a skipped step, with the reason; the stars
+                    # of the stack give the colours instead.
+                    raise OSError(
+                        "no local Gaia catalog is installed and the online Gaia server does not answer"
+                    )
+                commands = build_pcc_script(
+                    os.path.basename(input_path),
+                    os.path.splitext(os.path.basename(output_path))[0],
+                    solve,
+                    local_catalog,
+                )
+                succeeded = run_preview_script(scratch, commands, siril_executable)
+                if succeeded and _SIRIL_IMPRECISE_PCC_TEXT in last_siril_output():
+                    pcc_imprecise.append(True)
+                return succeeded
+
+            calibrated_name = next_source(
                 "Siril PCC",
                 name,
                 "colour.fits",
@@ -966,35 +396,46 @@ def _picture_script(
                 skipped_steps=skipped_steps,
             )
             method = "Siril PCC"
+            if calibrated_name != name and pcc_imprecise:
+                warning = "Siril reports that its photometric color calibration found an imprecise solution"
+                logger.warning("%s.", warning)
+                if skipped_steps is not None:
+                    skipped_steps.append(SkippedPreviewStep("Siril PCC", warning, still_used=True))
+                if settings_used is not None:
+                    settings_used["colour_calibration_warning"] = warning
+        checked = calibrated_name != name
         if calibrated_name == name:
-            # PCC was not asked for, or failed (no network, no catalogue, no
-            # solution): measure the stars in the stack itself.
-            calibrated_name = _next_source(
-                "Colour calibration from the stars",
-                name,
-                "colour.fits",
-                scratch,
-                calibrate_colours_in_file,
-                skipped_steps=skipped_steps,
-            )
-            method = "from the stars"
+            # PCC was not asked for, or failed (no network, no catalog, no
+            # solution): the Gaia stars like the Sun set the white point.
+            calibrated_name = calibrate_from_sun_like_stars(scratch, name, settings_used, skipped_steps)
+            method = "from the stars like the Sun"
         steps.append(
             f"Colour calibration ({method}) done"
             if calibrated_name != name
-            else "Colour calibration skipped after a failure"
+            else "Colour calibration not applied: the colours are left uncalibrated"
         )
         # A balanced picture needs a stretch shared by all channels: stretched
         # one by one, the channels would be set back to equal sky and scale.
         linked = calibrated_name != name
         name = calibrated_name
+        if checked:
+            name = check_white_balance(scratch, name, steps, settings_used, skipped_steps)
     else:
         linked = False
         steps.append("Colour calibration not used")
-    remove_green = configuration.get_preview_remove_green_noise_enabled() and colour
-    steps.append("Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used")
+    green_switch_on = bool(configuration.get_preview_remove_green_noise_enabled())
+    remove_green, green_reason = decide_remove_green(colour, green_switch_on, linked)
+    steps.append(
+        f"Remove Green Noise in the Siril stretch ({green_reason})"
+        if remove_green
+        else f"Remove Green Noise not used ({green_reason})"
+    )
+    if settings_used is not None:
+        settings_used["remove_green_noise"] = {"ran": remove_green, "reason": green_reason}
     stretched_by_starnet = False
+    linear_name = name
     if settings.starnet:
-        starnet_name = _stretch_with_starnet(
+        starnet_name = stretch_with_starnet(
             scratch, name, siril_executable, remove_green, linked, settings, skipped_steps
         )
         if starnet_name is not None:
@@ -1002,8 +443,26 @@ def _picture_script(
             steps.append("StarNet done: starless and stars stretched on their own")
         else:
             steps.append("StarNet failed: the normal stretch is used")
+    stretch_record: dict[str, Any] = {}
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
+    if stretched_by_starnet:
+        category_verdict = CategoryVerdict(
+            object_category, object_category, None, "StarNet stretched the picture, so the kind is not used"
+        )
+        masked = MaskedStretchPlan(
+            used=False, reason="StarNet stretched the picture", category=object_category
+        )
+    else:
+        # A cluster that lies inside a nebula is treated as a nebula (see
+        # `cluster_nebula`); any other kind is kept.
+        category_verdict = refine_object_category(
+            object_category, target_anchor, os.path.join(scratch, linear_name)
+        )
+        masked = plan_masked_stretch_for_file(
+            os.path.join(scratch, linear_name), category_verdict.category, target_anchor
+        )
+    logger.info("Masked stretch: %s.", masked.step_sentence())
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
     denoise_note = "Cosmic Clarity not configured"
     if not denoise_executable and configuration.get_cosmic_clarity_denoise_path():
@@ -1023,6 +482,9 @@ def _picture_script(
         # The stars were stretched apart already, so the formula that dims
         # stars would act twice.
         tone_stars = False
+    # A color stack's sky is leveled after the stretch and the denoise (see
+    # `sky_levelling`); the stretch is then saved as FITS first.
+    level_sky = bool(colour)
     if settings_used is not None:
         strength_used = None
         if denoise_executable:
@@ -1037,17 +499,41 @@ def _picture_script(
             star_toning=bool(tone_stars),
             starnet=stretched_by_starnet,
             bright_object=False,
+            background=background_record,
+            object_category=category_verdict.record(),
+            masked_stretch=masked.record(),
+            stretch_sky=stretch_record,
         )
-    if not stretched_by_starnet and not denoise_executable and not tone_stars:
+    if (
+        not stretched_by_starnet
+        and not denoise_executable
+        and not tone_stars
+        and not masked.used
+        and not level_sky
+    ):
         steps.extend(["Siril stretch done in the final script", denoise_note, "Star toning off"])
         logger.info("Preview steps: %s.", "; ".join(steps))
         if steps_log is not None:
             steps_log.extend(steps)
-        return build_preview_script(name, "preview", choice.sky_level, remove_green, linked)
+        return build_preview_script(
+            name,
+            "preview",
+            choice.sky_level,
+            remove_green,
+            linked,
+            sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
+        )
     if not stretched_by_starnet:
         stretched = run_preview_script(
             scratch,
-            build_stretch_script(name, "stretched", choice.sky_level, remove_green, linked),
+            build_stretch_script(
+                name,
+                "stretched",
+                choice.sky_level,
+                remove_green,
+                linked,
+                sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
+            ),
             siril_executable,
         )
         if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
@@ -1065,6 +551,10 @@ def _picture_script(
             else configuration.get_cosmic_clarity_denoise_strength()
         )
 
+        # Only a color stack has color speckle to remove; a single-channel
+        # stack keeps the brightness-only mode.
+        color_strength = configuration.get_preview_color_denoise_strength() if colour else None
+
         def denoise(input_path: str, output_path: str) -> bool:
             """Run Cosmic Clarity's denoise program.
 
@@ -1073,23 +563,47 @@ def _picture_script(
             succeeded : `bool`
                 Whether Cosmic Clarity succeeded.
             """
-            return denoise_with_cosmic_clarity(denoise_executable, input_path, output_path, strength)
+            return denoise_with_cosmic_clarity(
+                denoise_executable, input_path, output_path, strength, color_strength
+            )
 
-        denoised_name = _next_source(
+        denoised_name = next_source(
             "Cosmic Clarity", name, "denoised.fits", scratch, denoise, skipped_steps=skipped_steps
         )
         steps.append("Cosmic Clarity " + ("done" if denoised_name != name else "skipped after a failure"))
         name = denoised_name
     else:
         steps.append(denoise_note)
+    if level_sky:
+        name = level_stretched_sky(scratch, name, steps, settings_used, skipped_steps)
     if tone_stars:
-        toned_name = _next_source(
+        toned_name = next_source(
             "Star toning", name, "toned.fits", scratch, tone_stars_in_file, skipped_steps=skipped_steps
         )
         steps.append("Star toning " + ("done" if toned_name != name else "skipped after a failure"))
         name = toned_name
     else:
         steps.append("Star toning off")
+    if masked.used:
+        linear_path = os.path.join(scratch, linear_name)
+
+        def blend_masked_stretch(input_path: str, output_path: str) -> bool:
+            """Blend the second stretch into the picture.
+
+            Returns
+            -------
+            succeeded : `bool`
+                Whether the blended picture was written.
+            """
+            return apply_masked_stretch_in_file(linear_path, input_path, output_path, masked)
+
+        masked_name = next_source(
+            "Masked stretch", name, "masked.fits", scratch, blend_masked_stretch, skipped_steps=skipped_steps
+        )
+        steps.append(
+            masked.step_sentence() if masked_name != name else "Masked stretch skipped after a failure"
+        )
+        name = masked_name
     logger.info("Preview steps: %s.", "; ".join(steps))
     if steps_log is not None:
         steps_log.extend(steps)
@@ -1114,6 +628,45 @@ _LAYOUT_KEYWORDS = frozenset({
 })
 
 
+def picture_crop_box(stacked_path: str) -> CropBox | None:
+    """Find the part of a stack its processed picture keeps.
+
+    The stacking run saves the box in the stack's registration record, on the
+    stack as registered. The saved stack may have been turned by a quarter
+    turn since (see `quarter_turn`), so the box is turned the same way.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stack, as saved.
+
+    Returns
+    -------
+    box : `CropBox` or `None`
+        The box on the saved stack's pixels, or `None` when the picture keeps
+        the whole stack: no record, no box, a spectral stack, or a box that
+        does not fit the file.
+    """
+    record = read_registration_record(stacked_path)
+    if record is None or record.processed_crop is None or record.is_spectral:
+        return None
+    try:
+        header = read_header(stacked_path)
+        width, height = int(header["NAXIS1"]), int(header["NAXIS2"])
+    except OSError, KeyError, ValueError:
+        return None
+    degrees = read_quarter_turn(header) or 0
+    registered_width, registered_height = (height, width) if degrees % 180 else (width, height)
+    x0, x1, y0, y1 = record.processed_crop
+    box = turn_box(CropBox(x0, x1, y0, y1), degrees, registered_width, registered_height)
+    if not (0 <= box.x0 < box.x1 <= width and 0 <= box.y0 < box.y1 <= height):
+        logger.warning(
+            "The saved picture crop of '%s' does not fit the stack; the picture keeps it whole.", stacked_path
+        )
+        return None
+    return box
+
+
 def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
     """Copy the observation keywords from a stack to its stretched FITS.
 
@@ -1127,7 +680,8 @@ def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
     Parameters
     ----------
     stacked_path : `str`
-        Path of the stack.
+        Path of the stack, or of the copy of it the picture was made from
+        (which holds the crop's reference pixel and cards).
     processed_path : `str`
         Path of the stretched FITS, which is rewritten.
     """
@@ -1145,129 +699,14 @@ def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
         logger.warning("Could not copy the stack's header into '%s': %s.", processed_path, error)
 
 
-def preview_configuration() -> dict[str, Any]:
-    """Give the saved settings that shape a stack's preview picture.
-
-    These are the settings `_picture_script` reads: the GraXpert and Cosmic
-    Clarity programs, the denoise strength, the colour calibration, Remove
-    Green Noise and star toning. Program paths are kept as text, with an
-    empty string for a program that is not set up.
-
-    Returns
-    -------
-    configuration : `dict` [`str`, `Any`]
-        Setting name -> value, ready to save as JSON.
-    """
-    configuration = get_configuration()
-    return {
-        "graxpert_executable": str(configuration.get_graxpert_executable() or ""),
-        "cosmic_clarity_executable": str(configuration.get_cosmic_clarity_denoise_executable() or ""),
-        "cosmic_clarity_strength": float(configuration.get_cosmic_clarity_denoise_strength()),
-        "colour_calibration": bool(configuration.get_preview_colour_calibration_enabled()),
-        "colour_calibration_method": str(configuration.get_preview_colour_calibration_method()),
-        "remove_green_noise": bool(configuration.get_preview_remove_green_noise_enabled()),
-        "star_toning": bool(configuration.get_preview_star_tone_enabled()),
-    }
-
-
-def preview_is_out_of_date(stacked_path: str) -> str | None:
-    """Say whether an up-to-date stack's preview picture should be made again.
-
-    The picture is made again when it is missing, or when the picture
-    settings saved in its record differ from the settings now in force. A
-    picture made with choices for one run (``custom`` in its record) is
-    never replaced this way, and neither is a picture whose record is
-    missing or older than the saved settings: nothing shows what made it.
-
-    Parameters
-    ----------
-    stacked_path : `str`
-        The stack.
-
-    Returns
-    -------
-    reason : `str` or `None`
-        A plain sentence saying why the picture is made again, or `None`
-        when it is kept.
-    """
-    if not os.path.isfile(preview_path_for(stacked_path)):
-        return "the stack has no preview picture"
-    record = read_preview_settings(stacked_path)
-    if record is None or record.get("custom") or not isinstance(record.get("configuration"), dict):
-        return None
-    saved = record["configuration"]
-    changed = sorted(name for name, value in preview_configuration().items() if saved.get(name) != value)
-    if not changed:
-        return None
-    return "the picture settings changed (" + ", ".join(name.replace("_", " ") for name in changed) + ")"
-
-
-def write_preview_settings(
-    stacked_path: str, settings: PreviewSettings, settings_used: dict[str, Any], steps_run: list[str]
-) -> None:
-    """Save a small record of what made a stack's preview picture.
-
-    The record sits beside the stack. It is not part of the stack's inputs
-    (see `stack_inputs`): a change it shows never restacks. It does hold the
-    picture settings in force (`preview_configuration`), so that a stack
-    found up to date still gets a new picture when those settings changed
-    (see `preview_is_out_of_date`). A failure to write is logged and does
-    not fail the preview.
-
-    Parameters
-    ----------
-    stacked_path : `str`
-        The stack whose picture was just made.
-    settings : `PreviewSettings`
-        The choices this run was given.
-    settings_used : `dict`
-        The choices the run really used, as `_picture_script` reports them.
-    steps_run : `list` [`str`]
-        The sentences describing each step and whether it ran.
-    """
-    record = {
-        "made_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "settings_used": settings_used,
-        "steps_run": steps_run,
-        "custom": settings != PreviewSettings(),
-        "configuration": preview_configuration(),
-    }
-    try:
-        with open(preview_settings_path_for(stacked_path), "w", encoding="utf-8") as record_file:
-            json.dump(record, record_file, indent=1)
-    except OSError as error:
-        logger.warning("Could not save the preview settings of '%s': %s", stacked_path, error)
-
-
-def read_preview_settings(stacked_path: str) -> dict[str, Any] | None:
-    """Read the record of what made a stack's preview picture.
-
-    Parameters
-    ----------
-    stacked_path : `str`
-        The stack.
-
-    Returns
-    -------
-    record : `dict` or `None`
-        The record (``made_at``, ``settings_used``, ``steps_run``, ``custom``
-        and, for pictures made since it was added, ``configuration``), or
-        `None` if the file is missing or unreadable. `None` means unknown:
-        a picture made before the record existed has none.
-    """
-    try:
-        with open(preview_settings_path_for(stacked_path), encoding="utf-8") as record_file:
-            record = json.load(record_file)
-    except OSError, ValueError:
-        return None
-    return record if isinstance(record, dict) else None
-
-
 def write_stack_preview(
     stacked_path: str,
     settings: PreviewSettings | None = None,
     steps_log: list[str] | None = None,
     skipped_steps: list[SkippedPreviewStep] | None = None,
+    background_outcomes: list[BackgroundGradientOutcome] | None = None,
+    object_category: str | None = None,
+    target_anchor: TargetAnchor | None = None,
 ) -> str | None:
     """Save a cleaned-up, stretched JPEG and FITS of a stack beside it.
 
@@ -1289,16 +728,40 @@ def write_stack_preview(
         If given, each cleanup step that failed and was skipped is added to
         it, so the caller can record that the picture differs from its
         settings (see `preview_notices`).
+    background_outcomes : `list` [`BackgroundGradientOutcome`], optional
+        If given, GraXpert's background model is measured and the result is
+        added to it (see `background_gradient`), and the 64 by 64 map is saved
+        beside the picture (`background_model_path_for`). Left out, the model
+        is deleted unmeasured. A preview that was not made adds nothing.
+    object_category : `str` or `None`, optional
+        The target's kind (`Target.object_category`), for the masked stretch
+        (see `masked_stretch`). Left out, the stack is of an unknown kind and
+        the step is not used. Pass `None` for a spectral stack.
+    target_anchor : `TargetAnchor` or `None`, optional
+        The target's catalog position and size (see `anchor_for_target`).
 
     Returns
     -------
     preview_path : `str` or `None`
         Path of the new JPEG, or `None` if the stack file is missing, Siril
         is not configured, or Siril failed. The reason is logged as a warning.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled. The program that was running is stopped,
+        the scratch folder is removed and no picture is left beside the
+        stack.
     """
     preview_path = preview_path_for(stacked_path)
     processed_path = processed_fits_path_for(stacked_path)
-    for old_picture in (preview_path, processed_path, preview_settings_path_for(stacked_path)):
+    background_model_path = background_model_path_for(stacked_path)
+    for old_picture in (
+        preview_path,
+        processed_path,
+        preview_settings_path_for(stacked_path),
+        background_model_path,
+    ):
         if os.path.exists(old_picture):
             os.remove(old_picture)
     if not os.path.isfile(stacked_path):
@@ -1313,11 +776,30 @@ def write_stack_preview(
         os.makedirs(_SCRATCH_ROOT, exist_ok=True)
         _remove_stale_scratch_folders()
         scratch = tempfile.mkdtemp(prefix="stack_preview_", dir=_SCRATCH_ROOT)
-        shutil.copyfile(stacked_path, os.path.join(scratch, "stack.fits"))
+        scratch_stack = os.path.join(scratch, "stack.fits")
+        shutil.copyfile(stacked_path, scratch_stack)
+        # Only the picture is cropped, and before GraXpert and Cosmic Clarity
+        # run, so their models never see the noisy edge. The stack is not.
+        crop_box = picture_crop_box(stacked_path)
+        if crop_box is not None:
+            try:
+                crop_file(scratch_stack, crop_box, note_crop=True)
+            except (OSError, ValueError) as error:
+                logger.warning(
+                    "Could not crop the picture of '%s': %s. It keeps the whole stack.", stacked_path, error
+                )
         settings_used: dict[str, Any] = {}
         steps_taken: list[str] = []
         commands = _picture_script(
-            scratch, siril_executable, settings, steps_taken, settings_used, skipped_steps
+            scratch,
+            siril_executable,
+            settings,
+            steps_taken,
+            settings_used,
+            skipped_steps,
+            background_outcomes,
+            object_category,
+            target_anchor,
         )
         if steps_log is not None:
             steps_log.extend(steps_taken)
@@ -1329,11 +811,27 @@ def write_stack_preview(
         shutil.move(picture, preview_path)
         # The FITS copy is a bonus for the viewer. Without it the JPEG alone
         # is still a good preview, so a missing file is not a failure.
-        stretched_fits = os.path.join(scratch, f"{_PROCESSED_STEM}.fits")
+        stretched_fits = os.path.join(scratch, f"{PROCESSED_STEM}.fits")
         if os.path.isfile(stretched_fits):
             shutil.move(stretched_fits, processed_path)
-            _copy_observation_header(stacked_path, processed_path)
+            # The scratch copy holds the stack's header with the crop applied
+            # (the shifted reference pixel and the crop cards).
+            _copy_observation_header(scratch_stack, processed_path)
         write_preview_settings(stacked_path, settings or PreviewSettings(), settings_used, steps_taken)
+        for background_outcome in background_outcomes or []:
+            write_binned_model(background_outcome, background_model_path)
+    except RunAbandonedError:
+        # The job was cancelled. A picture only partly made is not left
+        # beside the stack; the caller of a remake puts the old one back.
+        for partial_picture in (
+            preview_path,
+            processed_path,
+            preview_settings_path_for(stacked_path),
+            background_model_path,
+        ):
+            if os.path.exists(partial_picture):
+                os.remove(partial_picture)
+        raise
     except (OSError, subprocess.SubprocessError) as error:
         logger.warning("No preview made for '%s': %s.", stacked_path, error)
         return None

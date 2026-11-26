@@ -37,6 +37,20 @@
     padding: 0;
 }
 
+/* A small control (such as a Back button) and the title, kept together at the left of the title row. */
+.panel__header-start {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.panel__header-start > .panel__title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .panel--no-padding > .panel__header {
     padding: 10px 12px 8px 12px;
     margin: 0;
@@ -536,4 +550,37 @@
     text-align: center;
     padding: 12px;
     font-size: var(--compact-font-size);
+}
+
+/* A folded panel. `down` keeps only the title row; `right` is a thin rail with the title running
+   down it. Both keep the panel's own surface and title font, so they read as the same panel shut. */
+.panel--collapsed {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+}
+
+.panel--collapsed > .panel__header {
+    margin: 0;
+    padding: 0;
+    border-bottom: none;
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+.panel__collapsed-note {
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: var(--control-font-size);
+    font-weight: normal;
+}
+
+.panel--collapsed-right {
+    width: auto;
+    height: 100%;
+    padding: 10px 4px;
+}
+
+.panel--collapsed-right > .panel__header {
+    writing-mode: vertical-rl;
+    align-items: center;
 }

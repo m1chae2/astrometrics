@@ -4,11 +4,17 @@ Siril takes the whole CPU when it runs, so this tests that we
 limit the number of Siril tasks running at once to prevent timeouts.
 """
 
+import contextlib
+import logging
 import multiprocessing
 import os
 import time
+from collections.abc import Callable, Generator
+from contextlib import AbstractContextManager
 
 from astrometricslib._internal.drivers.siril_interface import SIRIL_PROCESS_LOCK_PATH, siril_process_lock
+from astrometricslib._internal.drivers.siril_interface import session as siril_session
+from astrometricslib.foundation.storage import process_locks
 
 
 def test_lock_is_reentrant_across_sequential_uses() -> None:
@@ -163,3 +169,44 @@ def test_the_stacking_path_takes_exactly_one_slot() -> None:
                 worker.join(timeout=10)
 
     assert acquired == ["acquired", "acquired"]
+
+
+def _fake_slot(delay_seconds: float) -> Callable[..., AbstractContextManager[None]]:
+    """Build a stand-in for `acquire_resource_slot`.
+
+    Parameters
+    ----------
+    delay_seconds : `float`
+        Seconds the stand-in blocks before handing over the slot.
+
+    Returns
+    -------
+    fake : `Callable`
+        A context manager factory that blocks, then yields.
+    """
+
+    @contextlib.contextmanager
+    def fake_acquire_resource_slot(*args: object, **kwargs: object) -> Generator[None]:
+        """Block for the delay, then hand over the slot."""
+        time.sleep(delay_seconds)
+        yield
+
+    return fake_acquire_resource_slot
+
+
+def test_waiting_message_is_silent_when_the_slot_is_free(monkeypatch, caplog) -> None:  # ruff: ignore[missing-type-function-argument]
+    """An immediate acquisition logs no waiting line."""
+    monkeypatch.setattr(siril_session, "_SIRIL_WAIT_ANNOUNCE_SECONDS", 0.2)
+    monkeypatch.setattr(process_locks, "acquire_resource_slot", _fake_slot(0.0))
+    with caplog.at_level(logging.INFO), siril_process_lock(max_concurrent_runs=1):
+        time.sleep(0.4)
+    assert "Waiting for a free Siril slot" not in caplog.text
+
+
+def test_waiting_message_is_logged_when_the_slot_is_blocked(monkeypatch, caplog) -> None:  # ruff: ignore[missing-type-function-argument]
+    """A blocked acquisition logs the waiting line once."""
+    monkeypatch.setattr(siril_session, "_SIRIL_WAIT_ANNOUNCE_SECONDS", 0.1)
+    monkeypatch.setattr(process_locks, "acquire_resource_slot", _fake_slot(0.4))
+    with caplog.at_level(logging.INFO), siril_process_lock(max_concurrent_runs=1):
+        pass
+    assert caplog.text.count("Waiting for a free Siril slot") == 1

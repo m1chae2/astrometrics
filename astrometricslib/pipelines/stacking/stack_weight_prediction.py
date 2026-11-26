@@ -4,7 +4,7 @@ Description: Planning code asks what a stack of some frames would do before
 the frames are stacked: which weighting mode the stacker would choose, which
 exposure group each frame would fall in, and what weight each frame would
 carry. The answers come from the stacker's own rules (`choose_stack_weight`,
-`fold_exposure_lengths`, `wfwhm_weights` and `group_frame_weights`), so a
+`plan_exposure_folding`, `wfwhm_weights` and `group_frame_weights`), so a
 forecast and a real stack cannot disagree. This module asks all of them from
 one set of frame facts and returns one `StackWeightPrediction`.
 """
@@ -24,8 +24,9 @@ from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import
 )
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
+    ExposureFolding,
     exposure_group_key,
-    fold_exposure_lengths,
+    plan_exposure_folding,
 )
 
 __all__ = ["predict_stack_weights"]
@@ -84,7 +85,19 @@ def predict_stack_weights(
     """
     if minimum_frames_per_group is None:
         minimum_frames_per_group = resolve(MINIMUM_FRAMES_PER_EXPOSURE_GROUP).value
-    folded = fold_exposure_lengths(list(exposure_seconds), minimum_frames_per_group)
+    folding = plan_exposure_folding(list(exposure_seconds), minimum_frames_per_group)
+    if any(reason is not None for reason in folding.left_out_reasons):
+        return _predict_without_left_out_frames(
+            folding,
+            exposure_seconds,
+            configured_weight,
+            is_spectral=is_spectral,
+            star_width_px=star_width_px,
+            rate_variance=rate_variance,
+            group_frame_noise_adu=group_frame_noise_adu,
+            minimum_frames_per_group=minimum_frames_per_group,
+        )
+    folded = folding.group_lengths
     if len(set(folded)) > 1:
         mode = GROUP_MODE
     else:
@@ -102,7 +115,98 @@ def predict_stack_weights(
         rate_variance=rate_variance,
         group_frame_noise_adu=group_frame_noise_adu,
     )
-    return StackWeightPrediction(mode=mode, folded_exposure_lengths=folded, weights=weights, reasons=reasons)
+    return StackWeightPrediction(
+        mode=mode,
+        folded_exposure_lengths=folded,
+        left_out_reasons=folding.left_out_reasons,
+        weights=weights,
+        reasons=reasons,
+    )
+
+
+def _predict_without_left_out_frames(
+    folding: ExposureFolding,
+    exposure_seconds: Sequence[float | None],
+    configured_weight: str | None,
+    *,
+    is_spectral: bool,
+    star_width_px: Sequence[float | None] | None,
+    rate_variance: Sequence[float | None] | None,
+    group_frame_noise_adu: Mapping[float, float | None] | None,
+    minimum_frames_per_group: int,
+) -> StackWeightPrediction:
+    """Predict the stack of the frames the stacker would keep.
+
+    The frames the stacker leaves out take no part in the stack: they are
+    taken out, the rest are predicted, and the left-out frames come back with
+    weight 0 and their reason.
+
+    Parameters
+    ----------
+    folding : `ExposureFolding`
+        The fold plan of all the frames, with at least one frame left out.
+    exposure_seconds : `Sequence` [`float` or `None`]
+        The exposure length of every frame.
+    configured_weight : `str` or `None`
+        The configured weight (see `predict_stack_weights`).
+    is_spectral : `bool`
+        Whether the stack is spectral.
+    star_width_px : `Sequence` [`float` or `None`] or `None`
+        The weighted star width of every frame.
+    rate_variance : `Sequence` [`float` or `None`] or `None`
+        The variance of every frame in rate units.
+    group_frame_noise_adu : `Mapping` [`float`, `float` or `None`] or `None`
+        The noise of one raw frame of each group.
+    minimum_frames_per_group : `int`
+        The fewest frames a length needs to be stacked on its own.
+
+    Returns
+    -------
+    prediction : `StackWeightPrediction`
+        One entry per frame, in the order of the input.
+    """
+    kept = [index for index, reason in enumerate(folding.left_out_reasons) if reason is None]
+
+    def pick(values: Sequence[float | None] | None) -> list[float | None] | None:
+        """Keep the entries of the frames that stay in the stack.
+
+        Parameters
+        ----------
+        values : `Sequence` [`float` or `None`] or `None`
+            One value per frame, or `None`.
+
+        Returns
+        -------
+        kept_values : `list` [`float` or `None`] or `None`
+            The values of the kept frames. A list of the wrong length is
+            passed on as it is, for the prediction to refuse.
+        """
+        if values is None or len(values) != len(exposure_seconds):
+            return None if values is None else list(values)
+        return [values[index] for index in kept]
+
+    inner = predict_stack_weights(
+        [exposure_seconds[index] for index in kept],
+        configured_weight,
+        is_spectral=is_spectral,
+        star_width_px=pick(star_width_px),
+        rate_variance=pick(rate_variance),
+        group_frame_noise_adu=group_frame_noise_adu,
+        minimum_frames_per_group=minimum_frames_per_group,
+    )
+    lengths = list(folding.group_lengths)
+    weights = None if inner.weights is None else [0.0] * len(exposure_seconds)
+    for position, index in enumerate(kept):
+        lengths[index] = inner.folded_exposure_lengths[position]
+        if weights is not None and inner.weights is not None:
+            weights[index] = inner.weights[position]
+    return StackWeightPrediction(
+        mode=inner.mode,
+        folded_exposure_lengths=lengths,
+        left_out_reasons=folding.left_out_reasons,
+        weights=weights,
+        reasons=inner.reasons,
+    )
 
 
 def _weights_for_mode(

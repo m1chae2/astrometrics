@@ -630,6 +630,28 @@ def fold_exposure_lengths(exposure_seconds: Sequence[float | None]) -> list[floa
     return ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).folded_exposure_lengths
 
 
+def exposure_lengths_left_out(exposure_seconds: Sequence[float | None]) -> list[str | None]:
+    """Say which frames the stacker would leave out for their exposure length.
+
+    A length with too few frames to stack on its own is folded into the
+    nearest group only when that group is near enough in exposure. A frame
+    with no such group is left out of the stack. The rule is the stacker's
+    own, asked of the library (`ProcessingPipelines.predict_stack_weights`).
+
+    Parameters
+    ----------
+    exposure_seconds : `Sequence` [`float` or `None`]
+        The exposure of each frame, in seconds.
+
+    Returns
+    -------
+    reasons : `list` [`str` or `None`]
+        For each frame, `None` when the stacker would stack it, or the
+        sentence that says why it would leave it out.
+    """
+    return list(ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).left_out_reasons)
+
+
 def star_width_weights(widths_px: Sequence[float]) -> list[float] | None:
     """Give the stacker's star-width weights for frames of one group.
 
@@ -3381,7 +3403,10 @@ def plan_group_stack(
       existing group (nearest in the ratio of exposures, the fold rule's
       measure);
     * new frames of a length with fewer than 5 frames are folded into the
-      nearest large group (listed in `GroupPlan.folded_group_lengths`). The
+      nearest large group (listed in `GroupPlan.folded_group_lengths`), when
+      that group is within the fold ratio limit; a length with no group that
+      near would be left out of the stack, and the plan is refused with that
+      reason (`exposure_lengths_left_out`). The
       group's registration reference frame keeps the exposure it had, and
       each folded frame enters the group stack scaled to it, so its noise is
       scaled by ``k = t_ref / t`` (`StackGroup.frame_noise_factors`). A group
@@ -3413,7 +3438,20 @@ def plan_group_stack(
     if not existing:
         return _refused_plan("The stack has no exposure groups.")
     old_exposures = [frame.exposure_seconds for group in existing for frame in group.frames]
-    destinations = fold_exposure_lengths(old_exposures + [frame.exposure_seconds for frame in new])
+    all_exposures = old_exposures + [frame.exposure_seconds for frame in new]
+    # Only the new frames matter here: the old ones are the frames of the
+    # stack that exists, and the later checks compare them with it.
+    left_out = [
+        reason
+        for reason in exposure_lengths_left_out(all_exposures)[len(old_exposures) :]
+        if reason is not None
+    ]
+    if left_out:
+        return _refused_plan(
+            f"The stacker would leave {len(left_out)} frame(s) out of that stack ({left_out[0]}), "
+            "so the stack is not forecast."
+        )
+    destinations = fold_exposure_lengths(all_exposures)
     if destinations[0] is None:
         return _refused_plan(
             "No exposure length would have 5 frames, so the stacker would stack every frame in one "

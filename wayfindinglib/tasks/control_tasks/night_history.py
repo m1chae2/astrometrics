@@ -34,6 +34,7 @@ from astrometricslib.exceptions import (
     StorageError,
 )
 from astrometricslib.reports import observing_night_id
+from wayfindinglib._internal.arguments import check_limit
 from wayfindinglib.analytics import night_index
 from wayfindinglib.analytics.data_versions import (
     nights_context_signs,
@@ -375,8 +376,11 @@ def refuse_unused_arguments(
         )
 
 
-def clamp_limit(limit: int) -> int:
-    """Bring a caller's `limit` into the range of 1 to ``MAXIMUM_LIMIT``.
+def checked_limit(limit: int) -> int:
+    """Check that a caller's `limit` lies between 1 and ``MAXIMUM_LIMIT``.
+
+    A value outside the range is refused with `InvalidArgumentError` (by
+    `check_limit`), not moved into it, as everywhere in the public API.
 
     Parameters
     ----------
@@ -386,9 +390,10 @@ def clamp_limit(limit: int) -> int:
     Returns
     -------
     limit : `int`
-        The value, held between 1 and ``MAXIMUM_LIMIT``.
+        The same value.
     """
-    return max(1, min(int(limit), MAXIMUM_LIMIT))
+    check_limit(limit, 1, MAXIMUM_LIMIT, allow_none=False)
+    return int(limit)
 
 
 def build_night_list(
@@ -426,7 +431,7 @@ def build_night_list(
         context's review cache until the data behind them change (the live
         guiding samples do not count), and each caller gets its own copy.
     """
-    limit = clamp_limit(limit)
+    limit = checked_limit(limit)
     tonight = observing_night_id(time.time() if now is None else now)
     signs = nights_context_signs(context.config)
     cache = context.review_cache
@@ -610,7 +615,7 @@ def build_night_history(
     if kind not in KINDS:
         raise InvalidArgumentError(f"kind must be one of: {', '.join(KINDS)}.")
     refuse_unused_arguments(kind, KIND_ARGUMENTS[kind], session_id, ekos_file_id, include)
-    limit = clamp_limit(limit)
+    limit = checked_limit(limit)
     reply = _answer(context, kind, session_id, ekos_file_id, include, limit)
     return fit_to_budget(reply)
 

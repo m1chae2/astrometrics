@@ -8,6 +8,7 @@ table. Covers both the plate-solved (WCS) matching path and the RA/Dec-hint
 fallback path used when plate solving is skipped.
 """
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -15,9 +16,12 @@ import numpy as np
 import pytest
 from astropy.table import Column, MaskedColumn, Table
 
+from astrometricslib._internal.drivers.outside_services import ServicePausedError
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
-from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier, _block_average
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries, plate_solution_steps
+from astrometricslib.pipelines.astrometry.processing.star_detection import _block_average
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 # Real-world J2000 coordinates for Vega (alf Lyr), in degrees.
 VEGA_RA_DEG = 279.23473479
@@ -106,7 +110,7 @@ def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch:
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
-    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+    fake_wcs.all_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
 
     identifier._identify_stars_with_simbad(
         wcs=fake_wcs, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
@@ -163,7 +167,7 @@ def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch: p
     # Both stars map to Vega's own coordinates for this test; the
     # point is that the API attempts to identify both, not just the
     # one nearest the image center.
-    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+    fake_wcs.all_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
 
     result = identifier.identify_stars_with_wcs(stellar_objects, fake_wcs, width=1000, height=1000)
 
@@ -201,7 +205,7 @@ def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch: pytest.
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
-    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+    fake_wcs.all_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
 
     identifier._identify_stars_with_simbad(
         wcs=fake_wcs, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
@@ -240,7 +244,7 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
     })
     monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=galaxy_only_table))
 
-    with caplog.at_level("WARNING", logger=star_identifier_module.logger.name):
+    with caplog.at_level("WARNING", logger=plate_solution_steps.logger.name):
         identifier._identify_stars_with_simbad(
             wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
         )
@@ -250,160 +254,64 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
     assert any("no stellar-type simbad entries" in record.message.lower() for record in caplog.records)
 
 
-def test_query_gaia_region_pins_dr3_table_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
-) -> None:
-    """Verify _query_gaia_region pins Gaia DR3's table and limits the search.
+def _paused_failure() -> ExternalServiceError:
+    """Make the error of a tile that failed because Gaia is paused.
 
-    astroquery's cone search defaults to whichever table the ESA archive
-    server reports as current, which is not something this code pins. Every
-    other Gaia access in this file hardcodes gaiadr3.gaia_source (the
-    bulk-seed ADQL query, the local cache schema, every "Gaia DR3 ..." id
-    string), so the search names the table in its own ADQL query. The query
-    also carries the magnitude limit and the row limit, and asks for proper
-    motions.
+    Returns
+    -------
+    error : `ExternalServiceError`
+        An error whose cause is a gateway pause.
     """
-    import astrometricslib.foundation.config as config_loader_module
-    from astrometricslib.foundation.config import AppConfiguration
-
-    config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(tmp_path)}})
-    monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
-
-    captured_queries: list[str] = []
-
-    class _FakeJob:
-        """A finished job whose result table is empty."""
-
-        def get_results(self) -> Table:
-            """Return an empty result table.
-
-            Returns
-            -------
-            table : `astropy.table.Table`
-                A table with no rows and every column the query asks for,
-                as the archive returns for an empty circle.
-            """
-            names = ("source_id", "ra", "dec", "phot_g_mean_mag", "designation", "pmra", "pmdec")
-            return Table({name: [] for name in names})
-
-    def _fake_launch_job_async(query: str, **_keywords: object) -> _FakeJob:
-        """Record the ADQL text and return a finished empty job.
-
-        Parameters
-        ----------
-        query : `str`
-            The ADQL query text.
-        **_keywords
-            Ignored job options.
-
-        Returns
-        -------
-        job : `_FakeJob`
-            A job that returns an empty table.
-        """
-        captured_queries.append(query)
-        return _FakeJob()
-
-    monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", _fake_launch_job_async)
-
-    StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
-
-    assert len(captured_queries) == 1
-    query = captured_queries[0]
-    assert "FROM gaiadr3.gaia_source" in query
-    assert f"phot_g_mean_mag < {star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT.default}" in query
-    assert f"TOP {star_identifier_module.GAIA_ROW_LIMIT}" in query
-    assert "pmra" in query
-    assert "pmdec" in query
+    error = ExternalServiceError("Gaia tile 1 failed on every service")
+    error.__cause__ = ServicePausedError("paused")
+    return error
 
 
 class TestGaiaCircuitBreaker:
-    """Unit tests for the Gaia remote-query circuit breaker.
+    """Unit tests for the run's note that the gateway paused Gaia.
 
-    If the remote Gaia database is unresponsive, trying is stopped after
-    a few consecutive failures to save time. This should not affect
-    local cache lookups.
+    If the remote Gaia database is unresponsive, the outside-service gateway
+    pauses it and the run stops asking. This should not affect local cache
+    lookups.
     """
 
     def setup_method(self) -> None:
         """Start each test with a clean breaker (state is module-global)."""
-        star_identifier_module.reset_gaia_circuit_breaker()
+        gaia_tile_queries.reset_gaia_circuit_breaker()
 
     def teardown_method(self) -> None:
         """Leave no tripped breaker behind for other tests."""
-        star_identifier_module.reset_gaia_circuit_breaker()
+        gaia_tile_queries.reset_gaia_circuit_breaker()
 
     def test_starts_closed(self) -> None:
         """A fresh process attempts remote Gaia queries."""
-        assert star_identifier_module._gaia_remote_queries_disabled() is False
+        assert gaia_tile_queries._gaia_remote_queries_disabled() is False
 
-    def test_trips_only_at_the_configured_limit(self) -> None:
-        """Failures below the limit must not disable Gaia."""
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
-            star_identifier_module._record_gaia_failure("test")
-        assert star_identifier_module._gaia_remote_queries_disabled() is False
-
-        star_identifier_module._record_gaia_failure("test")
-        assert star_identifier_module._gaia_remote_queries_disabled() is True
-
-    def test_success_resets_the_failure_run(self) -> None:
-        """Intermittent failures never accumulate into a trip."""
+    def test_an_ordinary_failure_does_not_disable_gaia(self) -> None:
+        """Failures only count; the gateway decides when a service pauses."""
         for _ in range(10):
-            for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
-                star_identifier_module._record_gaia_failure("test")
-            star_identifier_module._record_gaia_success()
+            gaia_tile_queries._record_gaia_failure(ExternalServiceError("down"))
 
-        assert star_identifier_module._gaia_remote_queries_disabled() is False
+        assert gaia_tile_queries._gaia_remote_queries_disabled() is False
 
-    def test_open_breaker_skips_the_remote_cone_search(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
-    ) -> None:
-        """With the breaker open, no network call is attempted."""
-        import astrometricslib.foundation.config as config_loader_module
-        from astrometricslib.foundation.config import AppConfiguration
+    def test_a_gateway_pause_disables_the_run_s_downloads(self) -> None:
+        """A tile that fails because the gateway paused Gaia sets the flag."""
+        gaia_tile_queries._record_gaia_failure(_paused_failure())
 
-        config = AppConfiguration()
-        config.update_config({"Image Library": {"path": str(tmp_path)}})
-        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+        assert gaia_tile_queries._gaia_remote_queries_disabled() is True
 
-        remote_query_spy = MagicMock()
-        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)
+    def test_open_breaker_gives_no_tile_fetcher_and_says_so(self, caplog: pytest.LogCaptureFixture) -> None:
+        """An open breaker downloads nothing, and a warning says why."""
+        gaia_tile_queries._record_gaia_failure(_paused_failure())
 
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
-            star_identifier_module._record_gaia_failure("test")
+        with caplog.at_level(logging.WARNING):
+            fetch, reason = gaia_tile_queries.make_gaia_tile_fetcher()
 
-        table, coords = StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+        assert fetch is None
+        assert "paused" in reason
+        assert any("Gaia downloads are skipped" in record.message for record in caplog.records)
 
-        assert table is None
-        assert coords is None
-        remote_query_spy.assert_not_called()
-
-    def test_open_breaker_skips_the_cache_seed_download(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
-    ) -> None:
-        """The seed path is gated by the same breaker."""
-        import astrometricslib.foundation.config as config_loader_module
-        from astrometricslib.foundation.config import AppConfiguration
-
-        config = AppConfiguration()
-        config.update_config({"Image Library": {"path": str(tmp_path)}})
-        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
-
-        launch_job_spy = MagicMock()
-        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", launch_job_spy)
-
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
-            star_identifier_module._record_gaia_failure("test")
-
-        cached_count = StarIdentifier._seed_gaia_cache_for_field(VEGA_RA_DEG, VEGA_DEC_DEG, 0.2)
-
-        assert cached_count == 0
-        launch_job_spy.assert_not_called()
-
-    def test_open_breaker_still_serves_locally_cached_gaia_data(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
-    ) -> None:
+    def test_open_breaker_still_serves_locally_cached_gaia_tiles(self, tmp_path: Path) -> None:
         """The breaker must not disable the local cache.
 
         Cached Gaia rows are the one Gaia source that still works while
@@ -411,54 +319,27 @@ class TestGaiaCircuitBreaker:
         same pass that saw 67 remote failures. Gating those behind the
         breaker would throw away working data.
         """
-        import sqlite3
-
-        import astrometricslib.foundation.config as config_loader_module
         from astrometricslib._internal.drivers import catalog_store
-        from astrometricslib.foundation.config import AppConfiguration
+        from astrometricslib._internal.drivers.sky_tiles import tile_of_source_id
+        from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import load_field_gaia_stars
 
-        config = AppConfiguration()
-        config.update_config({"Image Library": {"path": str(tmp_path)}})
-        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
-
-        from astrometricslib.foundation.paths import catalog_cache_directory
-
-        cache_dir = Path(catalog_cache_directory())
-        connection = sqlite3.connect(cache_dir / "catalog_cache.db")
-        cursor = connection.cursor()
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS gaia_sources "
-            "(source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, designation TEXT)"
+        source_ids = [(5_000 << 35) + index for index in range(8)]
+        tile = int(tile_of_source_id(source_ids[0], 7))
+        catalog_store.record_tile_fetch(
+            None,
+            tile,
+            21.0,
+            [(str(number), 10.0, 20.0, 12.0, f"Gaia DR3 {number}") for number in source_ids],
+            "test",
         )
-        for index in range(8):
-            cursor.execute(
-                "INSERT OR REPLACE INTO gaia_sources VALUES (?, ?, ?, ?, ?)",
-                (
-                    f"{index}",
-                    VEGA_RA_DEG + index * 0.0001,
-                    VEGA_DEC_DEG + index * 0.0001,
-                    12.0,
-                    f"Gaia DR3 {index}",
-                ),
-            )
-        connection.commit()
-        connection.close()
-        # The cache is trusted only for a region recorded as completely
-        # downloaded, so record one that covers the query below.
-        catalog_store.record_gaia_region(config, VEGA_RA_DEG, VEGA_DEC_DEG, 0.1, 18.0, row_limit_hit=False)
+        gaia_tile_queries._record_gaia_failure(_paused_failure())
+        fetch, _ = gaia_tile_queries.make_gaia_tile_fetcher()
 
-        remote_query_spy = MagicMock()
-        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)
+        field = load_field_gaia_stars(None, [tile], 18.0, fetch)
 
-        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
-            star_identifier_module._record_gaia_failure("test")
-
-        table, coords = StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
-
-        assert table is not None, "cached Gaia rows must still be served with the breaker open"
-        assert len(table) == 8
-        assert coords is not None
-        remote_query_spy.assert_not_called()
+        assert field.table is not None, "cached Gaia rows must still be served with the breaker open"
+        assert len(field.table) == 8
+        assert field.missing_tiles == []
 
 
 def _apply_simbad_match_for_v_column(v_values, v_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
@@ -596,3 +477,83 @@ def test_block_average_crops_a_size_not_divisible_by_the_factor() -> None:
 
     assert binned.shape == (2, 2)
     assert binned[0, 0] == pytest.approx(data[:2, :2].mean())
+
+
+def test_nearest_catalog_distances_include_far_stars_and_take_the_closer_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each star gives its nearest catalog distance, matched or not.
+
+    Star A matches a SIMBAD entry 3 arcsec away and gives that distance.
+    Star B's nearest SIMBAD entry is 25 arcsec away and its nearest Gaia
+    entry 18 arcsec away; star C's are 12 and 30 arcsec. Neither matches
+    within the 10 arcsec match radius, and each gives the closer of its
+    two distances.
+    """
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+
+    from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
+
+    # Three stars a tenth of a degree apart, so each has its own neighbors.
+    stars_sky = [SkyCoord(VEGA_RA_DEG * u.deg, (VEGA_DEC_DEG + 0.1 * index) * u.deg) for index in range(3)]
+
+    def north_of(index: int, arcsec: float) -> SkyCoord:
+        """Give the point ``arcsec`` north of star ``index``.
+
+        Returns
+        -------
+        point : `SkyCoord`
+            The shifted position.
+        """
+        return stars_sky[index].directional_offset_by(0 * u.deg, arcsec * u.arcsec)
+
+    simbad_points = [north_of(0, 3.0), north_of(1, 25.0), north_of(2, 12.0)]
+    simbad_table = Table({
+        "main_id": Column(["* star A", "* star B", "* star C"], dtype=object),
+        "ids": Column(["* star A", "* star B", "* star C"], dtype=object),
+        "sp_type": MaskedColumn(["A0V", "A0V", "A0V"], mask=[False] * 3, dtype=object),
+        "otype": Column(["*", "*", "*"], dtype=object),
+        "V": MaskedColumn([5.0, 6.0, 7.0], mask=[False] * 3),
+        "ra": [float(point.ra.deg) for point in simbad_points],
+        "dec": [float(point.dec.deg) for point in simbad_points],
+    })
+    gaia_points = [north_of(1, 18.0), north_of(2, 30.0)]
+    gaia_table = Table({
+        "source_id": ["11", "12"],
+        "ra": [float(point.ra.deg) for point in gaia_points],
+        "dec": [float(point.dec.deg) for point in gaia_points],
+        "phot_g_mean_mag": [12.0, 12.5],
+        "DESIGNATION": ["Gaia DR3 11", "Gaia DR3 12"],
+        "pmra": [0.0, 0.0],
+        "pmdec": [0.0, 0.0],
+    })
+    use_field_stars(
+        monkeypatch,
+        gaia_table,
+        SkyCoord([point.ra for point in gaia_points], [point.dec for point in gaia_points]),
+    )
+
+    identifier = _make_star_identifier()
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=simbad_table))
+    stellar_objects = []
+    for index in range(3):
+        star = StellarObject()
+        star.name = f"Star {index}"
+        star.star_data = {"x_centroid": float(index), "y_centroid": 0.0, "flux": 50000.0}
+        stellar_objects.append(star)
+    fake_wcs = MagicMock()
+    fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
+    fake_wcs.all_pix2world.side_effect = lambda x, _y, _origin: (
+        float(stars_sky[int(x)].ra.deg),
+        float(stars_sky[int(x)].dec.deg),
+    )
+
+    identifier.identify_stars_with_wcs(stellar_objects, fake_wcs, width=1000, height=1000)
+
+    assert [star.is_catalog_identified for star in stellar_objects] == [True, False, False]
+    assert sorted(identifier.nearest_catalog_separations_arcsec) == pytest.approx([3.0, 12.0, 18.0], abs=0.01)
+    assert identifier.catalog_match_separations_arcsec == pytest.approx([3.0], abs=0.01)
+
+    identifier.identify_stars_with_wcs([], fake_wcs, width=1000, height=1000)
+    assert identifier.nearest_catalog_separations_arcsec == []

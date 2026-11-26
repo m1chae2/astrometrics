@@ -19,7 +19,7 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
-from astrometricslib.pipelines.shared.api_arguments import check_choice
+from astrometricslib.pipelines.shared.api_arguments import check_choice, check_limit
 
 __all__ = ["StellarCatalog"]
 
@@ -176,7 +176,10 @@ class StellarCatalog:
             star within it is returned.
         magnitude_min : `float`, optional
             Keep stars at least this magnitude (numerically). Stars with no
-            magnitude are dropped when a magnitude bound is given.
+            magnitude are dropped when a magnitude bound is given. The bound
+            is applied to `StellarObject.magnitude` as stored, which may be
+            a SIMBAD V, a Gaia G or an old instrumental value; add
+            ``has_catalog_magnitude=True`` to keep catalog values only.
         magnitude_max : `float`, optional
             Keep stars no fainter than this magnitude.
         has_spectra : `bool`, optional
@@ -185,8 +188,9 @@ class StellarCatalog:
             Keep only stars that do (or do not) have a light curve.
         has_catalog_magnitude : `bool`, optional
             Keep only stars whose magnitude is (or is not) a real catalog
-            magnitude. Zero, a missing value, and an instrumental magnitude
-            from photometry (below -2) are not catalog magnitudes.
+            magnitude (SIMBAD V or Gaia G). Zero, a missing value, and an
+            instrumental magnitude from photometry (below -2,
+            ``BRIGHTEST_CATALOG_MAGNITUDE``) are not catalog magnitudes.
         spectral_class : `str`, optional
             Keep only stars whose catalog spectral type is this class (O, B,
             A, F, G, K, M, C or W; a full type such as ``"G2V"`` uses its
@@ -212,10 +216,11 @@ class StellarCatalog:
             it matched, the absorption features and emission lines, and
             whether the brightness repeats), with no raw arrays.
             ``"objects"``: the full star records. ``"overlay"``: the stars of
-            ``target_id`` placed in pixels on the target's stacked image
-            (needs ``target_id``; takes no filter, ``order`` or
-            ``offset``). ``"class_counts"``: how many stars each spectral
-            class has. ``"target_counts"``: each target's star count and
+            ``target_id`` placed in 1-based pixels (as in FITS and DS9) on
+            the target's stacked image (needs ``target_id``; takes no
+            filter, ``order`` or ``offset``). ``"class_counts"``: how many
+            stars each spectral class has. ``"target_counts"``: each
+            target's star count and
             whether its stars have spectra or photometry. ``"stats"``:
             counts and coverage for the whole library, single-frame
             detections included. The last three take no selector and no
@@ -230,28 +235,41 @@ class StellarCatalog:
             ``spectral_class`` uses ``"match"``, and every other list is in
             id order.
         limit : `int` or `None`, optional
-            How many stars to return. At most 2000 ids, 500 summaries, 200
-            overlay stars, and 10 analysis or full records. Defaults to 50.
-            A program that needs every match passes `None`, which also lifts
+            How many stars to return, from 1 to the cap of the detail: 2000
+            ids, 500 summaries, 200 overlay stars, and 10 analysis or full
+            records. Defaults to 50, or the cap when it is smaller; any
+            other value outside the range is refused. A
+            program that needs every match passes `None`, which also lifts
             the cap on the region radius and on the number of ``ids`` for
             ``"exists"``.
         offset : `int`, optional
-            How many stars to skip, for paging.
+            How many stars to skip, for paging, at least 0.
 
         Returns
         -------
         answer : `StarQueryResult`
             The stars for the detail, ``total_matching``, and whether the
             answer was cut by the limit.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the detail or order is unknown, or
+        ``limit`` or ``offset`` is out of range.
         """
         from astrometricslib.pipelines.shared.star_catalog_queries import (
             QUERY_DETAILS,
+            QUERY_LIMITS,
             QUERY_ORDERS,
             StarQuery,
             run_star_query,
         )
 
         check_choice("detail", detail, QUERY_DETAILS)
+        # The default of 50 is cut to a smaller cap; a limit the caller
+        # chose must lie inside the cap.
+        if limit != 50:
+            check_limit(limit, 1, QUERY_LIMITS.get(detail))
+        check_limit(offset, 0, None, name="offset", allow_none=False)
         magnitude_range = None
         if magnitude_min is not None or magnitude_max is not None:
             magnitude_range = (
@@ -289,12 +307,13 @@ class StellarCatalog:
         target_id: str | None = None,
         tolerance_arcsec: float | None = None,
     ) -> StellarObject:
-        """Find the star at a spot on the sky, or record a new one there.
+        """Find the star at a spot on the sky, or make a new one there.
 
         Looks for an existing star with the given name, then for one within
-        ``tolerance_arcsec`` of the position, and only records a new star if
-        neither exists. Whichever star is used gets any of the spectral type,
-        magnitude and target that it does not have yet.
+        ``tolerance_arcsec`` of the position. A saved star that is found gets
+        any of the spectral type, magnitude and target that it does not have
+        yet. When neither exists, a new star is returned but not saved, since
+        the catalog keeps only stars with a light curve or a spectrum.
 
         Parameters
         ----------
@@ -319,7 +338,8 @@ class StellarCatalog:
         Returns
         -------
         star : `StellarObject`
-            The star that was found or created.
+            The star that was found, or a new one at that spot. A new star
+            holds no light curve or spectrum, so it is not saved.
         """
         from astrometricslib.foundation.parameters import resolve
         from astrometricslib.pipelines.shared.catalog_star_identity import SAME_STAR_POSITION_TOLERANCE_ARCSEC
@@ -402,55 +422,83 @@ class StellarCatalog:
         star_id : `str`
             The id of the star to update.
         updates : `dict`
-            Field name and new value pairs. Unknown names are ignored.
+            Field name and new value pairs. The names are `StellarObject`
+            field names (``spectral_type``, not ``spectralType``).
 
         Returns
         -------
         star : `StellarObject` or `None`
             The updated star, or `None` if ``star_id`` is not found.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a name is not a `StellarObject` field. Nothing is changed.
         """
+        unknown = sorted(set(updates) - set(StellarObject.model_fields))
+        if unknown:
+            raise InvalidArgumentError(
+                f"Unknown star field(s): {', '.join(unknown)}.", details={"unknown": unknown}
+            )
         existing = self.get(star_id)
         if not existing:
             return None
 
         for key, value in updates.items():
-            if hasattr(existing, key):
-                setattr(existing, key, value)
+            setattr(existing, key, value)
 
         def _apply_updates(current: StellarObject | None, updated: StellarObject) -> StellarObject:
+            """Write the changed fields onto the stored star.
+
+            Returns
+            -------
+            star : `StellarObject`
+                The stored star (or the new one) with the changes.
+            """
             target_obj = current if current is not None else updated
             for key, value in updates.items():
-                if hasattr(target_obj, key):
-                    setattr(target_obj, key, value)
+                setattr(target_obj, key, value)
             return target_obj
 
         self._catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
         return self.get(star_id)
 
-    def create(self, star_id: str, ra: str | None = None, dec: str | None = None) -> StellarObject:
+    def create(
+        self, star_id: str, ra_deg: float | None = None, dec_deg: float | None = None
+    ) -> StellarObject:
         """Record a new star in the catalog, or return the one with that id.
+
+        The catalog keeps only stars with a light curve or a spectrum, so a
+        new star made here, which holds neither, is returned but not saved.
 
         Parameters
         ----------
         star_id : `str`
             The id of the star to create.
-        ra : `str`, optional
-            Right ascension, in sexagesimal or degrees.
-        dec : `str`, optional
-            Declination, in sexagesimal or degrees.
+        ra_deg : `float`, optional
+            Right ascension (ICRS), in degrees, 0 up to 360.
+        dec_deg : `float`, optional
+            Declination (ICRS), in degrees, -90 to 90.
 
         Returns
         -------
         star : `StellarObject`
-            The existing or newly created star.
+            The existing star, or the new, unsaved one.
 
         Raises
         ------
         InvalidArgumentError
-            If ``star_id`` is empty.
+            If ``star_id`` is empty, or a position is not a number in range.
         """
         if not star_id or not str(star_id).strip():
             raise InvalidArgumentError("star_id cannot be empty.")
+        for name, value, low, high in (("ra_deg", ra_deg, 0.0, 360.0), ("dec_deg", dec_deg, -90.0, 90.0)):
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int | float) or not low <= value <= high:
+                raise InvalidArgumentError(
+                    f"{name} must be a number of degrees from {low:g} to {high:g}.", details={name: value}
+                )
 
         existing = self.get(star_id)
         if existing:
@@ -459,10 +507,10 @@ class StellarCatalog:
         new_star = StellarObject()
         new_star.id = star_id
         new_star.name = star_id
-        if ra:
-            new_star.right_ascension = ra
-        if dec:
-            new_star.declination = dec
+        if ra_deg is not None:
+            new_star.right_ascension = float(ra_deg)
+        if dec_deg is not None:
+            new_star.declination = float(dec_deg)
 
         self._catalog_access.merge_and_record(
             "stellar_catalog",

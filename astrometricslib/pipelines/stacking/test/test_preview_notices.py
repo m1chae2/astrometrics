@@ -16,7 +16,7 @@ from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
     preview_step_skipped_measurements,
     record_preview_step_notices,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 
 MEASURED_AT = datetime(2026, 11, 1, tzinfo=UTC)
 SKIPPED = [
@@ -49,6 +49,21 @@ def test_skipped_steps_become_one_failed_notice_of_the_job() -> None:
     assert "GraXpert did not finish" in row.reason
     assert "Cosmic Clarity could not run" in row.reason
     assert row.subject.subject_id == "M 31/M31_Stacked.fits"
+
+
+def test_a_step_kept_with_a_warning_is_told_apart_from_a_skipped_step() -> None:
+    """The row names a step that ran with a warning as used, not as skipped."""
+    warned = SkippedPreviewStep("Siril PCC", "Siril found an imprecise solution", still_used=True)
+
+    (only_warning,) = preview_step_skipped_measurements([warned], _context(), "M31_Stacked.fits")
+    (both,) = preview_step_skipped_measurements([*SKIPPED, warned], _context(), "M31_Stacked.fits")
+
+    assert only_warning.reason == "the preview used a step with a warning: Siril found an imprecise solution"
+    assert only_warning.action_taken == "the preview picture used the step's result"
+    assert both.value == pytest.approx(3.0)
+    assert "the preview skipped a step: GraXpert did not finish" in both.reason
+    assert "the preview used a step with a warning: Siril found" in both.reason
+    assert both.action_taken == "the preview picture was made without the skipped step"
 
 
 def test_no_skipped_step_gives_no_row() -> None:

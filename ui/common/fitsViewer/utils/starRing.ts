@@ -9,6 +9,7 @@
  * 0 up to 360.
  */
 import type { RingHarmonic, StarProfileMeasurement } from '../../types/backendTypes';
+import { turnStep } from '../displayTurn';
 
 /** Fewest pixels a direction bin should hold for its mean to be steady. */
 export const FEW_PIXELS_PER_BIN = 4;
@@ -61,19 +62,27 @@ export function formatPercent(fraction: number): string {
 /**
  * Names the screen direction that an angle points to, for the axis ticks.
  *
- * Image x always runs to the right. Image y runs down the screen when the file's first row is at the top,
- * and up the screen otherwise. So 0 degrees points down or up, and 90 degrees points right.
+ * Image x runs to the right, and image y runs down the screen when the file's first row is at the top,
+ * and up the screen otherwise, as long as the picture is not turned. When the picture is shown turned
+ * by a quarter turn, the directions turn with it. So with no turn, 0 degrees points down or up, and
+ * 90 degrees points right.
  *
  * @param angleDegrees One of 0, 90, 180 or 270 (any other angle is rounded to the nearest of them).
  * @param firstRowAtTop True when the picture shows the file's first row at the top.
+ * @param turn How far the picture is shown turned, clockwise in degrees (default 0).
  * @returns "Up", "Right", "Down" or "Left".
  */
-export function screenDirection(angleDegrees: number, firstRowAtTop: boolean): 'Up' | 'Right' | 'Down' | 'Left' {
+export function screenDirection(
+  angleDegrees: number, firstRowAtTop: boolean, turn: number = 0,
+): 'Up' | 'Right' | 'Down' | 'Left' {
   const quarter = (((Math.round(angleDegrees / 90) % 4) + 4) % 4);
-  if (quarter === 1) return 'Right';
-  if (quarter === 3) return 'Left';
-  const alongY = quarter === 0;
-  return alongY === firstRowAtTop ? 'Down' : 'Up';
+  // The direction as a step in the file's own x and y, then in the base picture, then in the turned one.
+  const fileStepX = quarter === 1 ? 1 : quarter === 3 ? -1 : 0;
+  const fileStepY = quarter === 0 ? 1 : quarter === 2 ? -1 : 0;
+  const shown = turnStep(fileStepX, firstRowAtTop ? fileStepY : -fileStepY, turn);
+  if (shown.x > 0.5) return 'Right';
+  if (shown.x < -0.5) return 'Left';
+  return shown.y > 0 ? 'Down' : 'Up';
 }
 
 /**
@@ -84,9 +93,10 @@ export function screenDirection(angleDegrees: number, firstRowAtTop: boolean): '
  *
  * @param harmonics The library's Fourier terms.
  * @param firstRowAtTop True when the picture shows the file's first row at the top.
+ * @param turn How far the picture is shown turned, clockwise in degrees (default 0).
  * @returns For example "One-sided 12% ± 2% toward Up; oval 3% ± 1%", or "Round within the noise".
  */
-export function describeRing(harmonics: RingHarmonic[], firstRowAtTop: boolean): string {
+export function describeRing(harmonics: RingHarmonic[], firstRowAtTop: boolean, turn: number = 0): string {
   const strongest = harmonics
     .filter((term) => term.significant)
     .sort((first, second) => second.amplitude_debiased - first.amplitude_debiased)
@@ -96,7 +106,7 @@ export function describeRing(harmonics: RingHarmonic[], firstRowAtTop: boolean):
     .map((term, index) => {
       const name = index === 0 ? orderName(term.order) : orderName(term.order).toLowerCase();
       const size = `${name} ${formatPercent(term.amplitude_debiased)} ± ${formatPercent(term.amplitude_error)}`;
-      return term.order === 1 ? `${size} toward ${screenDirection(term.direction_degrees, firstRowAtTop)}` : size;
+      return term.order === 1 ? `${size} toward ${screenDirection(term.direction_degrees, firstRowAtTop, turn)}` : size;
     })
     .join('; ');
 }

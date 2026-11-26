@@ -20,14 +20,15 @@ from astropy.io import fits
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces import plate_solve_driver
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+from astrometricslib.pipelines.astrometry.processing import gaia_field_matching, plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.test.processing.test_plate_solve_fit_statistics import (
     FIELD_DEC_DEG,
     FIELD_RA_DEG,
-    EmptySimbad,
     FakeSolver,
     make_wcs_header,
 )
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
 
 
 def _fail_if_called(*arguments: Any, **keywords: Any) -> None:
@@ -59,17 +60,19 @@ def _forbid_catalog_work(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "_refine_wcs_against_gaia",
         "_identify_stars_with_simbad",
-        "_query_gaia_region",
+        "_prepare_field_gaia_stars",
         "_query_simbad_region",
-        "_fetch_gaia_cone",
-        "_seed_gaia_cache_for_field",
     ):
-        if hasattr(StarIdentifier, name):
-            monkeypatch.setattr(StarIdentifier, name, _fail_if_called)
-    monkeypatch.setattr(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier._fetch_gaia_cone", _fail_if_called
-    )
-    for name in ("_seed_gaia_cache_from_wcs", "_build_extended_source_hint", "check_extended_source"):
+        monkeypatch.setattr(StarIdentifier, name, _fail_if_called)
+    for module, name in (
+        ("gaia_field_matching", "make_gaia_tile_fetcher"),
+        ("gaia_field_matching", "load_field_gaia_stars"),
+        ("plate_solution_steps", "load_field_gaia_stars"),
+    ):
+        monkeypatch.setattr(
+            f"astrometricslib.pipelines.astrometry.processing.{module}.{name}", _fail_if_called
+        )
+    for name in ("_build_extended_source_hint", "check_extended_source"):
         monkeypatch.setattr(AstrometryPipeline, name, _fail_if_called)
 
 
@@ -91,7 +94,7 @@ def _identifier(answer: fits.Header | None) -> StarIdentifier:
     config.get_value.return_value = None
     config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
     identifier = StarIdentifier(
-        config=config, drivers=Drivers(plate_solve=FakeSolver(answer), simbad=EmptySimbad())
+        config=config, drivers=Drivers(plate_solve=FakeSolver(answer), simbad=FakeSimbad())
     )
     sources = [{"x_centroid": 10.0 + 8 * i, "y_centroid": 10.0 + 8 * i, "flux": 100.0 - i} for i in range(10)]
     identifier.detector = MagicMock()
@@ -130,7 +133,7 @@ def test_solve_only_with_an_unsolved_field_still_raises(monkeypatch: pytest.Monk
         identifier.process_image(np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True)
 
 
-def test_the_pipeline_solve_wcs_skips_refit_naming_and_seeding(
+def test_the_pipeline_solve_wcs_skips_refit_and_naming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`AstrometryPipeline.solve_wcs` reads a file and returns only the WCS."""
@@ -142,7 +145,7 @@ def test_the_pipeline_solve_wcs_skips_refit_naming_and_seeding(
     config.get_value.return_value = None
     config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
     pipeline = AstrometryPipeline(
-        app_config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=EmptySimbad())
+        app_config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=FakeSimbad())
     )
     identifier = _identifier(make_wcs_header())
     pipeline.star_identifier.detector = identifier.detector
@@ -173,29 +176,36 @@ def _allow_only_the_cached_refit(
     from astrometricslib.pipelines.astrometry.processing import star_identifier
 
     calls: list[str] = []
+    table, coords = cached if cached is not None else (None, None)
 
-    def cache_lookup(*arguments: Any, **keywords: Any) -> tuple[Any, Any] | None:
-        """Record the lookup and give the prepared answer.
+    def cache_lookup(
+        config: Any, tiles: Any, depth: float, fetch: Any, **keywords: Any
+    ) -> star_identifier.FieldGaiaStars:
+        """Record a cache-only lookup and give the prepared answer.
 
         Parameters
         ----------
-        *arguments
+        config, tiles, depth : `Any`
             Ignored.
+        fetch : `Any`
+            Must be `None`: a cache-only read.
         **keywords
             Ignored.
 
         Returns
         -------
-        cached : `tuple` or `None`
+        field : `FieldGaiaStars`
             The prepared answer.
         """
+        assert fetch is None
         calls.append("cache")
-        return cached
+        return star_identifier.FieldGaiaStars(table=table, coords=coords, depth=depth, tiles=[1])
 
     monkeypatch.setattr(StarIdentifier, "_refine_wcs_against_gaia", _REAL_REFINE)
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region_from_cache", staticmethod(cache_lookup))
-    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(_fail_if_called))
-    monkeypatch.setattr(star_identifier, "_fetch_gaia_cone", _fail_if_called)
+    monkeypatch.setattr(gaia_field_matching, "load_field_gaia_stars", cache_lookup)
+    monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", cache_lookup)
+    monkeypatch.setattr(gaia_field_matching, "tiles_under_image", lambda *arguments, **keywords: [1])
+    monkeypatch.setattr(plate_solution_steps, "tiles_under_image", lambda *arguments, **keywords: [1])
     return calls
 
 
@@ -229,8 +239,6 @@ def test_refit_from_cache_with_a_cached_download_uses_the_refit_solution(
     from astropy.coordinates import SkyCoord
     from astropy.wcs import WCS
 
-    from astrometricslib.pipelines.astrometry.processing import star_identifier
-
     _forbid_catalog_work(monkeypatch)
     stars = SkyCoord([FIELD_RA_DEG] * 3, [FIELD_DEC_DEG] * 3, unit="deg")
     calls = _allow_only_the_cached_refit(monkeypatch, (SimpleNamespace(meta={}), stars))
@@ -246,7 +254,9 @@ def test_refit_from_cache_with_a_cached_download_uses_the_refit_solution(
         reason="",
         fit_star_indices=(),
     )
-    monkeypatch.setattr(star_identifier, "refine_wcs_with_gaia", lambda *arguments, **keywords: refinement)
+    monkeypatch.setattr(
+        plate_solution_steps, "refine_wcs_with_gaia", lambda *arguments, **keywords: refinement
+    )
     monkeypatch.setattr(
         StarIdentifier, "_move_gaia_coords_to_observation_epoch", lambda self, table, coords: coords
     )

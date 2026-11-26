@@ -14,6 +14,9 @@ import { safeParse, formatRA, formatDec, formatNumber } from '../utils/coordinat
 import { formatCatalogMagnitude } from '../layers/StarOverlay';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { useTargetPackage } from '../hooks/useTargetPackage';
+import { Skeleton } from '../../common/components/Skeleton';
+import { calculateLST } from '../utils/siderealTime';
+import { getAltAz } from '../utils/projectionMath';
 import { Button } from '../../common/components/Button';
 
 /**
@@ -28,6 +31,37 @@ interface Props {
   onClose: () => void;
   /** Whether the object is already a target in the library (changes the words of the toast). */
   isLibraryTarget?: boolean;
+  /** Opens or closes the framing panel for this object. Leave it out to show no Framing button. */
+  onToggleFraming?: () => void;
+  /** Whether the framing panel is open. */
+  isFramingOpen?: boolean;
+  /** The Framing button, so focus can return to it when the framing panel closes. */
+  framingButtonRef?: React.Ref<HTMLButtonElement>;
+  /**
+   * The moment the card describes (the planning time). Altitude, azimuth and hour angle are
+   * worked out from it at once, before the backend's fuller answer arrives. Defaults to now.
+   */
+  atTime?: Date;
+  /** True while the backend's visibility answer (rise and set times) is still on its way. */
+  visibilityPending?: boolean;
+}
+
+/**
+ * Works out where an object is in the sky right away, from its position, the site and the time.
+ *
+ * Used until the backend's answer arrives, so the card never shows blanks for a moment.
+ *
+ * @param {PlanetariumSource} source The object.
+ * @param {ObserverLocation} location The site.
+ * @param {Date} moment The time.
+ * @returns {{ altitude: number; azimuth: number; hourAngle: number }} Degrees, degrees and hours.
+ */
+export function localSkyPosition(source: PlanetariumSource, location: ObserverLocation, moment: Date) {
+  const lst = calculateLST(moment, 0, location.longitude);
+  const { alt, az } = getAltAz(source.ra, source.dec, lst, location.latitude);
+  let hourAngle = (lst - source.ra) / 15;
+  hourAngle = ((((hourAngle + 12) % 24) + 24) % 24) - 12;
+  return { altitude: alt, azimuth: az, hourAngle };
 }
 
 /**
@@ -84,7 +118,17 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
   observerLocation,
   onClose,
   isLibraryTarget = false,
+  onToggleFraming,
+  isFramingOpen = false,
+  framingButtonRef,
+  atTime,
+  visibilityPending = false,
 }) => {
+  // The backend's answer when it has come; until then, the position worked out here.
+  const local = observerLocation ? localSkyPosition(source, observerLocation, atTime ?? new Date()) : null;
+  const altitude = source.altitude ?? local?.altitude;
+  const azimuth = source.azimuth ?? local?.azimuth;
+  const hourAngle = source.hourAngle ?? local?.hourAngle;
   const { isWorking, refusal, addToPackage, dismissRefusal } = useTargetPackage(source.name, isLibraryTarget);
   const spectralClass = (source.spectralType || 'A').charAt(0).toUpperCase();
   const starGlowColor = spectralColors[spectralClass] || '#ffffff';
@@ -161,42 +205,60 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
             </tr>
             <tr>
               <td>Alt/Az</td>
-              <td>{formatNumber(source.altitude, 2)}° / {formatNumber(source.azimuth, 2)}°</td>
+              <td>{formatNumber(altitude, 2)}° / {formatNumber(azimuth, 2)}°</td>
             </tr>
             <tr>
               <td>Hour Angle</td>
-              <td>{formatNumber(source.hourAngle, 4)} h</td>
+              <td>{formatNumber(hourAngle, 4)} h</td>
             </tr>
             <tr>
               <td>Rise/Set</td>
-              <td>{source.riseTime || '--'} / {source.setTime || '--'}</td>
+              <td>
+                {visibilityPending && !source.riseTime && !source.setTime
+                  ? <Skeleton variant="line" count={1} label="Working out rise and set" />
+                  : `${source.riseTime || '--'} / ${source.setTime || '--'}`}
+              </td>
             </tr>
           </tbody>
         </table>
 
-        <Button
-          className="planetarium-info-card__add-package-btn"
-          onClick={() => void addToPackage()}
-          disabled={isWorking}
-          aria-disabled={isWorking}
-        >
-          Add to observation package
-        </Button>
+        {/* Every action sits in one column with one gap, all the same size. */}
+        <div className="planetarium-info-card__actions" data-testid="planetarium-info-card-actions">
+          <Button
+            fullWidth
+            onClick={() => void addToPackage()}
+            disabled={isWorking}
+            aria-disabled={isWorking}
+          >
+            Add to observation package
+          </Button>
+          {onToggleFraming && (
+            <Button
+              variant="secondary"
+              fullWidth
+              ref={framingButtonRef}
+              aria-expanded={isFramingOpen}
+              onClick={onToggleFraming}
+              title="Plan a grid of panels around this object"
+            >
+              Framing
+            </Button>
+          )}
+          {!isTarget && (source.hasSpectra || source.hasPhotometry) && (
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => viewInAstronomyManager(source)}
+            >
+              View in Astronomy Manager
+            </Button>
+          )}
+        </div>
         {refusal !== null && (
           <div role="alert" className="planetarium-info-card__refusal">
             {refusal}
             <Button variant="secondary" size="small" onClick={dismissRefusal}>Dismiss</Button>
           </div>
-        )}
-
-        {!isTarget && (source.hasSpectra || source.hasPhotometry) && (
-          <Button
-            variant="secondary"
-            className="planetarium-info-card__view-in-astronomy-btn"
-            onClick={() => viewInAstronomyManager(source)}
-          >
-            View in Astronomy Manager
-          </Button>
         )}
       </div>
     </div>

@@ -13,6 +13,29 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 
 
+@dataclass(frozen=True)
+class KnownTarget:
+    """What the library's own record says about the target of an image.
+
+    It is saved from SIMBAD when the target is first looked up, so it still
+    answers when SIMBAD cannot be reached.
+
+    Attributes
+    ----------
+    object_type : `str`
+        SIMBAD's type code for the object, such as "PN".
+    ra_deg, dec_deg : `float`
+        The object's position in decimal degrees (ICRS, epoch J2000).
+    major_axis_arcmin : `float` or `None`
+        The object's major axis in arcminutes, if the record has one.
+    """
+
+    object_type: str
+    ra_deg: float
+    dec_deg: float
+    major_axis_arcmin: float | None = None
+
+
 @dataclass
 class ExtendedSourceHint:
     """Where a large, non-stellar target (like a nebula) sits in an image.
@@ -60,3 +83,8 @@ class AnalysisContext:
     gaia_fit_peak_over_noise: tuple[float, ...] = ()
     gaia_fit_signal_reason: str = "no Gaia fit was made"
     astrometry_flags: list[str] = field(default_factory=list)
+    # How many Gaia cache tiles lie under the image, and how many of them
+    # were not complete to the query depth, so their detections got no Gaia
+    # name. Both 0 when no field was solved.
+    gaia_tiles_count: int = 0
+    gaia_tiles_missing_count: int = 0

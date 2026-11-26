@@ -5,6 +5,7 @@ following a standard pattern so different parts of the code don't have to
 worry about where the data actually lives.
 """
 
+import json
 import logging
 import math
 import os
@@ -27,6 +28,7 @@ from astrometricslib.foundation.storage.data_versions import STARS_KIND, TARGETS
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "POSITION_ONLY_STAR_ID_PREFIX",
+    "STAR_RECORD_COLUMNS",
     "UNRESOLVED_DETECTION_ID",
     "AbstractCatalogAccess",
     "CatalogAccess",
@@ -34,6 +36,10 @@ __all__ = [
     "StarGroupCount",
     "StarPosition",
     "StarSummary",
+    "holds_measurements",
+    "stellar_object_from_row",
+    "stellar_row_values",
+    "stellar_storage_payload",
 ]
 
 logger = logging.getLogger(__name__)
@@ -585,6 +591,21 @@ class AbstractCatalogAccess(ABC):
         """
         return [summary.id for summary in self.list_star_summaries()]
 
+    def read_star_radii(self, ids: list[str]) -> dict[str, float | None]:
+        """Read the saved star radius (``radius_px``) of some stars.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        radii : `dict` [`str`, `float` or `None`]
+            The radius in pixels of each star found, `None` when it has none.
+        """
+        return {record.id: record.radius_px for record in self.get_by_ids("stellar_catalog", ids)}
+
     def existing_star_ids(self, ids: list[str]) -> set[str]:
         """Say which of the given star ids are in the catalog.
 
@@ -616,10 +637,17 @@ class AbstractCatalogAccess(ABC):
         if not name:
             return []
         wanted_name = name.lower()
-        return [
+        matching_ids = [
             summary.id
             for summary in self.list_star_summaries()
             if summary.id == name or (summary.name and summary.name.lower() == wanted_name)
+        ]
+        if matching_ids:
+            return matching_ids
+        return [
+            record.id
+            for record in self.get_by_ids("stellar_catalog", self.list_star_ids())
+            if any(alias.lower() == wanted_name for alias in record.aliases)
         ]
 
 
@@ -677,6 +705,199 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
         "has_photometry": int(stellar_object.has_photometry),
         "spectral_type": stellar_object.spectral_type or "",
     }
+
+
+# The star's own columns that also stand for a field of its stored record,
+# as (record key, column name). The record leaves out a field its column
+# can give back exactly, and reading the row puts it back from the column.
+_STAR_FIELDS_HELD_IN_COLUMNS = (("name", "name"), ("ra", "ra"), ("dec", "dec"), ("magnitude", "magnitude"))
+
+STAR_RECORD_COLUMNS = ("id", "name", "ra", "dec", "magnitude", "target_id")
+"""The columns of the star table that `stellar_object_from_row` reads
+together with the stored record."""
+
+
+def _column_gives_back(value: Any, column_value: Any) -> bool:
+    """Tell whether a column holds a field's value exactly.
+
+    Parameters
+    ----------
+    value : `Any`
+        The field's value on the star.
+    column_value : `Any`
+        What the star's row keeps in the matching column.
+
+    Returns
+    -------
+    gives_back : `bool`
+        `True` when reading the column gives `value` back unchanged: the
+        same text, or the same finite number of the same type. A number
+        stored as text, or a value that is not a number (the database keeps
+        it as empty), stays in the record.
+    """
+    if isinstance(value, str):
+        return value == column_value
+    if type(value) is float and math.isfinite(value):
+        return column_value == value
+    return False
+
+
+def stellar_storage_payload(stellar_object: Any) -> dict[str, Any]:
+    """Build the record saved in a star's ``data_json``.
+
+    The record keeps only what reading the row back needs. A field still at
+    its default value is left out, because reading fills it in again. The
+    values worked out from other fields (``hasSpectra``, ``plotData`` and
+    the rest) are left out, because they are worked out again on reading.
+    The id, name, position, brightness and targets are left out when the
+    row's own columns give them back exactly (`stellar_object_from_row`
+    puts them back).
+
+    This is the stored form only. `StellarObject.serialize` still gives
+    the full form, with the worked-out values, for the app.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The star to save.
+
+    Returns
+    -------
+    payload : `dict`
+        The record, keyed by the field aliases.
+    """
+    payload = stellar_object.model_dump(
+        mode="python", by_alias=True, exclude_defaults=True, exclude_computed_fields=True
+    )
+    payload.pop("id", None)
+    columns = _stellar_extra_columns(stellar_object)
+    for key, column in _STAR_FIELDS_HELD_IN_COLUMNS:
+        if key in payload and _column_gives_back(payload[key], columns[column]):
+            del payload[key]
+    target_ids = payload.get("targetIds")
+    if target_ids is not None and _split_target_ids(columns["target_id"]) == target_ids:
+        del payload["targetIds"]
+    return payload
+
+
+def stellar_row_values(stellar_object: Any) -> dict[str, Any]:
+    """Give every column of a star's row, as the catalog saves it.
+
+    For a script that writes the star table with SQL of its own, so its rows
+    are the same as the ones the catalog writes.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The star to save.
+
+    Returns
+    -------
+    values : `dict`
+        ``id``, ``data_json`` (the record as JSON text, see
+        `stellar_storage_payload`) and the extra columns, by column name.
+    """
+    from astrometricslib.foundation.storage.local_database import safe_json_dumps
+
+    return {
+        "id": stellar_object.id,
+        "data_json": safe_json_dumps(stellar_storage_payload(stellar_object)),
+        **_stellar_extra_columns(stellar_object),
+    }
+
+
+def holds_measurements(stellar_object: Any) -> bool:
+    """Tell whether a star record holds a measurement worth saving.
+
+    The star catalog keeps a star only when this library measured it: a
+    light curve (``has_photometry``) or a spectrum (``has_spectra``). A star
+    that was only detected and named holds neither, and is not saved; its
+    name for the image overlay lives in the stack's own identification file.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject` or `None`
+        The record to test.
+
+    Returns
+    -------
+    holds : `bool`
+        `True` when the record has a light curve or a spectrum.
+    """
+    if stellar_object is None:
+        return False
+    return bool(
+        getattr(stellar_object, "has_photometry", False) or getattr(stellar_object, "has_spectra", False)
+    )
+
+
+def _keep_measured_stars(
+    merge_function: Callable[[Any | None, Any], Any],
+) -> Callable[[Any | None, Any], Any]:
+    """Wrap a star merge rule so a record with no measurement is not saved.
+
+    Parameters
+    ----------
+    merge_function : `Callable`
+        The caller's rule for combining a saved record with a new one.
+
+    Returns
+    -------
+    guarded : `Callable`
+        The same rule, giving `None` (save nothing) when the merged record
+        has neither a light curve nor a spectrum. A saved row is then left
+        as it is.
+    """
+
+    def guarded(existing: Any | None, updated: Any) -> Any | None:
+        """Merge, then drop a record with no measurement.
+
+        Parameters
+        ----------
+        existing : `StellarObject` or `None`
+            The saved record, or `None` for a new star.
+        updated : `StellarObject`
+            The new record.
+
+        Returns
+        -------
+        merged : `StellarObject` or `None`
+            The merged record, or `None` when it holds no measurement.
+        """
+        merged = merge_function(existing, updated)
+        return merged if holds_measurements(merged) else None
+
+    return guarded
+
+
+def stellar_object_from_row(payload: dict[str, Any], columns: dict[str, Any]) -> Any:
+    """Build a star from its stored record and its row's columns.
+
+    Works for both stored forms: a full record (saved before records left
+    out what the columns hold) is read as it is, and a short record gets the
+    missing fields from the columns.
+
+    Parameters
+    ----------
+    payload : `dict`
+        The parsed ``data_json``. It is changed in place.
+    columns : `dict`
+        The row's values for `STAR_RECORD_COLUMNS`.
+
+    Returns
+    -------
+    stellar_object : `StellarObject`
+        The star, equal to the one that was saved.
+    """
+    from astrometricslib.models.stellar_source import StellarObject
+
+    payload.setdefault("id", columns["id"])
+    for key, column in _STAR_FIELDS_HELD_IN_COLUMNS:
+        if key not in payload and columns.get(column) is not None:
+            payload[key] = columns[column]
+    if "targetIds" not in payload:
+        payload["targetIds"] = _split_target_ids(columns.get("target_id"))
+    return StellarObject.model_validate(payload)
 
 
 class CatalogAccess(AbstractCatalogAccess):
@@ -782,6 +1003,9 @@ class CatalogAccess(AbstractCatalogAccess):
                         "spectral_type": "TEXT",
                     },
                     extra_columns=_stellar_extra_columns,
+                    serializer=stellar_storage_payload,
+                    read_columns=STAR_RECORD_COLUMNS,
+                    deserializer=stellar_object_from_row,
                     # Rows saved before this column existed still hold the
                     # value inside their stored JSON. The database copies it
                     # out once, when the column is first added.
@@ -926,16 +1150,24 @@ class CatalogAccess(AbstractCatalogAccess):
             The new data to add or update.
         merge_function : `Callable`
             A function that knows how to combine the old data with the new
-            data.
+            data. It may give `None` to save nothing for a record.
 
         Raises
         ------
         InvalidArgumentError
             If the dataset type isn't supported for merging.
+
+        Notes
+        -----
+        A star whose merged record has neither a light curve nor a spectrum
+        is not saved (see `holds_measurements`), so no pipeline can add a
+        star that was only detected and named.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
             raise InvalidArgumentError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
+        if dataset_type == "stellar_catalog":
+            merge_function = _keep_measured_stars(merge_function)
         self._generic.merge_and_record(dataset_type, objects, merge_function)
 
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
@@ -985,6 +1217,25 @@ class CatalogAccess(AbstractCatalogAccess):
         """
         return [row["id"] for row in self._generic.list_projected("stellar_catalog", ["id"])]
 
+    def read_star_radii(self, ids: list[str]) -> dict[str, float | None]:
+        """Read the saved star radius (``radius_px``) of some stars.
+
+        Only that one value is read out of each stored record, so a star
+        with a long light curve or spectrum costs no more than any other.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        radii : `dict` [`str`, `float` or `None`]
+            The radius in pixels of each star found, `None` when it has none.
+        """
+        values = self._generic.read_record_field("stellar_catalog", ids, "radiusPx")
+        return {star_id: (float(value) if value is not None else None) for star_id, value in values.items()}
+
     def existing_star_ids(self, ids: list[str]) -> set[str]:
         """Say which of the given star ids are in the catalog.
 
@@ -1028,6 +1279,42 @@ class CatalogAccess(AbstractCatalogAccess):
         matching_ids.extend(
             found_id for found_id in self.existing_star_ids([name]) if found_id not in matching_ids
         )
+        if not matching_ids:
+            matching_ids = self._find_star_ids_by_alias(name)
+        return matching_ids
+
+    def _find_star_ids_by_alias(self, name: str) -> list[str]:
+        """Find the ids of stars that list `name` among their aliases.
+
+        A star saved under its Gaia number keeps its older SIMBAD id (such
+        as ``HD 183912``) as an alias, so a search by that id still finds
+        it. The database narrows the rows to records that contain the name;
+        this reads every record's text once, so it runs only when no id or
+        name matched.
+
+        Parameters
+        ----------
+        name : `str`
+            The name to look for.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of every star with an alias equal to `name`, ignoring
+            case.
+        """
+        wanted_name = name.lower()
+        candidate_rows = self._generic.list_projected(
+            "stellar_catalog", ["id", "data_json"], like={"data_json": name}
+        )
+        matching_ids = []
+        for row in candidate_rows:
+            try:
+                aliases = json.loads(row["data_json"]).get("aliases") or []
+            except TypeError, ValueError, AttributeError:
+                continue
+            if any(str(alias).lower() == wanted_name for alias in aliases):
+                matching_ids.append(row["id"])
         return matching_ids
 
     def count_star_groups(self, include_unresolved: bool = False) -> list[StarGroupCount]:

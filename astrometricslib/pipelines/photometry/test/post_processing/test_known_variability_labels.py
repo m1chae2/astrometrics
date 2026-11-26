@@ -83,7 +83,28 @@ def test_a_candidate_with_no_saved_row_is_unknown_not_unlisted() -> None:
     label_known_variability([candidate], FakeCatalog([]))
 
     assert candidate.known_variability == KnownVariability.UNKNOWN.value
-    assert "nothing is known" in candidate.known_variability_note
+    assert candidate.known_variability_note.startswith("Unverified")
+
+
+def test_a_candidate_with_no_saved_row_takes_the_answer_of_the_runs_star() -> None:
+    """A star not saved yet is labelled from the run's own star."""
+    candidate = make_candidate("G")
+    run_star = StellarObject(id="G", simbadObjectTypes="*|EB*|V*")
+
+    label_known_variability([candidate], FakeCatalog([]), run_stars=[run_star])
+
+    assert candidate.known_variability == KnownVariability.KNOWN_VARIABLE.value
+
+
+def test_a_saved_row_wins_over_the_runs_star() -> None:
+    """The saved row, which may hold a VSX answer, is used when it exists."""
+    candidate = make_candidate("H")
+    saved = StellarObject(id="H", simbadObjectTypes="*|IR")
+    run_star = StellarObject(id="H", simbadObjectTypes="*|EB*|V*")
+
+    label_known_variability([candidate], FakeCatalog([saved]), run_stars=[run_star])
+
+    assert candidate.known_variability == KnownVariability.NOT_LISTED.value
 
 
 def test_a_saved_row_with_no_catalog_answers_is_unknown() -> None:

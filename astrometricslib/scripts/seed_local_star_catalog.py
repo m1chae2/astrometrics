@@ -4,10 +4,10 @@ Run once after installing the library and indexing a frame library::
 
     python -m astrometricslib.scripts.seed_local_star_catalog
 
-Afterwards `star_identifier` answers star-identification queries from
-the local SQLite cache, and ESA's Gaia TAP service is only consulted for
-fields the sweep never covered. Re-running is safe and cheap: regions
-already stored are skipped.
+Afterwards `star_identifier` names stars from the Gaia sky tiles in the
+local SQLite cache, and the Gaia services are only asked for tiles the sweep
+never filled. Re-running is safe and cheap: tiles already complete to the
+depth are skipped.
 
 Use ``--dry-run`` first to see which fields would be downloaded without
 contacting the network at all -- field centers come from FITS headers,
@@ -23,7 +23,6 @@ from astrometricslib._internal.drivers.catalog_store import summarize_catalog_co
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
     DEFAULT_FIELD_RADIUS_DEGREES,
-    DEFAULT_MAGNITUDE_LIMIT,
     DEFAULT_REQUEST_DELAY_SECONDS,
     derive_field_centers,
     seed_local_gaia_catalog,
@@ -56,8 +55,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--magnitude-limit",
         type=float,
-        default=resolve(DEFAULT_MAGNITUDE_LIMIT).value,
-        help=f"Faintest Gaia G magnitude to store (default {resolve(DEFAULT_MAGNITUDE_LIMIT).value}).",
+        default=None,
+        help="Faintest Gaia G magnitude to store (default: the depth each field's equipment predicts).",
     )
     parser.add_argument(
         "--request-delay-seconds",
@@ -99,7 +98,7 @@ def run_catalog_seeding(argv: list[str] | None = None) -> int:
     configure_logging("seed_local_star_catalog", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
-    targets = astrometrics.targets.list()
+    targets = astrometrics.targets.query(detail="objects", limit=None).objects
     if arguments.target_ids:
         requested_ids = set(arguments.target_ids)
         targets = [target for target in targets if target.id in requested_ids]
@@ -164,7 +163,7 @@ def run_catalog_seeding(argv: list[str] | None = None) -> int:
     print(f"Fields failed: {report['fields_failed']}")
     print(
         f"Catalog now: {coverage_after['source_count']:,} sources across "
-        f"{coverage_after['region_count']} region(s), "
+        f"{coverage_after['region_count']} complete tile(s), "
         f"{coverage_after['size_megabytes']} MB"
     )
     print("==========================================")

@@ -31,7 +31,6 @@ from datetime import UTC, date, datetime
 from functools import partial
 from typing import Any, Literal
 
-from astropy.time import Time
 from pydantic import ValidationError
 
 from astrometricslib import (
@@ -44,7 +43,13 @@ from astrometricslib import (
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from astrometricslib.parameters import resolve_parameter
-from wayfindinglib._internal.arguments import check_choice, check_include, reject_unused_arguments
+from wayfindinglib._internal.arguments import (
+    TimeInput,
+    check_choice,
+    check_include,
+    check_limit,
+    reject_unused_arguments,
+)
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     TargetFrameReader,
@@ -308,7 +313,7 @@ class ObservationPlanning:
         target : `Target`
             The library target.
         """
-        return self._astrometrics.targets.resolve(target)
+        return self._astrometrics.targets.get(target, refresh=True, required=True)
 
     def _package(self, package_id: str) -> ObservationPackage:
         """Load one recorded observation package.
@@ -477,7 +482,8 @@ class ObservationPlanning:
         -------
         position : `CoordinateLookup`
             The ``id``, ``name`` and ``kind`` (``"target"`` or ``"star"``),
-            and the position in degrees (``ra_deg``, ``dec_deg``). A target
+            and the position in ICRS (J2000) degrees (``ra_deg``,
+            ``dec_deg``). A target
             also has its position as saved text; a star has its magnitude
             and spectral type.
         """
@@ -524,9 +530,9 @@ class ObservationPlanning:
         Parameters
         ----------
         ra_deg : `float`
-            Right ascension of the center, in degrees.
+            Right ascension of the center, in ICRS (J2000) degrees.
         dec_deg : `float`
-            Declination of the center, in degrees.
+            Declination of the center, in ICRS (J2000) degrees.
         radius_deg : `float`
             Search radius, in degrees.
         source : `list` [`str`], optional
@@ -553,7 +559,8 @@ class ObservationPlanning:
         limit : `int`, optional
             Most stars to list, from 1 to 300, brightest first. Targets are
             never cut. Defaults to 100. `None` lists every star in the order
-            found, which can be very long.
+            found, which can be very long. A value outside the range raises
+            `InvalidArgumentError`.
 
         Returns
         -------
@@ -572,6 +579,7 @@ class ObservationPlanning:
         """
         from wayfindinglib.tasks.planning_tasks import sky_sources
 
+        check_limit(limit, 1, MAXIMUM_SOURCES)
         sections = check_include(source, ("targets", "stars", "simbad", "catalogs"))
         if ("catalogs" in sections) != bool(catalog_drivers):
             raise InvalidArgumentError(
@@ -618,7 +626,6 @@ class ObservationPlanning:
         stars = [item for item in found if item.type == "star"]
         total_stars = len(stars)
         if limit is not None:
-            limit = max(1, min(int(limit), MAXIMUM_SOURCES))
             stars.sort(key=lambda item: (item.magnitude is None, item.magnitude or 0.0))
         truncated = catalogs_cut_short or (limit is not None and total_stars > limit)
         return SourceQueryResult(
@@ -657,8 +664,8 @@ class ObservationPlanning:
     def get_visibility(
         self,
         objects: list[str | Target | StellarObject | dict[str, Any]] | None = None,
-        time: str | datetime | Time | None = None,
-        end_time: str | datetime | Time | None = None,
+        time: TimeInput = None,
+        end_time: TimeInput = None,
         step_minutes: float | None = None,
         include: list[str] | None = None,
         minimum_altitude_deg: float = 0.0,
@@ -688,7 +695,8 @@ class ObservationPlanning:
         objects : `list`, optional
             Names or ids (the library first, then SIMBAD), `Target` or
             `StellarObject` objects, or dictionaries ``{"id", "ra_deg",
-            "dec_deg"}`` for points with known coordinates. When omitted,
+            "dec_deg"}`` (ICRS (J2000) degrees) for points with known
+            coordinates. When omitted,
             every library target, highest first.
         time : `str`, `datetime` or `astropy.time.Time`, optional
             The moment, or the start of the span. ``"now"`` or omitted
@@ -863,9 +871,10 @@ class ObservationPlanning:
         Parameters
         ----------
         ra_deg : `float`
-            Right ascension of the grid center, in degrees.
+            Right ascension of the grid center, in ICRS (J2000) degrees.
         dec_deg : `float`
-            Declination of the grid center, in degrees, from -90 to 90.
+            Declination of the grid center, in ICRS (J2000) degrees, from
+            -90 to 90.
         rows : `int`
             Number of panel rows.
         cols : `int`
@@ -1491,7 +1500,8 @@ class ObservationPlanning:
         session_id : `str`
             The session to change.
         framing : `dict`
-            The field center (``center_ra_deg``, ``center_dec_deg``), the
+            The field center (``center_ra_deg``, ``center_dec_deg``, ICRS
+            (J2000) degrees), the
             camera rotation and any mosaic panels.
         expected_revision : `int`, optional
             The plan revision the caller last read. Leave out to write
@@ -2925,7 +2935,9 @@ class ObservationPlanning:
         targets = (
             list(dict.fromkeys(target_ids))
             if target_ids is not None
-            else [target.id for target in self._astrometrics.targets.list()]
+            else [
+                target.id for target in self._astrometrics.targets.query(detail="objects", limit=None).objects
+            ]
         )
         reader = TargetFrameReader(self._astrometrics)
         noise_by_target: dict[str, Any] = {}

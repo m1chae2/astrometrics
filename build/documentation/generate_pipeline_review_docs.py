@@ -165,8 +165,9 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "the residual (position error), pixel scale (sky angle per pixel) or FWHM is missing."
     ),
     "catalog_lookup": (
-        "Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries "
-        "after repeated failures) tripped during the run, or when at least "
+        "Fails when the outside-service gateway paused a catalog (it pauses a host that keeps "
+        "failing or answers too busy, and a paused catalog is answered from stored results) "
+        "during the run, or when at least "
         "`MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made."
     ),
     # Photometry run gates
@@ -217,6 +218,11 @@ GATE_DESCRIPTIONS: dict[str, str] = {
     "flux_uncertainty": (
         "Cannot fail. Reports the median per-point error. Not checked when the errors assumed "
         "a gain of 1 e-/ADU (electrons per camera count), because the camera's gain was unknown."
+    ),
+    "target_crowding": (
+        "Fails when a neighbor with at least `CROWDING_NEIGHBOR_PEAK_FRACTION` of the target "
+        "star's peak lies within the aperture radius plus `CROWDING_MARGIN_PX`, so the target's "
+        "light curve may carry the neighbor's light. Not checked without a single target star."
     ),
     # Photometry period checks
     "holdout_nights": (
@@ -297,8 +303,8 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
     "frame_quarantine": (
-        "Fails when a batch had more bad frames (too few stars, or stars not round) than "
-        "`MAXIMUM_QUARANTINED_FRACTION`, so none were moved."
+        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
+        "aside. The frames are moved all the same; the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -685,8 +691,8 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
     "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",
     "stacked_fwhm_px": "Measured FWHM of the stacked image.",
-    "median_input_fwhm_px": "Median FWHM of all light frames that were kept.",
-    "expected_fwhm_px": "Predicted stack FWHM: the RMS of a sample of input-frame FWHMs.",
+    "median_input_fwhm_px": "Median FWHM of all frames in the stack.",
+    "expected_fwhm_px": "Predicted stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "fwhm_degradation_ratio": "Measured stack FWHM over the expected FWHM; 1 means no extra blur.",
     "fwhm_degradation_flagged": "True if the final image is clearly blurrier than its inputs.",
     "stacking_engine": "Program that did the pixel processing (for example Siril).",
@@ -710,7 +716,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "gaia_fit_star_count": "Stars used in the Gaia refit.",
     "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
-    "expected_stack_fwhm_px": "Expected stack FWHM: the RMS of a sample of input-frame FWHMs.",
+    "expected_stack_fwhm_px": "Expected stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
     ),
@@ -1314,8 +1320,13 @@ def build_astrometry_doc() -> str:
             "astrometricslib.pipelines.shared.catalog_star_identity", "CATALOG_MATCH_RADIUS_ARCSEC"
         ),
         "solver_sources": require_symbol(identifier_module, "MAXIMUM_PLATE_SOLVE_SOURCES"),
-        "gaia_epoch": require_symbol(identifier_module, "GAIA_DR3_REFERENCE_EPOCH"),
-        "depth_stars": require_symbol(identifier_module, "MINIMUM_STARS_FOR_DEPTH_ESTIMATE"),
+        "gaia_epoch": require_symbol(
+            "astrometricslib.pipelines.astrometry.processing.gaia_field_matching", "GAIA_DR3_REFERENCE_EPOCH"
+        ),
+        "depth_stars": require_symbol(
+            "astrometricslib.pipelines.astrometry.processing.star_detection",
+            "MINIMUM_STARS_FOR_DEPTH_ESTIMATE",
+        ),
         "local_minimum": require_symbol(driver_module, "MINIMUM_SOURCES_FOR_LOCAL_SOLVE"),
         "blind_cutoff": f"{require_symbol(driver_module, 'HINTED_SOLVE_NEAR_TIMEOUT_FRACTION'):.0%}",
         "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
@@ -1622,7 +1633,8 @@ a pixel or more off. The pipeline then refits the solution to the field's Gaia D
 **How.** Each detection is matched to the nearest Gaia star within <<refit_r1>> pixels, then
 <<refit_r2>> pixels on later passes. The map is fitted with
 `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a
-flat plane touching it at the field center) plus SIP distortion of order <<refit_sip>>. SIP
+flat plane touching it at the middle of the matched stars) plus SIP distortion of order
+<<refit_sip>>. SIP
 (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by
 the optics. Stars more than <<refit_clip>> robust standard deviations off are dropped, and the
 fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times
@@ -1631,6 +1643,11 @@ the median absolute deviation, a measure of spread that a few wild points cannot
 **When it is kept.** The refit needs at least <<refit_min_stars>> matches. It is kept only when
 it fits Gaia better than the solver's solution and moves the field by at most <<refit_shift>>
 arcsec.
+
+**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only
+when the cache already holds the field. A later analysis step downloads the Gaia stars. When it
+accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks
+it), unless the stack already holds a refit one.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -1697,9 +1714,10 @@ The gate detail names the one used.
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has
   already checked that an image path exists.
 - **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS
-  fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec
-  when they were unset (from its SIMBAD position, with the solved image's center only as a marked,
-  unverified fallback), and saves the stars to the shared catalog.
+  fallback, naming). It writes the solved WCS into the FITS header (never over a solution already
+  refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with
+  the solved image's center only as a marked, unverified fallback), and saves the stars to the
+  shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records
   `plate_solve`, then `astrometry_run_gates` adds the rest (<<gate_count>> in all).
   The runner then stores the summary's numbers and the gates as quality measurements
@@ -1731,9 +1749,10 @@ The gate detail names the one used.
 4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept.
    Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch
    2016.0 with a flag.
-5. **Catalog outages.** Repeated failures trip a process-wide circuit breaker: a shared switch
-   that stops further online catalog queries. Unnamed stars keep position-based names, and
-   `catalog_lookup` reports the outage.
+5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers
+   too busy, and the pause is shared by every process. A paused catalog is answered from stored
+   results, with a warning. Unnamed stars keep position-based names, and `catalog_lookup`
+   reports the outage.
 
 <<quality_section>>"""
     values["analysis_note"] = ANALYSIS_STAGES_NOTE
@@ -3144,7 +3163,7 @@ def build_stacking_doc() -> str:
         ),
         "quarantine": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine",
-            "MAXIMUM_QUARANTINED_FRACTION",
+            "WARN_QUARANTINED_FRACTION",
         ),
         "penalty": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
@@ -3156,6 +3175,10 @@ def build_stacking_doc() -> str:
         "group_minimum": require_symbol(
             "astrometricslib.pipelines.stacking.processing.exposure_groups",
             "MINIMUM_FRAMES_PER_EXPOSURE_GROUP",
+        ),
+        "fold_ratio": require_symbol(
+            "astrometricslib.pipelines.stacking.processing.exposure_groups",
+            "MAXIMUM_EXPOSURE_FOLD_RATIO",
         ),
         "gap_ratio": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.background_homogeneity",
@@ -3267,12 +3290,12 @@ def build_stacking_doc() -> str:
             "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
-            "`MAXIMUM_QUARANTINED_FRACTION`",
+            "`WARN_QUARANTINED_FRACTION`",
             f"`{values['quarantine']}`",
             status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
-            "Largest share of a batch the quarantine (setting bad frames aside) may move. About "
-            "twice the share it picks from a normal batch: room for a bad stretch, without "
-            "gutting a session whose limits do not suit the equipment.",
+            "Share of a batch above which setting frames aside draws a warning. It blocks nothing: "
+            "every frame that fails a check is moved. About twice the share the step picks from a "
+            "normal batch, so a larger share is unusual.",
         ],
         [
             "`MINIMUM_PENALTY_TO_WEIGHT`",
@@ -3294,7 +3317,16 @@ def build_stacking_doc() -> str:
             f"`{values['group_minimum']}`",
             design_estimate_cell("STK"),
             "Fewest frames an exposure length needs to be stacked on its own; a smaller set joins "
-            "the group with the nearest exposure length." + see_also("STK-11"),
+            "the group with the nearest exposure length, if that is near enough (next row)."
+            + see_also("STK-11"),
+        ],
+        [
+            "`MAXIMUM_EXPOSURE_FOLD_RATIO`",
+            f"`{values['fold_ratio']:g}`",
+            design_estimate_cell("STK"),
+            "Largest exposure ratio over which a small set is folded into a group. A folded frame is "
+            "scaled by the ratio, so its noise grows by it. A set with no group that near is left out "
+            "of the stack and recorded with the reason.",
         ],
         [
             "`DEFAULT_GAP_RATIO_THRESHOLD`",
@@ -3469,11 +3501,15 @@ A binning mismatch never falls back.
 FWHM (full width at half maximum) is the width of a star's light profile at half its peak
 height; a smaller FWHM means a sharper image. Averaging aligned frames adds no blur of its own,
 so the stack's FWHM follows from the input FWHMs. The pipeline predicts that FWHM and checks the
-stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are
-$\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
-inputs:
+stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ stacked frames
+are $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
+inputs, each weighted by the weight $a_j$ the frame had in the stack (Siril's star-width weights
+for `-weight=wfwhm`, all equal otherwise):
 
-$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^2} \tag{2}$$
+$$\text{FWHM}_\text{expected} = \sqrt{\frac{\sum_{j=1}^{N} a_j\,\text{FWHM}_j^2}{\sum_j a_j}} \tag{2}$$
+
+Every frame in the stack counts. A frame width the frame quality step already stored is reused,
+because it comes from the same estimator.
 
 The ratio $\rho_\text{FWHM}$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means
 the alignment or the combination blurred the stars. The stack passes when
@@ -3532,6 +3568,13 @@ stacked one length at a time. A spectral stack is also split by night, because t
 (the star's undispersed image) sits on a different pixel each night and aligning two nights
 together can lose most frames.
 
+**Short lengths.** A length with too few frames to be stacked alone is folded into the nearest
+group (nearest in exposure ratio), but only when that group is close in exposure. Siril scales a
+folded frame by the exposure ratio, so the frame's noise grows by the same factor, and its star
+profile and sky level lie farther from what the group's calibration covers. A frame with no group
+that close is left out of the stack. The stack records each such frame with the reason, as it does
+for any frame the checks leave out, and the file stays where it is.
+
 **Putting groups on one scale.** Each group's stack is turned into counts per second. That alone
 does not line the groups up, because Siril's normalization leaves each group's stack on the
 brightness scale of its own reference frame. Each group therefore gets a group scale factor that
@@ -3561,7 +3604,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    settings and stacking code: a short code that changes whenever any of them changes. A match
    with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
    preview image when its image is missing or the preview settings changed since it was made
-   (`stack_preview.preview_is_out_of_date`).
+   (`preview_settings.preview_is_out_of_date`).
 3. **Previous-stack staging.** The current stack moves to a staging folder. On success it
    becomes the single `_previous` version (`previous_stack.py`), which a person can swap back or
    discard.
@@ -3571,10 +3614,13 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
-5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames never line up exactly,
-   so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim
-   measures the noise and cuts each side back to where it matches the interior; a stack with
-   clean edges is left alone. The quality summary and its gates are built (<<gate_count>>).
+5. **After the stack.** Thinly covered edges are trimmed (`stack_crop.py`). Frames never line up exactly,
+   so the edges of a stack are covered by fewer frames than the middle and are noisier. For a
+   stack of exposure groups, the count of covering frames takes each group's alignment with the
+   reference group into account. The linear
+   stack is cut only where fewer than half the frames cover it; the processed picture is cropped
+   further, to the area at least 85% of the frames cover, before GraXpert and Cosmic Clarity run.
+   A stack with full coverage is left alone. The quality summary and its gates are built (<<gate_count>>).
    The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame
    count and time, and one weight per member frame as quality measurements
    (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty

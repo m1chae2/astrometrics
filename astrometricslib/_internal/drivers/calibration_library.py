@@ -831,6 +831,16 @@ class CalibrationLibrary(BaseModel):
     # measured frame by frame.
     measurement_stamps: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
+    # The dark frames to warn about or leave out, by file path. Each value
+    # holds ``verdict`` (``"warn"`` or ``"omit"``) and ``reason`` (one plain
+    # sentence). The dark defect job writes it (see
+    # `pipelines/stacking/dark_defect_run.py`) after it measures each dark
+    # against its set's median. A frame marked ``omit`` is not chosen for a
+    # master, a frame marked ``warn`` is chosen and the sentence reaches the
+    # stack's warnings. The file itself is never moved, so removing the entry
+    # puts the frame back.
+    dark_defect_verdicts: dict[str, dict[str, str]] = Field(default_factory=dict)
+
     # Internal config state, excluded from serialization
     app_config: Any = Field(default=None, exclude=True)
     _lock: threading.RLock = PrivateAttr(default_factory=threading.RLock)
@@ -1222,6 +1232,7 @@ class CalibrationLibrary(BaseModel):
         temperature_c: float | None = None,
         temperature_tolerance_c: float | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Choose the dark frames for a batch of lights, and how well they fit.
 
@@ -1273,6 +1284,10 @@ class CalibrationLibrary(BaseModel):
             `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
         light_label : `str`, optional
             How the flag sentences name the lights.
+        flag_log_level : `int`, optional
+            The log level of the flag sentences, by default
+            `logging.WARNING`. A query that only shows the choice, and
+            returns the flags itself, passes `logging.DEBUG`.
 
         Returns
         -------
@@ -1292,6 +1307,7 @@ class CalibrationLibrary(BaseModel):
             temperature_tolerance_c,
             light_label,
             judge_temperature=True,
+            flag_log_level=flag_log_level,
         )
 
     def _select_dark_frames(
@@ -1306,6 +1322,7 @@ class CalibrationLibrary(BaseModel):
         temperature_tolerance_c: float,
         light_label: str,
         judge_temperature: bool,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Do the work of `select_dark_frames`, or skip the temperature.
 
@@ -1319,6 +1336,8 @@ class CalibrationLibrary(BaseModel):
             When `False`, every temperature slot is used and no temperature
             flag is made (the way `get_dark_frames` works when it is given no
             temperature).
+        flag_log_level : `int`, optional
+            As in `select_dark_frames`.
 
         Returns
         -------
@@ -1371,10 +1390,8 @@ class CalibrationLibrary(BaseModel):
             if temperature_flag is not None:
                 flags.append(temperature_flag)
 
-        for flag in flags:
-            logger.warning(flag)
-        for flag in blocking_flags:
-            logger.warning(flag)
+        for flag in [*flags, *blocking_flags]:
+            logger.log(flag_log_level, flag)
         return CalibrationSelection(_without_duplicates(frames), flags, blocking_flags)
 
     def get_dark_frames(
@@ -1447,6 +1464,7 @@ class CalibrationLibrary(BaseModel):
         offset: Any | None = None,
         binning: Any | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Choose the bias frames for a batch of lights, and how well they fit.
 
@@ -1472,6 +1490,10 @@ class CalibrationLibrary(BaseModel):
             binning is used with no flag.
         light_label : `str`, optional
             How the flag sentences name the lights.
+        flag_log_level : `int`, optional
+            The log level of the flag sentences, by default
+            `logging.WARNING`. A query that only shows the choice, and
+            returns the flags itself, passes `logging.DEBUG`.
 
         Returns
         -------
@@ -1487,7 +1509,7 @@ class CalibrationLibrary(BaseModel):
             }
         chosen, flags, blocking_flags = _choose_slots(slots, iso, offset, binning, "bias", light_label)
         for flag in [*flags, *blocking_flags]:
-            logger.warning(flag)
+            logger.log(flag_log_level, flag)
         frames = _without_duplicates([path for paths in chosen.values() for path in paths])
         return CalibrationSelection(
             frames, flags, blocking_flags, [parse_calibration_setting_key(key) for key in chosen]
@@ -1543,6 +1565,7 @@ class CalibrationLibrary(BaseModel):
         offset: Any | None = None,
         binning: Any | None = None,
         light_label: str = _DEFAULT_LIGHT_LABEL,
+        flag_log_level: int = logging.WARNING,
     ) -> CalibrationSelection:
         """Choose the flat frames for a batch of lights, and how well they fit.
 
@@ -1575,6 +1598,10 @@ class CalibrationLibrary(BaseModel):
             binning is used with no flag.
         light_label : `str`, optional
             How the flag sentences name the lights.
+        flag_log_level : `int`, optional
+            The log level of the flag sentences, by default
+            `logging.WARNING`. A query that only shows the choice, and
+            returns the flags itself, passes `logging.DEBUG`.
 
         Returns
         -------
@@ -1598,12 +1625,76 @@ class CalibrationLibrary(BaseModel):
                     if isinstance(paths, list):
                         slots.setdefault(setting_key, []).extend(_existing(paths, validate_paths))
         chosen, flags, blocking_flags = _choose_slots(slots, iso, offset, binning, "flat", light_label)
+        if flags and self._flat_offset_is_compensated(chosen, camera, iso, offset, binning, validate_paths):
+            flags = []
         for flag in [*flags, *blocking_flags]:
-            logger.warning(flag)
+            logger.log(flag_log_level, flag)
         frames = _without_duplicates([path for paths in chosen.values() for path in paths])
         return CalibrationSelection(
             frames, flags, blocking_flags, [parse_calibration_setting_key(key) for key in chosen]
         )
+
+    def _flat_offset_is_compensated(
+        self,
+        chosen: dict[str, list[str]],
+        camera: str | None,
+        iso: Any,
+        offset: Any,
+        binning: Any,
+        validate_paths: bool,
+    ) -> bool:
+        """Tell whether flats at another offset have their own bias.
+
+        A flat holds the camera's bias level, so a flat at another offset than
+        the lights needs a bias at the flat's own offset. Stacking stages that
+        bias for the flats (see `ImageProcessing._select_flat_bias_frames`).
+        When it does, the offset difference changes nothing, so it is not a
+        mismatch to report. This is true only when the flats differ from the
+        lights in the offset alone (same gain, one flat offset), the library
+        holds bias frames at the flats' gain and offset, and the lights have
+        bias frames too (stacking stages the flat bias only then).
+
+        Parameters
+        ----------
+        chosen : `dict` [`str`, `list` [`str`]]
+            The flat slots chosen as a fallback, by library key.
+        camera : `str`, optional
+            The camera name.
+        iso : `Any`
+            The lights' gain or ISO.
+        offset : `Any`
+            The lights' camera offset.
+        binning : `Any`
+            The lights' binning.
+        validate_paths : `bool`
+            Whether the bias selections drop files that no longer exist.
+
+        Returns
+        -------
+        compensated : `bool`
+            `True` when the flats' own bias calibrates them, so the offset
+            difference needs no flag.
+        """
+        settings = {(setting.gain, setting.offset) for setting in map(parse_calibration_setting_key, chosen)}
+        if len(settings) != 1 or iso is None:
+            return False
+        ((flat_gain, flat_offset),) = settings
+        flat_gain_number, light_gain_number = _as_float(flat_gain), _as_float(iso)
+        if flat_gain_number is not None and light_gain_number is not None:
+            same_gain = flat_gain_number == light_gain_number
+        else:
+            same_gain = str(flat_gain).strip() == str(iso).strip()
+        if not same_gain:
+            return False
+        lights_bias = self.select_bias_frames(
+            camera=camera, validate_paths=validate_paths, iso=iso, offset=offset, binning=binning
+        )
+        if not lights_bias.frames:
+            return False
+        flat_bias = self.select_bias_frames(
+            camera=camera, validate_paths=validate_paths, iso=flat_gain, offset=flat_offset, binning=binning
+        )
+        return bool(flat_bias.frames) and not flat_bias.flags and not flat_bias.blocking_flags
 
     def get_flat_frames(
         self,
@@ -1766,6 +1857,99 @@ class CalibrationLibrary(BaseModel):
                 "modified_ns": modified_ns,
                 "metric_set": metric_set,
             }
+
+    def replace_dark_defect_verdicts(
+        self, judged_paths: Iterable[str], verdicts: dict[str, dict[str, str]]
+    ) -> None:
+        """Replace the dark defect verdicts of the frames that were judged.
+
+        Parameters
+        ----------
+        judged_paths : `Iterable` [`str`]
+            The frames the judging covered. Their old verdicts are dropped,
+            so a frame that is now fine is no longer left out.
+        verdicts : `dict` [`str`, `dict` [`str`, `str`]]
+            The new ``warn`` and ``omit`` verdicts by path, each holding
+            ``verdict`` and ``reason``.
+        """
+        with self._lock:
+            for path in judged_paths:
+                self.dark_defect_verdicts.pop(path, None)
+            self.dark_defect_verdicts.update(verdicts)
+
+    def clear_dark_defect_verdicts(self, paths: Iterable[str] | None = None) -> int:
+        """Remove dark defect verdicts, so the frames are used again.
+
+        Parameters
+        ----------
+        paths : `Iterable` [`str`], optional
+            The frames to clear. Every verdict is cleared when omitted.
+
+        Returns
+        -------
+        removed : `int`
+            How many verdicts were removed.
+        """
+        with self._lock:
+            wanted = list(self.dark_defect_verdicts) if paths is None else list(paths)
+            return sum(self.dark_defect_verdicts.pop(path, None) is not None for path in wanted)
+
+    def without_omitted_darks(self, paths: Iterable[str]) -> list[str]:
+        """Drop the darks the defect job marked ``omit``.
+
+        Parameters
+        ----------
+        paths : `Iterable` [`str`]
+            Dark file paths.
+
+        Returns
+        -------
+        kept : `list` [`str`]
+            The paths without the omitted ones, in the same order.
+        """
+        with self._lock:
+            return [
+                path for path in paths if self.dark_defect_verdicts.get(path, {}).get("verdict") != "omit"
+            ]
+
+    def apply_dark_defect_verdicts(self, selection: CalibrationSelection) -> CalibrationSelection:
+        """Leave out the darks marked ``omit`` and flag each mark.
+
+        Parameters
+        ----------
+        selection : `CalibrationSelection`
+            A dark selection.
+
+        Returns
+        -------
+        selection : `CalibrationSelection`
+            The same selection when no chosen frame has a verdict. Otherwise
+            a copy without the frames marked ``omit`` and with one flag
+            sentence for each frame marked ``omit`` or ``warn``. When every
+            frame is left out, `frames` is empty and the flags say why.
+        """
+        with self._lock:
+            marks = {
+                path: dict(self.dark_defect_verdicts[path])
+                for path in selection.frames
+                if path in self.dark_defect_verdicts
+            }
+        if not marks:
+            return selection
+        kept = [path for path in selection.frames if marks.get(path, {}).get("verdict") != "omit"]
+        sentences = []
+        for path, mark in marks.items():
+            name = os.path.basename(path)
+            if mark.get("verdict") == "omit":
+                sentences.append(f"Dark frame {name} was left out of the master: {mark.get('reason', '')}.")
+            else:
+                sentences.append(f"Dark frame {name} is used with a warning: {mark.get('reason', '')}.")
+        return CalibrationSelection(
+            frames=kept,
+            flags=[*selection.flags, *sentences],
+            blocking_flags=list(selection.blocking_flags),
+            chosen_settings=list(selection.chosen_settings),
+        )
 
     def list_calibration_sets(
         self, kind: str, camera: str | None = None, validate_paths: bool = True

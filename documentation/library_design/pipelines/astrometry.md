@@ -99,9 +99,12 @@ Only the local solver reports its fit statistics; an online solve has none (Sect
 
 **Why refit.** The solver fits only the bright stars of its index files, so its solution can be a pixel or more off. The pipeline then refits the solution to the field's Gaia DR3 stars (`wcs_refinement.py`).
 
-**How.** Each detection is matched to the nearest Gaia star within 4 pixels, then 1.5 pixels on later passes. The map is fitted with `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a flat plane touching it at the field center) plus SIP distortion of order 2. SIP (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by the optics. Stars more than 3 robust standard deviations off are dropped, and the fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of spread that a few wild points cannot inflate.
+**How.** Each detection is matched to the nearest Gaia star within 4 pixels, then 1.5 pixels on later passes. The map is fitted with `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a flat plane touching it at the middle of the matched stars) plus SIP distortion of order
+2. SIP (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by the optics. Stars more than 3 robust standard deviations off are dropped, and the fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of spread that a few wild points cannot inflate.
 
 **When it is kept.** The refit needs at least 40 matches. It is kept only when it fits Gaia better than the solver's solution and moves the field by at most 30 arcsec.
+
+**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only when the cache already holds the field. A later analysis step downloads the Gaia stars. When it accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks it), unless the stack already holds a refit one.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -163,7 +166,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 `run_astrometry_analysis` (`runner.py`) runs `AstrometryPipelineAdapter` through `run_pipeline`. `run_pipeline` (`pipeline_base.py`) calls the adapter's four methods in order. It skips `run` only when `process_input` returns a `Result` with `has_work=False`. After `validate_output` it stores the quality summary on the target and records the run's provenance.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has already checked that an image path exists.
-- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
+- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header (never over a solution already refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records `plate_solve`, then `astrometry_run_gates` adds the rest (5 run gates in all). The runner then stores the summary's numbers and the gates as quality measurements (`record_astrometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns `context`, `stellar_objects`, `wcs` and `image_stats`.
 
@@ -177,7 +180,7 @@ A quality gate is an automatic test on a run. It passes, fails, or is "not check
 | `source_detection` | run gate | `post_processing/record_quality.py` | Fails when no star was detected. |
 | `astrometric_residual` | run gate | `post_processing/record_quality.py` | Fails when the solution misses its stars by more than `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` of the FWHM (Eq. 5). Not checked when the residual (position error), pixel scale (sky angle per pixel) or FWHM is missing. |
 | `catalog_matches` | run gate | `post_processing/record_quality.py` | Fails when fewer than `MINIMUM_MATCHED_STARS` stars were matched to a catalog. Not checked when the image was not solved. |
-| `catalog_lookup` | run gate | `post_processing/record_quality.py` | Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries after repeated failures) tripped during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
+| `catalog_lookup` | run gate | `post_processing/record_quality.py` | Fails when the outside-service gateway paused a catalog (it pauses a host that keeps failing or answers too busy, and a paused catalog is answered from stored results) during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
 
 ## 5. Tuned calibration parameters
 
@@ -208,7 +211,7 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 2. **Too few detections (fewer than 4).** No solve is tried. A celestial WCS already in the image header is used instead. Without one, `plate_solve` fails.
 3. **Solver failure.** A tried solve that finds no solution, locally or online, raises `PlateSolveFailedError`. The adapter does not catch it, so the error reaches the caller: `validate_output` never runs, and no quality summary or gate is saved for that run.
 4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept. Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch 2016.0 with a flag.
-5. **Catalog outages.** Repeated failures trip a process-wide circuit breaker: a shared switch that stops further online catalog queries. Unnamed stars keep position-based names, and `catalog_lookup` reports the outage.
+5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers too busy, and the pause is shared by every process. A paused catalog is answered from stored results, with a warning. Unnamed stars keep position-based names, and `catalog_lookup` reports the outage.
 
 ## 7. Quality summary data models
 
@@ -252,6 +255,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `gaia_fit_star_count` | `int \| None` | Stars used in the Gaia refit. |
 | `wcs_refinement_shift_arcsec` | `float \| None` | Largest move of the field made by the Gaia refit. |
 | `astrometry_flags` | `list[str]` | Warnings about conditions that limit the accuracy of the sky positions. |
+| `gaia_tiles_count` | `int` | Quality metric attribute. |
+| `gaia_tiles_missing_count` | `int` | Quality metric attribute. |
 | `plate_scale_arcsec_per_pixel` | `float \| None` | Pixel scale: the sky angle one pixel covers, in arcsec/pixel. |
 | `star_fwhm_px` | `float \| None` | Median FWHM across the image, in pixels. |
 | `remote_catalog_queries_attempted` | `int` | Number of online catalog requests started. |

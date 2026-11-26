@@ -88,7 +88,6 @@ RPC_METHODS: tuple[str, ...] = (
     "system:health",
     "system:static_mounts",
     "system:frontend_log",
-    "system:completions",
     "system:get_config",
     "system:save_config",
     "system:introspection",
@@ -100,6 +99,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Python terminal and its documentation
     "terminal:execute",
     "terminal:get_workspace",
+    "terminal:get_preloaded_objects",
     "terminal:get_recent_runs",
     "terminal:completions",
     "terminal:list_recipes",
@@ -108,6 +108,7 @@ RPC_METHODS: tuple[str, ...] = (
     "terminal:read_script",
     "terminal:save_script",
     "terminal:reset_workspace",
+    "terminal:stop",
     "docs:list_topics",
     "docs:search_topics",
     "docs:get_topic",
@@ -115,6 +116,7 @@ RPC_METHODS: tuple[str, ...] = (
     "ui:editor_get",
     "ui:editor_set",
     "ui:navigate",
+    "ui:set_selection",
     "ui:inspect_variable",
     # Hand-off of the workspace to a paired phone
     "handoff:get_state",
@@ -155,9 +157,7 @@ RPC_METHODS: tuple[str, ...] = (
     "telescope:get_session_alignment",
     "telescope:get_cumulative_tracking_data",
     "telescope:sync_logs",
-    "telescope:get_pointing_model",
     "telescope:get_performance_envelope",
-    "telescope:get_guiding_spectrum",
     # Equipment set-up and control mode
     "observatory:list_cameras",
     "observatory:get_equipment_configuration",
@@ -182,19 +182,31 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:siril_open",
     "processing:cancel",
     "processing:status",
-    "processing:list_jobs",
-    "processing:active_jobs",
-    "processing:get_job",
     "processing:delete_job",
-    "processing:jobs_for_target",
-    "processing:job_log_tail",
     # A target's current stack in one short answer (a read).
     "processing:stack_summary",
     # Makes a stack's preview picture again without restacking (a background
-    # job; writes the pictures and the target's processed-image pointer).
+    # job; writes the pictures and the target's processed-image pointer). An
+    # optional `stack_path`, or `camera_id` and `focal_length_mm`, names one of
+    # the target's stacks by camera and optic; that stack gets its own
+    # pictures and the pointer is left alone.
     "processing:remake_preview",
+    # The nebulae and galaxies SIMBAD lists inside a target's stack (a read;
+    # asks SIMBAD once per stack file and keeps the list beside the stack).
+    "processing:list_bright_objects",
+    # Saves which object the preview's masked stretch protects on the target
+    # (a write; used the next time the stack or its preview is made). With
+    # mode "object", a `name` in any spelling picks an object of the list.
+    "processing:set_bright_object",
+    # What a stack would do with its frames: the frames it would set aside and
+    # why, and the darks, flats and bias each exposure group would use (a read;
+    # a background job, because it reads every frame).
+    "processing:check_stack",
     # The frames the stacker set aside for a target, with the reason (a read).
     "quality:set_aside_frames",
+    # A typical frame and a reference star for the viewer's Blink button
+    # (a read).
+    "quality:choose_blink_pair",
     # Measures a stack and the one before it the same way and compares them
     # (a background job; it records a job and writes no quality rows).
     "quality:measure_stack",
@@ -211,14 +223,22 @@ RPC_METHODS: tuple[str, ...] = (
     "quality:resolve_rows",
     # The job history. `detail="warnings"` lists the warnings one job detected.
     "jobs:query",
-    # Photometry and spectroscopy analysis
+    # Astrometry, photometry, spectroscopy and spectral variation analysis.
+    # `analyze_image` takes `target_id`, `image_files`, `filter_name`, `type`
+    # and an optional `stages` (a list from the library's selectable stages;
+    # omitted, the backend chooses as the Analyze Target button does). An
+    # optional `camera_id` and `focal_length_mm` analyze the target's stack of
+    # that camera and optic instead of its main stack. The library adds a
+    # stage first when another needs it and its result is missing or older
+    # than the stack.
     "analysis:analyze_image",
     "analysis:get_results",
     "analysis:cancel",
+    "analysis:identify_stack",
+    "analysis:get_stack_identification",
     # Target library
     "target:list",
     "target:get",
-    "target:get_targets",
     "target:create",
     "target:update",
     "target:delete",
@@ -226,6 +246,8 @@ RPC_METHODS: tuple[str, ...] = (
     "target:send_to_phone",
     "target:refresh",
     "target:get_files",
+    "target:get_frame_statuses",
+    "target:put_back_frames",
     "target:get_camera_index",
     "target:get_frames",
     "target:get_frames_grouped",
@@ -240,7 +262,6 @@ RPC_METHODS: tuple[str, ...] = (
     "astronomy:save",
     "astronomy:delete",
     "astronomy:analyze_periodicity",
-    "astronomy:get_stellar_objects",
     "astronomy:get_overlay_stars",
     "astronomy:get_status",
     "astronomy:visible",
@@ -253,22 +274,21 @@ RPC_METHODS: tuple[str, ...] = (
     "planetarium:list_catalog_drivers",
     "planetarium:get_deep_catalog_status",
     "planetarium:get_constellation_lines",
+    "planetarium:get_class_stars",
+    "planetarium:get_stack_pictures",
     # Camera capture
     "imaging:capture",
-    "imaging:get_active_jobs",
     "imaging:stop_capture",
     # Images and FITS files
     "images:get_target_frame",
     "images:get_light_frame_data",
     "images:convert_fits",
-    "images:get_fits_header",
     "images:measure_star_profile",
     "images:map_position",
     "images:measure_detections",
     "images:delete",
     "images:last",
     # Calibration frames
-    "calibration:get_stats",
     "calibration:measure_sensor_noise",
     "calibration:measure_frames",
     # Mosaics
@@ -283,13 +303,10 @@ RPC_METHODS: tuple[str, ...] = (
     # Night plan and observation packages: read them, edit them, tick a
     # checklist item. A session write sends the `plan:changed` event; a package
     # write sends the `packages:changed` event.
-    "plan:get",
     "plan:current_session",
     "plan:list_packages",
     "plan:package_for_target",
-    "plan:create",
     "plan:create_package",
-    "plan:edit",
     "plan:edit_package",
     "plan:refresh_suggestions",
     "plan:tick_checklist_item",
@@ -297,6 +314,7 @@ RPC_METHODS: tuple[str, ...] = (
     "advisory:target_report",
     "advisory:tonight",
     "advisory:result",
+    "advisory:star_shapes",
     "advisory:depth_goal",
     "advisory:set_depth_goal",
     "history:nights",

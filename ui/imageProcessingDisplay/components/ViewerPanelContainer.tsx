@@ -1,14 +1,22 @@
 import React, { useCallback, useState } from 'react';
+import { usePersistentFlag } from '../../common/hooks/usePersistentFlag';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { CollapsibleColumn } from '../../common/components/CollapsibleColumn';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
+import type { FileItem } from '../fileBrowser/FileBrowser';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
 import { Button } from '../../common/components/Button';
 import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
 import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
+import type { BlinkState } from '../hooks/useBlinkPair';
+import type { BlinkFocus } from '../utils/blinkView';
+import type { RestoreView } from '../../common/fitsViewer/hooks/useViewPlacement';
+import type { SavedViewport } from '../../common/utils/imageViewStore';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */
 
@@ -34,6 +42,22 @@ interface ViewerPanelContainerProps {
   overlayReason?: string | null;
   onStarClick?: (star: AstrometryOverlayStar) => void;
   selectedStarId?: string | null;
+  /** True when the target has a stack; raw frames are then shown turned to match it. */
+  matchStackTurn?: boolean;
+  /** The Blink comparison of the picked frame with a typical frame of its session. */
+  blink?: BlinkState;
+  /** The file the viewer is showing, when it is not the picked file (the typical frame while blinking). */
+  shownFile?: string | null;
+  /** The star to center in the picture on screen, from Blink. */
+  focusStar?: BlinkFocus | null;
+  /** True while the Detections overlay is on. */
+  detectionsEnabled: boolean;
+  /** Called when the Detections switch is changed. */
+  onDetectionsChange: (enabled: boolean) => void;
+  /** A saved view for the viewer to put back, or null. */
+  restoreView?: RestoreView | null;
+  /** Called when the viewer's zoom or center changes. */
+  onViewChange?: (view: SavedViewport) => void;
 
   // File Browser Props
   allFiles: any[];
@@ -52,6 +76,12 @@ interface ViewerPanelContainerProps {
   toggleFile: (path: string | null) => void;
   toggleAllFiles: () => void;
   analysisResults: any;
+  /** Each frame's status by file path, for the File Browser's Status column. */
+  frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
+  /** The frames the stacker set aside, listed in the File Browser. */
+  setAsideFiles?: FileItem[];
+  /** Puts one set-aside frame back into the target. */
+  onPutBackFrame?: (path: string) => void;
 }
 
 /**
@@ -61,24 +91,35 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, displayMode, onDisplayModeChange,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
-  selectedStarId,
+  selectedStarId, matchStackTurn, blink, shownFile, focusStar,
+  detectionsEnabled, onDetectionsChange, restoreView, onViewChange,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
-  toggleFile, toggleAllFiles, analysisResults
+  toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame
 }) => {
-  // True while the image shows a marker at every star the astrometry run's star finder detects.
-  const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+  // True while the picture is at its smallest zoom (the fit), so the zoom-out button is off.
+  const [viewAtMinimumZoom, setViewAtMinimumZoom] = useState(false);
+  // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
+  const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:imageProcessing:browserCollapsed', false);
 
   /** Finds the FITS file on screen: the file picked in the browser, else the light frame being shown. */
   const resolveMeasurePath = useCallback(async (): Promise<string | null> => {
-    if (selectedFile) return selectedFile;
+    if (shownFile ?? selectedFile) return shownFile ?? selectedFile;
     if (imageFrameInfo && imageFrameInfo.iso !== 'Unknown' && imageFrameInfo.objectId) {
       return resolveTargetFramePath(
         imageFrameInfo.objectId, imageFrameInfo.iso, imageFrameInfo.exposure, imageFrameInfo.index ?? 0
       );
     }
     return null;
-  }, [selectedFile, imageFrameInfo]);
+  }, [shownFile, selectedFile, imageFrameInfo]);
+
+  // The Astrometry button explains itself on hover; the result counts or the reason the overlay is empty follow.
+  const astrometryBase = isLoadingOverlay
+    ? "Getting astrometry results"
+    : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay");
+  const astrometryTooltip = showAstrometryOverlay && overlayReason && !isLoadingOverlay
+    ? `${astrometryBase}. ${overlayReason}`
+    : astrometryBase;
 
   return (
     <div className="image-processing-display__center">
@@ -88,30 +129,38 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         headerContent={
           <div className="fits-header-controls">
             <DisplayModeSelect mode={displayMode} onChange={onDisplayModeChange} />
-            <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
+            <DetectionsToggle enabled={detectionsEnabled} onChange={onDetectionsChange} />
             <Button
               size="small"
               active={showAstrometryOverlay}
               onClick={onToggleAstrometryOverlay}
               disabled={isLoadingOverlay}
-              title={
-                isLoadingOverlay
-                  ? "Getting astrometry results"
-                  : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay")
-              }
+              title={astrometryTooltip}
             >
               {isLoadingOverlay ? "Getting stars" : "Astrometry"}
             </Button>
-            {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
-              <span
-                className="fits-header-controls__note"
-                data-testid="astrometry-overlay-reason"
-              >
-                {overlayReason}
-              </span>
+            {blink?.applies && (
+              <>
+                <Button
+                  size="small"
+                  active={blink.blinkOn}
+                  disabled={!blink.ready}
+                  onClick={blink.toggle}
+                  title={
+                    blink.ready
+                      ? 'Switch between this frame and a typical frame of its session, at the same star (B)'
+                      : (blink.loading ? 'Choosing a typical frame' : blink.unavailableReason)
+                  }
+                >
+                  Blink
+                </Button>
+                {blink.note && (
+                  <span className="fits-header-controls__note" data-testid="blink-note">{blink.note}</span>
+                )}
+              </>
             )}
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</Button>
-            <Button size="small" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
+            <Button size="small" disabled={viewAtMinimumZoom} onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
             <Button size="small" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</Button>
             <SwitchDisplayButton targetDisplay="Image Viewer" selectedTarget={selectedTarget} />
@@ -120,6 +169,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
       >
         <FitsViewerManager
           ref={fitsRendererRef}
+          onMinimumZoomChange={setViewAtMinimumZoom}
           imageUrl={imageUrl}
           imageBlob={imageBlob}
           frameInfo={imageFrameInfo}
@@ -134,42 +184,63 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onStarClick={onStarClick}
           selectedStarId={selectedStarId}
           showDetections={detectionsEnabled}
+          matchStackTurn={matchStackTurn}
           resolveMeasurePath={resolveMeasurePath}
+          acceptPrefetch={Boolean(blink?.ready)}
+          focusStar={focusStar}
+          restoreView={restoreView}
+          onViewChange={onViewChange}
         />
       </SectionPanel>
-      <SectionPanel
-        title="File Browser"
-        className="image-processing-display__browser-section"
-        headerContent={
-          <FileBrowserToolbar
-            className="file-browser__toolbar--header"
-            files={allFiles}
+      <CollapsibleColumn
+        collapsed={browserCollapsed}
+        side="bottom"
+        onCollapsedChange={setBrowserCollapsed}
+        stripTitle="File Browser"
+        selectedLabel={`${filteredFiles.length} frames`}
+        showLabel="Expand the File Browser"
+      >
+        <SectionPanel
+          title="File Browser"
+          className="image-processing-display__browser-section"
+          onTitleClick={() => setBrowserCollapsed(true)}
+          titleButtonLabel="Collapse the File Browser to a tab bar"
+          headerContent={
+            <div className="image-processing-display__browser-header">
+              <FileBrowserToolbar
+                className="file-browser__toolbar--header"
+                files={allFiles}
+                searchTerm={fileFilterText}
+                onSearchChange={setFileFilterText}
+                selectedCamera={fileBrowserCamera}
+                onCameraChange={setFileBrowserCamera}
+                selectedOptic={selectedOptic}
+                onOpticChange={setSelectedOptic}
+                checkedFiles={checkedFiles}
+                onDeleteFiles={handleRequestDeleteFiles}
+                onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}
+              />
+            </div>
+          }
+        >
+          <FileBrowser
+            files={filteredFiles}
             searchTerm={fileFilterText}
             onSearchChange={setFileFilterText}
-            selectedCamera={fileBrowserCamera}
-            onCameraChange={setFileBrowserCamera}
-            selectedOptic={selectedOptic}
-            onOpticChange={setSelectedOptic}
-            checkedFiles={checkedFiles}
+            rejectedFiles={analysisResults?.rejectedFiles || []}
+            onSelectFile={onFileClick}
+            selectedFile={selectedFile}
             onDeleteFiles={handleRequestDeleteFiles}
-            onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}
+            checkedFiles={checkedFiles}
+            onToggleFile={toggleFile}
+            onToggleAll={toggleAllFiles}
+            selectedCamera={fileBrowserCamera}
+            frameStatuses={frameStatuses}
+            setAsideFiles={setAsideFiles}
+            onPutBackFrame={onPutBackFrame}
           />
-        }
-      >
-        <FileBrowser
-          files={filteredFiles}
-          searchTerm={fileFilterText}
-          onSearchChange={setFileFilterText}
-          rejectedFiles={analysisResults?.rejectedFiles || []}
-          onSelectFile={onFileClick}
-          selectedFile={selectedFile}
-          onDeleteFiles={handleRequestDeleteFiles}
-          checkedFiles={checkedFiles}
-          onToggleFile={toggleFile}
-          onToggleAll={toggleAllFiles}
-          selectedCamera={fileBrowserCamera}
-        />
-      </SectionPanel>
+        </SectionPanel>
+      </CollapsibleColumn>
     </div>
   );
 };

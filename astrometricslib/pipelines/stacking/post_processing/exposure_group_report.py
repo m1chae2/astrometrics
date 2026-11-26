@@ -24,6 +24,7 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
     FrameSaturation,
@@ -33,7 +34,6 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
 )
 from astrometricslib.pipelines.stacking.processing.group_combination import FRAMES_SAMPLED_PER_GROUP
 from astrometricslib.pipelines.stacking.processing.group_gains import (
-    CLIPPED_FRAME_ZERO_FRACTION,
     GroupGainMeasurement,
 )
 
@@ -349,10 +349,15 @@ def build_group_summary(
         "gain_bright_end_ratio": None,
         "gain_disagreement": None,
         "gain_nonlinear": False,
+        "gain_not_judged_reason": None,
     }
     if gain_measurement is not None:
         gain_fields = {
-            "gain_mid_range": float(gain_measurement.gain),
+            "gain_mid_range": float(
+                gain_measurement.gain
+                if gain_measurement.measured_gain is None
+                else gain_measurement.measured_gain
+            ),
             "gain_bright_end_ratio": None
             if gain_measurement.bright_end_ratio is None
             else float(gain_measurement.bright_end_ratio),
@@ -360,6 +365,7 @@ def build_group_summary(
             if gain_measurement.disagreement is None
             else float(gain_measurement.disagreement),
             "gain_nonlinear": bool(gain_measurement.nonlinear),
+            "gain_not_judged_reason": gain_measurement.not_judged_reason,
         }
     return {
         "exposure_seconds": float(exposure_seconds),
@@ -433,9 +439,14 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
             limit_source=limit_source,
         )
     if not compared:
+        not_judged = [
+            f"the {group['exposure_seconds']:g} s exposure group {group['gain_not_judged_reason']}"
+            for group in groups
+            if group.get("gain_not_judged_reason")
+        ]
         return unchecked_gate(
             EXPOSURE_GROUP_LINEARITY_GATE_NAME,
-            "no exposure group was compared with a reference group",
+            "; ".join(not_judged) or "no exposure group was compared with a reference group",
             limit_source,
         )
     return passed_gate(

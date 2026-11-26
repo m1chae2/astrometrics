@@ -35,6 +35,22 @@ LIBRARY_FOLDER_KINDS = {"darks": "dark", "biases": "bias"}
 """Library folders whose new frames are measured, with their kind."""
 
 
+def _plain(result: Any) -> Any:
+    """Turn a library result into plain data the caller can read.
+
+    Parameters
+    ----------
+    result : `Any`
+        A library result, usually a Pydantic model.
+
+    Returns
+    -------
+    plain : `Any`
+        The model as a dictionary of plain values, or the value as it was.
+    """
+    return result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+
+
 class SyncService:
     """Run frame syncs in the background and pass log syncs on."""
 
@@ -81,8 +97,15 @@ class SyncService:
         self,
         object_id: str,
         on_finished: Callable[[str, Any], None] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Start copying one target's (or calibration folder's) new frames.
+
+        The copy is recorded as a ``remote_sync`` job for the target, so it
+        shows in the job list with its log and its "N of M frames
+        transferred" progress, whoever started it: the app's sync button,
+        the automatic download or the AI's ``observatory_remote_sync_frames``
+        tool.
 
         Parameters
         ----------
@@ -92,14 +115,22 @@ class SyncService:
             Called on the sync thread when the sync ends, with the id and the
             sync's result (`None` when the sync failed). It must not raise;
             a failure is logged here. The app's own sync button passes none.
+        dry_run : `bool`, optional
+            Only say which frames would be copied. Nothing is copied, no
+            thread starts and no job is recorded.
 
         Returns
         -------
         result : `dict`
             ``started`` and ``target_id``. When a sync of the target is
             already running, nothing new starts and ``started`` is `False`,
-            with ``reason`` set to ``"already running"``.
+            with ``reason`` set to ``"already running"``. A dry run gives
+            ``started`` `False`, ``dry_run`` `True` and ``plan``, the
+            library's plan as plain data.
         """
+        if dry_run:
+            plan = self._observatory.remote.sync_frames(object_id, dry_run=True)
+            return {"started": False, "target_id": object_id, "dry_run": True, "plan": _plain(plan)}
 
         def run() -> None:
             """Copy the frames in a background log context; top of a thread."""
@@ -115,7 +146,9 @@ class SyncService:
                     """Tell the app the new frames are in the library."""
                     self._announce_frames_updated(object_id, frames_added)
 
-                result = self._observatory.remote.sync_frames(object_id, on_copied=announce_copied)
+                result = self._observatory.remote.sync_frames(
+                    object_id, on_copied=announce_copied, register_job=True
+                )
                 self._announce_measurements(object_id, result)
                 self._trigger_calibration_measurement(object_id, result)
                 self._trigger_suggestions(object_id)
@@ -338,19 +371,32 @@ class SyncService:
         except Exception:  # an announcement must never fail the sync: log it
             logger.exception("Could not announce the new guiding data")
 
-    def sync_telescope_logs(self) -> dict[str, Any]:
+    def sync_telescope_logs(self, dry_run: bool = False) -> dict[str, Any]:
         """Copy the new guide and Ekos logs and store their guiding samples.
 
         The pointing errors of plate-solved frames are recorded when the
-        frames themselves are synced, so this reports none of its own.
+        frames themselves are synced, so this reports none of its own. A
+        real run is recorded as a ``remote_sync`` job named ``logs``, so it
+        shows in the job list whoever started it.
+
+        Parameters
+        ----------
+        dry_run : `bool`, optional
+            Only say how many logs on the observatory computer are new.
+            Nothing is copied or stored, and no job is recorded.
 
         Returns
         -------
         summary : `dict` [`str`, `Any`]
             ``status``, ``guideLogsDownloaded``, ``guidingSamplesIngested``,
-            ``fitsSolvesRecorded`` (always 0 here) and ``message``.
+            ``fitsSolvesRecorded`` (always 0 here) and ``message``. A dry run
+            gives ``status`` ``"plan"`` and ``plan``, the library's plan as
+            plain data.
         """
-        result = self._observatory.remote.sync_logs(register_job=False)
+        if dry_run:
+            plan = self._observatory.remote.sync_logs(dry_run=True, register_job=False)
+            return {"status": "plan", "plan": _plain(plan)}
+        result = self._observatory.remote.sync_logs(register_job=True)
         guide_logs = result.guide_logs
         downloaded = (guide_logs.to_download or 0) if guide_logs and guide_logs.supported else 0
         ingested = result.ingested if isinstance(result.ingested, dict) else {}

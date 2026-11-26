@@ -5,8 +5,10 @@ import type { FitsRendererHandle } from './FitsRenderer';
 
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { StretchParameters } from '../types/backendTypes';
+import type { FocusStar, RestoreView } from './hooks/useViewPlacement';
+import type { SavedViewport } from '../utils/imageViewStore';
 
-export type { FitsRendererHandle };
+export type { FitsRendererHandle, FocusStar };
 
 /** Props for the FitsViewerManager component. */
 interface Props {
@@ -59,6 +61,16 @@ interface Props {
   noPixelDataMessage?: string;
   /** A sentence about the picture shown in the star profile panel; see `FitsRenderer`. */
   starProfilePictureNote?: string;
+  /** True to show raw frames turned to match the target's stack; see `FitsRenderer`. */
+  matchStackTurn?: boolean;
+  /** A star to put at the center of the view whenever a picture is drawn; see `FitsRenderer`. */
+  focusStar?: FocusStar | null;
+  /** A saved view to put back; see `FitsRenderer`. */
+  restoreView?: RestoreView | null;
+  /** Called when the zoom or the point at the center changes; see `FitsRenderer`. */
+  onViewChange?: (view: SavedViewport) => void;
+  /** Called with true when the view is at the smallest zoom (the fit); see `FitsRenderer`. */
+  onMinimumZoomChange?: (atMinimum: boolean) => void;
 }
 
 /**
@@ -86,7 +98,12 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   showDetections,
   resolveMeasurePath,
   noPixelDataMessage,
-  starProfilePictureNote
+  starProfilePictureNote,
+  matchStackTurn,
+  focusStar,
+  restoreView,
+  onViewChange,
+  onMinimumZoomChange
 }, ref) => {
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
   if (imageUrl || imageBlob || previewBlob) {
@@ -114,6 +131,11 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         resolveMeasurePath={resolveMeasurePath}
         noPixelDataMessage={noPixelDataMessage}
         starProfilePictureNote={starProfilePictureNote}
+        matchStackTurn={matchStackTurn}
+        focusStar={focusStar}
+        restoreView={restoreView}
+        onViewChange={onViewChange}
+        onMinimumZoomChange={onMinimumZoomChange}
       />
     );
   }

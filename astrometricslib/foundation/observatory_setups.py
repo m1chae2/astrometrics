@@ -32,6 +32,7 @@ done by `astrometricslib.pipelines.shared.frame_optics`.
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -127,7 +128,12 @@ class ObservatorySetups(BaseModel):
         """
         return next((setup for setup in self.setups if setup.name == setup_name), None)
 
-    def setup_for(self, camera_name: str, optic_name: str) -> SetupConfig | None:
+    def setup_for(
+        self,
+        camera_name: str,
+        optic_name: str,
+        camera_key: Callable[[str], str] = normalize_camera_name,
+    ) -> SetupConfig | None:
         """Find the setup that pairs a camera with an optic.
 
         Parameters
@@ -136,21 +142,64 @@ class ObservatorySetups(BaseModel):
             The camera, in any spelling; spaces and case are ignored.
         optic_name : `str`
             The optic's name.
+        camera_key : `Callable`, optional
+            Turns a camera name into text that is the same for every
+            spelling of the camera. The default ignores case, spaces and
+            punctuation. A caller passes one that also knows the aliases
+            listed in the camera profiles.
 
         Returns
         -------
         setup : `SetupConfig` or `None`
             The first setup with that camera and optic, or `None`.
         """
-        camera_key = normalize_camera_name(camera_name)
+        wanted_key = camera_key(camera_name)
         return next(
             (
                 setup
                 for setup in self.setups
-                if setup.optic_name == optic_name and normalize_camera_name(setup.camera_name) == camera_key
+                if setup.optic_name == optic_name and camera_key(setup.camera_name) == wanted_key
             ),
             None,
         )
+
+    def setup_for_focal_length(
+        self,
+        camera_name: str,
+        focal_length_mm: float,
+        camera_key: Callable[[str], str] = normalize_camera_name,
+    ) -> SetupConfig | None:
+        """Find the setup of a camera and an optic by focal length.
+
+        A stack's header gives its camera and focal length but not the
+        optic's name, so this finds the setup by those two.
+
+        Parameters
+        ----------
+        camera_name : `str`
+            The camera, in any spelling.
+        focal_length_mm : `float`
+            The focal length, in millimeters. It is compared to whole
+            millimeters.
+        camera_key : `Callable`, optional
+            As for `setup_for`.
+
+        Returns
+        -------
+        setup : `SetupConfig` or `None`
+            The first setup with that camera whose optic has that focal
+            length, or `None`.
+        """
+        wanted_key = camera_key(camera_name)
+        for setup in self.setups:
+            optic = self.optic_named(setup.optic_name)
+            if (
+                optic is not None
+                and camera_key(setup.camera_name) == wanted_key
+                and round(optic.focal_length_mm) == round(focal_length_mm)
+            ):
+                return setup
+        return None
 
     def active_setup(self) -> SetupConfig | None:
         """Return the active setup.

@@ -84,7 +84,7 @@ describe('StackComparisonControl', () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         callBackendMock.mockImplementation(async (action: string) => {
             if (action === 'quality:measure_stack') return { status: 'running', job_id: 'j7', result: null };
-            return { id: 'j7', status: 'completed', outputMetrics: { result: report } };
+            return { detail: 'full', job: { id: 'j7', job_type: 'diagnostics', status: 'completed', output_metrics: { result: report } } };
         });
         render(<StackComparisonControl targetId="M 81" kind="spectral" />);
         pressCompare();

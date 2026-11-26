@@ -1,23 +1,23 @@
 /**
  * @file StarProfilePanel.tsx
- * @description The star profile panel of the FITS viewer. It shows what the backend measured for the
- * star the user clicked: the width (FWHM) from the fit, a Clipped chip when the star is clipped, and one
- * plot shaped like a bell curve. The points are the real pixels along a straight cut through the star
- * (the angle is set with a slider). The curve is the fitted star shape, mirrored to both sides, with a
- * dashed line at half its height to show the width. The "Around the star" tab plots the library's ring (the
- * brightness by direction with the neighbor stars left out), the smooth curve of its significant Fourier terms,
- * and a small bar chart of the size of each term, with a one-line summary.
+ * @description The star profile panel of the FITS viewer, a compact star card. It shows what the backend
+ * measured for the star the user clicked: the star's name, a stat strip and a "Measurable here?" list (see
+ * StarInspector), and one short plot shaped like a bell curve. The points are the real pixels along a straight
+ * cut through the star (the angle is set with a slider). The curve is the fitted star shape, mirrored to both
+ * sides, with a dashed line at half its height to show the width. The "Optics detail" button swaps the plot for a
+ * view of the library's ring (the brightness by direction with the neighbor stars left out), the smooth curve of
+ * its significant Fourier terms, and a small bar chart of the size of each term, with a one-line summary.
  */
+import { readThemeToken, readThemeTokenNumber } from '../utils/themeToken';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/Button';
 import { InfoButton } from '../components/InfoButton';
 import { Slider } from '../components/Slider';
-import { StatusChip } from '../components/StatusChip';
-import { Tabs, tabElementId, tabPanelElementId } from '../components/Tabs';
 import { BasePlot } from '../components/plotting/BasePlot';
-import { buildLayout, getVar, getVarAsNum } from '../utils/plotTools';
+import { buildLayout } from '../utils/plotTools';
 import type { PlotlyTrace } from '../utils/plotTools';
-import type { ProfileFit, RingHarmonic, StarProfileMeasurement } from '../types/backendTypes';
+import type { ProfileFit, RingHarmonic, Spectrum, StarProfileMeasurement } from '../types/backendTypes';
+import { CloseStarButton, StarInspector } from './StarInspector';
 import type { StarProfileState } from './hooks/useStarProfile';
 import { rebuildCut } from './utils/starCut';
 import { describeRing, harmonicCurve, hasFewPixels, screenDirection } from './utils/starRing';
@@ -30,7 +30,7 @@ export const CUT_ANGLE_EXPLANATION = 'The dashed line on the image is the cut th
 export const SET_DISPLAY_TO_LINEAR_MESSAGE = 'Set Display to Linear to measure stars here.';
 
 /** The caption above the plot, which ties it to the dashed line on the image. */
-export const PLOT_CAPTION = 'Pixels along the dashed line';
+export const PLOT_CAPTION = 'Along the dashed line';
 
 /** The note shown when some direction bins hold few pixels. */
 export const FEW_PIXELS_NOTE = 'Few pixels per direction this close in';
@@ -144,6 +144,17 @@ export interface StarProfilePanelProps {
   followNote?: { method: string; note: string } | null;
   /** Called when what the image should draw changes (the tab, the cut length, the ring). */
   onViewChange?: (view: StarProfileView) => void;
+  /**
+   * The measured star's name, shown at the top: its most familiar designation, or "Unnamed star" with its
+   * right ascension and declination. Null when the image has no names and no plate solution.
+   */
+  starName?: string | null;
+  /** The star's record (magnitude, type and pattern chips), or null when it has none. */
+  identity?: Spectrum | null;
+  /** The typical star width of the frame, in pixels, or null when it is not known. */
+  frameWidthPx?: number | null;
+  /** Opens the star in the Astronomy Manager; leave out when the star has no catalog match. */
+  onOpenInManager?: () => void;
 }
 
 /**
@@ -168,9 +179,9 @@ function labelFwhm(fwhm: number, halfMaximum: number, halfRange: number, logScal
     xanchor: onLeft ? 'right' : 'left',
     yanchor: 'middle',
     xshift: onLeft ? -6 : 6,
-    bgcolor: getVar('--surface-menu', '#2e2e32'),
+    bgcolor: readThemeToken('--surface-menu', '#2e2e32'),
     borderwidth: 0,
-    font: { size: getVarAsNum('--small-font-size', 11), color: getVar('--plot-reference-line', '#aaaaaa') },
+    font: { size: readThemeTokenNumber('--small-font-size', 11), color: readThemeToken('--plot-reference-line', '#aaaaaa') },
   };
 }
 
@@ -194,7 +205,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
       y: lift(cut.values),
       type: 'scatter',
       mode: 'markers',
-      marker: { color: getVar('--text-dim', '#aaaaaa'), size: 5 },
+      marker: { color: readThemeToken('--text-dim', '#aaaaaa'), size: 5 },
       hovertemplate: 'x %{x:.2f} px, %{y:.3g}<extra></extra>',
       name: 'pixels along the cut',
     }];
@@ -209,7 +220,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
       const mirroredY = lift([...values].reverse().concat(values));
       list.push({
         x: mirroredX, y: mirroredY, type: 'scatter', mode: 'lines',
-        line: { color: getVar('--plot-accent', '#3584e4'), width: 2 }, name: 'fitted shape',
+        line: { color: readThemeToken('--plot-accent', '#3584e4'), width: 2 }, name: 'fitted shape',
         hovertemplate: 'fitted shape: %{y:.3g} at %{x:.2f} px<extra></extra>',
       });
       reach = Math.max(reach, ...radii);
@@ -219,7 +230,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
         width = chosen.fit.fwhm_px;
         list.push({
           x: [-width / 2, width / 2], y: [half, half], type: 'scatter', mode: 'lines',
-          line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1.5, dash: 'dash' }, name: 'FWHM',
+          line: { color: readThemeToken('--plot-reference-line', '#aaaaaa'), width: 1.5, dash: 'dash' }, name: 'FWHM',
           hoverinfo: 'skip',
         });
       }
@@ -232,7 +243,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
   const layout = useMemo(() => {
     const base = buildLayout({
       xTitle: 'distance through the star (px)',
-      yTitle: logScale ? 'brightness above sky, log (raised to the sky noise)' : 'brightness above sky',
+      yTitle: logScale ? 'above sky, log' : 'above sky',
       margin: { l: 56, r: 10, t: 8, b: 44 },
     });
     return {
@@ -265,8 +276,8 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
  * @param props The measurement, the axis kind, the cut angle and the picture's row order.
  * @returns The plot.
  */
-function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
-  measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean;
+function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: {
+  measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean; turn: number;
 }): React.ReactElement {
   const { traces, floorValue, highestValue, fewPixels } = useMemo(() => {
     const floor = measurement.sky_noise > 0 ? measurement.sky_noise : Math.abs(measurement.peak) * 1e-4;
@@ -274,7 +285,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
     const values = lift(measurement.ring_bin_values);
     const list: PlotlyTrace[] = [{
       x: measurement.ring_bin_angle_degrees, y: values, type: 'scatter', mode: 'lines+markers',
-      line: { color: getVar('--plot-accent', '#3584e4'), width: 1.5 }, marker: { color: getVar('--text-dim', '#aaaaaa'), size: 4 },
+      line: { color: readThemeToken('--plot-accent', '#3584e4'), width: 1.5 }, marker: { color: readThemeToken('--text-dim', '#aaaaaa'), size: 4 },
       hovertemplate: '%{x:.0f}°: %{y:.3g}<extra></extra>', name: 'around the star',
     }];
     const curve = harmonicCurve(measurement);
@@ -282,7 +293,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
     if (curve) {
       list.push({
         x: curve.angles, y: curveValues, type: 'scatter', mode: 'lines',
-        line: { color: getVar('--plot-orange', '#e5a50a'), width: 2 }, name: 'significant terms',
+        line: { color: readThemeToken('--plot-orange', '#e5a50a'), width: 2 }, name: 'significant terms',
         hovertemplate: 'fitted: %{y:.3g} at %{x:.0f}°<extra></extra>',
       });
     }
@@ -292,13 +303,13 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
   const layout = useMemo(() => {
     const base = buildLayout({
       xTitle: 'direction around the star (degrees)',
-      yTitle: logScale ? 'brightness above sky, log (raised to the sky noise)' : 'brightness above sky',
+      yTitle: logScale ? 'above sky, log' : 'above sky',
       margin: { l: 56, r: 10, t: 8, b: 56 },
     });
     const partner = (angleDegrees + 180) % 360;
     const markerLine = (angle: number) => ({
       type: 'line', xref: 'x', yref: 'paper', x0: angle, x1: angle, y0: 0, y1: 1,
-      line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
+      line: { color: readThemeToken('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
     });
     const ticks = [0, 90, 180, 270, 360];
     return {
@@ -307,7 +318,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
         ...base.xaxis,
         range: [0, 360],
         tickvals: ticks,
-        ticktext: ticks.map((angle) => `${screenDirection(angle, firstRowAtTop)}<br>${angle}°`),
+        ticktext: ticks.map((angle) => `${screenDirection(angle, firstRowAtTop, turn)}<br>${angle}°`),
       },
       yaxis: logScale
         ? { ...base.yaxis, type: 'log', autorange: false, range: [Math.log10(floorValue), Math.log10(highestValue * 1.5)] }
@@ -315,7 +326,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
       shapes: [markerLine(angleDegrees), markerLine(partner)],
       showlegend: false,
     };
-  }, [logScale, angleDegrees, firstRowAtTop, floorValue, highestValue]);
+  }, [logScale, angleDegrees, firstRowAtTop, turn, floorValue, highestValue]);
   return (
     <div className="star-profile__plot-area star-profile__plot-area--ring">
       <BasePlot data={traces} layout={layout} config={{ responsive: true, displayModeBar: false }} data-testid="star-profile-ring-plot" />
@@ -334,8 +345,8 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
  */
 function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.ReactElement | null {
   const traces = useMemo(() => {
-    const accent = getVar('--plot-accent', '#3584e4');
-    const dim = getVar('--text-dim', '#aaaaaa');
+    const accent = readThemeToken('--plot-accent', '#3584e4');
+    const dim = readThemeToken('--text-dim', '#aaaaaa');
     const trace: PlotlyTrace = {
       x: harmonics.map((term) => term.order),
       y: harmonics.map((term) => term.amplitude_debiased * 100),
@@ -343,7 +354,7 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
       marker: { color: harmonics.map((term) => (term.significant ? accent : dim)) },
       error_y: {
         type: 'data', array: harmonics.map((term) => term.amplitude_error * 100), visible: true,
-        color: getVar('--plot-reference-line', '#aaaaaa'), thickness: 1.5, width: 3,
+        color: readThemeToken('--plot-reference-line', '#aaaaaa'), thickness: 1.5, width: 3,
       },
       hovertemplate: 'order %{x}: %{y:.1f}%<extra></extra>',
       name: 'size of each term',
@@ -375,11 +386,14 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
  * @returns The panel, or null when it is closed.
  */
 export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
-  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null,
+  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null, starName = null,
+  identity = null, frameWidthPx = null, onOpenInManager,
 }) => {
   // Kept while the panel is open, and for the next star.
   const [logScale, setLogScale] = useState(false);
-  const [tabId, setTabId] = useState<'line' | 'ring'>('line');
+  // The ring analysis stays behind the "Optics detail" link until the person opens it.
+  const [opticsOpen, setOpticsOpen] = useState(false);
+  const tabId: 'line' | 'ring' = opticsOpen ? 'ring' : 'line';
   const measurement = state.status === 'ready' ? state.measurement : state.status === 'measuring' ? state.previous : null;
   const anchor = state.status === 'ready' || state.status === 'measuring' ? state.anchor : null;
   // The cutout reaches only as far as the length the star was measured with; a longer cut waits for a new measurement.
@@ -411,46 +425,48 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
 
   return (
     <aside className="star-profile" aria-label="Star profile" data-testid="star-profile-panel">
-      <div className="star-profile__header">
-        {measurement ? (
-          <span
-            className={`star-profile__width${measurement.star_found ? '' : ' star-profile__width--plain'}`}
-            data-testid="star-profile-width"
-          >{describeWidth(measurement)}</span>
-        ) : (
+      {measurement ? (
+        <StarInspector
+          measurement={measurement}
+          starName={starName}
+          identity={identity}
+          frameWidthPx={frameWidthPx}
+          onOpenInManager={onOpenInManager}
+          widthText={describeWidth(measurement)}
+          onClose={onClose}
+        />
+      ) : (
+        <div className="star-profile__header">
           <span className="star-profile__title">Star profile</span>
-        )}
-        {measurement?.clipped && <StatusChip status="warning" label="Clipped" title={measurement.clipped_reason} />}
-        <Button variant="ghost" size="square" onClick={onClose} aria-label="Close star profile" title="Close star profile">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-          </svg>
-        </Button>
-      </div>
+          <CloseStarButton onClose={onClose} />
+        </div>
+      )}
       {followNote && <p className="star-profile__note" title={followNote.note} data-testid="star-profile-follow">{describeFollow(followNote.method)}</p>}
       {message}
       {measurement && (
         <div className={`star-profile__body${state.status === 'measuring' ? ' star-profile__body--updating' : ''}`}>
           {notes && <p className="star-profile__note" data-testid="star-profile-note">{notes}</p>}
-          <Tabs
-            idPrefix="star-profile"
-            ariaLabel="Star profile views"
-            size="compact"
-            selectedId={tabId}
-            onChange={(id) => setTabId(id === 'ring' ? 'ring' : 'line')}
-            tabs={[{ id: 'line', label: 'Along the line' }, { id: 'ring', label: 'Around the star' }]}
-          />
           <div
             className="star-profile__tabpanel"
-            role="tabpanel"
-            id={tabPanelElementId('star-profile', tabId)}
-            aria-labelledby={tabElementId('star-profile', tabId)}
+            data-testid="star-profile-plots"
           >
             <div className="star-profile__plot-heading">
-              <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Mean brightness in the ring, by direction'}</span>
-              <Button size="small" pressed={logScale} variant={logScale ? 'default' : 'secondary'} title={LOG_SCALE_TOOLTIP} onClick={() => setLogScale(!logScale)}>
-                Log scale
-              </Button>
+              <span className="star-profile__caption">{tabId === 'line' ? PLOT_CAPTION : 'Light around the star by direction'}</span>
+              <span className="star-profile__plot-tools">
+                <Button size="small" pressed={logScale} variant={logScale ? 'default' : 'secondary'} title={LOG_SCALE_TOOLTIP} onClick={() => setLogScale(!logScale)}>
+                  Log scale
+                </Button>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  aria-expanded={opticsOpen}
+                  title="The light around the star by direction, for spikes, close pairs and halos. Roundness is in the list above."
+                  onClick={() => setOpticsOpen(!opticsOpen)}
+                  data-testid="star-profile-optics-toggle"
+                >
+                  {opticsOpen ? 'Hide optics detail' : 'Optics detail'}
+                </Button>
+              </span>
             </div>
             {tabId === 'line' ? (
               <ProfilePlot measurement={measurement} logScale={logScale} angleDegrees={cutAngleDegrees} halfLengthPx={cutHalfLengthPx} />
@@ -460,6 +476,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
                 logScale={logScale}
                 angleDegrees={cutAngleDegrees}
                 firstRowAtTop={anchor?.firstRowAtTop ?? false}
+                turn={anchor?.turn ?? 0}
               />
             )}
             {tabId === 'ring' && (
@@ -467,14 +484,14 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
                 <HarmonicBars harmonics={measurement.ring_harmonics} />
                 <p className="star-profile__note star-profile__summary" data-testid="star-profile-ring-summary" title={RING_SUMMARY_TOOLTIP}>
                   {measurement.ring_harmonics.length > 0
-                    ? describeRing(measurement.ring_harmonics, anchor?.firstRowAtTop ?? false)
+                    ? describeRing(measurement.ring_harmonics, anchor?.firstRowAtTop ?? false, anchor?.turn ?? 0)
                     : (measurement.ring_note ?? '')}
                 </p>
               </>
             )}
           </div>
-          <div className="star-profile__angle">
-            <span>{`Cut angle ${cutAngleDegrees}°`}</span>
+          <div className="star-profile__slider-row">
+            <span className="star-profile__slider-label">{`Cut angle ${cutAngleDegrees}°`}</span>
             <Slider
               aria-label="Cut angle in degrees"
               min={0}
@@ -486,8 +503,8 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
             <InfoButton text={CUT_ANGLE_EXPLANATION} label="About the cut angle" />
           </div>
           {tabId === 'line' ? (
-            <div className="star-profile__angle">
-              <span>{`Cut length ${Math.round(cutLengthPx ?? measurement.cut_half_length_px)} px`}</span>
+            <div className="star-profile__slider-row">
+              <span className="star-profile__slider-label">{`Cut length ${Math.round(cutLengthPx ?? measurement.cut_half_length_px)} px`}</span>
               <Slider
                 aria-label="Cut length in pixels"
                 min={CUT_LENGTH_RANGE.min}
@@ -498,8 +515,8 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
               />
             </div>
           ) : (
-            <div className="star-profile__angle">
-              <span>{`Ring ${Math.round(ringLimits.innerPx)} to ${Math.round(ringLimits.outerPx)} px`}</span>
+            <div className="star-profile__slider-row">
+              <span className="star-profile__slider-label">{`Ring ${Math.round(ringLimits.innerPx)} to ${Math.round(ringLimits.outerPx)} px`}</span>
               <span data-testid="star-profile-ring-neighbors">{describeNeighbors(measurement.ring_masked_neighbor_count)}</span>
             </div>
           )}

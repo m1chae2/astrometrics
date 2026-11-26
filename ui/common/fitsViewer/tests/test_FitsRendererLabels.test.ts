@@ -1,11 +1,11 @@
 /**
  * @file test_FitsRendererLabels.test.ts
- * @description Unit tests for FitsRenderer label formatting helper (formatStarDisplayName).
+ * @description Unit tests for the star overlay label helpers in utils/starOverlayLayout.ts (formatStarDisplayName and friends).
  * Verifies catalog compression for 2MASS, GPM, SDSS, Gaia, and unnamed field stars.
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeBadgePlacement, formatStarDisplayName, isStarSelected } from '../FitsRenderer';
+import { computeBadgePlacement, formatStarDisplayName, isStarSelected } from '../utils/starOverlayLayout';
 
 describe('formatStarDisplayName', () => {
   /**
@@ -104,6 +104,29 @@ describe('isStarSelected', () => {
     expect(isStarSelected({ ...sampleStar, id: 'KAD 656' }, 'CI* NGC 6205 KAD 656')).toBe(true);
     // Cluster designation prefix variance: Cl* (lowercase L) vs CI* (capital I)
     expect(isStarSelected(sampleStar, 'Cl* NGC 6205 KAD 656')).toBe(true);
+  });
+
+  /**
+   * A selected detection id must not select other detections whose ids only start with it.
+   */
+  it('matches ids exactly, never as a substring', () => {
+    const star = { id: 'detection-5', name: 'HD 214181', x: 1, y: 1 };
+    expect(isStarSelected(star, 'detection-5')).toBe(true);
+    expect(isStarSelected({ ...star, id: 'detection-50', name: 'HD 1' }, 'detection-5')).toBe(false);
+    expect(isStarSelected({ ...star, id: 'detection-512', name: 'HD 2' }, 'detection-5')).toBe(false);
+    expect(isStarSelected({ ...star, id: 'detection-5' }, 'detection-50')).toBe(false);
+  });
+
+  /**
+   * A star is selected by the library record id it carries or by its name; nothing is guessed from
+   * its Gaia number.
+   */
+  it('matches the library record id and the name of a stack star', () => {
+    const star = { id: 'detection-5', name: 'HD 214181', gaiaSourceId: '1234', libraryId: 'Gaia DR3 1234', x: 1, y: 1 };
+    expect(isStarSelected(star, 'Gaia DR3 1234')).toBe(true);
+    expect(isStarSelected(star, 'hd 214181')).toBe(true);
+    expect(isStarSelected(star, 'Gaia DR3 123')).toBe(false);
+    expect(isStarSelected({ ...star, libraryId: null }, 'Gaia DR3 1234')).toBe(false);
   });
 
   /**

@@ -20,6 +20,11 @@ from astrometricslib._internal.drivers.siril_interface.script_builders import (
     StagedFrameCounts,
 )
 
+# The key in the run diagnostics that holds the message when Siril did not
+# answer a command in time. The stacking pipeline reads it to tell a Siril
+# that stopped answering from a run where no stars could be matched.
+SIRIL_COMMUNICATION_ERROR_KEY = "siril_communication_error"
+
 
 def empty_run_diagnostics() -> dict[str, Any]:
     """Make the diagnostics record of a run that has not started.

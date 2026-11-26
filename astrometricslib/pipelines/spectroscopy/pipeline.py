@@ -105,6 +105,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_co
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     load_line_spread_profile,
+    record_measured_spectral_bases,
     resolve_resolution_element_angstrom,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
@@ -141,6 +142,7 @@ from astrometricslib.pipelines.spectroscopy.processing.star_reddening import (
 )
 from astrometricslib.utilities import SpectroscopyConfig
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -1629,6 +1631,20 @@ class SpectroscopyPipeline:
                 )
                 extracted.append((star, is_stellar_obj, result))
 
+        # The run's typical trail width, dispersion and line spread are
+        # measured from the spectra just read, before any star is applied,
+        # classified or checked. The limits of those steps (the zero-point
+        # offset, the refraction shift, the center search and the smoothing)
+        # are multiples of the line spread, so they must not run before it
+        # is known.
+        # An extraction result keeps its wavelengths in nanometers, and the
+        # bases are in Angstroms (1 nm is 10 Angstroms).
+        record_measured_spectral_bases(
+            (np.asarray(result.get("wavelengths") or [], dtype=float) * 10.0, result.get("trail_width_px"))
+            for _, _, result in extracted
+            if not result.get("is_neighbor_only")
+        )
+
         # Every star is read first, so each one's neighbors can be found and
         # their share of the star's light estimated before the results are
         # applied. The estimate changes no spectrum (SPE-34).
@@ -2785,7 +2801,7 @@ class SpectroscopyPipeline:
         # follows the trail is biased by which pixels happen to be brightest
         # (+0.2 to +0.4 degrees on the Albireo and Vega stacks).
         background_level = float(np.median(pixel_block))
-        noise_sigma = float(np.median(np.abs(pixel_block - background_level))) * 1.4826
+        noise_sigma = float(np.median(np.abs(pixel_block - background_level))) * MAD_TO_SIGMA
         if noise_sigma <= 0.0:
             noise_sigma = float(np.std(pixel_block))
         if noise_sigma <= 0.0:

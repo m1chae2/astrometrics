@@ -61,7 +61,7 @@ BANNED_TERMS: tuple[str, ...] = (
 """Terms a plain message must not use (matched as whole words, any case)."""
 
 FORECAST_WORDS: tuple[str, ...] = (
-    "we expect",
+    "expected",
     "roughly",
     "about",
     "likely",

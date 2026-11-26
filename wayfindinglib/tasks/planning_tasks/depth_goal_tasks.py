@@ -76,15 +76,15 @@ FIX_FIRST_ADVICE = {
 """The advice a quality statement adds to "more frames will not help"."""
 
 FIXED_PATTERN_CAUSE_SENTENCES = {
-    FixedPatternCause.FLATS: "The flats no longer match the optics; new flats should help.",
+    FixedPatternCause.FLATS: "The flats no longer match the optics. New flats should reduce it.",
     FixedPatternCause.NEAR_TARGET: (
-        "Faint light from the object itself fills the sky around it, so the noise there won't average away."
+        "Faint light from the target fills the surrounding sky and does not average away."
     ),
-    FixedPatternCause.BANDING: "The frames carry a fixed stripe pattern.",
-    FixedPatternCause.GRADIENT: "The sky brightness has a slope across the frame that stays in every frame.",
-    FixedPatternCause.CALIBRATION_MASTERS: "Noise in the calibration frames is the same in every frame.",
-    FixedPatternCause.SKY_STRUCTURE: "The sky has fixed structure, likely faint light in the background.",
-    FixedPatternCause.UNPLACED: "The noise has a fixed part we can't place yet.",
+    FixedPatternCause.BANDING: "The frames share a fixed stripe pattern.",
+    FixedPatternCause.GRADIENT: "A sky brightness gradient is present in every frame.",
+    FixedPatternCause.CALIBRATION_MASTERS: "Noise from the calibration masters repeats in every frame.",
+    FixedPatternCause.SKY_STRUCTURE: "The sky has fixed structure, likely faint background light.",
+    FixedPatternCause.UNPLACED: "Part of the noise is fixed, from an unidentified source.",
 }
 """One plain sentence for each cause of fixed-pattern noise (row WAY-D94).
 
@@ -324,7 +324,7 @@ def reason_frames_will_not_help(statements: list[Any]) -> str:
 
     The same statements always give the same sentence. The cause code comes
     from the "will not help" statement first, then from the "take N more"
-    statement. A report with no code gives the "can't place yet" sentence.
+    statement. A report with no code gives the "unidentified source" sentence.
 
     Parameters
     ----------
@@ -521,7 +521,7 @@ def _build_status(
     )
     base.update(forecast_status=forecast_status)
     if state == DepthGoalState.WILL_NOT_HELP:
-        message = f"More integration won't help much here. {advice}".strip()
+        message = f"Additional integration will reduce noise only slightly. {advice}".strip()
         return DepthGoalStatus(**base, state=state, message=message)
     if forecast_status == RecommendedAdditionalFramesStatus.NOT_CHECKED:
         return DepthGoalStatus(

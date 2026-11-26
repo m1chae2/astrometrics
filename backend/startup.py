@@ -3,8 +3,10 @@
 Description: The app's lifespan in `backend.main_backend` calls these
 functions. They:
 
-* poll the telescope every two seconds so the app's telemetry stays fresh
-  (`periodic_telemetry_loop`);
+* poll the telescope every two seconds so the app's telemetry stays fresh,
+  and send the app the running jobs of the shared job list when they change
+  (`periodic_telemetry_loop`, `publish_running_jobs`), so a job another
+  program started (an AI tool, a console script) shows up at once;
 * load the star catalog and other slow caches before the first screen
   needs them (`warm_start_up_caches`). The ``/api/ready`` route reports
   `sky_catalog_warmup_finished`, and the desktop shell keeps its splash
@@ -36,13 +38,39 @@ logger = logging.getLogger(__name__)
 sky_catalog_warmup_finished = threading.Event()
 
 
-async def periodic_telemetry_loop() -> None:
-    """Poll the telescope status every two seconds, until cancelled.
+def publish_running_jobs() -> None:
+    """Send the app the jobs that are running now, read from the job list.
 
-    Each poll updates the shared state, which sends the new telemetry to
-    every connected app window.
+    The job list is one table that every program shares: this backend, the
+    MCP servers and console scripts all record their jobs in it. The app
+    learns that a job started or ended from the ``processing`` part of the
+    ``system_state_update`` event. A backend service updates that part when
+    it starts or ends one of its own jobs, but a job recorded by another
+    path (a library call that records its own job, another program) would
+    not reach it. Reading the table here covers every job. The event goes
+    out only when the running jobs changed.
+    """
+    if not container.initialized or container.job_service is None or container.astrometrics_service is None:
+        return
+    running = container.job_service.get_active_jobs()
+    container.astrometrics_service.update_processing_jobs([
+        {"target_id": job.target_id, "job_id": job.id, "status": job.status} for job in running
+    ])
+
+
+async def periodic_telemetry_loop() -> None:
+    """Poll the telescope status and the running jobs every two seconds.
+
+    Each poll updates the shared state, which sends the new telemetry and
+    any change in the running jobs to every connected app window. The loop
+    runs until it is cancelled.
     """
     while True:
+        try:
+            with background_log_context("telemetry"):
+                await asyncio.to_thread(publish_running_jobs)
+        except Exception:
+            logger.exception("Error while reading the running jobs")
         try:
             if container.initialized and container.telescope_service:
                 # get_status() reaches async driver calls through

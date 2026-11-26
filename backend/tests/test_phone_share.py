@@ -1,6 +1,6 @@
 """Unit tests for phone_share.
 
-GSConnect and LocalSend are replaced, so nothing is sent and no window opens.
+GSConnect is replaced, so nothing is sent and no process starts.
 """
 
 from pathlib import Path
@@ -82,28 +82,18 @@ def test_a_connected_phone_gets_the_file_through_gsconnect(
     popen.assert_not_called()
 
 
-def test_with_no_phone_connected_localsend_opens_with_the_file(
+def test_with_no_phone_connected_a_configuration_error_is_raised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no GSConnect phone, the LocalSend Flatpak gets the file."""
+    """With no GSConnect phone, the user is told and no process starts."""
     popen = MagicMock()
-    monkeypatch.setattr(
-        phone_share.shutil, "which", lambda name: "/usr/bin/flatpak" if name == "flatpak" else None
-    )
+    run = MagicMock()
     monkeypatch.setattr(phone_share, "connected_gsconnect_devices", lambda: [])
     monkeypatch.setattr(phone_share.subprocess, "Popen", popen)
+    monkeypatch.setattr(phone_share.subprocess, "run", run)
 
-    assert phone_share.send_file_to_phone("/stacks/m57.jpg") == {"method": "localsend"}
-    command = popen.call_args.args[0]
-    assert command[:2] == ["flatpak", "run"]
-    assert command[-3:] == ["@@", "/stacks/m57.jpg", "@@"]
-
-
-def test_with_no_phone_and_no_localsend_a_configuration_error_is_raised(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With no phone, no LocalSend and no Flatpak, the user is told."""
-    monkeypatch.setattr(phone_share.shutil, "which", lambda name: None)
-
-    with pytest.raises(ConfigurationError, match="No phone link"):
+    with pytest.raises(ConfigurationError, match="No phone is connected in GSConnect"):
         phone_share.send_file_to_phone("/stacks/m57.jpg")
+
+    popen.assert_not_called()
+    run.assert_not_called()

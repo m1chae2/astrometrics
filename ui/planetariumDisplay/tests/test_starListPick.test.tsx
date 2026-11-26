@@ -63,6 +63,15 @@ vi.mock('../hooks/useAlignmentSessionData', () => ({
     activeAlignmentTargets: [], activePolarAlignment: null,
   }),
 }));
+vi.mock('../hooks/useStackPictures', () => ({
+  useStackPictures: () => ({
+    showImages: false, setShowImages: vi.fn(), opacity: 0.8, setOpacity: vi.fn(),
+    pictures: [], getDrawable: () => null, loadedVersion: 0,
+  }),
+}));
+vi.mock('../hooks/useClassStarSources', () => ({
+  useClassStarSources: () => ({ sources: [], totalCount: 0, isLoading: false, isError: false, retry: vi.fn() }),
+}));
 vi.mock('../hooks/useTrackingRiskMap', () => ({ useTrackingRiskMap: () => ({ trackingRisk: null }) }));
 vi.mock('../hooks/useSourceMerging', () => ({
   useSourceMerging: () => ({
@@ -104,6 +113,8 @@ vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: vi.f
 
 
 import { PlanetariumDisplay } from '../PlanetariumDisplay';
+import { callBackend } from '../../common/services/backendApi';
+import { postHandoff, resetHandoffsForTests } from '../../common/utils/displayHandoffStore';
 
 describe('Planetarium star list', () => {
   /** Picking a star centers the map at the star's position and zooms to the 1 degree field. */
@@ -122,5 +133,49 @@ describe('Planetarium star list', () => {
     expect(cardSource.current).toMatchObject({
       id: 'Albireo', magnitude: 3.08, hasCatalogMagnitude: true, spectralType: 'K3II+B9.5V',
     });
+  });
+
+  /** "Locate in Planetarium" gives the same card as picking the star from the list. */
+  it('gives a located star the same card fields as a list pick', async () => {
+    const listPick = render(<PlanetariumDisplay />);
+    fireEvent.click(screen.getByRole('button', { name: /Albireo/ }));
+    await waitFor(() => expect(screen.getByTestId('info-card')).toBeTruthy());
+    const fromList = { ...cardSource.current };
+    listPick.unmount();
+    cardSource.current = null;
+
+    vi.mocked(callBackend).mockImplementation(async (method: string) => (
+      method === 'astronomy:list'
+        ? [{ id: 'Albireo', name: 'Albireo', ra: 292.68, dec: 27.96, magnitude: 3.08, hasCatalogMagnitude: true,
+          spectralType: 'K3II+B9.5V', hasSpectra: true, hasPhotometry: true }]
+        : []
+    ) as never);
+    resetHandoffsForTests();
+    render(<PlanetariumDisplay />);
+    // The hand-off carries only the id, name, position and data flags.
+    postHandoff('Planetarium', 'locateStar', {
+      id: 'Albireo', name: 'Albireo', ra: 292.68, dec: 27.96, hasSpectra: true, hasPhotometry: true,
+    });
+    await waitFor(() => expect(cardSource.current?.spectralType).toBe('K3II+B9.5V'));
+    const fields = ['id', 'name', 'ra', 'dec', 'magnitude', 'hasCatalogMagnitude', 'spectralType', 'hasSpectra', 'hasPhotometry', 'type'];
+    for (const field of fields) {
+      expect(cardSource.current?.[field]).toEqual(fromList[field]);
+    }
+    vi.mocked(callBackend).mockResolvedValue([] as never);
+  });
+
+  /** A hand-off that carries the card fields opens the full card on its first render. */
+  it('opens a located star complete, before any lookup answers', async () => {
+    vi.mocked(callBackend).mockImplementation(() => new Promise(() => undefined) as never);
+    resetHandoffsForTests();
+    postHandoff('Planetarium', 'locateStar', {
+      id: 'Schedar', name: 'Schedar', ra: 10.13, dec: 56.54, hasSpectra: true, hasPhotometry: false,
+      type: 'star', magnitude: 2.24, hasCatalogMagnitude: true, spectralType: 'K0IIIa',
+    });
+    render(<PlanetariumDisplay />);
+    expect(cardSource.current).toMatchObject({
+      id: 'Schedar', magnitude: 2.24, hasCatalogMagnitude: true, spectralType: 'K0IIIa', type: 'star',
+    });
+    vi.mocked(callBackend).mockResolvedValue([] as never);
   });
 });

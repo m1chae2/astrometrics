@@ -80,6 +80,378 @@ def _class_hints(cls: type) -> dict[str, Any]:
         return {}
 
 
+#: A dotted name, such as ``astrometricslib.models.target.Target``. The last
+#: part is kept: ``Target``.
+_DOTTED_NAME = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)+([A-Za-z_][A-Za-z0-9_]*)")
+
+#: The anchor at the end of a reference line, such as
+#: ``{#api-TargetCatalog-delete_images}``. The Documentation tab turns it
+#: into the ``id`` of the heading or list item and does not show it.
+_ENTRY_ANCHOR = re.compile(r"\s\{#(api-[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)?)\}\s*$")
+
+#: The generated topics that hold the classes and methods of the libraries,
+#: with the library each one documents.
+API_REFERENCE_TOPICS = {"api/astrometricslib": "astrometricslib", "api/wayfindinglib": "wayfindinglib"}
+
+#: The objects the Command Console preloads, with the class each one is.
+CONSOLE_OBJECTS = {
+    "astrometrics": ("astrometricslib", "Astrometrics"),
+    "wayfinder": ("wayfindinglib", "Wayfinder"),
+}
+
+#: How many close names `find_doc_entries` offers when nothing matches.
+DOC_SUGGESTION_COUNT = 5
+
+#: How close a name must be, from 0 to 1, to be offered as a suggestion.
+DOC_SUGGESTION_CUTOFF = 0.6
+
+#: Cached result of `api_doc_entries`.
+_ENTRIES_CACHE: list[dict[str, str]] = []
+
+
+def short_type_names(text: str) -> str:
+    """Keep only the last part of each dotted name in a type.
+
+    Parameters
+    ----------
+    text : `str`
+        A type, such as ``astrometricslib.models.target.Target | None``.
+
+    Returns
+    -------
+    text : `str`
+        The same type with short names, such as ``Target | None``.
+    """
+    return _DOTTED_NAME.sub(r"\1", text)
+
+
+class _AnnotationText:
+    """A type written as text, which a signature prints without quotes.
+
+    Parameters
+    ----------
+    text : `str`
+        The type as it should be printed.
+    """
+
+    def __init__(self, text: str) -> None:
+        """Keep the text."""
+        self.text = text
+
+    def __repr__(self) -> str:
+        """Return the text, which is what a signature prints.
+
+        Returns
+        -------
+        text : `str`
+            The type as it should be printed.
+        """
+        return self.text
+
+
+def _short_annotation(annotation: Any) -> Any:
+    """Write one type with short names.
+
+    Parameters
+    ----------
+    annotation : `Any`
+        A type from a signature, or the empty marker when there is none.
+
+    Returns
+    -------
+    annotation : `Any`
+        The empty marker unchanged, or an `_AnnotationText` with short names.
+    """
+    if annotation is inspect.Parameter.empty:
+        return annotation
+    text = annotation if isinstance(annotation, str) else inspect.formatannotation(annotation)
+    return _AnnotationText(short_type_names(text))
+
+
+def format_signature(function: Any, hide_private_return: bool = False) -> str:
+    """Write a callable's signature with short type names.
+
+    Only the types are shortened; default values are printed as they are.
+
+    Parameters
+    ----------
+    function : `Any`
+        The function, method or class.
+    hide_private_return : `bool`, optional
+        When `True`, a return type that names a private (``_internal``)
+        class is left out, so no private name is shown.
+
+    Returns
+    -------
+    signature : `str`
+        Such as ``(target_id: str) -> Target | None``, or ``"(...)"`` when
+        the signature cannot be read.
+    """
+    from annotationlib import Format
+
+    try:
+        signature = inspect.signature(function, annotation_format=Format.FORWARDREF)
+    except ValueError, TypeError, NameError:
+        # Some built-in callables have no signature to read.
+        return "(...)"
+    if hide_private_return and "_internal" in str(signature.return_annotation):
+        signature = signature.replace(return_annotation=inspect.Signature.empty)
+    parameters = [
+        parameter.replace(annotation=_short_annotation(parameter.annotation))
+        for parameter in signature.parameters.values()
+    ]
+    return str(
+        signature.replace(
+            parameters=parameters, return_annotation=_short_annotation(signature.return_annotation)
+        )
+    )
+
+
+def entry_anchor(owner: str, name: str = "") -> str:
+    """Make the anchor of one reference entry.
+
+    Parameters
+    ----------
+    owner : `str`
+        The class name, such as ``TargetCatalog``, or for a module-level
+        name the last part of its module, such as ``exceptions``.
+    name : `str`, optional
+        The method or function name. Leave it out for a class heading.
+
+    Returns
+    -------
+    anchor : `str`
+        Such as ``api-TargetCatalog-delete_images``, or ``api-Target``.
+    """
+    return f"api-{owner}-{name}" if name else f"api-{owner}"
+
+
+def _anchor_mark(anchor: str) -> str:
+    """Write the anchor mark that ends a reference line.
+
+    Parameters
+    ----------
+    anchor : `str`
+        The anchor, from `entry_anchor`.
+
+    Returns
+    -------
+    mark : `str`
+        Such as `` {#api-TargetCatalog-delete_images}``.
+    """
+    return f" {{#{anchor}}}"
+
+
+def _qualified_name_of_anchor(anchor: str, library: str) -> str:
+    """Turn an anchor back into the name it documents.
+
+    Parameters
+    ----------
+    anchor : `str`
+        Such as ``api-TargetCatalog-delete_images`` or
+        ``api-exceptions-NotFoundError``.
+    library : `str`
+        The library the topic documents.
+
+    Returns
+    -------
+    name : `str`
+        Such as ``TargetCatalog.delete_images`` or
+        ``astrometricslib.exceptions.NotFoundError``.
+    """
+    owner, _, name = anchor.removeprefix("api-").partition("-")
+    modules = {module.rsplit(".", 1)[-1]: module for module in PUBLIC_LIBRARY_MODULES[library]}
+    owner = modules.get(owner, owner)
+    return f"{owner}.{name}" if name else owner
+
+
+def api_doc_entries() -> list[dict[str, str]]:
+    """List every class, method and function the API reference documents.
+
+    Returns
+    -------
+    entries : `list` of `dict`
+        ``topic_id`` (the reference topic), ``anchor_id`` (such as
+        ``api-TargetCatalog-delete_images``) and ``qualified_name`` (such as
+        ``TargetCatalog.delete_images``), in page order.
+    """
+    if _ENTRIES_CACHE:
+        return list(_ENTRIES_CACHE)
+    entries: list[dict[str, str]] = []
+    for topic_id, library in API_REFERENCE_TOPICS.items():
+        topic = get_api_topic_content(topic_id)
+        if topic is None:
+            continue
+        for line in topic["content"].splitlines():
+            match = _ENTRY_ANCHOR.search(line)
+            if match:
+                anchor = match.group(1)
+                entries.append({
+                    "topic_id": topic_id,
+                    "anchor_id": anchor,
+                    "qualified_name": _qualified_name_of_anchor(anchor, library),
+                })
+    _ENTRIES_CACHE.extend(entries)
+    return entries
+
+
+def _console_path_class_name(path: list[str]) -> str | None:
+    """Follow a console path to the class name of the object it reaches.
+
+    Parameters
+    ----------
+    path : `list` of `str`
+        The parts before the last one, such as ``["astrometrics", "targets"]``.
+
+    Returns
+    -------
+    class_name : `str` or `None`
+        Such as ``"TargetCatalog"``, or `None` when the path does not start
+        at a preloaded object or a part cannot be followed.
+    """
+    if not path or path[0] not in CONSOLE_OBJECTS:
+        return None
+    library, class_name = CONSOLE_OBJECTS[path[0]]
+    cls = _public_attribute(library, class_name)
+    for part in path[1:]:
+        if not isinstance(cls, type):
+            return None
+        cls = _class_hints(cls).get(part) or _assigned_attribute_class(cls, part)
+    return cls.__name__ if isinstance(cls, type) else None
+
+
+def _assigned_attribute_class(cls: type, attribute: str) -> type | None:
+    """Find the class of an attribute a class sets up in its constructor.
+
+    The library facades set their parts in code (``self.targets =
+    TargetCatalog(...)``) rather than declaring them, so the constructor's
+    source is read.
+
+    Parameters
+    ----------
+    cls : `type`
+        The class, such as ``Astrometrics``.
+    attribute : `str`
+        The attribute, such as ``targets``.
+
+    Returns
+    -------
+    attribute_class : `type` or `None`
+        The public class the attribute is made from, or `None`.
+    """
+    pattern = re.compile(rf"self\.{re.escape(attribute)}\s*=\s*(?:[\w.]+\s+or\s+)?([A-Z]\w*)\(")
+    for method_name in ("__init__", "_build"):
+        method = getattr(cls, method_name, None)
+        try:
+            source = inspect.getsource(method) if method is not None else ""
+        except OSError, TypeError:
+            continue
+        match = pattern.search(source)
+        if match:
+            for library in PUBLIC_LIBRARY_MODULES:
+                found = _public_attribute(library, match.group(1))
+                if isinstance(found, type):
+                    return found
+    return None
+
+
+def _as_result(entry: dict[str, str], suggestion: bool) -> dict[str, Any]:
+    """Copy an entry for `find_doc_entries`, marked as a match or a suggestion.
+
+    Parameters
+    ----------
+    entry : `dict`
+        One entry from `api_doc_entries`.
+    suggestion : `bool`
+        `True` when the entry is only a close name.
+
+    Returns
+    -------
+    result : `dict`
+        ``topic_id``, ``anchor_id``, ``qualified_name`` and ``suggestion``.
+    """
+    return {**entry, "suggestion": suggestion}
+
+
+def find_doc_entries(name: str) -> list[dict]:
+    """Find the API reference entries that document a name.
+
+    The name may be bare (``delete_images``, which can fit several
+    classes), an owner and a name (``TargetCatalog.delete_images``), or a
+    path through the console's preloaded objects
+    (``astrometrics.targets.delete_images``). Exact matches come first. When
+    nothing matches, close names are returned instead, each marked as a
+    suggestion.
+
+    Parameters
+    ----------
+    name : `str`
+        The name to look up.
+
+    Returns
+    -------
+    entries : `list` of `dict`
+        ``topic_id``, ``anchor_id``, ``qualified_name`` and ``suggestion``
+        (`False` for a match, `True` for a close name). Empty when nothing
+        is close.
+    """
+    import difflib
+
+    query = name.strip().removesuffix("()")
+    if not query:
+        return []
+    entries = api_doc_entries()
+    candidates = [query]
+    parts = query.split(".")
+    if parts[0] in CONSOLE_OBJECTS:
+        # A console path: the method of the object the path reaches
+        # (``astrometrics.targets.delete_images``), or the object itself
+        # (``wayfinder.control.mount``).
+        candidates = []
+        owner = _console_path_class_name(parts[:-1]) if len(parts) > 1 else None
+        if owner:
+            candidates.append(f"{owner}.{parts[-1]}")
+        whole = _console_path_class_name(parts)
+        if whole:
+            candidates.append(whole)
+        candidates.append(query)
+
+    def fits(qualified_name: str, text: str) -> bool:
+        """Say whether a qualified name is the text or ends with it.
+
+        Returns
+        -------
+        fits : `bool`
+            `True` for ``TargetCatalog.get`` and the text ``get``.
+        """
+        return qualified_name == text or qualified_name.endswith(f".{text}")
+
+    for candidate in candidates:
+        for compare in (str, str.lower):
+            wanted = compare(candidate)
+            matches = [entry for entry in entries if fits(compare(entry["qualified_name"]), wanted)]
+            if matches:
+                return [_as_result(entry, suggestion=False) for entry in matches]
+    query = candidates[0]
+
+    by_name = {entry["qualified_name"]: entry for entry in entries}
+    close = difflib.get_close_matches(
+        query, list(by_name), n=DOC_SUGGESTION_COUNT, cutoff=DOC_SUGGESTION_CUTOFF
+    )
+    if not close:
+        last_parts: dict[str, list[str]] = {}
+        for qualified_name in by_name:
+            last_parts.setdefault(qualified_name.rsplit(".", 1)[-1], []).append(qualified_name)
+        close_last = difflib.get_close_matches(
+            query.rsplit(".", 1)[-1], list(last_parts), n=DOC_SUGGESTION_COUNT, cutoff=DOC_SUGGESTION_CUTOFF
+        )
+        close = [qualified_name for last in close_last for qualified_name in last_parts[last]]
+    return [
+        _as_result(by_name[qualified_name], suggestion=True)
+        for qualified_name in close[:DOC_SUGGESTION_COUNT]
+    ]
+
+
 def format_docstring(doc: str | None) -> str:
     r"""Format a Python docstring into structured Markdown.
 
@@ -108,6 +480,7 @@ def format_method_markdown(
     method_name: str,
     method: Any,
     class_name: str = "",
+    anchor_owner: str = "",
 ) -> str:
     """Format a callable method or function into a Markdown block.
 
@@ -119,24 +492,23 @@ def format_method_markdown(
         The callable method object to inspect.
     class_name : `str`, optional
         Parent class name for prefixing.
+    anchor_owner : `str`, optional
+        The owner part of the entry's anchor for a module-level function,
+        such as ``astrometricslib``. Leave it out to use ``class_name``.
 
     Returns
     -------
     markdown : `str`
         Markdown block with signature, docstring, parameters, and return.
+        The heading ends with the entry's anchor mark.
     """
-    try:
-        sig = str(inspect.signature(method))
-    except ValueError, TypeError, NameError:
-        # Some built-in callables have no signature to read. NameError
-        # comes from a type hint that names a type only imported for type
-        # checking.
-        sig = "(...)"
+    sig = format_signature(method)
 
     doc = format_docstring(inspect.getdoc(method))
     qual_name = f"{class_name}.{method_name}" if class_name else method_name
+    anchor = entry_anchor(anchor_owner or class_name or method_name, method_name)
 
-    return f"#### `{qual_name}{sig}`\n\n{doc}\n"
+    return f"#### `{qual_name}{sig}`{_anchor_mark(anchor)}\n\n{doc}\n"
 
 
 def format_class_markdown(
@@ -164,7 +536,7 @@ def format_class_markdown(
     title = display_title or class_name
     doc = format_docstring(inspect.getdoc(cls))
 
-    lines = [f"### `{title}`\n"]
+    lines = [f"### `{title}`{_anchor_mark(entry_anchor(class_name))}\n"]
     if console_alias:
         lines.append(f"> **Console Alias:** Available globally as `{console_alias}` in the console.\n")
 
@@ -183,10 +555,7 @@ def format_class_markdown(
     if methods:
         lines.append("#### Method Summary\n")
         for m_name, m_func in methods:
-            try:
-                sig = str(inspect.signature(m_func))
-            except ValueError, TypeError, NameError:
-                sig = "(...)"
+            sig = format_signature(m_func)
             raw_doc = inspect.getdoc(m_func) or ""
             summary = raw_doc.split("\n")[0] if raw_doc else "No description provided."
             lines.append(f"- **`{m_name}{sig}`**: {summary}")
@@ -220,6 +589,7 @@ def format_public_module_markdown(module_name: str) -> str:
     first_paragraph = (inspect.getdoc(module) or "").split("\n\n")[0].replace("\n", " ")
     first_paragraph = first_paragraph.removeprefix("Purpose: ")
     lines = [f"### `{module_name}`\n", f"{first_paragraph}\n"]
+    owner = module_name.rsplit(".", 1)[-1]
     for name in sorted(getattr(module, "__all__", ())):
         value = getattr(module, name, None)
         if value is None:
@@ -228,11 +598,10 @@ def format_public_module_markdown(module_name: str) -> str:
         summary = raw_doc.split("\n")[0] if raw_doc else "No description provided."
         signature = ""
         if callable(value) and not isinstance(value, type):
-            try:
-                signature = str(inspect.signature(value))
-            except ValueError, TypeError, NameError:
-                signature = "(...)"
-        lines.append(f"- **`{name}{signature}`**: {summary}")
+            # A private class in the return type is not public: show the
+            # parameters only, so no private path is printed.
+            signature = format_signature(value, hide_private_return=True)
+        lines.append(f"- **`{name}{signature}`**: {summary}{_anchor_mark(entry_anchor(owner, name))}")
     lines.append("")
     return "\n".join(lines)
 
@@ -298,36 +667,33 @@ def generate_api_index() -> str:
         "",
         "| Variable | Type / Module | Description |",
         "| :--- | :--- | :--- |",
-        "| `astrometrics` | `Astrometrics` | Master facade for imaging, pipelines, and catalogs. |",
-        "| `wayfinder` | `Wayfinder` | Master facade for hardware, planning, and execution. |",
-        "| `targets` | `TargetCatalog` | Direct shortcut to `astrometrics.targets`. |",
-        "| `stars` | `StellarCatalog` | Direct shortcut to `astrometrics.stars`. |",
-        "| `telescope` | `ObservatoryControl` | Direct shortcut to `wayfinder.control`. |",
-        "| `planner` | `ObservationPlanning` | Direct shortcut to `wayfinder.planning`. |",
-        "| `executor` | `ObservationExecution` | Direct shortcut to `wayfinder.execution`. |",
-        "| `plt` | `matplotlib.pyplot` | Matplotlib interface (plots open in figure windows). |",
-        "| `np` / `pd` / `astropy` | Scientific Stack | Standard data manipulation libraries. |",
+        "| `astrometrics` | `Astrometrics` | The image library: targets, stars, processing, quality, "
+        "visualization and jobs. |",
+        "| `wayfinder` | `Wayfinder` | The observatory library: control, planning, execution and review. |",
+        "| `np` | `numpy` | NumPy arrays and math. |",
+        "| `plt` | `matplotlib.pyplot` | Matplotlib (figures open in their own windows). |",
+        "| `fits` | `astropy.io.fits` | Reading FITS files. |",
+        "",
+        (
+            "These are the objects a script or notebook makes itself (`Astrometrics()` and `Wayfinder()`), "
+            "so a script written in the console also runs in a notebook. The app's own services are not "
+            "in the console. `help(obj)` prints an object's description and public methods."
+        ),
         "",
         "---",
         "",
-        "## Quick Example: Target Inspection & Analysis",
+        "## Quick Example: Look at a Stack",
         "",
         "```python",
-        "# Inspect targets in your observatory database",
-        "all_targets = targets.list()",
-        'print(f"Total targets: {len(all_targets)}")',
-        "",
-        "# Retrieve a specific target",
-        'target = targets.get("M 42")',
-        'print(f"Target {target.id}: RA {target.ra}, DEC {target.dec}")',
+        "# Read a target and draw its stack with the detected stars and the named stars",
+        'target = astrometrics.targets.get("M 13")',
+        "figure = astrometrics.visualization.render_fits(",
+        '    target.stacking.stacked_image, target=target, kind="figure", overlays=["detections", "stars"]',
+        ")",
         "",
         "# Check visibility from your observatory location",
-        'vis = planner.get_visibility(target_name="M 42")',
-        "print(f\"Current Altitude: {vis.get('altitude', 0):.1f}°\")",
-        "",
-        "# Plot stacked light frame or spectroscopy if available",
-        "if target.stacking.stacked_image:",
-        '    figure = astrometrics.visualization.plot("astrometry", target)',
+        'report = wayfinder.planning.get_visibility(["M 13"])',
+        'print(f"Altitude now: {report.objects[0].altitude_deg:.1f} degrees")',
         "```",
         "",
         "---",
@@ -487,7 +853,7 @@ def generate_astrometricslib_docs() -> str:
     for u_name in utility_names:
         func = _public_attribute("astrometricslib", u_name)
         if func and callable(func):
-            sections.append(format_method_markdown(u_name, func))
+            sections.append(format_method_markdown(u_name, func, anchor_owner="astrometricslib"))
             sections.append("\n---\n")
 
     # 8. Core Data Models
@@ -507,7 +873,7 @@ def generate_astrometricslib_docs() -> str:
         m_cls = _public_attribute("astrometricslib", m_name)
         if m_cls and isinstance(m_cls, type):
             doc = format_docstring(inspect.getdoc(m_cls))
-            sections.append(f"### `{m_name}`\n\n{doc}\n")
+            sections.append(f"### `{m_name}`{_anchor_mark(entry_anchor(m_name))}\n\n{doc}\n")
 
     # 9. Public modules
     sections.append('<a id="public-modules"></a>')
@@ -673,7 +1039,9 @@ def generate_entity_doc(entity_name: str) -> str:
         doc = format_class_markdown(obj, display_title=clean_name)
         return f"# {clean_name}\n\n{doc}"
     elif callable(obj):
-        doc = format_method_markdown(short_name, obj)
+        doc = format_method_markdown(
+            short_name, obj, anchor_owner=getattr(obj, "__module__", "").rsplit(".", 1)[-1]
+        )
         return f"# {clean_name}\n\n{doc}"
     else:
         return f"# {clean_name}\n\n```python\n{obj!r}\n```\n"

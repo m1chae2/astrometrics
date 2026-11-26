@@ -44,7 +44,7 @@ from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script
+from astrometricslib.pipelines.stacking.post_processing.preview_siril import run_preview_script
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
     SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
     _center_crop,
@@ -54,6 +54,7 @@ from astrometricslib.pipelines.stacking.processing.group_alignment import (
     find_zero_order_position,
 )
 from astrometricslib.pipelines.stacking.processing.group_gains import estimate_saturation_mask_level
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def star_centroids(image: np.ndarray, limit: int = 400) -> np.ndarray:
     pixels = np.asarray(image, dtype=np.float64)
     smooth = ndimage.gaussian_filter(pixels, 1.2)
     median = np.median(smooth)
-    noise = 1.4826 * np.median(np.abs(smooth - median))
+    noise = MAD_TO_SIGMA * np.median(np.abs(smooth - median))
     is_peak = (smooth == ndimage.maximum_filter(smooth, 11)) & (smooth > median + 12 * noise)
     ceiling = np.percentile(pixels, 99.999)
     found = []

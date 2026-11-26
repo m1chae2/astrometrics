@@ -100,6 +100,8 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         # and the alias test.
         "holdout_nights": ALL_THREE,
         "alias_ambiguity": ALL_THREE,
+        # Not checked without a target star or a recorded crowding.
+        "target_crowding": ALL_THREE,
     },
     "spectroscopy": {
         "spectra_extracted": frozenset({PASSED, FAILED}),

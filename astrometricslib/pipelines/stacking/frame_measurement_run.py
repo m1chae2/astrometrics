@@ -51,8 +51,12 @@ ingestion and the stacking stage) goes through
   measured returns at once with a summary that says so
   (`FrameMeasurementSummary.already_running`);
 - one run reading frames at a time in the process: a run for another target
-  waits for its turn. The stacking stage never waits; it skips its
-  measurement step when the turn is taken.
+  waits for its turn. The stacking stage waits too, so every frame it
+  stacks is measured once. The wait cannot deadlock: the run that holds the
+  turn takes no other guard and waits for nothing but its own worker threads
+  and short database writes, and a waiting stage holds only the guard of its
+  own target, which a second request for that target does not wait for (it
+  is refused at once). A cancel of the waiting job ends the wait.
 
 How long it takes. Measuring one 3008 x 3008 px frame takes about 13 to 15 s
 of one core. With four worker processes a batch of those frames takes about
@@ -78,7 +82,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Generator, Mapping, Sequence
-from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -92,6 +96,13 @@ from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.jobs.runner import JobHandle, get_current_job
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import (
+    CANCEL_POLL_SECONDS,
+    RunAbandonedError,
+    completed_unless_abandoned,
+    raise_if_abandoned,
+    stopping_on_abandonment,
+)
 from astrometricslib.models.camera_profile import UNMIGRATED_NOISE_REASON, CameraProfile
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
@@ -103,6 +114,7 @@ from astrometricslib.models.quality.measurement import (
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_scanning import file_state_matches
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     UNREADABLE_FRAME_REASON_PREFIX,
     frame_metric_set_fingerprint,
@@ -110,6 +122,7 @@ from astrometricslib.pipelines.shared.quality.frame_measurement import (
     frame_subject_id,
     measure_clipped_mean_adu,
     measure_frame,
+    star_profile_measurements,
 )
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BACKGROUND_LEVEL,
@@ -118,8 +131,11 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
 from astrometricslib.pipelines.shared.quality.time_budget import TIME_BUDGET_REASON_PREFIX
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
-from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
-from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
+from astrometricslib.pipelines.stacking.metrics import (
+    FRAME_POINTING_OFFSET_FRACTION,
+    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SKY_UNEVENNESS,
+)
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
@@ -139,7 +155,6 @@ __all__ = [
     "BIAS_FRAMES_FOR_LEVEL",
     "MEASUREMENT_WORKER_COUNT",
     "MEASUREMENT_WORKER_NICENESS",
-    "STACKING_STAGE_MEASUREMENT_LIMIT",
     "STAMP_SAVE_INTERVAL_FRAMES",
     "BiasLevelFinder",
     "FrameMeasurementSession",
@@ -192,17 +207,6 @@ MEASUREMENT_WORKER_NICENESS = 5
 # reads cost a few seconds and are made once per setting per run.
 BIAS_FRAMES_FOR_LEVEL = 5
 
-# The most frames the stacking stage measures in full during one stack. The
-# job after a sync normally measures every frame long before it is stacked, so
-# the stage only picks up frames that were never measured (an older library, or
-# a sync that failed). Measured on real data, a batch costs about 11 s per
-# frame (see `MEASUREMENT_WORKER_COUNT`), so 40 frames add about seven minutes
-# to a stack. That is long next to a stack of a few minutes; the limit is a
-# cap on how much one stack can be delayed, not a tuned value. The frames that
-# are left wait for the next stack or the next call of
-# `QualityRecords.record_frame_measurements`.
-STACKING_STAGE_MEASUREMENT_LIMIT = 40
-
 # How many newly measured frames are collected before the frames' stamps are
 # saved to the stored target. A run of 60 frames takes about 11 minutes, so
 # saving every 20 frames (about every 3 to 4 minutes) means an interrupted run
@@ -227,6 +231,39 @@ _RUN_TURN = threading.Lock()
 # guards the set.
 _ACTIVE_TARGET_IDS: set[str] = set()
 _ACTIVE_TARGETS_LOCK = threading.Lock()
+
+
+def _acquire_run_turn(target_id: str, *, wait_for_turn: bool) -> bool:
+    """Take the library-wide turn, waiting for it if asked.
+
+    The wait is cut into short steps so a cancel of the bound job is seen
+    while another run holds the turn.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target the run measures, for the log line.
+    wait_for_turn : `bool`
+        `True` waits for the turn. `False` gives up at once.
+
+    Returns
+    -------
+    taken : `bool`
+        `True` when the caller now holds the turn and must release it.
+
+    Notes
+    -----
+    `RunAbandonedError` is raised (by `raise_if_abandoned`) if the bound job
+    was cancelled while waiting.
+    """
+    if _RUN_TURN.acquire(blocking=False):
+        return True
+    if not wait_for_turn:
+        return False
+    logger.info("Another measurement run is reading frames; the run for %s waits for its turn.", target_id)
+    while not _RUN_TURN.acquire(timeout=CANCEL_POLL_SECONDS):
+        raise_if_abandoned()
+    return True
 
 
 @contextmanager
@@ -257,7 +294,7 @@ def _measurement_turn(target_id: str, *, wait_for_turn: bool) -> Generator[str |
         yield refusal
         return
     try:
-        if not _RUN_TURN.acquire(blocking=wait_for_turn):
+        if not _acquire_run_turn(target_id, wait_for_turn=wait_for_turn):
             yield "another measurement run is reading frames, so this one was skipped"
             return
         try:
@@ -919,8 +956,12 @@ def quarantine_measurements_for_frame(
     Parameters
     ----------
     measurement : `dict`
-        One entry from `raw_frame_check.measure_raw_frame`: ``roundness``
-        (`None` when no star had a measurable shape) and ``sky_median_adu``.
+        One frame's entry from `QuarantineReport.measurements`:
+        ``sky_median_adu``, and ``sky_unevenness`` and
+        ``pointing_offset_fraction`` (each `None` when the check could not
+        be made). When the step fitted the frame's stars itself, the entry
+        also holds ``_star_profiles`` (what `measure_image_star_profiles`
+        returned), and the star rows are stored too.
     frame : `FrameRecord`
         The frame the entry measures.
     target_id : `str`
@@ -942,8 +983,14 @@ def quarantine_measurements_for_frame(
     Returns
     -------
     measurements : `list` [`QualityMeasurement`]
-        One roundness row and one sky median row. The roundness row is
-        ``not_measured`` with a reason when the frame had no measurable star.
+        One sky median row, one sky unevenness row and one pointing offset
+        row. A row is ``not_measured`` with a reason when the check could
+        not be made for the frame. The sky median row carries the action
+        taken (the other two are the same decision's evidence, so they
+        carry it too). When the step fitted the stars, the star width,
+        elongation and angle rows follow, the same rows a full frame
+        measurement stores (`star_profile_measurements`), so the next stack
+        reads the stored elongation and does not fit the frame again.
     """
     subject = frame_subject(frame.path, target_id, frame.timestamp, capture_setting_id=capture_setting_id)
     common = {
@@ -955,12 +1002,19 @@ def quarantine_measurements_for_frame(
         "measured_at": measured_at,
         "action_taken": action_taken,
     }
-    roundness = measurement.get("roundness")
-    sky = measurement.get("sky_median_adu")
     rows = []
     for metric, value, missing_reason in (
-        (FRAME_QUARANTINE_ROUNDNESS, roundness, "no star with a measurable shape was found"),
-        (FRAME_QUARANTINE_SKY_MEDIAN, sky, "the median could not be computed"),
+        (FRAME_QUARANTINE_SKY_MEDIAN, measurement.get("sky_median_adu"), "the median could not be computed"),
+        (
+            FRAME_SKY_UNEVENNESS,
+            measurement.get("sky_unevenness"),
+            "the session had too few frames with a sky grid to compare against",
+        ),
+        (
+            FRAME_POINTING_OFFSET_FRACTION,
+            measurement.get("pointing_offset_fraction"),
+            "the frame's stars could not be matched to the session's reference frame",
+        ),
     ):
         if value is None or not math.isfinite(float(value)):
             rows.append(
@@ -974,6 +1028,19 @@ def quarantine_measurements_for_frame(
                     metric=metric, status=MeasurementStatus.MEASURED, value=float(value), **common
                 )
             )
+    star_profiles = measurement.get("_star_profiles")
+    if star_profiles:
+        rows.extend(
+            star_profile_measurements(
+                star_profiles,
+                frame,
+                target_id,
+                run_id=run_id,
+                job_id=job_id,
+                measured_at=measured_at,
+                capture_setting_id=capture_setting_id,
+            )
+        )
     return rows
 
 
@@ -1025,7 +1092,7 @@ def record_frame_measurements_for_target(
         frames they added, so an old, never-measured frame is not swept in.
     limit : `int`, optional
         Measure at most this many frames, newest first. The rest wait for the
-        next run.
+        next run. No limit when omitted; the stacking stage passes none.
     save_target : `Callable`, optional
         Called every `STAMP_SAVE_INTERVAL_FRAMES` newly stamped frames and
         once at the end, when any frame was stamped, to save the target's
@@ -1035,8 +1102,9 @@ def record_frame_measurements_for_target(
         other changes to the stored target. A failure of the save is logged
         and noted, not raised.
     wait_for_turn : `bool`, optional
-        `True` (default) waits when another target's run is reading frames.
-        `False` returns at once instead; the stacking stage uses it.
+        `True` (default) waits when another target's run is reading frames
+        (a cancel of the bound job ends the wait). `False` returns at once
+        instead.
 
     Returns
     -------
@@ -1078,6 +1146,12 @@ def _measure_target_frames(
     -------
     summary : `FrameMeasurementSummary`
         The counts and notes of the run.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the job was cancelled. The frames not yet started are not
+        measured, and the stamps of the frames done are saved.
     """
     started = time.monotonic()
     chosen = list(target.frames if frames is None else frames)
@@ -1171,9 +1245,11 @@ def _measure_target_frames(
     # parent job writes progress lines for the parent's stage instead.
     nested_progress = LoopProgress("Measured", len(pending)) if progress_job is None else None
     try:
-        with pool:
+        # A cancel is seen while waiting, cancels the frames not yet started
+        # and does not wait for the ones in progress.
+        with stopping_on_abandonment(pool):
             futures = {submit(item): item for item in pending}
-            for done_count, future in enumerate(as_completed(futures), start=1):
+            for done_count, future in enumerate(completed_unless_abandoned(futures), start=1):
                 frame, file_state, _capture_setting_id = futures[future]
                 failure: str | None = None
                 cut_short = False
@@ -1184,6 +1260,9 @@ def _measure_target_frames(
                     else:
                         summary.rows_written += session.record(measurements_to_store(measurements))
                         cut_short = frame_was_cut_short(measurements)
+                except RunAbandonedError:
+                    # A cancel is not one frame's failure.
+                    raise
                 except Exception as error:  # one frame's failure, whatever its cause, must not end the run
                     # The image libraries (photutils, SciPy) can raise errors
                     # outside the named read and data errors, such as a
@@ -1247,15 +1326,21 @@ def record_stage_frame_quality(
     The stacking stage calls this after the quarantine step, which runs only
     for imaging stacks with the quarantine turned on. It records two things:
 
-    1. The quarantine step's own numbers (star roundness and median pixel
-       value) for every frame it measured, kept or moved. Today only the
-       moved frames' numbers reach a file.
-    2. The full frame measurement for kept frames whose file has not been
-       measured yet, up to `STACKING_STAGE_MEASUREMENT_LIMIT` frames, through
-       `record_frame_measurements_for_target` (the same path as every other
-       caller). The stage never waits for it: when a run for the target is
-       already going, or another run has the library's turn, this step is
-       skipped, and a note in the summary says so.
+    1. The quarantine step's own numbers (median pixel value, sky
+       unevenness and pointing offset) for every frame it measured, kept
+       or moved. Today only the moved frames' numbers reach a file.
+       When the step fitted a frame's stars itself, the star width,
+       elongation and angle rows are stored with them
+       (`quarantine_measurements_for_frame`).
+    2. The full frame measurement for every kept frame whose file has not been
+       measured yet, through `record_frame_measurements_for_target` (the same
+       path as every other caller). There is no limit on the number of
+       frames, and the stage waits for the library's turn when another
+       target's run is reading frames, so each frame is measured once and
+       the stored numbers grow to cover the whole target. A cancel is seen
+       while it waits. When a run for this same target is already going,
+       this step is skipped, because that run measures the frames, and a note
+       in the summary says so.
 
     The quarantine step reads each file into its own arrays and returns only
     numbers, so there are no loaded pixels to reuse. The full measurement
@@ -1340,9 +1425,7 @@ def record_stage_frame_quality(
             target,
             session,
             frames=needing,
-            limit=STACKING_STAGE_MEASUREMENT_LIMIT,
             save_target=save_target if save_target is not None else recording.save_target,
-            wait_for_turn=False,
         )
         full_summary.rows_written += summary.rows_written
         return full_summary

@@ -9,7 +9,6 @@ import {
     TargetFilesResponse,
     GroupedFrameStat,
     ProcessStatus,
-    ProcessingJob,
     AnalysisResult,
     Spectrum,
     FitsHeaderEntry,
@@ -21,7 +20,6 @@ import {
     RenderedImage,
     SequenceItem,
     SequencePlan,
-    CalibrationStats,
     MosaicPanel,
     FrameRecord,
     AlignmentAttempt,
@@ -39,13 +37,23 @@ import {
     CatalogSourcesResult,
     PlanetariumTarget,
     ObserverLocation,
-    ConstellationLineSegment
+    ConstellationLineSegment,
+    ClassStarColorRow,
+    StackSkyPicture
 } from '../types/planetariumTypes';
 
 
 
 /** Summary of one persisted observation session, from execution:list_sessions. */
 /** Answer to a request to stop a stacking job. */
+/** The answer of `target:get_frame_header`: the header and the turn that shows the frame like the stack. */
+export interface FrameHeaderAnswer {
+    /** The FITS header cards. */
+    entries: FitsHeaderEntry[];
+    /** The quarter turn (0, 90, 180 or 270 degrees, clockwise) the viewer shows the frame with. */
+    displayTurn: number;
+}
+
 export interface CancelProcessingResult {
     /** `cancelled`, `other_process` (the job runs in another program) or `none`. */
     status: string;
@@ -160,6 +168,14 @@ export interface CalibrationMeasurementStart {
 }
 
 /**
+ * What console code asked the app to do, returned with the run (see `terminal:execute`).
+ * `show` opens a target, star or file in a display; `doc` opens one entry of the API reference.
+ */
+export type ConsoleAppRequest =
+    | { kind: 'show'; display: 'Image Processing' | 'Astronomy Manager'; target: string | null; star_id: string | null; star_name: string | null; path: string | null }
+    | { kind: 'doc'; topic_id: string; anchor_id: string; qualified_name: string };
+
+/**
  * The payload and response of every RPC method the backend serves.
  *
  * The keys must be exactly the generated `RpcMethod` names from
@@ -169,19 +185,20 @@ export interface CalibrationMeasurementStart {
 export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
-    "target:get": { payload: { target_id: string }; response: TargetObject | null };
-    "target:get_targets": { payload: { target_id?: string; detail?: "full" | "summary" }; response: TargetObject[] | TargetObject | null };
+    "target:get": { payload: { target_id?: string; detail?: "full" | "summary" }; response: TargetObject[] | TargetObject | null };
     "target:create": { payload: { target_id: string; ra?: string; dec?: string }; response: TargetObject | null };
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
     "target:get_files": { payload: { target_id: string }; response: TargetFilesResponse };
+    "target:get_frame_statuses": { payload: { target_id: string }; response: import('../types/backendTypes').FrameStatusReport };
+    "target:put_back_frames": { payload: { target_id: string; paths: string[] }; response: { restored: string[] } };
     "target:get_camera_index": { payload: Record<string, never>; response: TargetCameraIndex };
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
     "target:add_data": { payload: { target_id: string; image_file: string }; response: boolean };
     "target:send_to_phone": { payload: { target_id: string }; response: { path: string; method: string; device?: string } };
     "target:refresh": { payload: { target_id: string; prune_missing?: boolean }; response: void };
-    "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FitsHeaderEntry[] };
+    "target:get_frame_header": { payload: { frame_path: string; target_id?: string }; response: FrameHeaderAnswer };
 
     // Astronomy & Stellar Library
     "astronomy:get_status": { payload: { target_id: string }; response: ObjectVisibility };
@@ -192,19 +209,20 @@ export interface ActionRegistry {
     "astronomy:analyze_periodicity": { payload: { star_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
-    "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
     "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number; image_path?: string }; response: { stars: any[]; reason: string | null } };
     "astronomy:target_data_availability": { payload: Record<string, never>; response: Record<string, { hasSpectra: boolean; hasPhotometry: boolean; starCount: number }> };
     "astronomy:spectral_class_summary": { payload: Record<string, never>; response: { spectralClass: string; label: string; count: number }[] };
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
-    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
+    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string; ra?: number; dec?: number }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: CatalogSourcesResult };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
+    "planetarium:get_class_stars": { payload: Record<string, never>; response: ClassStarColorRow[] };
+    "planetarium:get_stack_pictures": { payload: Record<string, never>; response: StackSkyPicture[] };
 
     // Equipment Configuration
     "observatory:list_cameras": { payload: Record<string, never>; response: EquipmentCameraProfile[] };
@@ -263,7 +281,6 @@ export interface ActionRegistry {
     "system:save": { payload: Record<string, never>; response: void };
     "system:health": { payload: Record<string, never>; response: SystemHealth };
     "system:static_mounts": { payload: Record<string, never>; response: StaticMount[] };
-    "system:completions": { payload: { text: string }; response: string[] };
     "system:get_config": { payload: Record<string, never>; response: Record<string, Record<string, any>> };
     "system:save_config": { payload: { config: Record<string, Record<string, any>> }; response: boolean };
     "system:introspection": { payload: Record<string, never>; response: IntrospectionEndpoint[] };
@@ -299,8 +316,6 @@ export interface ActionRegistry {
     "telescope:get_performance_envelope": { payload: Record<string, never>; response: PerformanceEnvelope | null };
     "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
     "telescope:sync_logs": { payload: Record<string, never>; response: { status: string; guideLogsDownloaded: number; guidingSamplesIngested: number; fitsSolvesRecorded: number; message: string } };
-    "telescope:get_pointing_model": { payload: { session_id?: string }; response: import('../types/backendTypes').MountPointingModel };
-    "telescope:get_guiding_spectrum": { payload: { session_id?: string }; response: import('../types/backendTypes').GuidingSpectrumAnalysis };
 
     // Guiding
     "guiding:status": { payload: Record<string, never>; response: LiveGuidingStatus };
@@ -317,20 +332,16 @@ export interface ActionRegistry {
     "execution:reconcile_session": { payload: { session_id: string }; response: Record<string, any> };
     "execution:build_divergence_record": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
-    // Night plan (#95). `plan:get` without a session id lists every session.
-    // `plan:list_packages` lists the package library;
+    // Night plan (#95). `plan:list_packages` lists the package library;
     // `plan:current_session` is tonight's session or null (never created by a
     // read). Session writes send the `plan:changed` event; package writes
     // (`plan:edit_package`, `plan:create_package`) send `packages:changed`.
     // A write answers with the `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
-    "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
     "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSessionWithProgress | null };
     "plan:list_packages": { payload: { status?: string; target?: string; include_dismissed?: boolean }; response: import('../types/backendTypes').ObservationPackage[] };
     "plan:package_for_target": { payload: { target: string }; response: import('../types/backendTypes').ObservationPackage | null };
-    "plan:create": { payload: { night_id?: string }; response: import('../types/backendTypes').ObservationSession };
     "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };
-    "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
     "plan:edit_package": { payload: { package_id: string; exposure_requests?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string; name?: string; framing?: Record<string, any>; reopen?: boolean; delete?: boolean; dismiss?: boolean; undismiss?: boolean; source_key?: string; expected_revision?: number }; response: import('../types/backendTypes').ObservationPackage };
     "plan:refresh_suggestions": { payload: { target_ids?: string[] }; response: { started: boolean } };
     "plan:tick_checklist_item": { payload: { session_id: string; item_id: string; expected_revision?: number; note?: string; ticked_at?: string }; response: import('../types/backendTypes').PlanChange };
@@ -344,56 +355,67 @@ export interface ActionRegistry {
     "ingestion:reindex": { payload: Record<string, never>; response: string };
 
     // Processing
-    "processing:stack": { payload: { target_id: string; image_files?: string[]; log_file?: string }; response: ProcessStatus };
+    "processing:stack": {
+        payload: {
+            target_id: string; image_files?: string[]; log_file?: string;
+            camera_id?: string; focal_length_mm?: number; filter_name?: string;
+        };
+        response: ProcessStatus;
+    };
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
     "processing:cancel": { payload: { target_id: string }; response: CancelProcessingResult };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
-    "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number; before?: string }; response: ProcessingJob[] };
-    "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
     "processing:delete_job": { payload: { job_id: string }; response: boolean };
-    "processing:jobs_for_target": { payload: { target_id: string }; response: ProcessingJob[] };
-    // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
-    // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
-    "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "quality:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
     "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
-    "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
     "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
+    // The nebulae and galaxies SIMBAD lists inside the target's stack (`message` says why there are none).
+    "processing:list_bright_objects": { payload: { target: string; refresh?: boolean }; response: import('../types/backendTypes').BrightObjectChoices };
+    // Saves which object the preview's masked stretch protects (used the next time the target is stacked or post-processed).
+    "processing:set_bright_object": { payload: { target: string; mode: 'auto' | 'off' | 'object'; simbad_id?: string; ra_deg?: number; dec_deg?: number; major_axis_arcmin?: number; name?: string }; response: import('../types/backendTypes').PreviewBrightObject };
     // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
-    "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
+    "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean; stack_path?: string; camera_id?: string; focal_length_mm?: number }; response: import('../types/backendTypes').StackReviewStart };
+    // What a stack would do with its frames (a background job that stacks nothing): the answer is the
+    // prediction, or the job to follow. `image_files` are the frames the Stack Frames click would send.
+    "processing:check_stack": { payload: { target_id: string; image_files?: string[]; kind?: 'imaging' | 'spectral'; filter_name?: string; camera_id?: string; focal_length_mm?: number }; response: import('../types/backendTypes').StackReviewStart };
     // Compares a stack with the previous one (a background job): the answer is the report, or the job to follow.
     "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
     // The frames the stacker set aside for a target, each with the reason it has on record.
     "quality:set_aside_frames": { payload: { target: string }; response: import('../types/backendTypes').SetAsideFrameRecord[] };
+    // A typical frame of a frame's session and one reference star in both, for the Blink button (a read; nothing is stored).
+    "quality:choose_blink_pair": { payload: { target: string; path: string }; response: import('../types/backendTypes').BlinkPair };
 
     // Quality measurements: the stored ones, and what each metric means.
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
-    "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
-    // The job history, read-only. detail 'warnings' lists the warnings one job detected (job_id required).
-    "jobs:query": { payload: { job_id?: string; target_id?: string; job_type?: string; status?: string; active_only?: boolean; detail?: 'summary' | 'log_tail' | 'result' | 'lineage' | 'warnings'; lines?: number; limit?: number; offset?: number }; response: import('../types/backendTypes').JobQueryResult };
+    "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera_id?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    // The job history, read-only, the app's one job read. detail 'full' adds each job's stored input and
+    // output numbers; 'warnings' lists the warnings one job detected (job_id required). `limit` is 1 to 500,
+    // `lines` 1 to 100000; `before` pages back by creation time; `max_line_chars: null` keeps log lines whole.
+    "jobs:query": { payload: { job_id?: string; target_id?: string; job_type?: string; status?: string; active_only?: boolean; detail?: 'summary' | 'full' | 'log_tail' | 'result' | 'lineage' | 'warnings'; lines?: number; limit?: number; offset?: number; before?: string; max_line_chars?: number | null }; response: import('../types/backendTypes').JobQueryResult };
     "quality:resolve_rows": { payload: { row_ids: number[] }; response: import('../types/backendTypes').QualityRowResolution };
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
-    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
+    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string; stages?: ('astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation')[]; camera_id?: string; focal_length_mm?: number }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
+    // Names the detected stars of a stack (a job of the analysis type), and reads the saved names.
+    "analysis:identify_stack": { payload: { target_id: string; stack_path: string }; response: { status: string; jobId: string } };
+    "analysis:get_stack_identification": { payload: { target_id: string; stack_path: string }; response: import('./astronomyService').StackIdentificationState };
 
     // Imaging
     // Matches ImagingService.capture_sequence. An earlier declaration listed
     // exposure/iso/filter/camera/delay/prefix, none of which the handler accepts;
     // a call typed against it failed on a missing target_id.
     "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
-    "imaging:get_active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "imaging:stop_capture": { payload: Record<string, never>; response: boolean };
 
     // Images
     "images:get_target_frame": { payload: { target_id: string; iso: string; exposure: string; index?: number }; response: string };
     "images:get_light_frame_data": { payload: { target_id: string; iso: string; exposure: string; index?: number; stretch?: boolean }; response: RenderedImage };
     "images:convert_fits": { payload: { path: string; stretch?: boolean }; response: RenderedImage };
-    "images:get_fits_header": { payload: { path: string }; response: FitsHeaderEntry[] };
     "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_degrees?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
     "images:map_position": { payload: { from_path: string; x: number; y: number; to_path: string }; response: { x: number | null; y: number | null; method: string; note: string } };
     "images:measure_detections": { payload: { path: string }; response: import('../types/backendTypes').DetectionsMeasurement };
@@ -401,7 +423,6 @@ export interface ActionRegistry {
     "images:last": { payload: { stretch?: boolean }; response: { id: string; min: number; max: number; image_data: string; path: string } | null };
 
     // Calibration
-    "calibration:get_stats": { payload: Record<string, never>; response: CalibrationStats };
     "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
@@ -422,16 +443,21 @@ export interface ActionRegistry {
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
 
     // Terminal, Console & Documentation
-    "terminal:execute": { payload: { code_str: string; source?: string; label?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
+    // `status` is 'stopped' when Ctrl+C stopped the run. `app_requests` holds what the code asked the
+    // app to show with show(...) and doc(...), for the window that ran it.
+    "terminal:execute": { payload: { code_str: string; source?: string; label?: string }; response: { status: 'success' | 'error' | 'stopped'; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[]; app_requests?: ConsoleAppRequest[] } };
     "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:get_preloaded_objects": { payload: Record<string, never>; response: Array<{ name: string; type: string; description: string; available: boolean }> };
     "terminal:get_recent_runs": { payload: { limit?: number }; response: Array<{ ran_at: string; label: string; source: string; source_code: string; status: string; stdout: string; stderr: string; plot_paths: string[]; execution_time_ms: number }> };
     "terminal:completions": { payload: { text: string }; response: string[] };
-    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
+    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; kind: 'notebook' | 'script'; description: string; size_bytes: number }> };
     "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };
     "terminal:list_scripts": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; size_bytes: number; modified_at: number }> };
     "terminal:read_script": { payload: { filename: string }; response: { filename: string; code: string } };
     "terminal:save_script": { payload: { filename: string; content: string }; response: { filename: string; size_bytes: number; status: string } };
     "terminal:reset_workspace": { payload: Record<string, never>; response: any[] };
+    // Ctrl+C in the terminal: stops the console code running now; lists what was stopped.
+    "terminal:stop": { payload: Record<string, never>; response: { stopped: string[] } };
     "docs:list_topics": { payload: Record<string, never>; response: Array<{ id: string; title: string; path: string; category: string }> };
     "docs:search_topics": { payload: { query: string }; response: Array<{ id: string; title: string; path: string; category: string; snippet?: string }> };
     "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
@@ -439,11 +465,28 @@ export interface ActionRegistry {
     "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
     "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
     "ui:inspect_variable": { payload: { variable_name: string }; response: void };
+    /** Image Processing tells the backend what is picked now, for the Command Console's `selection` object. Pixels count from 0. */
+    "ui:set_selection": {
+        payload: {
+            target?: string | null;
+            path?: string | null;
+            kind?: 'stack' | 'frame' | null;
+            star?: { id?: string | null; name?: string | null; library_id?: string | null; ra?: number | null; dec?: number | null; x?: number | null; y?: number | null } | null;
+        };
+        response: {
+            target: string | null;
+            path: string | null;
+            kind: 'stack' | 'frame' | null;
+            star: { id: string | null; name: string | null; library_id: string | null; ra: number | null; dec: number | null; x: number | null; y: number | null } | null;
+            set_at: string | null;
+        };
+    };
 
     // Quality advice and night history (reads)
     "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
     "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
     "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "advisory:star_shapes": { payload: { target: string; night?: string; frame_paths?: string[] }; response: import('../types/backendTypes').StarShapeReview };
     "advisory:depth_goal": { payload: { target: string }; response: import('../types/backendTypes').DepthGoalStatus };
     "advisory:set_depth_goal": { payload: { target: string; level: 'quick_look' | 'good' | 'deep' }; response: import('../types/backendTypes').DepthGoalStatus };
     "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
@@ -602,6 +645,8 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:stars_by_spectral_class',
     'images:last',
     'telescope:slew_target',
+    // Asks SIMBAD the first time for a stack.
+    'processing:list_bright_objects',
 ]);
 
 /**
@@ -611,7 +656,6 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
 const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
     'execution:list_sessions',
-    'plan:get',
     'plan:current_session',
     'plan:list_packages',
     'plan:package_for_target',
@@ -619,9 +663,12 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',
+    'advisory:star_shapes',
+    'target:get_frame_statuses',
     'advisory:depth_goal',
     'processing:stack_summary',
     'quality:set_aside_frames',
+    'quality:choose_blink_pair',
     'history:nights',
     'history:night_quality',
     'history:target_changes',
@@ -633,10 +680,11 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:get_performance_envelope',
     'planetarium:get_constellation_lines',
     'planetarium:get_sources',
+    'planetarium:get_class_stars',
+    'planetarium:get_stack_pictures',
     'planetarium:get_deep_catalog_status',
     'target:list',
     'target:get',
-    'target:get_targets',
     'target:get_camera_index',
     'target:get_frames',
     'target:get_frames_grouped',

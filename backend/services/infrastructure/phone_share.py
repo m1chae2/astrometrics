@@ -1,12 +1,10 @@
-"""Purpose: Send a file to the user's phone without a window if possible.
+"""Purpose: Send a file to the user's phone without a window.
 
-Description: Tries GSConnect (the GNOME build of KDE Connect) first. It
-sends the file to a paired, connected phone straight away, with nothing
-shown on the computer. If no phone is connected, it opens the LocalSend
-app with the file queued, and the user picks the phone there.
+Description: Uses GSConnect (the GNOME build of KDE Connect). It sends the
+file to a paired, connected phone straight away, with nothing shown on the
+computer. If no phone is connected, the send fails with a clear message.
 """
 
-import logging
 import re
 import shutil
 import subprocess
@@ -17,16 +15,14 @@ from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 
 __all__ = ["connected_gsconnect_devices", "send_file_to_phone"]
 
-logger = logging.getLogger(__name__)
-
 GSCONNECT_BUS_NAME = "org.gnome.Shell.Extensions.GSConnect"
 """The session-bus name the GSConnect extension answers on."""
 
 GSCONNECT_ROOT_PATH = "/org/gnome/Shell/Extensions/GSConnect"
 """The object path under which GSConnect lists its devices."""
 
-LOCALSEND_FLATPAK_ID = "org.localsend.localsend_app"
-"""The Flatpak id of the LocalSend app."""
+NO_PHONE_MESSAGE = "No phone is connected in GSConnect. Open KDE Connect on your phone and try again."
+"""What the user sees when no paired phone is connected."""
 
 DBUS_TIMEOUT_SECONDS = 10
 """How long to wait for the session bus to answer."""
@@ -99,54 +95,10 @@ def _send_with_gsconnect(path: str, device: dict[str, str]) -> None:
         raise ExternalServiceError(f"GSConnect could not send the file: {result.stderr.strip()}")
 
 
-def _open_localsend(path: str) -> None:
-    """Open LocalSend with a file queued, for the user to send.
-
-    A LocalSend program on the path is used first. Otherwise the Flatpak is
-    started with file forwarding, which gives it access to this one file even
-    though the Flatpak cannot see the rest of the disk.
-
-    Parameters
-    ----------
-    path : `str`
-        The file to queue.
-
-    Raises
-    ------
-    ConfigurationError
-        If LocalSend is not installed.
-    ExternalServiceError
-        If LocalSend could not be started.
-    """
-    program = shutil.which("localsend_app") or shutil.which("localsend")
-    if program:
-        command = [program, path]
-    elif shutil.which("flatpak"):
-        command = [
-            "flatpak", "run", "--branch=stable", "--command=localsend",
-            "--file-forwarding", LOCALSEND_FLATPAK_ID, "@@", path, "@@",
-        ]  # fmt: skip
-    else:
-        raise ConfigurationError(
-            "No phone link is available: connect a phone in GSConnect or install LocalSend."
-        )
-    try:
-        subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except OSError as error:
-        raise ExternalServiceError(f"Could not start LocalSend: {error}") from error
-
-
 def send_file_to_phone(path: str) -> dict[str, str]:
-    """Send a file to the user's phone.
+    """Send a file to the user's phone with GSConnect.
 
-    Sends it with GSConnect to the first connected, paired phone. With no
-    such phone, opens LocalSend with the file queued instead.
+    Sends it to the first connected, paired phone.
 
     Parameters
     ----------
@@ -156,14 +108,13 @@ def send_file_to_phone(path: str) -> dict[str, str]:
     Returns
     -------
     result : `dict` [`str`, `str`]
-        ``method`` (``"gsconnect"`` or ``"localsend"``) and, for GSConnect,
-        the phone's ``device`` name.
+        ``method`` (always ``"gsconnect"``) and the phone's ``device`` name.
 
     Raises
     ------
     ConfigurationError
         If the launch sends nothing off the computer, or if no phone is
-        connected and LocalSend is not installed.
+        connected in GSConnect.
 
     Notes
     -----
@@ -175,9 +126,7 @@ def send_file_to_phone(path: str) -> dict[str, str]:
             details={"offline": True},
         )
     devices = connected_gsconnect_devices()
-    if devices:
-        _send_with_gsconnect(path, devices[0])
-        return {"method": "gsconnect", "device": devices[0]["name"]}
-    logger.info("No GSConnect phone is connected; opening LocalSend.")
-    _open_localsend(path)
-    return {"method": "localsend"}
+    if not devices:
+        raise ConfigurationError(NO_PHONE_MESSAGE)
+    _send_with_gsconnect(path, devices[0])
+    return {"method": "gsconnect", "device": devices[0]["name"]}

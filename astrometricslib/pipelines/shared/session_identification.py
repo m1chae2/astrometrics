@@ -13,6 +13,7 @@ solver does not report them.
 
 import configparser
 import logging
+import math
 import os
 import re
 import warnings
@@ -22,7 +23,12 @@ from typing import Any, Protocol
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, update_first_header
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    PLATE_SOLVED_KEYWORD,
+    header_is_plate_solved,
+    update_first_header,
+)
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
@@ -36,6 +42,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +56,31 @@ class SessionStarIdentifier(Protocol):
     """
 
     solver: PlateSolveDriver
+
+    @property
+    def nearest_catalog_separations_arcsec(self) -> list[float]:
+        """Give each star's distance to its nearest catalog entry.
+
+        Returns
+        -------
+        separations : `list` [`float`]
+            One distance, in arcseconds, for each star that had a sky
+            position in the last `identify_stars_with_wcs` call, including
+            stars too far from any entry to match.
+        """
+        ...
+
+    @property
+    def field_catalog_density_per_square_degree(self) -> float | None:
+        """Give the catalog stars per square degree over the last image.
+
+        Returns
+        -------
+        density : `float` or `None`
+            Counted over the image's footprint in the last
+            `identify_stars_with_wcs` call, or `None` when not known.
+        """
+        ...
 
     def detect_stars(self, data: Any, is_color_frame: bool = False) -> tuple[list[dict], list[dict]]:
         """Find the stars in an image and drop duplicates.
@@ -81,6 +113,16 @@ class SessionStarIdentifier(Protocol):
         """
         ...
 
+    def use_image_header(self, header: Any) -> None:
+        """Set the Gaia query depth from the header of the image to be named.
+
+        Parameters
+        ----------
+        header : `Any`
+            The image's FITS header.
+        """
+        ...
+
     def identify_stars_with_wcs(
         self, stellar_objects: list[StellarObject], wcs: WCS, width: int, height: int
     ) -> list[StellarObject]:
@@ -103,6 +145,15 @@ class SessionStarIdentifier(Protocol):
 # Setting the limit to 0.10 (10%) easily separates the good from the bad,
 # ensuring a correct solution isn't accidentally thrown away just
 # because the star field is sparse.
+# The share does not separate them in a dense field. A wrong solution still
+# pairs a star with whatever catalog star happens to fall within the match
+# radius. The chance is 1 - exp(-pi R^2 n) for a catalog of n stars per unit
+# area: about 17% for a 10 arcsecond radius in a Milky Way field with
+# 7,700 catalog stars per square degree, and about 30% at the 14 arcsecond
+# radius of a Nikon D5300 behind a 300 mm lens. There the concentration
+# test of `plate_solution_problem` (`match_concentration_limit`) is what
+# catches a wrong solution. Both a reused header map and a photometry
+# session's solution go through both tests (AST-D19).
 MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = TunedParameter(
     name="shared.min_catalog_match_fraction_for_reused_wcs",
     default=0.10,
@@ -130,19 +181,233 @@ MIN_STARS_TO_VERIFY_REUSED_WCS = TunedParameter(
 )
 
 
+# The circle the concentration test looks in, as a multiple of the catalog
+# match radius R (`CATALOG_MATCH_RADIUS_ARCSEC`, resolved for the run's plate
+# scale). The test counts the stars whose nearest catalog entry lies within
+# this wider circle W, whether or not that entry is close enough to match,
+# and asks what share of them have it inside R. Design estimate (AST-D19).
+SOLUTION_CHECK_RADIUS_FACTOR = TunedParameter(
+    name="shared.solution_check_radius_factor",
+    default=2.0,
+    unit="multiple of match radius",
+    description="Radius of the plate solution check's search circle, as a multiple of the match radius.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D19",
+)
+
+# How far above the chance share, in standard errors, a solution's share must
+# be. Under a wrong solution each star's nearest catalog entry is a chance
+# neighbor, and of the n stars with one inside the search circle W the share
+# inside the match radius R is a binomial count over n with a chance share s0
+# (`chance_concentration`). Three standard errors sets a wrong solution aside
+# except about once in 700 (one-sided normal tail). Design estimate until
+# shifted real solutions are checked (AST-D19).
+MATCH_CONCENTRATION_SIGMAS = TunedParameter(
+    name="shared.match_concentration_sigmas",
+    default=3.0,
+    unit="standard errors",
+    description="Standard errors above the chance share a plate solution's concentration must reach.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-D19",
+)
+
+# Highest concentration limit the check may demand. With few stars in the
+# search circle the limit (`match_concentration_limit`) climbs, and a right
+# solution in a dense field, whose faint detections take chance neighbors,
+# may not reach it: with 20% true matches its share is about 0.5. Above this
+# value the test cannot tell a right solution from a wrong one, so it is
+# skipped instead of failing, and only the match-share test judges the run.
+# Design estimate until shifted real solutions are checked (AST-D19).
+MAX_DECIDABLE_CONCENTRATION_LIMIT = TunedParameter(
+    name="shared.max_decidable_concentration_limit",
+    default=0.5,
+    unit="fraction",
+    description="Highest concentration limit the plate solution check demands; above it the test is skipped.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-D19",
+)
+
+# The least share the concentration test asks for, whatever the field. With
+# many stars the chance share plus three standard errors nears the chance
+# share itself (0.25 in a sparse field, 0.32 at 10 arcsec and 0.40 at
+# 14 arcsec with 7,700 catalog stars per square degree), so this floor keeps a
+# margin above the sparse value. A right solution puts true neighbors inside
+# R: at 20% true matches in that dense field the share is about 0.55. On the
+# real catalog (backup of 2026-11-24), right solutions had median match
+# distances of 6.5 arcsec (Algol, ZWO ASI533MM) and 6.2 arcsec (M 67, Nikon
+# D5300), so a median test cannot separate them. Design estimate (AST-D19).
+MIN_MATCH_CONCENTRATION = TunedParameter(
+    name="shared.min_match_concentration",
+    default=0.35,
+    unit="fraction",
+    description=(
+        "Least share of catalog neighbors in the search circle that must lie within the match radius."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D19",
+)
+
+
+def chance_concentration(
+    match_radius_arcsec: float, search_radius_arcsec: float, catalog_density_per_square_degree: float | None
+) -> float:
+    """Give the share a wrong solution puts inside the match radius by chance.
+
+    Under a wrong solution a star's nearest catalog entry is the nearest of
+    entries scattered at random. With ``lam`` entries expected inside the
+    match radius R (the density times pi R^2), the chance of one inside R is
+    1 - exp(-lam), and inside the search circle W it is
+    1 - exp(-lam (W/R)^2). The share is their ratio. A sparse field gives
+    (R/W)^2; a dense field draws the nearest entry inward and gives more.
+
+    Parameters
+    ----------
+    match_radius_arcsec : `float`
+        The match radius R.
+    search_radius_arcsec : `float`
+        The search circle's radius W.
+    catalog_density_per_square_degree : `float` or `None`
+        Catalog stars per square degree over the image. `None` (not known)
+        gives the sparse-field value (R/W)^2.
+
+    Returns
+    -------
+    share : `float`
+        The chance share, between (R/W)^2 and 1.
+    """
+    area_ratio = (search_radius_arcsec / match_radius_arcsec) ** 2
+    if catalog_density_per_square_degree is None or catalog_density_per_square_degree <= 0.0:
+        return 1.0 / area_ratio
+    expected_inside = catalog_density_per_square_degree / 3600.0**2 * math.pi * match_radius_arcsec**2
+    return -math.expm1(-expected_inside) / -math.expm1(-expected_inside * area_ratio)
+
+
+def match_concentration_limit(chance_share: float, stars_in_search_circle: int) -> float:
+    """Give the least concentration a solution must show to stand.
+
+    Parameters
+    ----------
+    chance_share : `float`
+        The share a wrong solution gives (`chance_concentration`).
+    stars_in_search_circle : `int`
+        The stars whose nearest catalog entry lies in the search circle.
+
+    Returns
+    -------
+    limit : `float`
+        The chance share plus `MATCH_CONCENTRATION_SIGMAS` binomial standard
+        errors, and at least `MIN_MATCH_CONCENTRATION`.
+    """
+    spread = math.sqrt(chance_share * (1.0 - chance_share) / stars_in_search_circle)
+    return max(
+        float(resolve(MIN_MATCH_CONCENTRATION).value),
+        chance_share + float(resolve(MATCH_CONCENTRATION_SIGMAS).value) * spread,
+    )
+
+
+def plate_solution_problem(
+    stellar_objects: list[StellarObject],
+    nearest_catalog_separations_arcsec: list[float],
+    catalog_density_per_square_degree: float | None,
+) -> str | None:
+    """Say why a run's plate solution looks wrong, judged by its stars.
+
+    A wrong solution puts every star somewhere it is not. Few stars then
+    find their catalog star (`MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`),
+    and each star's nearest catalog entry is a chance neighbor. Among the
+    stars with a neighbor inside the search circle
+    (`SOLUTION_CHECK_RADIUS_FACTOR` times the match radius), the share whose
+    neighbor is also inside the match radius is then near the chance share
+    of the field's catalog density (`chance_concentration`). A solution
+    stands only when its share is clearly above it
+    (`match_concentration_limit`). Saving a wrong run would make new
+    position-only stars at false positions and give light curves to the
+    wrong stars.
+
+    The match radius is `CATALOG_MATCH_RADIUS_ARCSEC` as the current run
+    resolves it (it follows the plate scale), the same radius the star
+    identifier matched with. Call this inside the run that identified the
+    stars.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The run's identified stars.
+    nearest_catalog_separations_arcsec : `list` [`float`]
+        For each star with a sky position, the distance in arcseconds to
+        its nearest catalog entry, matched or not (the star identifier's
+        `nearest_catalog_separations_arcsec` from the same run).
+    catalog_density_per_square_degree : `float` or `None`
+        The catalog stars per square degree over the image, from the same
+        run. `None` when not known: the sparse-field chance share is used.
+
+    Returns
+    -------
+    problem : `str` or `None`
+        A sentence saying what is wrong, or `None` when the solution looks
+        right or there are fewer than `MIN_STARS_TO_VERIFY_REUSED_WCS`
+        stars to judge by. The concentration test alone is skipped when
+        fewer than that many stars have a neighbor in the search circle, or
+        when its limit would exceed `MAX_DECIDABLE_CONCENTRATION_LIMIT`
+        (too few stars to tell a right solution from chance).
+    """
+    stars = [star for star in stellar_objects if star.right_ascension is not None]
+    minimum_stars = resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value
+    if len(stars) < minimum_stars:
+        return None
+    matched_fraction = _catalog_matched_count(stars) / len(stars)
+    if matched_fraction < resolve(MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS).value:
+        return f"only {matched_fraction:.0%} of {len(stars)} stars matched a catalog star"
+    match_radius = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
+    search_radius = float(resolve(SOLUTION_CHECK_RADIUS_FACTOR).value) * match_radius
+    in_search_circle = [
+        distance for distance in nearest_catalog_separations_arcsec if distance <= search_radius
+    ]
+    if len(in_search_circle) < minimum_stars:
+        return None
+    concentration = sum(1 for distance in in_search_circle if distance <= match_radius) / len(
+        in_search_circle
+    )
+    chance_share = chance_concentration(match_radius, search_radius, catalog_density_per_square_degree)
+    limit = match_concentration_limit(chance_share, len(in_search_circle))
+    if limit > float(resolve(MAX_DECIDABLE_CONCENTRATION_LIMIT).value):
+        logger.info(
+            "Plate solution concentration not judged: %d stars in the search circle are too few "
+            "(limit %.0f%%, chance %.0f%%)",
+            len(in_search_circle),
+            100 * limit,
+            100 * chance_share,
+        )
+        return None
+    if concentration < limit:
+        return (
+            f"only {concentration:.0%} of the {len(in_search_circle)} stars with a catalog entry within "
+            f"{search_radius:.1f} arcsec have it within the {match_radius:.1f} arcsec match radius "
+            f"(limit {limit:.0%}, chance {chance_share:.0%})"
+        )
+    return None
+
+
+# The header card that says the sky map was refit to Gaia stars after the
+# solver made it (see `wcs_refinement`). A file with no card, or a false one,
+# holds the solver's own solution, which the analysis step may still refit
+# and save (`stage.save_refit_stack_plate_solution`).
+REFIT_TO_GAIA_KEYWORD = "WCSREFIT"
+
 # The keywords that describe where an image points on the sky, for the first
 # two axes. `write_wcs_to_fits_header` deletes these before it writes a new
 # solution. Without that step, a card from an older solve can survive and
 # contradict the new one. For example, an old `CD1_1` matrix outranks a new
 # `PC1_1` matrix when astropy reads the header, and an old `A_4_0` term
 # stays next to a new second-order SIP fit.
-# The header card that marks a sky map as written by a plate solve of this
-# library. Camera and capture programs also write position keywords (the
-# place the mount was told to point), which are only a pointing guess, so a
-# reader that needs a true solution looks for this card or for the distortion
-# terms that only a solver fits (see `header_is_plate_solved`).
-PLATE_SOLVED_KEYWORD = "PLTSOLVD"
-
 _STALE_WCS_KEYWORD_PATTERN = re.compile(
     r"^(WCSAXES|CTYPE[12]|CRVAL[12]|CRPIX[12]|CDELT[12]|CUNIT[12]|CROTA[12]"
     r"|PC[12]_[12]|CD[12]_[12]|PV[12]_\d+|PS[12]_\d+"
@@ -151,12 +416,8 @@ _STALE_WCS_KEYWORD_PATTERN = re.compile(
 )
 
 
-def header_is_plate_solved(header: fits.Header) -> bool:
-    """Say whether a header's sky map came from a plate solve.
-
-    A header can hold sky-map keywords that are only the position the mount
-    was told to point at. Those are not a solution: a star placed with them
-    can sit tens of pixels from where it really is.
+def header_is_refit_to_gaia(header: fits.Header) -> bool:
+    """Say whether a header's sky map was refit to Gaia stars.
 
     Parameters
     ----------
@@ -165,16 +426,47 @@ def header_is_plate_solved(header: fits.Header) -> bool:
 
     Returns
     -------
-    is_solved : `bool`
-        True when the header carries `PLATE_SOLVED_KEYWORD` as true, or SIP
-        distortion terms (``A_ORDER``), which a solver fits and a pointing
-        guess does not have. The second test recognizes files solved before
-        the card was written.
+    is_refit : `bool`
+        True when the header carries `REFIT_TO_GAIA_KEYWORD` as true.
     """
-    return bool(header.get(PLATE_SOLVED_KEYWORD, False)) or "A_ORDER" in header
+    return bool(header.get(REFIT_TO_GAIA_KEYWORD, False))
 
 
-def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
+def put_wcs_in_header(
+    header: fits.Header, wcs: WCS, *, mark_plate_solved: bool, refit_to_gaia: bool | None = None
+) -> None:
+    """Replace the sky-map keywords of a header in memory.
+
+    The old sky-map keywords are deleted first (see `write_wcs_to_fits_header`
+    for why), then the keywords of ``wcs`` are written, with the SIP
+    distortion terms.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The header to change.
+    wcs : `astropy.wcs.WCS`
+        The sky map to store.
+    mark_plate_solved : `bool`
+        Whether to write `PLATE_SOLVED_KEYWORD`.
+    refit_to_gaia : `bool`, optional
+        Whether to write `REFIT_TO_GAIA_KEYWORD` as true or false. Left out,
+        the card is not touched, so a solution that is only moved (turned or
+        cropped) keeps its mark.
+    """
+    for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
+        del header[keyword]
+    for card in wcs.to_header(relax=True).cards:
+        if not card.keyword:
+            continue
+        header[card.keyword] = (card.value, card.comment)
+    if mark_plate_solved:
+        header[PLATE_SOLVED_KEYWORD] = (True, "sky map written by a plate solve")
+    if refit_to_gaia is not None:
+        header[REFIT_TO_GAIA_KEYWORD] = (refit_to_gaia, "sky map refit to Gaia stars")
+
+
+def write_wcs_to_fits_header(path: str, wcs: WCS, *, refit_to_gaia: bool = False) -> None:
     """Save a solved sky map (WCS) into a FITS file's header.
 
     The next program that opens the file (this library, Siril, a FITS
@@ -188,7 +480,9 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
     file would then lose the lens distortion near the image edges.
 
     It also writes the card `PLATE_SOLVED_KEYWORD`, so a reader can tell this
-    solution from a pointing guess (see `header_is_plate_solved`).
+    solution from a pointing guess (see `header_is_plate_solved`), and the
+    card `REFIT_TO_GAIA_KEYWORD`, so a reader can tell a refit solution from
+    the solver's own (see `header_is_refit_to_gaia`).
 
     The function logs a warning and returns if the file cannot be updated.
 
@@ -198,6 +492,9 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
         The FITS file to update. A missing or empty path does nothing.
     wcs : `astropy.wcs.WCS`
         The solved sky map to store.
+    refit_to_gaia : `bool`, optional
+        True when ``wcs`` was refit to Gaia stars. Written to the header either
+        way, so an older mark never survives a new solution.
     """
     if not path or not os.path.exists(path):
         return
@@ -216,13 +513,7 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
             changed : `bool`
                 Always `True`, because the header is changed.
             """
-            for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
-                del header[keyword]
-            for card in wcs.to_header(relax=True).cards:
-                if not card.keyword:
-                    continue
-                header[card.keyword] = (card.value, card.comment)
-            header[PLATE_SOLVED_KEYWORD] = (True, "sky map written by a plate solve")
+            put_wcs_in_header(header, wcs, mark_plate_solved=True, refit_to_gaia=refit_to_gaia)
             return True
 
         update_first_header(path, _write_solved_wcs)
@@ -241,6 +532,7 @@ def resolve_frame_wcs(
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
     solve_timeout: int = 300,
+    trust_image_wcs: bool = False,
 ) -> tuple[WCS | None, bool, bool]:
     """Figure out the sky map (WCS) for an image.
 
@@ -266,6 +558,11 @@ def resolve_frame_wcs(
         If True, ignore any saved map and force it to calculate a new one.
     solve_timeout : `int`, optional
         The maximum time in seconds to let the solver run.
+    trust_image_wcs : `bool`, optional
+        Use the image's sky map even when its header does not mark it as
+        plate solved (`header_is_plate_solved`). Set when the caller put a
+        solved stack's map on the image itself. Otherwise a header map that
+        is only the mount's pointing (as INDI writes) is not used.
 
     Returns
     -------
@@ -286,6 +583,7 @@ def resolve_frame_wcs(
         write_back=write_back,
         ignore_existing_wcs=ignore_existing_wcs,
         solve_timeout=solve_timeout,
+        trust_image_wcs=trust_image_wcs,
     )
     return wcs, reused_existing_header_wcs, solve_attempted
 
@@ -300,6 +598,7 @@ def _resolve_frame_wcs_with_fit(
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
     solve_timeout: int = 300,
+    trust_image_wcs: bool = False,
 ) -> tuple[WCS | None, bool, bool, tuple[float | None, int | None]]:
     """Find an image's sky map (WCS) and keep the solver's fit numbers.
 
@@ -325,6 +624,11 @@ def _resolve_frame_wcs_with_fit(
         If True, ignore any saved map and force it to calculate a new one.
     solve_timeout : `int`, optional
         The maximum time in seconds to let the solver run.
+    trust_image_wcs : `bool`, optional
+        Use the image's sky map even when its header does not mark it as
+        plate solved (`header_is_plate_solved`). Set when the caller put a
+        solved stack's map on the image itself. Otherwise a header map that
+        is only the mount's pointing (as INDI writes) is not used.
 
     Returns
     -------
@@ -340,10 +644,19 @@ def _resolve_frame_wcs_with_fit(
         or the solver did not report them.
     """
     no_fit_statistics: tuple[float | None, int | None] = (None, None)
-    if not ignore_existing_wcs and image.wcs is not None and image.wcs.is_celestial:
+    if (
+        not ignore_existing_wcs
+        and image.wcs is not None
+        and image.wcs.is_celestial
+        and (trust_image_wcs or _image_header_is_plate_solved(image))
+    ):
         # NOTE: is_celestial is a *structural* check (does this WCS have
         # RA/Dec axes), not an accuracy one -- a header solution that is
         # off by tens of arcsec passes it just as readily as a good one.
+        # A header map that is only the mount's pointing is refused above:
+        # on the M 31 frames of 2026-11-04 (ZWO ASI 533MM Pro, 405 mm) the
+        # one INDI writes sits dRA +34", dDec +44" from the solved frame,
+        # which put 303 stars outside the catalog match radius.
         # `identify_session_stars` verifies the result against catalog
         # matches and re-solves when this turns out to be untrustworthy.
         return image.wcs, True, False, no_fit_statistics
@@ -382,6 +695,26 @@ def _resolve_frame_wcs_with_fit(
     return wcs, False, True, read_fit_statistics(header)
 
 
+def _image_header_is_plate_solved(image: Any) -> bool:
+    """Say whether an image's header map came from a plate solve.
+
+    Parameters
+    ----------
+    image : `AstrometricsImage`
+        The image.
+
+    Returns
+    -------
+    is_solved : `bool`
+        `True` when the header passes `header_is_plate_solved`. An image
+        without a header gives `False`.
+    """
+    header = getattr(image, "header", None)
+    if header is None:
+        return False
+    return header_is_plate_solved(header)
+
+
 def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
     """Count how many stars were successfully looked up in the database.
 
@@ -391,25 +724,6 @@ def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
         The number of stars positively identified.
     """
     return sum(1 for star in stellar_objects if star.is_catalog_identified)
-
-
-def _reused_wcs_looks_untrustworthy(stellar_objects: list[StellarObject]) -> bool:
-    """Check if the saved map in the image file is actually garbage.
-
-    Sometimes an image has a saved map, but it's completely wrong.
-    This can be determined because when trying to look up the stars
-    using that map, none of them match the real database.
-
-    Returns
-    -------
-    untrustworthy : `bool`
-        True if the saved map is so bad it needs to be thrown out and
-        recalculated.
-    """
-    if len(stellar_objects) < resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value:
-        return False
-    matched_fraction = _catalog_matched_count(stellar_objects) / len(stellar_objects)
-    return matched_fraction < resolve(MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS).value
 
 
 @dataclass
@@ -423,10 +737,19 @@ class SessionIdentificationResult:
     plate_solve_succeeded: bool = False
     simbad_matched_count: int = 0
     sources_detected: int = 0
-    # True when a reused header WCS matched too few catalog stars to be
-    # trusted and was replaced by a fresh plate solve; see
-    # MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS.
+    # True when a reused header WCS failed `plate_solution_problem` (too few
+    # catalog matches, or nearest catalog entries not concentrated inside
+    # the match radius) and was replaced by a fresh plate solve.
     header_wcs_replaced_after_verification: bool = False
+    # For each star in `stellar_objects` with a sky position, the distance in
+    # arcseconds to its nearest catalog entry, matched or not. It belongs to
+    # the identification that made `stellar_objects`, and is what
+    # `plate_solution_problem` needs beside the stars.
+    nearest_catalog_separations_arcsec: list[float] = field(default_factory=list)
+    # The catalog stars per square degree over the image in that same
+    # identification, which sets the chance share of `plate_solution_problem`.
+    # `None` when not known.
+    catalog_density_per_square_degree: float | None = None
     # How well the plate solve that produced `wcs` fit its reference stars.
     # `fit_residual_rms_arcsec` is the root mean square (RMS) distance, in
     # arcseconds, between the matched stars' fitted positions and the
@@ -444,6 +767,7 @@ def identify_session_stars(
     center_dec: float | None = None,
     max_detections: int | None = None,
     write_back: bool = True,
+    trust_image_wcs: bool = False,
 ) -> SessionIdentificationResult:
     """Find and name all the stars in the first image of a sequence.
 
@@ -463,6 +787,10 @@ def identify_session_stars(
         This puts a cap on how many of the brightest stars are identified.
     write_back : `bool`, optional
         Whether to save the calculated map data back into the image file.
+    trust_image_wcs : `bool`, optional
+        Use a sky map the caller put on the image even though its header
+        is not marked as plate solved (see `resolve_frame_wcs`). It is
+        still checked against the catalog.
 
     Returns
     -------
@@ -475,6 +803,7 @@ def identify_session_stars(
     data, unique_sources, sources_detected = _detect_and_limit_session_sources(
         reference_image, star_identifier, max_detections
     )
+    star_identifier.use_image_header(getattr(reference_image, "header", None))
 
     stellar_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
 
@@ -486,16 +815,23 @@ def identify_session_stars(
         center_dec=center_dec,
         sources=unique_sources,
         write_back=write_back,
+        trust_image_wcs=trust_image_wcs,
     )
 
     height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)
 
+    nearest_separations: list[float] = []
+    catalog_density: float | None = None
     if wcs is not None and stellar_objects:
         star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
+        nearest_separations = list(star_identifier.nearest_catalog_separations_arcsec)
+        catalog_density = _field_catalog_density(star_identifier)
 
     (
         wcs,
         stellar_objects,
+        nearest_separations,
+        catalog_density,
         reused_existing_header_wcs,
         solve_attempted,
         header_wcs_replaced,
@@ -508,6 +844,8 @@ def identify_session_stars(
         center_dec,
         wcs,
         stellar_objects,
+        nearest_separations,
+        catalog_density,
         reused_existing_header_wcs,
         solve_attempted,
         width,
@@ -527,6 +865,8 @@ def identify_session_stars(
         simbad_matched_count=simbad_matched_count,
         sources_detected=sources_detected,
         header_wcs_replaced_after_verification=header_wcs_replaced,
+        nearest_catalog_separations_arcsec=nearest_separations,
+        catalog_density_per_square_degree=catalog_density,
         fit_residual_rms_arcsec=fit_statistics[0],
         matched_star_count=fit_statistics[1],
     )
@@ -589,13 +929,24 @@ def _reverify_wcs_solution(
     center_dec: float | None,
     wcs: WCS | None,
     stellar_objects: list[StellarObject],
+    nearest_separations: list[float],
+    catalog_density: float | None,
     reused_existing_header_wcs: bool,
     solve_attempted: bool,
     width: int,
     height: int,
     write_back: bool,
     fit_statistics: tuple[float | None, int | None],
-) -> tuple[WCS | None, list[StellarObject], bool, bool, bool, tuple[float | None, int | None]]:
+) -> tuple[
+    WCS | None,
+    list[StellarObject],
+    list[float],
+    float | None,
+    bool,
+    bool,
+    bool,
+    tuple[float | None, int | None],
+]:
     """Re-solve a reused header WCS that turns out to be untrustworthy.
 
     Parameters
@@ -612,6 +963,10 @@ def _reverify_wcs_solution(
         The WCS from the first pass.
     stellar_objects : `list` [`StellarObject`]
         The stars identified against `wcs`.
+    nearest_separations : `list` [`float`]
+        The nearest catalog distances of that identification.
+    catalog_density : `float` or `None`
+        The catalog stars per square degree of that identification.
     reused_existing_header_wcs : `bool`
         Whether `wcs` came from the image header.
     solve_attempted : `bool`
@@ -630,6 +985,11 @@ def _reverify_wcs_solution(
         better, otherwise unchanged.
     stellar_objects : `list` [`StellarObject`]
         The stars identified against `wcs`.
+    nearest_separations : `list` [`float`]
+        The nearest catalog distances of the identification against the
+        returned `wcs`.
+    catalog_density : `float` or `None`
+        The catalog stars per square degree of that identification.
     reused_existing_header_wcs : `bool`
         Whether the returned WCS is still the reused header one.
     solve_attempted : `bool`
@@ -643,16 +1003,28 @@ def _reverify_wcs_solution(
         when it replaced the header WCS, otherwise `fit_statistics`
         unchanged.
     """
-    if not (reused_existing_header_wcs and _reused_wcs_looks_untrustworthy(stellar_objects)):
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
+    problem = (
+        plate_solution_problem(stellar_objects, nearest_separations, catalog_density)
+        if reused_existing_header_wcs
+        else None
+    )
+    if problem is None:
+        return (
+            wcs,
+            stellar_objects,
+            nearest_separations,
+            catalog_density,
+            reused_existing_header_wcs,
+            solve_attempted,
+            False,
+            fit_statistics,
+        )
 
     matched_before = _catalog_matched_count(stellar_objects)
     logger.warning(
-        "Reused header WCS for %s identified only %s/%s stars against a catalog; discarding it and "
-        "plate-solving this frame fresh.",
+        "Reused header WCS for %s looks wrong (%s); discarding it and plate-solving this frame fresh.",
         reference_image.path,
-        matched_before,
-        len(stellar_objects),
+        problem,
     )
     # write_back=False: the header is only corrected below, once the
     # fresh solve has actually proven better. Overwriting first would
@@ -669,15 +1041,29 @@ def _reverify_wcs_solution(
         ignore_existing_wcs=True,
     )
     solve_attempted = solve_attempted or fresh_solve_attempted
+    # What is returned when the header WCS stays: the first pass's stars and
+    # distances, not the fresh pass's, which the identifier now holds.
+    kept = (
+        wcs,
+        stellar_objects,
+        nearest_separations,
+        catalog_density,
+        reused_existing_header_wcs,
+        solve_attempted,
+        False,
+        fit_statistics,
+    )
 
     if fresh_wcs is None:
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
+        return kept
 
     # Identify onto *fresh* objects: the first pass already mutated
     # the originals (ids, names, coordinates), so reusing them would
     # compare a re-identified list against itself.
     fresh_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
     star_identifier.identify_stars_with_wcs(fresh_objects, fresh_wcs, width, height)
+    fresh_separations = list(star_identifier.nearest_catalog_separations_arcsec)
+    fresh_density = _field_catalog_density(star_identifier)
     matched_after = _catalog_matched_count(fresh_objects)
 
     if matched_after <= matched_before:
@@ -687,7 +1073,7 @@ def _reverify_wcs_solution(
             matched_before,
             matched_after,
         )
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
+        return kept
 
     logger.info(
         "Fresh plate solve for %s improved catalog matches %s -> %s; using it instead of the header WCS.",
@@ -697,4 +1083,30 @@ def _reverify_wcs_solution(
     )
     if write_back:
         write_wcs_to_fits_header(reference_image.path, fresh_wcs)
-    return fresh_wcs, fresh_objects, False, solve_attempted, True, fresh_fit_statistics
+    return (
+        fresh_wcs,
+        fresh_objects,
+        fresh_separations,
+        fresh_density,
+        False,
+        solve_attempted,
+        True,
+        fresh_fit_statistics,
+    )
+
+
+def _field_catalog_density(star_identifier: SessionStarIdentifier) -> float | None:
+    """Read the catalog density the identifier counted over the last image.
+
+    Parameters
+    ----------
+    star_identifier : `SessionStarIdentifier`
+        The identifier that just named the stars.
+
+    Returns
+    -------
+    density : `float` or `None`
+        Catalog stars per square degree, or `None` when the identifier did
+        not count them (a stand-in, or no complete Gaia tiles).
+    """
+    return getattr(star_identifier, "field_catalog_density_per_square_degree", None)

@@ -10,10 +10,18 @@ import logging
 from collections.abc import Callable
 
 import numpy as np
-from astropy.stats import sigma_clipped_stats
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    collapse_to_2d,
+    read_data,
+    read_header_and_data,
+)
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
+from astrometricslib.pipelines.shared.quality.background_measurement import (
+    is_color_mosaic,
+    measure_background_of_pixels,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,
@@ -63,10 +71,11 @@ def measure_frame_input_quality(
     }
 
     try:
-        data = read_data(path)
-        if data is None:
+        header, raw_data = read_header_and_data(path)
+        if raw_data is None:
             return metrics
-        data = np.asarray(data, dtype=float)
+        color_mosaic = is_color_mosaic(header, raw_data)
+        data = np.asarray(raw_data, dtype=float)
     except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read %s for input-quality measurement: %s", path, read_error)
         return metrics
@@ -76,8 +85,10 @@ def measure_frame_input_quality(
     data = collapse_to_2d(data)
 
     try:
-        _, median, _ = sigma_clipped_stats(data, sigma=3.0)
-        metrics["background_level"] = float(median)
+        # The same estimator as `measure_frame_background_level`
+        # (`BACKGROUND_LEVEL_METHOD`), so a level measured here and one
+        # measured by the stacking check can be compared.
+        metrics["background_level"] = measure_background_of_pixels(data, color_mosaic)
     except DATA_ERRORS as background_error:
         logger.debug("Background measurement failed for %s: %s", path, background_error)
 

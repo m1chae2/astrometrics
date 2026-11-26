@@ -39,6 +39,17 @@ from astrometricslib.models.tuned_parameter import (
 
 _instance = None
 
+# The two SIMBAD servers, Strasbourg (CDS) and its Harvard mirror, which hold
+# the same database. `[Catalogs] simbad_preferred_server` must be one of them.
+SIMBAD_SERVER_CHOICES = ("simbad.cds.unistra.fr", "simbad.harvard.edu")
+DEFAULT_SIMBAD_SERVER = "simbad.harvard.edu"
+
+# The two VizieR servers, Strasbourg (CDS) and its Harvard mirror, which hold
+# the same catalogs. `[Catalogs] vizier_preferred_server` must be one of them.
+# astroquery takes the host name as `Vizier(vizier_server=...)`.
+VIZIER_SERVER_CHOICES = ("vizier.cds.unistra.fr", "vizier.cfa.harvard.edu")
+DEFAULT_VIZIER_SERVER = "vizier.cfa.harvard.edu"
+
 # Defaults of the processing settings below. Each is a `TunedParameter`
 # whose value comes from the config file; the default is used when the
 # file has none. The getters of `AppConfiguration` read them.
@@ -107,13 +118,23 @@ MINIMUM_CALIBRATION_FRAMES = TunedParameter(
 )
 COSMIC_CLARITY_DENOISE_STRENGTH = TunedParameter(
     name="stacking.cosmic_clarity_denoise_strength",
-    default=0.9,
+    default=0.5,
     unit="fraction (0 to 1)",
     description="How strongly Cosmic Clarity removes noise from the stack preview.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.PROCESSING_SETTING,
     register_entry="STK-30",
     config_key=("Processing.CosmicClarity", "denoise_strength"),
+)
+PREVIEW_COLOR_DENOISE_STRENGTH = TunedParameter(
+    name="stacking.preview_color_denoise_strength",
+    default=0.3,
+    unit="fraction (0 to 1)",
+    description="How strongly Cosmic Clarity removes color speckle from a color stack's preview.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-D81",
+    config_key=("Processing.CosmicClarity", "color_denoise_strength"),
 )
 MAXIMUM_IDENTIFIED_STARS = TunedParameter(
     name="astrometry.maximum_identified_stars",
@@ -609,6 +630,8 @@ class AppConfiguration:
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
                 "preview_remove_green_noise_enabled": "true",
+                "preview_color_from_other_stack_enabled": "true",
+                "preview_star_width_match_enabled": "true",
                 "preview_colour_calibration_enabled": "true",
                 "preview_colour_calibration_method": "pcc",
                 "keep_previous_stack_enabled": "true",
@@ -619,6 +642,12 @@ class AppConfiguration:
                 # ten times the slowest local run, for a slow network mount.
                 "flat_match_time_limit_seconds": "300",
                 "auto_open_gui": "false",
+            },
+            # Harvard first: the Strasbourg server was down for days and each
+            # start waited out a 30 s timeout before trying the mirror.
+            "Catalogs": {
+                "simbad_preferred_server": DEFAULT_SIMBAD_SERVER,
+                "vizier_preferred_server": DEFAULT_VIZIER_SERVER,
             },
             "Processing": {
                 # Off: the user wants nothing to download until they allow it.
@@ -634,6 +663,7 @@ class AppConfiguration:
                 "denoise_executable": "",
                 "denoise_enabled": "true",
                 "denoise_strength": str(COSMIC_CLARITY_DENOISE_STRENGTH.default),
+                "color_denoise_strength": str(PREVIEW_COLOR_DENOISE_STRENGTH.default),
             },
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
@@ -756,10 +786,10 @@ class AppConfiguration:
         -------
         strength : `float`
             The configured strength, kept between 0 and 1. A missing or
-            unreadable setting gives 0.9. On the M 101, M 57, NGC 4438 and
-            M 81 stacks, 0.9 cut the sky grain by 14-39% compared with 0.75
-            and left star peaks unchanged. On the M 13 stack, 0.5 left
-            visible grain. The denoise runs after the stretch.
+            unreadable setting gives 0.5. On the NGC 7331 and M 31 stacks,
+            0.5 halved the sky noise without widening stars; 0.7 smeared
+            the diffuse galaxy NGC 7320 more. Strength 0.9 smeared Stephan's
+            Quintet. The denoise runs after the stretch (STK-30).
         """
         raw = self.get_value(
             "Processing.CosmicClarity",
@@ -770,6 +800,30 @@ class AppConfiguration:
             return min(1.0, max(0.0, float(raw)))
         except TypeError, ValueError:
             return float(COSMIC_CLARITY_DENOISE_STRENGTH.default)
+
+    def get_preview_color_denoise_strength(self) -> float:
+        """Return how strongly Cosmic Clarity smooths color speckle (0 to 1).
+
+        Only a color stack, such as one from the Nikon DSLR, uses it. A
+        single-channel stack has no color to smooth.
+
+        Returns
+        -------
+        strength : `float`
+            The configured strength, kept between 0 and 1. A missing or
+            unreadable setting gives 0.3. On one Nikon stack, 0.3 more than
+            halved the red-minus-blue speckle in the sky and kept about 85
+            percent of the stars' color; 0.5 turned the stars gray (STK-D81).
+        """
+        raw = self.get_value(
+            "Processing.CosmicClarity",
+            "color_denoise_strength",
+            fallback=str(PREVIEW_COLOR_DENOISE_STRENGTH.default),
+        )
+        try:
+            return min(1.0, max(0.0, float(raw)))
+        except TypeError, ValueError:
+            return float(PREVIEW_COLOR_DENOISE_STRENGTH.default)
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.
@@ -1141,6 +1195,42 @@ class AppConfiguration:
         val = self.get_value("Processing.Siril", "preview_star_tone_enabled", fallback="true")
         return str(val).lower() == "true"
 
+    def get_preview_color_from_other_stack_enabled(self) -> bool:
+        """Return whether a monochrome stack also gets a color picture.
+
+        When on, and the target also has a color stack (from another camera
+        or optic), the preview step makes a second picture beside the
+        monochrome one: its brightness comes from the monochrome stack and
+        its color from the color stack (see
+        `pipelines/stacking/post_processing/color_from_other_stack.py`). The
+        monochrome picture and both stacks are never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the color picture should be made.
+        """
+        val = self.get_value("Processing.Siril", "preview_color_from_other_stack_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_star_width_match_enabled(self) -> bool:
+        """Return whether a color preview matches its channels' star widths.
+
+        When on, the preview of a color stack measures the star width of each
+        color channel on the linear data and sharpens a channel whose stars
+        are clearly wider than the green channel's, so stars do not get a
+        colored ring (see
+        `pipelines/stacking/post_processing/star_width_match.py`). The stack
+        itself is never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the star width matching step should run.
+        """
+        val = self.get_value("Processing.Siril", "preview_star_width_match_enabled", fallback="true")
+        return str(val).lower() == "true"
+
     def get_preview_colour_calibration_enabled(self) -> bool:
         """Return whether the stack preview balances a colour stack's colours.
 
@@ -1163,8 +1253,10 @@ class AppConfiguration:
 
         ``"pcc"`` runs Siril's photometric colour calibration, which solves
         the field, matches the stars to the Gaia catalogue over the network
-        and falls back to the star-based method if that fails. ``"stars"``
-        uses only the star-based method, which needs no network.
+        and falls back to the stars like the Sun if that fails. ``"stars"``
+        uses only the stars like the Sun: the stars whose Gaia colours match
+        the Sun's are made white (without Gaia colours the colours are left
+        uncalibrated).
 
         Returns
         -------
@@ -1173,6 +1265,57 @@ class AppConfiguration:
         """
         val = str(self.get_value("Processing.Siril", "preview_colour_calibration_method", fallback="pcc"))
         return val.strip().lower() if val.strip().lower() in ("pcc", "stars") else "pcc"
+
+    def get_simbad_preferred_server(self) -> str:
+        """Return the SIMBAD server to ask first.
+
+        SIMBAD has two servers with the same data. The driver asks this one
+        first and falls back to the other if it cannot be reached.
+
+        Returns
+        -------
+        server : `str`
+            ``"simbad.harvard.edu"`` or ``"simbad.cds.unistra.fr"``. A missing
+            setting, or any other value, gives ``"simbad.harvard.edu"`` with a
+            warning.
+        """
+        raw = str(self.get_value("Catalogs", "simbad_preferred_server", fallback=DEFAULT_SIMBAD_SERVER))
+        server = raw.strip().lower()
+        if server in SIMBAD_SERVER_CHOICES:
+            return server
+        logging.getLogger(__name__).warning(
+            "[Catalogs] simbad_preferred_server is %r; it must be one of %s. Using %s.",
+            raw,
+            ", ".join(SIMBAD_SERVER_CHOICES),
+            DEFAULT_SIMBAD_SERVER,
+        )
+        return DEFAULT_SIMBAD_SERVER
+
+    def get_vizier_preferred_server(self) -> str:
+        """Return the VizieR server to ask first.
+
+        VizieR has two servers with the same catalogs. The Gaia tile download
+        asks this one first and falls back to the other if it cannot be
+        reached.
+
+        Returns
+        -------
+        server : `str`
+            ``"vizier.cfa.harvard.edu"`` or ``"vizier.cds.unistra.fr"``. A
+            missing setting, or any other value, gives
+            ``"vizier.cfa.harvard.edu"`` with a warning.
+        """
+        raw = str(self.get_value("Catalogs", "vizier_preferred_server", fallback=DEFAULT_VIZIER_SERVER))
+        server = raw.strip().lower()
+        if server in VIZIER_SERVER_CHOICES:
+            return server
+        logging.getLogger(__name__).warning(
+            "[Catalogs] vizier_preferred_server is %r; it must be one of %s. Using %s.",
+            raw,
+            ", ".join(VIZIER_SERVER_CHOICES),
+            DEFAULT_VIZIER_SERVER,
+        )
+        return DEFAULT_VIZIER_SERVER
 
     def get_preview_remove_green_noise_enabled(self) -> bool:
         """Return whether the stack preview removes excess green.

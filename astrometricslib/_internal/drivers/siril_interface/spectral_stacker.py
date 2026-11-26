@@ -21,6 +21,7 @@ from astrometricslib._internal.drivers.siril_interface.run_models import (
     StagedInputs,
 )
 from astrometricslib._internal.drivers.siril_interface.script_builders import SIRIL_SCRIPT_PREAMBLE
+from astrometricslib._internal.drivers.siril_interface.session import SirilStatusQueue
 from astrometricslib._internal.drivers.siril_interface.staging import SirilStaging
 
 logger = logging.getLogger(__name__)
@@ -230,7 +231,7 @@ class SirilSpectralStacker(SirilStaging):
 
         stack_command_pipe, stack_output_pipe = self.create_named_pipes(target_folder)
         stack_process = self.run_siril_headless(stack_command_pipe, stack_output_pipe, job_logger=job_logger)
-        stack_status_queue: queue.Queue[str] = queue.Queue()
+        stack_status_queue: queue.Queue[str] = SirilStatusQueue()
         stack_script = [
             *SIRIL_SCRIPT_PREAMBLE,
             f'cd "{aligned_directory}"',

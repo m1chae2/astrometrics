@@ -21,6 +21,11 @@ works. Code that replaces a name for a test must replace it in the module
 that uses it.
 """
 
+from astrometricslib._internal.drivers.batch_calibration import (
+    dominant_exposure,
+    representative_light_binning,
+    representative_light_temperature_c,
+)
 from astrometricslib._internal.drivers.siril_interface.image_processing import ImageProcessing
 from astrometricslib._internal.drivers.siril_interface.run_models import SirilStackRequest
 from astrometricslib._internal.drivers.siril_interface.script_builders import (
@@ -45,10 +50,7 @@ from astrometricslib._internal.drivers.siril_interface.spectral_stacker import (
 )
 from astrometricslib._internal.drivers.siril_interface.staging import (
     CALIBRATION_MASTER_CACHE_DIRECTORY_NAME,
-    dominant_exposure,
     purge_stale_work_directories,
-    representative_light_binning,
-    representative_light_temperature_c,
     work_directory_name,
 )
 

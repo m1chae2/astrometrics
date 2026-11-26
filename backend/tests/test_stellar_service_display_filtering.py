@@ -101,6 +101,40 @@ def test_target_availability_uses_the_app_keys() -> None:
     service.astrometrics.stars.query.assert_called_once_with(detail="target_counts")
 
 
+def test_the_class_star_colors_list_every_classed_star_and_our_own_type() -> None:
+    """Every star in a class list or with a spectrum gets its facts."""
+    service = _service()
+    classes = [
+        {"spectralClass": "A", "label": "White", "count": 1},
+        {"spectralClass": "C", "label": "Carbon", "count": 1},
+    ]
+    service.astrometrics.stars.query.side_effect = [
+        StarQueryResult(detail="class_counts", classes=classes),
+        StarQueryResult(detail="summary", stars=[{"id": "Vega", "spectralType": "A0V"}]),
+        StarQueryResult(detail="summary", stars=[{"id": "Case 36", "spectralType": "C5:,4"}]),
+        StarQueryResult(
+            detail="summary",
+            stars=[{"id": "Vega", "spectralType": "A0V"}, {"id": "HD 2", "spectralType": ""}],
+        ),
+        StarQueryResult(
+            detail="analysis",
+            stars=[
+                {"id": "Vega", "b_minus_v": 0.0, "spectrum": {"own_spectral_type": "A1V"}},
+                {"id": "HD 2", "b_minus_v": None, "spectrum": None},
+            ],
+        ),
+    ]
+
+    assert service.get_class_star_colors() == [
+        {"id": "Vega", "spectralType": "A0V", "ownSpectralType": "A1V", "bMinusV": 0.0},
+        {"id": "Case 36", "spectralType": "C5:,4", "ownSpectralType": "", "bMinusV": None},
+        {"id": "HD 2", "spectralType": "", "ownSpectralType": "", "bMinusV": None},
+    ]
+    calls = [call.kwargs for call in service.astrometrics.stars.query.call_args_list]
+    assert calls[1] == {"spectral_class": "A", "detail": "summary", "limit": None}
+    assert calls[4] == {"has_spectra": True, "detail": "analysis", "limit": None}
+
+
 def test_the_class_summary_and_a_class_listing_come_from_the_library() -> None:
     """Class counts and one class's stars come from library queries."""
     service = _service()
@@ -241,19 +275,6 @@ def test_a_new_catalog_version_is_announced_once() -> None:
     )
 
 
-def test_full_star_records_include_single_frame_detections() -> None:
-    """The rare caller that wants every record gets detections too."""
-    service = _service()
-    service.astrometrics.stars.query.return_value = StarQueryResult(
-        detail="objects", objects=[StellarObject(id="HD 1")]
-    )
-
-    assert [star.id for star in service.get_stellar_objects("M 13")] == ["HD 1"]
-    service.astrometrics.stars.query.assert_called_once_with(
-        target_id="M 13", detail="objects", include_unresolved=True, limit=None
-    )
-
-
 def _sky_source(source_id: str, kind: str = "star") -> SkySource:
     """Build one sky source.
 
@@ -325,6 +346,18 @@ def test_planetarium_targets_are_every_library_target() -> None:
     )
     assert targets[0]["id"] == "M 13"
     assert targets[0]["type"] == "target"
+
+
+def test_planetarium_targets_carry_the_catalog_size() -> None:
+    """A target's catalog major axis reaches the map."""
+    service = _service()
+    galaxy = _sky_source("M 81", "target").model_copy(update={"major_axis_arcmin": 21.38})
+    service.wayfinder.planning.query_sources.return_value = _found([galaxy, _sky_source("Vega", "target")])
+
+    galaxy_row, star_row = service.get_planetarium_targets()
+
+    assert galaxy_row["majorAxisArcmin"] == pytest.approx(21.38)
+    assert star_row["majorAxisArcmin"] is None
 
 
 def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> None:

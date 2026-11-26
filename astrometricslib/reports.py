@@ -8,7 +8,6 @@ lives today.
 
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import (
-    QuarantinePreview,
     SetAsideFrame,
     SetAsideFrameRecord,
 )
@@ -47,7 +46,6 @@ __all__ = [
     "MeasurementStatus",
     "QualityLimit",
     "QualityMeasurement",
-    "QuarantinePreview",
     "RawFrameCheckReport",
     "SetAsideFrame",
     "SetAsideFrameRecord",

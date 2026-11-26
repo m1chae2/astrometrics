@@ -21,6 +21,7 @@ from astrometricslib.pipelines.shared.session_identification import (
     identify_session_stars,
     resolve_frame_wcs,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 
 def _make_star_identifier() -> StarIdentifier:
@@ -35,7 +36,16 @@ def _make_fake_image(wcs=None, path="/fake/session_reference.fits") -> MagicMock
     image.wcs = wcs
     image.path = path
     image.data = np.zeros((100, 100), dtype=np.float32)
-    image.header = {}
+    # A plate-solved header, so a header map counts as a solution.
+    image.header = {
+        "PLTSOLVD": True,
+        "CTYPE1": "RA---TAN",
+        "CTYPE2": "DEC--TAN",
+        "CRVAL1": 10.0,
+        "CRVAL2": 41.0,
+        "CRPIX1": 50.0,
+        "CRPIX2": 50.0,
+    }
     return image
 
 
@@ -60,6 +70,32 @@ class TestResolveFrameWcs:
         assert wcs is header_wcs
         assert reused is True
         assert solve_attempted is False
+        identifier.solver.solve.assert_not_called()
+
+    def test_a_pointing_map_that_is_not_plate_solved_is_not_reused(self) -> None:
+        """Verify a map INDI wrote from the pointing is solved fresh."""
+        identifier = _make_star_identifier()
+        identifier.solver.solve = MagicMock(return_value=None)
+        image = _make_fake_image(wcs=_make_celestial_wcs())
+        image.header = {"CTYPE1": "RA---TAN", "CRVAL1": 10.7}
+
+        _wcs, reused, solve_attempted = resolve_frame_wcs(image, identifier)
+
+        assert reused is False
+        assert solve_attempted is True
+
+    def test_a_map_the_caller_trusts_is_reused_without_the_plate_solved_card(self) -> None:
+        """Verify a borrowed stack map is reused without PLTSOLVD."""
+        identifier = _make_star_identifier()
+        identifier.solver.solve = MagicMock()
+        borrowed = _make_celestial_wcs()
+        image = _make_fake_image(wcs=borrowed)
+        image.header = {}
+
+        wcs, reused, _solve_attempted = resolve_frame_wcs(image, identifier, trust_image_wcs=True)
+
+        assert wcs is borrowed
+        assert reused is True
         identifier.solver.solve.assert_not_called()
 
     def test_non_celestial_header_wcs_is_not_reused(self) -> None:
@@ -251,6 +287,11 @@ class TestReusedHeaderWcsVerification:
         """
 
         def _identify(stellar_objects, wcs, width, height):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+            # The real identifier gives every star a sky position: a
+            # catalog star's, or the projected one for a position-only star.
+            for index, star in enumerate(stellar_objects):
+                star.right_ascension = 10.0 + index * 0.01
+                star.declination = 41.0
             for star in stellar_objects[:matched_count]:
                 star.is_catalog_identified = True
             return stellar_objects
@@ -388,12 +429,9 @@ if __name__ == "__main__":
 def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
     """Writing a sky map adds the plate-solve card."""
     from astropy.io import fits
-    from astropy.wcs import WCS
 
-    from astrometricslib.pipelines.shared.session_identification import (
-        header_is_plate_solved,
-        write_wcs_to_fits_header,
-    )
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
+    from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 
     path = tmp_path / "frame.fits"
     header = fits.Header()
@@ -402,12 +440,533 @@ def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
     fits.PrimaryHDU(data=np.zeros((10, 10), dtype=np.float32), header=header).writeto(path)
     assert not header_is_plate_solved(fits.getheader(path))
 
-    solved = WCS(naxis=2)
-    solved.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    solved.wcs.crval = [11.0, 21.0]
-    solved.wcs.crpix = [5.0, 5.0]
-    solved.wcs.cdelt = [-0.001, 0.001]
+    solved = tan_sky_map(11.0, 21.0, (5.0, 5.0), degrees_per_pixel=0.001)
     write_wcs_to_fits_header(str(path), solved)
 
     assert header_is_plate_solved(fits.getheader(path))
     assert fits.getheader(path)["CRVAL1"] == pytest.approx(11.0)
+
+
+# Plate scales, in arcseconds per pixel, of the two setups the wrong-solution
+# check must work on: the ZWO ASI533MM Pro (3.76 micron pixels) on the 405 mm
+# refractor, and the Nikon D5300 (3.89 micron pixels) behind a 300 mm lens.
+# The catalog match radius follows the plate scale, so it is 10 arcsec on the
+# first and about 14 arcsec on the second.
+_ASI533_PLATE_SCALE = 206.265 * 3.76 / 405.0
+_D5300_300MM_PLATE_SCALE = 206.265 * 3.89 / 300.0
+
+# Catalog entries in a dense Milky Way field: 7,700 per square degree, where a
+# chance entry lies within 10 arcsec of about 17% of all positions.
+_DENSE_FIELD_PER_SQUARE_DEGREE = 7700.0
+_DENSE_FIELD_PER_SQUARE_ARCSEC = _DENSE_FIELD_PER_SQUARE_DEGREE / 3600.0**2
+
+
+def _stars_at_distances(distances_arcsec: list[float], match_radius_arcsec: float) -> list:
+    """Build identified stars, one per nearest catalog distance.
+
+    A star whose nearest catalog entry lies within the match radius is
+    matched to it, as the star identifier would match it.
+
+    Parameters
+    ----------
+    distances_arcsec : `list` [`float`]
+        Each star's distance to its nearest catalog entry.
+    match_radius_arcsec : `float`
+        The run's catalog match radius.
+
+    Returns
+    -------
+    stars : `list` [`StellarObject`]
+        One star per distance, each with a sky position.
+    """
+    from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+    from astrometricslib.models.stellar_source import StellarObject
+
+    stars = []
+    for index, distance in enumerate(distances_arcsec):
+        star = StellarObject(id=f"FIELD_J{index}", right_ascension=10.0 + index * 0.01, declination=41.0)
+        if distance <= match_radius_arcsec:
+            star.id = f"Gaia DR3 {index + 1}"
+            star.is_catalog_identified = True
+            star.catalog_match_quality = CatalogMatchQuality(matched_via="gaia", separation_arcsec=distance)
+        stars.append(star)
+    return stars
+
+
+def _chance_neighbor_distances(
+    count: int, per_square_arcsec: float, generator: np.random.Generator
+) -> list[float]:
+    """Draw distances to the nearest of catalog entries scattered at random.
+
+    For entries scattered evenly at a density ``n``, the chance that none
+    lies within ``r`` of a position is ``exp(-pi r^2 n)``.
+
+    Parameters
+    ----------
+    count : `int`
+        How many distances.
+    per_square_arcsec : `float`
+        Catalog entries per square arcsecond.
+    generator : `numpy.random.Generator`
+        The random number source.
+
+    Returns
+    -------
+    distances : `list` [`float`]
+        The distances, in arcseconds.
+    """
+    draws = generator.uniform(0.0, 1.0, count)
+    return np.sqrt(-np.log(draws) / (np.pi * per_square_arcsec)).tolist()
+
+
+def _even_over_circle(count: int, radius_arcsec: float, generator: np.random.Generator) -> list[float]:
+    """Draw distances of points spread evenly over a circle.
+
+    Parameters
+    ----------
+    count : `int`
+        How many distances.
+    radius_arcsec : `float`
+        The circle's radius.
+    generator : `numpy.random.Generator`
+        The random number source.
+
+    Returns
+    -------
+    distances : `list` [`float`]
+        The distances from the center, in arcseconds.
+    """
+    return (radius_arcsec * np.sqrt(generator.uniform(0.0, 1.0, count))).tolist()
+
+
+def _judge(
+    plate_scale: float,
+    build: Callable[[float, float], list[float]],
+    catalog_density_per_square_degree: float | None = _DENSE_FIELD_PER_SQUARE_DEGREE,
+) -> tuple[str | None, float, float]:
+    """Judge a run built from nearest catalog distances at one plate scale.
+
+    Parameters
+    ----------
+    plate_scale : `float`
+        The run's plate scale, in arcseconds per pixel.
+    build : callable
+        Takes the match radius and the search radius, in arcseconds, and
+        gives each star's nearest catalog distance.
+    catalog_density_per_square_degree : `float` or `None`, optional
+        The field's catalog density passed to the check; the dense field by
+        default.
+
+    Returns
+    -------
+    problem, match_radius, search_radius : `tuple`
+        What `plate_solution_problem` said, and the two radii it used.
+    """
+    from astrometricslib.foundation.parameter_context import parameter_context, record_basis
+    from astrometricslib.foundation.parameters import resolve
+    from astrometricslib.models.tuned_parameter import RunBasis
+    from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
+    from astrometricslib.pipelines.shared.session_identification import (
+        SOLUTION_CHECK_RADIUS_FACTOR,
+        plate_solution_problem,
+    )
+
+    with parameter_context():
+        record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, plate_scale)
+        match_radius = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
+        search_radius = float(resolve(SOLUTION_CHECK_RADIUS_FACTOR).value) * match_radius
+        distances = build(match_radius, search_radius)
+        problem = plate_solution_problem(
+            _stars_at_distances(distances, match_radius), distances, catalog_density_per_square_degree
+        )
+    return problem, match_radius, search_radius
+
+
+def test_the_chance_share_follows_the_catalog_density() -> None:
+    """A sparse field gives (R/W)^2; the dense field about 0.32 and 0.40."""
+    from astrometricslib.pipelines.shared.session_identification import (
+        MIN_MATCH_CONCENTRATION,
+        chance_concentration,
+        match_concentration_limit,
+    )
+
+    assert chance_concentration(10.0, 20.0, None) == pytest.approx(0.25)
+    assert chance_concentration(10.0, 20.0, 1e-3) == pytest.approx(0.25, abs=1e-4)
+    assert chance_concentration(10.0, 20.0, _DENSE_FIELD_PER_SQUARE_DEGREE) == pytest.approx(0.32, abs=0.01)
+    assert chance_concentration(14.0, 28.0, _DENSE_FIELD_PER_SQUARE_DEGREE) == pytest.approx(0.40, abs=0.01)
+    # Three binomial standard errors above the chance share, never below
+    # the floor.
+    assert match_concentration_limit(0.25, 20) == pytest.approx(0.25 + 3 * np.sqrt(0.25 * 0.75 / 20))
+    assert match_concentration_limit(0.25, 100_000) == pytest.approx(MIN_MATCH_CONCENTRATION.default)
+
+
+def test_the_dense_field_limits_stay_decidable_with_a_few_hundred_stars() -> None:
+    """The ceiling leaves the check working where it matters most.
+
+    With about 200 stars in the ZWO search circle and 300 in the Nikon's,
+    the dense-field limits (about 0.42 and 0.48) stay below
+    `MAX_DECIDABLE_CONCENTRATION_LIMIT`, so a wrong solution there is still
+    judged.
+    """
+    from astrometricslib.pipelines.shared.session_identification import (
+        MAX_DECIDABLE_CONCENTRATION_LIMIT,
+        chance_concentration,
+        match_concentration_limit,
+    )
+
+    ceiling = MAX_DECIDABLE_CONCENTRATION_LIMIT.default
+    zwo = match_concentration_limit(chance_concentration(10.0, 20.0, _DENSE_FIELD_PER_SQUARE_DEGREE), 200)
+    nikon = match_concentration_limit(chance_concentration(14.0, 28.0, _DENSE_FIELD_PER_SQUARE_DEGREE), 300)
+    assert zwo < ceiling
+    assert nikon < ceiling
+
+
+@pytest.mark.parametrize("plate_scale", [_ASI533_PLATE_SCALE, _D5300_300MM_PLATE_SCALE])
+class TestPlateSolutionProblem:
+    """Verify the concentration test tells right from wrong, both scales."""
+
+    def test_a_dense_correct_solution_with_few_true_matches_passes(self, plate_scale: float) -> None:
+        """A right solution passes though only 20% of 500 detections are true.
+
+        The faint detections take chance neighbors in a dense field, which
+        pulls the share toward the chance share, but with enough stars it
+        stays clearly above it.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+
+        def build(match_radius: float, _search_radius: float) -> list[float]:
+            """Give 100 true matches and 400 chance neighbors.
+
+            Returns
+            -------
+            distances : `list` [`float`]
+                The nearest catalog distances.
+            """
+            generator = np.random.default_rng(3)
+            true_matches = np.minimum(generator.rayleigh(1.5, 100), match_radius).tolist()
+            return true_matches + _chance_neighbor_distances(400, _DENSE_FIELD_PER_SQUARE_ARCSEC, generator)
+
+        problem, _match_radius, _search_radius = _judge(plate_scale, build)
+        assert problem is None
+
+    def test_a_correct_solution_with_a_broad_match_spread_passes(self, plate_scale: float) -> None:
+        """A right solution with a median match distance of 6.5 arcsec passes.
+
+        This is the Algol run on the ZWO ASI533MM, which the old median test
+        rejected: every true match lies inside the match radius, though
+        spread across it.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+        true_matches: list[float] = []
+
+        def build(match_radius: float, _search_radius: float) -> list[float]:
+            """Give 40 broadly spread true matches and 20 chance neighbors.
+
+            Returns
+            -------
+            distances : `list` [`float`]
+                The nearest catalog distances.
+            """
+            generator = np.random.default_rng(5)
+            # A power of an even draw, chosen so the median is 6.5 arcsec.
+            power = np.log(6.5 / match_radius) / np.log(0.5)
+            true_matches.extend((match_radius * generator.uniform(0.0, 1.0, 40) ** power).tolist())
+            return true_matches + _chance_neighbor_distances(20, _DENSE_FIELD_PER_SQUARE_ARCSEC, generator)
+
+        problem, match_radius, _search_radius = _judge(plate_scale, build)
+        assert 5.5 < float(np.median(true_matches)) < 7.5
+        assert max(true_matches) <= match_radius
+        assert problem is None
+
+    def test_a_small_dense_field_session_is_not_judged(self, plate_scale: float) -> None:
+        """A right solution with too few stars to decide is skipped.
+
+        Ten true matches among fifty detections in a dense field leave too
+        few stars in the search circle: the limit would climb above
+        `MAX_DECIDABLE_CONCENTRATION_LIMIT`, which a right solution may not
+        reach, so the concentration test says nothing and the match-share
+        test alone judges the run.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+
+        def build(match_radius: float, _search_radius: float) -> list[float]:
+            """Give 10 true matches and 40 chance neighbors.
+
+            Returns
+            -------
+            distances : `list` [`float`]
+                The nearest catalog distances.
+            """
+            generator = np.random.default_rng(11)
+            true_matches = np.minimum(generator.rayleigh(1.5, 10), match_radius).tolist()
+            return true_matches + _chance_neighbor_distances(40, _DENSE_FIELD_PER_SQUARE_ARCSEC, generator)
+
+        problem, _match_radius, _search_radius = _judge(plate_scale, build)
+        assert problem is None
+
+    @pytest.mark.parametrize("seed", range(10))
+    def test_a_dense_field_wrong_solution_fails(self, plate_scale: float, seed: int) -> None:
+        """Chance neighbors of a dense field fail, also on the Nikon.
+
+        At 14 arcsec their share is about 0.40, the old fixed limit, so a
+        wrong Nikon solution passed about half the time. Every star is a
+        chance neighbor here; the check now asks for three standard errors
+        above the field's own chance share.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        seed : `int`
+            The random seed of the chance neighbors.
+        """
+        problem, _match_radius, _search_radius = _judge(
+            plate_scale,
+            lambda _match_radius, _search_radius: _chance_neighbor_distances(
+                400, _DENSE_FIELD_PER_SQUARE_ARCSEC, np.random.default_rng(seed)
+            ),
+        )
+        assert problem is not None
+        assert "match radius" in problem
+        assert "chance" in problem
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_a_sparse_field_wrong_solution_fails(self, plate_scale: float, seed: int) -> None:
+        """Neighbors spread evenly over the search circle fail the test.
+
+        About a quarter of them fall inside the match radius, which passes
+        the match-share test, so only the concentration catches it. The
+        density is not known, so the sparse-field chance share is used.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        seed : `int`
+            The random seed of the chance neighbors.
+        """
+        problem, match_radius, search_radius = _judge(
+            plate_scale,
+            lambda _match_radius, search_radius: _even_over_circle(
+                60, search_radius, np.random.default_rng(seed)
+            ),
+            catalog_density_per_square_degree=None,
+        )
+        assert problem is not None
+        assert "match radius" in problem
+        assert f"{match_radius:.1f} arcsec" in problem
+        assert f"{search_radius:.1f} arcsec" in problem
+        assert "chance 25%" in problem
+
+    def test_too_few_stars_in_the_search_circle_are_not_judged(self, plate_scale: float) -> None:
+        """Below the fewest stars to judge by, concentration is not tested.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+        from astrometricslib.pipelines.shared.session_identification import MIN_STARS_TO_VERIFY_REUSED_WCS
+
+        in_circle = MIN_STARS_TO_VERIFY_REUSED_WCS.default - 1
+
+        def build_for(count: int) -> Callable[[float, float], list[float]]:
+            """Build a run with ``count`` stars in the search circle.
+
+            Returns
+            -------
+            build : callable
+                The distance builder.
+            """
+
+            def build(match_radius: float, search_radius: float) -> list[float]:
+                """Give 4 matches, the rest of the circle outside R, 10 beyond.
+
+                Returns
+                -------
+                distances : `list` [`float`]
+                    The nearest catalog distances.
+                """
+                inside = [0.5 * match_radius] * 4
+                ring = [0.5 * (match_radius + search_radius)] * (count - 4)
+                beyond = [1.5 * search_radius] * 10
+                return inside + ring + beyond
+
+            return build
+
+        problem, _match_radius, _search_radius = _judge(plate_scale, build_for(in_circle))
+        assert problem is None
+        # With plenty of stars the same spread is judged, and fails.
+        problem, _match_radius, _search_radius = _judge(plate_scale, build_for(100))
+        assert problem is not None
+
+
+def _identify_with_distances(identifier: StarIdentifier, distances: list[float]) -> Callable[..., Any]:
+    """Build an identify stand-in giving each star a nearest catalog distance.
+
+    Stars within the default 10 arcsec match radius are marked as matched,
+    and the identifier records every distance, as the real one does.
+
+    Parameters
+    ----------
+    identifier : `StarIdentifier`
+        The identifier whose nearest-distance record the stand-in fills.
+    distances : `list` [`float`]
+        One nearest catalog distance per star, in arcseconds.
+
+    Returns
+    -------
+    identify : callable
+        A stand-in for `identify_stars_with_wcs`.
+    """
+
+    def identify(stellar_objects: list, _wcs: object, _width: int, _height: int) -> list:
+        """Give every star a position and match those within 10 arcsec.
+
+        Returns
+        -------
+        stars : `list`
+            The same stars.
+        """
+        identifier._nearest_catalog_by_star = {}
+        for index, (star, distance) in enumerate(zip(stellar_objects, distances, strict=True)):
+            star.right_ascension = 10.0 + index * 0.01
+            star.declination = 41.0
+            star.is_catalog_identified = distance <= 10.0
+            identifier._nearest_catalog_by_star[id(star)] = distance
+        return stellar_objects
+
+    return identify
+
+
+def test_a_reused_header_map_with_scattered_neighbors_is_solved_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reused map whose catalog neighbors are spread out is replaced.
+
+    A quarter of the stars match, which passes the match-share test, but
+    their nearest catalog entries are spread evenly over the search circle,
+    as under a wrong solution.
+    """
+    identifier = _make_star_identifier()
+    header_wcs = _make_celestial_wcs()
+    image = _make_fake_image(wcs=header_wcs)
+    sources = [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(40)]
+    identifier.detector.detect = MagicMock(return_value=sources)
+    identifier.detector.deduplicate = MagicMock(return_value=sources)
+    fresh_wcs = _make_celestial_wcs()
+    identifier.solver.solve = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=fresh_wcs))
+    monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", MagicMock())
+    # A 10 arcsec match radius and a 20 arcsec search circle by default.
+    scattered = [20.0 * np.sqrt((index + 0.5) / 40) for index in range(40)]
+    close = [1.0] * 30 + [50.0] * 10
+
+    marks = iter([
+        _identify_with_distances(identifier, scattered),
+        _identify_with_distances(identifier, close),
+    ])
+    monkeypatch.setattr(
+        identifier, "identify_stars_with_wcs", MagicMock(side_effect=lambda *a, **k: next(marks)(*a, **k))
+    )
+
+    result = identify_session_stars(image, identifier)
+
+    assert result.wcs is fresh_wcs
+    assert result.header_wcs_replaced_after_verification is True
+    assert sorted(result.nearest_catalog_separations_arcsec) == sorted(close)
+
+
+def test_a_kept_header_map_reports_its_own_distances(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the fresh solve is not better, the first pass's distances are kept.
+
+    The identifier holds the fresh pass's distances by then, so the result
+    must not read them from it.
+    """
+    identifier = _make_star_identifier()
+    image = _make_fake_image(wcs=_make_celestial_wcs())
+    sources = [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(40)]
+    identifier.detector.detect = MagicMock(return_value=sources)
+    identifier.detector.deduplicate = MagicMock(return_value=sources)
+    identifier.solver.solve = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=_make_celestial_wcs()))
+    monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", MagicMock())
+    first = [20.0 * np.sqrt((index + 0.5) / 40) for index in range(40)]
+    second = [15.0] * 40
+
+    marks = iter([_identify_with_distances(identifier, first), _identify_with_distances(identifier, second)])
+    monkeypatch.setattr(
+        identifier, "identify_stars_with_wcs", MagicMock(side_effect=lambda *a, **k: next(marks)(*a, **k))
+    )
+
+    result = identify_session_stars(image, identifier)
+
+    assert result.header_wcs_replaced_after_verification is False
+    assert sorted(result.nearest_catalog_separations_arcsec) == sorted(first)
+
+
+def test_the_result_carries_the_density_of_the_identification_it_keeps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The catalog density of the fresh pass goes with the fresh map.
+
+    The first pass counts 7,700 stars per square degree under a wrong
+    header map; the fresh solve, which replaces it, counts 900.
+    """
+    identifier = _make_star_identifier()
+    image = _make_fake_image(wcs=_make_celestial_wcs())
+    sources = [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(80)]
+    identifier.detector.detect = MagicMock(return_value=sources)
+    identifier.detector.deduplicate = MagicMock(return_value=sources)
+    identifier.solver.solve = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=_make_celestial_wcs()))
+    monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", MagicMock())
+    # Enough stars that the dense-field check can decide (see
+    # MAX_DECIDABLE_CONCENTRATION_LIMIT).
+    scattered = [20.0 * np.sqrt((index + 0.5) / 80) for index in range(80)]
+    close = [1.0] * 60 + [50.0] * 20
+
+    def with_density(distances: list[float], density: float) -> Callable[..., Any]:
+        """Wrap a distance stand-in so it also records a catalog density.
+
+        Returns
+        -------
+        identify : callable
+            A stand-in for `identify_stars_with_wcs`.
+        """
+        identify = _identify_with_distances(identifier, distances)
+
+        def run(*args: Any) -> list:
+            """Record the density, then give the distances.
+
+            Returns
+            -------
+            stars : `list`
+                The same stars.
+            """
+            identifier.field_catalog_density_per_square_degree = density
+            return identify(*args)
+
+        return run
+
+    marks = iter([with_density(scattered, 7700.0), with_density(close, 900.0)])
+    monkeypatch.setattr(
+        identifier, "identify_stars_with_wcs", MagicMock(side_effect=lambda *a, **k: next(marks)(*a, **k))
+    )
+
+    result = identify_session_stars(image, identifier)
+
+    assert result.header_wcs_replaced_after_verification is True
+    assert result.catalog_density_per_square_degree == pytest.approx(900.0)

@@ -11,8 +11,8 @@ work against the catalog storage (`AbstractCatalogAccess`):
   records, class counts, per-target counts, overlay positions or library
   statistics.
 * `find_star` finds one star by id, allowing small spelling differences.
-* `find_or_create_star` finds the star at a sky position, or records a new
-  one there.
+* `find_or_create_star` finds the star at a sky position, or gives a new,
+  unsaved one there (the catalog keeps only measured stars).
 
 The storage reads only what each question needs. Summary rows come from the
 indexed columns, so no full star record is loaded to list or count stars.
@@ -887,12 +887,14 @@ def find_or_create_star(
     target_id: str | None,
     tolerance_arcsec: float,
 ) -> StellarObject:
-    """Find the star at a spot on the sky, or record a new one there.
+    """Find the star at a spot on the sky, or make a new one there.
 
     A star with the given name is the same star wherever it sits. Otherwise
-    a star within ``tolerance_arcsec`` is the same star. Only when neither
-    exists is a new star recorded. Whichever star is used gets any of the
-    spectral type, magnitude and target that it does not have yet.
+    a star within ``tolerance_arcsec`` is the same star. Whichever saved
+    star is used gets any of the spectral type, magnitude and target that it
+    does not have yet. When neither exists, a new star is returned but not
+    saved: it holds no light curve or spectrum, and the catalog keeps only
+    measured stars (see `catalog_access.holds_measurements`).
 
     Parameters
     ----------
@@ -900,7 +902,9 @@ def find_or_create_star(
         The catalog storage.
     update, create, delete : `Callable`
         `StellarCatalog.update`, `StellarCatalog.create` and
-        `StellarCatalog.delete`, which write the changes.
+        `StellarCatalog.delete`, which write the changes. ``create`` is no
+        longer called, since a new star is not saved; it is kept so the
+        call stays the same.
     ra_deg, dec_deg : `float`
         The position, in degrees.
     name : `str` or `None`
@@ -964,10 +968,23 @@ def find_or_create_star(
         updates.update(missing_fields(nearby))
         if updates:
             if new_id != nearby.id:
-                delete(nearby.id)
-                create(new_id, ra=ra_deg, dec=dec_deg)
-            update(new_id, updates)
-            nearby = find_star(storage, new_id)
+                # Move the whole record to its new id, keeping its light
+                # curve and spectra, then remove the old one.
+                old_id = nearby.id
+                renamed = nearby.model_copy(deep=True)
+                renamed.id = new_id
+                storage.merge_and_record("stellar_catalog", [renamed], lambda _existing, updated: updated)
+                delete(old_id)
+                nearby = renamed
+            saved = update(new_id, updates)
+            if saved is None:
+                # Not saved (it holds no measurement): apply the updates in
+                # memory so the caller still gets the star it asked for.
+                for field_name, value in updates.items():
+                    if field_name != "id":
+                        setattr(nearby, field_name, value)
+                return nearby
+            nearby = find_star(storage, new_id) or nearby
         return nearby
 
     # 3. Nothing there yet: record a new star.
@@ -981,14 +998,14 @@ def find_or_create_star(
             new_star_id = f"{base_id}_{counter}"
             counter += 1
 
-    create(new_star_id, ra=ra_deg, dec=dec_deg)
-    new_star_updates: dict[str, Any] = {"name": name or new_star_id}
-    if spectral_type:
-        new_star_updates["spectral_type"] = spectral_type
-        new_star_updates["stellar_spectral_type"] = spectral_type
-    if magnitude is not None:
-        new_star_updates["magnitude"] = magnitude
-    if target_id:
-        new_star_updates["target_ids"] = [target_id]
-    update(new_star_id, new_star_updates)
-    return find_star(storage, new_star_id)
+    # A new star holds no measurement, so it is returned without saving.
+    return StellarObject(
+        id=new_star_id,
+        name=name or new_star_id,
+        right_ascension=ra_deg,
+        declination=dec_deg,
+        spectral_type=spectral_type or "",
+        stellar_spectral_type=spectral_type or "",
+        magnitude=magnitude,
+        target_ids=[target_id] if target_id else [],
+    )

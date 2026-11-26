@@ -14,6 +14,7 @@ program (such as Ekos) sends to the mount.
 import logging
 import threading
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import TargetCatalog
@@ -86,8 +87,10 @@ class AlignmentService:
             session per target, with jitter and drift rates, worked out by
             the library.
         """
+        started = self._run_started_at
         records = self._require_review().query_alignment_records(
-            limit=RECENT_ATTEMPTS_SHOWN, since=self._run_started_at
+            limit=RECENT_ATTEMPTS_SHOWN,
+            since=None if started is None else datetime.fromtimestamp(started, UTC),
         )
         attempts = [attempt.model_dump(mode="json", by_alias=True) for attempt in records.attempts]
         if self.is_active():
@@ -156,7 +159,10 @@ class AlignmentService:
         """
         try:
             records = self._require_review().query_alignment_records(
-                session_id, targets=self._targets.list() if self._targets is not None else None
+                session_id,
+                targets=self._targets.query(detail="objects", limit=None).objects
+                if self._targets is not None
+                else None,
             )
         except (StorageError, ValueError, TypeError) as exc:
             logger.debug("Error loading session %s alignment data: %s", session_id, exc)
@@ -184,29 +190,6 @@ class AlignmentService:
             Dictionary containing cumulative attempts and polar alignment.
         """
         return self.get_session_data("all")
-
-    def compute_pointing_model(self, session_id: str | None = None) -> dict[str, Any]:
-        """Compute decomposed geometric mount pointing terms.
-
-        Delegates to `review.query(kind="pointing_model")`
-        rather than fitting directly.
-
-        Parameters
-        ----------
-        session_id : `str` | `None`, optional
-            The observing night to model. A model that mixes nights is
-            not meaningful, so the library refuses `None`.
-
-        Returns
-        -------
-        model : `dict` [`str`, `Any`]
-            Decomposed model terms (ME, MA, CH, TF) and RMS improvements,
-            with camelCase keys. The library refuses with an
-            `InvalidArgumentError` when it cannot fit a model: no night was
-            given, or no observer location is known.
-        """
-        reply = self._require_review().query(kind="pointing_model", session_id=session_id, register_job=False)
-        return reply.model.model_dump(by_alias=True)
 
     def poll_external_syncs(self) -> None:
         """Store the plate-solve syncs and polar alignment of other programs.

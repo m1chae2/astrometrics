@@ -15,13 +15,14 @@ one place instead of four.
 
 import logging
 import os
-import warnings
 from typing import Any
 
-from astropy.wcs import WCS, FITSFixedWarning
+from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.pipelines.shared.analysis_context import KnownTarget
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,38 @@ def resolve_target_center_hint(target: Any) -> tuple[float | None, float | None]
         same condition as `center_ra`.
     """
     return resolve_center_hint(target.ra, target.dec)
+
+
+def resolve_known_target(target: Any) -> KnownTarget | None:
+    """Read what a target record says about the object, without SIMBAD.
+
+    The record helps only when it has a SIMBAD type and a position that is
+    the object's own. A position taken from a solved image's centre
+    (`position_unverified`) is where the camera looked, not where the object
+    is, so it is not used.
+
+    Parameters
+    ----------
+    target : `astrometricslib.models.target.Target`
+        The target to read.
+
+    Returns
+    -------
+    known_target : `KnownTarget` or `None`
+        The record's type, position and size, or `None` when the record
+        cannot stand in for SIMBAD.
+    """
+    if not target.simbad_object_type or target.position_unverified:
+        return None
+    center_ra, center_dec = resolve_target_center_hint(target)
+    if center_ra is None or center_dec is None:
+        return None
+    return KnownTarget(
+        object_type=str(target.simbad_object_type).strip(),
+        ra_deg=center_ra,
+        dec_deg=center_dec,
+        major_axis_arcmin=target.major_axis_arcmin,
+    )
 
 
 def _find_matching_solved_stack(target: Any, spectral_stack_path: str) -> tuple[str, Any] | None:
@@ -155,9 +188,7 @@ def resolve_solved_stack_wcs(target: Any, spectral_stack_path: str) -> WCS | Non
     if match is None:
         return None
     _candidate_path, header = match
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FITSFixedWarning)
-        return WCS(header, naxis=2)
+    return celestial_wcs(header)
 
 
 def resolve_solved_stack_center_hint(
@@ -200,9 +231,9 @@ def resolve_solved_stack_center_hint(
     if match is None:
         return None, None
     candidate_path, header = match
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FITSFixedWarning)
-        wcs = WCS(header, naxis=2)
+    wcs = celestial_wcs(header)
+    if wcs is None:
+        return None, None
     centre_x = header.get("NAXIS1", 0) / 2.0
     centre_y = header.get("NAXIS2", 0) / 2.0
     center_ra, center_dec = wcs.pixel_to_world_values(centre_x, centre_y)

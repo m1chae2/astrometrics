@@ -31,7 +31,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Generator
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
@@ -46,12 +46,23 @@ from astrometricslib.foundation.logging import (
     get_log_context,
     log_context,
 )
+from astrometricslib.foundation.parameter_context import collect_default_notices
 
 logger = logging.getLogger(__name__)
+
+WAITING_FOR_SLOT_MESSAGE = "Waiting for a free job slot"
+"""The message of a job that waits for a slot (`JobHandle.holding_slot`)."""
 
 # Statuses that mean the job is over. Once the work sets one of these, the
 # context manager stops second-guessing it -- see `registered_job`.
 _TERMINAL_STATUSES = frozenset({"completed", "failed"})
+
+# How long `run_as_background_job` keeps waiting for the work to record its
+# job after the grace period has passed. Writing the job row and its log file
+# can take a second or more on a slow disk (Windows in particular), so a
+# caller that gave up at the grace period could be told "no job to poll" when
+# the job appears moments later. This is a safety margin, not a tuned value.
+_JOB_RECORD_WAIT_SECONDS = 3.0
 
 
 _current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
@@ -87,6 +98,9 @@ def report_started_jobs(callback: Callable[[JobHandle], None]) -> Generator[None
     A caller that runs work in a thread cannot see the job the work records
     inside it. This gives the caller the handle as soon as the job exists.
 
+    A listener that is already active (the one `run_as_background_job` sets)
+    is told first, so nesting this never hides a job from it.
+
     Parameters
     ----------
     callback : `Callable`
@@ -97,7 +111,15 @@ def report_started_jobs(callback: Callable[[JobHandle], None]) -> Generator[None
     None
         The enclosed work runs while the callback is active.
     """
-    token = _job_started_listener.set(callback)
+    outer_listener = _job_started_listener.get()
+
+    def _tell_both(handle: JobHandle) -> None:
+        """Tell the enclosing listener, if any, and then this one."""
+        if outer_listener is not None:
+            outer_listener(handle)
+        callback(handle)
+
+    token = _job_started_listener.set(_tell_both)
     try:
         yield
     finally:
@@ -212,6 +234,39 @@ class JobHandle:
         if not self.reached_terminal_status:
             self.mark("running", done, progress_total=total, message=message)
 
+    @contextmanager
+    def holding_slot(
+        self, slot: AbstractContextManager, *, working_message: str = "Starting"
+    ) -> Generator[None]:
+        """Wait for a job slot as this job, then hold it while the work runs.
+
+        Call this inside `registered_job`, not around it. The job is then
+        in the job list while it waits, with the message "Waiting for a free
+        job slot", and its job id is known at once. A run given up on stops
+        waiting (the slot raises `RunAbandonedError`) and its job is
+        marked failed by `registered_job` like any other error.
+
+        Parameters
+        ----------
+        slot : `contextlib.AbstractContextManager`
+            The slot to take, such as the result of
+            ``ProcessingPipelines.acquire_job_slot()``.
+        working_message : `str`, optional
+            The job's message once the slot is won. The work's own stage
+            reports replace it.
+
+        Yields
+        ------
+        None
+            The caller's work runs while the slot is held.
+        """
+        if not self.reached_terminal_status:
+            self.mark("running", 0, message=WAITING_FOR_SLOT_MESSAGE)
+        with slot:
+            if not self.reached_terminal_status:
+                self.mark("running", 0, message=working_message)
+            yield
+
     def info(self, message: str) -> None:
         """Write an informational line to this job's log.
 
@@ -288,8 +343,12 @@ class JobHandle:
                 if message is not None:
                     stored_job.message = message
                 if output_metrics is not None:
-                    stored_job.output_metrics = output_metrics
+                    # Merge, so keys the job already stored (such as the
+                    # parameter defaults) are not lost.
+                    stored_job.output_metrics = {**(stored_job.output_metrics or {}), **output_metrics}
                 stored_job.updated_at = datetime.now().isoformat()
+                if status in _TERMINAL_STATUSES and stored_job.completed_at is None:
+                    stored_job.completed_at = stored_job.updated_at
                 self._job_store.upsert_job(stored_job)
         except sqlite3.Error as update_error:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
@@ -305,6 +364,42 @@ _open_log_files_lock = threading.Lock()
 #: that wrote them lost the job's log context, such as a worker thread that
 #: was started without copying it.
 JOB_LOG_PACKAGES: tuple[str, ...] = ("astrometricslib", "wayfindinglib")
+
+
+PARAMETER_DEFAULTS_KEY = "parameter_defaults"
+"""The key in a job's ``output_metrics`` that lists the notices of the
+parameters that used their defaults."""
+
+
+def _record_default_notices(job_id: str, job_store: JobStore | None, notices: list[str]) -> None:
+    """Log one line about the defaults a job used and store the full list.
+
+    A parameter with no tuned or equipment value uses its default and adds a
+    notice (see `collect_default_notices`). One log line says how many, so
+    the log is not filled with one warning per parameter. The notices are
+    stored in the job's ``output_metrics`` so the job can list them later.
+
+    Parameters
+    ----------
+    job_id : `str`
+        The job.
+    job_store : `JobStore` or `None`
+        Where the job row is. `None` skips storing.
+    notices : `list` [`str`]
+        The notices the job collected.
+    """
+    if not notices:
+        return
+    logger.info("%d parameters used their defaults (no tuned or equipment value)", len(notices))
+    if job_store is None:
+        return
+    try:
+        stored_job = job_store.get_job(job_id)
+        if stored_job is not None:
+            stored_job.output_metrics = {**(stored_job.output_metrics or {}), PARAMETER_DEFAULTS_KEY: notices}
+            job_store.upsert_job(stored_job)
+    except sqlite3.Error as store_error:
+        logger.debug("Could not store the default notices of job '%s': %s", job_id, store_error)
 
 
 @contextmanager
@@ -375,8 +470,15 @@ def capture_job_logs(
         # The router sends each record that carries this job's id to the sinks.
         # Nothing is attached to a shared logger, so nothing is left behind.
         sink_key = router.register(job_id, sinks, JOB_LOG_PACKAGES)
-        with log_context(job_id=job_id):
-            yield
+        with log_context(job_id=job_id), ExitStack() as notice_scope:
+            # A run nested in the same job adds to the outer run's list.
+            collects_notices = job_id not in active_job_ids()[:-1]
+            notices = notice_scope.enter_context(collect_default_notices()) if collects_notices else []
+            try:
+                yield
+            finally:
+                if collects_notices:
+                    _record_default_notices(job_id, job_store, notices)
     finally:
         if sink_key is not None:
             for handler in router.unregister(sink_key):
@@ -789,6 +891,7 @@ def run_as_background_job(
         `grace_period_seconds`, its exception is raised here again.
     """
     job_finished = threading.Event()
+    job_recorded = threading.Event()
     started_jobs: list[JobHandle] = []
     outcome: dict[str, Any] = {}
 
@@ -796,6 +899,7 @@ def run_as_background_job(
         """Keep the first job the work records, the outermost one."""
         if not started_jobs:
             started_jobs.append(handle)
+        job_recorded.set()
 
     def _run() -> None:
         listener_token = _job_started_listener.set(_remember_first_job)
@@ -818,6 +922,7 @@ def run_as_background_job(
                 100,
                 output_metrics={"result": _to_plain(outcome["result"])},
             )
+        job_recorded.set()
         job_finished.set()
 
     thread = threading.Thread(target=_run, daemon=True)
@@ -829,6 +934,9 @@ def run_as_background_job(
         job_id = started_jobs[0].job_id if started_jobs else None
         return {"jobId": job_id, "result": outcome["result"]}
 
+    # The grace period is over, but the job row may still be being written.
+    # Wait a little longer for it (or for work that records no job to end).
+    job_recorded.wait(timeout=_JOB_RECORD_WAIT_SECONDS)
     job = started_jobs[0] if started_jobs else None
     return {
         "status": "running",

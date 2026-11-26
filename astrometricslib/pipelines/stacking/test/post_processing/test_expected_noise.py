@@ -34,10 +34,10 @@ from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     measure_stack_sky_level,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
     signed_aperture_sum,
     sky_level_of_plane,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 GAIN = 0.8
 READ_NOISE = 3.8

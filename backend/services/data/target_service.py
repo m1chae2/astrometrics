@@ -11,8 +11,10 @@ from collections.abc import Callable
 from typing import Any
 
 from astrometricslib import FilterType, Target
+from astrometricslib.drivers import existing_stack_path
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from backend.services.data.deletion_archive import archive_record_before_delete
+from backend.services.data.image_paths import resolve_allowed_image
 from backend.services.data.image_service import ImageService
 from backend.services.infrastructure.phone_share import send_file_to_phone
 
@@ -98,7 +100,10 @@ class TargetService:
 
         The library scans each target folder under the frames folder's
         ``lights`` folder, creates a target for a folder that has none, and
-        saves each target as it finishes.
+        saves each target as it finishes. It also reads again the header of
+        each known frame whose file changed, or whose record was made before
+        a header field (such as the ISO) was added. An unchanged, up-to-date
+        frame is not opened.
 
         Parameters
         ----------
@@ -112,7 +117,9 @@ class TargetService:
         report : `ReindexReport`
             Each target's frame count before and after.
         """
-        return self.astrometrics.targets.reindex_frames(prune_missing=prune_missing, on_progress=on_progress)
+        return self.astrometrics.targets.reindex_frames(
+            prune_missing=prune_missing, refresh_headers=True, on_progress=on_progress
+        )
 
     def get_targets(self, target_id: str | None = None, detail: str = "full") -> Any:
         """Unified targets getter.
@@ -146,7 +153,7 @@ class TargetService:
         if target_id:
             found = self.astrometrics.targets.get(target_id)
             return _without_frames(found) if detail == "summary" and found is not None else found
-        everything = self.astrometrics.targets.list()
+        everything = self.astrometrics.targets.query(detail="objects", limit=None).objects
         return [_without_frames(target) for target in everything] if detail == "summary" else everything
 
     def get_camera_index(self) -> dict[str, Any]:
@@ -250,8 +257,8 @@ class TargetService:
         Returns
         -------
         result : `dict`
-            ``path`` (the file sent), ``method`` (``"gsconnect"`` or
-            ``"localsend"``) and, for GSConnect, the phone's ``device`` name.
+            ``path`` (the file sent), ``method`` (always ``"gsconnect"``)
+            and the phone's ``device`` name.
 
         Raises
         ------
@@ -347,11 +354,20 @@ class TargetService:
         -------
         result : `dict`
             Dictionary with ``files``, ``stackedImage``,
-            ``stackedSpectralTarget``, and ``totalExposure`` keys.
+            ``stackedSpectralTarget``, ``totalExposure``,
+            ``stackConfiguration`` (the camera and optic of the target's
+            current stack, or `None`) and ``stacks`` (every stack by camera
+            and optic whose file is on disk, the main one first) keys.
         """
         target = self.get_targets(target_id)
         if not target:
-            return {"files": [], "stackedImage": None, "stackedSpectralTarget": None, "totalExposure": 0}
+            return {
+                "files": [],
+                "stackedImage": None,
+                "stackedSpectralTarget": None,
+                "totalExposure": 0,
+                "stacks": [],
+            }
 
         files = []
         for frame in target.frames:
@@ -369,10 +385,154 @@ class TargetService:
 
         return {
             "files": files,
-            "stackedImage": target.stacking.stacked_image or None,
-            "stackedSpectralTarget": target.spectral_stacking.stacked_image or None,
+            "stackedImage": self._existing_stack_path(target.stacking.stacked_image),
+            "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
             "totalExposure": target.exposure_sec,
+            "stackConfiguration": self._current_stack_configuration(target),
+            "stacks": self._stack_choices(target),
         }
+
+    def _stack_choices(self, target: Any) -> list[dict]:
+        """List every stack of a target by camera and optic.
+
+        Only stacks whose file is on disk are listed, so opening one never
+        asks for a missing file. The main stack is the one the target record
+        names as its stack; it comes first, then the others by name.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+
+        Returns
+        -------
+        choices : `list` [`dict`]
+            One entry per stack with ``configurationKey``, ``camera``,
+            ``focalLengthMm`` (whole millimeters or `None`),
+            ``framesStacked``, ``stackedImage`` (a path that exists) and
+            ``isMain``.
+        """
+        main_path = self._existing_stack_path(target.stacking.stacked_image)
+        choices = []
+        for key, configuration in target.stacking.stacks_by_configuration.items():
+            path = self._existing_stack_path(configuration.stacked_image)
+            if not path:
+                continue
+            focal_length = configuration.focal_length_mm
+            choices.append({
+                "configurationKey": configuration.configuration_key or key,
+                "camera": configuration.camera,
+                "focalLengthMm": None if focal_length is None else round(float(focal_length)),
+                "framesStacked": int(configuration.frames_stacked),
+                "stackedImage": path,
+                "isMain": main_path is not None and os.path.abspath(path) == os.path.abspath(main_path),
+            })
+        choices.sort(key=lambda choice: (not choice["isMain"], choice["configurationKey"]))
+        return choices
+
+    @staticmethod
+    def _current_stack_configuration(target: Any) -> dict | None:
+        """Name the camera and optic of the target's current stack.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+
+        Returns
+        -------
+        configuration : `dict` or `None`
+            ``camera``, ``focalLengthMm`` (whole millimeters or `None`) and
+            ``label`` (the library's configuration key, such as
+            ``ZWO ASI 533MM Pro@405mm``) of the preferred stack, or of the
+            only stack. `None` when the target
+            has no stack by configuration, or several and none preferred.
+        """
+        configurations = list(target.stacking.stacks_by_configuration.values())
+        chosen = [item for item in configurations if item.is_preferred]
+        if not chosen and len(configurations) == 1:
+            chosen = configurations
+        if not chosen:
+            return None
+        focal_length = chosen[0].focal_length_mm
+        return {
+            "camera": chosen[0].camera,
+            "focalLengthMm": None if focal_length is None else round(float(focal_length)),
+            "label": chosen[0].configuration_key,
+        }
+
+    def get_frame_statuses(self, target_id: str) -> dict:
+        """Say what state each frame of a target is in, for the File Browser.
+
+        The library decides each state and finds the newest stack file
+        (`quality.frame_statuses`): ``included``, ``flagged`` (in the stack,
+        but its stars are stretched: at least the warning level and kept by
+        the quarantine, with a ``reason`` giving the numbers),
+        ``not_stacked`` (taken after the latest stack file was written, or
+        the target has no stack) or ``set_aside`` (moved into an `_excluded`
+        folder).
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target's id.
+
+        Returns
+        -------
+        report : `dict`
+            ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
+            ``reason``, ``date``, ``exposure``, ``elongation``,
+            ``originalPath``, ``restorable`` and ``restoreNote``) and
+            ``stackedAt``, the time of the latest stack file in seconds since
+            1970, or `None`.
+
+        Notes
+        -----
+        A target that is not in the library raises the library's
+        `NotFoundError`.
+        """
+        return self.astrometrics.quality.frame_statuses(target_id).model_dump(by_alias=True)
+
+    def put_back_frames(self, target_id: str, paths: list[str]) -> dict:
+        """Move set-aside frames back into a target.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target's id.
+        paths : `list` [`str`]
+            The set-aside frames to move back, as ``get_frame_statuses``
+            lists them.
+
+        Returns
+        -------
+        result : `dict`
+            ``restored``, the original paths of the frames that went back.
+            A frame that could not be moved is not in the list.
+
+        """
+        restored = self.astrometrics.quality.put_back_set_aside_frames(target_id, paths)
+        return {"restored": restored}
+
+    def _existing_stack_path(self, recorded_path: str | None) -> str | None:
+        """Return a recorded stack path only if the file is on disk.
+
+        The library's rule (`astrometricslib.drivers.existing_stack_path`)
+        also finds a stack that an old record names under ``lights/``.
+
+        Parameters
+        ----------
+        recorded_path : `str` or `None`
+            The stack path saved in the target record.
+
+        Returns
+        -------
+        path : `str` or `None`
+            A path that exists, or `None` if there is no such stack.
+        """
+        get_stacks_path = getattr(getattr(self, "config", None), "get_stacks_path", None)
+        stacks_path = str(get_stacks_path()) if callable(get_stacks_path) else None
+        return existing_stack_path(recorded_path, stacks_path)
 
     def get_frame_stats_grouped(self, target_id: str, camera: str | None = None) -> list:
         """Calculate exposure specs grouped by filter, with calibration status.
@@ -422,7 +582,7 @@ class TargetService:
         target : `Target` or `None`
             The stored target, or `None` if nothing is stored under that id.
         """
-        return self.astrometrics.targets.read_saved(target_id)
+        return self.astrometrics.targets.get(target_id, refresh="storage")
 
     def save_targets(self) -> None:
         """Commit all active targets catalog arrays.
@@ -444,33 +604,53 @@ class TargetService:
             logger.exception("Failed to save targets")
             raise
 
-    def get_frame_header(self, target_id: str, frame_path: str) -> list[dict[str, str]]:
-        """Read full FITS headers for a specified frame record.
+    def get_frame_header(self, frame_path: str, target_id: str | None = None) -> dict[str, Any]:
+        """Read a frame's FITS header and the turn that shows it as the stack.
 
-        Scoped to the target index.
+        The header is the library's (`targets.read_frame_header` with
+        ``as_cards``).
+
+        Parameters
+        ----------
+        frame_path : `str`
+            The FITS file.
+        target_id : `str`, optional
+            The target the file must belong to (one of its frames or stacks).
+            Left out, the file must be inside the library folders or the
+            scratch folder, and no turn is worked out.
 
         Returns
         -------
-        result : `list` of `dict` of `str`
-            FITS header key/value pairs for the specified frame. Empty when
-            the file is no longer on disk: a stack that was moved or deleted
-            is a normal state for a target record, not a server error (a
-            server error would be logged and shown as a failed request every
-            time the target is opened).
+        result : `dict`
+            ``entries``, the FITS header cards of the frame (each with
+            ``key``, ``value`` and ``comment``), and ``displayTurn``, the
+            quarter turn (0, 90, 180 or 270 degrees, clockwise) the viewer
+            shows the frame with so it looks the same way round as the
+            target's stack (the library decides it, `targets.display_turn`;
+            0 without a target). Empty entries and no turn when the file is
+            no longer on disk: a stack that was moved or deleted is a normal
+            state for a target record, not a server error (a server error
+            would be logged and shown as a failed request every time the
+            target is opened).
 
-        Raises
-        ------
-        NotFoundError
-            If no target matches ``target_id``.
+        Notes
+        -----
+        An unknown ``target_id`` raises the library's `NotFoundError`. A file
+        that does not belong to the target, or, with no target, a file outside
+        the allowed folders raises `InvalidArgumentError`.
         """
-        target = self.astrometrics.targets.get(target_id)
-        if not target:
-            raise NotFoundError(f"Target not found: {target_id}")
+        target = None
+        if target_id is None:
+            frame_path = resolve_allowed_image(frame_path, self.config)
+        else:
+            target = self.astrometrics.targets.get(target_id, required=True)
         try:
-            return self.astrometrics.targets.get_header(frame_path, target=target)
+            entries = self.astrometrics.targets.read_frame_header(frame_path, target=target, as_cards=True)
         except NotFoundError:
-            logger.debug("Frame file for %s is missing, returning an empty header: %s", target_id, frame_path)
-            return []
+            logger.debug("Frame file %s is missing, returning an empty header", frame_path)
+            return {"entries": [], "displayTurn": 0}
+        turn = 0 if target is None else self.astrometrics.targets.display_turn(frame_path, target)
+        return {"entries": entries, "displayTurn": turn}
 
     def refresh_target_images_by_id(self, target_id: str, prune_missing: bool = False) -> None:
         """RPC wrapper to trigger frame scans on a target.

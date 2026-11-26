@@ -77,7 +77,7 @@ class QualityRule(BaseModel):
         sentences that say what the finding means for the observer and what
         to do. It uses the same fields as ``wording`` (and may use more, which
         the code that builds the statement passes). It avoids statistics
-        terms, uses forecast words (``"we expect"``, ``"roughly"``) when the
+        terms, uses forecast words (``"expected"``, ``"roughly"``) when the
         rule is a design estimate, and says when a value comes from a model.
     produces : `str`
         What the rule's proposed action becomes in the observer's plan:

@@ -20,6 +20,7 @@ They were written during issue #94. The full test suites are left to continuous 
 | `realrun.sh <checkout> <script.py> [args]` | Runs a real-data script against the copy config only |
 | `repoint_copy_paths.py <copy_config>` | Rewrites stored real paths inside a copy database so they point into the copy |
 | `dbq.sh "<select ...>"` | Read-only SQL on the copy database |
+| `validate_plate_solution_check.py` | Runs the plate-solution check on real frames with shifted solutions (run a copy of it through `realrun.sh`) |
 
 `<checkout>` is the folder name of a checkout that sits beside this one, such as `astrometrics` or
 a worktree named `astrometrics-<something>`. The full test suites are left to continuous
@@ -60,3 +61,21 @@ To fix a fresh copy, run `ASTROMETRICS_SCRATCH=... build/agent_tools/repoint_cop
 <copy_config>`. It rewrites paths that contain a `/lights/` folder to the copy's stacks folder, and
 paths under the real data folder to the copy library folder. It edits only databases inside
 `ASTROMETRICS_SCRATCH` and refuses otherwise. With `--mirror-outside`, it instead moves every stored path still outside the copy (for example an old stacks folder) to `ASTROMETRICS_SCRATCH/outside/<original path>`; `build/tpm/real_snapshot.py prepare` does this for its database copies. Tests are in `backend/tests/test_copy_path_guard.py`.
+
+## Checking the plate-solution check on real frames
+
+`validate_plate_solution_check.py` measures how the plate-solution check (`plate_solution_problem`, register entry AST-D19) behaves on real data. The check calls a solution wrong when too few stars have their nearest catalog entry inside the match radius R, compared with the share that chance neighbors give at the field's catalog density.
+
+1. The script picks plate-solved light frames from the copy library: by default 2 per target and camera, 12 in all (`--target`, `--frames-per-setup`, `--max-frames`).
+2. For each frame it moves the solution's reference sky position (`CRVAL1`, `CRVAL2`) diagonally by 0, 0.5, 1, 2 and 5 match radii (`--shifts`), on an in-memory copy of the frame's sky map.
+3. It names the stars with `identify_session_stars` (`trust_image_wcs=True`, `write_back=False`) inside the frame's parameter context, so R follows the frame's plate scale. A stand-in plate solver never solves, so a failed check keeps the shifted solution's own numbers.
+4. It prints one tab-separated row per frame and shift: camera, plate scale (arcseconds per pixel), catalog density (Gaia stars per square degree over the image, or `unknown`), n (stars with a catalog entry within the search circle W), the share of those within R, the chance share s0, the limit, and the verdict.
+
+An unshifted solution should pass, and a shift of 2 match radii or more should fail. The script reads frames and writes no file except the copy's Gaia and SIMBAD caches, which any naming run fills. `realrun.sh` runs only scripts inside `ASTROMETRICS_SCRATCH`, so copy the script there first:
+
+```bash
+cp build/agent_tools/validate_plate_solution_check.py "$ASTROMETRICS_SCRATCH"/
+build/agent_tools/realrun.sh astrometrics "$ASTROMETRICS_SCRATCH"/validate_plate_solution_check.py --target "M 67"
+```
+
+The script refuses to run when `ASTROMETRICS_CONFIG_PATH` does not point at a config inside `ASTROMETRICS_SCRATCH`. The check and its limits are in `astrometricslib/pipelines/shared/session_identification.py`.

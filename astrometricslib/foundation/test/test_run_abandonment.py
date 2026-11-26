@@ -196,3 +196,49 @@ def test_a_timeout_without_a_bound_run_ends_the_program_and_its_helper(tmp_path:
 
     helper_process_id = int(helper_file.read_text())
     assert wait_until_gone(helper_process_id)
+
+
+def test_a_run_waiting_for_a_slot_gives_up_when_abandoned() -> None:
+    """A run queued for a heavy-job slot stops waiting once it is abandoned."""
+    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
+
+    slot_held = threading.Event()
+    release_slot = threading.Event()
+
+    def hold_the_only_slot() -> None:
+        """Hold the slot, in a thread of its own, until released."""
+        with acquire_resource_slot(None, "abandon_wait_test", 1):
+            slot_held.set()
+            release_slot.wait(30)
+
+    holder = threading.Thread(target=hold_the_only_slot)
+    holder.start()
+    assert slot_held.wait(10)
+
+    abandonment = RunAbandonment()
+    outcome: list[BaseException | None] = []
+
+    def wait_for_the_slot() -> None:
+        """Queue for the slot as an abandonable run and record how it ended."""
+        try:
+            with (
+                bind_abandonment(abandonment),
+                acquire_resource_slot(None, "abandon_wait_test", 1, poll_interval_seconds=0.05),
+            ):
+                outcome.append(None)
+        except RunAbandonedError as error:
+            outcome.append(error)
+
+    waiter = threading.Thread(target=wait_for_the_slot)
+    waiter.start()
+    time.sleep(0.3)
+    assert waiter.is_alive()
+
+    abandonment.abandon()
+    waiter.join(10)
+    release_slot.set()
+    holder.join(10)
+
+    assert not waiter.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], RunAbandonedError)

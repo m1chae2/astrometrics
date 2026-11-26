@@ -104,6 +104,18 @@ describe('socketClient session-token recovery', () => {
     expect(FakeWebSocket.instances[1].url).toContain('token=old-token');
   });
 
+  it('reconnects after an error and close without calling console.error', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await socketClient.connect();
+    FakeWebSocket.instances[0].onerror?.(new Event('error'));
+    FakeWebSocket.instances[0].onclose?.();
+    FakeWebSocket.instances[0].readyState = 3;
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(FakeWebSocket.instances.length).toBe(2);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
   it('makes one token request when several sockets ask at the same moment', async () => {
     const { getSessionToken } = await import('../common/services/backendApi');
 

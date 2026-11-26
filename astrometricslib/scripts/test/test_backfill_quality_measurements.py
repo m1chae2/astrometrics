@@ -617,9 +617,15 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     """Skip and count noise, weights, run-data gates and notice rows."""
     database = make_database(tmp_path, {TARGET: full_document()})
     report = backfill.run_backfill(database, log=lambda _: None)
-    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5
-    assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1
-    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1
+    # The last term is the notice that an exposure group's brightness scale
+    # was not judged (`stacking.notice_exposure_group_not_judged`): a notice
+    # row, which a stored summary never holds, so it is counted, not written.
+    # The stack's star-direction coherence
+    # (`stacking.star_elongation_coherence`) is measured on the stack image,
+    # which a summary never held either.
+    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8 + 1 + 9 + 1 + 1
+    assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1 + 1
+    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
     assert "stacking.frame_weight" not in rows
@@ -1036,6 +1042,8 @@ def test_every_stacking_summary_field_is_a_measurement_or_listed_as_not_one() ->
         "stacking_engine": "text",
         "stacking_engine_version": "text",
         "registration_reference_frame": "a file name",
+        "stack_crop_reason": "text; the crop notice row holds it",
+        "stack_crop_area_fraction": "a share the crop notice row holds",
     }
     fields = set(StackingPipelineQualityMetrics.model_fields)
     mapped = set(stacking_record._METRICS_FIELDS)

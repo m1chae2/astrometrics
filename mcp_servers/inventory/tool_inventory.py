@@ -234,12 +234,6 @@ CLASSIFICATION_RULES = (
         "high",
         "Changes frames or stacks on disk or in the database.",
     ),
-    _rule(
-        r"^processing_run_spectroscopy_by_session$",
-        "change-data",
-        "high",
-        "Pipeline run that writes results to the live catalog or stacks.",
-    ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
     _rule(
         r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
@@ -368,7 +362,7 @@ CLASSIFICATION_RULES = (
         "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
     ),
     _rule(
-        r"^observatory_remote_frame_status$",
+        r"^observatory_remote_frame_locations$",
         "observe",
         "high",
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",

@@ -69,8 +69,13 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], ToolFunction]] = []
 function. `build_registry` registers them all."""
 
 
-def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[[ToolFunction], ToolFunction]:
-    """Build a decorator that adds a function to `TOOL_SPECS`.
+def tool(
+    name: str,
+    description: str,
+    input_schema: dict[str, Any],
+    specs: list[tuple[str, str, dict[str, Any], ToolFunction]] = TOOL_SPECS,
+) -> Callable[[ToolFunction], ToolFunction]:
+    """Build a decorator that adds a function to a list of tool specs.
 
     Parameters
     ----------
@@ -80,6 +85,9 @@ def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[
         What the tool does, shown to the client.
     input_schema : `dict`
         The JSON schema of the tool's arguments.
+    specs : `list`, optional
+        The list to add the tool to. Defaults to `TOOL_SPECS`; the job tools
+        in `mcp_servers.backend.app_jobs` keep their own list.
 
     Returns
     -------
@@ -95,7 +103,7 @@ def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[
         func : `Callable`
             The same function.
         """
-        TOOL_SPECS.append((name, description, input_schema, func))
+        specs.append((name, description, input_schema, func))
         return func
 
     return decorator
@@ -122,7 +130,7 @@ def suggest_remediation(tool_name: str, message: str) -> dict[str, Any]:
     if "target" in text and "not found" in text:
         return {
             "suggestion": "Target names are case-sensitive. Verify exact catalog identifier.",
-            "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_list', {})",
+            "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_query', {})",
         }
     if "disconnected" in text or "not connected" in text or "indi" in text:
         return {
@@ -155,11 +163,16 @@ def build_registry() -> ToolRegistry:
     Returns
     -------
     registry : `ToolRegistry`
-        All tools, before a profile removes any. A failed call's error
-        holds a recovery hint from `suggest_remediation`.
+        All tools, before a profile removes any, including the job tools of
+        `mcp_servers.backend.app_jobs`. A failed call's error holds a
+        recovery hint from `suggest_remediation`.
     """
+    # The job tools call `execute_rpc` from this module, so they are loaded
+    # here, once this module is complete.
+    from mcp_servers.backend.app_jobs import JOB_TOOL_SPECS
+
     registry = ToolRegistry(remediation=suggest_remediation)
-    for name, description, input_schema, func in TOOL_SPECS:
+    for name, description, input_schema, func in [*TOOL_SPECS, *JOB_TOOL_SPECS]:
         registry.register(name, description, input_schema)(func)
     return registry
 
@@ -914,12 +927,18 @@ async def _indi_properties(device: str, property_names: list[str] | None) -> dic
 async def _active_jobs() -> Any:
     """List the jobs the backend records as running.
 
+    The list comes from the job history read (``jobs:query`` with
+    ``active_only``), the same read the app uses.
+
     Returns
     -------
     jobs : `list` [`dict`]
-        The jobs whose status is ``started`` or ``running``.
+        Up to 50 jobs whose status is ``started`` or ``running``, newest
+        first. A job whose process most likely died has ``looks_stale``
+        true and ``is_active`` false.
     """
-    return _unwrap(await execute_rpc("processing:active_jobs", {}))
+    answer = _unwrap(await execute_rpc("jobs:query", {"active_only": True, "limit": 50}))
+    return (answer.get("jobs") or []) if isinstance(answer, dict) else []
 
 
 @tool(
@@ -1012,8 +1031,17 @@ def build_script_header(description: str) -> str:
 @tool(
     "terminal_add_script",
     (
-        "Add a new Python script to the app's Command Console 'User Scripts' list for the person to "
-        "review and run. You cannot run it. It will not replace an existing script."
+        "Add a new Python script to the app's Command Console 'My scripts' list for the person to "
+        "review and run. You cannot run it. It will not replace an existing script. The console "
+        "preloads only the public objects a notebook would make: astrometrics (Astrometrics), wayfinder "
+        "(Wayfinder), np, plt and fits (astropy.io.fits), plus three console helpers: selection "
+        "(read-only: what is picked in Image Processing now, with target, path, kind ('stack' or "
+        "'frame'), star (name, ra, dec in degrees, x and y as 1-based pixel column and row) and set_at; "
+        "fields are None when nothing is picked), show(target=..., star=..., path=..., display=...) "
+        "(opens a target, star or file in Image Processing or the Astronomy Manager when the run ends) "
+        "and doc(name) (opens that name's API reference entry). The app's internal services are not "
+        "available. astrometrics.visualization.render_fits(path, kind='figure', overlays=['detections', "
+        "'stars']) draws a frame or stack with its detected and named stars."
     ),
     {
         "type": "object",
@@ -1085,9 +1113,9 @@ async def tool_terminal_add_script(filename: str, content: str, description: str
         "size_bytes": saved["size_bytes"],
         "status": saved["status"],
         "next_step": (
-            f"Tell the person to open Command Console > User Scripts, open {saved['filename']}, "
+            f"Tell the person to open Command Console > Scripts > My scripts, open {saved['filename']}, "
             "review it, and press Run. You cannot run it. An open Command Console shows the new "
-            "file in its User Scripts list right away."
+            "file in its My scripts list right away."
         ),
     }
 

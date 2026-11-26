@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.errors import InvalidArgumentError
 
 STATS = {

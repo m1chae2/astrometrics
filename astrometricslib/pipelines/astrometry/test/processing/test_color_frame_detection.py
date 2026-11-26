@@ -3,7 +3,7 @@
 Description: A debayered (colour) stack's demosaicing interpolation leaves
 spatially correlated noise that a matched-filter point-source finder reads
 as thousands of star-like features -- see `star_identifier`'s
-`_COLOR_DETECTION_BIN_FACTOR` docstring for the synthetic measurements this
+`COLOR_DETECTION_BIN_FACTOR` docstring for the synthetic measurements this
 was built from. `StarIdentifier.detect_stars` handles this by detecting on
 a block-averaged copy for colour frames and rescaling the results back to
 full resolution, while monochrome frames instead get their detection
@@ -18,13 +18,13 @@ import numpy as np
 import pytest
 from scipy.ndimage import zoom
 
-from astrometricslib.pipelines.astrometry.processing.star_identifier import (
-    StarIdentifier,
+from astrometricslib.pipelines.astrometry.processing.star_detection import (
     _block_average,
     _rescale_source_centroids,
 )
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
-# Reproduces this module's `_COLOR_DETECTION_BIN_FACTOR` synthetic
+# Reproduces this module's `COLOR_DETECTION_BIN_FACTOR` synthetic
 # validation as a locked-in regression test: a bilinear-demosaiced RGGB
 # background with realistic per-channel gain and photon/read noise, no
 # real stars, using a fixed RNG seed so the array itself is
@@ -203,13 +203,13 @@ def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm() -> None:
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
         return_value=6.75,
     ):
         identifier.detect_stars(data, is_color_frame=False)
 
     assert identifier.detector.fwhm == 6.75  # ruff: ignore[float-equality-comparison]
-    identifier.detector.detect.assert_called_once_with(data)
+    identifier.detector.detect.assert_called_once_with(data, with_radius=True)
 
 
 def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails() -> None:
@@ -220,7 +220,7 @@ def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails() ->
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
         return_value=None,
     ):
         identifier.detect_stars(data, is_color_frame=False)
@@ -240,7 +240,7 @@ def test_mono_frame_detection_survives_a_measurement_exception() -> None:
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
         side_effect=ValueError("too few sources to measure"),
     ):
         sources, unique_sources = identifier.detect_stars(data, is_color_frame=False)
@@ -262,7 +262,7 @@ def test_mono_frame_detection_does_not_hide_a_bug_in_the_measurement() -> None:
 
     with (
         patch(
-            "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+            "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
             side_effect=AttributeError("a coding mistake"),
         ),
         pytest.raises(AttributeError),
@@ -280,7 +280,7 @@ def test_binning_suppresses_demosaic_false_positives_on_a_real_detector() -> Non
     default detection path. Uses `StarIdentifier` end-to-end (a real
     `SourceDetector`, not a mock), so a change to detection internals
     that defeats this fix would be caught here, not just in the
-    hand-derivation in `_COLOR_DETECTION_BIN_FACTOR`'s comment.
+    hand-derivation in `COLOR_DETECTION_BIN_FACTOR`'s comment.
     """
     identifier = StarIdentifier(config=MagicMock(get_value=MagicMock(return_value=None)))
     background = _synthetic_demosaiced_background(height=400, width=400, seed=7)
@@ -289,3 +289,37 @@ def test_binning_suppresses_demosaic_false_positives_on_a_real_detector() -> Non
     _, binned_unique = identifier.detect_stars(background, is_color_frame=True)
 
     assert len(binned_unique) < len(unbinned_unique) / 3
+
+
+def test_color_frame_stars_land_once_at_their_true_positions() -> None:
+    """Verify each colour-frame star is rescaled exactly once.
+
+    A star found only once is the same dictionary in the raw and the
+    deduplicated list. Scaling both lists used to scale it twice, which put
+    most stars outside the image (x = 4 * x_binned + 1.5 instead of
+    2 * x_binned + 0.5). This test uses the real detector and stars at known
+    places, and checks that the two lists agree and sit on the true places.
+    """
+    rng = np.random.default_rng(3)
+    height, width = 400, 600
+    rows, columns = np.mgrid[0:height, 0:width]
+    image = rng.normal(500.0, 5.0, size=(height, width))
+    true_positions = [(120.0, 80.0), (300.0, 200.0), (450.0, 330.0), (520.0, 90.0), (60.0, 350.0)]
+    for x_true, y_true in true_positions:
+        image += 4000.0 * np.exp(-((columns - x_true) ** 2 + (rows - y_true) ** 2) / (2 * 2.5**2))
+    identifier = StarIdentifier(config=MagicMock(get_value=MagicMock(return_value=None)))
+
+    sources, unique_sources = identifier.detect_stars(image, is_color_frame=True)
+
+    assert len(unique_sources) >= len(true_positions)
+    for star in unique_sources:
+        assert 0 <= star["x_centroid"] < width
+        assert 0 <= star["y_centroid"] < height
+    for x_true, y_true in true_positions:
+        nearest = min(
+            np.hypot(star["x_centroid"] - x_true, star["y_centroid"] - y_true) for star in unique_sources
+        )
+        assert nearest < 2.0
+    raw_positions = {(star["x_centroid"], star["y_centroid"]) for star in sources}
+    for star in unique_sources:
+        assert (star["x_centroid"], star["y_centroid"]) in raw_positions or star.get("merged_detection_count")

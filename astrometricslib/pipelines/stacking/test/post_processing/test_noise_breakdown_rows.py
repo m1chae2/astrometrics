@@ -180,7 +180,9 @@ def test_the_master_dark_noise_falls_with_the_square_root_of_its_frame_count() -
     one = expected_master_dark_noise(expected, 1, False)
     sixteen = expected_master_dark_noise(expected, 16, False)
 
-    assert one.value == pytest.approx(expected.coherent_read_noise)
+    # The master dark is combined with the median (STK-D76), so sqrt(pi / 2)
+    # times the mean's noise.
+    assert one.value == pytest.approx(expected.coherent_read_noise * math.sqrt(math.pi / 2.0))
     assert sixteen.value == pytest.approx(one.value / 4.0)
     assert sixteen.dark_frame_count == 16
 

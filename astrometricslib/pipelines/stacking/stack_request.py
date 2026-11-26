@@ -31,7 +31,7 @@ from astrometricslib.models.processing_results import StackResult
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection, select_library_frames
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
 from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
     choose_camera_frames,
     ensure_single_camera,
@@ -160,7 +160,6 @@ def run_stack(
     chosen: list[FrameRecord],
     *,
     kind: StackKind,
-    plan_only: bool,
     force: bool,
     preview_settings: PreviewSettings,
     siril: SirilOptions,
@@ -171,7 +170,7 @@ def run_stack(
     measured_at: datetime | None = None,
     quality_recording: FrameQualityRecording | None = None,
 ) -> StackResult:
-    """Stack the chosen frames, or only report the plan.
+    """Stack the chosen frames.
 
     Parameters
     ----------
@@ -182,8 +181,6 @@ def run_stack(
         The frames to stack, from `choose_frames_to_stack`.
     kind : {"imaging", "spectral"}
         Which kind of frames they are.
-    plan_only : `bool`
-        Only report the frames. Nothing is stacked or saved.
     force : `bool`
         Rebuild even if nothing changed since the stack on disk was made.
     preview_settings : `PreviewSettings`
@@ -211,7 +208,7 @@ def run_stack(
     Returns
     -------
     result : `StackResult`
-        The frames chosen and, unless ``plan_only``, the stack made.
+        The frames chosen and the stack made.
 
     Raises
     ------
@@ -227,21 +224,21 @@ def run_stack(
         first_file=os.path.basename(chosen[0].path),
         last_file=os.path.basename(chosen[-1].path),
     )
-    if plan_only:
-        return result.model_copy(update={"plan_only": True, "note": "Nothing was stacked or saved."})
 
     from astrometricslib.pipelines.stacking import stage as stacking_stage
 
+    # The job is recorded first, so a stack waiting for a slot shows in the
+    # job list and returns its job id.
     with (
-        stacking_slot(),
         registered_job(
             enabled=register_job,
             job_type="stacking",
             target_id=target.id,
             log_file=siril.log_file,
-            completed_message=f"[{target.id}] Stacking completed successfully.",
-            failed_message=f"[{target.id}] Stacking failed.",
+            completed_message=f"[{target.id}] Stacking completed",
+            failed_message=f"[{target.id}] Stacking failed",
         ) as job,
+        job.holding_slot(stacking_slot()),
     ):
         stacked_path = stacking_stage.stack_frames(
             target,
@@ -262,7 +259,11 @@ def run_stack(
         )
         # Stacking can finish without raising and still make no image, so
         # the outcome is decided here, not left to "no exception means done".
-        job.mark("completed" if stacked_path else "failed", 100)
+        job.mark(
+            "completed" if stacked_path else "failed",
+            100,
+            message="Stacking completed" if stacked_path else "Stacking failed",
+        )
     if not stacked_path:
         raise ProcessingError(
             f"Stacking {target.id!r} finished without making a stack. See the job log.",

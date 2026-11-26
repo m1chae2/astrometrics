@@ -138,19 +138,3 @@ class GuidingService:
         """
         live = self._observatory.guiding.status(include=["live"]).live
         return live.model_dump(mode="json", by_alias=True)
-
-    def analyze_guiding_spectrum(self, session_id: str | None = None) -> dict[str, Any]:
-        """Refit the mount's periodic error model from recorded samples.
-
-        Parameters
-        ----------
-        session_id : `str`, optional
-            One night's samples, or every recorded sample when omitted.
-
-        Returns
-        -------
-        spectrum : `dict` [`str`, `Any`]
-            Dominant periods, peak-to-peak periodic error and the spectrum.
-        """
-        analysis = self._observatory.guiding.refit_spectrum(session_id=session_id, limit=2000)
-        return analysis.model_dump(by_alias=True)

@@ -2,8 +2,17 @@
 
 This folder implements the "astronomy Manager" UI. Responsibilities:
 
-- Left column: `astronomyListManager` — lists available astronomy data metadata and
-  allows selecting a spectrum to view.
+- Left column: the "By target / By spectral class" tabs, the Targets (or Spectral classes)
+  list and the star list. Clicking the Targets title folds the whole column to a thin strip
+  that shows "Targets" and the selected target, the same `CollapsibleColumn` that Image
+  Processing uses. Clicking the strip opens it again. The choice is remembered under
+  `astrometrics:astronomyManager:targetListCollapsed`.
+- "Back to image" (on the star card, after the person opened a star from the Image
+  Processing picture): the same star under the same target puts the saved Image Processing
+  view back. Any other star, or a star of a target picked here later, opens in Image
+  Processing on its target's main stack with the Astrometry overlay on, the star selected and
+  the view zoomed in on it (`utils/backToImage.ts`). The target is the one selected in the
+  Targets list when the star belongs to it, otherwise the star's first target.
 - Center area: `astronomyViewer` — plots the parsed wavelength/flux arrays and
   renders annotations (known lines) when requested.
 
@@ -26,6 +35,10 @@ Default star
 - A star the user picked in a target is remembered for the session and chosen again when the
   user returns to that target. A star already open on first mount (a hand-off from another
   view) is kept.
+- A star opened from another view also moves the Targets list to the star's own target
+  (`chooseTargetForStar`, in `utils/handedOffStar.ts`). The target the user came from wins
+  when the star belongs to it; otherwise the selected target stays if it holds the star, else
+  the first target in the star's record. The Image Viewer sends the target it was showing.
 - A target with no stars selects nothing, so the list shows its "No stars found" message.
 - The Planetarium's "Stars in <target>" list uses the same hook, so it gets the same default.
 

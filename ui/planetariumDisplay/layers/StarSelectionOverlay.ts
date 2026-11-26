@@ -22,7 +22,8 @@ export class StarSelectionOverlay implements PlanetariumOverlay {
   name = 'Selected Star Reticle';
 
   /**
-   * Draws the selection reticle around the selected star, if it is currently visible.
+   * Draws the selection reticle around the selected star, if it is currently visible,
+   * in the star's class color when it has one (the spectral class mode).
    *
    * @param {CanvasRenderingContext2D} context - The 2D rendering context.
    * @param {ProjectionContext} projectionContext - Projection context.
@@ -41,6 +42,7 @@ export class StarSelectionOverlay implements PlanetariumOverlay {
           projectionContext.showCatalog,
           limitingMagnitude,
           projectionContext.fov,
+          projectionContext.selectedTargetId,
         ),
     );
     if (!selected) return;
@@ -48,6 +50,6 @@ export class StarSelectionOverlay implements PlanetariumOverlay {
     const point = projectionContext.projectCoords(selected.ra, selected.dec);
     if (!point.visible) return;
 
-    drawStarSelectionReticle(context, point.x, point.y);
+    drawStarSelectionReticle(context, point.x, point.y, selected.colorClass);
   }
 }

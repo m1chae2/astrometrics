@@ -96,15 +96,44 @@ _NOTICE_ROW_REASON = (
     "issue 97."
 )
 UNUSED_DECISION_METRICS = {
+    "frame.dark_longest_streak_px": (
+        "judged by the stacking step's dark defect check (`dark_defect_judgement`), which keeps or leaves "
+        "out a dark before the stack; no rule of this table compares it with a limit"
+    ),
+    "frame.dark_edge_to_edge_streak": (
+        "judged by the stacking step's dark defect check (`dark_defect_judgement`), which leaves out a dark "
+        "with a track from edge to edge; no rule of this table compares it with a limit"
+    ),
+    "frame.dark_outlier_pixel_count": (
+        "judged by the stacking step's dark defect check (`dark_defect_judgement`), which leaves out a dark "
+        "with too many outlying pixels; no rule of this table compares it with a limit"
+    ),
     "stacking.notice_frames_moved_to_excluded": _NOTICE_ROW_REASON,
     "frame.notice_synthetic": _NOTICE_ROW_REASON,
     "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,
+    "stacking.notice_stack_cropped": _NOTICE_ROW_REASON,
+    "stacking.notice_stack_turned": _NOTICE_ROW_REASON,
+    "astrometry.notice_gaia_tiles_missing": _NOTICE_ROW_REASON,
+    "frame.sky_unevenness": (
+        "evidence of a set-aside frame, cited by the target report inputs next to the star count; the "
+        "quarantine step judges it, no rule of this table compares it with a limit"
+    ),
+    "frame.pointing_offset_fraction": (
+        "evidence of a set-aside frame, cited by the target report inputs next to the star count; the "
+        "quarantine step judges it, no rule of this table compares it with a limit"
+    ),
+    "stacking.star_elongation": (
+        "stack-level star elongation, read by the star-shape review, not a pass/fail rule"
+    ),
     "stacking.notice_flat_calibration_note": _NOTICE_ROW_REASON,
     "stacking.notice_exposure_group_left_out": _NOTICE_ROW_REASON,
+    "stacking.notice_exposure_group_not_judged": _NOTICE_ROW_REASON,
     "stacking.notice_preview_step_skipped": _NOTICE_ROW_REASON,
     "stacking.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "photometry.notice_session_without_comparison_stars": _NOTICE_ROW_REASON,
+    "photometry.notice_logged_warnings": _NOTICE_ROW_REASON,
     "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "spectroscopy.notice_stars_below_feature_limit": (
         "issue 97: counts the extracted spectra too faint for feature detection and classification "

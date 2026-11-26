@@ -6,16 +6,46 @@ file, and checks what `measure_star_profile_in_file` reports.
 
 import math
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 from astropy.io import fits
+from scipy.ndimage import maximum_filter
 
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
-from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.quality.star_profile import StarProfileMeasurement
+from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    APERTURE_RADIUS_PX,
+    CROWDING_MARGIN_PX,
+    CROWDING_NEIGHBOR_PEAK_FRACTION,
+    SKY_ANNULUS_INNER_RADIUS_PX,
+    SKY_ANNULUS_OUTER_RADIUS_PX,
+)
+from astrometricslib.pipelines.shared.quality.star_profile import PhotometryGeometry, _judge_core_shape
+from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file as _measure
 
 SIZE = 101
 SKY = 500.0
+
+
+def measure_star_profile_in_file(*args: Any, **kwargs: Any) -> StarProfileMeasurement:
+    """Measure a star, passing the photometry geometry the API passes.
+
+    Returns
+    -------
+    measurement : `StarProfileMeasurement`
+        What `measure_star_profile_in_file` returns.
+    """
+    geometry = PhotometryGeometry(
+        aperture_radius_px=float(resolve(APERTURE_RADIUS_PX).value),
+        sky_inner_px=float(resolve(SKY_ANNULUS_INNER_RADIUS_PX).value),
+        sky_outer_px=float(resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value),
+        crowding_margin_px=float(resolve(CROWDING_MARGIN_PX).value),
+        crowding_neighbor_peak_fraction=float(resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value),
+    )
+    return _measure(*args, photometry_geometry=geometry, **kwargs)
 
 
 def _write(tmp_path: Path, stars: list[tuple[float, float, float, float]], clip: float | None = None) -> str:
@@ -248,3 +278,209 @@ def test_cutout_pads_outside_the_image_and_is_limited(tmp_path: Path) -> None:
         measure_star_profile_in_file(path, 6.0, 6.0, radius_px=500.0)
     with pytest.raises(InvalidArgumentError):
         measure_star_profile_in_file(path, 6.0, 6.0, cut_half_length_px=500.0)
+
+
+def test_surroundings_report_edge_and_signal(tmp_path: Path) -> None:
+    """A star near the edge reports its edge distance and a high peak."""
+    path = _write(tmp_path, [(6.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 7.0, 51.0)
+    assert result.edge_distance_px == pytest.approx(6.0, abs=0.5)
+    assert result.coverage_fraction < 0.9
+    assert result.peak_over_sky_noise > 100
+
+
+def test_surroundings_count_neighbors_in_circle_and_sky_ring(tmp_path: Path) -> None:
+    """A bright star in the circle and one in the sky ring count apart."""
+    path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8), (56.0, 50.0, 1000.0, 1.8), (50.0, 59.0, 2000.0, 1.8)])
+
+    def finder(box: np.ndarray) -> list[tuple[float, float]]:
+        """Find the local brightness peaks in a piece of the image.
+
+        Returns
+        -------
+        stars : `list` [`tuple` [`float`, `float`]]
+            The 0-based column and row of each peak.
+        """
+        peaks = (box == maximum_filter(box, size=5)) & (box > SKY + 100.0)
+        rows, columns = np.nonzero(peaks)
+        return [(float(column), float(row)) for column, row in zip(columns, rows, strict=True)]
+
+    result = measure_star_profile_in_file(path, 51.0, 51.0, find_neighbors=finder)
+    assert result.circle_neighbor_count == 1
+    assert result.sky_ring_neighbor_count == 1
+    alone = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert alone.circle_neighbor_count == 0
+
+
+def _write_stretched_star(
+    tmp_path: Path, peak: float, sigma_long: float, sigma_short: float, angle_deg: float
+) -> str:
+    """Write one stretched Gaussian star on a noisy sky.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder for the file.
+    peak : `float`
+        The peak above the sky.
+    sigma_long, sigma_short : `float`
+        The widths along and across the long axis, in pixels.
+    angle_deg : `float`
+        The long axis, from the x axis toward the y axis.
+
+    Returns
+    -------
+    path : `str`
+        The file.
+    """
+    rng = np.random.default_rng(5)
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    cosine, sine = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+    along = (columns - 50.3) * cosine + (rows - 49.8) * sine
+    across = -(columns - 50.3) * sine + (rows - 49.8) * cosine
+    image = SKY + rng.normal(0.0, 2.0, (SIZE, SIZE))
+    image += peak * np.exp(-(along**2 / (2 * sigma_long**2) + across**2 / (2 * sigma_short**2)))
+    path = tmp_path / "stretched.fits"
+    fits.PrimaryHDU(image.astype(np.float32)).writeto(path)
+    return str(path)
+
+
+def test_round_star_core_shape_is_round(tmp_path: Path) -> None:
+    """A round star reads an elongation near 1 and is judgeable."""
+    path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.star_shape_judgeable
+    assert result.star_shape_note is None
+    assert result.star_elongation == pytest.approx(1.0, abs=0.03)
+
+
+def test_stretched_star_gives_its_ratio_and_angle(tmp_path: Path) -> None:
+    """A star stretched 4:3 at 30 degrees from +x reads 60 degrees from +y.
+
+    The result gives the long axis in the cut's convention (from +y toward
+    +x), so a cut at that angle runs along the star. With no plate solution
+    there is no position angle on the sky.
+    """
+    path = _write_stretched_star(tmp_path, 3000.0, 2.4, 1.8, 30.0)
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.star_shape_judgeable
+    assert result.star_elongation == pytest.approx(2.4 / 1.8, abs=0.06)
+    assert result.star_elongation_angle_deg == pytest.approx(60.0, abs=4.0)
+    assert result.star_elongation_position_angle_deg is None
+
+
+def test_a_plate_solved_star_gives_its_position_angle(tmp_path: Path) -> None:
+    """North up, east left: a long axis along +y points north (0 degrees)."""
+    path = _write_stretched_star(tmp_path, 3000.0, 2.4, 1.8, 90.0)
+    with fits.open(path, mode="update") as hdul:
+        hdul[0].header.update({
+            "PLTSOLVD": True,
+            "CTYPE1": "RA---TAN",
+            "CTYPE2": "DEC--TAN",
+            "CRVAL1": 150.0,
+            "CRVAL2": 20.0,
+            "CRPIX1": 50.0,
+            "CRPIX2": 50.0,
+            "CDELT1": -1.0 / 3600.0,
+            "CDELT2": 1.0 / 3600.0,
+        })
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.star_elongation_angle_deg == pytest.approx(0.0, abs=4.0) or (
+        result.star_elongation_angle_deg == pytest.approx(180.0, abs=4.0)
+    )
+    position_angle = result.star_elongation_position_angle_deg
+    assert position_angle is not None
+    assert min(position_angle, 180.0 - position_angle) < 4.0
+
+
+def test_the_fits_carry_their_estimator_and_scale_width(tmp_path: Path) -> None:
+    """Each fitted width names its estimator and gives its scale width."""
+    path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.moffat.estimator == "frame Moffat"
+    assert result.gaussian.estimator == "frame Gaussian"
+    assert result.moffat.fwhm_on_scale_px == pytest.approx(result.moffat.fwhm_px * 1.192, rel=1e-6)
+
+
+def test_faint_star_shape_is_not_judgeable(tmp_path: Path) -> None:
+    """A star barely above the noise gives no elongation and says why."""
+    path = _write(tmp_path, [(50.0, 50.0, 8.0, 1.8)])
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert not result.star_shape_judgeable
+    assert result.star_elongation is None
+    assert result.star_elongation_angle_deg is None
+    assert result.star_shape_note is not None
+
+
+def test_star_at_the_edge_is_not_judgeable(tmp_path: Path) -> None:
+    """A star whose fit box leaves the image is not judged."""
+    path = _write(tmp_path, [(6.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 7.0, 51.0)
+    assert not result.star_shape_judgeable
+    assert "edge" in (result.star_shape_note or "")
+
+
+def _star_image(peak: float = 3000.0) -> np.ndarray:
+    """Draw one round, clean star at the middle of a noisy sky.
+
+    Parameters
+    ----------
+    peak : `float`, optional
+        The star's peak above the sky.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        The image, with the star at column 50 and row 50.
+    """
+    rng = np.random.default_rng(3)
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    image = SKY + rng.normal(0.0, 2.0, (SIZE, SIZE))
+    return image + peak * np.exp(-((columns - 50.0) ** 2 + (rows - 50.0) ** 2) / (2 * 1.8**2))
+
+
+def test_shape_note_for_a_clean_star_is_empty() -> None:
+    """A clean, bright star is judged and has no note or detail."""
+    image = _star_image()
+    elongation, _, judgeable, note, detail = _judge_core_shape(image, 50.0, 50.0, 500.0, False, True, 0)
+    assert judgeable and elongation is not None
+    assert note is None and detail is None
+
+
+@pytest.mark.parametrize(
+    ("case", "note"),
+    [
+        ("not_star", "not a single star"),
+        ("faint", "too faint"),
+        ("clipped", "the core is clipped"),
+        ("neighbor", "a neighbor is too close"),
+        ("edge", "too near the edge"),
+        ("gaps", "gaps in the image"),
+        ("fit", "the fit did not hold"),
+    ],
+)
+def test_shape_note_names_the_failing_check(case: str, note: str) -> None:
+    """Each refusing check gives its own short reason and a sentence."""
+    image = _star_image()
+    column = row = 50.0
+    signal_to_noise, clipped, found, neighbors = 500.0, False, True, 0
+    if case == "not_star":
+        found = False
+    elif case == "faint":
+        signal_to_noise = 2.0
+    elif case == "clipped":
+        clipped = True
+    elif case == "neighbor":
+        neighbors = 1
+    elif case == "edge":
+        column = 4.0
+    elif case == "gaps":
+        image[48, 52] = np.nan
+    elif case == "fit":
+        image = SKY + np.random.default_rng(9).normal(0.0, 2.0, (SIZE, SIZE))
+    elongation, _, judgeable, found_note, detail = _judge_core_shape(
+        image, column, row, signal_to_noise, clipped, found, neighbors
+    )
+    assert not judgeable and elongation is None
+    assert found_note == note
+    assert detail and detail.endswith(".")

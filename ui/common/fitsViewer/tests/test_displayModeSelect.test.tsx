@@ -26,7 +26,7 @@ describe('DisplayModeSelect', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Display: Auto Stretch' }));
     const linear = screen.getByRole('button', { name: 'Linear' });
     const autoStretch = screen.getAllByRole('button', { name: 'Auto Stretch' })[0];
-    expect(linear.getAttribute('title')).toBe('Brightness shown in proportion. Use this to judge star sizes, halos and pairs.');
+    expect(linear.getAttribute('title')).toBe('Brightness shown in proportion, with the range set from the sky noise, so equal noise looks equally grainy on any image. Use this to judge star sizes, halos and pairs.');
     expect(autoStretch.getAttribute('title')).toBe('Brightens faint detail. Star sizes and halos look larger than they are.');
     expect(screen.queryByText(/min|max/i)).toBeNull();
   });

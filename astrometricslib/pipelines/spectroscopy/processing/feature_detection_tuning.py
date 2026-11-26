@@ -63,6 +63,7 @@ from astrometricslib.pipelines.spectroscopy.tuning_data import (
     spectral_target_stars,
     stored_spectra,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +260,7 @@ def control_scatter(depths: list[float]) -> float | None:
     if len(depths) < 3:
         return None
     values = np.asarray(depths)
-    return 1.4826 * float(np.median(np.abs(values - np.median(values))))
+    return robust_sigma(values)
 
 
 def feature_geometry(

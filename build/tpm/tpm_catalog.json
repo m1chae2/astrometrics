@@ -165,7 +165,7 @@
         "per": "rpc",
         "rpcs": [
           "history:night_quality",
-          "target:get_targets",
+          "target:get",
           "processing:stack_summary"
         ]
       },
@@ -1245,7 +1245,7 @@
         "per": "rpc",
         "rpcs": [
           "history:night_quality",
-          "target:get_targets",
+          "target:get",
           "processing:stack_summary"
         ]
       },
@@ -1962,7 +1962,7 @@
           "preview"
         ]
       },
-      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. The stack job logs one line 'Stage N of M' at the start of each stage, with a time to the millisecond (processing:job_log_tail). A stage runs to the next stage's line; the last one to the end of the job. A skipped stage gives no TPM.",
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. The stack job logs one line 'Stage N of M' at the start of each stage, with a time to the millisecond (jobs:query, detail log_tail). A stage runs to the next stage's line; the last one to the end of the job. A skipped stage gives no TPM.",
       "statistic": "last",
       "threshold": null,
       "objective": null,
@@ -2275,7 +2275,7 @@
           "stack_comparison"
         ]
       },
-      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. From the RPC call until every job it started has ended (processing:list_jobs for the target, new jobs only; the quality calls do not return their job's number).",
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. From the RPC call until every job it started has ended (jobs:query for the target, new jobs only; the quality calls do not return their job's number).",
       "statistic": "last",
       "threshold": null,
       "objective": null,

@@ -2,9 +2,10 @@
 
 A star the photometry flags as variable is only a lead if no catalog lists it.
 The answer comes from the saved catalog row (SIMBAD object types, Gaia DR3 and
-VSX, whichever have been asked; see `models/known_variability.py`). A
-candidate whose row is missing, or whose catalogs were never asked, is labelled
-unknown, never "not listed".
+VSX, whichever have been asked; see `models/known_variability.py`), or from the
+run's own star when the star has no saved row yet (only measured stars are
+saved). A candidate with neither, or whose catalogs were never asked, is
+labelled unknown, never "not listed".
 """
 
 import logging
@@ -19,7 +20,11 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS
 logger = logging.getLogger(__name__)
 
 
-def label_known_variability(candidates: Iterable[VariableCandidate], catalog_access: Any) -> None:
+def label_known_variability(
+    candidates: Iterable[VariableCandidate],
+    catalog_access: Any,
+    run_stars: Iterable[StellarObject] = (),
+) -> None:
     """Fill in each candidate's known-variability answer, in place.
 
     Parameters
@@ -27,26 +32,33 @@ def label_known_variability(candidates: Iterable[VariableCandidate], catalog_acc
     candidates : `Iterable` [`VariableCandidate`]
         The candidates to label.
     catalog_access : `CatalogAccess` or `None`
-        Loads the saved stars. With `None`, or if the lookup fails, every
-        candidate is left labelled unknown.
+        Loads the saved stars. With `None`, or if the lookup fails, only the
+        run's stars are used.
+    run_stars : `Iterable` [`StellarObject`], optional
+        The run's own stars, with the catalog answers filled in memory. A
+        candidate with no saved row takes its answer from the run's star of
+        the same id.
     """
     candidates = list(candidates)
     unknown_note = describe_known_variability(KnownVariability.UNKNOWN, [])
     for candidate in candidates:
         candidate.known_variability = KnownVariability.UNKNOWN.value
         candidate.known_variability_note = unknown_note
-    if not candidates or catalog_access is None:
+    if not candidates:
         return
-    try:
-        saved = {
-            star.id: star
-            for star in catalog_access.get_by_ids(
-                "stellar_catalog", [candidate.id for candidate in candidates]
+    saved: dict[str, StellarObject] = {star.id: star for star in run_stars}
+    if catalog_access is not None:
+        try:
+            saved.update({
+                star.id: star
+                for star in catalog_access.get_by_ids(
+                    "stellar_catalog", [candidate.id for candidate in candidates]
+                )
+            })
+        except (AstrometricsError, *DATA_ERRORS):
+            logger.warning(
+                "Could not look up the saved catalog rows to label known variability.", exc_info=True
             )
-        }
-    except (AstrometricsError, *DATA_ERRORS):
-        logger.warning("Could not look up the saved catalog rows to label known variability.", exc_info=True)
-        return
     for candidate in candidates:
         star = saved.get(candidate.id)
         if star is None:

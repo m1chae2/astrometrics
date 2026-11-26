@@ -8,7 +8,10 @@ import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendError } from '../../services/backendError';
-import { buildDetectionPaths, detectionScreenPosition } from '../utils/detectionMarkers';
+import {
+  buildDetectionPaths, detectionScreenPosition, CROWDED_DOT_OPACITY, CROWDED_DOT_RADIUS_PX,
+  CROWDED_MERGED_DOT_OPACITY, CROWDED_MERGED_DOT_RADIUS_PX, DOT_OPACITY,
+} from '../utils/detectionMarkers';
 import type { DetectionGeometry } from '../utils/detectionMarkers';
 import type { DetectionsMeasurement } from '../../types/backendTypes';
 
@@ -106,6 +109,60 @@ describe('detection marker placement', () => {
     // The third star is at x = 10 + 189.5 * 2 = 389: outside the 300 px view.
     expect(paths.visibleCount).toBe(2);
   });
+
+  it('draws the photometry circle at its size in image pixels, scaled by the zoom', () => {
+    const paths = buildDetectionPaths([{ x: 20, y: 20, flux: 1, merged: false }], { ...geometry, apertureRadiusPx: 4 });
+    // 4 image pixels at 2 screen pixels each: an 8 px radius.
+    expect(paths.circles).toContain('a8.0 8.0');
+  });
+
+  it('draws a dot for every star, single or merged, when the circle would be under 3 screen pixels', () => {
+    const paths = buildDetectionPaths(
+      [{ x: 20, y: 20, flux: 1, merged: false }, { x: 40, y: 30, flux: 2, merged: true }, { x: 60, y: 30, flux: 2, merged: false }],
+      { ...geometry, stepX: 0.5, stepY: 0.5, apertureRadiusPx: 4 },
+    );
+    expect(paths.mode).toBe('dots');
+    expect(paths.circles.match(/a1.25 1.25/g)).toHaveLength(4);
+    expect(paths.diamonds.match(/a2 2/g)).toHaveLength(2);
+    expect(paths.diamonds).not.toContain('Z');
+    expect(paths.visibleCount).toBe(3);
+  });
+
+  it('keeps the normal dot size and opacity at low density', () => {
+    const paths = buildDetectionPaths(
+      [{ x: 20, y: 20, flux: 1, merged: false }],
+      { ...geometry, stepX: 0.5, stepY: 0.5, apertureRadiusPx: 4 },
+    );
+    expect(paths.dotOpacity).toBe(DOT_OPACITY);
+  });
+
+  it('shrinks and fades dots in a crowded view, never below the floors, and keeps merged dots larger', () => {
+    const many = Array.from({ length: 12000 }, (_, index) => ({
+      x: 1 + (index % 200), y: 1 + Math.floor(index / 200) % 160, flux: 1, merged: index % 10 === 0,
+    }));
+    const paths = buildDetectionPaths(many, {
+      ...geometry, stepX: 0.1, stepY: 0.1, panX: 0, panY: 0, viewWidth: 180, viewHeight: 180, apertureRadiusPx: 4,
+    });
+    expect(paths.mode).toBe('dots');
+    expect(paths.dotOpacity).toBeGreaterThanOrEqual(CROWDED_DOT_OPACITY);
+    expect(paths.dotOpacity).toBeLessThan(DOT_OPACITY);
+    expect(paths.dotOpacity).toBeCloseTo(CROWDED_DOT_OPACITY, 5);
+    expect(paths.mergedDotOpacity).toBeCloseTo(CROWDED_MERGED_DOT_OPACITY, 5);
+    expect(paths.mergedDotOpacity).toBeGreaterThan(paths.dotOpacity);
+    expect(paths.visibleCount).toBe(12000);
+    expect(paths.circles).toContain(`a${CROWDED_DOT_RADIUS_PX} ${CROWDED_DOT_RADIUS_PX}`);
+    expect(paths.diamonds).toContain(`a${CROWDED_MERGED_DOT_RADIUS_PX} ${CROWDED_MERGED_DOT_RADIUS_PX}`);
+  });
+
+  it('draws circles and diamonds once the circle is at least 3 screen pixels', () => {
+    const paths = buildDetectionPaths(
+      [{ x: 20, y: 20, flux: 1, merged: false }, { x: 40, y: 30, flux: 2, merged: true }],
+      { ...geometry, stepX: 0.75, stepY: 0.75, apertureRadiusPx: 4 },
+    );
+    expect(paths.mode).toBe('circles');
+    expect(paths.circles).toContain('a3.0 3.0');
+    expect(paths.diamonds).toContain('Z');
+  });
 });
 
 describe('Detections overlay', () => {
@@ -162,6 +219,17 @@ describe('Detections overlay', () => {
     await waitFor(() => expect(screen.getByTestId('detections-note').textContent).toContain('2 detections'));
     expect(callBackendMock).toHaveBeenCalledWith('images:measure_detections', { path: '/stacks/M31.fits' }, expect.anything());
     expect(screen.getByTestId('detections-single').getAttribute('d')).not.toBe('');
+    expect(screen.getByTestId('detections-merged').getAttribute('d')).not.toBe('');
+  });
+
+  it('draws dots and says to zoom in when the photometry circles are too small to see', async () => {
+    callBackendMock.mockResolvedValue({
+      ...makeDetections([{ x: 30, y: 40, flux: 5, merged: false }, { x: 60, y: 80, flux: 9, merged: true }]),
+      aperture_radius_px: 0.5,
+    });
+    renderViewer(true);
+    await waitFor(() => expect(screen.getByTestId('detections-note').textContent).toContain('Zoom in to see the photometry circles'));
+    expect(screen.getByTestId('detections-layer').getAttribute('data-mode')).toBe('dots');
     expect(screen.getByTestId('detections-merged').getAttribute('d')).not.toBe('');
   });
 

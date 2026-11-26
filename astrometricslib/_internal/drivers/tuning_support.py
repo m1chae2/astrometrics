@@ -6,8 +6,8 @@ need the same few things, so they are kept here once:
 
 - the stored quality rows of one metric that belong to the setup's camera,
   each with the capture setting it was taken with;
-- two robust statistics (the spread that one stray value cannot move, and the
-  widest gap in a list of numbers);
+- the widest gap in a list of numbers (the robust spread is
+  `astrometricslib.utilities.robust_statistics.robust_sigma`);
 - a check of whether a camera is a colour camera, read from the header of one
   of its frames.
 
@@ -16,8 +16,7 @@ numbers with a known answer.
 """
 
 import math
-import statistics
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from itertools import pairwise
 from typing import Any
 
@@ -26,29 +25,6 @@ from astrometricslib._internal.drivers.fits_access import frame_uses_color_filte
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
-
-# The factor that turns the median absolute deviation of normally spread data
-# into one standard deviation. It is a mathematical constant of the normal
-# distribution (1 / 0.6745), not a tuned value.
-MAD_TO_SIGMA = 1.4826
-
-
-def robust_sigma(values: Sequence[float]) -> float:
-    """Measure the spread of some numbers in a way a stray value cannot move.
-
-    Parameters
-    ----------
-    values : `Sequence` [`float`]
-        The numbers. At least one.
-
-    Returns
-    -------
-    sigma : `float`
-        The median absolute deviation about the median, times `MAD_TO_SIGMA`,
-        so it equals the standard deviation for normally spread numbers.
-    """
-    middle = statistics.median(values)
-    return MAD_TO_SIGMA * statistics.median(abs(value - middle) for value in values)
 
 
 def widest_gap(values: Iterable[float]) -> tuple[float, float] | None:
@@ -146,7 +122,7 @@ def camera_is_colour(astrometrics: Any, camera_name: str, configuration: Any) ->
         no frame of the camera has a readable header.
     """
     identity = camera_identity(camera_name, configuration)
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
         for frame in target.frames:
             if str(frame.role).upper() != "LIGHT" or camera_identity(frame.camera, configuration) != identity:
                 continue

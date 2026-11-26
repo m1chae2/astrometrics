@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 import numpy as np
 from astropy.io import fits
-from astropy.wcs import WCS
 
 from astrometricslib.models.quality.gate_result import GateResult, passed_gate
 from astrometricslib.models.quality.measurement import QualityMeasurement
@@ -39,6 +38,7 @@ from astrometricslib.pipelines.shared.registration_record import (
     RegistrationRecord,
     write_registration_record,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 
 def astrometry_fixture_run() -> tuple[AstrometryPipelineQualityMetrics, list[GateResult], PipelineRunContext]:
@@ -96,11 +96,7 @@ def fixture_target_clipping_rows(context: PipelineRunContext) -> list[QualityMea
         The two target-clipping rows of each of two frames. The stack holds a
         bright star at the target and the frames hold a clipped patch there.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crpix = [51.0, 51.0]
-    wcs.wcs.crval = [250.0, 36.0]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(250.0, 36.0, (51.0, 51.0), degrees_per_pixel=2.0 / 3600.0)
     generator = np.random.default_rng(1)
     with tempfile.TemporaryDirectory() as folder:
         rows_grid, columns_grid = np.mgrid[0:100, 0:100]

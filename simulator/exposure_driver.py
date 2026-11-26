@@ -179,7 +179,7 @@ class BackendTargetFinder:
     Parameters
     ----------
     fetch_targets : `~collections.abc.Callable`
-        Returns the backend's targets as ``target:get_targets`` gives them
+        Returns the backend's targets as ``target:get`` gives them
         (the position is text, such as ``16h 41m 42s``; each entry is read
         through the library's `Target` model, as `library_copy` does). It
         may raise `RuntimeError` or `OSError`.
@@ -210,7 +210,7 @@ class BackendTargetFinder:
         """
         reply = self._fetch_targets()
         if not isinstance(reply, list):
-            raise RuntimeError("target:get_targets did not return a list.")
+            raise RuntimeError("target:get did not return a list.")
         targets: list[tuple[str, float, float]] = []
         for entry in reply:
             try:
@@ -1080,9 +1080,7 @@ def main() -> int:
     find_target = None
     if arguments.backend_port is not None:
         backend_port = arguments.backend_port
-        find_target = BackendTargetFinder(
-            lambda: call_rpc(backend_port, "target:get_targets", {"detail": "summary"})
-        )
+        find_target = BackendTargetFinder(lambda: call_rpc(backend_port, "target:get", {"detail": "summary"}))
         frame_source = FrameSource(
             lambda method, params: call_rpc(backend_port, method, params),
             arguments.standin / "frame_source_cache",

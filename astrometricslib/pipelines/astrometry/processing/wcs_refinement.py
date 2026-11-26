@@ -50,6 +50,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # The fewest matched stars with which a second-order SIP fit is attempted. The
 # fit has two linear and ten distortion terms for each axis plus the reference
@@ -250,7 +251,7 @@ def _clip(separations_arcsec: np.ndarray, clip_sigmas: float) -> np.ndarray:
         standard deviations of the median.
     """
     median = np.median(separations_arcsec)
-    spread = 1.4826 * np.median(np.abs(separations_arcsec - median))
+    spread = MAD_TO_SIGMA * np.median(np.abs(separations_arcsec - median))
     if spread <= 0:
         return np.ones(separations_arcsec.size, dtype=bool)
     return np.abs(separations_arcsec - median) <= clip_sigmas * spread
@@ -353,7 +354,6 @@ def refine_wcs_with_gaia(
     if scale_arcsec is None:
         return WcsRefinement(wcs, False, "the solution has no usable pixel scale")
     radius_arcsec = initial_match_radius_pixels * scale_arcsec
-    projection_point = SkyCoord(wcs.wcs.crval[0] * u.deg, wcs.wcs.crval[1] * u.deg)
     current = wcs
     used: np.ndarray | None = None
     fitted: WCS | None = None
@@ -372,7 +372,10 @@ def refine_wcs_with_gaia(
             fitted = fit_wcs_from_points(
                 (positions[star_indices, 0], positions[star_indices, 1]),
                 gaia_coordinates[gaia_indices],
-                proj_point=projection_point,
+                # The middle of the stars, not the old reference point. When
+                # the old reference pixel is far from the image center
+                # (M 13), a fit around it can stop in a wrong answer.
+                proj_point="center",
                 projection="TAN",
                 sip_degree=sip_degree,
             )

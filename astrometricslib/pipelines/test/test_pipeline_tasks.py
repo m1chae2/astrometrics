@@ -28,8 +28,8 @@ from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 from astrometricslib.pipelines.shared.star_recording import (
     StarIdentificationBreakdown,
-    _drop_unresolved_stars,
     _reconcile_position_only_star_ids,
+    drop_unresolved_stars,
 )
 from astrometricslib.pipelines.spectroscopy.frame_analysis import analyze_frame_spectroscopy
 from astrometricslib.pipelines.stacking import stage as stacking_stage
@@ -50,7 +50,7 @@ def _make_image_fits(path: str, shape: tuple = (100, 100)) -> None:
 def test_drop_unresolved_stars_separates_catalog_position_and_dropped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify _drop_unresolved_stars buckets, filters, and logs correctly.
+    """Verify drop_unresolved_stars buckets, filters, and logs correctly.
 
     Catalog-matched (SIMBAD/Gaia) and position-only (FIELD_J) stars
     are kept and counted separately; bare Star_N placeholders --
@@ -69,7 +69,7 @@ def test_drop_unresolved_stars_separates_catalog_position_and_dropped(
     prefixed_placeholder = StellarObject(id="sess1:Star_7")
 
     with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.shared.star_recording"):
-        resolved, breakdown = _drop_unresolved_stars(
+        resolved, breakdown = drop_unresolved_stars(
             [catalog_star, position_only_star, bare_placeholder, prefixed_placeholder],
             target_id="TestTarget",
             pipeline_name="astrometry",
@@ -89,7 +89,7 @@ def test_drop_unresolved_stars_separates_catalog_position_and_dropped(
 
 def test_drop_unresolved_stars_empty_input_returns_zero_counts() -> None:
     """Verify an empty input produces an empty result and all-zero counts."""
-    resolved, breakdown = _drop_unresolved_stars([], target_id="EmptyTarget", pipeline_name="photometry")
+    resolved, breakdown = drop_unresolved_stars([], target_id="EmptyTarget", pipeline_name="photometry")
 
     assert resolved == []
     assert breakdown == StarIdentificationBreakdown(catalog_matched=0, position_only=0, unresolved=0)
@@ -448,7 +448,13 @@ def test_target_analyze_frame_spectroscopy(tmp_path: Path, mocker: MockerFixture
         )
         mocker.patch(
             "astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process",
-            return_value=[StellarObject(id="Vega_Star")],
+            # Only a star with a spectrum is saved.
+            return_value=[
+                StellarObject(
+                    id="Vega_Star",
+                    spectroscopy=SpectroscopyResult(wavelengths_angstrom=[4000.0], intensities=[1.0]),
+                )
+            ],
         )
 
         target = Target(id="Vega")
@@ -526,7 +532,13 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         )
         mocker.patch(
             "astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process",
-            return_value=[StellarObject(id="Vega_Star")],
+            # Only a star with a spectrum is saved.
+            return_value=[
+                StellarObject(
+                    id="Vega_Star",
+                    spectroscopy=SpectroscopyResult(wavelengths_angstrom=[4000.0], intensities=[1.0]),
+                )
+            ],
         )
 
         target = Target(id="Vega")
@@ -709,7 +721,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(
     return a distinct, real (non-placeholder) id and a working WCS
     -- centered far enough apart between the two sessions that no
     cross-session sky match is possible -- per session, so every
-    tracked star survives `_drop_unresolved_stars` and the resulting
+    tracked star survives `drop_unresolved_stars` and the resulting
     counts are exact rather than an incidental DAOStarFinder count. If
     sessions were incorrectly merged into one analysis (the pre-fix
     bug), only one session's reference frame would ever be identified
@@ -849,7 +861,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     seed_star.spectral_type = "A0Va"
     # A real SIMBAD match always sets this (see _apply_simbad_match);
     # set it here too so this hand-built seed star is bucketed as
-    # catalog-matched, not position-only, by _drop_unresolved_stars.
+    # catalog-matched, not position-only, by drop_unresolved_stars.
     seed_star.is_catalog_identified = True
 
     from astrometricslib.pipelines.shared import session_identification
@@ -906,7 +918,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
 
     Without astrometry seeding, every tracked star only ever gets a
     synthetic `Star_N` placeholder id -- there's no sky position or
-    catalog match to derive a real one from. `_drop_unresolved_stars`
+    catalog match to derive a real one from. `drop_unresolved_stars`
     drops exactly this pattern before it reaches the persistent
     `stellar_catalog`, since a bare `Star_N` row can never be
     meaningfully merged back into the physical star it came from on a

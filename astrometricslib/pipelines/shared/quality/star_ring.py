@@ -45,6 +45,8 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.neighbor_masking import mask_radius_from_profile
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 __all__ = [
     "STAR_RING_BIN_DEGREES",
@@ -445,7 +447,7 @@ def _ring_background(
     for _ in range(_SKY_CLIP_ITERATIONS):
         coefficients = np.linalg.lstsq(design[keep], target[keep], rcond=None)[0]
         residual = target - design @ coefficients
-        scatter = 1.4826 * float(np.median(np.abs(residual[keep] - np.median(residual[keep]))))
+        scatter = robust_sigma(residual[keep])
         keep = np.abs(residual) <= _SKY_CLIP_SIGMA * scatter
     background = coefficients[0] + coefficients[1] * delta_x + coefficients[2] * delta_y
     return float(coefficients[0]), background
@@ -772,9 +774,7 @@ def _mask_neighbors(
             continue
         # Annulus k of the star falls below the level where the star's peak
         # scaled to the neighbor's height reaches the mask level.
-        threshold = mask_level * peak / height_above_glow
-        below = np.flatnonzero(envelope < threshold)
-        mask_radius = float(below[0]) if below.size else float(len(envelope) - 1)
+        mask_radius = mask_radius_from_profile(envelope, peak, height_above_glow, mask_level)
         disc = (np.hypot(columns - column, rows - row) <= mask_radius) & finite
         newly = disc & in_ring & ~masked
         masked |= disc

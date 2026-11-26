@@ -57,6 +57,7 @@ class Container:
         self.auto_download_service = None
         self.notification_service = None
         self.handoff_service = None
+        self.app_selection_service = None
         self.settings_service = None
         self.observatory_source_service = None
         self.equipment_service = None
@@ -238,6 +239,11 @@ class Container:
         notification_path = os.path.join(os.path.dirname(__file__), "notifications.json")
         self.notification_service = NotificationService(storage_path=notification_path)
         self.handoff_service = HandoffService(socket_manager=self.socket_manager)
+
+        from backend.services.infrastructure.app_selection_service import AppSelectionService
+
+        # What is picked in Image Processing, for the console's `selection`.
+        self.app_selection_service = AppSelectionService()
 
         from backend.services.observatory.guiding_service import GuidingService
 

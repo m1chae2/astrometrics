@@ -198,3 +198,12 @@ def test_target_changes_refuses_an_argument_it_does_not_use(control: Observatory
     """`ekos_file_id` is not an argument of this kind."""
     with pytest.raises(InvalidArgumentError, match="ekos_file_id"):
         ObservationReview(control).query(kind="target_changes", ekos_file_id="x", register_job=False)
+
+
+@pytest.mark.parametrize("limit", [0, 201, None])
+def test_frame_guiding_refuses_a_limit_outside_its_range(
+    control: ObservatoryControl, limit: int | None
+) -> None:
+    """A frame count below 1 or above 200 raises; it is never clamped."""
+    with pytest.raises(InvalidArgumentError, match="limit"):
+        ObservationReview(control).frame_guiding("M 81", limit=limit)

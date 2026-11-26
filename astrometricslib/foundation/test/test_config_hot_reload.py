@@ -120,7 +120,7 @@ def test_defaults_are_put_back_after_a_reload(tmp_path: Path, monkeypatch: pytes
     )
     configuration.app_config._next_check_time = 0.0
 
-    assert configuration.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
+    assert configuration.get_cosmic_clarity_denoise_strength() == pytest.approx(0.5)
     assert configuration.get_cosmic_clarity_denoise_enabled() is True
 
 

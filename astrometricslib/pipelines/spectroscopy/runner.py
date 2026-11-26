@@ -12,7 +12,6 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.quality_summary import (
@@ -35,7 +34,9 @@ from astrometricslib.pipelines.pipeline_base import (
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars
 from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_known_target,
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
@@ -53,10 +54,6 @@ from astrometricslib.pipelines.spectroscopy.post_processing.record_quality impor
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
     summarize_wavelength_scale,
-)
-from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
-    FWHM_PER_SIGMA,
-    estimate_resolution_element_angstrom,
 )
 from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
     record_and_flag_spectroscopy_stars,
@@ -175,7 +172,7 @@ def _recover_extended_source_hint(
         return
     spectral_wcs = shift_wcs_to_frame(reference_wcs, offset)
     context.extended_source_hint = astrometry.build_extended_source_hint(
-        context.image, spectral_wcs, hint_ra, hint_dec
+        context.image, spectral_wcs, hint_ra, hint_dec, resolve_known_target(target)
     )
 
 
@@ -277,18 +274,108 @@ def _can_be_a_reference_star(stellar_object: Any) -> bool:
     return bool(star_id) and not star_id.startswith(_ANONYMOUS_ID_PREFIXES) and has_position
 
 
+def _named_star_ids(star_ids: list[str]) -> list[str]:
+    """Keep the ids that are not anonymous detections.
+
+    A position-only (``FIELD_J...``) or blind-detection (``Star_<n>``) row
+    is never flagged as identified from a catalog (none of the 247,678
+    position-only rows of the real library is), so it can never be a
+    reference star (see `_can_be_a_reference_star`). Leaving such ids out
+    before the full records are read saves reading about four rows in five.
+
+    Parameters
+    ----------
+    star_ids : `list` [`str`]
+        Star ids from a short listing.
+
+    Returns
+    -------
+    named_ids : `list` [`str`]
+        The ids that do not start with an anonymous prefix.
+    """
+    return [star_id for star_id in star_ids if not str(star_id).startswith(_ANONYMOUS_ID_PREFIXES)]
+
+
+def _solved_stack_stars(target: Target) -> list:
+    """Read the stars astrometry named on the target's imaging stacks.
+
+    Astrometry keeps them in a file next to each stack it solved (see
+    `solved_star_list`), since the star catalog saves only measured stars.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose stacks are read.
+
+    Returns
+    -------
+    stars : `list` [`StellarObject`]
+        The named stars of every stack that has the file, each id once.
+    """
+    stacking = getattr(target, "stacking", None)
+    if stacking is None:
+        return []
+    stack_paths = [stacking.stacked_image] + [
+        configuration.stacked_image for configuration in stacking.stacks_by_configuration.values()
+    ]
+    stars: dict[str, Any] = {}
+    for stack_path in dict.fromkeys(path for path in stack_paths if isinstance(path, str) and path):
+        for star in read_solved_stars(stack_path):
+            stars.setdefault(star.id, star)
+    return list(stars.values())
+
+
 def _registration_reference_candidates(
     target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
 ) -> list:
     """Collect the stars a spectral field can register its identity against.
 
+    The stars astrometry named on this target's imaging stacks come first
+    (see `_solved_stack_stars`), joined by this target's own saved catalog
+    stars. Without a named stack star in the field, the saved catalog stars
+    alone are used (see `_saved_reference_candidates`).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target running spectroscopy.
+    catalog_access : `Any`
+        Provides the queries on `stellar_catalog`.
+    field_center : `tuple` [`float`, `float`], optional
+        Where the spectral frame points, `(ra, dec)` in decimal degrees.
+        Only stars within `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` of it
+        are kept.
+
+    Returns
+    -------
+    candidates : `list` [`StellarObject`]
+        The reference stars, each id once.
+    """
+    solved = [
+        star
+        for star in _solved_stack_stars(target)
+        if _can_be_a_reference_star(star) and _within_field(star, field_center)
+    ]
+    saved = _saved_reference_candidates(target, catalog_access, field_center)
+    if not solved:
+        return saved
+    candidates = {star.id: star for star in solved}
+    for star in saved:
+        if target.id in star.target_ids:
+            candidates.setdefault(star.id, star)
+    return list(candidates.values())
+
+
+def _saved_reference_candidates(
+    target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
+) -> list:
+    """Collect the saved catalog stars a spectral field can register against.
+
     `identify_spectral_stars_via_registration` needs a reference set of
     stars with known identities and pixel positions to match a
     spectroscopy image's blind detections against. Prefer this target's
-    own catalog-identified stars -- a target with both standard and SPEC
-    frames ("mixed frames") gets its own astrometry pass run first, so
-    by the time spectroscopy runs, the catalog usually already has stars
-    tagged with this exact target's id.
+    own catalog-identified stars: the measured stars (photometry or
+    spectra) saved with this exact target's id.
 
     A SPEC-only target (no standard frames of its own) never produces
     catalog-identified stars for its own id, and there is no field
@@ -308,7 +395,7 @@ def _registration_reference_candidates(
     ----------
     target : `Target`
         The target running spectroscopy; scopes the preferred candidate
-        set to stars this target's own astrometry pass already found.
+        set to the measured stars saved for this target.
     catalog_access : `Any`
         Provides the queries on `stellar_catalog`: `list_stars_in_region`,
         `list_star_summaries`, `list_star_ids` and `get_by_ids`.
@@ -335,12 +422,12 @@ def _registration_reference_candidates(
         # sky-position index. This used to read every star in the catalog
         # (about 270,000) just to keep the few hundred in the field, which
         # cost gigabytes of memory in every analysis worker.
-        field_star_ids = [
+        field_star_ids = _named_star_ids([
             summary.id
             for summary in catalog_access.list_stars_in_region(
                 field_center[0], field_center[1], registration_reference_field_radius_deg
             )
-        ]
+        ])
         catalog_identified = [
             stellar_object
             for stellar_object in catalog_access.get_by_ids("stellar_catalog", field_star_ids)
@@ -353,7 +440,9 @@ def _registration_reference_candidates(
 
     # The frame's position is unknown, so no part of the sky can be ruled
     # out. This target's own stars are read first, from the target index.
-    own_star_ids = [summary.id for summary in catalog_access.list_star_summaries(target_id=target.id)]
+    own_star_ids = _named_star_ids([
+        summary.id for summary in catalog_access.list_star_summaries(target_id=target.id)
+    ])
     own_target_stars = [
         stellar_object
         for stellar_object in catalog_access.get_by_ids("stellar_catalog", own_star_ids)
@@ -363,7 +452,7 @@ def _registration_reference_candidates(
         return own_target_stars
     # Nothing of its own: fall back to every catalog-identified star, read a
     # slice of the catalog at a time so only the identified ones are kept.
-    all_star_ids = catalog_access.list_star_ids()
+    all_star_ids = _named_star_ids(catalog_access.list_star_ids())
     return [
         stellar_object
         for start in range(0, len(all_star_ids), _CATALOG_SLICE_SIZE)
@@ -372,46 +461,6 @@ def _registration_reference_candidates(
         )
         if _can_be_a_reference_star(stellar_object)
     ]
-
-
-def record_measured_spectral_bases(stellar_objects: list[Any]) -> None:
-    """Record the run's typical trail width, dispersion and line spread.
-
-    Each is the median over the run's spectra, recorded once, so the values
-    that scale with them (the wavelength limits, the sky bands and the
-    neighbor distances) follow the run's own data. Nothing is recorded for a
-    quantity no spectrum measured. Outside a run this does nothing.
-
-    Parameters
-    ----------
-    stellar_objects : `list`
-        The stars of the run, with the spectra the extraction produced.
-    """
-    trail_widths_px: list[float] = []
-    dispersions: list[float] = []
-    resolution_elements: list[float] = []
-    for stellar_object in stellar_objects:
-        spectrum = stellar_object.spectroscopy
-        if spectrum is None or not spectrum.wavelengths_angstrom:
-            continue
-        widths = [width for width in (spectrum.trail_width_px or []) if width > 0.0]
-        trail_widths_px.extend(widths)
-        wavelengths = np.asarray(spectrum.wavelengths_angstrom, dtype=float)
-        finite_wavelengths = np.sort(wavelengths[np.isfinite(wavelengths)])
-        if finite_wavelengths.size >= 2:
-            # One step along the trail is one pixel, so the gap between
-            # neighboring wavelengths is the Angstroms one pixel covers.
-            dispersions.append(float(np.median(np.abs(np.diff(finite_wavelengths)))))
-        resolution_element = estimate_resolution_element_angstrom(wavelengths, spectrum.trail_width_px)
-        if resolution_element is not None:
-            resolution_elements.append(resolution_element)
-    if trail_widths_px:
-        # The trail width is stored as a sigma; the basis is the FWHM.
-        record_basis(RunBasis.TRAIL_WIDTH_PX, FWHM_PER_SIGMA * statistics.median(trail_widths_px))
-    if dispersions:
-        record_basis(RunBasis.DISPERSION_ANGSTROM_PER_PX, statistics.median(dispersions))
-    if resolution_elements:
-        record_basis(RunBasis.SPECTRAL_RESOLUTION_ANGSTROM, statistics.median(resolution_elements))
 
 
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
@@ -477,6 +526,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             target_ra=hint_ra,
             target_dec=hint_dec,
             target_name=target.id,
+            known_target=resolve_known_target(target),
         )
 
         # The spectral stack has no WCS of its own (see the module
@@ -546,8 +596,6 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 target_id=target.id,
             )
         )
-
-        record_measured_spectral_bases(stellar_objects)
 
         return Result(
             context=context,

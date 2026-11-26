@@ -21,7 +21,7 @@ factor, and the allowed range of the parameter keeps it far below them.
 
 from collections.abc import Sequence
 
-from astrometricslib._internal.drivers.tuning_support import MAD_TO_SIGMA, camera_rows
+from astrometricslib._internal.drivers.tuning_support import camera_rows
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.tuning import Tuner, TuningInputs, TuningResult, TuningSkippedError
 from astrometricslib.models.quality.measurement import SubjectLevel
@@ -40,6 +40,7 @@ from astrometricslib.pipelines.stacking.post_processing.registration_shifts impo
     MINIMUM_STEP_SCALE_PX,
     STEP_JUMP_SIGMAS,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # How many times longer than the longest real step of the library the limit
 # is. The survey of 2026-10-23 (STK-44) found a longest jump of about 10 px

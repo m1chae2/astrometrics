@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
 # Matches the private `_CalibrationKind` literal that
-# `astrometricslib.api.processing.CalibrationCatalog.reindex_frames` accepts.
+# `astrometricslib.api.calibration.CalibrationCatalog.reindex_frames` accepts.
 CalibrationKind = Literal["dark", "bias", "flat"]
 
 # Remote folder name (case-insensitive) -> the calibration kind
@@ -767,7 +767,7 @@ def discover_unassociated_remote_targets(context: ControlContext) -> list[str]:
     except AstrometricsError, OSError:
         return []
 
-    local_targets = context.astrometrics.targets.list()
+    local_targets = context.astrometrics.targets.query(detail="objects", limit=None).objects
 
     def fuzzy_normalize(name: str) -> str:
         """Normalize a target name for fuzzy comparison.
@@ -1147,7 +1147,9 @@ def sync_all_remote_folders(
 
         astrometrics = context.astrometrics
         known_target_ids = [
-            target.id for target in astrometrics.targets.list() if not is_calibration_folder(target.id)
+            target.id
+            for target in astrometrics.targets.query(detail="objects", limit=None).objects
+            if not is_calibration_folder(target.id)
         ]
         new_target_ids = [
             folder_name

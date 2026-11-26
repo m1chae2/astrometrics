@@ -134,8 +134,10 @@ def test_a_search_records_how_its_noise_comparison_was_made() -> None:
     """The result carries the noise-only version count and the block length."""
     flux = correlated_noise(NIGHTLY_TIMES.size, 0.9, np.random.default_rng(5))
 
-    cycle = search.lomb_scargle_search(NIGHTLY_TIMES, flux, shuffle_count=50)
-    dip = search.box_search(NIGHTLY_TIMES, flux, shuffle_count=50)
+    # `stop_above=None` searches every version; by default a search stops as
+    # soon as its verdict can no longer change.
+    cycle = search.lomb_scargle_search(NIGHTLY_TIMES, flux, shuffle_count=50, stop_above=None)
+    dip = search.box_search(NIGHTLY_TIMES, flux, shuffle_count=50, stop_above=None)
 
     assert cycle.shuffle_count == 50
     assert dip.shuffle_count == 50

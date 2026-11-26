@@ -66,8 +66,10 @@ describe('isDisplayableStar for the user\'s own stars', () => {
 
   it('still applies the limiting magnitude to stars that have a real one', () => {
     expect(isShownLocally(catalog(3.0), WIDE_FOV_DEG)).toBe(true);
-    expect(isShownLocally(catalog(14.0), WIDE_FOV_DEG)).toBe(false);
-    expect(isShownLocally(catalog(14.0), NARROW_FOV_DEG)).toBe(true);
+    // At NARROW_FOV_DEG the limit is about 13.3, so a 13th-magnitude star shows there but not wide.
+    expect(isShownLocally(catalog(13.0), WIDE_FOV_DEG)).toBe(false);
+    expect(isShownLocally(catalog(13.0), NARROW_FOV_DEG)).toBe(true);
+    expect(isShownLocally(catalog(14.0), NARROW_FOV_DEG)).toBe(false);
   });
 
   it('respects the showCatalog toggle', () => {

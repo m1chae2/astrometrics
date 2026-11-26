@@ -5,28 +5,38 @@ runs the analysis stages. Each of those returns one of these structures, so a
 caller reads named fields instead of
 guessing at the keys of a dictionary.
 
-- `StackResult` says which frames were chosen and, unless only a plan was
-  asked for, where the stack went and its quality summary.
+- `StackResult` says which frames were chosen, where the stack went and its
+  quality summary.
 - `PreviewRemakeResult` says where the new preview picture went and which
   steps made it.
 - `ProcessTargetResult` holds one target's result from each analysis stage
   that ran, and the target's quality summaries afterwards.
 - `StackWeightPrediction` says how the stacker would weight a set of frames:
   the mode, each frame's exposure group and each frame's weight.
+- `StackPrediction` says what a stack would do with its frames: which it
+  would set aside and why, and which darks, flats and bias each exposure
+  group would use. It is made without stacking anything.
 """
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
-from astrometricslib.models.target import TargetQualitySummaries
+from astrometricslib.models.target import PreviewBrightObject, TargetQualitySummaries
 
 __all__ = [
+    "BrightObjectChoice",
+    "BrightObjectChoices",
+    "PredictedCalibration",
+    "PredictedFrame",
+    "PredictedGroup",
     "PreviewRemakeResult",
     "PreviewSettingsRecord",
     "PreviewSettingsUsed",
     "ProcessTargetResult",
+    "StackPrediction",
     "StackResult",
     "StackWeightPrediction",
 ]
@@ -43,12 +53,10 @@ class StackResult(BaseModel):
     frames_selected: int
     first_file: str
     last_file: str
-    # True when only the frame choice was reported and nothing was stacked.
-    plan_only: bool = False
-    # Where the stack is. None for a plan, or when stacking made no image.
+    # Where the stack is. None when stacking made no image.
     stacked_path: str | None = None
     # The new stack's quality summary (rejected fraction, star sharpness
-    # against the inputs, gates). None for a plan. Its warnings are listed by
+    # against the inputs, gates). Its warnings are listed by
     # `Jobs.query(job_id=..., detail="warnings")`.
     quality_summary: StackQualitySummary | None = None
     note: str = ""
@@ -64,11 +72,49 @@ class StackResult(BaseModel):
         Returns
         -------
         activity_id : `str` or `None`
-            The run's id, or `None` for a plan or a run with no provenance.
+            The run's id, or `None` for a run with no provenance.
         """
         if self.quality_summary is None:
             return None
         return self.quality_summary.provenance_activity_id
+
+
+class BrightObjectChoice(BaseModel):
+    """One nebula or galaxy SIMBAD lists inside a stack's field.
+
+    The user may pick it as the object the preview's masked stretch protects.
+    """
+
+    # SIMBAD's main name for the object.
+    simbad_id: str
+    # SIMBAD's main type code (such as "HII" or "G").
+    object_type: str
+    # The broad kind the type maps to: "nebula" or "galaxy".
+    category: str
+    ra_deg: float
+    dec_deg: float
+    # SIMBAD's major axis in arcminutes, or None when it lists none.
+    major_axis_arcmin: float | None = None
+
+
+class BrightObjectChoices(BaseModel):
+    """The objects a target's stack could protect with the masked stretch.
+
+    ``objects`` is empty when the list could not be made, and ``message``
+    then says why in plain words. A list read from the saved copy beside the
+    stack has ``from_cache`` set. ``current`` is the choice saved on the
+    target.
+    """
+
+    target_id: str
+    objects: list[BrightObjectChoice] = Field(default_factory=list)
+    # Why there are no objects (no plate solution, no stack, SIMBAD not
+    # reached), or None when the list was made.
+    message: str | None = None
+    from_cache: bool = False
+    # The choice saved on the target, or None when the list was made
+    # without a target record.
+    current: PreviewBrightObject | None = None
 
 
 class PreviewSettingsUsed(BaseModel):
@@ -118,6 +164,12 @@ class PreviewRemakeResult(BaseModel):
     # What made the new picture, read from the record saved beside the stack.
     # None when the record could not be read, which means unknown.
     preview_settings: PreviewSettingsRecord | None = None
+    # The color picture of a monochrome stack, with its color taken from a
+    # color stack of another setup, when one was made.
+    color_preview_path: str | None = None
+    # One sentence on the color picture: what it was made from, or why it
+    # was not made. None for a spectral stack's remake.
+    color_preview_note: str | None = None
 
 
 class ProcessTargetResult(BaseModel):
@@ -131,6 +183,14 @@ class ProcessTargetResult(BaseModel):
     target_id: str
     # The stages that ran, in the order they ran.
     stages_run: list[str] = Field(default_factory=list)
+    # The stages that ran only because a stage the caller asked for needs
+    # them and their saved result was missing or out of date (they are also
+    # in `stages_run`).
+    prerequisites_run: list[str] = Field(default_factory=list)
+    # The stages that did not run because a prerequisite could not run, with
+    # the reason (such as "needs astrometry: the target has no imaging
+    # stack to solve"). Each also has a "skipped" entry in `results`.
+    stages_skipped: dict[str, str] = Field(default_factory=dict)
     results: dict[str, Any] = Field(default_factory=dict)
     # The target's astrometry, photometry and spectroscopy quality
     # summaries after the stages ran.
@@ -173,10 +233,109 @@ class StackWeightPrediction(BaseModel):
     mode: str
     # For each frame, the length of the exposure group it would land in, in
     # seconds. Every entry is None when the frames stay in one group because
-    # a length cannot be read or no length has enough frames.
+    # a length cannot be read or no length has enough frames. A frame that is
+    # left out (see `left_out_reasons`) shows its own length.
     folded_exposure_lengths: list[float | None] = Field(default_factory=list)
+    # For each frame, None when the stacker would stack it, or a plain
+    # sentence when it would leave the frame out because its exposure length
+    # has too few frames and no group within the fold ratio limit. Empty when
+    # the prediction was made without this check. A frame left out has weight
+    # 0 in `weights`.
+    left_out_reasons: list[str | None] = Field(default_factory=list)
     # For each frame, the weight it would carry (the star-width weights have
     # mean 1; the others are not scaled). None when they are unknown.
     weights: list[float] | None = None
     # Why the weights are unknown. Empty when they are known.
     reasons: list[str] = Field(default_factory=list)
+
+
+class PredictedFrame(BaseModel):
+    """One frame a stack would set aside, or keep with a warning."""
+
+    path: str
+    # The file name, for a list.
+    file: str
+    # Why, in one sentence with the frame's value and the limit.
+    reason: str
+    # "clouded", "trailed" or "off_field" (the quarantine step), "uneven_sky"
+    # (kept with a warning), "minority_gain", "already_set_aside",
+    # "background_split" or "exposure_not_foldable" (its exposure length has
+    # too few frames and no group within the fold ratio limit).
+    kind: str
+
+
+class PredictedCalibration(BaseModel):
+    """The calibration frames of one kind that an exposure group would use."""
+
+    # "dark", "bias", "flat" or "flat_bias" (the bias made for the flats).
+    kind: str
+    # How many frames the library would use. Zero when none fits.
+    frame_count: int
+    # The distinct folders the frames lie in, so a person can see which set
+    # of the library was chosen (for example
+    # ``darks/ZWO ASI 533MM Pro/0.0/30.0``).
+    folders: list[str] = Field(default_factory=list)
+    # The gain and offset of the chosen frames, such as "gain 100, offset 10".
+    # Empty when the library does not say.
+    settings: str = ""
+    # Mismatches the library worked around (the frames are still used), such
+    # as a dark of another temperature or flats of another offset.
+    flags: list[str] = Field(default_factory=list)
+    # Mismatches that stop the frames from being used (a binning mismatch).
+    blocking_flags: list[str] = Field(default_factory=list)
+
+
+class PredictedGroup(BaseModel):
+    """One exposure group of a stack and the calibration it would get."""
+
+    exposure_seconds: float
+    # The observing night, for a spectral group split by night; else None.
+    night: str | None = None
+    frames_kept: int
+    first_file: str
+    last_file: str
+    filter_name: str
+    gain: str
+    offset: str
+    binning: str
+    temperature_c: float | None = None
+    dark: PredictedCalibration
+    bias: PredictedCalibration
+    flat: PredictedCalibration
+    # Only when the flats need a bias of their own; else None.
+    flat_bias: PredictedCalibration | None = None
+    # Every flag and note of this group's calibration in one list.
+    warnings: list[str] = Field(default_factory=list)
+
+
+class StackPrediction(BaseModel):
+    """What a stack would do with its frames, made without stacking.
+
+    The frame checks and the calibration choice are the ones the stack runs
+    (`frame_screening.screen_frames` and `batch_calibration`), so the answer
+    and the stack cannot disagree. Nothing is stacked, moved, stored or saved.
+    """
+
+    target_id: str
+    kind: Literal["imaging", "spectral"]
+    camera: str | None = None
+    frames_selected: int
+    frames_kept: int
+    # The file names of the first and last chosen frame ("" when none).
+    first_file: str = ""
+    last_file: str = ""
+    # False when only the frame choice was made (``checks=False``): nothing
+    # below was looked at, so no frame is set aside or flagged.
+    checks_run: bool = True
+    set_aside: list[PredictedFrame] = Field(default_factory=list)
+    flagged: list[PredictedFrame] = Field(default_factory=list)
+    groups: list[PredictedGroup] = Field(default_factory=list)
+    # Checks that failed, were not run, or have a note: one sentence each.
+    warnings: list[str] = Field(default_factory=list)
+    # What each frame check found, in the order they ran.
+    gates: list[GateResult] = Field(default_factory=list)
+    # Frames the quarantine check could not read. They stay in the stack.
+    unreadable: list[str] = Field(default_factory=list)
+    # True when no frame is left, so a stack would fail.
+    nothing_left: bool = False
+    note: str = "Nothing was stacked, moved, stored or saved."

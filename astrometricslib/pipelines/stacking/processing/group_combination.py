@@ -27,9 +27,9 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
 from astrometricslib.pipelines.stacking.processing.group_gains import (
-    CLIPPED_FRAME_ZERO_FRACTION,
     DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
     SATURATION_FRACTION_OF_FULL_SCALE,
     GroupGainMeasurement,
@@ -37,6 +37,7 @@ from astrometricslib.pipelines.stacking.processing.group_gains import (
     estimate_saturation_mask_level,
     measure_group_gains,
 )
+from astrometricslib.pipelines.stacking.processing.group_sky_matching import match_sky_to_reference
 from astrometricslib.pipelines.stacking.processing.group_star_gains import (
     measure_group_gains_with_stars,
     star_clip_level,
@@ -205,6 +206,26 @@ def _prepare_group_inputs(
     return per_second, weights, usable_masks, trusted_masks, star_masks
 
 
+def _near_clip_masks(images: list[np.ndarray], clip_ceiling_adu: float | None) -> list[np.ndarray]:
+    """Mark each group's pixels at or above the clip level of its stack.
+
+    Parameters
+    ----------
+    images : `list` [`numpy.ndarray`]
+        The stacked image of each group.
+    clip_ceiling_adu : `float`, optional
+        The camera's clip ceiling in ADU (see `star_clip_level`).
+
+    Returns
+    -------
+    masks : `list` [`numpy.ndarray`]
+        `True` where a pixel is at or above `star_clip_level`, the level the
+        star method already treats as too close to clipping to measure.
+    """
+    level = star_clip_level(clip_ceiling_adu)
+    return [np.asarray(image) >= level for image in images]
+
+
 def measure_exposure_group_gains(
     images: list[np.ndarray],
     exposures_seconds: list[float],
@@ -283,10 +304,13 @@ def measure_exposure_group_gains(
         clip_ceiling_adu,
     )
     reference_index = int(np.argmax(weights))
+    near_clip_masks = _near_clip_masks(images, clip_ceiling_adu)
     if not use_star_fluxes:
-        return reference_index, measure_group_gains(per_second, trusted_masks, reference_index, tolerance)
+        return reference_index, measure_group_gains(
+            per_second, trusted_masks, reference_index, tolerance, near_clip_masks=near_clip_masks
+        )
     return reference_index, measure_group_gains_with_stars(
-        per_second, star_masks, trusted_masks, reference_index, tolerance
+        per_second, star_masks, trusted_masks, reference_index, tolerance, near_clip_masks=near_clip_masks
     )
 
 
@@ -436,10 +460,15 @@ def combine_exposure_group_images(
     # stack's signal and its noise alike, so a gain removes the same factor
     # from both and the signal-to-noise of each group is unchanged.
     reference_index = int(np.argmax(weights))
+    near_clip_masks = _near_clip_masks(images, clip_ceiling_adu)
     if use_star_fluxes:
-        measurements = measure_group_gains_with_stars(per_second, star_masks, trusted_masks, reference_index)
+        measurements = measure_group_gains_with_stars(
+            per_second, star_masks, trusted_masks, reference_index, near_clip_masks=near_clip_masks
+        )
     else:
-        measurements = measure_group_gains(per_second, trusted_masks, reference_index)
+        measurements = measure_group_gains(
+            per_second, trusted_masks, reference_index, near_clip_masks=near_clip_masks
+        )
     gains = [measurement.gain for measurement in measurements]
     logger.info(
         "Exposure groups combined with brightness gains %s (bright-star or bright-end ratios %s; "
@@ -458,6 +487,29 @@ def combine_exposure_group_images(
         (image - measurement.sky_level) / measurement.gain + reference_sky if measurement.measured else image
         for image, measurement in zip(per_second, measurements, strict=True)
     ]
+    # One sky number per group cannot match a color image: the sky differs
+    # between the color channels and across the frame, and the groups'
+    # backgrounds differ in both. So each group that was scaled is also
+    # lowered onto the reference's background with a tilted plane per channel,
+    # fitted where both groups hold trusted data. Without this, the average
+    # steps in level and color where the set of groups changes (the edge of a
+    # shifted group). A spectrum has no sky to compare, so it is left alone.
+    if use_star_fluxes:
+        for index, measurement in enumerate(measurements):
+            if index == reference_index or not measurement.measured:
+                continue
+            per_second[index], plane_fitted = match_sky_to_reference(
+                per_second[index],
+                per_second[reference_index],
+                trusted_masks[index] & trusted_masks[reference_index],
+            )
+            if not plane_fitted:
+                logger.info(
+                    "The sky background of the %g s exposure group could not be matched to the %g s "
+                    "group's with a plane (too little overlap); only its overall level was matched.",
+                    exposures_seconds[index],
+                    exposures_seconds[reference_index],
+                )
 
     numerator = np.zeros_like(per_second[0])
     denominator = np.zeros_like(per_second[0])

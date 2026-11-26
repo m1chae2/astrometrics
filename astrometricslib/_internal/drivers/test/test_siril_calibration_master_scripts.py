@@ -119,19 +119,23 @@ def test_a_lone_bias_or_dark_is_loaded_and_saved_without_a_stack(
     assert not any(line.startswith("stack") for line in commands)
 
 
-@pytest.mark.parametrize(
-    ("builder", "kind"),
-    [(build_bias_master_commands, "bias"), (build_dark_master_commands, "dark")],
-)
 @pytest.mark.parametrize("num_frames", [2, 3])
-def test_several_biases_or_darks_are_stacked_with_rejection(
-    builder: Callable[[int], list[str]], kind: str, num_frames: int
-) -> None:
-    """Two or more frames are stacked with sigma rejection, unnormalised."""
+def test_several_biases_are_stacked_with_rejection(num_frames: int) -> None:
+    """Two or more bias frames stack with sigma rejection, unnormalized."""
+    builder, kind = build_bias_master_commands, "bias"
     commands = builder(num_frames)
 
     assert f"convert {kind} -out=../process -fitseq" in commands
     assert f"stack {kind} rej 3 3 -nonorm -out={kind}_stacked" in commands
+
+
+@pytest.mark.parametrize("num_frames", [2, 3, 109])
+def test_several_darks_are_combined_with_the_median_not_rejection(num_frames: int) -> None:
+    """One dark with a cosmic-ray track must not reach the master dark."""
+    commands = build_dark_master_commands(num_frames)
+
+    assert "stack dark med -nonorm -out=dark_stacked" in commands
+    assert not any(" rej " in line for line in commands)
 
 
 # ----------------------------------------------------------- the lights

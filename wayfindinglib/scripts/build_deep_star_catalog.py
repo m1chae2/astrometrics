@@ -42,6 +42,7 @@ import sys
 import time
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.drivers import pixels_near_circles
 from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
 from astrometricslib.parameters import resolve_parameter
 from wayfindinglib import Wayfinder
@@ -52,7 +53,6 @@ from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_QUERY_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_DELAY_SECONDS,
-    pixels_near_circles,
 )
 
 # Radius, in degrees, of the circle drawn around each imaged field by
@@ -196,8 +196,8 @@ def _choose_search_circles(
         field_centers = Astrometrics(config).targets.imaged_field_centers(register_job=False).centers
         for field_center in field_centers:
             circles.append((
-                field_center.right_ascension_deg,
-                field_center.declination_deg,
+                field_center.ra_deg,
+                field_center.dec_deg,
                 arguments.near_targets_radius_degrees,
             ))
         print(f"\nFound {len(field_centers)} imaged field(s) in the library.")

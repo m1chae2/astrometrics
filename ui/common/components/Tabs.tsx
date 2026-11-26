@@ -97,7 +97,12 @@ export const Tabs: React.FC<TabsProps> = ({
                         aria-selected={isSelected}
                         aria-controls={tabPanelElementId(idPrefix, tab.id)}
                         tabIndex={isSelected ? 0 : -1}
-                        onClick={() => onChange(tab.id)}
+                        onClick={(event) => {
+                            // A mouse click (detail > 0) hides the focus ring, even when no pointer
+                            // event came first, as with some automated or remote clicks.
+                            if (event.detail > 0) tabListRef.current?.setAttribute('data-pointer', 'true');
+                            onChange(tab.id);
+                        }}
                         onKeyDown={(event) => handleKeyDown(event, index)}
                     >
                         {tab.label}{tab.count !== undefined && ' '}

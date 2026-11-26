@@ -4,7 +4,7 @@ This folder holds the list that lets you pick a target (a sky object such as M 3
 
 ## What each file is for
 
-- `RadioListManager.tsx` — lays out one list panel: an optional filter panel on top, the search box, the list, and an optional panel of action buttons below. It takes the panel as the `topPanel` prop.
+- `RadioListManager.tsx` — lays out one list panel: an optional filter panel on top, the search box, the list, and an optional panel of action buttons below. It takes the panel as the `topPanel` prop. The list panel takes the leftover height, and the filter and action panels are only as tall as their content. With `onCollapsedChange` the title of the first panel (Filter Targets) becomes the fold button, the same one Frame Analysis uses (`hideLabel` is its hover text). Folded, the whole column is a thin strip (`showLabel`) drawn by `common/components/CollapsibleColumn.tsx`, which also narrows the display's left column to match. The Image Viewer and Image Processing screens use this and remember the choice with `common/hooks/usePersistentFlag.ts`.
 - `RadioListFiltering.tsx` — the search box that sits above the list.
 - `TargetListFilterPanel.tsx` — the filter panel for the target list. It has two tabs and a second compact tab strip for the sort order (A–Z or Newest).
 

@@ -14,9 +14,12 @@ Results are sorted into three groups:
 
 A MISSING or CHANGED file under ``lights/``, ``darks/``, ``biases/`` or
 ``flats/`` is serious, unless it is derived output (stacks, rejection maps,
-processed pictures, JPEGs, ``.seq`` files, or anything in a ``stacks/``
-folder). Derived files are expected to be rebuilt, so they are only listed as
-information. The ``_backup`` folder is skipped because another job writes it.
+processed pictures, JPEGs, ``.seq`` files, the frame-quarantine record
+``excluded_frames.json``, or anything in a ``stacks/`` folder). Frames moved
+into an ``_excluded/`` folder are still checked as raw frames. Derived
+files are expected to be rebuilt, so they are only listed as
+information. The ``_backup`` folder is skipped because another job writes
+it.
 
 Exit codes: 0 means no serious problem, 2 means at least one, and 1 means
 ``rclone`` failed. The first run has nothing to compare with, so it only
@@ -46,7 +49,17 @@ logger = logging.getLogger(__name__)
 
 RAW_TOP_FOLDERS = ("lights", "darks", "biases", "flats")
 SKIPPED_TOP_FOLDERS = ("_backup",)
-DERIVED_NAME_PATTERNS = ("*_Stacked*.fits", "*_RejMap.fits", "*_processed.*", "*.jpg", "*.seq")
+# "excluded_frames.json" is the stacking frame-quarantine record
+# (frame_quarantine.MANIFEST_FILE_NAME). The name is repeated here so this
+# light script does not import the stacking module.
+DERIVED_NAME_PATTERNS = (
+    "*_Stacked*.fits",
+    "*_RejMap.fits",
+    "*_processed.*",
+    "*.jpg",
+    "*.seq",
+    "excluded_frames.json",
+)
 MANIFESTS_TO_KEEP = 10
 MANIFEST_PREFIX = "manifest_"
 MANIFEST_SUFFIX = ".json.gz"
@@ -66,7 +79,8 @@ def is_derived_path(path: str) -> bool:
     -------
     is_derived : `bool`
         True for stacks, rejection maps, processed pictures, JPEGs, ``.seq``
-        files and anything inside a ``stacks`` folder.
+        files, the frame-quarantine record ``excluded_frames.json`` and
+        anything inside a ``stacks`` folder.
     """
     parts = path.split("/")
     if "stacks" in parts[:-1]:

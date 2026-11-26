@@ -64,6 +64,12 @@ class FrameMeasurements(BaseModel):
     # Statistics calculated straight from the raw picture, even if it
     # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
+    # The version of the method that gave `background_level`
+    # (`BACKGROUND_LEVEL_METHOD` in `background_measurement.py`). A level
+    # stored with no version, or with an older one, was measured another way
+    # (version 1 mixed the color pixels of a raw color mosaic), so it is
+    # measured again before it is compared with a newer level.
+    background_level_method: int | None = Field(default=None, alias="backgroundLevelMethod")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
     # The level, in ADU, at or above which a pixel was counted as saturated
     # when `saturated_pixel_fraction` was measured. Records written before
@@ -147,6 +153,12 @@ class FrameRecord(BaseModel):
     # Records saved before these existed have None and are read once.
     file_size: int | None = Field(default=None, alias="fileSize")
     file_modified_ns: int | None = Field(default=None, alias="fileModifiedNs")
+    # Which set of header fields the last header read filled in
+    # (`frame_scanning.HEADER_FIELDS_VERSION`). A record read before a field
+    # was added to that set is read once more even when its file is unchanged,
+    # so the new field is filled in. None for a record saved before this
+    # existed.
+    header_fields_version: int | None = Field(default=None, alias="headerFieldsVersion")
 
     # The file size and last-change time the frame had when its quality
     # measurements were last recorded (`record_frame_measurements`). A frame
@@ -277,6 +289,11 @@ class TargetStackingResult(BaseModel):
 
     stacked_image: str = Field(default="", alias="stackedImage")
     processed_image: str = Field(default="", alias="processedImage")
+    # The color picture of a monochrome stack, with its color taken from a
+    # color stack of another setup (see `color_from_other_stack`). Empty when
+    # there is none. It sits beside the stack's own picture and never
+    # replaces it.
+    color_preview_image: str = Field(default="", alias="colorPreviewImage")
     # A dictionary tracking the finished pictures from every telescope
     # setup used on this target. The key is a label like "CameraName@300mm".
     stacks_by_configuration: dict[str, StackConfigurationResult] = Field(
@@ -313,7 +330,7 @@ class AsteroidDetectionResult(BaseModel):
 
 
 class TargetQualitySummaries(BaseModel):
-    """The three per-pipeline quality summaries `Target` keeps by itself.
+    """The per-pipeline quality summaries `Target` keeps by itself.
 
     Astrometry, photometry, and spectroscopy each write their per-star
     findings onto `StellarObject`, not `Target` -- they don't own a
@@ -327,6 +344,12 @@ class TargetQualitySummaries(BaseModel):
     astrometry: AstrometryQualitySummary | None = Field(default=None, alias="astrometry")
     photometry: PhotometryQualitySummary | None = Field(default=None, alias="photometry")
     spectroscopy: SpectroscopyQualitySummary | None = Field(default=None, alias="spectroscopy")
+    # The summary of the spectral variation stage, which follows the stars
+    # across the raw spectral frames. It is kept apart from `spectroscopy`,
+    # which describes the master stack, so neither replaces the other.
+    spectroscopy_variation: SpectroscopyQualitySummary | None = Field(
+        default=None, alias="spectroscopyVariation"
+    )
 
 
 class TargetObjectType(StrEnum):
@@ -343,6 +366,36 @@ class TargetObjectType(StrEnum):
     COMET = "comet"
     CALIBRATION = "calibration"
     STAR = "star"
+
+
+class PreviewBrightObject(BaseModel):
+    """Which object the preview's masked stretch protects, as the user chose.
+
+    Attributes
+    ----------
+    mode : `str`
+        ``"auto"`` (the default) lets the stretch use the target's own
+        catalog position and kind. ``"off"`` never uses the masked stretch.
+        ``"object"`` protects the object named below, whatever the target's
+        kind.
+    simbad_id : `str` or `None`
+        SIMBAD's main name of the chosen object (mode ``"object"``).
+    ra_deg : `float` or `None`
+        The chosen object's right ascension in degrees (ICRS, J2000).
+    dec_deg : `float` or `None`
+        The chosen object's declination in degrees.
+    major_axis_arcmin : `float` or `None`
+        SIMBAD's major axis of the chosen object in arcminutes, or `None`
+        when SIMBAD gives none (then only its position is checked).
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    mode: str = Field(default="auto", alias="mode", pattern="^(auto|off|object)$")
+    simbad_id: str | None = Field(default=None, alias="simbadId")
+    ra_deg: float | None = Field(default=None, alias="raDeg")
+    dec_deg: float | None = Field(default=None, alias="decDeg")
+    major_axis_arcmin: float | None = Field(default=None, alias="majorAxisArcmin")
 
 
 class Target(BaseModel):
@@ -380,6 +433,13 @@ class Target(BaseModel):
     # records it as the target-size basis (issue #175), so the values sized to
     # the target follow it.
     major_axis_arcmin: float | None = Field(default=None, alias="majorAxisArcmin")
+    # Which object the preview's masked stretch protects (see
+    # `astrometricslib.pipelines.stacking.post_processing.masked_stretch`).
+    # The default, "auto", is the rule used before the choice existed. The
+    # choice is read the next time the stack's preview is made.
+    preview_bright_object: PreviewBrightObject = Field(
+        default_factory=PreviewBrightObject, alias="previewBrightObject"
+    )
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

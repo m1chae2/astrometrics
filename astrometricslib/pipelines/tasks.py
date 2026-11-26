@@ -37,31 +37,57 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib._internal.drivers.driver_set import Drivers
-from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
+from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.errors import (
+    AstrometricsError,
+    ConflictError,
+    InvalidArgumentError,
+    ProcessingError,
+)
 from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
-from astrometricslib.foundation.parameter_context import frames_parameter_context, record_basis
-from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
+from astrometricslib.foundation.parameter_context import (
+    equipment_parameter_context,
+    frames_parameter_context,
+    record_basis,
+)
+from astrometricslib.foundation.run_abandonment import (
+    RunAbandonedError,
+    RunAbandonment,
+    bind_abandonment,
+    raise_if_abandoned,
+)
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.models.tuned_parameter import RunBasis
+from astrometricslib.pipelines.analysis_stage_names import ANALYSIS_STAGES
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
+from astrometricslib.pipelines.shared.analysis_configuration import (
+    analysis_frames_and_configuration,
+    context_filter_name,
+    report_left_out,
+)
 from astrometricslib.pipelines.shared.camera_passes import ProcessingFrameSelection
 from astrometricslib.pipelines.shared.frame_grouping import (
     frame_is_spectral,
     select_frames_for_processing,
     split_standard_and_spectral_frames,
 )
+from astrometricslib.pipelines.shared.provenance_recording import stacked_image_entity_id
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
+from astrometricslib.pipelines.spectroscopy.spectral_variation import run_spectral_variation_analysis
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
@@ -150,8 +176,8 @@ def _stack_with_job_tracking(
         enabled=True,
         job_type="stacking",
         target_id=target.id,
-        completed_message=f"[{target.id}] Stacking completed successfully.",
-        failed_message=f"[{target.id}] Stacking failed.",
+        completed_message=f"[{target.id}] Stacking completed",
+        failed_message=f"[{target.id}] Stacking failed",
     ) as job:
         job.info(f"[{target.id}] Stacking job started (Job: {job.job_id}).")
 
@@ -167,7 +193,11 @@ def _stack_with_job_tracking(
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
-        job.mark("completed" if stacked_path else "failed", 100)
+        job.mark(
+            "completed" if stacked_path else "failed",
+            100,
+            message="Stacking completed" if stacked_path else "Stacking failed",
+        )
         return stacked_path
 
 
@@ -383,6 +413,7 @@ def stack_frames_with_timeout(
 PIPELINE_RUNNERS = {
     "astrometry": run_astrometry_analysis,
     "spectroscopy": run_spectroscopy_analysis,
+    "spectral_variation": run_spectral_variation_analysis,
     "photometry": run_photometry_analysis,
     "asteroid_detection": run_asteroid_detection_analysis,
 }
@@ -397,6 +428,7 @@ def analyze_target(
     register_job: bool = True,
     path: str | None = None,
     measured_at: datetime | None = None,
+    analyzed_stack: str | None = None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Run a specific analysis pipeline on the given target.
@@ -417,6 +449,10 @@ def analyze_target(
         with a time zone. Pipeline code never reads the clock, so the caller
         supplies it. With `None` (for tests only) the pipeline stores no
         quality measurements and logs a warning.
+    analyzed_stack : str, optional
+        For a frame-based stage (photometry), the imaging stack whose
+        camera and optic the frames must match, when it is not the target's
+        recorded stack. `None` uses the recorded stack.
 
     Returns
     -------
@@ -472,9 +508,28 @@ def analyze_target(
         # such as a caller's batch job. With neither, the rows have no job.
         kwargs["job_id"] = job.job_id or kwargs.get("job_id") or current_job_id()
         kwargs["measured_at"] = measured_at
-        # Parameters are read for the setup and filter of the frames analyzed
-        # (the target's own frames when none are given).
-        with frames_parameter_context(frames or target.frames or []):
+        # Parameters are read for the camera and optic of the image analyzed:
+        # the stack's own header for a stack-based stage, the stack's camera
+        # and optic for a frame-based one. Frames of another camera or optic
+        # are never mixed in: a frame-based stage keeps only the frames of
+        # the analyzed configuration and reports the rest.
+        analysis_camera, kept_frames, left_out = analysis_frames_and_configuration(
+            target, pipeline_type, frames, path, get_configuration(), stack_path=analyzed_stack
+        )
+        if kept_frames is not None:
+            frames = kept_frames
+        if left_out and analysis_camera is not None:
+            report_left_out(target.id, left_out, analysis_camera, job)
+            kwargs["frames_left_out"] = left_out
+        if analysis_camera is not None:
+            context_manager = equipment_parameter_context(
+                analysis_camera.camera,
+                analysis_camera.focal_length_mm,
+                context_filter_name(pipeline_type, frames or target.frames or [], analysis_camera),
+            )
+        else:
+            context_manager = frames_parameter_context(frames or target.frames or [])
+        with context_manager:
             _record_target_size(target)
             return _run_analysis_pipeline_match(
                 target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
@@ -498,16 +553,11 @@ def _run_analysis_pipeline_match(
 
 # -- Running chosen analysis stages for one target ----------------------
 
-ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "asteroids")
-"""The analysis stages `run_target_stages` can run, in the order run."""
-
-DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
-"""The stages that run for one target when the caller names none."""
-
 STAGE_OPTIONS = {
     "astrometry": frozenset({"path"}),
     "photometry": frozenset({"frames", "filter_name", "use_astrometry_seed", "max_workers"}),
     "spectroscopy": frozenset({"path", "limit"}),
+    "spectral_variation": frozenset({"frames", "max_workers"}),
     "asteroids": frozenset({"moving_object_config"}),
 }
 """The options each stage accepts in its options dictionary."""
@@ -516,8 +566,370 @@ _PIPELINE_TYPES = {
     "astrometry": "astrometry",
     "photometry": "photometry",
     "spectroscopy": "spectroscopy",
+    "spectral_variation": "spectral_variation",
     "asteroids": "asteroid_detection",
 }
+
+STAGE_PREREQUISITES: dict[str, tuple[str, ...]] = {
+    # Astrometry needs only a stack to solve.
+    "astrometry": (),
+    # Photometry names its stars with the plate solution of the imaging stack:
+    # with `use_astrometry_seed` it borrows the solution of the solved stack
+    # of the same camera and focal length for a session's first frame when
+    # that frame has none (`photometry/batch.py`,
+    # `_run_variability_analysis_for_session`). Without it, photometry
+    # plate-solves each session itself, which costs more time and can fail
+    # on a sparse frame. The code can still run without astrometry. The
+    # rule is that photometry must not run on a guess: a project ruling of
+    # 2026-11-22 makes astrometry a hard prerequisite, enforced here in the
+    # stage order and not inside the pipelines (their fallbacks stay).
+    "photometry": ("astrometry",),
+    # Spectroscopy takes its field center from the solved imaging stack
+    # taken with the same camera and telescope
+    # (`shared/target_center_hint.py`, about lines 104-132; otherwise it
+    # uses the mount's position, up to about 24 arcminutes off), and it names
+    # the zero-order stars from the star list astrometry keeps next to the
+    # stack (`shared/solved_star_list.py`, read by `spectroscopy/runner.py`,
+    # `_registration_reference_candidates`). The spectral
+    # stack is never plate-solved. Same ruling as photometry.
+    "spectroscopy": ("astrometry",),
+    # The spectral variation stage follows each star's spectrum across the
+    # raw spectral frames. It reads the stars the master-stack spectroscopy
+    # found and must not overwrite that result, so it needs spectroscopy
+    # first (and spectroscopy needs astrometry, so the chain runs in order).
+    "spectral_variation": ("spectroscopy",),
+    # The asteroid search works on a stack and needs no solution.
+    "asteroids": (),
+}
+"""The stages each stage needs first, by stage name.
+
+Astrometry is a hard prerequisite of photometry and spectroscopy. A
+prerequisite runs before the stage that needs it only when its result is
+missing or out of date (see `stage_result_is_current`). Each stage appears
+as a key, so a missing key is a coding error.
+"""
+
+
+def imaging_stack_path(target: Target) -> str | None:
+    """Find the imaging stack that astrometry solves, if it exists.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to read.
+
+    Returns
+    -------
+    stack_path : `str` or `None`
+        The path of the target's imaging stack, or `None` when the target
+        has none or the file is gone.
+    """
+    stack_path = target.stacking.stacked_image
+    if stack_path and os.path.exists(stack_path):
+        return stack_path
+    return None
+
+
+def _as_utc(moment: datetime) -> datetime:
+    """Give a time a time zone, taking a bare time to be UTC.
+
+    Parameters
+    ----------
+    moment : `datetime`
+        A time with or without a time zone.
+
+    Returns
+    -------
+    moment_utc : `datetime`
+        The same time with a time zone.
+    """
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def stage_result_is_current(target: Target, stage: str, image_path: str | None = None) -> bool:
+    """Say whether a stage's saved result matches the target's current stack.
+
+    The rule, for astrometry (the only stage that others depend on):
+
+    - The result is current when the target has an astrometry summary and an
+      imaging stack on disk.
+    - The summary must not be older than the stack. The stack's time is the
+      ``created_at`` of its quality summary, or the file's modification time
+      when the stack has no summary.
+    - The summary's ``upstream_entity_id`` must be `None` (the run recorded
+      no stack, as when a job is not registered) or name the current stack.
+      That id comes from the stack's path, so it changes only when the
+      path changes. A restack at the same path is caught by the time check.
+    - When the caller names an image of its own (``image_path``), the result
+      is never current. A run records the stack it solved, not the file it
+      was given, so nothing saved says which file the result came from.
+      Rerunning is the safe answer.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to check.
+    stage : `str`
+        The stage, which must be ``"astrometry"``.
+    image_path : `str`, optional
+        An image the caller wants the stage to run on instead of the stack.
+
+    Returns
+    -------
+    is_current : `bool`
+        `True` when the stage's result can be used as it is. `False` when it
+        is missing or out of date, or when there is no imaging stack.
+    """
+    return stage_staleness_reason(target, stage, image_path) is None
+
+
+def stage_staleness_reason(target: Target, stage: str, image_path: str | None = None) -> str | None:
+    """Say why a stage's saved result cannot be used, or `None` when it can.
+
+    Applies the rule in `stage_result_is_current`, which gives the details.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to check.
+    stage : `str`
+        The stage, ``"astrometry"`` or ``"spectroscopy"``.
+    image_path : `str`, optional
+        An image the caller wants the stage to run on instead of the stack.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A short phrase such as "its result is missing", or `None` when the
+        saved result is current.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the stage is neither ``"astrometry"`` nor ``"spectroscopy"``, the
+        two stages another stage can need.
+    """
+    if stage == "spectroscopy":
+        return _spectroscopy_staleness_reason(target, image_path)
+    if stage != "astrometry":
+        raise InvalidArgumentError(f"No staleness rule exists for the {stage!r} stage.")
+    if image_path:
+        return "an image was named, so the saved result may not match it"
+    summary = target.quality.astrometry
+    stack_path = imaging_stack_path(target)
+    if summary is None:
+        return "its result is missing"
+    if stack_path is None:
+        return "the target has no imaging stack to compare it with"
+    stack_summary = target.stacking.quality_summary
+    if stack_summary is not None:
+        stack_time = _as_utc(stack_summary.created_at)
+    else:
+        stack_time = datetime.fromtimestamp(os.path.getmtime(stack_path), UTC)
+    if _as_utc(summary.created_at) < stack_time:
+        return "its result is older than the stack"
+    upstream_entity_id = summary.upstream_entity_id
+    if upstream_entity_id is not None and upstream_entity_id != stacked_image_entity_id(
+        target.id, stack_path
+    ):
+        return "its result was made for a different stack"
+    return None
+
+
+def _is_same_file(first: str | None, second: str | None) -> bool:
+    """Say whether two paths name the same file.
+
+    A caller that passes the target's own stack as the image has named no
+    other image, so the saved result still matches it.
+
+    Parameters
+    ----------
+    first, second : `str` or `None`
+        The paths.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when both are given and name the same file.
+    """
+    return bool(first and second and os.path.realpath(first) == os.path.realpath(second))
+
+
+def _spectroscopy_staleness_reason(target: Target, image_path: str | None) -> str | None:
+    """Say why the saved spectroscopy result cannot be used, or `None`.
+
+    The result is current when the target has a spectroscopy summary made
+    from the spectral stack, and the summary is no older than that stack
+    (its quality summary's time, or the file's modification time when it has
+    none). A summary built from raw frames (an older run that followed the
+    frames only) is not a stack result, so it is out of date. An image the
+    caller names is never current, unless it is the target's own spectral
+    stack, which the app always sends with the spectroscopy options.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to check.
+    image_path : `str` or `None`
+        An image the caller wants the stage to run on instead of the stack.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A short phrase, or `None` when the saved result is current.
+    """
+    if image_path and not _is_same_file(image_path, target.spectral_stacking.stacked_image):
+        return "an image was named, so the saved result may not match it"
+    summary = target.quality.spectroscopy
+    if summary is None:
+        return "its result is missing"
+    if summary.upstream_quality_summary_reference == "raw_frames":
+        return "its result came from raw frames, not from the spectral stack"
+    stack_path = target.spectral_stacking.stacked_image
+    if not stack_path or not os.path.exists(stack_path):
+        return "the target has no spectral stack to compare it with"
+    stack_summary = target.spectral_stacking.quality_summary
+    if stack_summary is not None:
+        stack_time = _as_utc(stack_summary.created_at)
+    else:
+        stack_time = datetime.fromtimestamp(os.path.getmtime(stack_path), UTC)
+    if _as_utc(summary.created_at) < stack_time:
+        return "its result is older than the spectral stack"
+    return None
+
+
+def _prerequisite_blocker(target: Target, stage: str, options: dict[str, Any]) -> str | None:
+    """Say why a prerequisite stage cannot run, or `None` when it can.
+
+    Astrometry runs on the image the caller names (``path`` in its options)
+    or, when none is named, on the imaging stack.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target the stage would run on.
+    stage : `str`
+        The prerequisite stage.
+    options : `dict`
+        The stage's options.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        Why the stage cannot run, or `None`.
+    """
+    if stage == "spectroscopy":
+        if options.get("path") or target.spectral_stacking.stacked_image:
+            return None
+        return "the target has no spectral stack to extract from and no image was given"
+    if stage != "astrometry":
+        return None
+    named_path = options.get("path")
+    if named_path:
+        return None if os.path.exists(named_path) else f"the image {named_path} does not exist"
+    if imaging_stack_path(target) is None:
+        return "the target has no imaging stack to solve and no image was given"
+    return None
+
+
+def _has_spectral_input(
+    target: Target, options: dict[str, Any], frame_selection: ProcessingFrameSelection | None
+) -> bool:
+    """Say whether the spectroscopy stage has anything to work on.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    options : `dict`
+        The spectroscopy stage's options.
+    frame_selection : `ProcessingFrameSelection` or `None`
+        The chosen frames, or `None` to use every frame of the target.
+
+    Returns
+    -------
+    has_input : `bool`
+        `True` when a path was named, the target has a spectral stack, or the
+        frames hold a spectral frame.
+    """
+    spectral_candidates = (
+        frame_selection.spectral_frames if frame_selection is not None else target.frames or []
+    )
+    return (
+        bool(options.get("path"))
+        or bool(target.spectral_stacking.stacked_image)
+        or any(frame_is_spectral(frame) for frame in spectral_candidates)
+    )
+
+
+def _has_raw_spectral_frames(
+    target: Target, options: dict[str, Any], frame_selection: ProcessingFrameSelection | None
+) -> bool:
+    """Say whether the spectral variation stage has raw spectral frames.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    options : `dict`
+        The spectral variation stage's options.
+    frame_selection : `ProcessingFrameSelection` or `None`
+        The chosen frames, or `None` to use every frame of the target.
+
+    Returns
+    -------
+    has_frames : `bool`
+        `True` when the frames the stage would follow hold a spectral frame.
+    """
+    candidates = options.get("frames")
+    if candidates is None:
+        candidates = frame_selection.spectral_frames if frame_selection is not None else target.frames or []
+    return any(frame_is_spectral(frame) for frame in candidates)
+
+
+def _stages_to_add(
+    target: Target,
+    requested: tuple[str, ...],
+    skipped_for_no_input: set[str],
+    stage_options: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    """List the prerequisite stages to add to a run.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    requested : `tuple` [`str`, ...]
+        The stages the caller asked for.
+    skipped_for_no_input : `set` [`str`]
+        Requested stages that will be skipped for lack of input. They need
+        no prerequisites.
+    stage_options : `dict` [`str`, `dict`]
+        Each stage's options. An astrometry ``path`` is the image to solve.
+
+    Returns
+    -------
+    added : `tuple` [`str`, ...]
+        The prerequisites that are not requested and whose result is
+        missing or out of date, in `ANALYSIS_STAGES` order.
+    """
+    wanted: set[str] = set()
+    pending = [stage for stage in requested if stage not in skipped_for_no_input]
+    while pending:
+        stage = pending.pop()
+        for prerequisite in STAGE_PREREQUISITES[stage]:
+            image_path = (stage_options.get(prerequisite) or {}).get("path")
+            if prerequisite in requested or prerequisite in wanted:
+                continue
+            reason = stage_staleness_reason(target, prerequisite, image_path)
+            if reason is not None:
+                logger.info(
+                    "[%s] Running %s first: %s needs it and %s", target.id, prerequisite, stage, reason
+                )
+                wanted.add(prerequisite)
+                # The added stage has prerequisites of its own.
+                pending.append(prerequisite)
+    return tuple(stage for stage in ANALYSIS_STAGES if stage in wanted)
 
 
 def run_target_stages(
@@ -529,13 +941,24 @@ def run_target_stages(
     drivers: Drivers | None = None,
     frame_selection: ProcessingFrameSelection | None = None,
     measured_at: datetime | None = None,
+    run_prerequisites: bool = True,
+    on_stages_planned: Callable[[tuple[str, ...], tuple[str, ...]], None] | None = None,
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
-    The order is astrometry, photometry, spectroscopy, asteroids, whatever
-    order ``stages`` lists them in. Spectroscopy is skipped, with a
-    ``{"status": "skipped", ...}`` entry, when the target has no spectral
-    data, and otherwise receives photometry's result.
+    The order is astrometry, photometry, spectroscopy, spectral variation,
+    asteroids, whatever order ``stages`` lists them in. Spectroscopy is
+    skipped, with a ``{"status": "skipped", ...}`` entry, when the target
+    has no spectral data, and spectral variation when it has no raw
+    spectral frames.
+
+    With ``run_prerequisites``, a stage that another stage needs (see
+    `STAGE_PREREQUISITES`) is added to the run when its result is missing or
+    out of date for the current stack (see `stage_result_is_current`). A
+    prerequisite that cannot run, because there is neither an imaging stack
+    nor an image named in the stage's options, or the stage fails, blocks the
+    stages that need it: they are skipped, with
+    the reason ``needs astrometry: <why>``, and are not run on a guess.
 
     Parameters
     ----------
@@ -563,39 +986,125 @@ def run_target_stages(
         The time stamped on the quality measurements each stage stores,
         with a time zone. The caller supplies it because pipeline code does
         not read the clock. `None` (for tests only) stores no measurements.
+    run_prerequisites : `bool`, optional
+        Whether to add the prerequisite stages that are missing or out of
+        date. Pass `False` only when astrometry has just been run for this
+        stack, or when a stage is meant to run alone.
+    on_stages_planned : `Callable`, optional
+        Called once before the first stage runs, as ``(requested, added)``:
+        the stages asked for and the prerequisites that will be added, both
+        in running order. A caller uses it to show the plan while the run is
+        under way.
 
     Returns
     -------
     result : `ProcessTargetResult`
-        One result per stage that ran, keyed by stage name, and the
-        target's quality summaries afterwards.
+        One result per stage that ran, keyed by stage name, the prerequisites
+        added (``prerequisites_run``), the stages skipped because a
+        prerequisite could not run (``stages_skipped``), and the target's
+        quality summaries afterwards.
+
+    Raises
+    ------
+    RunAbandonedError
+        If the run was given up on while a prerequisite was running.
     """
     result = ProcessTargetResult(target_id=target.id)
+    requested = tuple(stage for stage in ANALYSIS_STAGES if stage in stages)
+    skipped_for_no_input: set[str] = set()
+    if "spectroscopy" in requested and not _has_spectral_input(
+        target, dict(stage_options.get("spectroscopy") or {}), frame_selection
+    ):
+        skipped_for_no_input.add("spectroscopy")
+    if "spectral_variation" in requested and not _has_raw_spectral_frames(
+        target, dict(stage_options.get("spectral_variation") or {}), frame_selection
+    ):
+        skipped_for_no_input.add("spectral_variation")
+    added = (
+        _stages_to_add(target, requested, skipped_for_no_input, stage_options) if run_prerequisites else ()
+    )
+    if on_stages_planned is not None:
+        on_stages_planned(requested, added)
+    # The reason each prerequisite that cannot run gives, by stage.
+    blocked: dict[str, str] = {}
     for stage in ANALYSIS_STAGES:
-        if stage not in stages:
+        if stage not in requested and stage not in added:
+            continue
+        # A cancelled job stops before the next stage starts.
+        raise_if_abandoned()
+        prerequisite_failures = [
+            f"needs {prerequisite}: {blocked[prerequisite]}"
+            for prerequisite in STAGE_PREREQUISITES[stage]
+            if prerequisite in blocked
+        ]
+        if prerequisite_failures and stage in added:
+            # An added stage whose own prerequisite failed is blocked too.
+            blocked[stage] = "; ".join(prerequisite_failures)
+            continue
+        if prerequisite_failures and stage in requested:
+            reason = "; ".join(prerequisite_failures)
+            result.results[stage] = {"status": "skipped", "reason": reason}
+            result.stages_skipped[stage] = reason
+            logger.info("[%s] Skipping %s: %s", target.id, stage, reason)
             continue
         options = dict(stage_options.get(stage) or {})
         if "filter_name" in options:
             # The stage runner still names this argument ``filter_type``.
             options["filter_type"] = options.pop("filter_name")
-        if drivers is not None and stage in ("astrometry", "photometry", "spectroscopy"):
+        if drivers is not None and stage in (
+            "astrometry",
+            "photometry",
+            "spectroscopy",
+            "spectral_variation",
+        ):
             options["drivers"] = drivers
         if stage == "photometry" and frame_selection is not None:
             options.setdefault("frames", frame_selection.frames)
-        if stage == "spectroscopy":
-            spectral_candidates = (
-                frame_selection.spectral_frames if frame_selection is not None else target.frames or []
-            )
-            has_spectral_input = (
-                bool(options.get("path"))
-                or bool(target.spectral_stacking.stacked_image)
-                or any(frame_is_spectral(frame) for frame in spectral_candidates)
-            )
-            if not has_spectral_input:
-                result.results[stage] = {"status": "skipped", "reason": "target has no spectral data"}
-                result.stages_run.append(stage)
+            if frame_selection.stack_path:
+                # The frames belong to the stack being analyzed, which may be
+                # another configuration's stack than the recorded one.
+                options.setdefault("analyzed_stack", frame_selection.stack_path)
+        if stage == "spectral_variation" and frame_selection is not None:
+            options.setdefault("frames", frame_selection.spectral_frames)
+        if stage == "spectral_variation" and stage in skipped_for_no_input:
+            result.results[stage] = {"status": "skipped", "reason": "target has no raw spectral frames"}
+            result.stages_run.append(stage)
+            continue
+        if stage == "spectroscopy" and stage in skipped_for_no_input:
+            result.results[stage] = {"status": "skipped", "reason": "target has no spectral data"}
+            result.stages_run.append(stage)
+            continue
+        if stage in added:
+            blocker = _prerequisite_blocker(target, stage, options)
+            if blocker is not None:
+                blocked[stage] = blocker
+                logger.info("[%s] Could not run %s first: %s", target.id, stage, blocker)
                 continue
-            options["photometry_result"] = result.results.get("photometry")
+            try:
+                stage_result = analyze_target(
+                    target,
+                    pipeline_type=_PIPELINE_TYPES[stage],
+                    catalog_access=catalog_access,
+                    register_job=register_job,
+                    measured_at=measured_at,
+                    **options,
+                )
+            except RunAbandonedError:
+                raise
+            except (AstrometricsError, OSError, *DATA_ERRORS) as error:
+                logger.warning(
+                    "[%s] The %s stage added as a prerequisite failed: %s", target.id, stage, error
+                )
+                blocked[stage] = f"it failed ({error})"
+                continue
+            if isinstance(stage_result, dict) and "wcs" in stage_result and stage_result["wcs"] is None:
+                blocked[stage] = "the stack could not be plate solved"
+                logger.info("[%s] Could not run %s first: %s", target.id, stage, blocked[stage])
+                continue
+            result.results[stage] = stage_result
+            result.stages_run.append(stage)
+            result.prerequisites_run.append(stage)
+            continue
         result.results[stage] = analyze_target(
             target,
             pipeline_type=_PIPELINE_TYPES[stage],

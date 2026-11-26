@@ -108,7 +108,7 @@ class QualityMeasurementService:
         level: str | None = None,
         target_id: str | None = None,
         observing_night_id: str | None = None,
-        camera: str | None = None,
+        camera_id: str | None = None,
         telescope: str | None = None,
         since: str | None = None,
         row_ids: list[int] | None = None,
@@ -132,7 +132,7 @@ class QualityMeasurementService:
             Only this target.
         observing_night_id : `str`, optional
             Only this observing night.
-        camera : `str`, optional
+        camera_id : `str`, optional
             Only measurements made with this camera.
         telescope : `str`, optional
             Only measurements made with this telescope.
@@ -158,7 +158,7 @@ class QualityMeasurementService:
             level=level,
             target_id=target_id,
             observing_night_id=observing_night_id,
-            camera=camera,
+            camera_id=camera_id,
             telescope=telescope,
             since=since,
             row_ids=row_ids,

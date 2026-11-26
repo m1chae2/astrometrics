@@ -13,6 +13,8 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
+
 
 def smallest_passing_value(
     candidates: Sequence[float], pass_shares: Sequence[float | None], required_share: float
@@ -159,7 +161,7 @@ def window_variance_spread(
     median_variance = float(np.median(variances))
     if median_variance <= 0.0:
         return None
-    deviation = 1.4826 * float(np.median(np.abs(np.asarray(variances) - median_variance)))
+    deviation = MAD_TO_SIGMA * float(np.median(np.abs(np.asarray(variances) - median_variance)))
     return deviation / median_variance
 
 
@@ -179,7 +181,7 @@ def point_to_point_noise(values: np.ndarray) -> float:
         differences, so only the noise is left.
     """
     differences = np.diff(values)
-    return 1.4826 * float(np.median(np.abs(differences - np.median(differences)))) / np.sqrt(2.0)
+    return robust_sigma(differences) / np.sqrt(2.0)
 
 
 def raw_noise_inflation(residual: np.ndarray) -> float:

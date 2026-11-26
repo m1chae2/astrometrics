@@ -26,3 +26,15 @@
     outline: var(--focus-outline);
     outline-offset: 2px;
 }
+
+/* compact: a smaller box and the toolbar's small text, to sit beside small buttons. */
+.checkbox--compact {
+    gap: var(--space-1);
+    font-size: var(--small-font-size);
+}
+
+.checkbox--compact .checkbox__input,
+.checkbox__input--compact {
+    width: 13px;
+    height: 13px;
+}

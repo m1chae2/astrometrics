@@ -285,3 +285,107 @@ def test_a_floating_point_flat_keeps_a_full_scale_of_one_for_any_camera(tmp_path
     assert assessment.full_scale == pytest.approx(1.0)
     assert assessment.full_scale_source == fc.FULL_SCALE_SOURCE_FLOAT_RANGE
     assert assessment.level_fraction == pytest.approx(0.4, rel=0.01)
+
+
+def write_bayer_flat(
+    path: Path, red: float, green: float, blue: float, seed: int, pattern: str = "RGGB"
+) -> str:
+    """Write a 14-bit colour flat with one brightness for each channel.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        File to write.
+    red, green, blue : `float`
+        Mean counts of the red, green and blue pixels. A value at or above
+        16383 is clipped to the ceiling of 16383.
+    seed : `int`
+        Seed of the noise.
+    pattern : `str`, optional
+        The Bayer layout of the top-left 2 by 2 block, written to the header.
+
+    Returns
+    -------
+    path : `str`
+        The file written.
+    """
+    generator = np.random.default_rng(seed)
+    levels = {"R": red, "G": green, "B": blue}
+    data = np.zeros((SIZE, SIZE))
+    for position, letter in enumerate(pattern):
+        data[position // 2 :: 2, position % 2 :: 2] = levels[letter]
+    data = data * (1.0 + 0.01 * generator.standard_normal(data.shape))
+    header = fits.Header()
+    header["BAYERPAT"] = pattern
+    fits.writeto(path, np.clip(data, 0, 16383).astype(np.uint16), header, overwrite=True)
+    return str(path)
+
+
+def test_frames_clipped_in_green_and_blue_are_left_out_and_named(tmp_path: Path) -> None:
+    """Half the set is clipped in G and B only: those frames are left out."""
+    faint = [write_bayer_flat(tmp_path / f"a{i}.fits", 3000, 5000, 4000, seed=i) for i in range(4)]
+    clipped = [write_bayer_flat(tmp_path / f"b{i}.fits", 8000, 20000, 20000, seed=10 + i) for i in range(4)]
+    assessment = fc.assess_flats([*faint, *clipped], camera="Nikon D5300")
+    assert assessment.left_out_paths == clipped
+    assert assessment.frame_count == 8
+    assert "4 of 8 flat frames are clipped (green and blue at the sensor's ceiling)" in assessment.issues[0]
+    assert "left out of the master flat" in assessment.issues[0]
+
+
+def test_one_clipped_channel_is_found_although_the_whole_frame_share_is_small() -> None:
+    """Green pixels at the ceiling make a clipped frame, channel by channel."""
+    frame = np.full((8, 8), 5000.0)
+    frame[0::2, 1::2] = 16383.0
+    frame[1::2, 0::2] = 16383.0
+    assert fc.find_clipped_channels(frame, "RGGB", 16000.0) == ["G"]
+    assert fc.find_clipped_channels(frame, "GRBG", 16000.0) == ["R", "B"]
+    assert fc.find_clipped_channels(np.full((8, 8), 5000.0), "RGGB", 16000.0) == []
+
+
+def test_the_bayer_offset_in_the_header_moves_the_channel_names(tmp_path: Path) -> None:
+    """A header Bayer offset shifts the layout the channels are named by."""
+    path = write_bayer_flat(tmp_path / "x.fits", 3000, 20000, 4000, seed=1)
+    with fits.open(path, mode="update") as hdul:
+        hdul[0].header["XBAYROFF"] = 1
+    frame_and_pattern = fc._read_frame_and_pattern(path)
+    assert frame_and_pattern is not None
+    assert frame_and_pattern[1] == "GRBG"
+
+
+def test_a_mono_set_with_one_clipped_frame_leaves_it_out(tmp_path: Path) -> None:
+    """A mono frame is clipped on the whole-frame share."""
+    good = [write_counts_flat(tmp_path / f"g{i}.fits", 8000.0, seed=i) for i in range(3)]
+    bad = write_counts_flat(tmp_path / "bad.fits", 16383.0, seed=9, noise=0.0)
+    assessment = fc.assess_flats([good[0], bad, good[1], good[2]], camera="Nikon D5300")
+    assert assessment.left_out_paths == [bad]
+    assert assessment.issues[0] == (
+        "1 of 4 flat frames is clipped (at the sensor's ceiling) and was left out of the master flat"
+    )
+    assert assessment.level_fraction == pytest.approx(8000.0 / 16383.0, rel=0.01)
+
+
+def test_a_set_with_no_clipped_frame_is_unchanged(tmp_path: Path) -> None:
+    """Nothing is left out and no clipping issue is raised."""
+    paths = [write_bayer_flat(tmp_path / f"a{i}.fits", 6000, 8000, 7000, seed=i) for i in range(4)]
+    assessment = fc.assess_flats(paths, camera="Nikon D5300")
+    assert assessment.left_out_paths == []
+    assert not any("clipped" in issue for issue in assessment.issues)
+
+
+def test_a_set_clipped_in_every_frame_keeps_all_and_warns(tmp_path: Path) -> None:
+    """With no frame to fall back on, all are kept, with warnings."""
+    paths = [write_bayer_flat(tmp_path / f"c{i}.fits", 8000, 20000, 20000, seed=i) for i in range(3)]
+    assessment = fc.assess_flats(paths, camera="Nikon D5300")
+    assert assessment.left_out_paths == []
+    assert assessment.issues[0].startswith("all 3 flat frames are clipped (green and blue")
+    assert any(issue.startswith(fc.BRIGHT_FLAT_ISSUE_PREFIX) for issue in assessment.issues)
+
+
+def test_the_level_and_noise_describe_the_frames_that_are_kept(tmp_path: Path) -> None:
+    """The faint and noise checks use the kept frames, not frame 0 of all."""
+    clipped = write_bayer_flat(tmp_path / "a0.fits", 20000, 20000, 20000, seed=1)
+    kept = [write_bayer_flat(tmp_path / f"k{i}.fits", 2000, 2000, 2000, seed=20 + i) for i in range(3)]
+    assessment = fc.assess_flats([clipped, *kept], camera="Nikon D5300")
+    assert assessment.left_out_paths == [clipped]
+    assert assessment.level_fraction == pytest.approx(2000.0 / 16383.0, rel=0.02)
+    assert assessment.noise_fraction == pytest.approx(0.01 / np.sqrt(3), rel=0.3)

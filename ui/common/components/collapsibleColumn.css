@@ -1,0 +1,62 @@
+/* CollapsibleColumn: a display's left column folded to a thin strip.
+   The strip itself is a SectionPanel folded to the right (panels.css). */
+
+/* The strip fills the grid column, which the rule below narrows to the strip's width. */
+.collapsible-column--collapsed {
+  width: 100%;
+  max-width: none;
+}
+
+.layout:has(.collapsible-column--collapsed) {
+  --layout-left-col-width: var(--collapsed-strip-width);
+}
+
+/* A long note ("Albireo · HD 338506") is cut with an ellipsis at the bottom of the strip
+   instead of running past it; the strip's hover text holds the whole note. */
+.collapsible-column--collapsed .panel__header {
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.collapsible-column--collapsed .panel__collapsed-note {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* side="right": the strip of a column on the right edge. It has its own class, so the left-column
+   rule above never narrows the left column for it. It keeps the strip's width wherever it sits
+   (a flex row or a right grid column), and a display with a right grid column narrows it too. */
+.collapsible-column--collapsed-right {
+  flex: 0 0 var(--collapsed-strip-width);
+  width: var(--collapsed-strip-width);
+  max-width: var(--collapsed-strip-width);
+}
+
+.layout:has(.layout__panel--right .collapsible-column--collapsed-right) {
+  --layout-right-col-width: var(--collapsed-strip-width);
+}
+
+.collapsible-column--collapsed-right .panel__header {
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.collapsible-column--collapsed-right .panel__collapsed-note {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* side="bottom": a block under a viewer folded to a bar across the full width. The bar keeps
+   its own height and the bar's panel takes the whole row. */
+.collapsible-column--collapsed-bottom {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.collapsible-column--collapsed-bottom > .panel {
+  flex: 1 1 auto;
+}

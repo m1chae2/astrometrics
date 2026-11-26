@@ -19,6 +19,7 @@ from astropy.io import fits
 
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.run_bases import StarWidthEstimator, star_width_on_scale
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.stacking import folder_frame_measurement
 from astrometricslib.pipelines.stacking.test.test_frame_measurement_run import _Library, _profile, biases
@@ -131,6 +132,28 @@ def test_star_width_and_sky_rate_are_recovered_and_nothing_is_stored(tmp_path: P
     assert report.medians["frame.sky_rate_e_per_s_per_px"] == pytest.approx(expected_rate, rel=0.05)
     assert report.frames[0].exposure_seconds == pytest.approx(EXPOSURE_SECONDS)
     assert storage.method_calls == []
+
+
+def test_each_star_width_names_its_estimator_and_its_value_on_the_scale(tmp_path: Path) -> None:
+    """Each width names its estimator; one with a ratio has a scale value."""
+    _write_star_field(tmp_path / "frame_001.fits")
+    quality, _ = _quality(tmp_path)
+
+    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU, register_job=False)
+
+    moffat = "frame.star_width_moffat_px"
+    assert report.star_width_estimators[moffat] == "frame Moffat"
+    expected = star_width_on_scale(report.medians[moffat], StarWidthEstimator.FRAME_MOFFAT)
+    assert report.frames[0].widths_on_scale_px[moffat] == pytest.approx(expected)
+    assert report.medians_on_scale_px[moffat] == pytest.approx(expected)
+    assert moffat not in report.star_widths_not_on_scale
+    assert "frame.sky_rate_e_per_s_per_px" not in report.star_width_estimators
+    assert (
+        report.star_width_estimators["frame.star_width_effective_px"]
+        == "frame Moffat, square pixel blur added"
+    )
+    assert "frame.star_width_effective_px" not in report.medians_on_scale_px
+    assert "AST-17" in report.star_widths_not_on_scale["frame.star_width_effective_px"]
     assert list(tmp_path.glob("*.db")) == []
 
 

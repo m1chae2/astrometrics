@@ -32,6 +32,21 @@ logger = logging.getLogger(__name__)
 # added for fields with many stars (the comment it came with mentions 99-125
 # stars per frame), and that case has not been re-tested here; that is why it
 # is kept as a fallback (see `stack_frames`) instead of removed.
+# The resampling options of `seqapplyreg` for imaging light frames. Lanczos
+# (`la`) without clamping (`-noclamp`). Siril's default here is Lanczos with
+# clamping, which cuts the negative lobes of the filter and so blurs the
+# stars a little. On 44 frames of 120 s on M 52 (validation register STK-25)
+# the stack's star width was 2.434 px with the default, 2.393 px with cubic
+# and clamping, 2.232 px with cubic and no clamping and 2.195 px with
+# Lanczos and no clamping, where the width predicted from the frames is
+# 2.173 px. Sky scatter did not change and no pixel went negative. The
+# unclamped filter can overshoot (a dark ring) around a very bright star;
+# that is not yet checked on a bright field. The spectral path registers
+# with `register -transf=shift` and is left as it was.
+# Change this together with `STACKING_ALGORITHM_VERSION` in
+# ``stack_inputs.py``, which makes existing stacks restack once.
+IMAGING_REGISTRATION_INTERPOLATION_OPTIONS = ("-interp=la", "-noclamp")
+
 SPECTRAL_STAR_DETECTION_COMMANDS = {
     "standard": "setfindstar -relax=on",
     "relaxed": "setfindstar -relax=on -roundness=0.15 -radius=3",
@@ -166,12 +181,30 @@ def build_bias_master_commands(
 def build_dark_master_commands(num_darks: int) -> list[str]:
     """Write the Siril commands that build the master dark.
 
-    One dark frame is used as it is, with no rejection, because Siril's
-    ``convert`` writes no sequence for a single frame and there is nothing to
-    compare it with. Several are stacked with sigma rejection (``rej 3 3``),
-    without normalisation, since dark current is an absolute signal. A master
-    from fewer frames than the configured minimum is reported by
-    `calibration_count_flags`, not changed here.
+    One dark frame is used as it is, because Siril's ``convert`` writes no
+    sequence for a single frame and there is nothing to combine it with.
+    Several are combined with the median (``stack dark med``), without
+    normalisation, since dark current is an absolute signal.
+
+    The median is used, not sigma rejection, because a cosmic-ray track in
+    one dark must not reach the master. Siril's default rejection (winsorized
+    sigma clipping) left a track with a peak of 3500 ADU, in 1 of 109 30 s
+    darks, in the master at about 4 times the level around it, and that
+    printed a dark line into every calibrated 30 s light. The median of 109
+    frames ignores any single frame completely. The price is noise: the
+    median of N frames is about 1.25 times as noisy as their mean. Measured
+    on the 109 30 s darks of the ASI533MM (gain 0, offset 0), one dark has a
+    pixel-to-pixel spread of 1.1 ADU after the camera clips at zero, so the
+    mean master carries 1.1 / sqrt(109) = 0.11 ADU and the median master
+    0.14 ADU. A calibrated light has at least the 4.8 ADU read noise
+    (3.8 e- at 0.783 e-/ADU), so the master adds under 0.1% to one frame and
+    about 2% to the variance of a 60-frame stack (0.14 ** 2 against
+    4.8 ** 2 / 60). See the validation register for the measurement.
+
+    A master from fewer frames than the configured minimum is reported by
+    `calibration_count_flags`, not changed here. Change the command only
+    together with `DARK_MASTER_RECIPE` in ``staging.py``, which keeps a
+    master built the old way from being reused.
 
     Parameters
     ----------
@@ -194,7 +227,7 @@ def build_dark_master_commands(num_darks: int) -> list[str]:
     return [
         "convert dark -out=../process -fitseq",
         "cd ../process",
-        "stack dark rej 3 3 -nonorm -out=dark_stacked",
+        "stack dark med -nonorm -out=dark_stacked",
     ]
 
 
@@ -723,7 +756,8 @@ def build_light_script(target_folder: str, settings: LightScriptSettings) -> Lig
             # whose intermediates measured 65GB, a 90% wfwhm
             # setting is ~24 frames of resample-and-write
             # avoided.
-            register_commands.append(" ".join([f"seqapplyreg {seq}", *frame_filter_options]))
+            apply_options = [*IMAGING_REGISTRATION_INTERPOLATION_OPTIONS, *frame_filter_options]
+            register_commands.append(" ".join([f"seqapplyreg {seq}", *apply_options]))
             registered_seq = f"r_{seq}"
             # Deliberately empty: seqapplyreg already dropped
             # those frames, and passing the same filters again

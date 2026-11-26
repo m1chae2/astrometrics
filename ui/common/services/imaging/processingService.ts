@@ -2,8 +2,9 @@
  * Service for managing image processing, log tailing, and variability analysis actions via the JSON-RPC backend api.
  */
 
-import { callBackend, CancelProcessingResult } from '../backendApi';
+import { callBackend, CancelAnalysisResult, CancelProcessingResult } from '../backendApi';
 import { ProcessStatus, AnalysisResult, ProcessingJob } from '../../types/backendTypes';
+import { formatJobLogLine, toProcessingJob } from './jobRecords';
 
 /**
  * Initiates image processing (stacking) for a target.
@@ -25,13 +26,23 @@ export async function processTarget(
     }
 }
 
+/** Most unfinished jobs one `jobs:query` call lists for the active-jobs feed. */
+const ACTIVE_JOBS_LIMIT = 50;
+
+/** How many jobs a job list asks for when the caller names no limit. */
+const DEFAULT_JOBS_LIMIT = 50;
+
 /**
- * Fetches all active processing jobs, including their progress.
+ * Fetches the jobs running now anywhere in the app, with their progress.
+ *
+ * Reads the job history (`jobs:query` with `active_only`). A job left at
+ * "started" or "running" by a program that stopped is not listed: the
+ * history marks it as stale after an hour without an update.
  */
 export async function fetchAllProcesses(): Promise<ProcessingJob[]> {
     try {
-        const result = await callBackend('processing:active_jobs', {});
-        return result || [];
+        const answer = await callBackend('jobs:query', { active_only: true, limit: ACTIVE_JOBS_LIMIT });
+        return (answer?.jobs ?? []).filter((job) => job.is_active).map(toProcessingJob);
     } catch {
         return [];
     }
@@ -66,20 +77,50 @@ export async function cancelProcessing(
 }
 
 /**
+ * Requests cancellation of the analysis job of a target.
+ * @return The answer, whose `reason` says why no job was stopped (for example, it runs in
+ *   another program or none is running), or null if the request failed.
+ */
+export async function cancelAnalysis(
+    objectId: string
+): Promise<CancelAnalysisResult | null> {
+    try {
+        const result = await callBackend('analysis:cancel', { target_id: objectId });
+        return result as CancelAnalysisResult;
+    } catch {
+        return null;
+    }
+}
+
+/** The analysis stages a caller can ask the backend to run by name. */
+export type AnalysisStageName = 'astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation';
+
+/**
  * Initiates scientific image analysis (astrometry, photometry, or spectroscopy) for a target.
+ *
+ * @param objectId The target to analyze.
+ * @param imageFiles The files chosen in the UI. The backend uses a target's stack when it has one.
+ * @param filterType The filter name to tell the backend, if known.
+ * @param type The analysis type, used when no stages are named.
+ * @param stages The stages to run, a non-empty subset of astrometry, photometry, spectroscopy and spectral variation.
+ *   Leave it out to let the backend choose from the file type. The backend runs astrometry first
+ *   when a picked stage needs it and its result is missing or old.
+ * @returns The started job, or null if the request failed.
  */
 export async function analyzeImage(
     objectId: string,
     imageFiles?: string[],
     filterType?: string,
-    type: string = 'photometry'
+    type: string = 'photometry',
+    stages?: AnalysisStageName[]
 ): Promise<AnalysisResult | null> {
     try {
         const result = await callBackend('analysis:analyze_image', {
             target_id: objectId,
             image_files: imageFiles,
             filter_name: filterType,
-            type: type
+            type: type,
+            ...(stages && stages.length > 0 ? { stages } : {})
         });
         return result || null;
     } catch {
@@ -90,8 +131,9 @@ export async function analyzeImage(
 export const analyzeTarget = (
     objectId: string,
     imageFiles?: string[],
-    filterType?: string
-) => analyzeImage(objectId, imageFiles, filterType, 'photometry');
+    filterType?: string,
+    stages?: AnalysisStageName[]
+) => analyzeImage(objectId, imageFiles, filterType, 'photometry', stages);
 
 
 /**
@@ -115,7 +157,8 @@ export async function fetchAnalysisResults(
 const inFlightJobsRequests = new Map<string, Promise<ProcessingJob[]>>();
 
 /**
- * Fetches jobs from the registry, optionally filtered by target and job type.
+ * Fetches whole job records from the job history (`jobs:query` with `detail: 'full'`),
+ * newest first, optionally filtered by target and job type.
  *
  * Concurrent calls with the same targetId/jobType are coalesced into a single
  * shared in-flight request rather than issuing duplicate backend calls — e.g.
@@ -125,7 +168,8 @@ const inFlightJobsRequests = new Map<string, Promise<ProcessingJob[]>>();
  * @param {string} [targetId] - Restricts results to jobs for this target, if provided.
  * @param {string} [jobType] - Restricts results to jobs of this type, if provided.
  * @param {{before?: string, limit?: number}} [paging] - Optional paging. `before` is a local
- *   ISO time: only jobs created earlier than it come back. `limit` caps how many jobs return.
+ *   ISO time: only jobs created earlier than it come back. `limit` is how many jobs to ask for,
+ *   from 1 to 500 (50 when left out).
  * @returns {Promise<ProcessingJob[]>} The matching processing jobs.
  */
 export function fetchJobs(
@@ -139,13 +183,14 @@ export function fetchJobs(
 
     const request = (async () => {
         try {
-            const result = await callBackend('processing:list_jobs', {
+            const answer = await callBackend('jobs:query', {
                 target_id: targetId,
                 job_type: jobType,
+                detail: 'full',
+                limit: paging?.limit ?? DEFAULT_JOBS_LIMIT,
                 ...(paging?.before ? { before: paging.before } : {}),
-                ...(paging?.limit ? { limit: paging.limit } : {}),
             });
-            return (result || []) as ProcessingJob[];
+            return (answer?.jobs ?? []).map(toProcessingJob);
         } catch {
             return [];
         }
@@ -158,21 +203,30 @@ export function fetchJobs(
 }
 
 /**
- * Fetches the tail of logs for a specific job ID.
+ * Fetches the last log lines of one job, whole (`jobs:query` with `detail: 'log_tail'`).
+ * @param jobId The job.
+ * @param lines How many of the last lines to read, from 1 to 100,000.
+ * @return The lines as `<time> - <level> - <message>`, oldest first; empty when the job is
+ *   unknown or the read fails.
  */
 export async function fetchJobLogTail(jobId: string, lines: number = 100): Promise<string[]> {
     try {
-        const result = await callBackend('processing:job_log_tail', { job_id: jobId, lines });
-        return (result || []) as string[];
+        // Silent: a job that is not recorded yet has no log, which is not an error to show.
+        const answer = await callBackend(
+            'jobs:query',
+            { job_id: jobId, detail: 'log_tail', lines, max_line_chars: null },
+            { silent: true }
+        );
+        return (answer?.log_lines ?? []).map(formatJobLogLine);
     } catch {
         return [];
     }
 }
 
 /**
- * Streams the tail of logs for a specific job ID by polling the DB-backed
- * job_log_tail endpoint, which is scoped strictly to this job_id and cannot
- * be cross-contaminated by unrelated logging elsewhere in the process.
+ * Streams the tail of logs for a specific job ID by polling the job's log in the
+ * job history, which is scoped strictly to this job_id and cannot be
+ * cross-contaminated by unrelated logging elsewhere in the process.
  */
 export async function streamJobLog(
     jobId: string,

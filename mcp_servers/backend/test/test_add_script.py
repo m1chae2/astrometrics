@@ -1,7 +1,7 @@
 """Purpose: Tests for the terminal_add_script tool of the backend MCP server.
 
 Description: The tool lets an AI save a new script to the Command Console's
-User Scripts list, and never run it. These tests replace the backend with a
+My scripts list, and never run it. These tests replace the backend with a
 small fake that keeps scripts in memory. They check the saved text and its
 header, that an existing name is refused, that a bad file name is refused
 before any call, that no code-running RPC method is ever used, and that
@@ -82,7 +82,7 @@ async def test_a_new_script_is_saved_with_a_header(backend: FakeScriptBackend) -
     assert "# Description: Plots it.\n# Description: Two lines.\n" in saved
     assert saved.endswith("\n\nprint(1)\n")
     assert result["filename"] == "plot_it.py"
-    assert "Command Console > User Scripts" in result["next_step"]
+    assert "Command Console > Scripts > My scripts" in result["next_step"]
     assert "press Run" in result["next_step"]
     assert backend.methods == ["terminal:list_scripts", "terminal:save_script"]
 

@@ -9,6 +9,8 @@ The rules applied here:
 * A target is drawn with its stacked image. A target with no stack uses its
   longest LIGHT frame instead (or its longest frame of any kind when it has
   no LIGHT frames), so the map still has a picture to show.
+* A target carries its catalog size (SIMBAD's major axis), when the library
+  has one, so the map can draw the object at its true size.
 * A target or star whose position cannot be read, or whose right ascension
   or declination is exactly zero (never set), is left out.
 * A star with a real catalog magnitude fainter than ``limiting_magnitude``
@@ -104,6 +106,7 @@ def target_source(target: Target, is_global: bool = False) -> SkySource | None:
         is_global=is_global,
         stacked_image=stacked_image,
         field_of_view=target.field_of_view,
+        major_axis_arcmin=target.major_axis_arcmin,
     )
 
 
@@ -239,7 +242,11 @@ def collect_sky_sources(
     found = resolution_operations.get_sources(
         sky, ra_deg, dec_deg, radius_deg, include_catalog=include_online, include_stars=False
     )
-    local_target_ids = {target.id for target in sky._astrometrics.targets.list()} if include_online else set()
+    local_target_ids = (
+        {target.id for target in sky._astrometrics.targets.query(detail="objects", limit=None).objects}
+        if include_online
+        else set()
+    )
 
     targets: list[SkySource] = []
     online: list[Any] = []

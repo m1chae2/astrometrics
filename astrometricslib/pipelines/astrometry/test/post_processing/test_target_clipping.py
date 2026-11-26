@@ -57,6 +57,7 @@ from astrometricslib.pipelines.shared.registration_record import (
     RegistrationRecord,
     write_registration_record,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 CONTEXT = PipelineRunContext(
     "M 99", "astrometry", "1.4.0", "job-1", "job-1", datetime(2026, 10, 23, tzinfo=UTC)
@@ -208,11 +209,7 @@ def _wcs() -> WCS:
     wcs : `astropy.wcs.WCS`
         A solution of 2 arcsec per pixel, north up in the array.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crpix = [51.0, 51.0]
-    wcs.wcs.crval = [250.0, 36.0]
-    wcs.wcs.cdelt = [-SCALE_ARCSEC / 3600.0, SCALE_ARCSEC / 3600.0]
+    wcs = tan_sky_map(250.0, 36.0, (51.0, 51.0), degrees_per_pixel=SCALE_ARCSEC / 3600.0)
     return wcs
 
 

@@ -1,20 +1,22 @@
-"""Draw FITS frames for the app's viewer, read their headers, and delete them.
+"""Draw FITS frames for the app's viewer, measure stars on them, delete them.
 
-The service is a thin adapter over the library's `Visualization.render_fits`
-and `TargetCatalog`. It turns the paths the app sends into paths on this
-computer and shapes each picture the way the viewer reads it.
+The service is a thin adapter over the library's `Visualization.render_fits`,
+`QualityRecords` and `TargetCatalog`. It turns the paths the app sends into
+paths on this computer, refuses a path outside the folders the app may read
+(`image_paths.resolve_allowed_image`), and shapes each picture the way the
+viewer reads it. A frame's header is read through ``target:get_frame_header``
+(`TargetService.get_frame_header`).
 """
 
 import logging
 import os
 import threading
 from collections import OrderedDict
-from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
-from astrometricslib.drivers import is_path_inside, resolve_mounted_path, scratch_directory
-from astrometricslib.exceptions import InvalidArgumentError
-from backend.services.data.position_mapping import PROCESSED_PICTURE_ENDING, CannotMapError, PositionMapper
+from astrometricslib.drivers import resolve_mounted_path
+from backend.services.data.image_paths import PROCESSED_PICTURE_ENDING, resolve_allowed_image
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,6 @@ class ImageService:
 
     def __init__(self, target_service: Any) -> None:
         self.target_service = target_service
-        self._position_mapper = PositionMapper(self._allowed_image_roots, self._registration_record_roots)
         # The detection lists by real path, each with the file's modified
         # time and size when it was measured, newest last.
         self._detection_cache: OrderedDict[str, tuple[float, int, dict[str, Any]]] = OrderedDict()
@@ -151,54 +152,25 @@ class ImageService:
         """
         return self._astrometrics.targets.get_frame(target_id, iso, exposure, index)
 
-    def get_fits_header_data(self, path: str) -> list[dict[str, str]]:
-        """Extract the FITS header as a list of key/value/comment entries.
+    def _resolve(self, path: str) -> str:
+        """Give the real path of an image the app sent, in the allowed folders.
 
         Parameters
         ----------
         path : `str`
-            Filesystem path to the FITS file.
+            The path as the app sent it.
 
         Returns
         -------
-        header_entries : `list`
-            One dictionary per header card, with ``"key"``, ``"value"``,
-            and ``"comment"`` entries.
+        resolved : `str`
+            The real path on this computer.
+
+        Notes
+        -----
+        A path outside the library folders and the scratch folder raises
+        `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
-        return self._astrometrics.targets.get_header(resolve_mounted_path(path))
-
-    def _allowed_image_roots(self) -> list[str]:
-        """List the folders a star measurement may read images from.
-
-        Returns
-        -------
-        roots : `list` [`str`]
-            The real paths of the library folder, the frames and stacks
-            folders when the settings name them, and the scratch folder.
-        """
-        config = self.target_service.config
-        roots = [Path(config.get_library_path()), Path(scratch_directory())]
-        for getter in ("get_frames_path", "get_stacks_path"):
-            method = getattr(config, getter, None)
-            if callable(method):
-                roots.append(Path(method()))
-        return [os.path.realpath(root) for root in roots]
-
-    def _registration_record_roots(self) -> list[str]:
-        """List the folders searched for stack registration records.
-
-        Returns
-        -------
-        roots : `list` [`str`]
-            The stacks folder when the settings name one, and the ``stacks``
-            folder inside the library folder.
-        """
-        config = self.target_service.config
-        roots = [Path(config.get_library_path()) / "stacks"]
-        method = getattr(config, "get_stacks_path", None)
-        if callable(method):
-            roots.append(Path(method()))
-        return list(dict.fromkeys(os.path.realpath(root) for root in roots))
+        return resolve_allowed_image(path, self.target_service.config)
 
     def map_position(self, from_path: str, x: float, y: float, to_path: str) -> dict[str, Any]:
         """Find where a pixel of one image is on another image.
@@ -220,25 +192,20 @@ class ImageService:
         Returns
         -------
         result : `dict`
-            ``x`` and ``y`` (1-based, on the second image), ``method`` ("sky",
-            "stack alignment", "stack alignment + sky" or "same pixel") and
+            The library's answer (`QualityRecords.map_position`): ``x`` and
+            ``y`` (1-based, on the second image), ``method`` ("sky", "stack
+            alignment", "stack alignment + sky", "same pixel" or "none") and
             ``note``. When the position cannot be followed, ``x`` and ``y`` are
             `None`, ``method`` is "none" and ``note`` says why.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If an image is outside the allowed folders.
+        Notes
+        -----
+        An image outside the allowed folders raises `InvalidArgumentError`
+        (`image_paths.resolve_allowed_image`), and a missing image file the
+        library's `NotFoundError`.
         """
-        resolved = [os.path.realpath(resolve_mounted_path(path)) for path in (from_path, to_path)]
-        roots = self._allowed_image_roots()
-        if not all(any(is_path_inside(root, path) for root in roots) for path in resolved):
-            raise InvalidArgumentError("The image must be inside the library folders.")
-        try:
-            mapped = self._position_mapper.map_position(resolved[0], float(x), float(y), resolved[1])
-        except CannotMapError as error:
-            return {"x": None, "y": None, "method": "none", "note": str(error)}
-        return {"x": mapped.x, "y": mapped.y, "method": mapped.method, "note": mapped.note}
+        source, destination = self._resolve(from_path), self._resolve(to_path)
+        return self._astrometrics.quality.map_position(source, float(x), float(y), destination).model_dump()
 
     def measure_star_profile(
         self,
@@ -276,14 +243,12 @@ class ImageService:
             The measurement: the refined center, the sky, the pixels of the
             radial profile, the Moffat and Gaussian fits, and the cut.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If the image is outside the allowed folders.
+        Notes
+        -----
+        A path outside the library folders and the scratch folder raises
+        `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
-        resolved = os.path.realpath(resolve_mounted_path(path))
-        if not any(is_path_inside(root, resolved) for root in self._allowed_image_roots()):
-            raise InvalidArgumentError("The image must be inside the library folders.")
+        resolved = self._resolve(path)
         result = self._astrometrics.quality.measure_star_profile(
             resolved,
             x,
@@ -318,33 +283,63 @@ class ImageService:
             ``x``, ``y`` in 1-based pixels, ``flux`` and ``merged``), their
             count, the merged count, and the kernel width used.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If the image is outside the allowed folders.
+        Notes
+        -----
+        A path outside the library folders and the scratch folder raises
+        `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
-        resolved = os.path.realpath(resolve_mounted_path(path))
-        if not any(is_path_inside(root, resolved) for root in self._allowed_image_roots()):
-            raise InvalidArgumentError("The image must be inside the library folders.")
-        resolved = _detection_source(resolved)
+        resolved = _detection_source(self._resolve(path))
+        return self._measure_with_cache(
+            resolved,
+            self._detection_cache,
+            self._detection_cache_lock,
+            lambda: self._astrometrics.quality.measure_detections(resolved).model_dump(),
+        )
+
+    @staticmethod
+    def _measure_with_cache(
+        resolved: str,
+        cache: OrderedDict[str, tuple[float, int, dict[str, Any]]],
+        lock: threading.Lock,
+        measure: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Return a file's measurement, reusing the last while it is unchanged.
+
+        Parameters
+        ----------
+        resolved : `str`
+            The real path of the file.
+        cache : `collections.OrderedDict`
+            The kept answers by path, each with the file's modified time and
+            size, newest last.
+        lock : `threading.Lock`
+            Guards ``cache``.
+        measure : `Callable`
+            Measures the file when there is no kept answer.
+
+        Returns
+        -------
+        result : `dict`
+            The measurement as plain data.
+        """
         try:
             status = os.stat(resolved)
             stamp = (status.st_mtime, status.st_size)
         except OSError:
             stamp = None
         if stamp is not None:
-            with self._detection_cache_lock:
-                cached = self._detection_cache.get(resolved)
+            with lock:
+                cached = cache.get(resolved)
                 if cached is not None and cached[:2] == stamp:
-                    self._detection_cache.move_to_end(resolved)
+                    cache.move_to_end(resolved)
                     return cached[2]
-        result = self._astrometrics.quality.measure_detections(resolved).model_dump()
+        result = measure()
         if stamp is not None:
-            with self._detection_cache_lock:
-                self._detection_cache[resolved] = (stamp[0], stamp[1], result)
-                self._detection_cache.move_to_end(resolved)
-                while len(self._detection_cache) > DETECTION_CACHE_SIZE:
-                    self._detection_cache.popitem(last=False)
+            with lock:
+                cache[resolved] = (stamp[0], stamp[1], result)
+                cache.move_to_end(resolved)
+                while len(cache) > DETECTION_CACHE_SIZE:
+                    cache.popitem(last=False)
         return result
 
     def delete_images(self, paths: list[str], target_id: str | None = None) -> dict[str, Any]:
@@ -417,7 +412,8 @@ class ImageService:
         Parameters
         ----------
         path : `str`
-            The FITS file.
+            The FITS file. It must be inside the library folders or the
+            scratch folder.
         maxdim : `int`, optional
             Longest side of the picture, in pixels. Defaults to 2000.
         stretch : `bool`, optional
@@ -428,8 +424,13 @@ class ImageService:
         result : `dict` or `None`
             The picture as a data URL, with its brightness range and FITS
             header.
+
+        Notes
+        -----
+        A path outside the library folders and the scratch folder raises
+        `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
         picture = self._astrometrics.visualization.render_fits(
-            resolve_mounted_path(path), kind="data_url", max_dimensions=maxdim, stretch=stretch
+            self._resolve(path), kind="data_url", max_dimensions=maxdim, stretch=stretch
         )
         return _viewer_payload(picture)

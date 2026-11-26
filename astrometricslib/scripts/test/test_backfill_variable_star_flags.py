@@ -1,9 +1,9 @@
-"""Tests for the script that fills in VSX and Gaia DR3 variability flags.
+"""Tests for the script that fills in VSX variability flags.
 
-A fake cross-match service and a fake catalog stand in, so no network or
+A fake VSX lookup and a fake catalog stand in, so no network or
 database is touched. They check what the script must get right: nothing is
 written without ``--apply``, a backup comes before the first write, a finished
-star is skipped, an outage stops the run, and only the two flag fields change.
+star is skipped, an outage stops the run, and only the VSX fields change.
 """
 
 from types import SimpleNamespace
@@ -31,54 +31,43 @@ def make_star(
     return StellarObject(id=star_id, name=star_id, ra=ra, dec=dec, spectralType="A0V", **fields)
 
 
-class FakeXMatch:
-    """A cross-match stand-in that answers from fixed tables by catalog."""
+class FakeVsx:
+    """A VSX lookup stand-in that answers from a fixed table of types."""
 
-    def __init__(self, vsx: dict[str, str], gaia: dict[str, str], fail: bool = False) -> None:
+    def __init__(self, vsx: dict[str, str], fail: bool = False) -> None:
         self.vsx = vsx
-        self.gaia = gaia
         self.fail = fail
-        self.calls: list[str] = []
+        self.calls = 0
 
-    def __call__(self, **arguments: Any) -> Table | None:
-        """Answer one cross-match request.
+    def __call__(self, positions: Table) -> Table | None:
+        """Answer the request for one field.
 
         Returns
         -------
         table : `astropy.table.Table` or `None`
-            Matches for the stars in the request that the fake knows.
+            Matches for the stars in the field that the fake knows.
 
         Raises
         ------
         ExternalServiceError
-            When this fake was built to fail, like an unreachable service.
+            When this fake was built to fail, like two unreachable servers.
         """
-        self.calls.append(arguments["cat2"])
+        self.calls += 1
         if self.fail:
-            raise ExternalServiceError("The cross-match failed.")
-        ids = list(arguments["cat1"]["id"])
-        if arguments["cat2"].endswith("vsx"):
-            known = [(i, t) for i, t in self.vsx.items() if i in ids]
-            if not known:
-                return None
-            return Table({
-                "id": [k[0] for k in known],
-                "angDist": [0.1] * len(known),
-                "Type": [k[1] for k in known],
-                "max": [2.09] * len(known),
-                "min": [3.3] * len(known),
-                "f_min": [""] * len(known),
-                "n_max": ["V"] * len(known),
-                "Period": [2.867343] * len(known),
-            })
-        known = [(i, f) for i, f in self.gaia.items() if i in ids]
+            raise ExternalServiceError("Neither VizieR server answered.")
+        ids = list(positions["id"])
+        known = [(i, t) for i, t in self.vsx.items() if i in ids]
         if not known:
             return None
         return Table({
             "id": [k[0] for k in known],
             "angDist": [0.1] * len(known),
-            "VarFlag": [k[1] for k in known],
-            "Gmag": [10.0] * len(known),
+            "Type": [k[1] for k in known],
+            "max": [2.09] * len(known),
+            "min": [3.3] * len(known),
+            "f_min": [""] * len(known),
+            "n_max": ["V"] * len(known),
+            "Period": [2.867343] * len(known),
         })
 
 
@@ -141,26 +130,46 @@ def small_catalog() -> FakeCatalog:
         The catalog.
     """
     return FakeCatalog([
-        make_star("* bet Per"),
+        make_star("* bet Per", gaiaDr3SourceId=7),
         make_star("* alf Lyr"),
-        make_star("HD 1"),
+        make_star("HD 1", gaiaDr3SourceId=8),
         make_star("FIELD_J000000+000000"),
         make_star("HD 2", ra=None, dec=None),
         make_star("HD 3", vsxVariabilityType="CST", gaiaVariableFlag="CONSTANT"),
     ])
 
 
-def fake_service() -> FakeXMatch:
-    """Build a cross-match stand-in that knows Algol and Vega.
+def fake_gaia(positions: Table) -> dict[int, str]:
+    """Stand in for the Gaia variability lookup: only source 7 is listed.
 
     Returns
     -------
-    service : `FakeXMatch`
-        Algol is a VSX variable and Gaia variable; Vega is VSX constant.
+    classes : `dict` [`int`, `str`]
+        Source number to class.
     """
-    return FakeXMatch(
-        {"* bet Per": "EA/SD", "* alf Lyr": "CST"}, {"* bet Per": "VARIABLE", "* alf Lyr": "CONSTANT"}
-    )
+    return {7: "ECL"}
+
+
+def run_backfill(catalog: Any, vsx_lookup: Any, **options: Any) -> Any:
+    """Run the backfill with the fake Gaia lookup.
+
+    Returns
+    -------
+    report : `FlagReport`
+        What the run found.
+    """
+    return backfill.run_backfill(catalog, vsx_lookup, fake_gaia, **options)
+
+
+def fake_service() -> FakeVsx:
+    """Build a VSX stand-in that knows Algol and Vega.
+
+    Returns
+    -------
+    service : `FakeVsx`
+        Algol is a VSX variable; Vega is VSX constant.
+    """
+    return FakeVsx({"* bet Per": "EA/SD", "* alf Lyr": "CST"})
 
 
 def test_the_selection_skips_finished_unplaced_and_position_only_stars() -> None:
@@ -179,15 +188,13 @@ def test_a_dry_run_writes_and_backs_up_nothing_and_reports_what_it_found() -> No
     catalog = small_catalog()
     backups: list[str] = []
 
-    report = backfill.run_backfill(
-        catalog, fake_service(), make_backup=lambda: backups.append("x") or "b", log=no_log
-    )
+    report = run_backfill(catalog, fake_service(), make_backup=lambda: backups.append("x") or "b", log=no_log)
 
     assert report.candidates == 3
     assert catalog.saved == []
     assert backups == []
     assert report.vsx_types == {"EA/SD": 1}
-    assert report.gaia_flags == {"VARIABLE": 1, "CONSTANT": 1, NO_GAIA_MATCH: 1}
+    assert report.gaia_flags == {"VARIABLE": 1, NO_GAIA_MATCH: 1}  # Vega has no Gaia number
     assert report.confirmed_constant == 1  # Vega only
     assert "Dry run" in backfill.format_report(report, apply=False)
 
@@ -199,14 +206,16 @@ def test_apply_backs_up_first_and_saves_the_looked_up_stars() -> None:
     original = catalog.merge_and_record
     catalog.merge_and_record = lambda *args: (order.append("write"), original(*args))[1]
 
-    report = backfill.run_backfill(
+    report = run_backfill(
         catalog, fake_service(), apply=True, make_backup=lambda: order.append("backup") or "b.bak", log=no_log
     )
 
     assert order == ["backup", "write"]
     assert report.saved == 3
     assert catalog.stars["* bet Per"].vsx_variability_type == "EA/SD"
-    assert catalog.stars["* bet Per"].gaia_variable_flag == "VARIABLE"
+    assert catalog.stars["* bet Per"].gaia_variable_flag == "VARIABLE:ECL"
+    assert catalog.stars["* alf Lyr"].gaia_variable_flag == ""  # no Gaia number: not asked
+    assert catalog.stars["HD 1"].gaia_variable_flag == NO_GAIA_MATCH
     assert catalog.stars["HD 1"].vsx_variability_type == NOT_IN_VSX
 
 
@@ -221,7 +230,8 @@ def test_the_merge_rule_changes_only_the_flag_fields() -> None:
     merged = backfill.copy_flags(saved, loaded)
 
     assert merged is saved
-    assert (merged.vsx_variability_type, merged.gaia_variable_flag) == ("CST", "CONSTANT")
+    assert merged.vsx_variability_type == "CST"
+    assert merged.gaia_variable_flag == "CONSTANT"
     assert (merged.spectral_type, merged.simbad_object_types) == ("B8V", "*|V*")
     assert backfill.copy_flags(None, loaded) is loaded
 
@@ -231,7 +241,7 @@ def test_a_failed_backup_aborts_before_any_write() -> None:
     catalog = small_catalog()
 
     with pytest.raises(RuntimeError, match="backup"):
-        backfill.run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: None, log=no_log)
+        run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: None, log=no_log)
 
     assert catalog.saved == []
 
@@ -239,16 +249,16 @@ def test_a_failed_backup_aborts_before_any_write() -> None:
 def test_apply_without_a_backup_function_is_refused() -> None:
     """Saving cannot be asked for without a way to back up."""
     with pytest.raises(ValueError, match="backup"):
-        backfill.run_backfill(small_catalog(), fake_service(), apply=True)
+        run_backfill(small_catalog(), fake_service(), apply=True)
 
 
 def test_an_outage_stops_the_run_and_saves_nothing() -> None:
     """Three failed requests in a row end the run."""
     stars = [make_star(f"HD {number}") for number in range(backfill.BATCH_SIZE * 4)]
     catalog = FakeCatalog(stars)
-    service = FakeXMatch({}, {}, fail=True)
+    service = FakeVsx({}, fail=True)
 
-    report = backfill.run_backfill(catalog, service, apply=True, make_backup=lambda: "b", log=no_log)
+    report = run_backfill(catalog, service, apply=True, make_backup=lambda: "b", log=no_log)
 
     assert report.stopped_early is True
     assert catalog.saved == []
@@ -257,19 +267,19 @@ def test_an_outage_stops_the_run_and_saves_nothing() -> None:
 
 def test_the_limit_is_respected() -> None:
     """A limit of 2 looks up two stars."""
-    report = backfill.run_backfill(small_catalog(), fake_service(), limit=2, log=no_log)
+    report = run_backfill(small_catalog(), fake_service(), limit=2, log=no_log)
 
     assert report.candidates == 2
 
 
 def test_stars_are_looked_up_in_batches() -> None:
-    """Twice the batch size takes two requests per catalog."""
+    """Twice the batch size takes two requests (one field each)."""
     stars = [make_star(f"HD {number}") for number in range(backfill.BATCH_SIZE * 2)]
-    service = FakeXMatch({}, {})
+    service = FakeVsx({})
 
-    backfill.run_backfill(FakeCatalog(stars), service, log=no_log)
+    run_backfill(FakeCatalog(stars), service, log=no_log)
 
-    assert len(service.calls) == 4
+    assert service.calls == 2
 
 
 def test_only_stars_with_a_light_curve_can_be_chosen() -> None:
@@ -277,7 +287,7 @@ def test_only_stars_with_a_light_curve_can_be_chosen() -> None:
     catalog = small_catalog()
     catalog.with_photometry = {"FIELD_J000000+000000", "HD 1"}
 
-    report = backfill.run_backfill(
+    report = run_backfill(
         catalog, fake_service(), include_position_only=True, only_with_photometry=True, log=no_log
     )
 
@@ -288,7 +298,7 @@ def test_a_typed_variable_is_saved_with_its_vsx_range_and_period() -> None:
     """The VSX range, period and band are saved with the type."""
     catalog = small_catalog()
 
-    backfill.run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: "b", log=no_log)
+    run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: "b", log=no_log)
 
     algol = catalog.stars["* bet Per"]
     assert (algol.vsx_bright_magnitude, algol.vsx_faint_magnitude) == (2.09, 3.3)
@@ -355,7 +365,21 @@ def test_a_legacy_record_is_marked_checked_after_the_lookup() -> None:
     assert make_star("A", vsxVariabilityType="EA/SD").vsx_range_checked is False
     catalog = small_catalog()
 
-    backfill.run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: "b", log=no_log)
+    run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: "b", log=no_log)
 
     assert catalog.stars["* bet Per"].vsx_range_checked is True
     assert catalog.stars["* alf Lyr"].vsx_range_checked is True
+
+
+def test_when_neither_vizier_server_answers_the_stars_stay_unverified(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed field writes nothing and logs a warning."""
+    catalog = small_catalog()
+
+    report = run_backfill(catalog, FakeVsx({}, fail=True), apply=True, make_backup=lambda: "b", log=no_log)
+
+    assert report.failed_requests == 1
+    assert catalog.saved == []
+    assert not catalog.stars["* bet Per"].vsx_variability_type
+    assert "unverified" in caplog.text

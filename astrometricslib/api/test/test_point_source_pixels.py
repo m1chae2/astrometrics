@@ -5,8 +5,11 @@ A star drawn at array index (row 30, column 20) must come back near x 21,
 y 31.
 """
 
+from unittest.mock import MagicMock
+
 import numpy as np
 
+from astrometricslib import AppConfiguration
 from astrometricslib._internal.processing_scripts import detect_point_sources
 
 
@@ -17,8 +20,10 @@ def test_point_sources_are_in_one_based_pixels() -> None:
     image = rng.normal(100.0, 2.0, (64, 64))
     image += 5000.0 * np.exp(-((columns - 20.0) ** 2 + (rows - 30.0) ** 2) / (2 * 1.7**2))
 
-    sources = detect_point_sources(None, image).sources
+    pipelines = MagicMock()
+    pipelines._config = AppConfiguration()
+    stars = detect_point_sources(pipelines, image).stars
 
-    assert sources
-    assert abs(sources[0].x_centroid - 21.0) < 0.2
-    assert abs(sources[0].y_centroid - 31.0) < 0.2
+    assert stars
+    assert abs(stars[0].x - 21.0) < 0.2
+    assert abs(stars[0].y - 31.0) < 0.2

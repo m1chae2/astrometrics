@@ -3,7 +3,7 @@
  * measured center, or "Unnamed star" with its sky position on a plate-solved image.
  */
 import { describe, expect, it } from 'vitest';
-import { canOpenInAstronomyManager, catalogKeysOfStar, nameStarAt, UNNAMED_STAR } from '../utils/starNames';
+import { canOpenInAstronomyManager, nameStarAt, UNNAMED_STAR } from '../utils/starNames';
 
 const solved = () => ({ raDegrees: 10.684708, decDegrees: 41.26875 });
 
@@ -33,20 +33,5 @@ describe('canOpenInAstronomyManager', () => {
     expect(canOpenInAstronomyManager({ libraryId: 'Vega' })).toBe(true);
     expect(canOpenInAstronomyManager({ libraryId: null })).toBe(false);
     expect(canOpenInAstronomyManager({})).toBe(false);
-  });
-});
-
-describe('catalogKeysOfStar', () => {
-  /**
-   * The Gaia DR3 id comes first, then the name; a detection id and an unnamed star give no key.
-   */
-  it('lists the Gaia DR3 id then the name, never a detection id', () => {
-    expect(catalogKeysOfStar({ name: 'HD 214181', gaiaSourceId: '99' })).toEqual(['Gaia DR3 99', 'HD 214181']);
-    expect(catalogKeysOfStar({ name: 'HD 1' })).toEqual(['HD 1']);
-    expect(catalogKeysOfStar({ name: UNNAMED_STAR })).toEqual([]);
-    expect(catalogKeysOfStar({ name: 'Gaia DR3 99', gaiaSourceId: '99' })).toEqual(['Gaia DR3 99']);
-    expect(catalogKeysOfStar({ id: 'detection-5', name: 'HD 1' })).toEqual(['HD 1']);
-    expect(catalogKeysOfStar({ id: 'Gaia DR3 7', name: 'Gaia DR3 7' })).toEqual(['Gaia DR3 7']);
-    expect(catalogKeysOfStar({ id: 'HIP 5', name: 'Vega' })).toEqual(['Vega', 'HIP 5']);
   });
 });

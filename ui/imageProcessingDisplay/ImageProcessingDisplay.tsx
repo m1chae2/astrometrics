@@ -33,7 +33,6 @@ import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
 import { isStarSelected } from '../common/fitsViewer/FitsRenderer';
 import { publishedStarFromOverlay, useSelectionPublisher } from '../common/hooks/useSelectionPublisher';
 import type { DisplayMode } from '../common/fitsViewer/displayMode';
-import { useLibraryStars } from './hooks/useLibraryStars';
 import { useStarFocusRequest, type StarFocusRequest } from './hooks/useStarFocusRequest';
 import { usePhotometryStars } from './hooks/usePhotometryStars';
 import { useStackIdentification } from './hooks/useStackIdentification';
@@ -291,10 +290,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
   const photometryStars = usePhotometryStars(
     isStackShown ? namedOverlayStars : [], selectedTarget, showAstrometryOverlay && isStackShown
   );
-  // On a raw frame, one call says which stars the library has a record of; only those can open in
-  // the Astronomy Manager.
-  const libraryStars = useLibraryStars(
-    isStackShown ? [] : namedOverlayStars, `${selectedTarget ?? ''}|${selectedFile ?? ''}`
+  // A raw frame's overlay stars are read from the library, so each one's id is its record id.
+  const libraryStars: AstrometryOverlayStar[] = useMemo(
+    () => (isStackShown ? [] : namedOverlayStars.map((star) => ({ ...star, libraryId: star.id }))),
+    [isStackShown, namedOverlayStars]
   );
   const overlayStars = isStackShown ? photometryStars.stars : libraryStars;
   const overlayReason: string | null = isStackShown

@@ -2,20 +2,20 @@
  * @file usePhotometryStars.ts
  * @description Keeps only the stack's named stars that have photometry (a light curve), so every star the
  * Astrometry overlay draws on a stack opens in the Astronomy Manager with a light curve. It asks the
- * backend once for the ids of the target's stars with photometry and matches them with the same catalog
- * keys `useLibraryStars` uses (see `catalogKeysOfStar`). It also writes the count line for the viewer.
+ * backend once for the ids of the target's stars with photometry and keeps the stars whose library id
+ * (`libraryId`, set by the library when it named the stack) is one of them. It also writes the count
+ * line for the viewer.
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchPhotometryStarIds, type AstrometryOverlayStar } from '../../common/services/astronomyService';
-import { catalogKeysOfStar } from '../../common/fitsViewer/utils/starNames';
 
 /** The note shown when the target has no star with photometry yet. */
 export const NO_PHOTOMETRY_NOTE = 'No stars with photometry yet: run Analyze Target';
 
 /** What the overlay shows on a stack. */
 export interface PhotometryStarsView {
-  /** The named stars that have photometry, each with `libraryId` set to its library record. */
+  /** The named stars that have photometry. */
   stars: AstrometryOverlayStar[];
   /** One line saying how many stars are shown, or the no-photometry note. Null until known. */
   countText: string | null;
@@ -61,8 +61,7 @@ export function usePhotometryStars(
     const withPhotometry = new Set(query.data);
     const shown: AstrometryOverlayStar[] = [];
     for (const star of stars) {
-      const libraryId = catalogKeysOfStar(star).find((key) => withPhotometry.has(key));
-      if (libraryId) shown.push({ ...star, libraryId });
+      if (star.libraryId && withPhotometry.has(star.libraryId)) shown.push(star);
     }
     // Before the stack's names are read there is nothing to count yet.
     const countText = stars.length > 0 || withPhotometry.size === 0

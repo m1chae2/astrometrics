@@ -26,7 +26,7 @@ import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
 import type { SkyPosition } from './wcs';
 import { createPixelToSky } from './wcs';
-import { canOpenInAstronomyManager, catalogKeysOfStar, findStarAt, nameStarAt } from './utils/starNames';
+import { canOpenInAstronomyManager, findStarAt, nameStarAt } from './utils/starNames';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -80,7 +80,7 @@ export function formatStarDisplayName(name: string): string {
 /**
  * Checks if a given overlay star matches the currently selected star identifier.
  *
- * The match is exact and ignores case: the star's own id, its catalog keys (Gaia DR3 id and name), or
+ * The match is exact and ignores case: the star's own id, its library record id, its name, or
  * its display name with cluster prefixes removed (so "Cl* NGC 6205 KAD 656" matches "KAD 656").
  * It never matches part of an id, so "detection-5" does not select "detection-50".
  *
@@ -92,7 +92,7 @@ export function isStarSelected(star: AstrometryOverlayStar, selectedId?: string 
   if (!selectedId) return false;
   const wanted = selectedId.trim().toLowerCase();
   if (!wanted) return false;
-  const keys = [star.id || '', ...catalogKeysOfStar(star)].map((key) => key.trim().toLowerCase());
+  const keys = [star.id || '', star.libraryId || '', star.name || ''].map((key) => key.trim().toLowerCase());
   if (keys.includes(wanted)) return true;
 
   // Compare formatted display names (e.g. "Cl* NGC 6205 KAD 656" vs "CI* NGC 6205 KAD 656" both normalize to "KAD 656")

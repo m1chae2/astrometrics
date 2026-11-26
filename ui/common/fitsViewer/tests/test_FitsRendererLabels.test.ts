@@ -118,13 +118,15 @@ describe('isStarSelected', () => {
   });
 
   /**
-   * A star is selected by its catalog keys: its Gaia DR3 id or its name.
+   * A star is selected by the library record id it carries or by its name; nothing is guessed from
+   * its Gaia number.
    */
-  it('matches the Gaia DR3 id and the name of a stack star', () => {
-    const star = { id: 'detection-5', name: 'HD 214181', gaiaSourceId: '1234', x: 1, y: 1 };
+  it('matches the library record id and the name of a stack star', () => {
+    const star = { id: 'detection-5', name: 'HD 214181', gaiaSourceId: '1234', libraryId: 'Gaia DR3 1234', x: 1, y: 1 };
     expect(isStarSelected(star, 'Gaia DR3 1234')).toBe(true);
     expect(isStarSelected(star, 'hd 214181')).toBe(true);
     expect(isStarSelected(star, 'Gaia DR3 123')).toBe(false);
+    expect(isStarSelected({ ...star, libraryId: null }, 'Gaia DR3 1234')).toBe(false);
   });
 
   /**

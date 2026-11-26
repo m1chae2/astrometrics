@@ -213,7 +213,10 @@ export type AstrometryOverlayStar = OverlayStar & {
     gaiaSourceId?: string | null;
     /** Where the name came from: `simbad`, `gaia` or `none`. */
     nameSource?: string;
-    /** The id of the star's record in the library, set when the library has one (see `useLibraryStars`). */
+    /**
+     * The id of the star's library record. A stack's star carries the id the library gave it when it
+     * named the stack; a raw frame's star comes from the library, so it is the star's own id.
+     */
     libraryId?: string | null;
 };
 
@@ -325,14 +328,3 @@ export async function fetchPhotometryStarIds(targetId: string): Promise<string[]
     return Array.isArray(rows) ? rows.map((row) => row.id).filter((id): id is string => typeof id === 'string' && id !== '') : [];
 }
 
-/**
- * Asks which of some star ids have a record in the library, in one call.
- *
- * @param starIds The ids to look for.
- * @returns The ids that have a record.
- */
-export async function fetchExistingStarIds(starIds: string[]): Promise<string[]> {
-    if (starIds.length === 0) return [];
-    const found = await callBackend("astronomy:existing_ids", { star_ids: starIds });
-    return Array.isArray(found) ? found : [];
-}

@@ -13,7 +13,7 @@ import type { AstrometryOverlayStar } from '../../common/services/astronomyServi
 
 /** A named star of the NGC 7023 stack. */
 const STAR: AstrometryOverlayStar = {
-  id: 'det-7', name: 'HD 200775', gaiaSourceId: '123', x: 400, y: 300, referenceWidth: 800, referenceHeight: 600,
+  id: 'det-7', name: 'HD 200775', gaiaSourceId: '123', libraryId: 'Gaia DR3 123', x: 400, y: 300, referenceWidth: 800, referenceHeight: 600,
 };
 
 /** The screen's inputs, with the M 31 target on screen. */
@@ -32,11 +32,11 @@ function inputs(overrides: Partial<StarFocusInputs> = {}): StarFocusInputs {
 }
 
 describe('star focus helpers', () => {
-  it('finds the star by its record id or its catalog keys', () => {
-    expect(findStarForRecord([STAR], 'HD 200775')).toBe(STAR);
+  it('finds the star by the library record id it carries', () => {
     expect(findStarForRecord([STAR], 'Gaia DR3 123')).toBe(STAR);
     expect(findStarForRecord([{ ...STAR, libraryId: 'rec-1' }], 'rec-1')).not.toBeNull();
-    expect(findStarForRecord([STAR], 'Vega')).toBeNull();
+    expect(findStarForRecord([STAR], 'HD 200775')).toBeNull();
+    expect(findStarForRecord([{ ...STAR, libraryId: null }], 'Gaia DR3 123')).toBeNull();
   });
 
   it('centers the star and zooms in screen pixels per stack pixel', () => {
@@ -54,7 +54,7 @@ describe('useStarFocusRequest', () => {
     const { result, rerender } = renderHook((props: StarFocusInputs) => useStarFocusRequest(props), {
       initialProps: inputs({ showMainStack, onFound }),
     });
-    act(() => result.current.request({ targetId: 'NGC 7023', recordId: 'HD 200775', starName: 'HD 200775' }));
+    act(() => result.current.request({ targetId: 'NGC 7023', recordId: 'Gaia DR3 123', starName: 'HD 200775' }));
     // Still on M 31: nothing happens yet.
     expect(showMainStack).not.toHaveBeenCalled();
     rerender(inputs({ selectedTarget: 'NGC 7023', isLoadingFiles: true, mainStackPath: null, showMainStack, onFound }));

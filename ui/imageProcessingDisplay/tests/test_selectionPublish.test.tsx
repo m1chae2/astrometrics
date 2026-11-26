@@ -70,7 +70,7 @@ const RAW_FILES = [
 ];
 
 /** One named star of the stack, with photometry under the library id "HD 1". */
-const STACK_STAR = { id: 'det-1', name: 'HD 1', x: 250, y: 100, raDeg: 148.9, decDeg: 69.1, referenceWidth: 1000, referenceHeight: 500 };
+const STACK_STAR = { id: 'det-1', name: 'HD 1', libraryId: 'HD 1', x: 250, y: 100, raDeg: 148.9, decDeg: 69.1, referenceWidth: 1000, referenceHeight: 500 };
 
 /** Sets what the backend returns: the target's files, the stack's star names and the stars with photometry. */
 function answerBackend() {

@@ -231,7 +231,7 @@ def test_frames_measure_the_sky_and_star_width_the_fit_aimed_at(
     report = astrometrics.quality.measure_folder(
         str(pictures),
         limit=FRAMES,
-        camera=CAMERA,
+        camera_id=CAMERA,
         bias_level_adu=BIAS_LEVEL_ADU,
         register_job=False,
     )

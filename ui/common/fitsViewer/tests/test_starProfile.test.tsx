@@ -204,7 +204,7 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
     ring_masked_neighbor_count: 0,
     ring_masked_fraction: 0,
     ring_note: null,
-    signal_to_noise: 300,
+    peak_over_sky_noise: 300,
     edge_distance_px: 100,
     coverage_fraction: 1,
     aperture_radius_px: 4,
@@ -1143,7 +1143,7 @@ describe('the star inspector card', () => {
   });
 
   it('lists Measurable here rows with yes or no, comparing the width with the frame typical', () => {
-    const measurement = makeMeasurement({ circle_neighbor_count: 1, signal_to_noise: 4 });
+    const measurement = makeMeasurement({ circle_neighbor_count: 1, peak_over_sky_noise: 4 });
     render(
       <StarProfilePanel
         state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} frameWidthPx={3.0}

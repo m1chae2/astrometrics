@@ -23,6 +23,9 @@ the stacked light frames are split into the quarantine's sessions
 (`split_into_batches`), and each session's threshold comes from its frames'
 stored elongations. The frames already set aside are no longer in the list,
 so the session median can sit a little lower than when the stack was made.
+
+`latest_stack_time` finds when the target's newest stack file was written,
+the time a frame must be older than to be ``included``.
 """
 
 import os
@@ -32,7 +35,7 @@ from astrometricslib._internal.drivers.fits_access import frame_uses_color_filte
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.frame_status import FrameStatus, FrameStatusReport
-from astrometricslib.models.target import FrameRecord
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     MINIMUM_FRAMES_TO_JUDGE,
@@ -41,7 +44,66 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     split_into_batches,
 )
 
-__all__ = ["build_frame_statuses", "set_aside_limits_by_path", "stretched_star_reason"]
+__all__ = ["build_frame_statuses", "latest_stack_time", "set_aside_limits_by_path", "stretched_star_reason"]
+
+
+def _existing_stack_path(recorded_path: str | None, stacks_path: str | None) -> str | None:
+    """Give a recorded stack path only when the file is on disk.
+
+    A record made before the stacks moved to the stacks folder may still name
+    the old place under ``lights/``. The same file name is then looked for
+    under ``lights/<target folder>/`` in the stacks folder.
+
+    Parameters
+    ----------
+    recorded_path : `str` or `None`
+        The stack path saved in the target record.
+    stacks_path : `str` or `None`
+        The library's stacks folder, or `None` when it is not known.
+
+    Returns
+    -------
+    path : `str` or `None`
+        A path that exists, or `None` when there is no such stack.
+    """
+    if not recorded_path:
+        return None
+    if os.path.exists(recorded_path):
+        return recorded_path
+    if not stacks_path:
+        return None
+    target_folder = os.path.basename(os.path.dirname(recorded_path))
+    moved = os.path.join(stacks_path, "lights", target_folder, os.path.basename(recorded_path))
+    return moved if os.path.exists(moved) else None
+
+
+def latest_stack_time(target: Target, stacks_path: str | None) -> float | None:
+    """Find when the newest of a target's stack files was written.
+
+    The imaging stack, the spectral stack and the stack of every saved stack
+    configuration count. A stack whose file is on disk nowhere is a status
+    (there is no stack), not an error.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    stacks_path : `str` or `None`
+        The library's stacks folder, where an old record's stack is looked for.
+
+    Returns
+    -------
+    stacked_at : `float` or `None`
+        The newest stack file's modification time, in seconds since the Unix
+        epoch, or `None` when the target has no stack on disk.
+    """
+    recorded = [target.stacking.stacked_image, target.spectral_stacking.stacked_image]
+    recorded.extend(
+        configuration.stacked_image for configuration in target.stacking.stacks_by_configuration.values()
+    )
+    paths = {_existing_stack_path(path, stacks_path) for path in recorded}
+    times = [os.path.getmtime(path) for path in paths if path]
+    return max(times) if times else None
 
 
 def set_aside_limits_by_path(

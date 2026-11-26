@@ -61,10 +61,16 @@ class DetectionsMeasurement(BaseModel):
         averaged, smaller copy, as the run does. Positions are given back
         in full image pixels.
     star_width_px : `float` or `None`
-        The star width measured on this image, in pixels, on the library's
-        one star-width scale. It sizes the photometry circle. `None` when no
-        star could be measured; the active setup's typical width was used
-        instead.
+        The star width measured on this image, in pixels, already put on the
+        library's one star-width scale (the per-frame Gaussian of the
+        brightest stars) with the ratio of ``star_width_estimator``. It sizes
+        the photometry circle. `None` when no star could be measured; the
+        active setup's typical width was used instead.
+    star_width_estimator : `str` or `None`
+        The `StarWidthEstimator` that measured the width: ``"stack
+        Gaussian"`` for a stack of two or more frames, else ``"frame
+        Gaussian, brightest stars"`` (the scale itself). `None` with no
+        width.
     aperture_radius_px : `float` or `None`
         The radius, in image pixels, of the circle that photometry measures
         every star in, sized from ``star_width_px``. It is the same for every
@@ -81,4 +87,5 @@ class DetectionsMeasurement(BaseModel):
     kernel_fwhm_px: float
     binned_on_color: bool = False
     star_width_px: float | None = None
+    star_width_estimator: str | None = None
     aperture_radius_px: float | None = None

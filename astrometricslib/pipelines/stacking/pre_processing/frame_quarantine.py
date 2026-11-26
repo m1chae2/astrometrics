@@ -16,8 +16,8 @@ The step is built to be undone:
   each frame came from and why it was moved (the rule, the frame's value and
   the limit, in plain words).
 - `restore_quarantined_frames` moves the frames back.
-- `quarantine_preview_report` shows which frames the step would move,
-  without moving any.
+- `ProcessingPipelines.predict_stack` shows which frames the step would
+  move, without moving any.
 - It judges each frame against the other frames of its own session, camera,
   filter and exposure, so a poor night is not mistaken for a few bad frames.
 - It sets aside every frame that fails a check, however many that is. When
@@ -62,10 +62,9 @@ from astrometricslib.foundation.run_abandonment import (
     raise_if_abandoned,
     stopping_on_abandonment,
 )
-from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrame
+from astrometricslib.models.quality.excluded_frames import SetAsideFrame
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.measurement import SubjectLevel
-from astrometricslib.models.target import Target
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
@@ -73,7 +72,6 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quality.frame_measurement import measure_image_star_profiles
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_ELONGATION
@@ -106,7 +104,6 @@ __all__ = [
     "judge_batch_in_full",
     "list_set_aside_frames",
     "quarantine_bad_frames",
-    "quarantine_preview_report",
     "read_quarantine_manifest",
     "restore_quarantined_frames",
     "set_aside_elongation_limit",
@@ -1890,97 +1887,6 @@ def decision_to_set_aside_frame(decision: QuarantineDecision) -> SetAsideFrame:
         star_count=decision.star_count,
         typical_star_count=decision.typical_star_count,
         sky_median_adu=decision.sky_median_adu,
-    )
-
-
-def quarantine_preview_report(
-    target: Target, limit: int, quarantine_enabled: bool, frames_path: str
-) -> QuarantinePreview:
-    """Show which frames a stack would set aside, without moving any.
-
-    It judges every non-spectral light frame of the target, each capture
-    setting (camera, optic, filter, exposure and gain) in its own sessions
-    (`split_into_batches`). A target imaged with two cameras is stacked one
-    camera at a time, so every camera's frames are judged. Frames an earlier
-    run already set aside are left out, as a stack leaves them out
-    (`find_frames_already_set_aside`). The stacker also leaves out the
-    frames of a minority gain setting of a camera before its check
-    (`find_dominant_gain_subset`); the preview still judges them, in their
-    own sessions, and says how many there are. It measures each frame
-    (about a second each), so a large target takes a while. It changes
-    neither the target nor any file.
-
-    Parameters
-    ----------
-    target : `Target`
-        The target to check.
-    limit : `int`
-        Most frames to list. ``would_move_total`` gives the full count.
-    quarantine_enabled : `bool`
-        The ``quarantine_bad_frames_enabled`` setting. When it is off, a
-        stack moves nothing, so the preview measures nothing.
-    frames_path : `str`
-        The library's frames folder, where the `_excluded` folders are found.
-
-    Returns
-    -------
-    preview : `QuarantinePreview`
-        The frames the check would move, with the measurements behind each,
-        the batches it would leave alone, and any frame it could not read.
-        ``frames_checked`` counts the frames judged: every light frame that
-        is not already set aside.
-    """
-    from astrometricslib.pipelines.shared.frame_grouping import frame_configuration_key
-    from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import (
-        find_dominant_gain_subset,
-    )
-
-    if not quarantine_enabled:
-        return QuarantinePreview(
-            target_id=target.id,
-            quarantine_enabled=False,
-            frames_checked=0,
-            notes=[
-                "Frame quarantine is turned off in the settings "
-                "(quarantine_bad_frames_enabled), so a stack would move no frames."
-            ],
-        )
-    lights = [
-        frame
-        for frame in target.frames
-        if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
-    ]
-    by_configuration: dict[str, list[Any]] = defaultdict(list)
-    for frame in lights:
-        by_configuration[frame_configuration_key(frame) or str(frame.camera)].append(frame)
-    minority_gain = [
-        frame for frames in by_configuration.values() for frame in find_dominant_gain_subset(frames)[1]
-    ]
-    already_set_aside = {
-        frame.path for frame in find_frames_already_set_aside(target.id, lights, frames_path)
-    }
-    judged = [frame for frame in lights if frame.path not in already_set_aside]
-    found = find_frames_to_quarantine(judged, target_id=target.id)
-    notes = [*found.notes, *found.warnings]
-    if minority_gain:
-        notes.append(
-            f"{len(minority_gain)} frame(s) have a minority gain setting for their camera. They were "
-            "judged in their own sessions, but a stack of that camera leaves them out before this check."
-        )
-    if already_set_aside:
-        notes.append(
-            f"{len(already_set_aside)} frame(s) that an earlier run set aside are still listed on "
-            "the target; a stack leaves them out before this check."
-        )
-    would_move = [decision_to_set_aside_frame(decision) for decision in found.moved]
-    return QuarantinePreview(
-        target_id=target.id,
-        frames_checked=len(judged),
-        would_move_total=len(would_move),
-        would_move=would_move[:limit],
-        notes=notes,
-        unreadable=found.unreadable,
-        flagged=[decision_to_set_aside_frame(decision) for decision in found.flagged][:limit],
     )
 
 

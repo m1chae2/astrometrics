@@ -97,7 +97,12 @@ class ImageService:
 
     def __init__(self, target_service: Any) -> None:
         self.target_service = target_service
-        self._position_mapper = PositionMapper(self._allowed_image_roots, self._registration_record_roots)
+        self._position_mapper = PositionMapper(
+            self._allowed_image_roots,
+            lambda from_path, x, y, to_path: self._astrometrics.quality.map_position(
+                from_path, x, y, to_path
+            ),
+        )
         # The detection lists by real path, each with the file's modified
         # time and size when it was measured, newest last.
         self._detection_cache: OrderedDict[str, tuple[float, int, dict[str, Any]]] = OrderedDict()
@@ -184,22 +189,6 @@ class ImageService:
             if callable(method):
                 roots.append(Path(method()))
         return [os.path.realpath(root) for root in roots]
-
-    def _registration_record_roots(self) -> list[str]:
-        """List the folders searched for stack registration records.
-
-        Returns
-        -------
-        roots : `list` [`str`]
-            The stacks folder when the settings name one, and the ``stacks``
-            folder inside the library folder.
-        """
-        config = self.target_service.config
-        roots = [Path(config.get_library_path()) / "stacks"]
-        method = getattr(config, "get_stacks_path", None)
-        if callable(method):
-            roots.append(Path(method()))
-        return list(dict.fromkeys(os.path.realpath(root) for root in roots))
 
     def map_position(self, from_path: str, x: float, y: float, to_path: str) -> dict[str, Any]:
         """Find where a pixel of one image is on another image.

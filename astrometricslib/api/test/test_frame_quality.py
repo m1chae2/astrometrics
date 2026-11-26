@@ -113,46 +113,37 @@ def test_camera_filter_and_dark_frames(diagnostics: QualityRecords) -> None:
         assert diagnostics.measure_frames(_target(), camera_id="nikon").frames_measured == 0
 
 
-def test_limit_is_clamped(diagnostics: QualityRecords) -> None:
-    """A limit below 1 is raised to 1."""
+def test_a_limit_outside_its_range_is_refused(diagnostics: QualityRecords) -> None:
+    """The one limit rule: a limit outside 1 to 300 (100 spectral) raises."""
+    for kind, limit in (("input_quality", 0), ("input_quality", 301), ("spectral", 101)):
+        with pytest.raises(InvalidArgumentError, match="limit must be"):
+            diagnostics.measure_frames(_target(), kind=kind, limit=limit)
     with patch(
         "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
     ):
-        assert diagnostics.measure_frames(_target(), limit=0).frames_measured == 1
+        assert diagnostics.measure_frames(_target(), limit=1).frames_measured == 1
 
 
-def test_raw_check_needs_a_folder_and_passes_the_limit(diagnostics: QualityRecords) -> None:
-    """The folder check needs a folder and measures only the newest frames."""
-    with pytest.raises(InvalidArgumentError, match="needs a target or a folder_path"):
-        diagnostics.measure_frames(kind="raw_check")
-    selected = ["/staging/a.fits", "/staging/b.fits", "/staging/c.fits"]
-    with (
-        patch(
-            "astrometricslib.pipelines.shared.quality.frame_selection.select_folder_paths",
-            return_value=selected,
-        ),
-        patch(
-            "astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames",
-            return_value={"frames": [], "batch": {}},
-        ) as check,
-    ):
-        report = diagnostics.measure_frames(kind="raw_check", folder_path="/staging", limit=2)
-    check.assert_called_once_with(paths=selected[-2:])
-    assert (report.frames_matching, report.frames_checked) == (3, 2)
+def test_raw_check_measures_a_targets_newest_frames(diagnostics: QualityRecords) -> None:
+    """The batch check measures only the newest of a target's light frames."""
+    with patch(
+        "astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames",
+        return_value={"frames": [], "batch": {}},
+    ) as check:
+        report = diagnostics.measure_frames(_target(), kind="raw_check", limit=2)
+    assert len(check.call_args.kwargs["paths"]) == 2
+    assert report.frames_checked == 2
     assert report.kind == "raw_check"
-    assert report.folder_path == "/staging"
 
 
 def test_bad_requests_are_errors(diagnostics: QualityRecords) -> None:
     """An unknown kind, a missing target, or an unused argument is refused."""
     with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        diagnostics.measure_frames(kind="everything")
-    with pytest.raises(InvalidArgumentError, match="needs a target"):
-        diagnostics.measure_frames(kind="input_quality")
-    with pytest.raises(InvalidArgumentError, match="needs a target"):
-        diagnostics.measure_frames(kind="quarantine_preview")
+        diagnostics.measure_frames(_target(), kind="everything")
+    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
+        diagnostics.measure_frames(_target(), kind="quarantine_preview")
     with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
-        diagnostics.measure_frames(_target(), kind="quarantine_preview", camera_id="asi533")
+        diagnostics.measure_frames(_target(), kind="raw_check", camera_id="asi533")
     with pytest.raises(InvalidArgumentError, match="does not use: fwhm"):
         diagnostics.measure_frames(_target(), kind="raw_check", include=["fwhm"])
 
@@ -176,13 +167,13 @@ def test_a_bad_time_is_refused(diagnostics: QualityRecords) -> None:
 
 
 def test_the_spectral_kind_passes_its_inputs_to_the_spectrum_check(diagnostics: QualityRecords) -> None:
-    """``kind="spectral"`` hands the exposure inputs and a clamped limit on."""
+    """``kind="spectral"`` hands the exposure inputs and the limit on."""
     with patch(
         "astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check.check_spectral_frames",
         return_value="report",
     ) as check:
         report = diagnostics.measure_frames(
-            _target(), kind="spectral", exposure_seconds=30.0, predict_exposure_seconds=60.0, limit=500
+            _target(), kind="spectral", exposure_seconds=30.0, predict_exposure_seconds=60.0, limit=100
         )
     assert report == "report"
     arguments = check.call_args.args

@@ -1,16 +1,18 @@
 """Tests of ``images:map_position`` and the position mapping behind it.
 
 The call is declared and wired, and refuses an image outside the library.
-Two plate-solved images are linked by the sky. A stack's registration record
-moves a pixel from a frame to the stack (with the crop offset) and back, and
-links two frames of one stack. Frames of different stacks are chained through
-the sky. The same pixel is the fallback. A real M 31 frame and its stack
-agree on where the bright stars are (skipped when the files are missing).
+The mapping itself is the library's (`QualityRecords.map_position`, whose
+matrix steps are tested in the library); these tests run it through the
+image service. Two plate-solved images are linked by the sky. A stack's
+registration record moves a pixel from a frame to the stack (with the crop
+offset) and back, and links two frames of one stack. Frames of different
+stacks are chained through the sky. The same pixel is the fallback. A real
+M 31 frame and its stack agree on where the bright stars are (skipped when
+the files are missing).
 """
 
 import json
 import os
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,17 +20,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib import QualityRecords
 from astrometricslib.exceptions import InvalidArgumentError
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.data.image_service import ImageService
-from backend.services.data.position_mapping import (
-    PositionMapper,
-    _read_record,
-    _Record,
-    frame_to_stack,
-    stack_to_frame,
-)
+from backend.services.data.position_mapping import PositionMapper
 
 REAL_LIBRARY = Path.home() / "Astrometrics" / "Library"
 REAL_STACK = REAL_LIBRARY / "stacks" / "lights" / "M 31" / "M_31_L_Stacked_ZWO_ASI_533MM_Pro_405mm.fits"
@@ -45,8 +42,11 @@ def _service(root: Path) -> ImageService:
     service : `ImageService`
         The service.
     """
-    config = SimpleNamespace(get_library_path=lambda: str(root))
-    return ImageService(target_service=SimpleNamespace(config=config, astrometrics=None))
+    config = SimpleNamespace(get_library_path=lambda: str(root), get_stacks_path=lambda: str(root / "stacks"))
+    quality = QualityRecords(config, storage=None)  # type: ignore[arg-type]
+    return ImageService(
+        target_service=SimpleNamespace(config=config, astrometrics=SimpleNamespace(quality=quality))
+    )
 
 
 def _write_image(
@@ -98,22 +98,6 @@ def _write_record(
     record_file.write_text(json.dumps(document), encoding="utf-8")
 
 
-def _one_frame_record(dx: float, dy: float, crop: tuple[int, int]) -> _Record:
-    """Write and read back a record of one frame.
-
-    Returns
-    -------
-    record : `_Record`
-        The record.
-    """
-    with tempfile.TemporaryDirectory() as folder:
-        stack = Path(folder) / "s.fits"
-        _write_record(stack, [Path(folder) / "f.fits"], [(dx, dy)], crop)
-        record = _read_record(str(Path(folder) / "s_registration_frames.json"))
-    assert record is not None
-    return record
-
-
 def test_call_is_declared_and_wired() -> None:
     """The call is in the public interface and the registry."""
     assert "images:map_position" in RPC_METHODS
@@ -150,17 +134,6 @@ def test_pointing_keywords_alone_are_not_a_plate_solution(tmp_path: Path) -> Non
     _write_image(library / "b.fits", header={"RA": 150.0, "DEC": 20.0})
     result = _service(library).map_position(str(library / "a.fits"), 5.0, 6.0, str(library / "b.fits"))
     assert result["method"] == "same pixel"
-
-
-def test_homography_round_trip_and_crop_offset() -> None:
-    """A frame pixel goes onto the stack and back, with the crop applied."""
-    record = _one_frame_record(5.0, 3.0, (2, 1))
-    # Frame 40 rows high: pixel (10, 20), 1-based, is column 9, row 19.
-    # Siril y = 40 - 1 - 19 = 20. It moves to column 14 and Siril y 23, so
-    # row 40 - 1 - 23 = 16; minus the crop (2, 1): column 12, row 15.
-    stack_x, stack_y = frame_to_stack(record, 0, 10.0, 20.0, 40)
-    assert (stack_x, stack_y) == pytest.approx((13.0, 16.0))
-    assert stack_to_frame(record, 0, stack_x, stack_y, 40) == pytest.approx((10.0, 20.0))
 
 
 def test_registration_record_links_frame_stack_and_frame(tmp_path: Path) -> None:
@@ -256,7 +229,11 @@ def test_real_asi_frame_and_stack_agree_on_the_bright_stars() -> None:
     """Bright stars of a real frame land on stack stars within 2 pixels."""
     from scipy.ndimage import gaussian_filter, maximum_filter
 
-    mapper = PositionMapper(lambda: [os.path.realpath(REAL_LIBRARY)], lambda: [str(REAL_LIBRARY / "stacks")])
+    config = SimpleNamespace(
+        get_library_path=lambda: str(REAL_LIBRARY), get_stacks_path=lambda: str(REAL_LIBRARY / "stacks")
+    )
+    quality = QualityRecords(config, storage=None)  # type: ignore[arg-type]
+    mapper = PositionMapper(lambda: [os.path.realpath(REAL_LIBRARY)], quality.map_position)
 
     def bright_stars(path: Path, count: int) -> np.ndarray:
         """Find the brightest smoothed peaks, as 1-based (x, y) pairs.

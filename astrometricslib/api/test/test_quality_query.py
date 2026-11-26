@@ -137,7 +137,7 @@ def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_pat
     latest = quality.query(level="frame").rows
     assert [measurement.value for measurement in latest] == [3.0]
     assert len(quality.query(level="frame", latest_only=False).rows) == 2
-    assert [m.subject.target_id for m in quality.query(camera="ASI533MM").rows] == ["M13"]
+    assert [m.subject.target_id for m in quality.query(camera_id="ASI533MM").rows] == ["M13"]
     assert quality.query(target_id="nobody").rows == []
     assert len(quality.query(since="2026-10-01T03:30:00").rows) == 1
     assert len(quality.query(since=BASE_TIME + timedelta(hours=2)).rows) == 0

@@ -66,7 +66,7 @@ A satellite or aircraft streak does not trigger it, because the stacker's pixel 
 
 **Undoing it.** The step moves frames and never deletes them. Each `_excluded` folder holds `excluded_frames.json`, which records every frame's original path, why it was moved and what was measured. The scanner and the downloader both leave `_excluded` alone, so moved frames neither return to the target nor download again. Two calls work with them:
 
-- `QualityRecords.measure_frames(target, kind="quarantine_preview")` shows what the check would move without moving anything. `QualityRecords.set_aside_frames` lists what the step moved.
+- `ProcessingPipelines.predict_stack(target)` shows what the check would move without moving anything. `QualityRecords.set_aside_frames` lists what the step moved.
 - The internal function `restore_excluded_frames(pipelines, target, apply=True)` (in `astrometricslib._internal.processing_scripts`) moves the frames back. `scripts/restore_excluded_frames.py` is its command-line form.
 
 **Setting.** `quarantine_bad_frames_enabled` in `[Processing.Siril]` turns the step off.

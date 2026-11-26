@@ -72,8 +72,9 @@ DETECTIONS_SIDECAR_SUFFIX = "_detections.json"
 # Raise this when the layout of a saved list changes, or when a fix changes
 # the positions it holds, so an old file is not read as a new one. Version 3:
 # a color stack's single-star positions were scaled back twice, so most of its
-# saved stars sat outside the image.
-DETECTIONS_FILE_VERSION = 3
+# saved stars sat outside the image. Version 4: the list names the estimator
+# of its star width.
+DETECTIONS_FILE_VERSION = 4
 
 # The key that holds the image's stamp (size and modification time) in a saved
 # list.
@@ -306,6 +307,7 @@ def _build_measurement(
         kernel_fwhm_px=kernel_fwhm_px,
         binned_on_color=binned_on_color,
         star_width_px=star_width_px,
+        star_width_estimator=estimator.value if star_width_px is not None else None,
         aperture_radius_px=aperture_radius_px,
     )
 

@@ -10,11 +10,13 @@ argument and does what the method did. A script or test reaches them through
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+import numpy as np
 
 from astrometricslib.foundation.jobs.runner import registered_job
-from astrometricslib.models.point_sources import PointSource, PointSourceDetection
 from astrometricslib.models.quality.excluded_frames import RestoreReport
+from astrometricslib.models.quality.image_measurements import FoundStars
 from astrometricslib.models.quality.subset_stacks import SubsetStackResult
 from astrometricslib.models.spectroscopy_calibration import (
     CalibrationLineFit,
@@ -31,54 +33,6 @@ __all__ = [
     "stack_subset",
     "tune_spectroscopy_calibration",
 ]
-
-
-def _optional_float(value: Any) -> float | None:
-    """Turn a NumPy or Python number into a plain float, keeping `None`.
-
-    Parameters
-    ----------
-    value : `Any`
-        A number or `None`.
-
-    Returns
-    -------
-    number : `float` or `None`
-        The number as a Python float.
-    """
-    return None if value is None else float(value)
-
-
-def _to_point_source(row: dict[str, Any]) -> PointSource:
-    """Turn one detector row into a `PointSource` with plain Python numbers.
-
-    Parameters
-    ----------
-    row : `dict` [`str`, `Any`]
-        One star from the source detector. Its numbers may be NumPy values,
-        and the centroid keys may be written ``xcentroid`` or ``x_centroid``.
-
-    Returns
-    -------
-    source : `PointSource`
-        The star.
-    """
-    identifier = row.get("id")
-    pixel_count = row.get("n_pixels")
-    return PointSource(
-        id=None if identifier is None else int(identifier),
-        x_centroid=float(row.get("x_centroid", row.get("xcentroid"))),
-        y_centroid=float(row.get("y_centroid", row.get("ycentroid"))),
-        flux=float(row.get("flux", 0.0)),
-        peak=_optional_float(row.get("peak")),
-        sharpness=_optional_float(row.get("sharpness")),
-        roundness1=_optional_float(row.get("roundness1")),
-        roundness2=_optional_float(row.get("roundness2")),
-        n_pixels=None if pixel_count is None else int(pixel_count),
-        mag=_optional_float(row.get("mag")),
-        daofind_mag=_optional_float(row.get("daofind_mag")),
-        radius_px=_optional_float(row.get("radius_px")),
-    )
 
 
 def restore_excluded_frames(
@@ -224,32 +178,40 @@ def detect_point_sources(
     image_data: Any,
     threshold_sigma: float | None = None,
     fwhm: float | None = None,
-) -> PointSourceDetection:
+) -> FoundStars:
     """Find stars (point sources) in an image's pixel data.
+
+    This is `QualityBlocks.find_stars` with the astrometry run's finder, the
+    library's one star search; this function only keeps the script call.
 
     Parameters
     ----------
     pipelines : `ProcessingPipelines`
-        The processing pipelines to work with.
+        The processing pipelines to work with. Its settings give the camera
+        profiles.
     image_data : `numpy.ndarray`
         2D pixel array to search.
     threshold_sigma : `float`, optional
         Detection threshold, in noise standard deviations above the
         background. Defaults to the star finder's registered threshold (5).
     fwhm : `float`, optional
-        Expected star width (FWHM), in pixels. Defaults to the star finder's
-        own kernel width, which follows the star width of the setup (4 px on
-        the reference setup).
+        Expected star width (FWHM), in pixels. Defaults to the star width
+        measured in the image, as the astrometry run sizes its finder.
 
     Returns
     -------
-    detection : `PointSourceDetection`
-        The stars found, brightest first.
+    detection : `FoundStars`
+        The stars found, brightest first, with ``x`` and ``y`` in 1-based
+        pixels (as in FITS and DS9) and the finder's ``flux``.
     """
-    from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+    from astrometricslib.api._quality_building_blocks import QualityBlocks
 
-    found = SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)
-    return PointSourceDetection(sources=[_to_point_source(row) for row in found])
+    found = QualityBlocks(pipelines._config).find_stars(
+        np.asarray(image_data), finder="astrometry", fwhm_px=fwhm, threshold_sigma=threshold_sigma
+    )
+    # Only the "daofind" finder can come back empty-handed (no measurable
+    # sky); the astrometry finder always answers.
+    return cast(FoundStars, found)
 
 
 def tune_spectroscopy_calibration(

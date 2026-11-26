@@ -164,7 +164,11 @@ def estimate_faintest_detected_magnitude(stellar_objects: list[StellarObject]) -
 
 
 def find_unique_stars(
-    detector: SourceDetector, data: np.ndarray, is_color_frame: bool = False, with_radius: bool = True
+    detector: SourceDetector,
+    data: np.ndarray,
+    is_color_frame: bool = False,
+    with_radius: bool = True,
+    size_kernel_from_image: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """Find the stars of an image the way the astrometry run does.
 
@@ -188,6 +192,10 @@ def find_unique_stars(
         Whether to measure each star's ``radius_px``. The run reads it. The
         viewer's overlay does not, and skipping it saves most of the time.
         The stars, their positions and their fluxes are the same either way.
+    size_kernel_from_image : `bool`, optional
+        Whether a black-and-white frame sizes the kernel from its measured
+        star width, as the run does. `False` keeps the detector's own
+        ``fwhm``, for a caller that chose the width.
 
     Returns
     -------
@@ -206,7 +214,9 @@ def find_unique_stars(
         return sources, unique_sources
 
     try:
-        blob_width = measure_blob_width_from_data(data) if data is not None else None
+        blob_width = (
+            measure_blob_width_from_data(data) if data is not None and size_kernel_from_image else None
+        )
     except DATA_ERRORS as width_error:
         logger.debug(
             "Could not measure the detection kernel width, keeping the configured default: %s",

@@ -22,7 +22,7 @@ function goodStar(overrides: Partial<StarProfileMeasurement> = {}): StarProfileM
     moffat: { model: 'moffat', fitted: true, fwhm_px: 3.1 },
     gaussian: { model: 'gaussian', fitted: true, fwhm_px: 3.0 },
     ring_harmonics: [],
-    signal_to_noise: 200,
+    peak_over_sky_noise: 200,
     edge_distance_px: 500,
     coverage_fraction: 1,
     sky_outer_px: 12,
@@ -58,7 +58,7 @@ describe('buildMeasurableRows', () => {
   });
 
   it('flags a clipped star, a weak star and neighbors in the circle or the sky ring', () => {
-    const rows = buildMeasurableRows(goodStar({ clipped: true, signal_to_noise: 6, circle_neighbor_count: 2, sky_ring_neighbor_count: 1 }), 3.0);
+    const rows = buildMeasurableRows(goodStar({ clipped: true, peak_over_sky_noise: 6, circle_neighbor_count: 2, sky_ring_neighbor_count: 1 }), 3.0);
     expect(rowOf(rows, 'saturation')?.ok).toBe(false);
     expect(rowOf(rows, 'signal')?.ok).toBe(false);
     expect(rowOf(rows, 'neighbors')?.value).toBe('2 neighbors in the star circle, 1 neighbor in the sky ring');
@@ -77,7 +77,7 @@ describe('buildMeasurableRows', () => {
     expect(round?.value).toBe('elongation 1.08');
     const stretched = rowOf(buildMeasurableRows(goodStar({ star_elongation: 1.5, star_elongation_angle_deg: 35 }), 3.0), 'shape');
     expect(stretched?.ok).toBe(false);
-    expect(stretched?.value).toBe('elongation 1.50, long axis at 35° from x toward y');
+    expect(stretched?.value).toBe('elongation 1.50, long axis at 35° from y toward x');
   });
 
   it('gives no verdict when the shape cannot be judged, and says so for something that is not a single star', () => {

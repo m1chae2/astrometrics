@@ -56,11 +56,11 @@ with fits.open(path, memmap=False) as hdul:
     data = np.asarray(hdul[0].data, dtype=float)
     header = hdul[0].header
 
-sources = detect_point_sources(astrometrics.processing, data).sources
+stars = detect_point_sources(astrometrics.processing, data).stars
 centres = []
-for source in sources[:3000]:
-    x = int(round(source.x_centroid))
-    y = int(round(source.y_centroid))
+for star in stars[:3000]:
+    x = int(round(star.x - 1.0))  # 1-based to 0-based
+    y = int(round(star.y - 1.0))
     box = data[y - 7 : y + 8, x - 7 : x + 8]
     if box.shape != (15, 15):
         continue
@@ -651,7 +651,7 @@ astrometrics = Astrometrics()
 for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
     with fits.open(path, memmap=False) as hdul:
         data = np.asarray(hdul[0].data, dtype=float)
-    count = len(detect_point_sources(astrometrics.processing, data).sources)
+    count = detect_point_sources(astrometrics.processing, data).star_count
     start = time.monotonic()
     try:
         solved = astrometrics.processing.plate_solve(path) is not None

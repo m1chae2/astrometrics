@@ -31,7 +31,7 @@ from scipy import ndimage, optimize
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.foundation.run_bases import StarWidthEstimator, factor_for, star_width_on_scale
 from astrometricslib.models.quality.star_profile import ProfileFit, StarProfileMeasurement
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -469,10 +469,13 @@ def _fit_curves(
             curve = _moffat_values(grid, parameters[0], parameters[3], parameters[4])
         else:
             curve = _gaussian_values(grid, parameters[0], parameters[3])
+        estimator = StarWidthEstimator.FRAME_MOFFAT if name == "moffat" else StarWidthEstimator.FRAME_GAUSSIAN
         return ProfileFit(
             model=name,
             fitted=True,
             fwhm_px=float(fwhm),
+            estimator=estimator.value,
+            fwhm_on_scale_px=float(star_width_on_scale(float(fwhm), estimator)),
             fwhm_arcsec=None if scale is None else float(fwhm * scale),
             peak=float(parameters[0]),
             beta=beta,
@@ -484,6 +487,49 @@ def _fit_curves(
         )
 
     return fit_one("moffat"), fit_one("gaussian")
+
+
+def _position_angle_east_of_north(
+    header: object, center_column: float, center_row: float, angle_deg: float | None
+) -> float | None:
+    """Turn a direction on the image into a position angle on the sky.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The image's header.
+    center_column, center_row : `float`
+        The star's center, 0-based.
+    angle_deg : `float` or `None`
+        The direction on the image, from +y toward +x, in degrees.
+
+    Returns
+    -------
+    position_angle : `float` or `None`
+        The same direction on the sky, from north toward east, 0 up to but
+        not including 180 degrees. `None` when there is no direction or the
+        image has no plate solution.
+    """
+    from astropy.coordinates import SkyCoord
+
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
+    from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+
+    if angle_deg is None or header is None or not header_is_plate_solved(header):  # type: ignore[arg-type]
+        return None
+    wcs = celestial_wcs(header)  # type: ignore[arg-type]
+    if wcs is None:
+        return None
+    radians = math.radians(angle_deg)
+    columns = [center_column, center_column + math.sin(radians)]
+    rows = [center_row, center_row + math.cos(radians)]
+    try:
+        ra, dec = wcs.all_pix2world(columns, rows, 0)
+    except ValueError, RuntimeError:
+        return None
+    start, end = SkyCoord(ra[0], dec[0], unit="deg"), SkyCoord(ra[1], dec[1], unit="deg")
+    position_angle = float(start.position_angle(end).deg) % 180.0
+    return position_angle if math.isfinite(position_angle) else None
 
 
 def _judge_star(peak: float, sky_noise: float, moffat: ProfileFit) -> tuple[bool, str | None]:
@@ -914,6 +960,10 @@ def measure_star_profile_in_file(
         int(surroundings["circle_neighbor_count"]),
     )
 
+    # The core-shape fit gives its angle from +x toward +y, as the frame
+    # metric does; the result gives every angle from +y toward +x, as the cut.
+    profile_angle = None if elongation_angle is None else float((90.0 - elongation_angle) % 180.0)
+
     return StarProfileMeasurement(
         path=path,
         color_note=color_note,
@@ -961,9 +1011,12 @@ def measure_star_profile_in_file(
         ring_masked_neighbor_count=len(ring.neighbors),
         ring_masked_fraction=ring.masked_fraction,
         ring_note=ring.note,
-        signal_to_noise=float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
+        peak_over_sky_noise=float(peak / float(sky_noise)) if float(sky_noise) > 0 else 0.0,
         star_elongation=elongation,
-        star_elongation_angle_deg=elongation_angle,
+        star_elongation_angle_deg=profile_angle,
+        star_elongation_position_angle_deg=_position_angle_east_of_north(
+            image.header, center_column, center_row, profile_angle
+        ),
         star_shape_judgeable=shape_judgeable,
         star_shape_note=shape_note,
         star_shape_detail=shape_detail,

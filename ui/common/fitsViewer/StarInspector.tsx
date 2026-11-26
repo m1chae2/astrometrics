@@ -3,7 +3,7 @@
  * @description The top of the FITS viewer's star card. The header gives the star's name and a close button.
  * Under it, one muted line gives the sky position, the catalog magnitude, the same type and pattern chips the
  * Astronomy Manager shows, and a button that opens the star there. A stat strip then gives the key numbers
- * (width, signal-to-noise, roundness). "Measurable here?" is a tight list with a small status icon, the check
+ * (width, peak over the sky noise, roundness). "Measurable here?" is a tight list with a small status icon, the check
  * and the value behind it, so the person can tell at a glance whether this star can be trusted on this frame.
  */
 import React from 'react';
@@ -80,7 +80,7 @@ export const StarInspector: React.FC<StarInspectorProps> = ({
   const rows = buildMeasurableRows(measurement, frameWidthPx);
   const { title, position } = splitStarName(starName);
   const roundness = describeRoundness(measurement);
-  const signalToNoise = measurement.signal_to_noise;
+  const peakOverSkyNoise = measurement.peak_over_sky_noise;
   const hasMeta = position !== null || magnitude !== null || identity !== null || onOpenInManager !== undefined;
   return (
     <>
@@ -109,8 +109,8 @@ export const StarInspector: React.FC<StarInspectorProps> = ({
           className={`star-profile__width${measurement.star_found ? '' : ' star-profile__width--plain'}`}
           data-testid="star-profile-width"
         >{widthText}</span>
-        {measurement.star_found && signalToNoise !== undefined && signalToNoise !== null && (
-          <span className="star-profile__stat" title="Peak brightness divided by the sky noise">{`S/N ${signalToNoise.toFixed(0)}`}</span>
+        {measurement.star_found && peakOverSkyNoise !== undefined && peakOverSkyNoise !== null && (
+          <span className="star-profile__stat" title="Peak brightness divided by the sky noise">{`peak/noise ${peakOverSkyNoise.toFixed(0)}`}</span>
         )}
         {roundness && <span className="star-profile__stat" title="Elongation of the star core: its long width divided by its short width, 1 for a circle">{roundness}</span>}
       </div>

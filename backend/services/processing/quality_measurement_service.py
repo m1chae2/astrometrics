@@ -158,7 +158,7 @@ class QualityMeasurementService:
             level=level,
             target_id=target_id,
             observing_night_id=observing_night_id,
-            camera=camera,
+            camera_id=camera,
             telescope=telescope,
             since=since,
             row_ids=row_ids,

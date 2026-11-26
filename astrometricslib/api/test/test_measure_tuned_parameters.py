@@ -1,7 +1,8 @@
 """Tests for `QualityRecords.measure_tuned_parameters` (#175).
 
-The call runs this library's tuners for one setup, gives them the owning
-`Astrometrics`, and saves nothing unless asked.
+The call is a thin wrapper of the one tuning core,
+`astrometricslib.parameters.tune`. These tests run through that core with
+stand-in tuners, so they also cover its tuner and setup checks.
 """
 
 from types import SimpleNamespace
@@ -73,7 +74,9 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """
     seen: list[dict[str, Any]] = []
     tuners = [SimpleNamespace(name="a.first"), SimpleNamespace(name="a.second")]
-    monkeypatch.setattr(tuning, "collect_tuners", lambda packages: tuners)
+    monkeypatch.setattr(
+        tuning, "collect_tuners", lambda packages: tuners if tuple(packages) == ("astrometricslib",) else []
+    )
 
     def fake_run(tuners: list, setup: Any, configuration: Any, **keywords: Any) -> str:
         """Record what the run was given.
@@ -124,3 +127,10 @@ def test_a_missing_setup_is_not_found(calls: list[dict[str, Any]]) -> None:
 def test_the_module_imports_the_report_model() -> None:
     """The return type is the public tuning report."""
     assert quality.TuningReport is tuning.TuningReport
+
+
+def test_the_core_is_the_public_tune() -> None:
+    """`astrometricslib.parameters.tune` is the core the wrappers share."""
+    import astrometricslib.parameters as parameters
+
+    assert parameters.tune is tuning.tune

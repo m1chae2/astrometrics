@@ -57,6 +57,7 @@ __all__ = [
     "PhotometryResult",
     "PlotData",
     "SpectralExtractionDiagnostics",
+    "StackChoice",
     "StackConfigurationRef",
     "StellarObject",
     "StellarSessionMatch",
@@ -1596,6 +1597,24 @@ class StackConfigurationRef(BaseModel):
     focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
 
 
+class StackChoice(BaseModel):
+    """One stack of a target, made from the frames of one camera and optic.
+
+    A target imaged with two setups has one stack for each. The file list
+    names every one whose file is on disk, so a viewer can open any of them
+    without changing which stack is the target's main one.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    configuration_key: str = Field(alias="configurationKey")
+    camera: str = Field(default="", alias="camera")
+    focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
+    frames_stacked: int = Field(default=0, alias="framesStacked")
+    stacked_image: str = Field(alias="stackedImage")
+    is_main: bool = Field(default=False, alias="isMain")
+
+
 class TargetFilesResponse(BaseModel):
     """All the files and summary statistics that belong to a single target."""
 
@@ -1607,3 +1626,5 @@ class TargetFilesResponse(BaseModel):
     total_exposure: float = Field(default=0.0, alias="totalExposure", ge=0.0)
     exposure_counts: dict[str, int] = Field(default_factory=dict, alias="exposureCounts")
     stack_configuration: StackConfigurationRef | None = Field(default=None, alias="stackConfiguration")
+    # Every stack of the target by camera and optic, the main one first.
+    stacks: list[StackChoice] = Field(default_factory=list, alias="stacks")

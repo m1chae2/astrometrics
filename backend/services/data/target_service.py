@@ -353,13 +353,20 @@ class TargetService:
         -------
         result : `dict`
             Dictionary with ``files``, ``stackedImage``,
-            ``stackedSpectralTarget``, ``totalExposure`` and
+            ``stackedSpectralTarget``, ``totalExposure``,
             ``stackConfiguration`` (the camera and optic of the target's
-            current stack, or `None`) keys.
+            current stack, or `None`) and ``stacks`` (every stack by camera
+            and optic whose file is on disk, the main one first) keys.
         """
         target = self.get_targets(target_id)
         if not target:
-            return {"files": [], "stackedImage": None, "stackedSpectralTarget": None, "totalExposure": 0}
+            return {
+                "files": [],
+                "stackedImage": None,
+                "stackedSpectralTarget": None,
+                "totalExposure": 0,
+                "stacks": [],
+            }
 
         files = []
         for frame in target.frames:
@@ -381,7 +388,46 @@ class TargetService:
             "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
             "totalExposure": target.exposure_sec,
             "stackConfiguration": self._current_stack_configuration(target),
+            "stacks": self._stack_choices(target),
         }
+
+    def _stack_choices(self, target: Any) -> list[dict]:
+        """List every stack of a target by camera and optic.
+
+        Only stacks whose file is on disk are listed, so opening one never
+        asks for a missing file. The main stack is the one the target record
+        names as its stack; it comes first, then the others by name.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+
+        Returns
+        -------
+        choices : `list` [`dict`]
+            One entry per stack with ``configurationKey``, ``camera``,
+            ``focalLengthMm`` (whole millimeters or `None`),
+            ``framesStacked``, ``stackedImage`` (a path that exists) and
+            ``isMain``.
+        """
+        main_path = self._existing_stack_path(target.stacking.stacked_image)
+        choices = []
+        for key, configuration in target.stacking.stacks_by_configuration.items():
+            path = self._existing_stack_path(configuration.stacked_image)
+            if not path:
+                continue
+            focal_length = configuration.focal_length_mm
+            choices.append({
+                "configurationKey": configuration.configuration_key or key,
+                "camera": configuration.camera,
+                "focalLengthMm": None if focal_length is None else round(float(focal_length)),
+                "framesStacked": int(configuration.frames_stacked),
+                "stackedImage": path,
+                "isMain": main_path is not None and os.path.abspath(path) == os.path.abspath(main_path),
+            })
+        choices.sort(key=lambda choice: (not choice["isMain"], choice["configurationKey"]))
+        return choices
 
     @staticmethod
     def _current_stack_configuration(target: Any) -> dict | None:

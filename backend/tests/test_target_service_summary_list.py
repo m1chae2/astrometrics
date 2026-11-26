@@ -154,3 +154,52 @@ def test_file_list_names_the_preferred_stack_configuration() -> None:
     result = _service_with(target).get_file_list("M 31")
 
     assert result["stackConfiguration"] == {"camera": "ZWO ASI 533MM Pro", "focalLengthMm": 405}
+
+
+def test_file_list_lists_each_stack_on_disk_with_the_main_one_first(tmp_path: Path) -> None:
+    """Each stack on disk is listed, the main stack first."""
+    main_stack = tmp_path / "M27_asi.fits"
+    nikon_stack = tmp_path / "M27_nikon300.fits"
+    main_stack.write_text("x")
+    nikon_stack.write_text("x")
+    target = _target("M 27")
+    target.stacking = target.stacking.model_validate({
+        "stackedImage": str(main_stack),
+        "stacksByConfiguration": {
+            "Nikon@300mm": {
+                "configurationKey": "Nikon@300mm",
+                "camera": "Nikon D5300",
+                "focalLengthMm": 300.0,
+                "framesStacked": 40,
+                "stackedImage": str(nikon_stack),
+            },
+            "Nikon@405mm": {
+                "configurationKey": "Nikon@405mm",
+                "camera": "Nikon D5300",
+                "focalLengthMm": 405.0,
+                "stackedImage": str(tmp_path / "missing.fits"),
+            },
+            "ZWO@405mm": {
+                "configurationKey": "ZWO@405mm",
+                "camera": "ZWO ASI 533MM Pro",
+                "focalLengthMm": 405.2,
+                "framesStacked": 90,
+                "stackedImage": str(main_stack),
+                "isPreferred": True,
+            },
+        },
+    })
+
+    stacks = _service_with(target).get_file_list("M 27")["stacks"]
+
+    assert [stack["configurationKey"] for stack in stacks] == ["ZWO@405mm", "Nikon@300mm"]
+    assert stacks[0] == {
+        "configurationKey": "ZWO@405mm",
+        "camera": "ZWO ASI 533MM Pro",
+        "focalLengthMm": 405,
+        "framesStacked": 90,
+        "stackedImage": str(main_stack),
+        "isMain": True,
+    }
+    assert stacks[1]["isMain"] is False
+    assert stacks[1]["stackedImage"] == str(nikon_stack)

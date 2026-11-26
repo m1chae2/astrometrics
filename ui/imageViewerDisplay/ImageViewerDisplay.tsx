@@ -21,6 +21,9 @@ import { CitedFramesPanel } from './citedFrames/CitedFramesPanel';
 import { useOpenedFrame } from './citedFrames/useOpenedFrame';
 import './imageViewerDisplay.css';
 
+/** The picture shown first for a target that has a color picture: the color one. */
+const DEFAULT_PICTURE_CHOICE: PictureChoice = 'color';
+
 /**
  * Main component for the target display view.
  * Coordinates target selection, viewing, and detail management.
@@ -70,9 +73,10 @@ export const ImageViewerDisplay: React.FC = () => {
   useNeighborPrefetch(items.map((item) => ({ id: item.id, hasImage: Boolean(item.isProcessed) })), activeTarget, !loading && !error);
   // A frame opened from the Evidence list is shown in place of the target's image.
   const { openedFrame, openFrame, closeFrame } = useOpenedFrame();
-  // Black and white or color, for targets that have a color picture. Kept while the app runs;
-  // black and white first, so the viewer looks as it did before color pictures existed.
-  const [pictureChoice, setPictureChoice] = useState<PictureChoice>('mono');
+  // Black and white or color, for targets that have a color picture. Color comes first: it is the
+  // picture made from the stacks of both cameras. Black and white is one click away on the switch,
+  // and the choice is kept while the app runs. A target with no color picture shows black and white.
+  const [pictureChoice, setPictureChoice] = useState<PictureChoice>(DEFAULT_PICTURE_CHOICE);
   const colorPreview = useColorPreview(activeTarget, pictureChoice === 'color');
   const colorAvailable = Boolean(colorPreview.colorPreviewPath) && !openedFrame;
   const showColor = colorAvailable && pictureChoice === 'color';

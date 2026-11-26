@@ -33,6 +33,7 @@ import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
 import type { DisplayMode } from '../common/fitsViewer/displayMode';
 import { useLibraryStars } from './hooks/useLibraryStars';
 import { useStackIdentification } from './hooks/useStackIdentification';
+import { isStackChoicePath } from './utils/stackChoices';
 
 /**
  * Main component for the image processing view.
@@ -107,6 +108,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
     stackedImage, stackedSpectralTarget, stackConfiguration,
+    stackChoices, viewedStack, viewedStackKey, setChosenStackKey,
     starShapeReview, frameStatuses, frameReport, setAsideFiles, putBackFrame
   } = files;
 
@@ -246,7 +248,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // On the imaging stack, the Astrometry button shows the stack's own star names: every detection,
   // named from Gaia and SIMBAD, and the catalog stars it missed (made by a job on first use). On a
   // raw frame it shows the target's catalog stars, placed only when the frame has a real solution.
-  const isStackShown = Boolean(selectedFile && stackedImage && selectedFile === stackedImage);
+  // Any stack by camera and optic counts: its star names are kept by its own path.
+  const isStackShown = Boolean(
+    selectedFile && ((stackedImage && selectedFile === stackedImage) || isStackChoicePath(stackChoices, selectedFile))
+  );
   const stackIdentification = useStackIdentification(
     selectedTarget, isStackShown ? selectedFile : null, showAstrometryOverlay && isStackShown
   );
@@ -495,6 +500,14 @@ const ImageProcessingDisplayInner: React.FC = () => {
     setSelectedFile(path);
   }, [setSelectedFile]);
 
+  // Show the stack of another camera or lens (or the main one again). The main stack does not change.
+  const handleChooseStack = React.useCallback((configurationKey: string) => {
+    const choice = stackChoices.find((item) => item.configurationKey === configurationKey);
+    if (!choice) return;
+    setChosenStackKey(choice.isMain ? null : choice.configurationKey);
+    pickFile(choice.stackedImage);
+  }, [stackChoices, setChosenStackKey, pickFile]);
+
   // --- Action Handlers ---
 
   // Wrapper for file selection to ensure both UI highlight and Viewer state update
@@ -530,7 +543,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
         setAsideFiles.some(f => f.path === selectedFile) ||
         allFiles.some(f => f.path === selectedFile) ||
         selectedFile === stackedImage ||
-        selectedFile === stackedSpectralTarget)
+        selectedFile === stackedSpectralTarget ||
+        isStackChoicePath(stackChoices, selectedFile))
     ) {
       return;
     }
@@ -540,7 +554,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (bestFile) {
       setSelectedFile(bestFile.path);
     }
-  }, [isLoadingFiles, filteredFiles, selectedFile, setSelectedFile, preferredStack, stackedImage, stackedSpectralTarget, setAsideFiles, allFiles]);
+  }, [isLoadingFiles, filteredFiles, selectedFile, setSelectedFile, preferredStack, stackedImage, stackedSpectralTarget, setAsideFiles, allFiles, stackChoices]);
 
 
 
@@ -550,14 +564,18 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (!pendingRestore || isLoadingFiles) return;
     if (pendingRestore.target && selectedTarget !== pendingRestore.target) return;
     const saved = pendingRestore;
+    const savedChoice = stackChoices.find((choice) => choice.stackedImage === saved.file);
     const fileKnown = saved.file !== null && (
-      saved.file === stackedImage || saved.file === stackedSpectralTarget || allFiles.some((file) => file.path === saved.file)
+      saved.file === stackedImage || saved.file === stackedSpectralTarget || Boolean(savedChoice)
+      || allFiles.some((file) => file.path === saved.file)
     );
     if (saved.file && fileKnown) {
       // The saved file is the person's own choice and is not replaced by the default.
       pickedByUserRef.current = true;
       stackShownRef.current = true;
       setSelectedFile(saved.file);
+      // A saved stack of another camera or lens is shown in the stack picker too.
+      if (savedChoice) setChosenStackKey(savedChoice.isMain ? null : savedChoice.configurationKey);
     }
     if (saved.displayMode === 'linear' || saved.displayMode === 'auto-stretch') setDisplayMode(saved.displayMode as DisplayMode);
     setShowAstrometryOverlay(saved.astrometry);
@@ -568,7 +586,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       setRestoreView({ key: `restore-${restoreCountRef.current}`, view: saved.view });
     }
     setPendingRestore(null);
-  }, [pendingRestore, isLoadingFiles, selectedTarget, allFiles, stackedImage, stackedSpectralTarget, setSelectedFile, setDisplayMode]);
+  }, [pendingRestore, isLoadingFiles, selectedTarget, allFiles, stackedImage, stackedSpectralTarget, stackChoices, setSelectedFile, setChosenStackKey, setDisplayMode]);
 
   const handleAddImages = async (): Promise<void> => {
     if (!selectedTarget) return;
@@ -697,6 +715,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
       stackedImage={stackedImage}
       stackedSpectralTarget={stackedSpectralTarget}
       stackConfiguration={stackConfiguration}
+      stackChoices={stackChoices}
+      viewedStack={viewedStack}
+      viewedStackKey={viewedStackKey}
+      onChooseStack={handleChooseStack}
       fileBrowserCamera={fileBrowserCamera}
       fileBrowserOptic={selectedOptic}
       handleSelectFile={pickFile}

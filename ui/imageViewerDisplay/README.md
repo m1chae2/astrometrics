@@ -180,9 +180,12 @@ name with `target:get`. Only when the name is set does the viewer header show a
 "Black and white" / "Color" switch (`Tabs`). The app never asks for the file
 without the name, so a target without a color picture makes no failed request.
 The picture is read from the backend's `/static` folders, like the stack preview,
-and only once the user picks Color. It is kept in `targetImageCache` by path, so a
-pause does not free it. The choice is kept while the app runs and starts on
-"Black and white". A frame opened from the Evidence list hides the switch.
+and only while Color is picked. It is kept in `targetImageCache` by path, so a
+pause does not free it. The switch starts on "Color", so a target with a color
+picture opens in color; "Black and white" is one click away. The choice is kept
+while the app runs. A target without a color picture shows the black-and-white
+picture whatever the choice is. A frame opened from the Evidence list hides the
+switch.
 
 `hooks/useNeighborPrefetch.ts` prepares the two targets directly above and below
 the selected one in the list (as filtered and sorted). It starts only when the

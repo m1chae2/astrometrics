@@ -15,7 +15,7 @@ import { StarShapesSummary } from './StarShapesSummary';
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
 import { chooseCalibrationScope } from '../utils/calibrationLine';
-import { FrameStatusReport, GroupedFrameStat, StackConfigurationRef, StarShapeReview } from '../../common/types/backendTypes';
+import { FrameStatusReport, GroupedFrameStat, StackChoice, StackConfigurationRef, StarShapeReview } from '../../common/types/backendTypes';
 import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
 import { chooseAnalysisSelection, chooseStageSelection, NO_SOURCE_TO_ANALYZE_REASON, type AnalysisStage } from '../utils/analysisSelection';
@@ -34,6 +34,14 @@ interface FrameAnalysisPanelProps {
   fileBrowserCamera?: string;
   /** The File Browser's optic in whole millimeters as text, or "". */
   fileBrowserOptic?: string;
+  /** Every stack of the target by camera and optic, the main one first. */
+  stackChoices?: readonly StackChoice[];
+  /** The stack being looked at: the chosen one, or the main stack. Analysis still uses `stackedImage`. */
+  viewedStack?: string | null;
+  /** The configuration key of `viewedStack`, or null when it is not known. */
+  viewedStackKey?: string | null;
+  /** Called with the configuration key of the stack the person picked. */
+  onChooseStack?: (configurationKey: string) => void;
 
   // Control Props
   handleAddImages: () => void;
@@ -61,6 +69,7 @@ interface FrameAnalysisPanelProps {
 export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget,
   handleSelectFile, stackConfiguration = null, fileBrowserCamera = 'All', fileBrowserOptic = '',
+  stackChoices = [], viewedStack, viewedStackKey = null, onChooseStack,
   handleAddImages, setIsAddModalOpen,
   selectedFile, onShowHeader, starShapeReview = null, frameReport = null, frameStatuses,
   analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
@@ -243,13 +252,16 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
               content: (
                 <>
                   <StackedImagePanel
-                    path={stackedImage || ''}
+                    path={(viewedStack ?? stackedImage) || ''}
                     spectralPath={stackedSpectralTarget || ''}
                     targetId={selectedTarget}
                     selectedFile={selectedFile}
                     onView={handleSelectFile}
                     onShowHeader={onShowHeader}
                     depthGoalRefreshKey={`${reloadKey}-${isProcessing ? 'busy' : 'idle'}`}
+                    stackChoices={stackChoices}
+                    viewedStackKey={viewedStackKey}
+                    onChooseStack={onChooseStack}
                   />
                   <AnalysisResults results={analysisResults} />
                   <StarShapesSummary

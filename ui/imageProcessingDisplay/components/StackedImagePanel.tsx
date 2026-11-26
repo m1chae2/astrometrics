@@ -1,7 +1,8 @@
 /**
  * @file StackedImagePanel.tsx
  * @description Component displaying final and spectral stacked output files for a target,
- * with options to view FITS headers and preview stacks in the viewer.
+ * with options to view FITS headers and preview stacks in the viewer. A target with stacks from
+ * more than one camera or lens gets a picker to look at any of them; the main stack stays main.
  */
 import React, { useEffect, useState } from 'react';
 import { fetchTargetFrameHeader } from '../../common/services/targetService';
@@ -9,6 +10,9 @@ import { DepthGoalRow } from './DepthGoalRow';
 import { StackSummaryPanel } from './StackSummaryPanel';
 import { BrightObjectRow } from './BrightObjectRow';
 import { Button } from '../../common/components/Button';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
+import type { StackChoice } from '../../common/types/backendTypes';
+import { stackChoiceOptions } from '../utils/stackChoices';
 import {
     formatPlateScale, formatRotation, headerEntriesToCards, measurePlateGeometry,
 } from '../../common/fitsViewer/plateGeometry';
@@ -23,7 +27,16 @@ interface StackedImagePanelProps {
     onShowHeader?: (path: string) => void;
     /** Changes when a stack finishes, so the depth goal row reads again. */
     depthGoalRefreshKey?: string | number;
+    /** Every stack of the target by camera and optic, the main one first. The picker shows when there are two or more. */
+    stackChoices?: readonly StackChoice[];
+    /** The configuration key of the stack in `path`, or null when it is not known. */
+    viewedStackKey?: string | null;
+    /** Called with the configuration key the person picked. */
+    onChooseStack?: (configurationKey: string) => void;
 }
+
+/** The note shown while a stack other than the main one is being looked at. */
+export const OTHER_STACK_NOTE = 'You are looking at another stack. Analyze Target, Post Process Target and the stack summary still use the main stack.';
 
 /** What one stack's own FITS header tells: its exposure time and its plate solution. */
 interface StackHeaderInfo {
@@ -87,7 +100,10 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
     selectedFile,
     onView,
     onShowHeader,
-    depthGoalRefreshKey
+    depthGoalRefreshKey,
+    stackChoices = [],
+    viewedStackKey = null,
+    onChooseStack,
 }) => {
     const finalHeader = useStackHeaderInfo(path, targetId);
     const spectralHeader = useStackHeaderInfo(spectralPath, targetId);
@@ -194,15 +210,38 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
         );
     };
 
+    // The picker is shown only when there is more than one stack to choose from.
+    const showPicker = stackChoices.length > 1 && Boolean(onChooseStack);
+    const viewedChoice = stackChoices.find((choice) => choice.configurationKey === viewedStackKey);
+    // The summary and the Enhance row belong to the main stack, so they show only while it is shown.
+    const isMainShown = !viewedChoice || Boolean(viewedChoice.isMain);
+
     // One tree for every case. The slots keep their positions, so the depth
     // goal row is not unmounted and mounted again when a stack path arrives.
     return (
         <div className="stacked-image-panel-container">
+            {showPicker ? (
+                <div className="stacked-image-panel__row" data-testid="stack-choice-row">
+                    <div className="stacked-image-panel__info">
+                        <span className="stacked-image-panel__label">Camera and lens:</span>
+                        <PopoverSelect
+                            label="Stack to show"
+                            options={stackChoiceOptions(stackChoices)}
+                            selectedId={viewedStackKey}
+                            onSelect={(id) => { if (id && onChooseStack) onChooseStack(id); }}
+                            size="compact"
+                        />
+                    </div>
+                </div>
+            ) : null}
             {renderItem(path, "Final Stack")}
             {path ? renderExposure(finalHeader.exposure, 'final-exposure') : null}
             {path ? renderPlateRows(finalHeader.geometry, 'final') : null}
-            {path ? <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} /> : null}
-            {path ? <BrightObjectRow targetId={targetId} stackPath={path} /> : null}
+            {path && !isMainShown ? (
+                <div className="stacked-image-panel__total" data-testid="other-stack-note">{OTHER_STACK_NOTE}</div>
+            ) : null}
+            {path && isMainShown ? <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} /> : null}
+            {path && isMainShown ? <BrightObjectRow targetId={targetId} stackPath={path} /> : null}
             {renderItem(spectralPath || "", "Spectral Stack")}
             {spectralPath ? renderExposure(spectralHeader.exposure, 'spectral-exposure') : null}
             {spectralPath ? renderPlateRows(spectralHeader.geometry, 'spectral') : null}

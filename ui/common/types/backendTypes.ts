@@ -175,6 +175,22 @@ export interface StackConfigurationRef {
 }
 
 /**
+ * One stack of a target, made from the frames of one camera and optic.
+ *
+ * A target imaged with two setups has one stack for each. The file list
+ * names every one whose file is on disk, so a viewer can open any of them
+ * without changing which stack is the target's main one.
+ */
+export interface StackChoice {
+  configurationKey: string;
+  camera?: string;
+  focalLengthMm?: number | null;
+  framesStacked?: number;
+  stackedImage: string;
+  isMain?: boolean;
+}
+
+/**
  * The final stacked image for a specific telescope/camera setup.
  *
  * If a target was shot with two different telescopes, it will produce
@@ -313,6 +329,7 @@ export interface TargetFilesResponse {
   totalExposure?: number;
   exposureCounts?: Record<string, number>;
   stackConfiguration?: StackConfigurationRef | null;
+  stacks?: StackChoice[];
 }
 
 /**

@@ -8,7 +8,7 @@ import { FileItem } from '../fileBrowser/FileBrowser';
 import { putBackFrames } from '../../common/services/imaging/frameReviewService';
 import { useStarShapeReview } from './useStarShapeReview';
 import { useFrameStatuses } from './useFrameStatuses';
-import type { StackConfigurationRef } from '../../common/types/backendTypes';
+import type { StackChoice, StackConfigurationRef } from '../../common/types/backendTypes';
 import { buildOpticOptions, chooseDefaultOptic, filterFilesByCamera, filterFilesByOptic } from '../utils/opticSelection';
 
 /**
@@ -47,6 +47,10 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const [stackedSpectralTarget, setStackedSpectralTarget] = useState<string | null>(null);
     const [stackConfiguration, setStackConfiguration] = useState<StackConfigurationRef | null>(null);
     const [totalExposure, setTotalExposure] = useState<number>(0);
+    // Every stack of the target by camera and optic, the main one first (empty when it has none).
+    const [stackChoices, setStackChoices] = useState<StackChoice[]>([]);
+    // The stack the person chose to look at. null means the main stack. The main stack never changes.
+    const [chosenStackKey, setChosenStackKey] = useState<string | null>(null);
 
     // The optic the user picked: null means "not picked yet, use the default",
     // and '' means the user chose "All optics".
@@ -84,6 +88,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             setStackedImage(res.stackedImage ?? null);
             setStackedSpectralTarget(res.stackedSpectralTarget ?? null);
             setStackConfiguration(res.stackConfiguration ?? null);
+            setStackChoices(res.stacks ?? []);
             setTotalExposure(res.totalExposure ?? 0);
         }).catch(err => {
             console.error("Failed to load target files", err);
@@ -91,6 +96,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             setStackedImage(null);
             setStackedSpectralTarget(null);
             setStackConfiguration(null);
+            setStackChoices([]);
             setTotalExposure(0);
             setExposureCounts({});
         }).finally(() => {
@@ -110,6 +116,8 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         setStackedImage(null);
         setStackedSpectralTarget(null);
         setStackConfiguration(null);
+        setStackChoices([]);
+        setChosenStackKey(null);
         setSelectedFile(null);
         setAllFiles([]);
         setExposureCounts({});
@@ -139,6 +147,17 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         if (!fileFilterText) return opticFiles;
         return opticFiles.filter(f => matchesQuery({ ...f, status: frameReview.statuses.get(f.path)?.filterText }, fileFilterText));
     }, [allFiles, fileFilterText, selectedCamera, selectedOptic, frameReview.statuses]);
+
+    // The stack being looked at: the chosen one, or the main stack. A choice that is no longer
+    // listed (the stack was remade or removed) falls back to the main stack.
+    const chosenStack = useMemo(
+        () => (chosenStackKey ? stackChoices.find(choice => choice.configurationKey === chosenStackKey) ?? null : null),
+        [chosenStackKey, stackChoices],
+    );
+    const viewedStack = chosenStack?.stackedImage ?? stackedImage;
+    const viewedStackKey = chosenStack?.configurationKey
+        ?? stackChoices.find(choice => choice.isMain)?.configurationKey
+        ?? null;
 
     // The frames the stacker moved into `_excluded`. They are not part of the target's frames, so
     // they stay out of every stack and delete; the File Browser shows them so none disappears.
@@ -253,6 +272,10 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         stackedImage,
         stackedSpectralTarget,
         stackConfiguration,
+        stackChoices,
+        viewedStack,
+        viewedStackKey,
+        setChosenStackKey,
         totalExposure,
         starShapeReview,
         frameStatuses: frameReview.statuses,

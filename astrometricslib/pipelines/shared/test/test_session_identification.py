@@ -600,6 +600,27 @@ def test_the_chance_share_follows_the_catalog_density() -> None:
     assert match_concentration_limit(0.25, 100_000) == pytest.approx(MIN_MATCH_CONCENTRATION.default)
 
 
+def test_the_dense_field_limits_stay_decidable_with_a_few_hundred_stars() -> None:
+    """The ceiling leaves the check working where it matters most.
+
+    With about 200 stars in the ZWO search circle and 300 in the Nikon's,
+    the dense-field limits (about 0.42 and 0.48) stay below
+    `MAX_DECIDABLE_CONCENTRATION_LIMIT`, so a wrong solution there is still
+    judged.
+    """
+    from astrometricslib.pipelines.shared.session_identification import (
+        MAX_DECIDABLE_CONCENTRATION_LIMIT,
+        chance_concentration,
+        match_concentration_limit,
+    )
+
+    ceiling = MAX_DECIDABLE_CONCENTRATION_LIMIT.default
+    zwo = match_concentration_limit(chance_concentration(10.0, 20.0, _DENSE_FIELD_PER_SQUARE_DEGREE), 200)
+    nikon = match_concentration_limit(chance_concentration(14.0, 28.0, _DENSE_FIELD_PER_SQUARE_DEGREE), 300)
+    assert zwo < ceiling
+    assert nikon < ceiling
+
+
 @pytest.mark.parametrize("plate_scale", [_ASI533_PLATE_SCALE, _D5300_300MM_PLATE_SCALE])
 class TestPlateSolutionProblem:
     """Verify the concentration test tells right from wrong, both scales."""
@@ -663,6 +684,36 @@ class TestPlateSolutionProblem:
         problem, match_radius, _search_radius = _judge(plate_scale, build)
         assert 5.5 < float(np.median(true_matches)) < 7.5
         assert max(true_matches) <= match_radius
+        assert problem is None
+
+    def test_a_small_dense_field_session_is_not_judged(self, plate_scale: float) -> None:
+        """A right solution with too few stars to decide is skipped.
+
+        Ten true matches among fifty detections in a dense field leave too
+        few stars in the search circle: the limit would climb above
+        `MAX_DECIDABLE_CONCENTRATION_LIMIT`, which a right solution may not
+        reach, so the concentration test says nothing and the match-share
+        test alone judges the run.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+
+        def build(match_radius: float, _search_radius: float) -> list[float]:
+            """Give 10 true matches and 40 chance neighbors.
+
+            Returns
+            -------
+            distances : `list` [`float`]
+                The nearest catalog distances.
+            """
+            generator = np.random.default_rng(11)
+            true_matches = np.minimum(generator.rayleigh(1.5, 10), match_radius).tolist()
+            return true_matches + _chance_neighbor_distances(40, _DENSE_FIELD_PER_SQUARE_ARCSEC, generator)
+
+        problem, _match_radius, _search_radius = _judge(plate_scale, build)
         assert problem is None
 
     @pytest.mark.parametrize("seed", range(10))
@@ -757,7 +808,8 @@ class TestPlateSolutionProblem:
 
         problem, _match_radius, _search_radius = _judge(plate_scale, build_for(in_circle))
         assert problem is None
-        problem, _match_radius, _search_radius = _judge(plate_scale, build_for(in_circle + 1))
+        # With plenty of stars the same spread is judged, and fails.
+        problem, _match_radius, _search_radius = _judge(plate_scale, build_for(100))
         assert problem is not None
 
 
@@ -875,14 +927,16 @@ def test_the_result_carries_the_density_of_the_identification_it_keeps(
     """
     identifier = _make_star_identifier()
     image = _make_fake_image(wcs=_make_celestial_wcs())
-    sources = [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(40)]
+    sources = [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(80)]
     identifier.detector.detect = MagicMock(return_value=sources)
     identifier.detector.deduplicate = MagicMock(return_value=sources)
     identifier.solver.solve = MagicMock(return_value=MagicMock())
     monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=_make_celestial_wcs()))
     monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", MagicMock())
-    scattered = [20.0 * np.sqrt((index + 0.5) / 40) for index in range(40)]
-    close = [1.0] * 30 + [50.0] * 10
+    # Enough stars that the dense-field check can decide (see
+    # MAX_DECIDABLE_CONCENTRATION_LIMIT).
+    scattered = [20.0 * np.sqrt((index + 0.5) / 80) for index in range(80)]
+    close = [1.0] * 60 + [50.0] * 20
 
     def with_density(distances: list[float], density: float) -> Callable[..., Any]:
         """Wrap a distance stand-in so it also records a catalog density.

@@ -207,6 +207,7 @@ shared.gaia_colour_magnitude_range,STK-D86,measurement,Design estimate
 shared.low_star_fraction,STK-34,exclusion criteria,Partly measured
 shared.match_concentration_sigmas,AST-D19,judgment,Design estimate
 shared.match_radius_arcsec,AST-12,exclusion criteria,Partly measured
+shared.max_decidable_concentration_limit,AST-D19,judgment,Design estimate
 shared.maximum_stars_measured,STK-D38,exclusion criteria,Design estimate
 shared.min_catalog_match_fraction_for_reused_wcs,AST-D19,judgment,Design estimate
 shared.min_match_concentration,AST-D19,judgment,Design estimate

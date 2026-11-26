@@ -215,6 +215,24 @@ MATCH_CONCENTRATION_SIGMAS = TunedParameter(
     register_entry="AST-D19",
 )
 
+# Highest concentration limit the check may demand. With few stars in the
+# search circle the limit (`match_concentration_limit`) climbs, and a right
+# solution in a dense field, whose faint detections take chance neighbors,
+# may not reach it: with 20% true matches its share is about 0.5. Above this
+# value the test cannot tell a right solution from a wrong one, so it is
+# skipped instead of failing, and only the match-share test judges the run.
+# Design estimate until shifted real solutions are checked (AST-D19).
+MAX_DECIDABLE_CONCENTRATION_LIMIT = TunedParameter(
+    name="shared.max_decidable_concentration_limit",
+    default=0.5,
+    unit="fraction",
+    description="Highest concentration limit the plate solution check demands; above it the test is skipped.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-D19",
+)
+
 # The least share the concentration test asks for, whatever the field. With
 # many stars the chance share plus three standard errors nears the chance
 # share itself (0.25 in a sparse field, 0.32 at 10 arcsec and 0.40 at
@@ -337,7 +355,9 @@ def plate_solution_problem(
         A sentence saying what is wrong, or `None` when the solution looks
         right or there are fewer than `MIN_STARS_TO_VERIFY_REUSED_WCS`
         stars to judge by. The concentration test alone is skipped when
-        fewer than that many stars have a neighbor in the search circle.
+        fewer than that many stars have a neighbor in the search circle, or
+        when its limit would exceed `MAX_DECIDABLE_CONCENTRATION_LIMIT`
+        (too few stars to tell a right solution from chance).
     """
     stars = [star for star in stellar_objects if star.right_ascension is not None]
     minimum_stars = resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value
@@ -358,6 +378,15 @@ def plate_solution_problem(
     )
     chance_share = chance_concentration(match_radius, search_radius, catalog_density_per_square_degree)
     limit = match_concentration_limit(chance_share, len(in_search_circle))
+    if limit > float(resolve(MAX_DECIDABLE_CONCENTRATION_LIMIT).value):
+        logger.info(
+            "Plate solution concentration not judged: %d stars in the search circle are too few "
+            "(limit %.0f%%, chance %.0f%%)",
+            len(in_search_circle),
+            100 * limit,
+            100 * chance_share,
+        )
+        return None
     if concentration < limit:
         return (
             f"only {concentration:.0%} of the {len(in_search_circle)} stars with a catalog entry within "

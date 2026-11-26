@@ -49,10 +49,12 @@ from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack i
 )
 from astrometricslib.pipelines.stacking.post_processing.masked_stretch import anchor_for_target
 from astrometricslib.pipelines.stacking.post_processing.preview_notices import record_preview_step_notices
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import (
     PreviewSettings,
-    SkippedPreviewStep,
     read_preview_settings,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     record_preview_as_processed_image,
     write_stack_preview,
 )

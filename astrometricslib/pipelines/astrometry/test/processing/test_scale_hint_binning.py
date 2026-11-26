@@ -16,7 +16,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing import plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 # arcsec per pixel of an unbinned frame: 206.265 * 3.76 / 405
@@ -118,7 +118,7 @@ def test_different_x_and_y_pixel_sizes_use_the_mean_and_raise_a_flag() -> None:
     lower, _ = identifier._calculate_scale_hints(make_image(XPIXSZ=7.52, YPIXSZ=3.76))
 
     assert lower == pytest.approx(1.5 * UNBINNED_SCALE * 0.95)
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_SCALE_HINT_BINNING_MISMATCH]
+    assert identifier.astrometry_flags == [plate_solution_steps.FLAG_SCALE_HINT_BINNING_MISMATCH]
 
 
 def test_different_x_and_y_binning_with_pixsize1_uses_the_mean_and_raises_a_flag() -> None:
@@ -130,7 +130,7 @@ def test_different_x_and_y_binning_with_pixsize1_uses_the_mean_and_raises_a_flag
 
     assert lower == pytest.approx(1.5 * UNBINNED_SCALE * 0.95)
     assert upper == pytest.approx(1.5 * UNBINNED_SCALE * 1.05)
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_SCALE_HINT_BINNING_MISMATCH]
+    assert identifier.astrometry_flags == [plate_solution_steps.FLAG_SCALE_HINT_BINNING_MISMATCH]
 
 
 def test_a_header_scale_in_arcseconds_per_pixel_is_not_multiplied_by_binning() -> None:

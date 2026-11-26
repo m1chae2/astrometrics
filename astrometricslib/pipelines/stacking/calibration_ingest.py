@@ -8,7 +8,7 @@ from before a rescan with the one from after, and measures each new set of
 flats with the same check the stacker runs.
 
 Everything here takes plain data and returns plain data. The public
-`CalibrationCatalog` in `api/processing.py` calls it.
+`CalibrationCatalog` in `api/calibration.py` calls it.
 """
 
 from collections.abc import Iterable

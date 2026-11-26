@@ -25,7 +25,7 @@ from astrometricslib.pipelines.astrometry.processing.detections import (
     measure_detections_in_file,
     save_run_detections,
 )
-from astrometricslib.pipelines.astrometry.processing.star_identifier import find_unique_stars
+from astrometricslib.pipelines.astrometry.processing.star_detection import find_unique_stars
 
 STAR_POSITIONS = [(40.0, 50.0), (120.0, 60.0), (80.0, 140.0), (150.0, 150.0)]
 CLOSE_PAIR = [(60.0, 100.0), (66.0, 100.0)]

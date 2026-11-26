@@ -45,7 +45,7 @@ from astrometricslib.pipelines.astrometry.pre_processing.source_detection import
     VIEWING_SEPARATION_KERNEL_WIDTHS,
     SourceDetector,
 )
-from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+from astrometricslib.pipelines.astrometry.processing.star_detection import (
     _COLOR_DETECTION_BIN_FACTOR,
     find_unique_stars,
 )

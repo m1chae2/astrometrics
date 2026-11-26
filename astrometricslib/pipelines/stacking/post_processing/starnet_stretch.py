@@ -31,17 +31,27 @@ import glob
 import logging
 import os
 import shutil
+import subprocess
 
 import numpy as np
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
+from astrometricslib.pipelines.stacking.post_processing.preview_siril import (
+    build_stretch_script,
+    run_preview_script,
+    sky_background_for_file,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
 
 logger = logging.getLogger(__name__)
 
@@ -233,3 +243,92 @@ def blend_files(
         return False
     write_image(output_path, blend_stars(starless, stars, stretch, strength), header)
     return True
+
+
+def stretch_with_starnet(
+    scratch: str,
+    name: str,
+    siril_executable: str,
+    remove_green: bool,
+    linked: bool,
+    settings: PreviewSettings,
+    skipped_steps: list[SkippedPreviewStep] | None = None,
+) -> str | None:
+    """Stretch the stars and the rest of the image on their own with StarNet.
+
+    StarNet splits the linear image into a starless image and a stars-only
+    image. The starless image gets the usual stretch, the stars get an
+    arcsinh stretch of their own, and the two are blended (see
+    `starnet_stretch`). The result is saved as ``stretched.fits``.
+
+    Parameters
+    ----------
+    scratch : `str`
+        The scratch folder.
+    name : `str`
+        The linear image in the scratch folder to split.
+    siril_executable : `str`
+        The command that starts Siril.
+    remove_green : `bool`
+        Whether the stretch of the starless image removes excess green first.
+    linked : `bool`
+        Whether the colour channels share one stretch.
+    settings : `PreviewSettings`
+        Supplies the strength and the stretch of the stars layer.
+    skipped_steps : `list` [`SkippedPreviewStep`], optional
+        If given, a failure adds a `SkippedPreviewStep` to it.
+
+    Returns
+    -------
+    file_name : `str` or `None`
+        ``"stretched.fits"`` if StarNet and the blend worked, otherwise
+        `None`. The reason is logged.
+    """
+    strength = (
+        resolve(DEFAULT_STAR_STRENGTH).value if settings.star_strength is None else settings.star_strength
+    )
+    stretch = resolve(DEFAULT_STAR_STRETCH).value if settings.star_stretch is None else settings.star_stretch
+
+    def fall_back(reason: str) -> None:
+        """Log that StarNet failed and remember it for the caller."""
+        logger.warning("%s; the preview uses the normal stretch.", reason)
+        if skipped_steps is not None:
+            skipped_steps.append(SkippedPreviewStep("StarNet", reason))
+
+    raise_if_abandoned()
+    try:
+        ran = run_preview_script(scratch, build_starnet_script(name), siril_executable)
+    except (OSError, subprocess.SubprocessError) as error:
+        fall_back(f"StarNet could not run ({error})")
+        return None
+    if not ran or not collect_starnet_outputs(scratch):
+        fall_back("StarNet did not give a starless and a stars image")
+        return None
+    level = choose_sky_level_for_file(os.path.join(scratch, STARLESS_NAME)).sky_level
+    logger.info("StarNet: the starless image is stretched to sky level %.2f.", level)
+    try:
+        stretched = run_preview_script(
+            scratch,
+            build_stretch_script(
+                STARLESS_NAME,
+                "starless_stretched",
+                level,
+                remove_green,
+                linked,
+                sky_background_for_file(os.path.join(scratch, STARLESS_NAME), remove_green, linked),
+            ),
+            siril_executable,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        fall_back(f"The starless stretch could not run ({error})")
+        return None
+    if not stretched or not blend_files(
+        os.path.join(scratch, "starless_stretched.fits"),
+        os.path.join(scratch, STARS_NAME),
+        os.path.join(scratch, "stretched.fits"),
+        stretch,
+        strength,
+    ):
+        fall_back("StarNet's stretched pieces could not be blended")
+        return None
+    return "stretched.fits"

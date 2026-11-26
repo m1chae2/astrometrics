@@ -20,6 +20,7 @@ from astropy.io import fits
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces import plate_solve_driver
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+from astrometricslib.pipelines.astrometry.processing import gaia_field_matching, plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.test.processing.test_plate_solve_fit_statistics import (
     FIELD_DEC_DEG,
@@ -63,9 +64,13 @@ def _forbid_catalog_work(monkeypatch: pytest.MonkeyPatch) -> None:
         "_query_simbad_region",
     ):
         monkeypatch.setattr(StarIdentifier, name, _fail_if_called)
-    for name in ("make_gaia_tile_fetcher", "load_field_gaia_stars"):
+    for module, name in (
+        ("gaia_field_matching", "make_gaia_tile_fetcher"),
+        ("gaia_field_matching", "load_field_gaia_stars"),
+        ("plate_solution_steps", "load_field_gaia_stars"),
+    ):
         monkeypatch.setattr(
-            f"astrometricslib.pipelines.astrometry.processing.star_identifier.{name}", _fail_if_called
+            f"astrometricslib.pipelines.astrometry.processing.{module}.{name}", _fail_if_called
         )
     for name in ("_build_extended_source_hint", "check_extended_source"):
         monkeypatch.setattr(AstrometryPipeline, name, _fail_if_called)
@@ -197,8 +202,10 @@ def _allow_only_the_cached_refit(
         return star_identifier.FieldGaiaStars(table=table, coords=coords, depth=depth, tiles=[1])
 
     monkeypatch.setattr(StarIdentifier, "_refine_wcs_against_gaia", _REAL_REFINE)
-    monkeypatch.setattr(star_identifier, "load_field_gaia_stars", cache_lookup)
-    monkeypatch.setattr(star_identifier, "tiles_under_image", lambda *arguments, **keywords: [1])
+    monkeypatch.setattr(gaia_field_matching, "load_field_gaia_stars", cache_lookup)
+    monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", cache_lookup)
+    monkeypatch.setattr(gaia_field_matching, "tiles_under_image", lambda *arguments, **keywords: [1])
+    monkeypatch.setattr(plate_solution_steps, "tiles_under_image", lambda *arguments, **keywords: [1])
     return calls
 
 
@@ -232,8 +239,6 @@ def test_refit_from_cache_with_a_cached_download_uses_the_refit_solution(
     from astropy.coordinates import SkyCoord
     from astropy.wcs import WCS
 
-    from astrometricslib.pipelines.astrometry.processing import star_identifier
-
     _forbid_catalog_work(monkeypatch)
     stars = SkyCoord([FIELD_RA_DEG] * 3, [FIELD_DEC_DEG] * 3, unit="deg")
     calls = _allow_only_the_cached_refit(monkeypatch, (SimpleNamespace(meta={}), stars))
@@ -249,7 +254,9 @@ def test_refit_from_cache_with_a_cached_download_uses_the_refit_solution(
         reason="",
         fit_star_indices=(),
     )
-    monkeypatch.setattr(star_identifier, "refine_wcs_with_gaia", lambda *arguments, **keywords: refinement)
+    monkeypatch.setattr(
+        plate_solution_steps, "refine_wcs_with_gaia", lambda *arguments, **keywords: refinement
+    )
     monkeypatch.setattr(
         StarIdentifier, "_move_gaia_coords_to_observation_epoch", lambda self, table, coords: coords
     )

@@ -12,7 +12,11 @@ from astropy.io import fits
 
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing import (
+    gaia_field_matching,
+    gaia_tile_queries,
+    star_detection,
+)
 from astrometricslib.pipelines.astrometry.processing.gaia_depth import GaiaDepthPrediction
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
@@ -87,26 +91,24 @@ def stars_with_depth(faintest_magnitude: float, matched_count: int = 6) -> list[
 @pytest.mark.parametrize("faintest", [11.0, 16.0, 18.5, 22.0])
 def test_the_estimate_is_the_faintest_detection_with_no_margin_or_clamp(faintest: float) -> None:
     """The estimate is the faintest star's magnitude, with no margin."""
-    estimate = star_identifier_module.estimate_faintest_detected_magnitude(stars_with_depth(faintest))
+    estimate = star_detection.estimate_faintest_detected_magnitude(stars_with_depth(faintest))
 
     assert estimate == pytest.approx(faintest, abs=1e-6)
 
 
 def test_too_few_matched_stars_gives_no_estimate() -> None:
     """With fewer than five identified stars there is no estimate to check."""
-    stars = stars_with_depth(
-        16.0, matched_count=star_identifier_module.MINIMUM_STARS_FOR_DEPTH_ESTIMATE.default - 1
-    )
+    stars = stars_with_depth(16.0, matched_count=star_detection.MINIMUM_STARS_FOR_DEPTH_ESTIMATE.default - 1)
 
-    assert star_identifier_module.estimate_faintest_detected_magnitude(stars) is None
-    assert star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT.default == pytest.approx(18.0)
+    assert star_detection.estimate_faintest_detected_magnitude(stars) is None
+    assert gaia_tile_queries.GAIA_DEFAULT_MAGNITUDE_LIMIT.default == pytest.approx(18.0)
 
 
 def test_a_star_without_a_flux_is_ignored_by_the_estimate() -> None:
     """A zero or missing flux cannot give a magnitude."""
     stars = [*stars_with_depth(16.0), make_star(0.0, None), StellarObject(id="x", name="x")]
 
-    assert star_identifier_module.estimate_faintest_detected_magnitude(stars) == pytest.approx(16.0, abs=1e-6)
+    assert star_detection.estimate_faintest_detected_magnitude(stars) == pytest.approx(16.0, abs=1e-6)
 
 
 def _identifier_with_depth(query_depth: float) -> StarIdentifier:
@@ -136,7 +138,7 @@ def test_a_detection_fainter_than_the_query_depth_raises_the_flag() -> None:
 
     identifier._check_query_depth(stars_with_depth(18.0))
 
-    assert star_identifier_module.FLAG_GAIA_DEPTH_EXCEEDED in identifier.astrometry_flags
+    assert gaia_field_matching.FLAG_GAIA_DEPTH_EXCEEDED in identifier.astrometry_flags
 
 
 def test_a_detection_inside_the_query_depth_raises_no_flag() -> None:
@@ -193,8 +195,8 @@ def test_simbad_v_magnitudes_do_not_set_the_g_estimate() -> None:
         make_star(star.flux, star.magnitude - 3.0, "simbad") for star in gaia_stars if star.magnitude
     ]
 
-    assert star_identifier_module.estimate_faintest_detected_magnitude(simbad_stars) is None
-    assert star_identifier_module.estimate_faintest_detected_magnitude([
+    assert star_detection.estimate_faintest_detected_magnitude(simbad_stars) is None
+    assert star_detection.estimate_faintest_detected_magnitude([
         *gaia_stars,
         *simbad_stars,
-    ]) == pytest.approx(star_identifier_module.estimate_faintest_detected_magnitude(gaia_stars))
+    ]) == pytest.approx(star_detection.estimate_faintest_detected_magnitude(gaia_stars))

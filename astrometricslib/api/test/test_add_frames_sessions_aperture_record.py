@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.foundation.config import AppConfiguration, _TomlSectionedConfig

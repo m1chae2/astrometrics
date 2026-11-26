@@ -21,8 +21,7 @@ from astropy.table import Table
 from astropy.wcs import WCS, Sip
 
 from astrometricslib._internal.drivers.driver_set import Drivers
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
-from astrometricslib.pipelines.astrometry.processing import wcs_refinement
+from astrometricslib.pipelines.astrometry.processing import plate_solution_steps, wcs_refinement
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
 
@@ -330,7 +329,7 @@ def test_the_identifier_refits_the_solution_and_records_the_flag(monkeypatch: py
     refined = identifier._refine_wcs_against_gaia(alnath_like_solution(), sources, *IMAGE_SHAPE)
 
     assert np.median(error_against_truth_arcsec(refined, truth)) < 0.05
-    assert star_identifier_module.FLAG_WCS_REFINED in identifier.astrometry_flags
+    assert plate_solution_steps.FLAG_WCS_REFINED in identifier.astrometry_flags
     assert identifier.wcs_refinement is not None and identifier.wcs_refinement.applied
 
 
@@ -345,7 +344,7 @@ def test_a_failed_gaia_download_keeps_the_solver_solution(monkeypatch: pytest.Mo
     )
 
     assert result is solver
-    assert star_identifier_module.FLAG_WCS_REFINEMENT_SKIPPED in identifier.astrometry_flags
+    assert plate_solution_steps.FLAG_WCS_REFINEMENT_SKIPPED in identifier.astrometry_flags
     assert identifier.wcs_refinement is None
 
 

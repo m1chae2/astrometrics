@@ -46,7 +46,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+from astrometricslib.pipelines.astrometry.processing.simbad_matching import (
     CENTRE_STAR_SEARCH_RADIUS_FRACTION,
     HINT_MATCH_WARNING_ARCSEC,
     POINTING_ERROR_SEARCH_RADIUS_ARCSEC,

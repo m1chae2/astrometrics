@@ -16,7 +16,7 @@ from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
     preview_step_skipped_measurements,
     record_preview_step_notices,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 
 MEASURED_AT = datetime(2026, 11, 1, tzinfo=UTC)
 SKIPPED = [

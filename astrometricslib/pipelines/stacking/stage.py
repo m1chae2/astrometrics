@@ -1152,8 +1152,8 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
         record_preview_step_notices,
     )
+    from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
-        SkippedPreviewStep,
         record_preview_as_processed_image,
         write_stack_preview,
     )
@@ -1202,7 +1202,7 @@ def _remake_preview_if_out_of_date(run: StackRun, forced_reason: str | None = No
 
     The stack is kept. Its preview picture is made again when it is missing
     or the picture settings changed since it was made (see
-    `stack_preview.preview_is_out_of_date`); otherwise every stage left is
+    `preview_settings.preview_is_out_of_date`); otherwise every stage left is
     skipped.
 
     Parameters
@@ -1213,7 +1213,7 @@ def _remake_preview_if_out_of_date(run: StackRun, forced_reason: str | None = No
         A reason to make the picture again whatever its settings say, such as
         a stack that was just turned.
     """
-    from astrometricslib.pipelines.stacking.post_processing.stack_preview import preview_is_out_of_date
+    from astrometricslib.pipelines.stacking.post_processing.preview_settings import preview_is_out_of_date
 
     reason = forced_reason or preview_is_out_of_date(run.stacked_path)
     if reason is None:

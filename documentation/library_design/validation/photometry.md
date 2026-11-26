@@ -1005,7 +1005,7 @@ print(median_signal_to_noise(table)[:10])
   print(result.gain_e_per_adu, result.gain_spread_e_per_adu, result.read_noise_adu, result.read_noise_e)
   ```
 
-  <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_sensor_noise -->
+  <!-- impl: astrometricslib.api.calibration.CalibrationCatalog.measure_sensor_noise -->
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The gain and its spread across the flat pairs, the read noise in ADU and in electrons, and the pair counts.
 - **Our result:** Run on 2026-11-25 on a copy of the configuration, without saving. The frames were cut to the central 1000 by 1000 pixels as they were read, the region the measurement uses, because loading 90 whole frames ran out of memory.

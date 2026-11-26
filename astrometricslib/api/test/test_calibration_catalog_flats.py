@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.errors import InvalidArgumentError
 
 CAMERA = "ZWO ASI 533MM Pro"

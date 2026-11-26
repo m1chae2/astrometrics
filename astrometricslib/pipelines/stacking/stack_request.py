@@ -31,7 +31,7 @@ from astrometricslib.models.processing_results import StackResult
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection, select_library_frames
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
 from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
     choose_camera_frames,
     ensure_single_camera,

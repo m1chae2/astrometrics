@@ -26,7 +26,7 @@ from astrometricslib.pipelines.stacking.post_processing.preview_remake import (
     PREVIOUS_PICTURES_FOLDER,
     remake_stack_preview,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
 
 
 @pytest.fixture

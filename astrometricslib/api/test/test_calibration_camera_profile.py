@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
-from astrometricslib.api import processing
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api import calibration
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import CameraProfile
 
@@ -22,7 +22,7 @@ def test_camera_profile_passes_its_own_configuration(monkeypatch: pytest.MonkeyP
     config = AppConfiguration()
     profile = MagicMock(spec=CameraProfile)
     lookup = MagicMock(return_value=profile)
-    monkeypatch.setattr(processing, "resolve_camera_profile", lookup)
+    monkeypatch.setattr(calibration, "resolve_camera_profile", lookup)
 
     catalog = CalibrationCatalog(config, MagicMock())
 

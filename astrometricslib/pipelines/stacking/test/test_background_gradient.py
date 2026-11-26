@@ -23,7 +23,11 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
     background_model_path_for,
     preview_path_for,
 )
-from astrometricslib.pipelines.stacking.post_processing import background_gradient, stack_preview
+from astrometricslib.pipelines.stacking.post_processing import (
+    background_gradient,
+    preview_graxpert,
+    stack_preview,
+)
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
     BACKGROUND_BIN_COUNT,
     BackgroundGradientOutcome,
@@ -34,12 +38,10 @@ from astrometricslib.pipelines.stacking.post_processing.background_gradient impo
     record_background_gradient,
     write_binned_model,
 )
+from astrometricslib.pipelines.stacking.post_processing.preview_graxpert import flatten_background
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import STACK_COMPANION_SUFFIXES
 from astrometricslib.pipelines.stacking.post_processing.sky_plane import BackgroundDecision
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
-    flatten_background,
-    write_stack_preview,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import write_stack_preview
 
 LEVEL = 0.015
 ROWS, COLUMNS = 200, 300
@@ -496,7 +498,7 @@ class _Programs:
         flat = np.random.default_rng(0).normal(0.001, 0.0001, (ROWS, COLUMNS))
         fits.writeto(f"{output_stem}.fits", flat.astype(np.float32))
         if self.write_model:
-            model_path = stack_preview.graxpert_background_model_path(output_stem)
+            model_path = preview_graxpert.graxpert_background_model_path(output_stem)
             fits.writeto(model_path, (LEVEL * (1.0 + 0.005 * x)).astype(np.float32))
             self.model_paths.append(model_path)
         return True
@@ -520,10 +522,10 @@ class _Programs:
         as one that needs GraXpert (the plane path has its own tests in
         `test_stack_preview` and `test_sky_plane`).
         """
-        monkeypatch.setattr(stack_preview, "flatten_background", self.flatten)
+        monkeypatch.setattr(preview_graxpert, "flatten_background", self.flatten)
         monkeypatch.setattr(stack_preview, "run_preview_script", self.siril)
         monkeypatch.setattr(
-            stack_preview,
+            preview_graxpert,
             "choose_background_method_for_file",
             lambda path: BackgroundDecision("graxpert", 0.1, 0.03, 100, "test", []),
         )
@@ -544,15 +546,17 @@ def test_graxpert_is_asked_to_save_its_background_model(monkeypatch: pytest.Monk
         captured["arguments"] = arguments
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(stack_preview, "run_registered", run)
-    monkeypatch.setattr(stack_preview, "siril_process_lock", lambda: __import__("contextlib").nullcontext())
+    monkeypatch.setattr(preview_graxpert, "run_registered", run)
+    monkeypatch.setattr(
+        preview_graxpert, "siril_process_lock", lambda: __import__("contextlib").nullcontext()
+    )
 
     assert flatten_background("/opt/graxpert", "/work/stack.fits", "/work/flat")
 
     arguments = captured["arguments"]
     assert "-bg" in arguments
     assert arguments.index("-bg") < arguments.index("-output")
-    assert stack_preview.graxpert_background_model_path("/work/flat") == "/work/flat_background.fits"
+    assert preview_graxpert.graxpert_background_model_path("/work/flat") == "/work/flat_background.fits"
 
 
 def test_the_preview_measures_the_model_saves_the_map_and_deletes_the_big_file(

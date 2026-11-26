@@ -369,7 +369,7 @@ def seed_field_tiles(
     from astrometricslib._internal.drivers import catalog_store
     from astrometricslib._internal.drivers.sky_tiles import tiles_for_cone
     from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import load_field_gaia_stars
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+    from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import (
         GAIA_DEFAULT_MAGNITUDE_LIMIT,
         make_gaia_tile_fetcher,
     )

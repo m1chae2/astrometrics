@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
 # Matches the private `_CalibrationKind` literal that
-# `astrometricslib.api.processing.CalibrationCatalog.reindex_frames` accepts.
+# `astrometricslib.api.calibration.CalibrationCatalog.reindex_frames` accepts.
 CalibrationKind = Literal["dark", "bias", "flat"]
 
 # Remote folder name (case-insensitive) -> the calibration kind

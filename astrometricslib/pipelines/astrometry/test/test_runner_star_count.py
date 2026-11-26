@@ -11,7 +11,7 @@ import pytest
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.astrometry import pipeline as astrometry_pipeline
 from astrometricslib.pipelines.astrometry import runner
-from astrometricslib.pipelines.astrometry.processing import star_identifier
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries
 from astrometricslib.pipelines.pipeline_base import PipelineRequest
 
 
@@ -41,8 +41,8 @@ def test_run_sets_number_of_stars_from_stacked_image_stars(monkeypatch: pytest.M
     monkeypatch.setattr(runner, "_fill_target_position", lambda *_: None)
     monkeypatch.setattr(runner, "_write_solved_wcs_to_fits_header", lambda *_: None)
     monkeypatch.setattr(runner, "record_pipeline_stars", lambda stars, **_: (stars, None))
-    monkeypatch.setattr(star_identifier, "get_gaia_query_statistics", lambda: {})
-    monkeypatch.setattr(star_identifier, "reset_gaia_query_statistics", lambda: None)
+    monkeypatch.setattr(gaia_tile_queries, "get_gaia_query_statistics", lambda: {})
+    monkeypatch.setattr(gaia_tile_queries, "reset_gaia_query_statistics", lambda: None)
 
     target = Target(id="Test Target")
     assert target.number_of_stars == 0

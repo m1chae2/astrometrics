@@ -17,6 +17,7 @@ import pytest
 from astrometricslib.drivers import LaunchIdentity
 from astrometricslib.exceptions import ExternalServiceError
 from astrometricslib.foundation import offline
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries
 
 
 @pytest.fixture(autouse=True)
@@ -83,15 +84,13 @@ def test_gaia_tile_clients_refuse() -> None:
 
 def test_the_star_identifier_skips_gaia_quietly(caplog: pytest.LogCaptureFixture) -> None:
     """No tile fetcher is made, with no warning or mark."""
-    from astrometricslib.pipelines.astrometry.processing import star_identifier
-
     with caplog.at_level("DEBUG"):
-        fetch, reason = star_identifier.make_gaia_tile_fetcher()
+        fetch, reason = gaia_tile_queries.make_gaia_tile_fetcher()
 
     assert fetch is None
     assert "nothing off the computer" in reason
     assert not [record for record in caplog.records if record.levelname in ("WARNING", "ERROR")]
-    assert not star_identifier._gaia_remote_queries_disabled()
+    assert not gaia_tile_queries._gaia_remote_queries_disabled()
 
 
 def test_gaia_reddening_refuses_as_an_external_service_error() -> None:

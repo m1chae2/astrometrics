@@ -18,7 +18,7 @@ from astrometricslib._internal.drivers import catalog_store
 from astrometricslib._internal.drivers.gaia_cone_driver import GAIA_CONE_COLUMNS, TileFetch
 from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points
 from astrometricslib.foundation.errors import ExternalServiceError
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing import gaia_field_matching, plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     load_field_gaia_stars,
     tiles_under_image,
@@ -216,7 +216,7 @@ def test_the_identifier_warns_once_and_flags_missing_tiles(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Missing tiles give one warning per field and the run flag."""
-    monkeypatch.setattr(star_identifier_module, "make_gaia_tile_fetcher", lambda: (None, "offline test"))
+    monkeypatch.setattr(gaia_field_matching, "make_gaia_tile_fetcher", lambda: (None, "offline test"))
     identifier = StarIdentifier.__new__(StarIdentifier)
     identifier.config = None
     identifier.astrometry_flags = []
@@ -230,7 +230,7 @@ def test_the_identifier_warns_once_and_flags_missing_tiles(
     warnings = [record for record in caplog.records if "Gaia tiles under this image" in record.getMessage()]
     assert len(warnings) == 1
     assert "offline test" in warnings[0].getMessage()
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_GAIA_TILES_MISSING]
+    assert identifier.astrometry_flags == [gaia_field_matching.FLAG_GAIA_TILES_MISSING]
 
 
 @pytest.mark.parametrize(("cache_only", "expected_level"), [(True, logging.INFO), (False, logging.WARNING)])
@@ -243,7 +243,8 @@ def test_an_empty_refit_cache_is_a_warning_only_after_a_real_fetch(
     cached until the analysis downloads it. After a real fetch, an empty
     answer is still a warning. Both keep the note and the flag.
     """
-    monkeypatch.setattr(star_identifier_module, "load_field_gaia_stars", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gaia_field_matching, "load_field_gaia_stars", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         StarIdentifier,
         "_prepare_field_gaia_stars",
@@ -263,4 +264,4 @@ def test_an_empty_refit_cache_is_a_warning_only_after_a_real_fetch(
     assert [record.levelno for record in records] == [expected_level]
     assert kept is wcs
     assert identifier.wcs_refit_note.startswith("not refit: no Gaia stars cached")
-    assert identifier.astrometry_flags == [star_identifier_module.FLAG_WCS_REFINEMENT_SKIPPED]
+    assert identifier.astrometry_flags == [plate_solution_steps.FLAG_WCS_REFINEMENT_SKIPPED]

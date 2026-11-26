@@ -11,7 +11,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.table import MaskedColumn, Table
 
-from astrometricslib.pipelines.astrometry.processing.star_identifier import brightest_unresolved_entry_index
+from astrometricslib.pipelines.astrometry.processing.simbad_matching import brightest_unresolved_entry_index
 
 STAR = SkyCoord(292.6804 * u.deg, 27.9597 * u.deg)
 

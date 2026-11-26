@@ -66,7 +66,7 @@ def build_calibration_advisory(
 
     Parameters
     ----------
-    calibration : `astrometricslib.api.processing.CalibrationCatalog`
+    calibration : `astrometricslib.api.calibration.CalibrationCatalog`
         The library calibration catalog
         (``astrometrics.processing.calibration``).
     camera_id : `str`

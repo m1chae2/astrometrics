@@ -1320,8 +1320,13 @@ def build_astrometry_doc() -> str:
             "astrometricslib.pipelines.shared.catalog_star_identity", "CATALOG_MATCH_RADIUS_ARCSEC"
         ),
         "solver_sources": require_symbol(identifier_module, "MAXIMUM_PLATE_SOLVE_SOURCES"),
-        "gaia_epoch": require_symbol(identifier_module, "GAIA_DR3_REFERENCE_EPOCH"),
-        "depth_stars": require_symbol(identifier_module, "MINIMUM_STARS_FOR_DEPTH_ESTIMATE"),
+        "gaia_epoch": require_symbol(
+            "astrometricslib.pipelines.astrometry.processing.gaia_field_matching", "GAIA_DR3_REFERENCE_EPOCH"
+        ),
+        "depth_stars": require_symbol(
+            "astrometricslib.pipelines.astrometry.processing.star_detection",
+            "MINIMUM_STARS_FOR_DEPTH_ESTIMATE",
+        ),
         "local_minimum": require_symbol(driver_module, "MINIMUM_SOURCES_FOR_LOCAL_SOLVE"),
         "blind_cutoff": f"{require_symbol(driver_module, 'HINTED_SOLVE_NEAR_TIMEOUT_FRACTION'):.0%}",
         "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
@@ -3599,7 +3604,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    settings and stacking code: a short code that changes whenever any of them changes. A match
    with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
    preview image when its image is missing or the preview settings changed since it was made
-   (`stack_preview.preview_is_out_of_date`).
+   (`preview_settings.preview_is_out_of_date`).
 3. **Previous-stack staging.** The current stack moves to a staging folder. On success it
    becomes the single `_previous` version (`previous_stack.py`), which a person can swap back or
    discard.

@@ -99,13 +99,13 @@ from astrometricslib.pipelines.stacking.post_processing.other_stack_alignment im
     align_with_stars,
     find_bright_stars,
 )
-from astrometricslib.pipelines.stacking.post_processing.sky_levelling import sky_weight
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
-    SkippedPreviewStep,
+from astrometricslib.pipelines.stacking.post_processing.preview_color import (
     has_plate_solution,
     is_colour_image,
-    run_preview_script,
 )
+from astrometricslib.pipelines.stacking.post_processing.preview_siril import run_preview_script
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.sky_levelling import sky_weight
 from astrometricslib.pipelines.stacking.post_processing.star_color_measurement import (
     SOURCE_NAMES,
     StarColors,

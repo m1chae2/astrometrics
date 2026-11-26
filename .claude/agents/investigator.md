@@ -46,7 +46,7 @@ tools:
   - mcp__wayfindinglib-core__observatory_imaging_query_focus_models
   - mcp__wayfindinglib-core__observatory_mount_get_centering_exposure
   - mcp__wayfindinglib-core__observatory_remote_check_connection
-  - mcp__wayfindinglib-core__observatory_remote_frame_status
+  - mcp__wayfindinglib-core__observatory_remote_frame_locations
   - mcp__wayfindinglib-core__observatory_remote_list
   - mcp__wayfindinglib-core__planning_calculate_panels
   - mcp__wayfindinglib-core__planning_get_calibration_advice

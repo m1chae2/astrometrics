@@ -42,8 +42,8 @@ PRELOADED_OBJECTS = {
     "fits": "astropy.io.fits, for reading FITS files",
     "selection": (
         "What is picked in Image Processing now (read-only): target, path, kind (stack or frame) "
-        "and star (the Astrometry overlay pick: name, ra and dec in degrees, x and y as the 0-based "
-        "pixel column and row, as NumPy counts)"
+        "and star (the Astrometry overlay pick: name, ra and dec in degrees, x and y as the 1-based "
+        "pixel column and row, as FITS and DS9 count)"
     ),
     "show": 'show(target="M 31", star=..., path=...) opens it in Image Processing or the Astronomy Manager',
     "doc": "doc(name) opens the name's entry in the Documentation tab; also typed as: doc name",

@@ -5,11 +5,13 @@ target and the latest polar alignment run are read through the review
 and come back as one result model.
 """
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.review import ObservationReview
 
@@ -132,9 +134,13 @@ def test_the_live_view_drops_attempts_before_since(review: tuple[ObservationRevi
     """`since` removes the older attempts."""
     observation_review, _ = review
 
-    result = observation_review.query_alignment_records(since=150.0)
+    result = observation_review.query_alignment_records(since=datetime.fromtimestamp(150.0, UTC))
+    as_text = observation_review.query_alignment_records(since="1970-01-01T00:02:30Z")
 
     assert [attempt.timestamp for attempt in result.attempts] == [200.0]
+    assert [attempt.timestamp for attempt in as_text.attempts] == [200.0]
+    with pytest.raises(InvalidArgumentError):
+        observation_review.query_alignment_records(since="yesterday")
 
 
 def test_the_night_view_adds_tracking_rows_and_the_polar_run(

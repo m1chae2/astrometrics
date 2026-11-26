@@ -51,7 +51,7 @@ export interface SystemPulse {
  */
 export async function fetchSystemCompletions(text: string): Promise<string[]> {
     try {
-        const data = await callBackend("system:completions", { text });
+        const data = await callBackend("terminal:completions", { text });
         return Array.isArray(data) ? data : [];
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');

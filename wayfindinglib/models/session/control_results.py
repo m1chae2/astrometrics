@@ -1,6 +1,6 @@
 """Purpose: The results of the `control.remote` and `control.guiding` calls.
 
-Description: `control.remote.frame_status`, `sync_frames` and `sync_logs`,
+Description: `control.remote.frame_locations`, `sync_frames` and `sync_logs`,
 `control.guiding.expose` and `review.frame_guiding` each return a model
 that names its fields. The remote results fill different fields in
 different cases (see the call's description), and leave the others out
@@ -15,7 +15,7 @@ from wayfindinglib.models.session.sparse_result import SparseResult
 __all__ = [
     "FrameDifference",
     "FrameGuidingReport",
-    "FrameStatusReport",
+    "FrameLocationReport",
     "FrameSyncResult",
     "GuideExposureResult",
     "LogPlan",
@@ -130,7 +130,7 @@ class FrameDifference(BaseModel):
     examples: list[str]
 
 
-class FrameStatusReport(SparseResult):
+class FrameLocationReport(SparseResult):
     """Where a target's frames are: telescope, drive, library.
 
     Attributes

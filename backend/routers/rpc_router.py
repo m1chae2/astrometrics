@@ -43,7 +43,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "system:health": ("maintenance_service", "check_health"),
     "system:static_mounts": ("settings_service", "get_static_mounts"),
     "system:frontend_log": log_frontend_message,
-    "system:completions": ("scripting_service", "get_completions"),
     "system:get_config": ("config_service", "get_all_config"),
     "system:save_config": ("settings_service", "save_config"),
     "system:introspection": ("scripting_service", "get_introspection_tree"),
@@ -123,11 +122,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:get_session_alignment": ("alignment_service", "get_session_data"),
     "telescope:get_cumulative_tracking_data": ("alignment_service", "get_cumulative_tracking_data"),
     "telescope:sync_logs": ("sync_service", "sync_telescope_logs"),
-    "telescope:get_pointing_model": ("alignment_service", "compute_pointing_model"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
     "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
-    "telescope:get_guiding_spectrum": ("guiding_service", "analyze_guiding_spectrum"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),
@@ -148,15 +145,13 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "ingestion:list_files": ("ingestion_service", "list_remote_files"),
     "ingestion:reindex": ("ingestion_service", "start_reindex"),
     # Stacking and the job list
-    "processing:stack": ("image_processing_service", "process_target"),
+    "processing:stack": ("image_processing_service", "stack_target"),
     "processing:siril_open": ("image_processing_service", "open_siril"),
     "processing:cancel": ("image_processing_service", "cancel_processing_jobs"),
     "processing:status": ("image_processing_service", "get_processing_status"),
     "processing:list_jobs": ("job_service", "list_jobs"),
-    "processing:active_jobs": ("job_service", "get_active_jobs"),
     "processing:get_job": ("job_service", "get_job"),
     "processing:delete_job": ("job_service", "delete_job"),
-    "processing:jobs_for_target": ("job_service", "get_jobs_for_target"),
     "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
     # A short answer about a target's current stack, read from the numbers the
     # stacking stage saved with it. Nothing is measured and nothing is written.
@@ -211,7 +206,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # job detected, from the stored quality rows that carry its id.
     "jobs:query": ("astrometrics.jobs", "query"),
     # Photometry and spectroscopy analysis
-    "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
+    "analysis:analyze_image": ("analysis_orchestrator", "run_analysis"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
     "analysis:cancel": ("analysis_orchestrator", "cancel_analysis"),
     "analysis:identify_stack": ("analysis_orchestrator", "identify_stack"),
@@ -219,7 +214,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Target library
     "target:list": ("target_service", "get_all_targets_list"),
     "target:get": ("target_service", "get_targets"),
-    "target:get_targets": ("target_service", "get_targets"),
     "target:create": ("target_service", "create_target"),
     "target:update": ("target_service", "update_target"),
     "target:delete": ("target_service", "delete_target"),
@@ -242,11 +236,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "astronomy:spectral_class_summary": ("stellar_service", "get_spectral_class_summary"),
     "astronomy:stars_by_spectral_class": ("stellar_service", "get_stars_by_spectral_class"),
     "astronomy:get": ("stellar_service", "get_object_fuzzy_by_id"),
-    "astronomy:existing_ids": ("stellar_service", "get_existing_star_ids"),
     "astronomy:save": ("stellar_service", "save_objects"),
     "astronomy:delete": ("stellar_service", "delete_object"),
     "astronomy:analyze_periodicity": ("stellar_service", "analyze_periodicity"),
-    "astronomy:get_stellar_objects": ("stellar_service", "get_stellar_objects"),
     "astronomy:get_overlay_stars": ("stellar_service", "get_astrometry_overlay_stars"),
     "astronomy:get_status": ("stellar_service", "get_target_status"),
     "astronomy:visible": ("stellar_service", "list_visible_targets"),
@@ -263,20 +255,17 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "planetarium:get_stack_pictures": ("stellar_service", "get_stack_sky_pictures"),
     # Camera capture
     "imaging:capture": ("imaging_service", "capture_sequence"),
-    "imaging:get_active_jobs": ("imaging_service", "get_active_capture_jobs"),
     "imaging:stop_capture": ("imaging_service", "stop_capture"),
     # Images and FITS files
     "images:get_target_frame": ("image_service", "get_target_frame_by_id"),
     "images:get_light_frame_data": ("image_service", "get_light_frame_data_by_id"),
     "images:convert_fits": ("image_service", "convert_fits"),
-    "images:get_fits_header": ("image_service", "get_fits_header_data"),
     "images:measure_star_profile": ("image_service", "measure_star_profile"),
     "images:map_position": ("image_service", "map_position"),
     "images:measure_detections": ("image_service", "measure_detections"),
     "images:delete": ("image_service", "delete_images"),
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames
-    "calibration:get_stats": ("image_processing_service", "get_calibration_stats"),
     # Measures a camera setting's gain and read noise from the library's
     # flat and bias frames. With `save` true it writes the camera profile in
     # the config (after a backup), so the AI's read-only profile withholds it.
@@ -295,21 +284,17 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
     "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
-    # Night plan and observation packages. `plan:get` reads (no `session_id`
-    # lists all), `plan:list_packages` lists the package library and
-    # `plan:current_session` reads tonight's session. `plan:edit` and
-    # `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # Night plan and observation packages. `plan:list_packages` lists the
+    # package library and `plan:current_session` reads tonight's session.
+    # `plan:tick_checklist_item` writes and sends the `plan:changed` event;
     # `plan:edit_package` and `plan:create_package` send `packages:changed`;
     # a stale `expected_revision` answers with the `conflict` error and the
     # current revision in its details. Writes, so the AI's read-only profile
     # withholds them.
-    "plan:get": ("plan_service", "get_plan"),
     "plan:current_session": ("plan_service", "current_session"),
     "plan:list_packages": ("plan_service", "list_packages"),
     "plan:package_for_target": ("plan_service", "package_for_target"),
-    "plan:create": ("plan_service", "create_plan"),
     "plan:create_package": ("plan_service", "create_package"),
-    "plan:edit": ("plan_service", "edit_plan"),
     "plan:edit_package": ("plan_service", "edit_package"),
     "plan:refresh_suggestions": ("plan_service", "refresh_suggestions"),
     "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
@@ -360,11 +345,16 @@ HEAVY_METHODS = frozenset({
     "advisory:star_shapes",
     "astronomy:list",
     "astronomy:visible",
-    "target:get_targets",
+    "target:get",
     "target:get_frames_grouped",
     "planetarium:get_sources",
     "planetarium:get_catalog_sources",
 })
+
+#: Heavy methods that are light when they name one record: the parameter
+#: that names it. ``target:get`` lists every target when no ``target_id`` is
+#: given, and reads one target record when it is.
+LIGHT_WHEN_NAMED = {"target:get": "target_id"}
 
 
 async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -384,7 +374,7 @@ async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **k
     result : `~typing.Any`
         What `function` returns.
     """
-    if method in HEAVY_METHODS:
+    if method in HEAVY_METHODS and not kwargs.get(LIGHT_WHEN_NAMED.get(method, "")):
         return await run_heavy(function, *args, **kwargs)
     return await run_in_threadpool(function, *args, **kwargs)
 

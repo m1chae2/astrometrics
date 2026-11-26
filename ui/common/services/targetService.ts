@@ -84,10 +84,10 @@ async function loadFrameStatsGrouped(targetId: string, camera?: string): Promise
 export async function getTargets(targetId?: string): Promise<any> {
     try {
         if (targetId) {
-            const data = await callBackend("target:get_targets", { target_id: targetId });
+            const data = await callBackend("target:get", { target_id: targetId });
             return data as TargetObject | null;
         } else {
-            const data = await callBackend("target:get_targets", { detail: "summary" });
+            const data = await callBackend("target:get", { detail: "summary" });
             return Array.isArray(data) ? data : [];
         }
     } catch (err: unknown) {
@@ -98,7 +98,7 @@ export async function getTargets(targetId?: string): Promise<any> {
 
 // All six top-level mode displays mount at once at app boot and each calls
 // fetchTargetList() independently via useTargetListLogic; without coalescing,
-// that's N simultaneous, identical "target:get_targets" requests contending
+// that's N simultaneous, identical "target:get" requests contending
 // for the same backend round trip instead of one shared result.
 let inFlightTargetListRequest: ReturnType<typeof getTargets> | null = null;
 
@@ -108,7 +108,7 @@ let inFlightTargetListRequest: ReturnType<typeof getTargets> | null = null;
  * All six top-level mode displays mount at once at app boot and each calls this
  * independently via useTargetListLogic; concurrent calls are coalesced into a
  * single shared in-flight request so N simultaneous callers issue only one
- * "target:get_targets" backend round trip instead of N identical ones.
+ * "target:get" backend round trip instead of N identical ones.
  *
  * @return List of target summary objects.
  */

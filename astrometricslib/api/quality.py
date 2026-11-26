@@ -34,7 +34,6 @@ The argument helpers it shares with `ProcessingPipelines` live in
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
-from numbers import Integral
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -75,6 +74,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
     TimeInput,
     check_choice,
     check_include,
+    check_limit,
     make_frame_selection,
     reject_unused_arguments,
     resolve_target,
@@ -114,33 +114,6 @@ _FRAME_QUALITY_SECTIONS_BY_KIND = {
     "raw_check": ("spectra",),
     "spectral": (),
 }
-
-
-def _check_limit(limit: int, highest: int) -> int:
-    """Check a ``limit`` against its documented range: the one limit rule.
-
-    A limit outside the range is refused, never quietly moved inside it.
-
-    Parameters
-    ----------
-    limit : `int`
-        The limit the caller gave.
-    highest : `int`
-        The largest allowed limit. The smallest is 1.
-
-    Returns
-    -------
-    limit : `int`
-        The limit, as a Python `int`.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If ``limit`` is not a whole number from 1 to ``highest``.
-    """
-    if isinstance(limit, bool) or not isinstance(limit, Integral) or not 1 <= limit <= highest:
-        raise InvalidArgumentError(f"limit must be a whole number from 1 to {highest}, not {limit!r}.")
-    return int(limit)
 
 
 class QualityRecords:
@@ -748,7 +721,7 @@ class QualityRecords:
             },
         )
         reject_unused_arguments(kind, _FRAME_QUALITY_SECTIONS_BY_KIND, dict.fromkeys(sections, True))
-        limit = _check_limit(limit, 100 if kind == "spectral" else 300)
+        check_limit(limit, 1, 100 if kind == "spectral" else 300, allow_none=False)
         resolved = resolve_target(self._targets, target)
         if trend_frames is None or trend_threshold_percent is None:
             from astrometricslib.foundation.parameters import resolve
@@ -877,7 +850,7 @@ class QualityRecords:
 
         if not os.path.isdir(folder_path):
             raise InvalidArgumentError(f"folder_path {folder_path!r} is not a folder.")
-        limit = _check_limit(limit, 300)
+        check_limit(limit, 1, 300, allow_none=False)
         selection = make_frame_selection(filter_name, first_file, last_file, since, until, True)
         bias_finder = None
         if bias_level_adu is None and self._calibration_library_provider is not None:
@@ -983,7 +956,7 @@ class QualityRecords:
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
 
-    def frame_statuses(self, target: str | Target, stacked_at: float | None = None) -> FrameStatusReport:
+    def frame_statuses(self, target: str | Target) -> FrameStatusReport:
         """Say what state each frame of a target is in, for a status column.
 
         Each frame of the target is ``not_stacked`` when it was taken after
@@ -1005,10 +978,6 @@ class QualityRecords:
         ----------
         target : `str` or `Target`
             The target, or its id or name.
-        stacked_at : `float`, optional
-            Kept for callers that still pass it: when given, this time (in
-            seconds since the Unix epoch) is used instead of the newest
-            stack file's. Leave it out.
 
         Returns
         -------
@@ -1030,8 +999,7 @@ class QualityRecords:
         from astrometricslib.utilities.frame_identity import frame_subject_id
 
         resolved = resolve_target(self._targets, target)
-        if stacked_at is None:
-            stacked_at = latest_stack_time(resolved, str(self._config.get_stacks_path()))
+        stacked_at = latest_stack_time(resolved, str(self._config.get_stacks_path()))
         stored = stored_star_elongations(resolved.id)
         elongations = {
             frame.path: stored[subject_id]

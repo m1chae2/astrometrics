@@ -83,7 +83,7 @@ def test_a_stack_chosen_by_frame_choice_is_the_stack_buttons_job(
 
     monkeypatch.setattr(image_processing_service, "start_siril_processing_task", fake_task)
 
-    reply = service.process_target("M 13", kind="imaging", filter_name="L", first_file="013", force=True)
+    reply = service.stack_target("M 13", kind="imaging", filter_name="L", first_file="013", force=True)
 
     assert reply["status"] == "started"
     processing.predict_stack.assert_called_once_with(
@@ -106,7 +106,7 @@ def test_a_frame_list_and_a_frame_choice_are_refused_together(tmp_path: Path) ->
     service, processing, job_service = _stacking_service(tmp_path)
 
     with pytest.raises(InvalidArgumentError, match="not both"):
-        service.process_target("M 13", image_files=["/lights/a.fits"], filter_name="L")
+        service.stack_target("M 13", image_files=["/lights/a.fits"], filter_name="L")
 
     processing.predict_stack.assert_not_called()
     assert job_service.get_recent_jobs() == []
@@ -122,7 +122,7 @@ def test_a_mixed_frame_list_is_refused_and_starts_no_job(tmp_path: Path) -> None
         "Select only one kind and stack again."
     )
     with pytest.raises(InvalidArgumentError, match="mix imaging and spectral"):
-        service.process_target("M 57", image_files=["/lights/a.fits", "/lights/b.fits"])
+        service.stack_target("M 57", image_files=["/lights/a.fits", "/lights/b.fits"])
     assert job_service.get_recent_jobs() == []
 
 
@@ -138,7 +138,7 @@ def test_the_apps_cancel_reaches_a_stack_the_ai_started(
         lambda *arguments, **kwargs: release.wait(timeout=5.0),
     )
 
-    reply = service.process_target("M 13", kind="spectral")
+    reply = service.stack_target("M 13", kind="spectral")
     outcome = service.cancel_processing_jobs("M 13")
     release.set()
 

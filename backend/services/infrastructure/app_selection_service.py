@@ -34,11 +34,11 @@ class SelectedStar:
         Declination, in degrees. Usually `None` on a raw frame.
     x : `float` or `None`
         Column of the star's center on the shown picture, in pixels,
-        counted from 0 as NumPy and Astropy count (the Star Profile panel
-        counts from 1).
+        1-based as in FITS and DS9 (the center of the first pixel is 1),
+        the same as the Star Profile panel.
     y : `float` or `None`
-        Row of the star's center on the shown picture, in pixels, counted
-        from 0 the same way.
+        Row of the star's center on the shown picture, in pixels, 1-based
+        the same way.
 
     Notes
     -----

@@ -29,6 +29,7 @@ from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from astrometricslib.parameters import TuningReport
+from wayfindinglib._internal.arguments import TimeInput, to_epoch_seconds
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.focus_temperature_fit import FocusSource, FocusTemperatureFit
@@ -433,8 +434,8 @@ class ObservationReview(ControlChild):
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: str | None = None,
-        until: str | None = None,
+        since: TimeInput = None,
+        until: TimeInput = None,
         limit: int = 60,
         include: list[str] | None = None,
     ) -> FrameGuidingReport:
@@ -457,11 +458,11 @@ class ObservationReview(ControlChild):
             ``"013"`` means the frame numbered 013.
         last_file : `str`, optional
             Only frames up to this file or number.
-        since : `str`, optional
-            Only frames taken at or after this ISO 8601 time. No offset
-            means UTC.
-        until : `str`, optional
-            Only frames taken at or before this ISO 8601 time.
+        since : `str`, `datetime` or `astropy.time.Time`, optional
+            Only frames taken at or after this time. A string is ISO 8601;
+            no time zone means UTC.
+        until : `str`, `datetime` or `astropy.time.Time`, optional
+            Only frames taken at or before this time.
         limit : `int`, optional
             How many frames to cover, from 1 to 200. With a range or time
             these are the first frames inside it; otherwise the newest.
@@ -476,7 +477,7 @@ class ObservationReview(ControlChild):
         report : `FrameGuidingReport`
             ``frames`` (one row per frame) and ``group`` (the median error
             and the frames well above it). An unknown target raises
-            `NotFoundError`. A `since` or `until` that is not an ISO 8601
+            `NotFoundError`. A `since` or `until` that cannot be read as a
             time, or an `include` that names an unknown section, raises
             `InvalidArgumentError`.
         """
@@ -541,7 +542,7 @@ class ObservationReview(ControlChild):
         self,
         session_id: str | None = None,
         limit: int = 50,
-        since: float | None = None,
+        since: TimeInput = None,
         targets: list[Target] | None = None,
     ) -> AlignmentRecords:
         """Read the stored alignment attempts, grouped by target.
@@ -560,9 +561,10 @@ class ObservationReview(ControlChild):
         limit : `int`, optional
             Most attempts to read when `session_id` is `None`. Defaults
             to 50.
-        since : `float`, optional
-            When `session_id` is `None`, drop attempts older than this Unix
-            time. For a night view it is ignored.
+        since : `str`, `datetime` or `astropy.time.Time`, optional
+            When `session_id` is `None`, drop attempts older than this time
+            (a string is ISO 8601; no time zone means UTC). For a night view
+            it is ignored.
         targets : `list` [`Target`], optional
             The library targets whose frames show when each was tracked.
             Used only with a `session_id`.
@@ -572,13 +574,15 @@ class ObservationReview(ControlChild):
         records : `AlignmentRecords`
             The attempts, their grouping by target, and the polar run.
             A status the attempt model does not know reads as ``aligned``.
-            Nothing is returned for records that cannot be read.
+            Nothing is returned for records that cannot be read. A `since`
+            that cannot be read as a time raises `InvalidArgumentError`.
         """
+        since_seconds = to_epoch_seconds(since, "since")
         records = self._context.records
         if session_id is None:
             rows = list(reversed(records.get_alignment_attempts(limit=limit)))
-            if since is not None:
-                rows = [row for row in rows if (row.get("timestamp") or 0) >= since]
+            if since_seconds is not None:
+                rows = [row for row in rows if (row.get("timestamp") or 0) >= since_seconds]
             attempts = [_attempt_from_row(row, with_session=False) for row in rows]
             polar = None
         else:
@@ -775,9 +779,11 @@ class ObservationReview(ControlChild):
         epoch_seconds : `float`
             The time, in seconds since the Unix epoch.
         ra_deg : `float`
-            Right ascension the telescope points at, in degrees.
+            Right ascension the telescope points at, in ICRS (J2000)
+            degrees (as catalogs and plate solutions give it, not the
+            mount's current-epoch reading).
         dec_deg : `float`
-            Declination the telescope points at, in degrees.
+            Declination the telescope points at, in ICRS (J2000) degrees.
         filter_name : `str`, optional
             The filter. The setting with the most fitted nights when omitted.
         exclude_nights : `list` [`str`], optional

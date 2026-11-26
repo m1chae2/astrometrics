@@ -34,7 +34,7 @@ const depthStatus = {
 function answerAll() {
   callBackendMock.mockImplementation(async (method: string) => {
     switch (method) {
-      case 'target:get_targets': return [{ id: 'M 31', name: 'M 31' }, { id: 'M 81', name: 'M 81' }];
+      case 'target:get': return [{ id: 'M 31', name: 'M 31' }, { id: 'M 81', name: 'M 81' }];
       case 'target:get_camera_index': return { cameras: [], targets: {} };
       case 'astronomy:list': return [];
       case 'advisory:depth_goal': return depthStatus;
@@ -83,20 +83,20 @@ describe('redundant backend calls', () => {
     };
     const view = render(<Harness visible reloadKey={0} />);
     await settle();
-    expect([count('target:get_targets'), count('target:get_camera_index'), count('astronomy:list')])
+    expect([count('target:get'), count('target:get_camera_index'), count('astronomy:list')])
       .toEqual([1, 1, 1]);
 
     view.rerender(<Harness visible={false} reloadKey={0} />);
     await settle();
     view.rerender(<Harness visible reloadKey={0} />);
     await settle();
-    expect([count('target:get_targets'), count('target:get_camera_index'), count('astronomy:list')])
+    expect([count('target:get'), count('target:get_camera_index'), count('astronomy:list')])
       .toEqual([1, 1, 1]);
 
     // A real reload (for example after an ingest) reads each query exactly once more.
     view.rerender(<Harness visible reloadKey={1} />);
     await settle();
-    expect([count('target:get_targets'), count('target:get_camera_index'), count('astronomy:list')])
+    expect([count('target:get'), count('target:get_camera_index'), count('astronomy:list')])
       .toEqual([2, 2, 2]);
   });
 
@@ -171,9 +171,9 @@ describe('redundant backend calls', () => {
     const wrapper = makeWrapper(client);
     renderHook(() => useTargetListQuery(), { wrapper });
     await settle();
-    expect(count('target:get_targets')).toBe(1);
+    expect(count('target:get')).toBe(1);
     await act(async () => { await client.invalidateQueries({ queryKey: ['targetList'] }); });
-    expect(count('target:get_targets')).toBe(2);
+    expect(count('target:get')).toBe(2);
   });
 
   /** A finished ingest marks the lists stale without reading, and the reload key reads each once. */
@@ -185,7 +185,7 @@ describe('redundant backend calls', () => {
     };
     const view = render(<QueryClientProvider client={client}><ListProbe reloadKey={0} /></QueryClientProvider>);
     await settle();
-    expect(count('target:get_targets')).toBe(1);
+    expect(count('target:get')).toBe(1);
     // The same steps as the ingestion context's finish step.
     await act(async () => {
       void client.invalidateQueries({ queryKey: ['targetList'], refetchType: 'none' });
@@ -193,7 +193,7 @@ describe('redundant backend calls', () => {
     });
     view.rerender(<QueryClientProvider client={client}><ListProbe reloadKey={1} /></QueryClientProvider>);
     await settle();
-    expect(count('target:get_targets')).toBe(2);
+    expect(count('target:get')).toBe(2);
     expect(count('target:get_camera_index')).toBe(2);
   });
 

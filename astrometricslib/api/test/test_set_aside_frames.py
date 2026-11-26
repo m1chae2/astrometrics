@@ -304,8 +304,11 @@ def test_frame_statuses_list_the_targets_frames_with_the_flags(
         "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
         lambda target_id: {"M 1/a.fits": 1.6, "M 1/b.fits": 1.7},
     )
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.frame_status.latest_stack_time", lambda resolved, stacks: 200.0
+    )
 
-    report = quality.frame_statuses(target, 200.0)
+    report = quality.frame_statuses(target)
 
     assert [(status.name, status.state) for status in report.frames] == [
         ("a.fits", "flagged"),
@@ -318,7 +321,7 @@ def test_frame_statuses_list_the_targets_frames_with_the_flags(
 def test_frame_statuses_find_the_stack_time_themselves(
     quality: QualityRecords, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """With no stack time given, the newest stack file's time is used."""
+    """The newest stack file's time is the stack time."""
     import os
 
     stack = tmp_path / "stacks" / "M_1_Stacked.fits"

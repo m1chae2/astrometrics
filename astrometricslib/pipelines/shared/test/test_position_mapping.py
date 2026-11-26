@@ -121,3 +121,55 @@ def test_the_quality_method_checks_the_files_and_searches_the_stacks_folders(tmp
     assert mapping.method == "stack alignment"
     assert (mapping.x, mapping.y) == pytest.approx((13.0, 16.0))
     assert type(mapping.x) is float
+
+
+@pytest.mark.parametrize(
+    ("degrees", "saved_shape", "expected"),
+    [
+        # Registered stack: 38 rows, 56 columns. The frame pixel lands on
+        # column 12, row 15 there (counted from 0; see the round-trip test).
+        (0, (38, 56), (13.0, 16.0)),
+        # A half turn sends (row 15, column 12) to (38 - 1 - 15, 56 - 1 - 12).
+        (180, (38, 56), (44.0, 23.0)),
+        # A counterclockwise quarter turn sends (row, column) to
+        # (56 - 1 - 12, 15), on a stack 56 rows high and 38 columns wide.
+        (90, (56, 38), (16.0, 44.0)),
+    ],
+)
+def test_a_turned_stack_is_followed_on_its_saved_pixels(
+    tmp_path: Path, degrees: int, saved_shape: tuple[int, int], expected: tuple[float, float]
+) -> None:
+    """The quarter turn in the record moves the pixel onto the saved stack."""
+    frame = tmp_path / "lights" / "f.fits"
+    stack = tmp_path / "stacks" / "t" / "T_Stacked.fits"
+    _write_image(frame)
+    _write_image(stack, shape=saved_shape)
+    _write_record(stack, [frame], (5.0, 3.0), (2, 1), quarter_turn_degrees=degrees)
+    roots = [str(tmp_path / "stacks")]
+
+    to_stack = map_position(str(frame), 10.0, 20.0, str(stack), roots)
+    back = map_position(str(stack), to_stack.x, to_stack.y, str(frame), roots)
+
+    assert to_stack.method == "stack alignment"
+    assert (to_stack.x, to_stack.y) == pytest.approx(expected)
+    assert (back.x, back.y) == pytest.approx((10.0, 20.0))
+
+
+def test_a_cropped_picture_of_a_turned_stack_is_followed(tmp_path: Path) -> None:
+    """The picture's crop cards count on the saved (turned) stack."""
+    frame = tmp_path / "lights" / "f.fits"
+    stack = tmp_path / "stacks" / "t" / "T_Stacked.fits"
+    picture = stack.with_name("T_Stacked_processed.fits")
+    _write_image(frame)
+    _write_image(stack, shape=(38, 56))
+    picture.parent.mkdir(parents=True, exist_ok=True)
+    header = fits.Header({"CROPX0": 6, "CROPY0": 4, "CROPW": 44, "CROPH": 30})
+    fits.PrimaryHDU(np.zeros((30, 44), dtype=np.float32), header=header).writeto(picture)
+    _write_record(stack, [frame], (5.0, 3.0), (2, 1), quarter_turn_degrees=180)
+    roots = [str(tmp_path / "stacks")]
+
+    to_picture = map_position(str(frame), 10.0, 20.0, str(picture), roots)
+    back = map_position(str(picture), to_picture.x, to_picture.y, str(frame), roots)
+
+    assert (to_picture.x, to_picture.y) == pytest.approx((44.0 - 6.0, 23.0 - 4.0))
+    assert (back.x, back.y) == pytest.approx((10.0, 20.0))

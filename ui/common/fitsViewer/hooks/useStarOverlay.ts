@@ -18,6 +18,7 @@ import {
   isInView,
   isStarSelected,
   MARKER_ALL_STARS_SCALE,
+  overlayPicturePoint,
   starScreenPosition,
 } from '../utils/starOverlayLayout';
 
@@ -109,9 +110,10 @@ export function useStarOverlay(input: StarOverlayInput): StarOverlay {
       const ratio = window.devicePixelRatio || 1;
       const width = star.referenceWidth ?? parsedData?.w ?? (bitmap ? Math.round(bitmap.width / ratio) : 1);
       const height = star.referenceHeight ?? parsedData?.h ?? (bitmap ? Math.round(bitmap.height / ratio) : 1);
-      const place = baseToTurned({ x: star.x, y: star.y }, width, height, turn);
+      // Turned from the picture's corner, then given back 1-based like the stars the backend sent.
+      const place = baseToTurned(overlayPicturePoint(star), width, height, turn);
       const shown = turnedSize(width, height, turn);
-      return { ...star, x: place.x, y: place.y, referenceWidth: shown.w, referenceHeight: shown.h };
+      return { ...star, x: place.x + 1, y: place.y + 1, referenceWidth: shown.w, referenceHeight: shown.h };
     });
   }, [overlayStarsAsSent, turn, parsedData, bitmap]);
 

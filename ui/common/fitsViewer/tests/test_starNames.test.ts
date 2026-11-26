@@ -8,13 +8,13 @@ import { canOpenInAstronomyManager, nameStarAt, UNNAMED_STAR } from '../utils/st
 const solved = () => ({ raDegrees: 10.684708, decDegrees: 41.26875 });
 
 describe('nameStarAt', () => {
-  it('uses the overlay star at the measured center', () => {
-    const stars = [{ x: 99, y: 49, name: 'alf Lyr' }, { x: 10, y: 10, name: 'HD 1' }];
+  it('uses the overlay star at the measured center (both 1-based)', () => {
+    const stars = [{ x: 100, y: 50, name: 'alf Lyr' }, { x: 10, y: 10, name: 'HD 1' }];
     expect(nameStarAt(100.5, 50.2, stars, solved)).toBe('alf Lyr');
   });
 
   it('calls a detection with no catalog star an unnamed star at its sky position', () => {
-    const stars = [{ x: 99, y: 49, name: 'Unnamed star', matchKind: 'unmatched' }];
+    const stars = [{ x: 100, y: 50, name: 'Unnamed star', matchKind: 'unmatched' }];
     expect(nameStarAt(100, 50, stars, solved)).toBe(`${UNNAMED_STAR} at 00h 42m 44.33s +41° 16′ 07.5″`);
   });
 

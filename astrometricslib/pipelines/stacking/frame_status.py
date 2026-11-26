@@ -33,6 +33,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from astrometricslib._internal.drivers.fits_access import frame_uses_color_filter_array
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.paths import existing_stack_path
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.frame_status import FrameStatus, FrameStatusReport
 from astrometricslib.models.target import FrameRecord, Target
@@ -45,36 +46,6 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
 )
 
 __all__ = ["build_frame_statuses", "latest_stack_time", "set_aside_limits_by_path", "stretched_star_reason"]
-
-
-def _existing_stack_path(recorded_path: str | None, stacks_path: str | None) -> str | None:
-    """Give a recorded stack path only when the file is on disk.
-
-    A record made before the stacks moved to the stacks folder may still name
-    the old place under ``lights/``. The same file name is then looked for
-    under ``lights/<target folder>/`` in the stacks folder.
-
-    Parameters
-    ----------
-    recorded_path : `str` or `None`
-        The stack path saved in the target record.
-    stacks_path : `str` or `None`
-        The library's stacks folder, or `None` when it is not known.
-
-    Returns
-    -------
-    path : `str` or `None`
-        A path that exists, or `None` when there is no such stack.
-    """
-    if not recorded_path:
-        return None
-    if os.path.exists(recorded_path):
-        return recorded_path
-    if not stacks_path:
-        return None
-    target_folder = os.path.basename(os.path.dirname(recorded_path))
-    moved = os.path.join(stacks_path, "lights", target_folder, os.path.basename(recorded_path))
-    return moved if os.path.exists(moved) else None
 
 
 def latest_stack_time(target: Target, stacks_path: str | None) -> float | None:
@@ -101,7 +72,7 @@ def latest_stack_time(target: Target, stacks_path: str | None) -> float | None:
     recorded.extend(
         configuration.stacked_image for configuration in target.stacking.stacks_by_configuration.values()
     )
-    paths = {_existing_stack_path(path, stacks_path) for path in recorded}
+    paths = {existing_stack_path(path, stacks_path) for path in recorded}
     times = [os.path.getmtime(path) for path in paths if path]
     return max(times) if times else None
 

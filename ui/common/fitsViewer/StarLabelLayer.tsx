@@ -7,7 +7,9 @@
 import React from 'react';
 import type { AstrometryOverlayStar } from '../services/astronomyService';
 import { canOpenInAstronomyManager } from './utils/starNames';
-import { computeBadgePlacement, estimateBadgeWidth, formatStarDisplayName, isStarSelected } from './utils/starOverlayLayout';
+import {
+  computeBadgePlacement, estimateBadgeWidth, formatStarDisplayName, isStarSelected, starScreenPosition,
+} from './utils/starOverlayLayout';
 
 /** Props for StarLabelLayer. */
 interface Props {
@@ -70,8 +72,9 @@ export const StarLabelLayer: React.FC<Props> = ({
         return aScore - bScore;
       })
       .map((star) => {
-        const screenX = panX + star.x * scaleX;
-        const screenY = panY + star.y * scaleY;
+        const { x: screenX, y: screenY } = starScreenPosition(
+          star, { panX, panY, scaleX, scaleY, viewWidth: containerW, viewHeight: 0 }
+        );
         const displayName = formatStarDisplayName(star.name);
         const badgeWidth = estimateBadgeWidth(star);
         const badgeHeight = 24;

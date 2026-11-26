@@ -15,8 +15,9 @@ column and row. Only a plate solution counts: the sky-map keywords a capture
 program writes are the position the mount was told to point at, and stars
 placed with them can sit tens of pixels off. Such an image is treated as
 having no WCS, with a reason that says so. Stars that land outside the image
-are left out. Files ending in ``.fits``, ``.fit`` or ``.fts`` (any case) are
-read.
+are left out. The pixels are worked out from 0 (as Astropy and the saved
+detection centers count) and given 1-based, as in FITS and DS9. Files ending
+in ``.fits``, ``.fit`` or ``.fts`` (any case) are read.
 
 Two passes find the stars:
 
@@ -242,8 +243,8 @@ def _summary_pass(
             OverlayStar(
                 id=star_id,
                 name=str(row["name"] or star_id),
-                x=round(pixel[0], 1),
-                y=round(pixel[1], 1),
+                x=round(pixel[0] + 1.0, 1),
+                y=round(pixel[1] + 1.0, 1),
                 spectral_type=spectral_type,
                 is_catalog_identified=True,
                 reference_width=width,
@@ -336,8 +337,8 @@ def _record_pass(
         OverlayStar(
             id=star.id,
             name=str(star.name or star.id),
-            x=round(pixel[0], 1),
-            y=round(pixel[1], 1),
+            x=round(pixel[0] + 1.0, 1),
+            y=round(pixel[1] + 1.0, 1),
             spectral_type=str(star.stellar_spectral_type or star.spectral_type or ""),
             is_catalog_identified=bool(star.is_catalog_identified),
             reference_width=width,

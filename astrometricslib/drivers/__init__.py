@@ -15,7 +15,8 @@ checks for a mounted drive, the launch identity (`LaunchIdentity`,
 `read_launch_identity`) and the offline switch it carries (`require_online`,
 `require_local_host`, `is_loopback_host` and the ``ASTROMETRICS_OFFLINE``
 variable name `OFFLINE_VARIABLE`), the folders a settings file names
-(`library_folders`),
+(`library_folders`), the stack file a target record names, found again where
+the stacks folder moved it (`existing_stack_path`),
 and `stop_process_group`, which ends a program and the helpers it started,
 and the HEALPix sky-tile helpers (`tile_of_source_id`, `tiles_for_cone`,
 `tiles_for_footprint`, `pixels_near_circles`, `healpix_pixels_of_points`,
@@ -59,6 +60,7 @@ from astrometricslib.foundation.offline import (
 )
 from astrometricslib.foundation.paths import (
     LibraryFolders,
+    existing_stack_path,
     is_path_inside,
     library_folders,
     locks_directory,
@@ -96,6 +98,7 @@ __all__ = [
     "build_pixel_query",
     "bump_data_version",
     "connect_db",
+    "existing_stack_path",
     "file_lock",
     "get_camera_data_versions",
     "get_frame_metric_signs",

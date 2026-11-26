@@ -83,7 +83,7 @@ DEFAULT_WATCH_RATIO = 1.25
 #: Past this multiple of the baseline (plus the slack) a value is breached.
 DEFAULT_BREACH_RATIO = 1.5
 #: The three RPC methods whose p95 is a TPM of its own.
-TRACKED_RPC_METHODS = ("history:night_quality", "target:get_targets", "processing:stack_summary")
+TRACKED_RPC_METHODS = ("history:night_quality", "target:get", "processing:stack_summary")
 #: TPMs where a higher value is better (the limits divide instead of multiply).
 HIGHER_IS_BETTER = ("planetarium_fps_panning", "planetarium_fps_zooming", "fps_hw")
 
@@ -804,13 +804,13 @@ def catalog_match(catalog: dict, name: str) -> tuple[dict, dict[str, str]] | Non
         The parsed catalog.
     name : `str`
         A flat name as `entry` makes it, for example
-        ``rpc_p95[target:get_targets]``.
+        ``rpc_p95[target:get]``.
 
     Returns
     -------
     match : `tuple` or `None`
         The catalog entry and the values of its placeholders (for example
-        ``{"rpc": "target:get_targets"}``), or `None` if no entry
+        ``{"rpc": "target:get"}``), or `None` if no entry
         defines the name.
     """
     for definition in catalog["tpms"]:

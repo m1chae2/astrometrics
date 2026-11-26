@@ -37,7 +37,8 @@ export function pickProcessedImagePath(target: TargetPictureFiles): string | nul
  */
 export async function resolveProcessedImagePath(targetId: string): Promise<string | null> {
     const target = await callBackend('target:get', { target_id: targetId }, { silent: true });
-    return target ? pickProcessedImagePath(target) : null;
+    // A named target is one record; only a call with no target lists them.
+    return target && !Array.isArray(target) ? pickProcessedImagePath(target) : null;
 }
 
 /**

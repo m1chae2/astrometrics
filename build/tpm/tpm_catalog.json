@@ -165,7 +165,7 @@
         "per": "rpc",
         "rpcs": [
           "history:night_quality",
-          "target:get_targets",
+          "target:get",
           "processing:stack_summary"
         ]
       },
@@ -1245,7 +1245,7 @@
         "per": "rpc",
         "rpcs": [
           "history:night_quality",
-          "target:get_targets",
+          "target:get",
           "processing:stack_summary"
         ]
       },

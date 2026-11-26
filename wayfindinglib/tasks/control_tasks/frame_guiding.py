@@ -27,6 +27,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
+from wayfindinglib._internal.arguments import TimeInput
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
     guiding_read_range,
@@ -48,16 +49,16 @@ class FrameRange:
     first_file, last_file : `str` or `None`
         Keep frames from this file name to that one. A short bound such as
         ``"013"`` means the frame numbered 013.
-    since, until : `str` or `None`
-        Keep frames that began from this ISO 8601 time to that one. No offset
-        means UTC.
+    since, until : `str`, `datetime`, `astropy.time.Time` or `None`
+        Keep frames that began from this time to that one. A string is ISO
+        8601; no time zone means UTC.
     """
 
     filter_name: str | None = None
     first_file: str | None = None
     last_file: str | None = None
-    since: str | None = None
-    until: str | None = None
+    since: TimeInput = None
+    until: TimeInput = None
 
     @property
     def has_bounds(self) -> bool:

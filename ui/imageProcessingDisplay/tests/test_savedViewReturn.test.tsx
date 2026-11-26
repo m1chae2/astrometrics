@@ -159,7 +159,7 @@ describe('Image Processing saved view', () => {
 
     it('shows a star asked for by "Back to image": main stack, star selected, centered and zoomed, over the saved view', async () => {
         answerFiles('/stack/M81.fits');
-        answerStackNames([{ id: 'det-1', name: 'HD 1', gaiaSourceId: '42', libraryId: 'HD 1', x: 250, y: 100, referenceWidth: 1000, referenceHeight: 500 }]);
+        answerStackNames([{ id: 'det-1', name: 'HD 1', gaiaSourceId: '42', libraryId: 'HD 1', x: 251, y: 101, referenceWidth: 1000, referenceHeight: 500 }]);
         saveImageView(SAVED);
         postHandoff('Image Processing', 'targetSelected', {
             targetId: 'M 81', enableAstrometry: true, focusLibraryStarId: 'HD 1', focusStarName: 'HD 1',

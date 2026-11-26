@@ -927,12 +927,18 @@ async def _indi_properties(device: str, property_names: list[str] | None) -> dic
 async def _active_jobs() -> Any:
     """List the jobs the backend records as running.
 
+    The list comes from the job history read (``jobs:query`` with
+    ``active_only``), the same read the app uses.
+
     Returns
     -------
     jobs : `list` [`dict`]
-        The jobs whose status is ``started`` or ``running``.
+        Up to 50 jobs whose status is ``started`` or ``running``, newest
+        first. A job whose process most likely died has ``looks_stale``
+        true and ``is_active`` false.
     """
-    return _unwrap(await execute_rpc("processing:active_jobs", {}))
+    answer = _unwrap(await execute_rpc("jobs:query", {"active_only": True, "limit": 50}))
+    return (answer.get("jobs") or []) if isinstance(answer, dict) else []
 
 
 @tool(
@@ -1030,7 +1036,7 @@ def build_script_header(description: str) -> str:
         "preloads only the public objects a notebook would make: astrometrics (Astrometrics), wayfinder "
         "(Wayfinder), np, plt and fits (astropy.io.fits), plus three console helpers: selection "
         "(read-only: what is picked in Image Processing now, with target, path, kind ('stack' or "
-        "'frame'), star (name, ra, dec in degrees, x and y as 0-based pixel column and row) and set_at; "
+        "'frame'), star (name, ra, dec in degrees, x and y as 1-based pixel column and row) and set_at; "
         "fields are None when nothing is picked), show(target=..., star=..., path=..., display=...) "
         "(opens a target, star or file in Image Processing or the Astronomy Manager when the run ends) "
         "and doc(name) (opens that name's API reference entry). The app's internal services are not "

@@ -17,6 +17,9 @@ Description: Two groups of paths live here.
   on others. A configuration file written on one system and read on the other
   names a path that does not exist. The functions here treat the two spellings
   as the same place.
+
+`existing_stack_path` also finds a stack file that a target record made
+before the stacks moved to the stacks folder still names at its old place.
 """
 
 import os
@@ -279,6 +282,37 @@ def is_path_inside(root: str, path: str) -> bool:
             except ValueError:
                 continue
     return False
+
+
+def existing_stack_path(recorded_path: str | None, stacks_path: str | None) -> str | None:
+    """Give a recorded stack path only when the file is on disk.
+
+    A record made before the stacks moved to the stacks folder may still name
+    the old place under ``lights/``. The same file name is then looked for
+    under ``lights/<target folder>/`` in the stacks folder. A stack that is on
+    disk nowhere is a status (there is no stack), not an error.
+
+    Parameters
+    ----------
+    recorded_path : `str` or `None`
+        The stack path saved in the target record.
+    stacks_path : `str` or `None`
+        The library's stacks folder, or `None` when it is not known.
+
+    Returns
+    -------
+    path : `str` or `None`
+        A path that exists, or `None` when there is no such stack.
+    """
+    if not recorded_path:
+        return None
+    if os.path.exists(recorded_path):
+        return recorded_path
+    if not stacks_path:
+        return None
+    target_folder = os.path.basename(os.path.dirname(recorded_path))
+    moved = os.path.join(stacks_path, "lights", target_folder, os.path.basename(recorded_path))
+    return moved if os.path.exists(moved) else None
 
 
 @dataclass(frozen=True)

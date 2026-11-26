@@ -11,8 +11,10 @@ from collections.abc import Callable
 from typing import Any
 
 from astrometricslib import FilterType, Target
+from astrometricslib.drivers import existing_stack_path
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from backend.services.data.deletion_archive import archive_record_before_delete
+from backend.services.data.image_paths import resolve_allowed_image
 from backend.services.data.image_service import ImageService
 from backend.services.infrastructure.phone_share import send_file_to_phone
 
@@ -462,13 +464,13 @@ class TargetService:
     def get_frame_statuses(self, target_id: str) -> dict:
         """Say what state each frame of a target is in, for the File Browser.
 
-        The library decides each state (`quality.frame_statuses`):
-        ``included``, ``flagged`` (in the stack, but its stars are stretched:
-        at least the warning level and kept by the quarantine, with a
-        ``reason`` giving the numbers), ``not_stacked`` (taken after the
-        latest stack file was written, or the target has no stack) or
-        ``set_aside`` (moved into an `_excluded` folder). This method gives
-        it the time of the newest stack file on disk.
+        The library decides each state and finds the newest stack file
+        (`quality.frame_statuses`): ``included``, ``flagged`` (in the stack,
+        but its stars are stretched: at least the warning level and kept by
+        the quarantine, with a ``reason`` giving the numbers),
+        ``not_stacked`` (taken after the latest stack file was written, or
+        the target has no stack) or ``set_aside`` (moved into an `_excluded`
+        folder).
 
         Parameters
         ----------
@@ -482,22 +484,14 @@ class TargetService:
             ``reason``, ``date``, ``exposure``, ``elongation``,
             ``originalPath``, ``restorable`` and ``restoreNote``) and
             ``stackedAt``, the time of the latest stack file in seconds since
-            1970, or `None`. A target that is not found gives an empty list.
+            1970, or `None`.
+
+        Notes
+        -----
+        A target that is not in the library raises the library's
+        `NotFoundError`.
         """
-        target = self.get_targets(target_id)
-        if not target:
-            return {"frames": [], "stackedAt": None}
-        stack_paths = {
-            self._existing_stack_path(target.stacking.stacked_image),
-            self._existing_stack_path(target.spectral_stacking.stacked_image),
-        }
-        stack_paths.update(
-            self._existing_stack_path(configuration.stacked_image)
-            for configuration in target.stacking.stacks_by_configuration.values()
-        )
-        stack_times = [os.path.getmtime(path) for path in stack_paths if path]
-        report = self.astrometrics.quality.frame_statuses(target, max(stack_times) if stack_times else None)
-        return report.model_dump(by_alias=True)
+        return self.astrometrics.quality.frame_statuses(target_id).model_dump(by_alias=True)
 
     def put_back_frames(self, target_id: str, paths: list[str]) -> dict:
         """Move set-aside frames back into a target.
@@ -523,11 +517,8 @@ class TargetService:
     def _existing_stack_path(self, recorded_path: str | None) -> str | None:
         """Return a recorded stack path only if the file is on disk.
 
-        A record made before the stacks moved to the stacks folder may
-        still name the old place under ``lights/``. The same file name is
-        looked for under ``lights/<target>/`` in the stacks folder. A
-        stack that exists nowhere is a status (there is no stack), not an
-        error, so the answer is `None`.
+        The library's rule (`astrometricslib.drivers.existing_stack_path`)
+        also finds a stack that an old record names under ``lights/``.
 
         Parameters
         ----------
@@ -539,16 +530,9 @@ class TargetService:
         path : `str` or `None`
             A path that exists, or `None` if there is no such stack.
         """
-        if not recorded_path:
-            return None
-        if os.path.exists(recorded_path):
-            return recorded_path
         get_stacks_path = getattr(getattr(self, "config", None), "get_stacks_path", None)
-        if not callable(get_stacks_path):
-            return None
-        target_folder = os.path.basename(os.path.dirname(recorded_path))
-        moved = os.path.join(str(get_stacks_path()), "lights", target_folder, os.path.basename(recorded_path))
-        return moved if os.path.exists(moved) else None
+        stacks_path = str(get_stacks_path()) if callable(get_stacks_path) else None
+        return existing_stack_path(recorded_path, stacks_path)
 
     def get_frame_stats_grouped(self, target_id: str, camera: str | None = None) -> list:
         """Calculate exposure specs grouped by filter, with calibration status.
@@ -620,38 +604,53 @@ class TargetService:
             logger.exception("Failed to save targets")
             raise
 
-    def get_frame_header(self, target_id: str, frame_path: str) -> dict[str, Any]:
+    def get_frame_header(self, frame_path: str, target_id: str | None = None) -> dict[str, Any]:
         """Read a frame's FITS header and the turn that shows it as the stack.
 
-        Scoped to the target index.
+        The header is the library's (`targets.read_frame_header` with
+        ``as_cards``).
+
+        Parameters
+        ----------
+        frame_path : `str`
+            The FITS file.
+        target_id : `str`, optional
+            The target the file must belong to (one of its frames or stacks).
+            Left out, the file must be inside the library folders or the
+            scratch folder, and no turn is worked out.
 
         Returns
         -------
         result : `dict`
-            ``entries``, the FITS header key/value pairs of the frame, and
-            ``displayTurn``, the quarter turn (0, 90, 180 or 270 degrees,
-            clockwise) the viewer shows the frame with so it looks the same
-            way round as the target's stack (the library decides it,
-            `targets.display_turn`). Empty entries and no turn when the file
-            is no longer on disk: a stack that was moved or deleted is a
-            normal state for a target record, not a server error (a server
-            error would be logged and shown as a failed request every time
-            the target is opened).
+            ``entries``, the FITS header cards of the frame (each with
+            ``key``, ``value`` and ``comment``), and ``displayTurn``, the
+            quarter turn (0, 90, 180 or 270 degrees, clockwise) the viewer
+            shows the frame with so it looks the same way round as the
+            target's stack (the library decides it, `targets.display_turn`;
+            0 without a target). Empty entries and no turn when the file is
+            no longer on disk: a stack that was moved or deleted is a normal
+            state for a target record, not a server error (a server error
+            would be logged and shown as a failed request every time the
+            target is opened).
 
-        Raises
-        ------
-        NotFoundError
-            If no target matches ``target_id``.
+        Notes
+        -----
+        An unknown ``target_id`` raises the library's `NotFoundError`. A file
+        that does not belong to the target, or, with no target, a file outside
+        the allowed folders raises `InvalidArgumentError`.
         """
-        target = self.astrometrics.targets.get(target_id)
-        if not target:
-            raise NotFoundError(f"Target not found: {target_id}")
+        target = None
+        if target_id is None:
+            frame_path = resolve_allowed_image(frame_path, self.config)
+        else:
+            target = self.astrometrics.targets.get(target_id, required=True)
         try:
             entries = self.astrometrics.targets.read_frame_header(frame_path, target=target, as_cards=True)
         except NotFoundError:
-            logger.debug("Frame file for %s is missing, returning an empty header: %s", target_id, frame_path)
+            logger.debug("Frame file %s is missing, returning an empty header", frame_path)
             return {"entries": [], "displayTurn": 0}
-        return {"entries": entries, "displayTurn": self.astrometrics.targets.display_turn(frame_path, target)}
+        turn = 0 if target is None else self.astrometrics.targets.display_turn(frame_path, target)
+        return {"entries": entries, "displayTurn": turn}
 
     def refresh_target_images_by_id(self, target_id: str, prune_missing: bool = False) -> None:
         """RPC wrapper to trigger frame scans on a target.

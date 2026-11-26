@@ -1,6 +1,6 @@
-"""Tests for the one-call frame status of a target.
+"""Tests for the one-call frame locations of a target.
 
-The status compares three places: the telescope computer, the frames drive
+The answer compares three places: the telescope computer, the frames drive
 and the library database. The tests use a fake telescope and a fake library
 so each kind of difference can be set up by hand.
 """
@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from wayfindinglib.tasks.control_tasks import frame_status
+from wayfindinglib.tasks.control_tasks import frame_locations
 
 
 class FakeDriver:
@@ -70,7 +70,7 @@ def library(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     )
     monkeypatch.setattr(_FAKE_LIBRARY, "targets", fake_targets)
     monkeypatch.setattr(
-        frame_status.remote_transfer_tasks,
+        frame_locations.remote_transfer_tasks,
         "plan_target_download",
         lambda observatory, target_id: {"remote_folder": "M_57"},
     )
@@ -84,7 +84,7 @@ def test_each_place_and_each_difference_is_reported(tmp_path: Path, library: lis
     (folder / "a.fits").write_bytes(b"1234")
     (folder / "b.fits").write_bytes(b"1234")
     (folder / "e.fits").write_bytes(b"12")
-    status = frame_status.build_frame_status(make_observatory(tmp_path), "M 57")
+    status = frame_locations.build_frame_locations(make_observatory(tmp_path), "M 57")
     assert status["counts"] == {"telescope": 3, "disk": 3, "set_aside_on_disk": 0, "library": 2}
     assert status["on_telescope_not_on_disk"]["examples"] == ["c.fits"]
     assert status["on_disk_not_on_telescope"]["examples"] == ["e.fits"]
@@ -97,7 +97,7 @@ def test_set_aside_frames_are_counted_apart(tmp_path: Path, library: list[str]) 
     folder = tmp_path / "lights" / "M 57" / "_excluded"
     folder.mkdir(parents=True)
     (folder / "c.fits").write_bytes(b"1234")
-    status = frame_status.build_frame_status(make_observatory(tmp_path), "M 57")
+    status = frame_locations.build_frame_locations(make_observatory(tmp_path), "M 57")
     assert status["counts"]["set_aside_on_disk"] == 1
     assert "c.fits" not in status["on_telescope_not_on_disk"]["examples"]
 
@@ -117,8 +117,8 @@ def test_an_unreachable_telescope_leaves_the_other_places(
         """
         raise ValueError("telescope computer not reachable")
 
-    monkeypatch.setattr(frame_status.remote_transfer_tasks, "plan_target_download", refuse)
-    status = frame_status.build_frame_status(make_observatory(tmp_path), "M 57")
+    monkeypatch.setattr(frame_locations.remote_transfer_tasks, "plan_target_download", refuse)
+    status = frame_locations.build_frame_locations(make_observatory(tmp_path), "M 57")
     assert "not reachable" in status["telescope_error"]
     assert status["counts"]["telescope"] is None
     assert "on_disk_not_in_library" in status

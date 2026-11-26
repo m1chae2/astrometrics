@@ -13,7 +13,7 @@ import type { AstrometryOverlayStar } from '../../common/services/astronomyServi
 
 /** A named star of the NGC 7023 stack. */
 const STAR: AstrometryOverlayStar = {
-  id: 'det-7', name: 'HD 200775', gaiaSourceId: '123', libraryId: 'Gaia DR3 123', x: 400, y: 300, referenceWidth: 800, referenceHeight: 600,
+  id: 'det-7', name: 'HD 200775', gaiaSourceId: '123', libraryId: 'Gaia DR3 123', x: 401, y: 301, referenceWidth: 800, referenceHeight: 600,
 };
 
 /** The screen's inputs, with the M 31 target on screen. */

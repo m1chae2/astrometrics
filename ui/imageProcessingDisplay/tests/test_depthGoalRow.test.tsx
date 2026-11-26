@@ -34,7 +34,7 @@ const libraryTargetList = [{ id: 'M 31', name: 'M 31' }];
  */
 function answerBackend(answer: (action: string, params: unknown) => unknown) {
     callBackendMock.mockImplementation(async (action: string, params: unknown) => (
-        action === 'target:get_targets' ? libraryTargetList : answer(action, params)
+        action === 'target:get' ? libraryTargetList : answer(action, params)
     ));
 }
 
@@ -132,7 +132,7 @@ describe('DepthGoalRow', () => {
     it('reads no depth goal and shows nothing for a star that is not in the library', async () => {
         answerBackend(() => baseStatus);
         const { container } = renderRow('HIP 48113');
-        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get_targets', { detail: 'summary' }));
+        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get', { detail: 'summary' }));
         // Give the row a chance to react to the loaded list before checking.
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(callBackendMock.mock.calls.some(([action]) => String(action).startsWith('advisory:'))).toBe(false);

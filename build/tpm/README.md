@@ -252,7 +252,7 @@ The `data_size` block in `tpm.json` holds the counts the table uses.
 | `processing_stage_cpu_seconds`, `_peak_rss_mb`, `_disk_read_mb`, `_disk_write_mb`, `_nvidia_util_percent_mean`, `_nvidia_memory_mb_peak` (each `[<stage>]`), `analysis_cpu_seconds[<step>]`, `analysis_peak_rss_mb[<step>]` | Only with `--processing`. What the backend's process tree and the NVIDIA card used in that stage or step. | Lower |
 | `processing_frame_count`, `processing_failed_jobs` | Only with `--processing`. The number of frames stacked (the input size) and the number of jobs that failed or timed out. | information |
 | `rpc_count_load`, `rpc_count_per_visit[<display>]` | Backend calls at load, and per visit to each display. | Lower |
-| `rpc_p95[history:night_quality]`, `rpc_p95[target:get_targets]`, `rpc_p95[processing:stack_summary]` | Round-trip time of the night review, the target list and the stack summary. | Lower |
+| `rpc_p95[history:night_quality]`, `rpc_p95[target:get]`, `rpc_p95[processing:stack_summary]` | Round-trip time of the night review, the target list and the stack summary. | Lower |
 | `idle_rpc_per_minute` | Backend calls per minute the page makes while nobody uses it. | Lower |
 
 The backend does not log how long each RPC call takes, so the per-method times are the page's round trips (the time from sending a request to receiving the reply). They include the preview server's forwarding, which adds a small, steady amount.

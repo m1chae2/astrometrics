@@ -105,11 +105,9 @@ class TestUseCasesIntegration:
 
     async def test_use_case_3_2_ad_hoc_spectroscopy_analysis(self, client: TestClient) -> None:
         """Verify ad-hoc spectroscopy extraction (Use Case 3.2)."""
-        # The dynamic reflection resolver translates
-        # analysis:get_stellar_objects or astronomy:get_stellar_objects.
         resp = client.post(
             "/api/rpc",
-            json={"jsonrpc": "2.0", "method": "astronomy:get_stellar_objects", "params": {}, "id": "3.2"},
+            json={"jsonrpc": "2.0", "method": "astronomy:list", "params": {}, "id": "3.2"},
         )
         assert resp.status_code == 200
 
@@ -203,7 +201,13 @@ class TestUseCasesIntegration:
     async def test_use_case_8_1_master_calibration_matching(self, client: TestClient) -> None:
         """Verify querying matched master calibration files (Use Case 8.1)."""
         resp = client.post(
-            "/api/rpc", json={"jsonrpc": "2.0", "method": "calibration:get_stats", "params": {}, "id": "8.1"}
+            "/api/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "method": "calibration:query",
+                "params": {"detail": "counts"},
+                "id": "8.1",
+            },
         )
         assert resp.status_code == 200
 

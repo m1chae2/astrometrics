@@ -66,7 +66,8 @@ async function fetchPreviewPicture(processedFitsPath: string, signal?: AbortSign
  */
 export async function fetchColorPreviewPath(objectId: string, signal?: AbortSignal): Promise<string | null> {
     const target = await callBackend('target:get', { target_id: objectId }, { silent: true, signal });
-    return target?.stacking?.colorPreviewImage || null;
+    // A named target is one record; only a call with no target lists them.
+    return (Array.isArray(target) ? null : target?.stacking?.colorPreviewImage) || null;
 }
 
 /**
@@ -102,7 +103,7 @@ export async function fetchProcessedImage(
 ): Promise<Blob | null> {
     try {
         const target = await callBackend("target:get", { target_id: objectId });
-        if (!target) {
+        if (!target || Array.isArray(target)) {
             return null;
         }
 

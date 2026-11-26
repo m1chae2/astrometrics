@@ -38,7 +38,7 @@ STACK_IDENTIFICATION_LOG_PREFIX = "stack_astrometry_"
 MASTER_STACK_STAR_LIMIT = 10
 
 # The stages a client may ask for with the `stages` argument of
-# `analyze_image` are the library's
+# `analysis:analyze_image` (`run_analysis`) are the library's
 # `ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES`. They run in that order.
 # Photometry and spectroscopy need astrometry, which the library adds on its
 # own when it is missing or old. Spectral variation needs spectroscopy, which
@@ -149,18 +149,17 @@ def _identification_payload(identification: Any) -> dict[str, Any]:
     Returns
     -------
     payload : `dict`
-        ``stars`` in the overlay layout (0-based pixels), placed on the
-        viewer's copy of the stack (moved by its crop offset), each with
+        ``stars`` in the overlay layout (1-based pixels, as the library
+        gives them), placed on the viewer's copy of the stack (moved by its
+        crop offset), each with
         its ``libraryId`` (the id of its library record, or `None`), the
         counts, ``solutionReused``,
         ``gaiaDepth``, ``catalogOnlyLimit``, ``gaiaTilesMissing``,
         ``simbadUsed`` and ``notes``.
     """
     # The viewer shows the stack's stretched copy, which may be a crop of it.
-    # The library gives 1-based pixels; the overlay layout counts from 0, so
-    # one more pixel comes off with the crop offset.
-    offset_x = (getattr(identification, "viewer_offset_x", 0) or 0) + 1.0
-    offset_y = (getattr(identification, "viewer_offset_y", 0) or 0) + 1.0
+    offset_x = getattr(identification, "viewer_offset_x", 0) or 0
+    offset_y = getattr(identification, "viewer_offset_y", 0) or 0
     shown_width = getattr(identification, "viewer_width", 0) or identification.width
     shown_height = getattr(identification, "viewer_height", 0) or identification.height
     stars = [
@@ -270,7 +269,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         self._target_service = target_service
         self._notification_service = notification_service
         self.astrometrics = astrometrics
-        # Serializes analyze_image's check-then-submit sequence per
+        # Serializes run_analysis's check-then-submit sequence per
         # process. Without this, two near-simultaneous calls for the
         # same target (e.g. a double-click, or a UI race) can both read
         # "no active job yet" before either has committed its own job
@@ -283,7 +282,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # The give-up switch of each running analysis job, by job id.
         self._analysis_abandonments: dict[str, RunAbandonment] = {}
 
-    def analyze_image(
+    def run_analysis(
         self,
         target_id: str,
         image_files: Any = None,

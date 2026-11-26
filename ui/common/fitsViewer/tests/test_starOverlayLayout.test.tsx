@@ -7,7 +7,7 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, createEvent } from '@testing-library/react';
-import { STAR_LABEL_BUDGET, labelCapForScale, StarScreenTransform, chooseLabeledStarIds, findStarNearPointer, estimateBadgeWidth } from '../utils/starOverlayLayout';
+import { STAR_LABEL_BUDGET, labelCapForScale, StarScreenTransform, chooseLabeledStarIds, findStarNearPointer, estimateBadgeWidth, overlayPicturePoint, starScreenPosition } from '../utils/starOverlayLayout';
 
 // A fixed decoded picture, so the renderer treats the full image as ready.
 const FAKE_BITMAP = { width: 800, height: 1000 } as unknown as ImageBitmap;
@@ -110,6 +110,18 @@ describe('findStarNearPointer', () => {
     const stars = makeGridStars();
     expect(findStarNearPointer(stars, fitTransform, 10, 10)?.id).toBe('S0_0');
     expect(findStarNearPointer(stars, fitTransform, 20, 20)).toBeNull();
+  });
+});
+
+describe('starScreenPosition', () => {
+  /**
+   * Overlay stars come in 1-based pixels; the first pixel's center (1, 1) lands on the picture's corner.
+   */
+  it('takes the 1 off the 1-based pixels before scaling', () => {
+    expect(overlayPicturePoint({ x: 1, y: 1 })).toEqual({ x: 0, y: 0 });
+    const transform: StarScreenTransform = { scaleX: 2, scaleY: 3, panX: 10, panY: 20, viewWidth: 100, viewHeight: 100 };
+    const star = { id: 's', name: 's', x: 6, y: 11 } as Parameters<typeof starScreenPosition>[0];
+    expect(starScreenPosition(star, transform)).toEqual({ x: 20, y: 50 });
   });
 });
 

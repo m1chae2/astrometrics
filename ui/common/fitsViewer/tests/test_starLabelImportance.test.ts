@@ -58,7 +58,7 @@ describe('chooseLabeledStarIds by importance', () => {
    * Two stars of one tier are ordered by magnitude.
    */
   it('orders one tier by catalog magnitude', () => {
-    const stars = [star('faint', 'HD 1', 0, 0, 9), star('bright', 'HD 2', 0, 0, 2)];
+    const stars = [star('faint', 'HD 1', 1, 1, 9), star('bright', 'HD 2', 1, 1, 2)];
     expect(Array.from(chooseLabeledStarIds(stars, wide, estimateBadgeWidth, 1))).toEqual(['bright']);
   });
 
@@ -77,7 +77,7 @@ describe('chooseLabeledStarIds by importance', () => {
   it('never overlaps badges', () => {
     const stars: AstrometryOverlayStar[] = [];
     for (let index = 0; index < 400; index++) {
-      stars.push(star(`s${index}`, `HD ${index}`, (index % 20) * 9, Math.floor(index / 20) * 9, index));
+      stars.push(star(`s${index}`, `HD ${index}`, (index % 20) * 9 + 1, Math.floor(index / 20) * 9 + 1, index));
     }
     const chosen = chooseLabeledStarIds(stars, { ...wide, scaleX: 2, scaleY: 2 }, estimateBadgeWidth);
     const boxes = stars.filter((item) => chosen.has(item.id)).map((item) => ({

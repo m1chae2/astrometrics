@@ -275,7 +275,7 @@
       "interim_block": "",
       "note": "A small network probe."
     },
-    "observatory_remote_frame_status": {
+    "observatory_remote_frame_locations": {
       "tool_class": "observe",
       "category": "observatory-sync",
       "disposition": "keep",

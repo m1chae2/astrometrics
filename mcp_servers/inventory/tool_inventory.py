@@ -362,7 +362,7 @@ CLASSIFICATION_RULES = (
         "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
     ),
     _rule(
-        r"^observatory_remote_frame_status$",
+        r"^observatory_remote_frame_locations$",
         "observe",
         "high",
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",

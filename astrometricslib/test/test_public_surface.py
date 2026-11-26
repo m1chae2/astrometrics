@@ -182,6 +182,7 @@ EXPECTED_MODULE_NAMES = {
         "build_pixel_query",
         "bump_data_version",
         "connect_db",
+        "existing_stack_path",
         "file_lock",
         "get_camera_data_versions",
         "get_frame_metric_signs",

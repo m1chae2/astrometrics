@@ -16,7 +16,7 @@ from astrometricslib import Target
 from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
-from wayfindinglib.models.session.control_results import FrameStatusReport, FrameSyncResult, LogSyncResult
+from wayfindinglib.models.session.control_results import FrameLocationReport, FrameSyncResult, LogSyncResult
 
 __all__ = ["RemoteControl"]
 
@@ -147,7 +147,7 @@ class RemoteControl(ControlChild):
 
         return remote_transfer_tasks.check_remote_connection(self._context)
 
-    def frame_status(self, target: str | Target) -> FrameStatusReport:
+    def frame_locations(self, target: str | Target) -> FrameLocationReport:
         """Show where a target's frames are: telescope, drive, library.
 
         Gives the count in each place and the frames that are in one place
@@ -162,13 +162,13 @@ class RemoteControl(ControlChild):
 
         Returns
         -------
-        status : `FrameStatusReport`
+        locations : `FrameLocationReport`
             The counts and the differences, with a few file names each.
         """
-        from wayfindinglib.tasks.control_tasks import frame_status
+        from wayfindinglib.tasks.control_tasks import frame_locations
 
-        return FrameStatusReport.model_validate(
-            frame_status.build_frame_status(self._context, _target_id(target))
+        return FrameLocationReport.model_validate(
+            frame_locations.build_frame_locations(self._context, _target_id(target))
         )
 
     @background_job("remote_sync", grace_period_seconds=8.0)

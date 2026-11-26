@@ -6,7 +6,6 @@ cover:
 
 * the nine new reads (declared, served, passing exactly the library
   arguments, and registering no background job for history reads),
-* ``plan:create``,
 * ``handoff:update_state`` with ``planning_time`` and ``clear_planning_time``,
 * ``mosaic:preview`` passing the rotation,
 * ``planetarium:get_visibility`` passing ``end`` and ``include``.
@@ -25,7 +24,6 @@ from backend.services.data.stellar_service import StellarService
 from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.observatory.advisory_service import AdvisoryService
 from backend.services.observatory.mosaic_service import MosaicService
-from backend.services.observatory.plan_service import PlanService
 from wayfindinglib.api.control.safety import SafetyControl
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.review import ObservationReview
@@ -69,9 +67,7 @@ def test_new_methods_are_declared_and_served() -> None:
         assert method in RPC_METHODS
         assert rpc_registry._handlers[method] == ("advisory_service", handler)
     assert rpc_registry._handlers["calibration:query"] == ("astrometrics.processing.calibration", "query")
-    assert rpc_registry._handlers["plan:create"] == ("plan_service", "create_plan")
-    for method in ("calibration:query", "plan:create"):
-        assert method in RPC_METHODS
+    assert "calibration:query" in RPC_METHODS
 
 
 def test_target_report_asks_for_the_quality_kind() -> None:
@@ -143,13 +139,6 @@ def test_safety_status_asks_only_for_the_policy() -> None:
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_safety_status()
     wayfinder.control.safety.status.assert_called_once_with(include=["delegation_policy"])
-
-
-def test_plan_create_makes_an_empty_session_for_the_night() -> None:
-    """``plan:create`` wraps ``create_session``."""
-    wayfinder = _wayfinder()
-    PlanService(wayfinder).create_plan(night_id="2026-10-24")
-    wayfinder.planning.create_session.assert_called_once_with(observing_night_id="2026-10-24")
 
 
 def test_mosaic_preview_passes_the_rotation() -> None:

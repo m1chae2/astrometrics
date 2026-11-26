@@ -69,7 +69,7 @@ def _difference(names: set[str]) -> dict[str, Any]:
     return {"count": len(ordered), "examples": ordered[-EXAMPLE_COUNT:]}
 
 
-def build_frame_status(context: ControlContext, target_id: str) -> dict[str, Any]:
+def build_frame_locations(context: ControlContext, target_id: str) -> dict[str, Any]:
     """Count a target's frames at the telescope, on disk and in the library.
 
     Parameters

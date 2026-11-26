@@ -88,7 +88,6 @@ RPC_METHODS: tuple[str, ...] = (
     "system:health",
     "system:static_mounts",
     "system:frontend_log",
-    "system:completions",
     "system:get_config",
     "system:save_config",
     "system:introspection",
@@ -158,9 +157,7 @@ RPC_METHODS: tuple[str, ...] = (
     "telescope:get_session_alignment",
     "telescope:get_cumulative_tracking_data",
     "telescope:sync_logs",
-    "telescope:get_pointing_model",
     "telescope:get_performance_envelope",
-    "telescope:get_guiding_spectrum",
     # Equipment set-up and control mode
     "observatory:list_cameras",
     "observatory:get_equipment_configuration",
@@ -186,10 +183,8 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:cancel",
     "processing:status",
     "processing:list_jobs",
-    "processing:active_jobs",
     "processing:get_job",
     "processing:delete_job",
-    "processing:jobs_for_target",
     "processing:job_log_tail",
     # A target's current stack in one short answer (a read).
     "processing:stack_summary",
@@ -247,7 +242,6 @@ RPC_METHODS: tuple[str, ...] = (
     # Target library
     "target:list",
     "target:get",
-    "target:get_targets",
     "target:create",
     "target:update",
     "target:delete",
@@ -268,11 +262,9 @@ RPC_METHODS: tuple[str, ...] = (
     "astronomy:spectral_class_summary",
     "astronomy:stars_by_spectral_class",
     "astronomy:get",
-    "astronomy:existing_ids",
     "astronomy:save",
     "astronomy:delete",
     "astronomy:analyze_periodicity",
-    "astronomy:get_stellar_objects",
     "astronomy:get_overlay_stars",
     "astronomy:get_status",
     "astronomy:visible",
@@ -289,20 +281,17 @@ RPC_METHODS: tuple[str, ...] = (
     "planetarium:get_stack_pictures",
     # Camera capture
     "imaging:capture",
-    "imaging:get_active_jobs",
     "imaging:stop_capture",
     # Images and FITS files
     "images:get_target_frame",
     "images:get_light_frame_data",
     "images:convert_fits",
-    "images:get_fits_header",
     "images:measure_star_profile",
     "images:map_position",
     "images:measure_detections",
     "images:delete",
     "images:last",
     # Calibration frames
-    "calibration:get_stats",
     "calibration:measure_sensor_noise",
     "calibration:measure_frames",
     # Mosaics
@@ -317,13 +306,10 @@ RPC_METHODS: tuple[str, ...] = (
     # Night plan and observation packages: read them, edit them, tick a
     # checklist item. A session write sends the `plan:changed` event; a package
     # write sends the `packages:changed` event.
-    "plan:get",
     "plan:current_session",
     "plan:list_packages",
     "plan:package_for_target",
-    "plan:create",
     "plan:create_package",
-    "plan:edit",
     "plan:edit_package",
     "plan:refresh_suggestions",
     "plan:tick_checklist_item",

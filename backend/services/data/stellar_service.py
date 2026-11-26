@@ -244,26 +244,6 @@ class StellarService:
             return
         self._socket_manager.broadcast_ui_event_sync("catalog:changed", {"dataset": "stellar_catalog"})
 
-    def get_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
-        """Read full star records, single-frame detections included.
-
-        Warning: with no ``target_id`` this reads every star in the library
-        into new objects -- about 12 seconds and 2.8 GB on a 274,000-star
-        library -- so it is only for a caller that truly needs all of them.
-        Pass a ``target_id`` to read just that target's stars.
-
-        Returns
-        -------
-        result : `list` of `StellarObject`
-            Stellar objects, optionally only those of ``target_id``.
-        """
-        return (
-            self.astrometrics.stars.query(
-                target_id=target_id or None, detail="objects", include_unresolved=True, limit=None
-            ).objects
-            or []
-        )
-
     def _allowed_image_roots(self) -> list[str]:
         """List the folders an overlay image may be in.
 
@@ -737,23 +717,6 @@ class StellarService:
         if not term:
             raise InvalidArgumentError("Missing search term or star_id")
         return self.get_object_fuzzy(term)
-
-    def get_existing_star_ids(self, star_ids: list[str]) -> list[str]:
-        """Tell which of the given star ids have a record in the library.
-
-        Parameters
-        ----------
-        star_ids : `list` [`str`]
-            The ids to look for. Any number is accepted.
-
-        Returns
-        -------
-        found : `list` [`str`]
-            The ids that have a record, sorted.
-        """
-        if not star_ids:
-            return []
-        return self.astrometrics.stars.query(ids=star_ids, detail="exists", limit=None).found or []
 
     def analyze_periodicity(self, star_id: str) -> StellarObject | None:
         """Search a star's light curve for a repeating pattern, and save it.

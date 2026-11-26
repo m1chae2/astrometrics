@@ -275,19 +275,6 @@ def test_a_new_catalog_version_is_announced_once() -> None:
     )
 
 
-def test_full_star_records_include_single_frame_detections() -> None:
-    """The rare caller that wants every record gets detections too."""
-    service = _service()
-    service.astrometrics.stars.query.return_value = StarQueryResult(
-        detail="objects", objects=[StellarObject(id="HD 1")]
-    )
-
-    assert [star.id for star in service.get_stellar_objects("M 13")] == ["HD 1"]
-    service.astrometrics.stars.query.assert_called_once_with(
-        target_id="M 13", detail="objects", include_unresolved=True, limit=None
-    )
-
-
 def _sky_source(source_id: str, kind: str = "star") -> SkySource:
     """Build one sky source.
 

@@ -3,7 +3,7 @@
  */
 
 import { callBackend, CancelAnalysisResult, CancelProcessingResult } from '../backendApi';
-import { ProcessStatus, AnalysisResult, ProcessingJob } from '../../types/backendTypes';
+import { ProcessStatus, AnalysisResult, ProcessingJob, JobSummary } from '../../types/backendTypes';
 
 /**
  * Initiates image processing (stacking) for a target.
@@ -25,13 +25,41 @@ export async function processTarget(
     }
 }
 
+/** Most unfinished jobs one `jobs:query` call lists (the library's cap). */
+const ACTIVE_JOBS_LIMIT = 50;
+
 /**
- * Fetches all active processing jobs, including their progress.
+ * Turns one job from the job history read into the app's job record.
+ * @param job A job as `jobs:query` lists it.
+ * @return The same job with its progress as two numbers.
+ */
+function toProcessingJob(job: JobSummary): ProcessingJob {
+    const [current, total] = (job.progress ?? '').split('/').map((part) => Number(part));
+    return {
+        id: job.id,
+        targetId: job.target_id ?? '',
+        jobType: job.job_type,
+        status: job.status,
+        progressCurrent: Number.isFinite(current) ? current : undefined,
+        progressTotal: Number.isFinite(total) ? total : undefined,
+        message: job.message ?? null,
+        createdAt: job.created_at ?? null,
+        updatedAt: job.updated_at ?? null,
+        completedAt: job.completed_at ?? null,
+    };
+}
+
+/**
+ * Fetches the jobs running now anywhere in the app, with their progress.
+ *
+ * Reads the job history (`jobs:query` with `active_only`). A job left at
+ * "started" or "running" by a program that stopped is not listed: the
+ * history marks it as stale after an hour without an update.
  */
 export async function fetchAllProcesses(): Promise<ProcessingJob[]> {
     try {
-        const result = await callBackend('processing:active_jobs', {});
-        return result || [];
+        const answer = await callBackend('jobs:query', { active_only: true, limit: ACTIVE_JOBS_LIMIT });
+        return (answer?.jobs ?? []).filter((job) => job.is_active).map(toProcessingJob);
     } catch {
         return [];
     }

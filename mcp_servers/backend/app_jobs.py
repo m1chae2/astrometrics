@@ -732,7 +732,7 @@ async def tool_observatory_remote_sync_frames(target: str, dry_run: bool = False
     return _with_hint(
         reply,
         f"Follow it with jobs_query (target_id {target!r}, job_type remote_sync), and count the frames with "
-        "observatory_remote_frame_status.",
+        "observatory_remote_frame_locations.",
     )
 
 

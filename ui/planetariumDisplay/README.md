@@ -6,11 +6,11 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 
 ## What each folder is for
 
-- `PlanetariumDisplay.tsx` puts the display together: the target and star lists, the sky map, the toolbar, the time bar and the Framing panel.
-- `components/` holds the map and its panels. `CelestialSkyMap.tsx` draws the map, `PlanetariumInfoCard.tsx` is the card for a clicked object, `FramingPanel.tsx` is the framing panel, and `PlanetariumToolbar.tsx`, `PlanetariumContextMenu.tsx`, `PlanetariumDateTimeModal.tsx` and `AlignmentPointCard.tsx` hold the other controls.
-- `hooks/` holds the data hooks. `useTargetPackage.ts` and `useMosaicPreview.ts` serve the package actions (see below).
+- `PlanetariumDisplay.tsx` puts the display together: the left column, the sky map, the toolbar, the time bar and the Framing panel. It keeps the selected object and takes the hand-offs from other displays.
+- `components/` holds the map and its panels. `CelestialSkyMap.tsx` draws the map, `PlanetariumBrowserColumn.tsx` is the left column (see below), `PlanetariumInfoCard.tsx` is the card for a clicked object, `FramingPanel.tsx` is the framing panel, and `PlanetariumToolbar.tsx`, `PlanetariumContextMenu.tsx`, `PlanetariumDateTimeModal.tsx` and `AlignmentPointCard.tsx` hold the other controls.
+- `hooks/` holds the data hooks. `useTargetListFilter.ts` applies the target filters and the horizon box to the left column, `useDrillInColumn.ts` runs its two levels, `useSkyVisibleObjects.ts` picks the stars, target markers and pictures the map draws, and `useSelectedSourceVisibility.ts` asks the backend for the selected object's rise and set times. `useTargetPackage.ts` and `useMosaicPreview.ts` serve the package actions (see below).
 - `layers/` holds the overlays drawn on the map, such as stars, grid, constellations, the field of view and the framing outline (`FramingOverlay.ts`).
-- Another display asks the map to center on a target with the `showOnSky` hand-off (see `ui/common/utils/README.md`). `PlanetariumDisplay.tsx` waits until the target lists have loaded, then acts on it. The `locateStar` hand-off from the Astronomy Manager works the same way. Both arrive even if the Planetarium was hidden when they were sent.
+- Another display asks the map to center on a target with the `showOnSky` hand-off (see `ui/common/utils/README.md`). `PlanetariumDisplay.tsx` waits until the target lists have loaded, then acts on it. The `locateStar` hand-off from the Astronomy Manager works the same way. Both arrive even if the Planetarium was hidden when they were sent. In the other direction, *Open in Astronomy Manager* in the right-click menu sends the `astronomySelectStar` hand-off; no star or display name is written to browser storage.
 - While the Planetarium is hidden, `App.tsx` pauses it: the drawing loop, the time playback and the arrow-key listeners stop, and start again when it is shown. The map's view and the time offset are kept.
 - `webgl/`, `utils/` and `styles/` hold the star renderer, the projection and time helpers and the stylesheets.
 - `tests/` holds the Vitest tests.

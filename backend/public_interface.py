@@ -195,14 +195,16 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:stack_summary",
     # Makes a stack's preview picture again without restacking (a background
     # job; writes the pictures and the target's processed-image pointer). An
-    # optional `stack_path` names one of the target's stacks by camera and
-    # optic; that stack gets its own pictures and the pointer is left alone.
+    # optional `stack_path`, or `camera_id` and `focal_length_mm`, names one of
+    # the target's stacks by camera and optic; that stack gets its own
+    # pictures and the pointer is left alone.
     "processing:remake_preview",
     # The nebulae and galaxies SIMBAD lists inside a target's stack (a read;
     # asks SIMBAD once per stack file and keeps the list beside the stack).
     "processing:list_bright_objects",
     # Saves which object the preview's masked stretch protects on the target
-    # (a write; used the next time the stack or its preview is made).
+    # (a write; used the next time the stack or its preview is made). With
+    # mode "object", a `name` in any spelling picks an object of the list.
     "processing:set_bright_object",
     # What a stack would do with its frames: the frames it would set aside and
     # why, and the darks, flats and bias each exposure group would use (a read;
@@ -231,12 +233,12 @@ RPC_METHODS: tuple[str, ...] = (
     "jobs:query",
     # Astrometry, photometry, spectroscopy and spectral variation analysis.
     # `analyze_image` takes `target_id`, `image_files`, `filter_name`, `type`
-    # and an optional `stages` (a list from astrometry, photometry,
-    # spectroscopy, spectral_variation; omitted, the file type chooses). With
-    # `stages`, an optional `camera_id` and `focal_length_mm` analyze the
-    # target's stack of that camera and optic instead of its main stack. The
-    # library adds a stage first when another needs it and its result is
-    # missing or older than the stack.
+    # and an optional `stages` (a list from the library's selectable stages;
+    # omitted, the backend chooses as the Analyze Target button does). An
+    # optional `camera_id` and `focal_length_mm` analyze the target's stack of
+    # that camera and optic instead of its main stack. The library adds a
+    # stage first when another needs it and its result is missing or older
+    # than the stack.
     "analysis:analyze_image",
     "analysis:get_results",
     "analysis:cancel",

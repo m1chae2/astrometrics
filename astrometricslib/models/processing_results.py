@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
-from astrometricslib.models.target import TargetQualitySummaries
+from astrometricslib.models.target import PreviewBrightObject, TargetQualitySummaries
 
 __all__ = [
     "BrightObjectChoice",
@@ -104,7 +104,8 @@ class BrightObjectChoices(BaseModel):
 
     ``objects`` is empty when the list could not be made, and ``message``
     then says why in plain words. A list read from the saved copy beside the
-    stack has ``from_cache`` set.
+    stack has ``from_cache`` set. ``current`` is the choice saved on the
+    target.
     """
 
     target_id: str
@@ -113,6 +114,9 @@ class BrightObjectChoices(BaseModel):
     # reached), or None when the list was made.
     message: str | None = None
     from_cache: bool = False
+    # The choice saved on the target, or None when the list was made
+    # without a target record.
+    current: PreviewBrightObject | None = None
 
 
 class PreviewSettingsUsed(BaseModel):

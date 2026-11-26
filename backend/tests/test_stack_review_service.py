@@ -112,6 +112,49 @@ def test_a_remake_of_one_configuration_names_its_stack() -> None:
     assert calls[0]["kind"] == "imaging"
 
 
+def test_a_remake_by_camera_and_optic_asks_the_library_for_the_stack() -> None:
+    """A camera and optic are turned into the stack by the library."""
+    calls: list[dict[str, Any]] = []
+
+    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+        """Record the call and give a result.
+
+        Returns
+        -------
+        result : `PreviewRemakeResult`
+            A small result.
+        """
+        calls.append({"target": target, **options})
+        return _result()
+
+    record = SimpleNamespace(stacked_image="/s/M_81_Nikon_300mm.fits", configuration_key="Nikon@300mm")
+    found: list[tuple] = []
+
+    def find_stack_configuration(*arguments: Any) -> SimpleNamespace:
+        """Record the lookup and give the Nikon stack's record.
+
+        Returns
+        -------
+        record : `SimpleNamespace`
+            The stand-in record.
+        """
+        found.append(arguments)
+        return record
+
+    processing = SimpleNamespace(
+        remake_preview=remake_preview, find_stack_configuration=find_stack_configuration
+    )
+    service = StackReviewService(SimpleNamespace(processing=processing))
+
+    reply = service.start_preview_remake("M 81", camera_id="D5300", focal_length_mm=300.0)
+
+    assert found == [("M 81", "D5300", 300.0)]
+    assert calls[0]["stack_path"] == "/s/M_81_Nikon_300mm.fits"
+    assert reply.configuration == "Nikon@300mm"
+    with pytest.raises(InvalidArgumentError, match="spectral"):
+        service.start_preview_remake("M 81", kind="spectral", camera_id="D5300")
+
+
 def test_a_slow_remake_gives_back_to_the_caller_while_it_runs() -> None:
     """A job that outlasts the wait answers ``running``; it still finishes."""
     release = threading.Event()

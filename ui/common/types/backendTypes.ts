@@ -4600,13 +4600,15 @@ export interface BrightObjectChoice {
  *
  * ``objects`` is empty when the list could not be made, and ``message``
  * then says why in plain words. A list read from the saved copy beside the
- * stack has ``from_cache`` set.
+ * stack has ``from_cache`` set. ``current`` is the choice saved on the
+ * target.
  */
 export interface BrightObjectChoices {
   target_id: string;
   objects?: BrightObjectChoice[];
   message?: string | null;
   from_cache?: boolean;
+  current?: PreviewBrightObject | null;
 }
 
 /**
@@ -4763,11 +4765,15 @@ export interface BlinkPair {
  * result : `dict` or `None`
  * The library's result as plain data, when the status is
  * ``"completed"``.
+ * configuration : `str` or `None`
+ * The key of the stack chosen by camera and optic (such as
+ * ``ZWO ASI 533MM Pro@405mm``), when one was chosen that way.
  */
 export interface StackReviewStart {
   status: any;
   job_id?: string | null;
   result?: Record<string, any> | null;
+  configuration?: string | null;
 }
 
 /**

@@ -24,14 +24,6 @@ JOB_TOOL_SPECS: list[tuple[str, str, dict[str, Any], ToolFunction]] = []
 """The job tools: name, description, argument schema and function.
 `mcp_servers.backend.definition.build_registry` registers them."""
 
-ANALYSIS_STAGES = ["astrometry", "photometry", "spectroscopy", "spectral_variation"]
-"""The stages the Analyze Target menu can run by name. The backend's
-``SELECTABLE_ANALYSIS_STAGES`` is the same list."""
-
-SPECTRAL_FILTER_NAMES = ("SPEC", "Spectroscopy", "Star Analyzer 200")
-"""Filter names that mean spectrum frames, as in the UI's
-``analysisSelection.ts``."""
-
 CANCELLABLE_JOB_TYPES = ["stacking", "analysis", "preview"]
 """The kinds of job the app's Cancel buttons stop."""
 
@@ -277,116 +269,6 @@ def _first_text(*values: Any) -> str | None:
     return next((value for value in values if isinstance(value, str) and value), None)
 
 
-def _configuration_label(record: dict[str, Any]) -> str:
-    """Name one stack configuration, such as ``Nikon D5300@300mm``.
-
-    Parameters
-    ----------
-    record : `dict` [`str`, `Any`]
-        One entry of the target's stacks by configuration.
-
-    Returns
-    -------
-    label : `str`
-        The camera, then ``@`` and the whole focal length when known.
-    """
-    camera = _first_text(record.get("camera")) or "unknown camera"
-    focal_length = record.get("focalLengthMm", record.get("focal_length_mm"))
-    return camera if focal_length is None else f"{camera}@{round(float(focal_length))}mm"
-
-
-def _same_camera_name(recorded: str, wanted: str) -> bool:
-    """Say whether a camera name the caller gave names a recorded camera.
-
-    Case, spaces and punctuation are ignored, and part of a name is enough
-    (``D5300`` names ``Nikon DSLR DSC D5300``).
-
-    Parameters
-    ----------
-    recorded : `str`
-        The camera a stack record names.
-    wanted : `str`
-        The camera the caller gave.
-
-    Returns
-    -------
-    same : `bool`
-        `True` when the plain letters and digits of ``wanted`` are part of
-        those of ``recorded``.
-    """
-
-    def plain(text: str) -> str:
-        """Keep only the lower-case letters and digits of a name.
-
-        Returns
-        -------
-        plain : `str`
-            The letters and digits.
-        """
-        return "".join(character for character in text.lower() if character.isalnum())
-
-    return bool(plain(wanted)) and plain(wanted) in plain(recorded)
-
-
-async def _chosen_configuration(
-    target: str, camera_id: str | None, focal_length_mm: float | None
-) -> dict[str, Any]:
-    """Find the one stack of the target taken with a camera and optic.
-
-    Parameters
-    ----------
-    target : `str`
-        The target id.
-    camera_id : `str` or `None`
-        The camera, or part of its name.
-    focal_length_mm : `float` or `None`
-        The optic's focal length in millimeters.
-
-    Returns
-    -------
-    record : `dict` [`str`, `Any`]
-        The matching entry of the target's stacks by configuration.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If no stack, or more than one, matches. The message lists the
-        target's configurations.
-    """
-    record = await execute_rpc("target:get", {"target_id": target, "detail": "summary"})
-    stacking = (record.get("stacking") if isinstance(record, dict) else None) or {}
-    by_configuration = stacking.get("stacksByConfiguration") or stacking.get("stacks_by_configuration") or {}
-    configurations = [entry for entry in by_configuration.values() if isinstance(entry, dict)]
-    matches = []
-    for entry in configurations:
-        if camera_id and not _same_camera_name(_first_text(entry.get("camera")) or "", camera_id):
-            continue
-        focal_length = entry.get("focalLengthMm", entry.get("focal_length_mm"))
-        if focal_length_mm is not None and (
-            focal_length is None or round(float(focal_length)) != round(float(focal_length_mm))
-        ):
-            continue
-        if _first_text(entry.get("stackedImage"), entry.get("stacked_image")):
-            matches.append(entry)
-    if len(matches) == 1:
-        return matches[0]
-    labels = sorted(_configuration_label(entry) for entry in configurations)
-    asked = f"camera {camera_id!r}" if camera_id else "any camera"
-    asked += f" at {focal_length_mm:g} mm" if focal_length_mm is not None else ""
-    if matches:
-        raise InvalidArgumentError(
-            f"Target {target!r} has more than one stack for {asked}: "
-            f"{', '.join(sorted(_configuration_label(entry) for entry in matches))}. "
-            "Give both camera_id and focal_length_mm.",
-            details={"target": target, "configurations": labels},
-        )
-    raise InvalidArgumentError(
-        f"Target {target!r} has no stack for {asked}. Its configurations are: "
-        f"{', '.join(labels) or 'none recorded (stack the target first)'}.",
-        details={"target": target, "configurations": labels},
-    )
-
-
 @tool(
     "processing_analyze",
     (
@@ -410,8 +292,11 @@ async def _chosen_configuration(
             "target": {"type": "string", "description": 'The target id, such as "M 13".'},
             "stages": {
                 "type": "array",
-                "items": {"type": "string", "enum": ANALYSIS_STAGES},
-                "description": "The stages to run. Default: the Analyze Target button's choice.",
+                "items": {"type": "string"},
+                "description": (
+                    "The stages to run: astrometry, photometry, spectroscopy or spectral_variation. "
+                    "Default: the Analyze Target button's choice."
+                ),
             },
             "camera_id": {
                 "type": "string",
@@ -434,13 +319,16 @@ async def tool_processing_analyze(
 ) -> Any:
     """Start the job the Analyze Target button starts.
 
+    The backend checks the stages, chooses them when none are given, and
+    finds the stack of the camera and optic.
+
     Parameters
     ----------
     target : `str`
         The target id.
     stages : `list` [`str`], optional
-        The stages to run. When omitted, photometry and spectroscopy for a
-        target with both stacks, or the stage of the one stack it has.
+        The stages to run. When omitted, the backend chooses as the button
+        does.
     camera_id : `str`, optional
         Analyze the target's stack of this camera (``processing_stack``'s
         meaning: the full name or part of it). The main stack by default.
@@ -451,110 +339,22 @@ async def tool_processing_analyze(
     -------
     reply : `Any`
         The backend's ``analysis:analyze_image`` answer (``status``
-        ``started`` or ``already_running``, ``jobId`` and ``logFile``) with
-        ``stages`` and ``paths`` as sent, ``configuration`` (the chosen
-        camera and optic, when one was asked for), and how to follow it.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If a stage is not one the app can run, or the list is empty; if the
-        camera and optic name no stack of the target, or more than one; or
-        if a spectral stage is asked for another configuration than the
-        main one.
-    NotFoundError
-        If a stage has nothing to work on (no stack, or no raw spectrum
-        frames for spectral_variation).
+        ``started`` or ``already_running``, ``jobId``, ``logFile``,
+        ``stages`` and, for a chosen camera and optic, ``configuration``),
+        with how to follow it.
     """
-    if stages is not None:
-        unknown = sorted({str(stage) for stage in stages} - set(ANALYSIS_STAGES))
-        if unknown or not stages:
-            raise InvalidArgumentError(
-                f"Unknown or missing analysis stage(s): {', '.join(unknown) or 'none given'}. "
-                f"Choose from: {', '.join(ANALYSIS_STAGES)}.",
-                details={"stages": stages},
-            )
-    files = await execute_rpc("target:get_files", {"target_id": target})
-    files = files if isinstance(files, dict) else {}
-    imaging_stack = _first_text(files.get("stackedImage"), files.get("stacked_image"))
-    spectral_stack = _first_text(files.get("stackedSpectralTarget"), files.get("stacked_spectral_target"))
-    configuration: dict[str, Any] | None = None
-    if camera_id or focal_length_mm is not None:
-        configuration = await _chosen_configuration(target, camera_id, focal_length_mm)
-        chosen_stack = _first_text(configuration.get("stackedImage"), configuration.get("stacked_image"))
-        if chosen_stack != imaging_stack:
-            # The spectral stack belongs to the main configuration; the
-            # spectral frames are not kept apart by camera and optic.
-            spectral_requested = [
-                stage for stage in stages or [] if stage in ("spectroscopy", "spectral_variation")
-            ]
-            if spectral_requested:
-                raise InvalidArgumentError(
-                    f"Spectral stacks are kept only for the main configuration of {target!r}, not for "
-                    f"{_configuration_label(configuration)}. Choose astrometry or photometry.",
-                    details={"target": target, "stages": spectral_requested},
-                )
-            imaging_stack = chosen_stack
-            spectral_stack = None
-    if stages is None:
-        if imaging_stack and spectral_stack:
-            chosen = ["photometry", "spectroscopy"]
-        elif imaging_stack:
-            chosen = ["photometry"]
-        elif spectral_stack:
-            chosen = ["spectroscopy"]
-        else:
-            raise NotFoundError(
-                f"Target {target!r} has no stack to analyze. Stack it first with processing_stack.",
-                details={"target": target},
-            )
-    else:
-        chosen = [stage for stage in ANALYSIS_STAGES if stage in stages]
-
-    paths: list[str] = []
-    for stage in chosen:
-        if stage in ("astrometry", "photometry"):
-            needed = [imaging_stack] if imaging_stack else []
-        elif stage == "spectroscopy":
-            needed = [spectral_stack] if spectral_stack else []
-        else:
-            needed = [
-                frame["path"]
-                for frame in files.get("files") or []
-                if frame.get("filter") in SPECTRAL_FILTER_NAMES and frame.get("path")
-            ]
-        if not needed:
-            raise NotFoundError(
-                f"Target {target!r} has nothing for the {stage} stage to work on. Stack the "
-                f"{'imaging' if stage in ('astrometry', 'photometry') else 'spectral'} frames first.",
-                details={"target": target, "stage": stage},
-            )
-        paths.extend(path for path in needed if path not in paths)
-
-    only_spectral = all(stage in ("spectroscopy", "spectral_variation") for stage in chosen)
     reply = await execute_rpc(
         "analysis:analyze_image",
         _without_empty({
             "target_id": target,
-            "image_files": paths,
-            "filter_name": "SPEC" if only_spectral else None,
-            "stages": chosen,
-            "camera_id": _first_text(configuration.get("camera")) if configuration else None,
-            "focal_length_mm": (
-                configuration.get("focalLengthMm", configuration.get("focal_length_mm"))
-                if configuration
-                else None
-            ),
+            "stages": stages,
+            "camera_id": camera_id,
+            "focal_length_mm": focal_length_mm,
         }),
     )
-    reply = _with_hint(
+    return _with_hint(
         reply, FOLLOW_A_JOB + " Read the results with star_query and processing_get_stack_identification."
     )
-    if isinstance(reply, dict):
-        reply = {**reply, "stages": chosen, "paths": paths}
-        if configuration:
-            reply["configuration"] = _configuration_label(configuration)
-    return reply
 
 
 @tool(
@@ -713,21 +513,8 @@ ENHANCE_APPLIES = (
 ENHANCE_MODES = {"target": "auto", "auto": "auto", "nothing": "off", "off": "off"}
 """The words for the two fixed Enhance choices -> the backend's mode."""
 
-
-def _fold_name(name: str) -> str:
-    """Make an object name comparable: lower case, spaces removed.
-
-    Parameters
-    ----------
-    name : `str`
-        A SIMBAD name such as ``"NAME Cocoon Nebula"`` or ``"NGC 7635"``.
-
-    Returns
-    -------
-    folded : `str`
-        The name without spaces, in lower case.
-    """
-    return "".join(name.split()).lower()
+ENHANCE_WORDS = {"auto": "target", "off": "nothing"}
+"""The backend's two fixed modes -> the words the tool uses for them."""
 
 
 @tool(
@@ -773,48 +560,24 @@ async def tool_processing_enhance(target: str, choice: str | None = None) -> Any
     reply : `dict`
         Without a choice: ``current`` (the saved choice), ``objects`` and
         ``message`` (why there are none, else `None`). With one: ``saved``
-        (the backend's record) and ``applies``.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If the choice is neither of the two words nor an object in the
-        frame.
+        (the backend's record) and ``applies``. The backend refuses a
+        choice that is neither of the two words nor an object in the frame.
     """
-    listing = await execute_rpc("processing:list_bright_objects", {"target": target})
-    listing = listing if isinstance(listing, dict) else {}
-    objects = [item for item in listing.get("objects") or [] if isinstance(item, dict)]
-    message = listing.get("message")
     if choice is None:
-        record = await execute_rpc("target:get", {"target_id": target, "detail": "summary"})
-        record = record if isinstance(record, dict) else {}
-        saved = record.get("preview_bright_object") or record.get("previewBrightObject") or {}
+        listing = await execute_rpc("processing:list_bright_objects", {"target": target})
+        listing = listing if isinstance(listing, dict) else {}
+        saved = listing.get("current") or {}
         mode = saved.get("mode", "auto")
-        named = saved.get("simbad_id") or saved.get("simbadId")
-        current = {"auto": "target", "off": "nothing"}.get(mode, named)
-        return {"current": current, "objects": objects, "message": message}
+        return {
+            "current": ENHANCE_WORDS.get(mode, saved.get("simbadId")),
+            "objects": listing.get("objects") or [],
+            "message": listing.get("message"),
+        }
     mode = ENHANCE_MODES.get(choice.strip().lower())
-    if mode is not None:
-        saved = await execute_rpc("processing:set_bright_object", {"target": target, "mode": mode})
-        return {"saved": saved, "applies": ENHANCE_APPLIES}
-    wanted = _fold_name(choice)
-    match = next((item for item in objects if _fold_name(str(item.get("simbad_id", ""))) == wanted), None)
-    if match is None:
-        names = ", ".join(str(item.get("simbad_id")) for item in objects) or "none"
-        raise InvalidArgumentError(
-            f"{choice!r} is not target, nothing or an object in {target!r}'s frame. Objects in the frame: "
-            f"{names}." + (f" {message}" if message else ""),
-            details={"target": target, "choice": choice},
-        )
-    payload = {
-        "target": target,
-        "mode": "object",
-        "simbad_id": match["simbad_id"],
-        "ra_deg": match["ra_deg"],
-        "dec_deg": match["dec_deg"],
-        "major_axis_arcmin": match.get("major_axis_arcmin"),
-    }
-    saved = await execute_rpc("processing:set_bright_object", _without_empty(payload))
+    parameters = (
+        {"target": target, "mode": mode} if mode else {"target": target, "mode": "object", "name": choice}
+    )
+    saved = await execute_rpc("processing:set_bright_object", parameters)
     return {"saved": saved, "applies": ENHANCE_APPLIES}
 
 
@@ -908,30 +671,12 @@ async def tool_processing_remake_preview(
         The backend's ``processing:remake_preview`` answer: ``status``
         (``completed`` with ``result``, or ``running``) and ``job_id``,
         with ``configuration`` (the chosen camera and optic, when one was
-        asked for).
-
-    Raises
-    ------
-    InvalidArgumentError
-        If the camera and optic name no stack of the target, or more than
-        one, or are given for a spectral stack.
+        asked for). The backend refuses a camera and optic that name no
+        stack of the target, or more than one, or are given for a spectral
+        stack.
     """
-    configuration: dict[str, Any] | None = None
-    if camera_id or focal_length_mm is not None:
-        if kind == "spectral":
-            raise InvalidArgumentError(
-                f"Spectral stacks are kept only for the main configuration of {target!r}. "
-                "Leave camera_id and focal_length_mm out, or choose kind imaging.",
-                details={"target": target},
-            )
-        configuration = await _chosen_configuration(target, camera_id, focal_length_mm)
     parameters = _without_empty({
         "target_id": target,
-        "stack_path": (
-            _first_text(configuration.get("stackedImage"), configuration.get("stacked_image"))
-            if configuration
-            else None
-        ),
         "kind": kind,
         "denoise": denoise,
         "denoise_strength": denoise_strength,
@@ -939,11 +684,10 @@ async def tool_processing_remake_preview(
         "starnet": starnet,
         "star_strength": star_strength,
         "star_stretch": star_stretch,
+        "camera_id": camera_id,
+        "focal_length_mm": focal_length_mm,
     })
-    reply = _with_hint(await execute_rpc("processing:remake_preview", parameters), FOLLOW_A_JOB)
-    if configuration and isinstance(reply, dict):
-        reply = {**reply, "configuration": _configuration_label(configuration)}
-    return reply
+    return _with_hint(await execute_rpc("processing:remake_preview", parameters), FOLLOW_A_JOB)
 
 
 @tool(

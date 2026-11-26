@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib import FrameRecord, Target
-from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import JobStore
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.processing.job_service import JobService
@@ -266,46 +266,135 @@ class TestChosenStages:
         assert checked == ["astrometry", "spectroscopy", "spectral_variation"]
         assert AnalysisOrchestrator._checked_stages(None) is None
 
-    def test_chosen_stages_reach_the_worker(self) -> None:
-        """Verify `stages` is handed to the job and `None` is left alone."""
+    @staticmethod
+    def _submitting_orchestrator(target: Target | None) -> AnalysisOrchestrator:
+        """Build an orchestrator that records the job it would submit.
+
+        Parameters
+        ----------
+        target : `Target` or `None`
+            The target the target service answers with.
+
+        Returns
+        -------
+        orchestrator : `AnalysisOrchestrator`
+            The orchestrator, with ``_submit_job`` recorded.
+        """
         orchestrator = _make_orchestrator()
         orchestrator._job_service = MagicMock()
         orchestrator._job_service.get_jobs_for_target.return_value = []
         orchestrator._submit_job = MagicMock(return_value="job1")
         orchestrator._config_service.get_logs_path.return_value = Path("/tmp")
+        orchestrator._target_service.get_targets.return_value = target
+        return orchestrator
 
-        orchestrator.analyze_image("M 57", ["/lib/a.fits"], stages=["spectroscopy", "photometry"])
+    @staticmethod
+    def _target_with_stacks(tmp_path: Path, imaging: bool, spectral: bool) -> Target:
+        """Build a target with an imaging stack, a spectral stack, both, none.
+
+        Returns
+        -------
+        target : `Target`
+            The target, whose stack files exist in ``tmp_path``.
+        """
+        target = Target(id="M 57")
+        if imaging:
+            (tmp_path / "M_57_L.fits").write_bytes(b"")
+            target.stacking.stacked_image = str(tmp_path / "M_57_L.fits")
+        if spectral:
+            (tmp_path / "M_57_SPEC.fits").write_bytes(b"")
+            target.spectral_stacking.stacked_image = str(tmp_path / "M_57_SPEC.fits")
+        return target
+
+    def test_chosen_stages_reach_the_worker(self) -> None:
+        """Verify `stages` reaches the job; sent files alone choose by kind."""
+        orchestrator = self._submitting_orchestrator(None)
+
+        reply = orchestrator.analyze_image("M 57", ["/lib/a.fits"], stages=["spectroscopy", "photometry"])
         orchestrator.analyze_image("M 57", ["/lib/a.fits"])
 
         assert orchestrator._submit_job.call_args_list[0].args[-2] == ["photometry", "spectroscopy"]
+        assert reply["stages"] == ["photometry", "spectroscopy"]
         assert orchestrator._submit_job.call_args_list[1].args[-2] is None
 
-    def test_a_chosen_camera_and_optic_reach_the_worker(self) -> None:
-        """Verify the camera and optic of the stack go to the job."""
-        orchestrator = _make_orchestrator()
-        orchestrator._job_service = MagicMock()
-        orchestrator._job_service.get_jobs_for_target.return_value = []
-        orchestrator._submit_job = MagicMock(return_value="job1")
-        orchestrator._config_service.get_logs_path.return_value = Path("/tmp")
+    @pytest.mark.parametrize(
+        ("imaging", "spectral", "files", "expected"),
+        [
+            (True, True, ["/lib/a.fits"], ["photometry", "spectroscopy"]),
+            (True, True, [], ["photometry", "spectroscopy"]),
+            (True, False, [], ["photometry"]),
+            (False, True, [], ["spectroscopy"]),
+            (True, False, ["/lib/a.fits"], None),
+        ],
+    )
+    def test_the_backend_chooses_the_stages_when_none_are_given(
+        self, tmp_path: Path, imaging: bool, spectral: bool, files: list[str], expected: list[str] | None
+    ) -> None:
+        """Verify the button's choice: both stacks, else the one stack sent."""
+        orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, imaging, spectral))
 
-        orchestrator.analyze_image(
-            "M 27", ["/lib/nikon.fits"], stages=["photometry"], camera_id="Nikon D5300", focal_length_mm=300.0
+        reply = orchestrator.analyze_image("M 57", files)
+
+        assert orchestrator._submit_job.call_args.args[-2] == expected
+        assert reply["stages"] == expected
+
+    def test_no_stack_and_no_files_is_refused(self, tmp_path: Path) -> None:
+        """Verify a target with nothing to analyze is refused before a job."""
+        orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, False, False))
+
+        with pytest.raises(NotFoundError, match="no stack to analyze"):
+            orchestrator.analyze_image("M 57", [])
+
+        orchestrator._submit_job.assert_not_called()
+
+    def test_a_stage_with_nothing_to_work_on_is_refused(self, tmp_path: Path) -> None:
+        """Verify spectroscopy with no spectral stack or files is refused."""
+        orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, True, False))
+
+        with pytest.raises(NotFoundError, match="spectroscopy"):
+            orchestrator.analyze_image("M 57", [], stages=["spectroscopy"])
+        with pytest.raises(NotFoundError, match="spectral_variation"):
+            orchestrator.analyze_image("M 57", [], stages=["spectral_variation"])
+
+        orchestrator._submit_job.assert_not_called()
+
+    def test_a_chosen_camera_and_optic_reach_the_worker(self, tmp_path: Path) -> None:
+        """Verify the library finds the stack; its camera reaches the job."""
+        orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, True, True))
+        orchestrator.astrometrics.processing.find_stack_configuration.return_value = SimpleNamespace(
+            configuration_key="Nikon DSLR DSC D5300@300mm",
+            camera="Nikon DSLR DSC D5300",
+            focal_length_mm=300.0,
+            stacked_image=str(tmp_path / "M_57_Nikon_300.fits"),
         )
-        orchestrator.analyze_image("M 27", ["/lib/a.fits"], stages=["photometry"])
 
+        reply = orchestrator.analyze_image("M 57", [], camera_id="D5300", focal_length_mm=300.0)
+        orchestrator.analyze_image("M 57", [], stages=["photometry"])
+
+        orchestrator.astrometrics.processing.find_stack_configuration.assert_called_once_with(
+            "M 57", "D5300", 300.0
+        )
         assert orchestrator._submit_job.call_args_list[0].args[-1] == {
-            "camera_id": "Nikon D5300",
+            "camera_id": "Nikon DSLR DSC D5300",
             "focal_length_mm": 300.0,
         }
+        # Another camera has no spectral stack: the choice is photometry.
+        assert orchestrator._submit_job.call_args_list[0].args[-2] == ["photometry"]
+        assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
         assert orchestrator._submit_job.call_args_list[1].args[-1] == {}
 
-    def test_a_camera_without_stages_is_refused(self) -> None:
-        """Verify a camera or optic needs the stages, and no job starts."""
-        orchestrator = _make_orchestrator()
-        orchestrator._submit_job = MagicMock()
+    def test_a_spectral_stage_for_another_camera_is_refused(self, tmp_path: Path) -> None:
+        """Verify spectral stacks belong to the main configuration only."""
+        orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, True, True))
+        orchestrator.astrometrics.processing.find_stack_configuration.return_value = SimpleNamespace(
+            configuration_key="Nikon DSLR DSC D5300@300mm",
+            camera="Nikon DSLR DSC D5300",
+            focal_length_mm=300.0,
+            stacked_image=str(tmp_path / "M_57_Nikon_300.fits"),
+        )
 
-        with pytest.raises(InvalidArgumentError, match="stages"):
-            orchestrator.analyze_image("M 27", ["/lib/a.fits"], camera_id="Nikon D5300")
+        with pytest.raises(InvalidArgumentError, match="only for the main configuration"):
+            orchestrator.analyze_image("M 57", [], stages=["spectroscopy"], camera_id="Nikon")
 
         orchestrator._submit_job.assert_not_called()
 

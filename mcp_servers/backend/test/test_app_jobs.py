@@ -166,217 +166,56 @@ async def test_identify_stack_refuses_a_target_with_no_stack(monkeypatch: pytest
     assert [request["method"] for request in requests] == ["target:get"]
 
 
-BOTH_STACKS = {
-    "files": [
-        {"path": "/raw/L_1.fits", "filter": "L"},
-        {"path": "/raw/S_1.fits", "filter": "SPEC"},
-        {"path": "/raw/S_2.fits", "filter": "SPEC"},
-    ],
-    "stackedImage": "/stacks/M_13_L.fits",
-    "stackedSpectralTarget": "/stacks/M_13_SPEC.fits",
-}
-"""A target's file list: an imaging stack, a spectral stack, raw spectrum
-frames."""
-
 STARTED = {"status": "started", "jobId": "job-12", "logFile": "/logs/analysis.log"}
 """The backend's answer when the analysis job starts."""
 
 
 @pytest.mark.anyio
-async def test_analyze_with_both_stacks_runs_photometry_and_spectroscopy(
+async def test_analyze_without_stages_leaves_the_choice_to_the_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No stages and two stacks send both stacks, as the button does."""
-    requests = fake_backend(monkeypatch, {"target:get_files": BOTH_STACKS, "analysis:analyze_image": STARTED})
+    """No stages sends only the target, and the backend chooses the stages."""
+    chosen = {**STARTED, "stages": ["photometry", "spectroscopy"]}
+    requests = fake_backend(monkeypatch, {"analysis:analyze_image": chosen})
 
     reply = await app_jobs.tool_processing_analyze("M 13")
 
-    assert [request["method"] for request in requests] == ["target:get_files", "analysis:analyze_image"]
-    assert requests[1]["params"] == {
-        "target_id": "M 13",
-        "image_files": ["/stacks/M_13_L.fits", "/stacks/M_13_SPEC.fits"],
-        "stages": ["photometry", "spectroscopy"],
-    }
+    assert [request["method"] for request in requests] == ["analysis:analyze_image"]
+    assert requests[0]["params"] == {"target_id": "M 13"}
     assert reply["jobId"] == "job-12"
     assert reply["stages"] == ["photometry", "spectroscopy"]
-    assert reply["paths"] == ["/stacks/M_13_L.fits", "/stacks/M_13_SPEC.fits"]
     assert "jobs_query" in reply["follow"]
 
 
 @pytest.mark.anyio
-async def test_analyze_with_one_stack_runs_that_stacks_stage(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only a spectral stack gets spectroscopy, with the spectral filter."""
-    only_spectral = {"files": [], "stackedImage": None, "stackedSpectralTarget": "/stacks/M_13_SPEC.fits"}
-    requests = fake_backend(
-        monkeypatch, {"target:get_files": only_spectral, "analysis:analyze_image": STARTED}
+async def test_analyze_forwards_the_stages_camera_and_optic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stages, camera and focal length go to the backend unchanged."""
+    answer = {**STARTED, "stages": ["photometry"], "configuration": "Nikon DSLR DSC D5300@300mm"}
+    requests = fake_backend(monkeypatch, {"analysis:analyze_image": answer})
+
+    reply = await app_jobs.tool_processing_analyze(
+        "M 27", stages=["photometry"], camera_id="D5300", focal_length_mm=300
     )
 
-    await app_jobs.tool_processing_analyze("M 13")
-
-    assert requests[1]["params"] == {
-        "target_id": "M 13",
-        "image_files": ["/stacks/M_13_SPEC.fits"],
-        "filter_name": "SPEC",
-        "stages": ["spectroscopy"],
+    assert requests[0]["params"] == {
+        "target_id": "M 27",
+        "stages": ["photometry"],
+        "camera_id": "D5300",
+        "focal_length_mm": 300,
     }
-
-
-@pytest.mark.anyio
-async def test_analyze_with_no_stack_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No stages and no stack is a clear error, and no job starts."""
-    requests = fake_backend(
-        monkeypatch, {"target:get_files": {"files": [], "stackedImage": None, "stackedSpectralTarget": None}}
-    )
-
-    with pytest.raises(NotFoundError, match="no stack to analyze"):
-        await app_jobs.tool_processing_analyze("M 13")
-
-    assert [request["method"] for request in requests] == ["target:get_files"]
-
-
-@pytest.mark.anyio
-async def test_analyze_with_stages_sends_each_stages_stack(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Named stages send their own stacks; variation sends raw frames."""
-    requests = fake_backend(monkeypatch, {"target:get_files": BOTH_STACKS, "analysis:analyze_image": STARTED})
-
-    await app_jobs.tool_processing_analyze("M 13", stages=["astrometry"])
-    await app_jobs.tool_processing_analyze("M 13", stages=["spectral_variation"])
-
-    assert requests[1]["params"] == {
-        "target_id": "M 13",
-        "image_files": ["/stacks/M_13_L.fits"],
-        "stages": ["astrometry"],
-    }
-    assert requests[3]["params"] == {
-        "target_id": "M 13",
-        "image_files": ["/raw/S_1.fits", "/raw/S_2.fits"],
-        "filter_name": "SPEC",
-        "stages": ["spectral_variation"],
-    }
-
-
-@pytest.mark.anyio
-async def test_analyze_refuses_an_unknown_stage_before_any_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stage the app cannot run is refused and the backend is not called."""
-    requests = fake_backend(monkeypatch, {})
-
-    with pytest.raises(InvalidArgumentError, match="bogus"):
-        await app_jobs.tool_processing_analyze("M 13", stages=["photometry", "bogus"])
-    with pytest.raises(InvalidArgumentError, match="none given"):
-        await app_jobs.tool_processing_analyze("M 13", stages=[])
-
-    assert requests == []
-
-
-@pytest.mark.anyio
-async def test_analyze_refuses_a_stage_with_nothing_to_work_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Spectroscopy on a target with no spectral stack is refused."""
-    only_imaging = {"files": [], "stackedImage": "/stacks/M_13_L.fits", "stackedSpectralTarget": None}
-    fake_backend(monkeypatch, {"target:get_files": only_imaging})
-
-    with pytest.raises(NotFoundError, match="spectroscopy"):
-        await app_jobs.tool_processing_analyze("M 13", stages=["spectroscopy"])
+    assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
 
 
 @pytest.mark.anyio
 async def test_analyze_passes_an_already_running_answer_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """The already_running answer reaches the caller with the job's id."""
     running = {"status": "already_running", "jobId": "job-3", "logFile": "/logs/analysis.log"}
-    fake_backend(monkeypatch, {"target:get_files": BOTH_STACKS, "analysis:analyze_image": running})
+    fake_backend(monkeypatch, {"analysis:analyze_image": running})
 
     reply = await app_jobs.tool_processing_analyze("M 13")
 
     assert reply["status"] == "already_running"
     assert reply["jobId"] == "job-3"
-
-
-M_27_RECORD = {
-    "id": "M 27",
-    "stacking": {
-        "stackedImage": "/stacks/M_27_ASI_405.fits",
-        "stacksByConfiguration": {
-            "asi@405": {
-                "camera": "ZWO ASI 533MM Pro",
-                "focalLengthMm": 405.0,
-                "stackedImage": "/stacks/M_27_ASI_405.fits",
-                "isPreferred": True,
-            },
-            "nikon@405": {
-                "camera": "Nikon DSLR DSC D5300",
-                "focalLengthMm": 405.0,
-                "stackedImage": "/stacks/M_27_Nikon_405.fits",
-            },
-            "nikon@300": {
-                "camera": "Nikon DSLR DSC D5300",
-                "focalLengthMm": 300.0,
-                "stackedImage": "/stacks/M_27_Nikon_300.fits",
-            },
-        },
-    },
-}
-"""A target with one stack per camera and optic; the ASI533 one is main."""
-
-M_27_FILES = {
-    "files": [{"path": "/raw/S_1.fits", "filter": "SPEC"}],
-    "stackedImage": "/stacks/M_27_ASI_405.fits",
-    "stackedSpectralTarget": "/stacks/M_27_SPEC.fits",
-}
-"""M 27's file list: the main imaging stack and a spectral stack."""
-
-
-@pytest.mark.anyio
-async def test_analyze_a_configuration_sends_that_configurations_stack(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A camera and optic send their own stack, camera and focal length."""
-    requests = fake_backend(
-        monkeypatch,
-        {"target:get_files": M_27_FILES, "target:get": M_27_RECORD, "analysis:analyze_image": STARTED},
-    )
-
-    reply = await app_jobs.tool_processing_analyze("M 27", camera_id="D5300", focal_length_mm=300)
-
-    assert requests[-1]["params"] == {
-        "target_id": "M 27",
-        "image_files": ["/stacks/M_27_Nikon_300.fits"],
-        "stages": ["photometry"],
-        "camera_id": "Nikon DSLR DSC D5300",
-        "focal_length_mm": 300.0,
-    }
-    assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
-
-
-@pytest.mark.anyio
-async def test_analyze_the_main_configuration_keeps_the_buttons_choice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Naming the main stack's camera and optic keeps both stacks."""
-    requests = fake_backend(
-        monkeypatch,
-        {"target:get_files": M_27_FILES, "target:get": M_27_RECORD, "analysis:analyze_image": STARTED},
-    )
-
-    await app_jobs.tool_processing_analyze("M 27", camera_id="ASI 533", focal_length_mm=405)
-
-    assert requests[-1]["params"]["image_files"] == ["/stacks/M_27_ASI_405.fits", "/stacks/M_27_SPEC.fits"]
-    assert requests[-1]["params"]["stages"] == ["photometry", "spectroscopy"]
-
-
-@pytest.mark.anyio
-async def test_analyze_refuses_an_unknown_or_unclear_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unknown or ambiguous camera and optic list the configurations."""
-    requests = fake_backend(monkeypatch, {"target:get_files": M_27_FILES, "target:get": M_27_RECORD})
-
-    with pytest.raises(InvalidArgumentError, match=r"has no stack for .*Nikon DSLR DSC D5300@300mm"):
-        await app_jobs.tool_processing_analyze("M 27", camera_id="Canon")
-    with pytest.raises(InvalidArgumentError, match="more than one stack"):
-        await app_jobs.tool_processing_analyze("M 27", camera_id="Nikon")
-    with pytest.raises(InvalidArgumentError, match="only for the main configuration"):
-        await app_jobs.tool_processing_analyze(
-            "M 27", stages=["spectroscopy"], camera_id="Nikon", focal_length_mm=300
-        )
-
-    assert "analysis:analyze_image" not in [request["method"] for request in requests]
 
 
 @pytest.mark.anyio
@@ -394,38 +233,15 @@ async def test_remake_preview_starts_the_apps_preview_job(monkeypatch: pytest.Mo
 
 
 @pytest.mark.anyio
-async def test_remake_preview_of_a_configuration_sends_that_configurations_stack(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A camera and optic send their own stack to the remake."""
-    requests = fake_backend(
-        monkeypatch,
-        {"target:get": M_27_RECORD, "processing:remake_preview": {"status": "running", "job_id": "job-12"}},
-    )
+async def test_remake_preview_forwards_the_camera_and_optic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A camera and optic go to the backend, which finds their stack."""
+    answer = {"status": "running", "job_id": "job-12", "configuration": "Nikon DSLR DSC D5300@300mm"}
+    requests = fake_backend(monkeypatch, {"processing:remake_preview": answer})
 
     reply = await app_jobs.tool_processing_remake_preview("M 27", camera_id="D5300", focal_length_mm=300)
 
-    assert requests[-1]["method"] == "processing:remake_preview"
-    assert requests[-1]["params"] == {"target_id": "M 27", "stack_path": "/stacks/M_27_Nikon_300.fits"}
+    assert requests[0]["params"] == {"target_id": "M 27", "camera_id": "D5300", "focal_length_mm": 300}
     assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
-    assert reply["job_id"] == "job-12"
-
-
-@pytest.mark.anyio
-async def test_remake_preview_refuses_an_unknown_unclear_or_spectral_configuration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Unknown or unclear cameras list the stacks; spectral is refused."""
-    requests = fake_backend(monkeypatch, {"target:get": M_27_RECORD})
-
-    with pytest.raises(InvalidArgumentError, match=r"has no stack for .*Nikon DSLR DSC D5300@300mm"):
-        await app_jobs.tool_processing_remake_preview("M 27", camera_id="Canon")
-    with pytest.raises(InvalidArgumentError, match="more than one stack"):
-        await app_jobs.tool_processing_remake_preview("M 27", camera_id="Nikon")
-    with pytest.raises(InvalidArgumentError, match="only for the main configuration"):
-        await app_jobs.tool_processing_remake_preview("M 27", kind="spectral", camera_id="Nikon")
-
-    assert "processing:remake_preview" not in [request["method"] for request in requests]
 
 
 @pytest.mark.anyio
@@ -627,40 +443,27 @@ NEBULA = {
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("saved", "word"),
+    [
+        ({"mode": "off"}, "nothing"),
+        ({"mode": "auto"}, "target"),
+        ({"mode": "object", "simbadId": "NGC 7635"}, "NGC 7635"),
+    ],
+)
 async def test_enhance_without_a_choice_lists_the_saved_choice_and_objects(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, saved: dict, word: str
 ) -> None:
-    """Reading changes nothing and returns the choice with the objects."""
+    """Reading changes nothing and returns the saved choice and the objects."""
     requests = fake_backend(
         monkeypatch,
-        {
-            "processing:list_bright_objects": {"objects": [NEBULA], "message": None},
-            "target:get": {"preview_bright_object": {"mode": "off"}},
-        },
+        {"processing:list_bright_objects": {"objects": [NEBULA], "message": None, "current": saved}},
     )
 
     reply = await app_jobs.tool_processing_enhance("M 52")
 
-    assert reply == {"current": "nothing", "objects": [NEBULA], "message": None}
-    assert "processing:set_bright_object" not in [request["method"] for request in requests]
-
-
-@pytest.mark.anyio
-async def test_enhance_without_objects_gives_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stack with no plate solution lists no objects and says why."""
-    fake_backend(
-        monkeypatch,
-        {
-            "processing:list_bright_objects": {"objects": [], "message": "Run Astrometry first."},
-            "target:get": {"previewBrightObject": {"mode": "auto"}},
-        },
-    )
-
-    reply = await app_jobs.tool_processing_enhance("M 52")
-
-    assert reply["current"] == "target"
-    assert reply["objects"] == []
-    assert reply["message"] == "Run Astrometry first."
+    assert reply == {"current": word, "objects": [NEBULA], "message": None}
+    assert [request["method"] for request in requests] == ["processing:list_bright_objects"]
 
 
 @pytest.mark.anyio
@@ -669,13 +472,7 @@ async def test_enhance_saves_the_two_fixed_choices(
     monkeypatch: pytest.MonkeyPatch, choice: str, mode: str
 ) -> None:
     """Target and nothing are the backend's auto and off modes."""
-    requests = fake_backend(
-        monkeypatch,
-        {
-            "processing:list_bright_objects": {"objects": [], "message": "Run Astrometry first."},
-            "processing:set_bright_object": {"mode": mode},
-        },
-    )
+    requests = fake_backend(monkeypatch, {"processing:set_bright_object": {"mode": mode}})
 
     reply = await app_jobs.tool_processing_enhance("M 52", choice)
 
@@ -684,36 +481,12 @@ async def test_enhance_saves_the_two_fixed_choices(
 
 
 @pytest.mark.anyio
-async def test_enhance_saves_an_object_from_the_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An object name, in any case or spacing, sends its listed position."""
+async def test_enhance_sends_an_object_name_for_the_library_to_find(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any other choice is an object name; the library finds it in the list."""
     requests = fake_backend(
-        monkeypatch,
-        {
-            "processing:list_bright_objects": {"objects": [NEBULA], "message": None},
-            "processing:set_bright_object": {"mode": "object", "simbad_id": "NGC 7635"},
-        },
+        monkeypatch, {"processing:set_bright_object": {"mode": "object", "simbadId": "NGC 7635"}}
     )
 
     await app_jobs.tool_processing_enhance("M 52", "ngc7635")
 
-    assert requests[-1]["params"] == {
-        "target": "M 52",
-        "mode": "object",
-        "simbad_id": "NGC 7635",
-        "ra_deg": 350.2,
-        "dec_deg": 61.2,
-        "major_axis_arcmin": 15.0,
-    }
-
-
-@pytest.mark.anyio
-async def test_enhance_refuses_an_object_not_in_the_frame(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unknown name is refused with the list, and nothing is saved."""
-    requests = fake_backend(
-        monkeypatch, {"processing:list_bright_objects": {"objects": [NEBULA], "message": None}}
-    )
-
-    with pytest.raises(InvalidArgumentError, match="NGC 7635"):
-        await app_jobs.tool_processing_enhance("M 52", "M 31")
-
-    assert [request["method"] for request in requests] == ["processing:list_bright_objects"]
+    assert requests[-1]["params"] == {"target": "M 52", "mode": "object", "name": "ngc7635"}

@@ -297,8 +297,12 @@ SUB_API_MEMBERS = {
         "update",
     },
     "processing": {
+        "ANALYSIS_STAGES",
+        "DEFAULT_ANALYSIS_STAGES",
+        "SELECTABLE_ANALYSIS_STAGES",
         "acquire_job_slot",
         "calibration",
+        "find_stack_configuration",
         "get_stack_identification",
         "identify_stack",
         "list_preview_bright_objects",

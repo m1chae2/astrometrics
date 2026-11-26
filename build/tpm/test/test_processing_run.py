@@ -216,26 +216,31 @@ class FakeBackend:
         now = self.clock.now
         if method == "processing:stack":
             return {"status": "started", "jobId": "stack-1"}
-        if method == "processing:get_job":
+        if method == "jobs:query" and params.get("detail") == "full":
             done = now >= self.stack_done_at
             return {
-                "id": "stack-1",
-                "status": "completed" if done else "running",
-                "message": "Stack finished",
-                "completedAt": "2026-11-06 10:01:23.700" if done else None,
+                "job": {
+                    "id": "stack-1",
+                    "status": "completed" if done else "running",
+                    "message": "Stack finished",
+                    "completed_at": "2026-11-06 10:01:23.700" if done else None,
+                }
             }
-        if method == "processing:job_log_tail":
-            return JOB_LOG
-        if method == "processing:list_jobs":
-            jobs = [{"id": "old", "status": "completed", "jobType": "stacking"}]
+        if method == "jobs:query" and params.get("detail") == "log_tail":
+            log_lines = [line.split(" - ", 2) for line in JOB_LOG]
+            return {
+                "log_lines": [{"time": time, "level": level, "text": text} for time, level, text in log_lines]
+            }
+        if method == "jobs:query":
+            jobs = [{"id": "old", "status": "completed", "job_type": "stacking"}]
             for step, start in self.started_steps:
                 finished = now >= start + self.step_jobs.get(step, 5.0)
                 jobs.append({
                     "id": f"job-{step}",
                     "status": "completed" if finished else "running",
-                    "jobType": step,
+                    "job_type": step,
                 })
-            return jobs
+            return {"jobs": jobs}
         self.started_steps.append((method, now))
         return {"status": "started"}
 

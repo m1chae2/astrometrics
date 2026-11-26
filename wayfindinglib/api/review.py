@@ -29,7 +29,7 @@ from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from astrometricslib.parameters import TuningReport
-from wayfindinglib._internal.arguments import TimeInput, to_epoch_seconds
+from wayfindinglib._internal.arguments import TimeInput, check_limit, to_epoch_seconds
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.focus_temperature_fit import FocusSource, FocusTemperatureFit
@@ -466,6 +466,8 @@ class ObservationReview(ControlChild):
         limit : `int`, optional
             How many frames to cover, from 1 to 200. With a range or time
             these are the first frames inside it; otherwise the newest.
+            Defaults to 60. A value outside the range raises
+            `InvalidArgumentError`.
         include : `list` [`str`], optional
             ``["quality"]`` also puts each frame's image measurements on
             its row: star count, star width, roundness, longest trail, sky
@@ -483,6 +485,7 @@ class ObservationReview(ControlChild):
         """
         from wayfindinglib.tasks.control_tasks import frame_guiding, hardware_operations
 
+        check_limit(limit, 1, frame_guiding.MAXIMUM_FRAMES, allow_none=False)
         sections = hardware_operations.check_sections(include or [], FRAME_GUIDING_SECTIONS)
         selection = frame_guiding.FrameRange(
             filter_name=filter_name, first_file=first_file, last_file=last_file, since=since, until=until

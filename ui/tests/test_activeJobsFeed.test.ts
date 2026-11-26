@@ -1,6 +1,6 @@
 /**
  * @fileoverview Tests that the app-wide active-jobs feed reads the job history (`jobs:query`), leaves out
- * a job whose program stopped (the history marks it stale), and turns the progress text into numbers.
+ * a job whose program stopped (the history marks it stale), and keeps the progress as two numbers.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -19,8 +19,8 @@ describe('fetchAllProcesses', () => {
     vi.mocked(callBackend).mockResolvedValue({
       detail: 'summary',
       jobs: [
-        { id: 'a', job_type: 'stacking', target_id: 'M 31', status: 'running', progress: '3/10', is_active: true },
-        { id: 'b', job_type: 'analysis', target_id: 'M 57', status: 'started', progress: '0/100', is_active: false, looks_stale: true },
+        { id: 'a', job_type: 'stacking', target_id: 'M 31', status: 'running', progress_done: 3, progress_total: 10, is_active: true },
+        { id: 'b', job_type: 'analysis', target_id: 'M 57', status: 'started', progress_done: 0, progress_total: 100, is_active: false, looks_stale: true },
       ],
     } as never);
 

@@ -1,8 +1,10 @@
 """Purpose: Small argument checks for the `wayfindinglib` public calls.
 
 Description: Copies of the science library's checks of a choice, an
-``include`` list, arguments a kind does not use, and a time, so this library
-does not reach into the science library's private package. `TimeInput` names
+``include`` list, a count (the one ``limit`` rule: a value outside the
+documented range is refused, never clamped), arguments a kind does not use,
+and a time, so this library does not reach into the science library's
+private package. `TimeInput` names
 the kinds of time a public call takes. Each refuses a bad
 value with `InvalidArgumentError`. Only `wayfindinglib` itself, and the tests
 of either library, may import this module.
@@ -16,7 +18,14 @@ from astropy.time import Time
 
 from astrometricslib.exceptions import InvalidArgumentError
 
-__all__ = ["TimeInput", "check_choice", "check_include", "reject_unused_arguments", "to_epoch_seconds"]
+__all__ = [
+    "TimeInput",
+    "check_choice",
+    "check_include",
+    "check_limit",
+    "reject_unused_arguments",
+    "to_epoch_seconds",
+]
 
 TimeInput = str | datetime | Time | None
 """A time a public call takes: an ISO 8601 string, a `datetime` or an astropy
@@ -79,6 +88,53 @@ def check_include(include: Iterable[str] | None, allowed: Collection[str]) -> fr
             details={"unknown": unknown, "choices": list(allowed)},
         )
     return sections
+
+
+def check_limit(
+    value: int | None,
+    minimum: int,
+    maximum: int | None,
+    *,
+    name: str = "limit",
+    allow_none: bool = True,
+) -> None:
+    """Refuse a count (``limit``, ``offset``, ``lines``) outside its range.
+
+    The same rule as the science library's own ``check_limit``: a value
+    outside the documented range raises, it is never clamped. `None` is
+    accepted when ``allow_none`` is set; each method says what `None` means.
+
+    Parameters
+    ----------
+    value : `int` or `None`
+        The count the caller gave.
+    minimum : `int`
+        The smallest allowed value.
+    maximum : `int` or `None`
+        The largest allowed value, or `None` for no upper bound.
+    name : `str`, optional
+        The argument's name, for the message. Defaults to ``"limit"``.
+    allow_none : `bool`, optional
+        Accept `None`. Defaults to `True`.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``value`` is not a whole number (or `None` when allowed), or is
+        outside ``minimum`` to ``maximum``.
+    """
+    if value is None and allow_none:
+        return
+    upper = "" if maximum is None else f" and at most {maximum}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidArgumentError(
+            f"{name} must be a whole number of at least {minimum}{upper}.", details={name: value}
+        )
+    if value < minimum or (maximum is not None and value > maximum):
+        raise InvalidArgumentError(
+            f"{name} must be at least {minimum}{upper}; got {value}.",
+            details={name: value, "minimum": minimum, "maximum": maximum},
+        )
 
 
 def reject_unused_arguments(

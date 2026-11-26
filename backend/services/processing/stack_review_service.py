@@ -10,10 +10,10 @@ library that records its own job.
 This service starts such a call in the background (with the library's
 `run_as_background_job`). A call that finishes within a short wait gives its
 answer at once. A slower one gives back its job id, and the app follows the
-job with ``processing:get_job``. When the job ends, its result is stored in the
-job's ``outputMetrics.result``. A call that fails inside the short wait raises
-its error to the caller. A later failure shows up as a failed job with a
-message.
+job with ``jobs:query`` (``detail="full"``). When the job ends, its result is
+stored in the job's ``output_metrics["result"]``. A call that fails inside the
+short wait raises its error to the caller. A later failure shows up as a
+failed job with a message.
 """
 
 import logging
@@ -99,7 +99,7 @@ class StackReviewStart(BaseModel):
         ``"running"`` when it is still going, or ``"cancelled"`` when the
         user cancelled it within the short wait.
     job_id : `str` or `None`
-        The job to follow with ``processing:get_job``. `None` when the work
+        The job to follow with ``jobs:query``. `None` when the work
         has not recorded a job yet, for example because it waits for another
         job to finish.
     result : `dict` or `None`

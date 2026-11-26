@@ -149,10 +149,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:siril_open": ("image_processing_service", "open_siril"),
     "processing:cancel": ("image_processing_service", "cancel_processing_jobs"),
     "processing:status": ("image_processing_service", "get_processing_status"),
-    "processing:list_jobs": ("job_service", "list_jobs"),
-    "processing:get_job": ("job_service", "get_job"),
     "processing:delete_job": ("job_service", "delete_job"),
-    "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
     # A short answer about a target's current stack, read from the numbers the
     # stacking stage saved with it. Nothing is measured and nothing is written.
     # A target with no saved stack summary raises `NotFoundError`.

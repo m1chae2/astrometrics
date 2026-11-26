@@ -8,8 +8,9 @@ convert it themselves. A method marked with `background_job` is called with
 ``register_job=True`` in a background thread, so a slow call answers with
 the id of the job it recorded instead of blocking the server. A server can
 also narrow what a client may send to one tool with `ClientLimits`: hide
-arguments a client cannot send (an array of pixels) and withhold choices of
-no use to it (a Matplotlib figure).
+arguments a client cannot send (an array of pixels), withhold choices of
+no use to it (a Matplotlib figure) and lower a count's maximum so that the
+answer stays small.
 """
 
 import asyncio
@@ -36,10 +37,15 @@ class ClientLimits:
         For an argument typed as a set of choices (a `Literal`), the
         choices a client may not use. The schema lists only the others as
         an ``enum``, and a call with a withheld one is refused.
+    maximums : `Mapping` [`str`, `int`]
+        For a count argument, the largest value a client may send, lower
+        than the library's own maximum so that the answers stay small. The
+        schema gives it as ``maximum``, and a call above it is refused.
     """
 
     hidden_parameters: tuple[str, ...] = ()
     withheld_choices: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    maximums: Mapping[str, int] = field(default_factory=dict)
 
 
 def parse_docstring_params(doc: str) -> dict[str, str]:
@@ -251,6 +257,11 @@ def _apply_client_limits(schema: dict[str, Any], method: Callable[..., Any], lim
         schema["properties"][name]["description"] += (
             " This tool offers only: " + ", ".join(repr(choice) for choice in offered) + "."
         )
+    for name, maximum in limits.maximums.items():
+        if name not in schema["properties"]:
+            continue
+        schema["properties"][name]["maximum"] = maximum
+        schema["properties"][name]["description"] += f" This tool allows at most {maximum}."
 
 
 def _check_client_limits(tool_name: str, arguments: Mapping[str, Any], limits: ClientLimits) -> None:
@@ -280,6 +291,13 @@ def _check_client_limits(tool_name: str, arguments: Mapping[str, Any], limits: C
             raise InvalidArgumentError(
                 f"{tool_name} does not offer {name}={arguments[name]!r}.",
                 details={"tool": tool_name, name: arguments[name]},
+            )
+    for name, maximum in limits.maximums.items():
+        value = arguments.get(name)
+        if isinstance(value, int) and not isinstance(value, bool) and value > maximum:
+            raise InvalidArgumentError(
+                f"{tool_name} allows {name} up to {maximum}; got {value}.",
+                details={"tool": tool_name, name: value, "maximum": maximum},
             )
 
 

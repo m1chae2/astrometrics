@@ -13,10 +13,10 @@ The steps, in order:
    written to ``processing-plan.json``). With ``--dry-run`` the script stops
    here, after it has checked that every frame file can be found.
 2. ``processing:stack`` starts the stacking job (the "Process" button). The
-   script polls ``processing:get_job`` until the job ends. The job log
-   (``processing:job_log_tail``) holds one line ``Stage N of M: ...`` at the
-   start of each stage, with a time to the millisecond. Those lines cut the
-   job into stages.
+   script polls ``jobs:query`` (``detail="full"``) until the job ends. The
+   job log (``jobs:query`` with ``detail="log_tail"``, every line, uncut)
+   holds one line ``Stage N of M: ...`` at the start of each stage, with a
+   time to the millisecond. Those lines cut the job into stages.
 3. The analysis steps run one after another, each a background job like the
    buttons in the display: ``photometry`` (``analysis:analyze_image`` on the
    new stack, the "Analyze Target" button), ``frame_measurements``
@@ -110,7 +110,7 @@ def stages_from_log(lines: list[str], keys: tuple[str, ...] | None = None) -> li
     Parameters
     ----------
     lines : `list` [`str`]
-        The log lines from ``processing:job_log_tail``, each
+        The log lines from `job_log_lines`, each
         ``<time> - <level> - <message>``.
     keys : `tuple` [`str`], optional
         The stage keys in order; `STAGE_KEYS` by default.
@@ -291,22 +291,42 @@ def describe_plan(target: str, camera: str, files: list[dict], listing: dict) ->
     }
 
 
-def job_field(job: dict, snake: str, camel: str) -> object:
-    """Read a job field whichever way the backend spelled it.
+def job_log_lines(answer: dict | None) -> list[str]:
+    """Turn a ``jobs:query`` log tail into ``<time> - <level> - <text>`` lines.
 
     Parameters
     ----------
-    job : `dict`
-        A job as the RPC returns it.
-    snake, camel : `str`
-        The two spellings of the field name.
+    answer : `dict` or `None`
+        The answer of ``jobs:query`` with ``detail="log_tail"``.
 
     Returns
     -------
-    value : `object`
-        The value, or `None`.
+    lines : `list` [`str`]
+        One text line per log line, oldest first, in the form
+        `stages_from_log` reads.
     """
-    return job.get(camel, job.get(snake))
+    return [
+        f"{line['time']} - {line['level']} - {line['text']}" for line in (answer or {}).get("log_lines") or []
+    ]
+
+
+def target_jobs(port: int, target: str) -> list[dict]:
+    """List the newest 200 jobs of a target from the job history.
+
+    Parameters
+    ----------
+    port : `int`
+        The backend's port.
+    target : `str`
+        The target.
+
+    Returns
+    -------
+    jobs : `list` [`dict`]
+        The jobs as ``jobs:query`` lists them, newest first.
+    """
+    answer = call_rpc(port, "jobs:query", {"target_id": target, "limit": 200}) or {}
+    return answer.get("jobs") or []
 
 
 class Recorder:
@@ -408,27 +428,34 @@ def run_stack(port: int, target: str, files: list[dict], recorder: Recorder, tim
         over : `bool`
             `True` once the job's status is final.
         """
-        state["job"] = call_rpc(port, "processing:get_job", {"job_id": job_id}) or {}
+        answer = call_rpc(port, "jobs:query", {"job_id": job_id, "detail": "full"}) or {}
+        state["job"] = answer.get("job") or {}
         return state["job"].get("status") in TERMINAL_STATUSES
 
     over = recorder.wait_for(finished, timeout)
     job = state.get("job", {})
     seen_end = recorder.clock()
-    completed = job_field(job, "completed_at", "completedAt")
+    completed = job.get("completed_at")
     end = seen_end
     if completed:
         try:
             end = min(seen_end, parse_log_time(str(completed)))
         except ValueError:
             end = seen_end
-    log_lines = call_rpc(port, "processing:job_log_tail", {"job_id": job_id, "lines": 100000}) or []
+    log_lines = job_log_lines(
+        call_rpc(
+            port,
+            "jobs:query",
+            {"job_id": job_id, "detail": "log_tail", "lines": 100000, "max_line_chars": None},
+        )
+    )
     record.update(
         status=job.get("status") if over else "timeout",
         end=end,
         seconds=end - start,
         message=job.get("message"),
         log_lines=log_lines,
-        log_file=job_field(job, "log_file_path", "logFilePath"),
+        log_file=job.get("log_file_path"),
     )
     return record
 
@@ -498,9 +525,7 @@ def run_analysis_step(
         status of each new job) and ``reply``.
     """
     method, params = analysis_request(step, target, stack_path)
-    known = {
-        job["id"] for job in call_rpc(port, "processing:list_jobs", {"target_id": target, "limit": 200}) or []
-    }
+    known = {job["id"] for job in target_jobs(port, target)}
     start = recorder.clock()
     reply = call_rpc(port, method, params)
     state: dict = {"new": []}
@@ -514,8 +539,7 @@ def run_analysis_step(
             `True` once at least one new job exists and none is active, or
             no job appeared within `JOB_APPEARS_SECONDS`.
         """
-        jobs = call_rpc(port, "processing:list_jobs", {"target_id": target, "limit": 200}) or []
-        state["new"] = [job for job in jobs if job["id"] not in known]
+        state["new"] = [job for job in target_jobs(port, target) if job["id"] not in known]
         if not state["new"]:
             return recorder.clock() - start > JOB_APPEARS_SECONDS
         return all(job.get("status") in TERMINAL_STATUSES for job in state["new"])
@@ -523,8 +547,7 @@ def run_analysis_step(
     over = recorder.wait_for(finished, timeout)
     end = recorder.clock()
     jobs = [
-        {"id": job["id"], "type": job_field(job, "job_type", "jobType"), "status": job.get("status")}
-        for job in state["new"]
+        {"id": job["id"], "type": job.get("job_type"), "status": job.get("status")} for job in state["new"]
     ]
     if not over:
         status = "timeout"

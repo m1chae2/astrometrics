@@ -305,7 +305,6 @@ class JobStore:
         job_type: str | None = None,
         status: str | None = None,
         limit: int = 50,
-        before: str | None = None,
     ) -> list[ProcessingJob]:
         """Retrieve all jobs for a specific target, sorted by newest first.
 
@@ -321,10 +320,6 @@ class JobStore:
             Default `None` (no filter).
         limit : `int`, optional
             Maximum number of jobs to return, default 50.
-        before : `str`, optional
-            If given, an ISO time. Only jobs created strictly before it
-            are returned, which lets a caller page back through history.
-            Default `None` (no cutoff).
 
         Returns
         -------
@@ -347,10 +342,6 @@ class JobStore:
             if status:
                 query += " AND status = ?"
                 params.append(status)
-
-            if before:
-                query += " AND created_at < ?"
-                params.append(before)
 
             query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
@@ -666,6 +657,7 @@ class JobStore:
         active_only: bool = False,
         limit: int = 50,
         offset: int = 0,
+        before: str | None = None,
     ) -> list[ProcessingJob]:
         """Find jobs by target, type and status, newest first.
 
@@ -684,6 +676,9 @@ class JobStore:
             Most jobs to return. Defaults to 50.
         offset : `int`, optional
             How many of the newest matching jobs to skip. Defaults to 0.
+        before : `str`, optional
+            Only jobs created strictly before this ISO time, so a caller can
+            page back through the history. Defaults to `None` (no cutoff).
 
         Returns
         -------
@@ -696,8 +691,21 @@ class JobStore:
             rows = conn.execute(
                 "SELECT * FROM processing_jobs WHERE (? IS NULL OR target_id = ?) "
                 "AND (? IS NULL OR job_type = ?) AND (? IS NULL OR status = ?) "
-                "AND (? = 0 OR status IN ('started', 'running')) ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (target_id, target_id, job_type, job_type, status, status, int(active_only), limit, offset),
+                "AND (? = 0 OR status IN ('started', 'running')) AND (? IS NULL OR created_at < ?) "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (
+                    target_id,
+                    target_id,
+                    job_type,
+                    job_type,
+                    status,
+                    status,
+                    int(active_only),
+                    before,
+                    before,
+                    limit,
+                    offset,
+                ),
             ).fetchall()
             conn.close()
             return [self._row_to_job(row) for row in rows]

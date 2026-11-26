@@ -3,7 +3,8 @@
  */
 
 import { callBackend, CancelAnalysisResult, CancelProcessingResult } from '../backendApi';
-import { ProcessStatus, AnalysisResult, ProcessingJob, JobSummary } from '../../types/backendTypes';
+import { ProcessStatus, AnalysisResult, ProcessingJob } from '../../types/backendTypes';
+import { formatJobLogLine, toProcessingJob } from './jobRecords';
 
 /**
  * Initiates image processing (stacking) for a target.
@@ -25,29 +26,11 @@ export async function processTarget(
     }
 }
 
-/** Most unfinished jobs one `jobs:query` call lists (the library's cap). */
+/** Most unfinished jobs one `jobs:query` call lists for the active-jobs feed. */
 const ACTIVE_JOBS_LIMIT = 50;
 
-/**
- * Turns one job from the job history read into the app's job record.
- * @param job A job as `jobs:query` lists it.
- * @return The same job with its progress as two numbers.
- */
-function toProcessingJob(job: JobSummary): ProcessingJob {
-    const [current, total] = (job.progress ?? '').split('/').map((part) => Number(part));
-    return {
-        id: job.id,
-        targetId: job.target_id ?? '',
-        jobType: job.job_type,
-        status: job.status,
-        progressCurrent: Number.isFinite(current) ? current : undefined,
-        progressTotal: Number.isFinite(total) ? total : undefined,
-        message: job.message ?? null,
-        createdAt: job.created_at ?? null,
-        updatedAt: job.updated_at ?? null,
-        completedAt: job.completed_at ?? null,
-    };
-}
+/** How many jobs a job list asks for when the caller names no limit. */
+const DEFAULT_JOBS_LIMIT = 50;
 
 /**
  * Fetches the jobs running now anywhere in the app, with their progress.
@@ -174,7 +157,8 @@ export async function fetchAnalysisResults(
 const inFlightJobsRequests = new Map<string, Promise<ProcessingJob[]>>();
 
 /**
- * Fetches jobs from the registry, optionally filtered by target and job type.
+ * Fetches whole job records from the job history (`jobs:query` with `detail: 'full'`),
+ * newest first, optionally filtered by target and job type.
  *
  * Concurrent calls with the same targetId/jobType are coalesced into a single
  * shared in-flight request rather than issuing duplicate backend calls — e.g.
@@ -184,7 +168,8 @@ const inFlightJobsRequests = new Map<string, Promise<ProcessingJob[]>>();
  * @param {string} [targetId] - Restricts results to jobs for this target, if provided.
  * @param {string} [jobType] - Restricts results to jobs of this type, if provided.
  * @param {{before?: string, limit?: number}} [paging] - Optional paging. `before` is a local
- *   ISO time: only jobs created earlier than it come back. `limit` caps how many jobs return.
+ *   ISO time: only jobs created earlier than it come back. `limit` is how many jobs to ask for,
+ *   from 1 to 500 (50 when left out).
  * @returns {Promise<ProcessingJob[]>} The matching processing jobs.
  */
 export function fetchJobs(
@@ -198,13 +183,14 @@ export function fetchJobs(
 
     const request = (async () => {
         try {
-            const result = await callBackend('processing:list_jobs', {
+            const answer = await callBackend('jobs:query', {
                 target_id: targetId,
                 job_type: jobType,
+                detail: 'full',
+                limit: paging?.limit ?? DEFAULT_JOBS_LIMIT,
                 ...(paging?.before ? { before: paging.before } : {}),
-                ...(paging?.limit ? { limit: paging.limit } : {}),
             });
-            return (result || []) as ProcessingJob[];
+            return (answer?.jobs ?? []).map(toProcessingJob);
         } catch {
             return [];
         }
@@ -217,21 +203,30 @@ export function fetchJobs(
 }
 
 /**
- * Fetches the tail of logs for a specific job ID.
+ * Fetches the last log lines of one job, whole (`jobs:query` with `detail: 'log_tail'`).
+ * @param jobId The job.
+ * @param lines How many of the last lines to read, from 1 to 100,000.
+ * @return The lines as `<time> - <level> - <message>`, oldest first; empty when the job is
+ *   unknown or the read fails.
  */
 export async function fetchJobLogTail(jobId: string, lines: number = 100): Promise<string[]> {
     try {
-        const result = await callBackend('processing:job_log_tail', { job_id: jobId, lines });
-        return (result || []) as string[];
+        // Silent: a job that is not recorded yet has no log, which is not an error to show.
+        const answer = await callBackend(
+            'jobs:query',
+            { job_id: jobId, detail: 'log_tail', lines, max_line_chars: null },
+            { silent: true }
+        );
+        return (answer?.log_lines ?? []).map(formatJobLogLine);
     } catch {
         return [];
     }
 }
 
 /**
- * Streams the tail of logs for a specific job ID by polling the DB-backed
- * job_log_tail endpoint, which is scoped strictly to this job_id and cannot
- * be cross-contaminated by unrelated logging elsewhere in the process.
+ * Streams the tail of logs for a specific job ID by polling the job's log in the
+ * job history, which is scoped strictly to this job_id and cannot be
+ * cross-contaminated by unrelated logging elsewhere in the process.
  */
 export async function streamJobLog(
     jobId: string,

@@ -51,7 +51,6 @@ preview is made from.
 """
 
 import logging
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -76,8 +75,9 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.gaia_star_colors import gaia_star_colors_in_footprint
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, image_corners_on_sky
 from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
-from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -573,29 +573,6 @@ def balance_sun_like_stars(
     return corrected, SunLikeBalance(applied=True, reason=reason, **found_numbers)
 
 
-def _footprint_corners(wcs: WCS, image_shape: tuple[int, int]) -> list[tuple[float, float]]:
-    """Find the sky positions of an image's four corners.
-
-    Parameters
-    ----------
-    wcs : `astropy.wcs.WCS`
-        The image's plate solution.
-    image_shape : `tuple` [`int`, `int`]
-        The image's height and width, in pixels.
-
-    Returns
-    -------
-    corners : `list` [`tuple` [`float`, `float`]]
-        ``(ra, dec)`` in degrees, in order around the edge, at the outer
-        edges of the corner pixels.
-    """
-    height, width = image_shape
-    ra, dec = wcs.all_pix2world(
-        [-0.5, width - 0.5, width - 0.5, -0.5], [-0.5, -0.5, height - 0.5, height - 0.5], 0
-    )
-    return [(float(a), float(b)) for a, b in zip(ra, dec, strict=True)]
-
-
 def balance_sun_like_stars_in_file(
     input_path: str,
     output_path: str,
@@ -632,13 +609,11 @@ def balance_sun_like_stars_in_file(
         return _not_applied(f"the image could not be read ({error})")
     if data is None or data.ndim != 3 or data.shape[0] != 3:
         return _not_applied("the image is not a color image")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        wcs = WCS(header, naxis=2)
-    if not wcs.has_celestial:
+    wcs = celestial_wcs(header)
+    if wcs is None:
         return _not_applied("the image has no plate solution")
     try:
-        corners = _footprint_corners(wcs, (data.shape[1], data.shape[2]))
+        corners = image_corners_on_sky(wcs, data.shape[2], data.shape[1])
         stars = (load_stars or gaia_star_colors_in_footprint)(corners, _FIELD_MARGIN_DEGREES)
     except ExternalServiceError as error:
         return _not_applied(f"the Gaia star colors are not available ({error})")

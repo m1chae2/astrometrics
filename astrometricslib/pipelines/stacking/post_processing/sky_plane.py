@@ -15,7 +15,10 @@ This module decides, before GraXpert runs, which of the two the stack gets.
    bins, and the bins that sit well above it are dropped, because a bright
    object or a nebula lifts them. The fit and the drop are repeated until the
    same bins stay. The spread used for "well above" comes from the bins
-   below the plane only, since the object cannot make a bin dimmer.
+   below the plane only, since the object cannot make a bin dimmer. The bin
+   medians and the clipped fit are `pipelines/shared/binned_sky_plane.py`,
+   which the exposure-group sky matching also uses (with clipping on both
+   sides).
 3. The sky bins are measured with `measure_background_model`, the same
    measure that describes GraXpert's model. Its tilt (the change of the
    fitted plane across the frame, as a fraction of the sky level) is the
@@ -72,10 +75,14 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.binned_sky_plane import (
+    block_medians,
+    even_block_edges,
+    fit_clipped_plane,
+    least_squares_fit,
+)
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
     BACKGROUND_BIN_COUNT,
-    _bin_model,
-    _fit,
     measure_background_model,
 )
 
@@ -176,11 +183,6 @@ SKY_CLIP_ROUNDS = 8
 # clip is treated as having gone wrong (a stack that is nearly all object) and
 # the last good set is kept. A plain minority guard; not tuned (STK-61).
 MINIMUM_SKY_BIN_SHARE = 0.3
-
-# The converted spread of the bins below the plane: the median distance of
-# the lower half of a Gaussian from its middle is 0.6745 sigma, so the
-# distance is multiplied by 1 / 0.6745.
-_MEDIAN_TO_SIGMA = 1.4826
 
 
 @dataclass(frozen=True)
@@ -327,7 +329,11 @@ def _bin_medians(plane: np.ndarray) -> np.ndarray:
         The 64 by 64 map. Empty pixels (zero or not a number, as at a blank
         border) are left out of each median, and a bin with none holds NaN.
     """
-    return _bin_model(np.where(np.isfinite(plane) & (plane > 0.0), plane, np.nan))
+    return block_medians(
+        np.where(np.isfinite(plane) & (plane > 0.0), plane, np.nan),
+        even_block_edges(plane.shape[0], BACKGROUND_BIN_COUNT),
+        even_block_edges(plane.shape[1], BACKGROUND_BIN_COUNT),
+    )
 
 
 def _bin_coordinates() -> tuple[np.ndarray, np.ndarray]:
@@ -367,21 +373,17 @@ def select_sky_bins(binned: np.ndarray) -> np.ndarray:
     """
     measurable = np.isfinite(binned)
     x, y = _bin_coordinates()
-    sky = measurable.copy()
-    for _ in range(SKY_CLIP_ROUNDS):
-        coefficients, _rms = _fit([np.ones(int(sky.sum())), x[sky], y[sky]], binned[sky])
-        residual = binned - (coefficients[0] + coefficients[1] * x + coefficients[2] * y)
-        middle = float(np.median(residual[sky]))
-        below = middle - residual[sky & (residual < middle)]
-        if below.size == 0:
-            break
-        spread = _MEDIAN_TO_SIGMA * float(np.median(below))
-        kept = measurable & (residual < middle + SKY_CLIP_SPREADS * spread)
-        if kept.sum() < MINIMUM_SKY_BIN_SHARE * measurable.sum():
-            break
-        if np.array_equal(kept, sky):
-            break
-        sky = kept
+    _plane, kept = fit_clipped_plane(
+        x[measurable],
+        y[measurable],
+        binned[measurable],
+        side="above",
+        clip_sigmas=SKY_CLIP_SPREADS,
+        rounds=SKY_CLIP_ROUNDS,
+        minimum_kept=MINIMUM_SKY_BIN_SHARE * int(measurable.sum()),
+    )
+    sky = np.zeros_like(measurable)
+    sky[measurable] = kept
     return sky
 
 
@@ -403,7 +405,7 @@ def _plane_terms(binned: np.ndarray, sky: np.ndarray) -> tuple[float, float, flo
     """
     use = sky & np.isfinite(binned)
     x, y = _bin_coordinates()
-    coefficients, _rms = _fit([np.ones(int(use.sum())), x[use], y[use]], binned[use])
+    coefficients, _rms = least_squares_fit([np.ones(int(use.sum())), x[use], y[use]], binned[use])
     return float(coefficients[0]), float(coefficients[1]), float(coefficients[2])
 
 
@@ -462,7 +464,7 @@ def _radial_fit(
         best: tuple[float, np.ndarray, tuple[float, float]] | None = None
         for powers in ((1,), (2,), (1, 2)):
             terms = [radius_squared[use] ** power for power in powers]
-            solution, rms = _fit([*plane_columns, *terms], binned[use])
+            solution, rms = least_squares_fit([*plane_columns, *terms], binned[use])
             if np.any(solution[3:] > 0.0) or (best is not None and rms >= best[0]):
                 continue
             radial = dict(zip(powers, solution[3:], strict=True))
@@ -485,7 +487,7 @@ def _radial_fit(
                 quarter = use & (np.sign(x) == column_sign) & (np.sign(y) == row_sign)
                 if int(quarter.sum()) < MINIMUM_QUARTER_SKY_BINS:
                     return [], fractions, "a quarter of the frame has too few sky bins to check the falloff"
-                quarter_fit, _quarter_rms = _fit(
+                quarter_fit, _quarter_rms = least_squares_fit(
                     [np.ones(int(quarter.sum())), radius_squared[quarter]], residual[quarter]
                 )
                 if quarter_fit[1] / level > QUARTER_RISE_TOLERANCE:
@@ -548,7 +550,7 @@ def _channel_radial_spread(binned_planes: list[np.ndarray], sky: np.ndarray) -> 
         use = sky & np.isfinite(binned)
         if int(use.sum()) < MINIMUM_QUARTER_SKY_BINS:
             return 0.0
-        solution, _rms = _fit(
+        solution, _rms = least_squares_fit(
             [np.ones(int(use.sum())), x[use], y[use], radius_squared[use], radius_squared[use] ** 2],
             binned[use],
         )

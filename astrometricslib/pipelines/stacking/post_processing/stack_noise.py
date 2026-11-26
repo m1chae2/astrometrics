@@ -142,6 +142,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     DETECTED_STAR_COUNT,
     MINIMUM_USABLE_APERTURES,
@@ -176,19 +177,17 @@ from astrometricslib.pipelines.stacking.post_processing.quarter_turn import (
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_SIGMA_ERROR_FACTOR,
-    MAD_TO_SIGMA,
     MEDIAN_ERROR_FACTOR,
     SaturationCheck,
-    celestial_wcs,
     pixel_scale_arcsec,
     read_stack_plane,
-    robust_sigma,
     signed_aperture_sum,
     sky_level_of_plane,
     sky_to_pixels,
 )
 from astrometricslib.pipelines.stacking.processing.group_alignment import detect_star_centroids
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 

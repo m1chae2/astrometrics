@@ -56,8 +56,8 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
 from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
-from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 from astrometricslib.pipelines.stacking.processing.image_registration import (
     RegistrationTransform,
     fit_transform,
@@ -234,15 +234,16 @@ def _remove_background(plane: np.ndarray) -> tuple[np.ndarray, float]:
     flat : `numpy.ndarray`
         The picture with the background taken away.
     noise : `float`
-        The robust spread of what is left. Not finite or zero when the
-        picture is blank.
+        The sky noise of what is left, from `measure_sky_background`. NaN
+        when the picture is blank.
     """
     plane = np.nan_to_num(np.asarray(plane, dtype=np.float32))
     binned = plane[::_BACKGROUND_BIN, ::_BACKGROUND_BIN]
     background = median_filter(binned, size=_BACKGROUND_FILTER_BINS)
     background = np.repeat(np.repeat(background, _BACKGROUND_BIN, 0), _BACKGROUND_BIN, 1)
     flat = plane - background[: plane.shape[0], : plane.shape[1]]
-    return flat, float(robust_sigma(flat[::4, ::4].ravel()))
+    measured_sky = measure_sky_background(flat.astype(np.float64))
+    return flat, measured_sky[1] if measured_sky is not None else float("nan")
 
 
 def measure_star_width(flat: np.ndarray, level: float, expected_fwhm_px: float) -> float:

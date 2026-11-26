@@ -49,12 +49,9 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
-from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
-    robust_sigma,
-    sky_level_of_plane,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_image import sky_level_of_plane
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseOutcome
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 

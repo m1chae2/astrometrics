@@ -58,10 +58,8 @@ from astrometricslib.pipelines.stacking.post_processing.aperture_placement impor
     faint_source_clearance_px,
     faint_source_distance,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_SIGMA_ERROR_FACTOR,
-    robust_sigma,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_SIGMA_ERROR_FACTOR
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 

@@ -86,6 +86,7 @@ from astrometricslib.pipelines.shared.gaia_star_colors import (
     BRIGHTEST_G_MAGNITUDE,
     gaia_star_colors_in_footprint,
 )
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, image_corners_on_sky
 from astrometricslib.pipelines.shared.simbad_object_types import STAR_REGION_VOTABLE_FIELDS
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -99,7 +100,6 @@ from astrometricslib.pipelines.stacking.post_processing.other_stack_alignment im
     find_bright_stars,
 )
 from astrometricslib.pipelines.stacking.post_processing.sky_levelling import sky_weight
-from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     SkippedPreviewStep,
     has_plate_solution,
@@ -117,6 +117,7 @@ from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
     collect_starnet_outputs,
 )
 from astrometricslib.pipelines.stacking.processing.image_registration import warp
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -1007,27 +1008,6 @@ def compose_color_picture(
     return np.clip(picture, 0.0, 1.0).astype(np.float32)
 
 
-def _celestial_wcs(header: Any) -> WCS | None:
-    """Read the celestial part of a plate solution.
-
-    Parameters
-    ----------
-    header : `astropy.io.fits.Header`
-        A FITS header.
-
-    Returns
-    -------
-    wcs : `astropy.wcs.WCS` or `None`
-        The two sky axes, or `None` when the header has no solution.
-    """
-    if "CTYPE1" not in header or "CRVAL1" not in header:
-        return None
-    try:
-        return WCS(header, naxis=2)
-    except ValueError, KeyError, MemoryError:
-        return None
-
-
 def _run_starnet(scratch: str, name: str, data: np.ndarray, siril_executable: str) -> np.ndarray | None:
     """Take the stars out of a stretched picture with StarNet.
 
@@ -1081,10 +1061,7 @@ def _gaia_colors(wcs: WCS, shape: tuple[int, int]) -> tuple[Any, str]:
         Why there are none, or an empty string.
     """
     rows, columns = shape
-    ra, dec = wcs.all_pix2world(
-        [-0.5, columns - 0.5, columns - 0.5, -0.5], [-0.5, -0.5, rows - 0.5, rows - 0.5], 0
-    )
-    corners = [(float(a), float(b)) for a, b in zip(ra, dec, strict=True)]
+    corners = image_corners_on_sky(wcs, columns, rows)
     try:
         stars = gaia_star_colors_in_footprint(corners, _GAIA_MARGIN_DEGREES)
     except ExternalServiceError as error:
@@ -1223,9 +1200,9 @@ def write_color_preview(
     )
     try:
         luminance = read_data(mono_picture_path)
-        mono_wcs = _celestial_wcs(read_header(mono_picture_path))
+        mono_wcs = celestial_wcs(read_header(mono_picture_path))
         color_picture = read_data(choice.picture_path)
-        color_wcs = _celestial_wcs(read_header(choice.picture_path))
+        color_wcs = celestial_wcs(read_header(choice.picture_path))
     except (OSError, ValueError) as error:
         return ColorPreviewOutcome(False, f"a picture could not be read ({error})", True, record=record)
     if luminance is None or color_picture is None or mono_wcs is None or color_wcs is None:
@@ -1265,7 +1242,7 @@ def write_color_preview(
 
     try:
         linear = read_data(choice.stacked_path)
-        linear_wcs = _celestial_wcs(read_header(choice.stacked_path))
+        linear_wcs = celestial_wcs(read_header(choice.stacked_path))
     except (OSError, ValueError) as error:
         return ColorPreviewOutcome(False, f"the color stack could not be read ({error})", True, record=record)
     if linear is None or linear_wcs is None or np.ndim(linear) != 3:

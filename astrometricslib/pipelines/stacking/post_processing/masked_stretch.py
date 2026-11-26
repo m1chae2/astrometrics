@@ -73,9 +73,13 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+from astrometricslib.pipelines.shared.image_scaling import (
+    measure_sky_background,
+    measure_smoothed_sky_background,
+)
 from astrometricslib.pipelines.stacking.post_processing.bright_object import WHITE_POINT_PERCENTILE
-from astrometricslib.pipelines.stacking.post_processing.stack_image import celestial_wcs, pixel_scale_arcsec
+from astrometricslib.pipelines.stacking.post_processing.stack_image import pixel_scale_arcsec
 
 logger = logging.getLogger(__name__)
 
@@ -270,11 +274,6 @@ _PEAK_NOISE_WIDTHS = TunedParameter(
     register_entry="STK-D75",
 )
 
-# The smoothed image is sampled every n-th pixel to measure its own noise.
-_NOISE_SAMPLE_STRIDE = 4
-
-# The rounds of 3-sigma clipping that find the smoothed image's sky noise.
-_NOISE_CLIP_ROUNDS = 4
 
 # The smallest brightness for which a color factor is worked out (guards the
 # division).
@@ -630,34 +629,6 @@ def _luminance(data: np.ndarray) -> np.ndarray | None:
     return np.nan_to_num(plane)
 
 
-def _smoothed_sky_noise(smoothed: np.ndarray) -> float:
-    """Measure the noise of the star-free image over the empty sky.
-
-    Parameters
-    ----------
-    smoothed : `numpy.ndarray`
-        The median-filtered image.
-
-    Returns
-    -------
-    noise : `float`
-        One standard deviation of the sky, found by clipping everything more
-        than 3 widths from the median a few times over a sparse grid.
-    """
-    values = smoothed[::_NOISE_SAMPLE_STRIDE, ::_NOISE_SAMPLE_STRIDE].ravel()
-    nonzero = values[values != 0]
-    values = nonzero if nonzero.size > 1000 else values
-    spread = 0.0
-    for _ in range(_NOISE_CLIP_ROUNDS):
-        centre = np.median(values)
-        spread = 1.4826 * float(np.median(np.abs(values - centre)))
-        kept = values[np.abs(values - centre) < 3.0 * spread]
-        if kept.size < 10:
-            break
-        values = kept
-    return spread
-
-
 def plan_masked_stretch(
     data: np.ndarray,
     category: str | None,
@@ -709,7 +680,8 @@ def plan_masked_stretch(
     sky_level, pixel_noise = sky
     box = max(3, round(resolve(_STAR_REMOVAL_BOX_PIXELS).value))
     smoothed = ndimage.median_filter(stack, size=box, mode="nearest")
-    smoothed_noise = _smoothed_sky_noise(smoothed)
+    smoothed_sky = measure_smoothed_sky_background(smoothed)
+    smoothed_noise = smoothed_sky[1] if smoothed_sky is not None else 0.0
     threshold = sky_level + max(
         resolve(_REGION_NOISE_WIDTHS).value * smoothed_noise,
         resolve(_REGION_SKY_MULTIPLE).value * abs(sky_level),

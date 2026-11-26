@@ -24,7 +24,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from astrometricslib._internal.drivers.tuning_support import camera_is_colour, camera_rows, robust_sigma
+from astrometricslib._internal.drivers.tuning_support import camera_is_colour, camera_rows
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.tuning import Tuner, TuningInputs, TuningResult, TuningSkippedError
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
@@ -41,6 +41,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     MINIMUM_FRAMES_TO_JUDGE,
     TRAILED_ELONGATION_LIMIT,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 # How many robust standard deviations above the typical elongation a frame must
 # be to count as trailed. Five is the repository's usual cut for an outlier

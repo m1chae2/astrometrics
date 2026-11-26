@@ -35,7 +35,6 @@ the stack's size and modification time, and `read_stack_identification`
 returns it while the stack is unchanged.
 """
 
-import json
 import logging
 import math
 import os
@@ -71,6 +70,12 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     order_names_by_familiarity,
 )
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+from astrometricslib.pipelines.shared.stack_sidecar import (
+    read_stamped_record,
+    sidecar_path,
+    write_stamped_record,
+)
 from astrometricslib.pipelines.shared.star_designations import most_familiar_designation, readable_designation
 
 __all__ = [
@@ -87,6 +92,10 @@ IDENTIFICATION_SIDECAR_SUFFIX = "_identification.json"
 
 # Raise this when the layout of the saved file changes.
 IDENTIFICATION_FILE_VERSION = 3
+
+# The key that holds the stack's stamp (size and modification time) in the
+# saved file.
+_STAMP_KEY = "stack_stamp"
 
 # The most catalog stars with no detection listed, brightest first, so a
 # dense field does not send tens of thousands of markers to the viewer. A
@@ -118,42 +127,6 @@ class StackIdentificationStoppedError(AstrometricsError):
     """The person stopped the identification before it finished."""
 
 
-def _sidecar_path(stack_path: str) -> str:
-    """Give the path of the saved result next to a stack.
-
-    Parameters
-    ----------
-    stack_path : `str`
-        The stack.
-
-    Returns
-    -------
-    path : `str`
-        ``<stack>_identification.json``.
-    """
-    return os.path.splitext(stack_path)[0] + IDENTIFICATION_SIDECAR_SUFFIX
-
-
-def _file_stamp(path: str) -> list[int] | None:
-    """Give a file's size and modification time, to tell when it changed.
-
-    Parameters
-    ----------
-    path : `str`
-        The file.
-
-    Returns
-    -------
-    stamp : `list` [`int`] or `None`
-        ``[size, mtime_ns]``, or `None` when the file cannot be read.
-    """
-    try:
-        status = os.stat(path)
-    except OSError:
-        return None
-    return [int(status.st_size), int(status.st_mtime_ns)]
-
-
 def read_stack_identification(stack_path: str) -> StackIdentification | None:
     """Read the saved identification of a stack, if the stack is unchanged.
 
@@ -168,17 +141,13 @@ def read_stack_identification(stack_path: str) -> StackIdentification | None:
         The saved result, or `None` when there is none, it cannot be read,
         or the stack changed since.
     """
-    saved = _sidecar_path(stack_path)
-    stamp = _file_stamp(stack_path)
-    if stamp is None or not os.path.isfile(saved):
+    saved = sidecar_path(stack_path, IDENTIFICATION_SIDECAR_SUFFIX)
+    record = read_stamped_record(saved, stack_path, IDENTIFICATION_FILE_VERSION, _STAMP_KEY)
+    if record is None:
         return None
     try:
-        with open(saved, encoding="utf-8") as handle:
-            record = json.load(handle)
-        if record.get("version") != IDENTIFICATION_FILE_VERSION or record.get("stack_stamp") != stamp:
-            return None
         return StackIdentification.model_validate(record["identification"])
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+    except (ValueError, KeyError, TypeError) as error:
         logger.debug("Could not read the saved identification %s: %s", saved, error)
         return None
 
@@ -195,22 +164,13 @@ def _save(stack_path: str, identification: StackIdentification) -> None:
     identification : `StackIdentification`
         The result.
     """
-    stamp = _file_stamp(stack_path)
-    if stamp is None:
-        return
-    saved = _sidecar_path(stack_path)
-    record = {
-        "version": IDENTIFICATION_FILE_VERSION,
-        "stack_stamp": stamp,
-        "identification": identification.model_dump(),
-    }
-    temporary = f"{saved}.{os.getpid()}.tmp"
-    try:
-        with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
-        os.replace(temporary, saved)
-    except OSError as error:
-        logger.warning("Could not save the star names of %s: %s", os.path.basename(stack_path), error)
+    write_stamped_record(
+        sidecar_path(stack_path, IDENTIFICATION_SIDECAR_SUFFIX),
+        stack_path,
+        IDENTIFICATION_FILE_VERSION,
+        _STAMP_KEY,
+        {"identification": identification.model_dump()},
+    )
 
 
 def _check(should_stop: StopCheck | None) -> None:
@@ -541,7 +501,8 @@ def _read_solution(stack_path: str, drivers: Any) -> tuple[WCS, bool, Any]:
         raise InvalidArgumentError(f"The stack could not be plate-solved: {reason}.")
     if not reused:
         header = read_header(stack_path)
-    return WCS(header, naxis=2), reused, header
+    saved_wcs = celestial_wcs(header)
+    return (saved_wcs if saved_wcs is not None else wcs), reused, header
 
 
 def _refit_and_save_solution(

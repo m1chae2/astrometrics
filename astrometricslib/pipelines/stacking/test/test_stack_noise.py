@@ -2043,22 +2043,6 @@ def test_the_solve_log_says_why_the_solution_was_not_refit(
     _CountingPipeline.note = ""
 
 
-def test_robust_sigma_matches_the_median_absolute_deviation_formula() -> None:
-    """`robust_sigma` is the scaled median absolute deviation, on any axis."""
-    from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA, robust_sigma
-
-    samples = np.random.default_rng(11).normal(5.0, 2.0, size=(6, 40))
-    flat = samples.ravel()
-
-    assert MAD_TO_SIGMA == pytest.approx(1.4826)
-    assert robust_sigma(flat) == pytest.approx(1.4826 * np.median(np.abs(flat - np.median(flat))), rel=1e-12)
-    by_row = robust_sigma(samples, axis=1)
-    for row in range(6):
-        expected = 1.4826 * np.median(np.abs(samples[row] - np.median(samples[row])))
-        assert by_row[row] == pytest.approx(expected, rel=1e-12)
-    assert robust_sigma(samples, axis=0).shape == (40,)
-
-
 class _FakePlateSolve:
     """A stand-in for the stack's one plate solve that counts its calls."""
 

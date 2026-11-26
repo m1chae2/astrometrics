@@ -38,6 +38,7 @@ from astrometricslib._internal.drivers.sky_tiles import tiles_for_footprint
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
+from astrometricslib.pipelines.shared.header_wcs import image_corners_on_sky
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,6 @@ __all__ = [
     "FieldGaiaStars",
     "TileFetcher",
     "fill_field_tiles",
-    "footprint_corners",
     "load_field_gaia_stars",
     "tiles_under_image",
 ]
@@ -105,28 +105,6 @@ class FieldGaiaStars:
     skipped_reason: str = ""
 
 
-def footprint_corners(wcs: Any, width: int, height: int) -> list[tuple[float, float]]:
-    """Find the sky positions of an image's four corners.
-
-    Parameters
-    ----------
-    wcs : `astropy.wcs.WCS`
-        The image's plate solution.
-    width, height : `int`
-        The image size, in pixels.
-
-    Returns
-    -------
-    corners : `list` [`tuple` [`float`, `float`]]
-        ``(ra, dec)`` in degrees, in order around the edge, at the outer
-        edges of the corner pixels.
-    """
-    pixel_x = np.array([-0.5, width - 0.5, width - 0.5, -0.5])
-    pixel_y = np.array([-0.5, -0.5, height - 0.5, height - 0.5])
-    ra_values, dec_values = wcs.wcs_pix2world(pixel_x, pixel_y, 0)
-    return [(float(ra), float(dec)) for ra, dec in zip(ra_values, dec_values, strict=True)]
-
-
 def tiles_under_image(wcs: Any, width: int, height: int, margin_deg: float | None = None) -> list[int]:
     """List every cache tile that any part of an image falls in.
 
@@ -149,7 +127,7 @@ def tiles_under_image(wcs: Any, width: int, height: int, margin_deg: float | Non
     if margin_deg is None:
         margin_deg = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value) / 3600.0
     level = int(resolve(catalog_store.GAIA_TILE_LEVEL).value)
-    return tiles_for_footprint(footprint_corners(wcs, width, height), margin_deg, level)
+    return tiles_for_footprint(image_corners_on_sky(wcs, width, height), margin_deg, level)
 
 
 def _cache_rows(table: Table) -> list[tuple]:

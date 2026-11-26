@@ -24,7 +24,6 @@ blob width, and for a color image it uses the setup's width.
 """
 
 import hashlib
-import json
 import logging
 import os
 from typing import Any
@@ -51,6 +50,11 @@ from astrometricslib.pipelines.astrometry.processing.star_identifier import (
     find_unique_stars,
 )
 from astrometricslib.pipelines.shared.quality.star_profile_fitting import STAR_FINDER_THRESHOLD_SIGMA
+from astrometricslib.pipelines.shared.stack_sidecar import (
+    read_stamped_record,
+    sidecar_path,
+    write_stamped_record,
+)
 
 __all__ = [
     "DETECTIONS_SIDECAR_SUFFIX",
@@ -70,6 +74,10 @@ DETECTIONS_SIDECAR_SUFFIX = "_detections.json"
 # a color stack's single-star positions were scaled back twice, so most of its
 # saved stars sat outside the image.
 DETECTIONS_FILE_VERSION = 3
+
+# The key that holds the image's stamp (size and modification time) in a saved
+# list.
+_STAMP_KEY = "image_stamp"
 
 # The cache folder keeps at most this many lists; the oldest are deleted.
 DETECTIONS_CACHE_LIMIT = 200
@@ -146,7 +154,9 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
     A file that does not exist raises `NotFoundError`. An image with no pixel
     data raises `InvalidArgumentError`.
     """
-    saved = _load_saved(path, _sidecar_path(path)) or _load_saved(path, _cache_path(path))
+    saved = _load_saved(path, sidecar_path(path, DETECTIONS_SIDECAR_SUFFIX)) or _load_saved(
+        path, _cache_path(path)
+    )
     if saved is not None:
         return saved
     measurement = _find_detections(path)
@@ -180,11 +190,10 @@ def save_run_detections(path: str) -> bool:
         if int(image.header.get("STACKCNT", 0) or 0) <= 1:
             return False
         measurement = _find_detections(path)
-        _write_saved(_sidecar_path(path), path, measurement)
     except (OSError, ValueError, TypeError, InvalidArgumentError) as error:
         logger.debug("Could not save the detection list of %s: %s", path, error)
         return False
-    return True
+    return _write_saved(sidecar_path(path, DETECTIONS_SIDECAR_SUFFIX), path, measurement)
 
 
 def _find_detections(path: str) -> DetectionsMeasurement:
@@ -321,42 +330,6 @@ def _finder_settings() -> dict[str, Any]:
     }
 
 
-def _file_stamp(path: str) -> list[int] | None:
-    """Describe a file by its size and modification time.
-
-    Parameters
-    ----------
-    path : `str`
-        The file.
-
-    Returns
-    -------
-    stamp : `list` [`int`] or `None`
-        ``[size, modification time in nanoseconds]``, `None` if unreadable.
-    """
-    try:
-        status = os.stat(path)
-    except OSError:
-        return None
-    return [int(status.st_size), int(status.st_mtime_ns)]
-
-
-def _sidecar_path(path: str) -> str:
-    """Give the path of the list the run saves next to a stack.
-
-    Parameters
-    ----------
-    path : `str`
-        The stack's FITS file.
-
-    Returns
-    -------
-    sidecar : `str`
-        The file's path.
-    """
-    return os.path.splitext(path)[0] + DETECTIONS_SIDECAR_SUFFIX
-
-
 def _cache_path(path: str) -> str:
     """Give the path of an image's list in the cache folder.
 
@@ -389,28 +362,22 @@ def _load_saved(path: str, saved_path: str) -> DetectionsMeasurement | None:
     -------
     measurement : `DetectionsMeasurement` or `None`
         The list, or `None` when there is no file, it cannot be read, or its
-        version, image stamp or finder settings differ from now.
+        version, image stamp or finder settings differ from now (see
+        `stack_sidecar.read_stamped_record`).
     """
-    stamp = _file_stamp(path)
-    if stamp is None or not os.path.isfile(saved_path):
+    record = read_stamped_record(saved_path, path, DETECTIONS_FILE_VERSION, _STAMP_KEY)
+    if record is None or record.get("finder_settings") != _finder_settings():
         return None
     try:
-        with open(saved_path, encoding="utf-8") as handle:
-            record = json.load(handle)
-        if (
-            record.get("version") != DETECTIONS_FILE_VERSION
-            or record.get("image_stamp") != stamp
-            or record.get("finder_settings") != _finder_settings()
-        ):
-            return None
         measurement = DetectionsMeasurement.model_validate(record["measurement"])
-    except OSError, ValueError, KeyError, TypeError, AttributeError:
+    except (ValueError, KeyError, TypeError) as error:
+        logger.debug("Could not read the detection list %s: %s", saved_path, error)
         return None
     measurement.path = path
     return measurement
 
 
-def _write_saved(saved_path: str, path: str, measurement: DetectionsMeasurement) -> None:
+def _write_saved(saved_path: str, path: str, measurement: DetectionsMeasurement) -> bool:
     """Save a list with the image's stamp and the finder's settings.
 
     A failure to write is logged and ignored: the list is only a shortcut.
@@ -423,26 +390,17 @@ def _write_saved(saved_path: str, path: str, measurement: DetectionsMeasurement)
         The image the list is for.
     measurement : `DetectionsMeasurement`
         The list.
+
+    Returns
+    -------
+    written : `bool`
+        `True` when the file was written.
     """
-    stamp = _file_stamp(path)
-    if stamp is None:
-        return
-    record = {
-        "version": DETECTIONS_FILE_VERSION,
-        "image_stamp": stamp,
-        "finder_settings": _finder_settings(),
-        "measurement": measurement.model_dump(),
-    }
-    try:
-        os.makedirs(os.path.dirname(saved_path), exist_ok=True)
-        temporary_path = f"{saved_path}.{os.getpid()}.tmp"
-        with open(temporary_path, "w", encoding="utf-8") as handle:
-            json.dump(record, handle, separators=(",", ":"))
-        os.replace(temporary_path, saved_path)
-        if os.path.basename(os.path.dirname(saved_path)) == "detections":
-            _prune_cache(os.path.dirname(saved_path))
-    except OSError as error:
-        logger.debug("Could not save the detection list %s: %s", saved_path, error)
+    contents = {"finder_settings": _finder_settings(), "measurement": measurement.model_dump()}
+    written = write_stamped_record(saved_path, path, DETECTIONS_FILE_VERSION, _STAMP_KEY, contents)
+    if written and os.path.basename(os.path.dirname(saved_path)) == "detections":
+        _prune_cache(os.path.dirname(saved_path))
+    return written
 
 
 def _prune_cache(folder: str) -> None:

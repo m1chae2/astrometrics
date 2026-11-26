@@ -16,6 +16,7 @@ from astrometricslib.foundation.errors import AstrometricsError, ConflictError
 from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
 from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation, stored_frame_widths
@@ -733,8 +734,6 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
     solved_now : `bool`
         True when the stack was solved by this call.
     """
-    from astropy.wcs import WCS
-
     from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
     from astrometricslib.pipelines.shared.session_identification import (
         header_is_refit_to_gaia,
@@ -751,8 +750,9 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
         logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
         return None, f"the header could not be read: {error}", False
     solved_now = False
-    if header_is_plate_solved(stack_header):
-        wcs = WCS(stack_header, naxis=2).celestial
+    saved_wcs = celestial_wcs(stack_header) if header_is_plate_solved(stack_header) else None
+    if saved_wcs is not None:
+        wcs = saved_wcs
         refit_to_gaia = header_is_refit_to_gaia(stack_header)
     else:
         wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
@@ -791,8 +791,6 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
         Whether the solution was refit to Gaia stars (see
         `write_wcs_to_fits_header`).
     """
-    from astropy.wcs import WCS
-
     from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
     from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
     from astrometricslib.pipelines.stacking.post_processing.stack_crop import (
@@ -833,7 +831,9 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
     if None in crop or (crop[2], crop[3]) != (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")):
         return
     shift_header_for_crop(stack_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
-    shifted_wcs = WCS(stack_header, naxis=2).celestial
+    shifted_wcs = celestial_wcs(stack_header)
+    if shifted_wcs is None:
+        return
     write_wcs_to_fits_header(processed_path, shifted_wcs, refit_to_gaia=refit_to_gaia)
     logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
 

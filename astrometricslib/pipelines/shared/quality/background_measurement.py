@@ -4,6 +4,16 @@ This file only handles reading the image data from the hard drive and
 measuring how bright the background is. The actual decision about
 whether that brightness has changed too much during a stacking session
 is kept separately, in `stacking/pre_processing/background_homogeneity.py`.
+
+This is a documented sibling of the library's one sky measurement,
+`image_scaling.measure_sky_background`. The level here is stored with every
+raw frame under a method number (`BACKGROUND_LEVEL_METHOD`) and compared
+across frames and nights, so its estimator stays fixed: the sigma-clipped
+median of every pixel of the raw frame (`astropy.stats.sigma_clipped_stats`,
+whose spread is the plain standard deviation). `measure_sky_background`
+samples a grid and clips with the robust spread, which suits a stacked
+picture with a large galaxy in it; switching the stored level to it would
+need a new method number and a fresh measurement of every frame.
 """
 
 import numpy as np

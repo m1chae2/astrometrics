@@ -31,6 +31,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +82,6 @@ TIE_CLIP_SIGMA = TunedParameter(
 # loop settles in two or three rounds, so five is a safety limit and not a
 # tuned value.
 _MAXIMUM_CLIP_ROUNDS = 5
-
-# 1.4826 x the median absolute deviation (MAD) equals the standard deviation
-# of normally distributed values and ignores outliers.
-_MAD_TO_SIGMA = 1.4826
 
 # The standard error of a sample median of normally distributed values is
 # sqrt(pi / 2) = 1.2533 times the standard error of their mean.
@@ -148,7 +145,7 @@ def measure_session_tie(
     kept = log_ratios
     for _ in range(_MAXIMUM_CLIP_ROUNDS):
         median = float(np.median(kept))
-        spread = _MAD_TO_SIGMA * float(np.median(np.abs(kept - median)))
+        spread = robust_sigma(kept)
         if spread <= 0:
             break
         survivors = kept[np.abs(kept - median) <= clip_sigma * spread]
@@ -156,7 +153,7 @@ def measure_session_tie(
             break
         kept = survivors
     median = float(np.median(kept))
-    spread = _MAD_TO_SIGMA * float(np.median(np.abs(kept - median)))
+    spread = robust_sigma(kept)
     star_count = int(kept.size)
     if star_count < minimum_stars:
         return SessionTieRecord(

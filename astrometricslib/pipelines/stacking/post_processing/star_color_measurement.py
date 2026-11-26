@@ -64,11 +64,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 from astrometricslib.pipelines.stacking.post_processing.sun_like_balance import (
     SUN_LIKE_COLOUR_RANGE,
     SUN_LIKE_MINIMUM_STARS,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 __all__ = [
     "SOURCE_NAMES",

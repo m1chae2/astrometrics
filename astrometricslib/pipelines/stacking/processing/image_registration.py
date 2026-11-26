@@ -63,6 +63,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import per_axis_sigma_from_distances
 
 # An output pixel counts as holding real data when, resampling an image of
 # ones onto it (linearly), the result is at least this. A pixel that is only
@@ -384,7 +385,10 @@ def fit_similarity(
     minimum_pairs : `int`
         The fewest pairs a fit may use.
     clip_sigmas : `float`
-        A pair farther than this many robust sigmas from the fit is dropped.
+        A pair farther from the fit than this many standard deviations of the
+        error along one axis is dropped. That standard deviation is the
+        median miss distance divided by 1.1774 (see
+        `per_axis_sigma_from_distances`).
     clip_passes : `int`
         The most times the fit is repeated.
 
@@ -405,7 +409,7 @@ def fit_similarity(
         design = np.vstack([moving_complex[kept], np.ones(int(kept.sum()), dtype=complex)]).T
         (a, b), *_ = np.linalg.lstsq(design, reference_complex[kept], rcond=None)
         residual = np.abs(reference_complex - (a * moving_complex + b))
-        spread = 1.4826 * float(np.median(residual[kept]))
+        spread = per_axis_sigma_from_distances(residual[kept])
         limit = max(clip_sigmas * spread, 1e-6)
         new_kept = residual <= limit
         if np.array_equal(new_kept, kept):
@@ -477,7 +481,8 @@ def fit_transform(
     minimum_pairs : `int`
         The fewest pairs a fit may use.
     clip_sigmas : `float`
-        A pair farther than this many robust sigmas from a fit is dropped.
+        A pair farther from a fit than this many standard deviations of the
+        error along one axis is dropped (see `fit_similarity`).
     clip_passes : `int`
         The most times each fit is repeated.
     minimum_pairs_per_quadrant : `int`, optional
@@ -550,7 +555,7 @@ def fit_transform(
         )
         leftover = wanted - np.column_stack([terms @ row_coefficients, terms @ column_coefficients])
         distance = np.sqrt((leftover**2).sum(axis=1))
-        spread = 1.4826 * float(np.median(distance[kept_polynomial]))
+        spread = per_axis_sigma_from_distances(distance[kept_polynomial])
         new_kept = distance <= max(clip_sigmas * spread, 1e-6)
         if np.array_equal(new_kept, kept_polynomial):
             break

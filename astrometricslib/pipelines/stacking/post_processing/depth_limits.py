@@ -63,10 +63,10 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
-    MAD_TO_SIGMA,
     MEDIAN_ERROR_FACTOR,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseResult
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 

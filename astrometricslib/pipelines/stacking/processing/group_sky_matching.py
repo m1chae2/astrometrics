@@ -30,6 +30,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.binned_sky_plane import (
+    block_medians,
+    fit_clipped_plane,
+    whole_block_edges,
+)
 from astrometricslib.pipelines.stacking.processing.group_gains import SKY_CLIP_PASSES, SKY_CLIP_SIGMAS
 
 # The difference between two sky backgrounds is a smooth surface that changes
@@ -80,53 +85,13 @@ SKY_MATCH_MINIMUM_BLOCKS = TunedParameter(
 )
 
 
-def _block_medians(difference: np.ndarray, valid: np.ndarray) -> np.ndarray:
-    """Take the median of the difference in each fully usable block.
-
-    Parameters
-    ----------
-    difference : `numpy.ndarray`
-        A 2-D image of the difference between two groups.
-    valid : `numpy.ndarray`
-        A 2-D boolean mask, `True` where the difference can be trusted.
-
-    Returns
-    -------
-    blocks : `numpy.ndarray`
-        An array of shape (N, 3) with the row of the block center, its
-        column, and the median of the difference over the block's valid
-        pixels, for each of the N blocks that were used.
-    """
-    block = int(resolve(SKY_MATCH_BLOCK_PIXELS).value)
-    minimum_fraction = float(resolve(SKY_MATCH_BLOCK_VALID_FRACTION).value)
-    rows, columns = difference.shape
-    block_rows, block_columns = rows // block, columns // block
-    if block_rows == 0 or block_columns == 0:
-        return np.empty((0, 3))
-    trimmed = (slice(0, block_rows * block), slice(0, block_columns * block))
-    values = difference[trimmed].reshape(block_rows, block, block_columns, block).transpose(0, 2, 1, 3)
-    values = values.reshape(block_rows, block_columns, block * block)
-    flags = valid[trimmed].reshape(block_rows, block, block_columns, block).transpose(0, 2, 1, 3)
-    flags = flags.reshape(block_rows, block_columns, block * block)
-    usable = flags.mean(axis=2) >= minimum_fraction
-    masked = np.where(flags, values, np.nan)
-    medians = np.full((block_rows, block_columns), np.nan)
-    if usable.any():
-        medians[usable] = np.nanmedian(masked[usable], axis=1)
-    block_row_index, block_column_index = np.nonzero(usable & np.isfinite(medians))
-    return np.column_stack((
-        block_row_index * block + block / 2.0,
-        block_column_index * block + block / 2.0,
-        medians[block_row_index, block_column_index],
-    ))
-
-
 def fit_sky_plane(difference: np.ndarray, valid: np.ndarray) -> np.ndarray | None:
     """Fit a plane to the sky difference between two groups.
 
     The plane is fitted to block medians (see `SKY_MATCH_BLOCK_PIXELS`),
-    dropping the blocks more than `SKY_CLIP_SIGMAS` spreads from the fit in up
-    to `SKY_CLIP_PASSES` passes, so stars and the target do not bend it.
+    dropping the blocks more than `SKY_CLIP_SIGMAS` spreads from the fit on
+    either side in up to `SKY_CLIP_PASSES` passes, so stars and the target
+    in either group do not bend it (`binned_sky_plane.fit_clipped_plane`).
 
     Parameters
     ----------
@@ -142,27 +107,33 @@ def fit_sky_plane(difference: np.ndarray, valid: np.ndarray) -> np.ndarray | Non
         slope along the columns), or `None` when fewer than
         `SKY_MATCH_MINIMUM_BLOCKS` blocks could be used.
     """
-    blocks = _block_medians(np.asarray(difference, dtype=np.float64), np.asarray(valid, dtype=bool))
-    if len(blocks) < int(resolve(SKY_MATCH_MINIMUM_BLOCKS).value):
+    difference = np.asarray(difference, dtype=np.float64)
+    block = int(resolve(SKY_MATCH_BLOCK_PIXELS).value)
+    row_edges = whole_block_edges(difference.shape[0], block)
+    column_edges = whole_block_edges(difference.shape[1], block)
+    medians = block_medians(
+        difference,
+        row_edges,
+        column_edges,
+        valid=np.asarray(valid, dtype=bool),
+        minimum_valid_fraction=float(resolve(SKY_MATCH_BLOCK_VALID_FRACTION).value),
+    )
+    used = np.isfinite(medians)
+    minimum_blocks = int(resolve(SKY_MATCH_MINIMUM_BLOCKS).value)
+    if int(used.sum()) < minimum_blocks:
         return None
-    center_row = difference.shape[0] / 2.0
-    center_column = difference.shape[1] / 2.0
-    design = np.column_stack((np.ones(len(blocks)), blocks[:, 0] - center_row, blocks[:, 1] - center_column))
-    kept = np.ones(len(blocks), dtype=bool)
-    plane = np.zeros(3)
-    clip_sigmas = float(resolve(SKY_CLIP_SIGMAS).value)
-    for _ in range(int(resolve(SKY_CLIP_PASSES).value)):
-        if kept.sum() < int(resolve(SKY_MATCH_MINIMUM_BLOCKS).value):
-            return None
-        plane = np.linalg.lstsq(design[kept], blocks[kept, 2], rcond=None)[0]
-        residual = blocks[:, 2] - design @ plane
-        spread = 1.4826 * float(np.median(np.abs(residual[kept] - np.median(residual[kept]))))
-        if spread <= 0:
-            break
-        new_kept = np.abs(residual) <= clip_sigmas * spread
-        if np.array_equal(new_kept, kept):
-            break
-        kept = new_kept
+    block_rows, block_columns = np.nonzero(used)
+    center_rows = (row_edges[:-1] + row_edges[1:]) / 2.0
+    center_columns = (column_edges[:-1] + column_edges[1:]) / 2.0
+    plane, _kept = fit_clipped_plane(
+        center_rows[block_rows] - difference.shape[0] / 2.0,
+        center_columns[block_columns] - difference.shape[1] / 2.0,
+        medians[used],
+        side="both",
+        clip_sigmas=float(resolve(SKY_CLIP_SIGMAS).value),
+        rounds=int(resolve(SKY_CLIP_PASSES).value),
+        minimum_kept=minimum_blocks,
+    )
     return plane
 
 

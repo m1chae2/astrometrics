@@ -58,8 +58,9 @@ from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.processing_results import BrightObjectChoice, BrightObjectChoices
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.simbad_object_types import quote_adql
-from astrometricslib.pipelines.stacking.post_processing.stack_image import celestial_wcs, pixel_scale_arcsec
+from astrometricslib.pipelines.stacking.post_processing.stack_image import pixel_scale_arcsec
 from astrometricslib.utilities.target_object_category import (
     GALAXY_CODES,
     NEBULA_CODES,

@@ -5,8 +5,11 @@
  * field, other), flagged, then included. Each frame is one small square in its lane at its time, so a
  * cloud passage shows as a run of marks in the cloud lane. Hovering a mark gives the file name and time. The frame picked in the File Browser has a ring around it, and clicking a mark
  * picks that frame. The time axis is broken: each night gets its own section, spread over that night's
- * real capture times and labeled with its date and frame count, so no frame hides behind another. A
- * dotted line marks each break between nights (the days between them are not drawn). A one-line count
+ * real capture times, so no frame hides behind another. Each night is labeled with its date, written flat;
+ * the year is added on the first label and wherever it changes. Only the labels that fit side by side at the
+ * plot's width are shown, so zooming in shows more of them. A frame's hover label names its night and that
+ * night's frame count. A dotted line marks each break between nights (the days between them are not drawn).
+ * A one-line count
  * of the frames sits above the chart. The mouse wheel (or a two-finger scroll) over the plot zooms the
  * time axis around the pointer, all nights together, never wider than the full range; a double-click
  * returns to the full range. When zoomed in, dragging the empty plot pans along x, kept inside the
@@ -50,8 +53,10 @@ export interface StarShapeChartData {
 
 /** One night's section of the broken time axis. */
 export interface NightSegment {
-    /** The label under the section, for example "Oct 3<br>61 frames". */
+    /** The night's date without the year, for example "Oct 3". */
     label: string;
+    /** The night's year, for example 2025. */
+    year: number;
     /** The number of frames in the night. */
     count: number;
     /** Where the section starts on the broken axis (0 to 1). */
@@ -119,6 +124,8 @@ interface ChartFrame {
     x: number;
     /** The place on the broken axis where the exposure ends. */
     xEnd: number;
+    /** Which night the frame belongs to (its place in the list of nights). */
+    nightIndex: number;
 }
 
 /** What the chart can draw beyond the frames' statuses. */
@@ -185,12 +192,89 @@ function placeNights(all: ChartFrame[]): NightSegment[] {
         cursor += width + BREAK_FRACTION;
         const first = group[0].time;
         for (const frame of group) {
+            frame.nightIndex = index;
             frame.x = group.length === 1 ? start + width / 2 : start + ((frame.time - first) / spans[index]) * width;
             frame.xEnd = group.length === 1 ? frame.x : start + ((frame.time + frame.durationMs - first) / spans[index]) * width;
         }
-        const date = new Date(first).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        return { label: `${date}<br>${group.length} ${group.length === 1 ? 'frame' : 'frames'}`, count: group.length, start, end: start + width };
+        const date = new Date(first);
+        const label = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        return { label, year: date.getFullYear(), count: group.length, start, end: start + width };
     });
+}
+
+/**
+ * Writes a night's date with its two-digit year, for example "Nov 3 '23".
+ * @param night The night.
+ * @return The date and year.
+ */
+export function nightDateWithYear(night: NightSegment): string {
+    return `${night.label} '${String(night.year % 100).padStart(2, '0')}`;
+}
+
+/** The labels to show under the time axis: where each one goes and what it says. */
+export interface NightTicks {
+    /** The places on the broken axis of the labels shown. */
+    tickvals: number[];
+    /** The text of each label shown. */
+    ticktext: string[];
+}
+
+/** The space kept between two labels, in pixels. */
+const LABEL_GAP_PX = 12;
+
+/**
+ * Guesses how wide a label is drawn, in pixels. Most letters and digits are a bit over half the font size wide.
+ * @param text The label.
+ * @param fontSize The font size in pixels.
+ * @return The guessed width in pixels.
+ */
+export function estimateLabelWidth(text: string, fontSize: number): number {
+    return text.length * fontSize * 0.6;
+}
+
+/**
+ * Picks the night labels that fit side by side. It walks the nights in view from left to right and keeps a
+ * label only when it does not touch the last kept one. The first and the last night in view are kept when
+ * they can be. The year is added to the first label shown and to any label whose year differs from the one
+ * before it.
+ * @param nights The nights, in time order.
+ * @param xRange The part of the axis in view.
+ * @param plotWidthPx The width of the drawing area, in pixels.
+ * @param fontSize The label font size, in pixels.
+ * @return The places and texts of the labels to show.
+ */
+export function pickNightLabels(
+    nights: readonly NightSegment[], xRange: readonly [number, number], plotWidthPx: number, fontSize: number,
+): NightTicks {
+    const span = xRange[1] - xRange[0];
+    if (span <= 0 || plotWidthPx <= 0) return { tickvals: [], ticktext: [] };
+    const pixelOf = (place: number): number => ((place - xRange[0]) / span) * plotWidthPx;
+    const inView = nights
+        .map((night) => ({ night, place: (night.start + night.end) / 2 }))
+        .filter((item) => item.place >= xRange[0] && item.place <= xRange[1]);
+    type Kept = { night: NightSegment; place: number; text: string; left: number; right: number };
+    /** Makes a label at a night, written with the year when it differs from the label before it. */
+    const labelAt = (item: { night: NightSegment; place: number }, before: Kept | undefined): Kept => {
+        const text = before && before.night.year === item.night.year ? item.night.label : nightDateWithYear(item.night);
+        const half = (estimateLabelWidth(text, fontSize) + LABEL_GAP_PX) / 2;
+        const center = pixelOf(item.place);
+        return { night: item.night, place: item.place, text, left: center - half, right: center + half };
+    };
+    const kept: Kept[] = [];
+    for (const item of inView) {
+        const candidate = labelAt(item, kept[kept.length - 1]);
+        if (kept.length === 0 || candidate.left >= kept[kept.length - 1].right) kept.push(candidate);
+    }
+    // Keep the last night in view too: it takes the place of the label before it when the two would touch.
+    const lastItem = inView[inView.length - 1];
+    if (lastItem && kept.length > 0 && kept[kept.length - 1].night !== lastItem.night) {
+        if (kept.length > 1 && labelAt(lastItem, kept[kept.length - 2]).left < kept[kept.length - 1].right) {
+            kept.pop();
+        }
+        const last = labelAt(lastItem, kept[kept.length - 1]);
+        if (last.left >= kept[kept.length - 1].right) kept.push(last);
+    }
+    return { tickvals: kept.map((item) => item.place), ticktext: kept.map((item) => item.text) };
 }
 
 /**
@@ -235,7 +319,7 @@ export function buildStarShapeChart(
         let lane: Lane = kind === 'flagged' ? 'Flagged' : 'Included';
         if (kind === 'set-aside') lane = `Set aside: ${setAsideCategory(status?.kind)}` as Lane;
         const seconds = options.exposureSeconds?.get(path) ?? typicalSeconds;
-        all.push({ path, time, lane, durationMs: seconds * 1000, x: 0, xEnd: 0 });
+        all.push({ path, time, lane, durationMs: seconds * 1000, x: 0, xEnd: 0, nightIndex: 0 });
     }
     all.sort((first, second) => first.time - second.time);
     const nights = placeNights(all);
@@ -250,7 +334,11 @@ export function buildStarShapeChart(
         x: group.map((frame) => Math.max(frame.xEnd - frame.x, minWidth)),
         y: group.map(yOf),
         customdata: group.map((frame) => frame.path),
-        text: group.map((frame) => `${frame.path.split('/').pop()}<br>${new Date(frame.time).toLocaleString()}`),
+        text: group.map((frame) => {
+            const night = nights[frame.nightIndex];
+            const nightLine = `Night of ${nightDateWithYear(night)}: ${night.count} ${night.count === 1 ? 'frame' : 'frames'}`;
+            return `${frame.path.split('/').pop()}<br>${new Date(frame.time).toLocaleString()}<br>${nightLine}`;
+        }),
     });
     const colorOf = (lane: Lane): string => {
         if (lane === 'Flagged') return getVar('--plot-orange', '#e95420');
@@ -363,7 +451,16 @@ export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedP
             setXRange(zoomXRange(current, fraction, event.deltaY, minSpanRef.current));
         };
         node.addEventListener('wheel', onWheel, { passive: false });
-        return () => node.removeEventListener('wheel', onWheel);
+        // Follow the panel's width, so the axis labels are thinned again when the panel is resized.
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+            const width = node.getBoundingClientRect().width;
+            if (width > 0) setPlotWidth(width);
+        });
+        observer?.observe(node);
+        return () => {
+            node.removeEventListener('wheel', onWheel);
+            observer?.disconnect();
+        };
     }, [hasChart]);
 
     const layout = useMemo(() => {
@@ -373,13 +470,15 @@ export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedP
             margin: { l: 8, r: 8, t: 8, b: 28 },
         });
         const top = chart.lanes.length - 1;
+        // The drawing area is the panel less its margins and the lane names on the left.
+        const laneNameWidth = Math.max(0, ...chart.lanes.map((lane) => estimateLabelWidth(lane, fontSize))) + 8;
+        const ticks = pickNightLabels(chart.nights, xRange, plotWidth - 16 - laneNameWidth, fontSize);
         return {
             ...base,
             font: { ...base.font, size: fontSize },
             xaxis: {
                 ...base.xaxis, type: 'linear', range: xRange, fixedrange: true, zeroline: false, showgrid: false,
-                tickfont: { size: fontSize }, tickmode: 'array',
-                tickvals: chart.nights.map((night) => (night.start + night.end) / 2), ticktext: chart.nights.map((night) => night.label),
+                tickfont: { size: fontSize }, tickmode: 'array', tickangle: 0, ticktext: ticks.ticktext, tickvals: ticks.tickvals,
             },
             yaxis: {
                 ...base.yaxis, tickfont: { size: fontSize }, range: [-0.6, top + 0.6], fixedrange: true, zeroline: false,
@@ -403,7 +502,7 @@ export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedP
                 }] : []),
             ],
         };
-    }, [chart.lanes, chart.nights, chart.nightBreaks, chart.selection, xRange]);
+    }, [chart.lanes, chart.nights, chart.nightBreaks, chart.selection, xRange, plotWidth]);
 
     if (chart.drawnCount === 0) return null;
     return (

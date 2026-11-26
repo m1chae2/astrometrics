@@ -2,13 +2,15 @@
  * @file test_starShapesSummary.test.tsx
  * @description Tests of the frame status timeline in Frame Analysis: lanes only for statuses that are
  * present, one mark per frame, the count line, night breaks, the status line when there are no frames,
- * and that clicking a mark picks that frame.
+ * that clicking a mark picks that frame, and that the night labels under the axis are flat, short and
+ * never overlap.
  */
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StarShapesSummary, NOT_MEASURED_NOTE } from '../components/StarShapesSummary';
-import { buildStarShapeChart, describeFrameCounts, zoomXRange, panXRange, FULL_X_RANGE } from '../components/StarShapeChart';
+import { buildStarShapeChart, describeFrameCounts, zoomXRange, panXRange, pickNightLabels, estimateLabelWidth, FULL_X_RANGE } from '../components/StarShapeChart';
+import type { NightSegment } from '../components/StarShapeChart';
 import type { FrameStatus, FrameStatusReport, StarShapeReview } from '../../common/types/backendTypes';
 import { describeFrameStatus } from '../utils/frameStatus';
 
@@ -115,10 +117,12 @@ describe('buildStarShapeChart', () => {
         expect(chart.drawnCount).toBe(5);
     });
 
-    it('puts the file name and time, not the status or reason, in the hover text', () => {
+    it('puts the file name, time and night, not the status or reason, in the hover text', () => {
         const cloud = build().traces[0] as unknown as Points;
         expect(cloud.text[0]).toMatch(/d\.fits/);
-        expect(cloud.text[0].split('<br>')).toHaveLength(2);
+        const lines = cloud.text[0].split('<br>');
+        expect(lines).toHaveLength(3);
+        expect(lines[2]).toMatch(/^Night of .+ '\d\d: 5 frames$/);
         expect(cloud.text[0]).not.toMatch(/Set aside|reason/);
     });
 
@@ -303,5 +307,71 @@ describe('frame status timeline bars', () => {
         const thin = buildStarShapeChart(series, new Set(), null, null, new Map(), { minWidth: 0.05 })
             .traces[0] as unknown as { x: number[] };
         expect(thin.x.every((width) => width >= 0.05)).toBe(true);
+    });
+});
+
+describe('night labels under the time axis', () => {
+    const FONT = 12;
+    /** Makes evenly spaced nights, one a week from 2023-11-03, with labels like the chart's. */
+    const nightsOf = (count: number): NightSegment[] => {
+        const width = 1 / count;
+        return Array.from({ length: count }, (_, index) => {
+            const date = new Date(2023, 10, 3 + index * 7);
+            return {
+                label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), year: date.getFullYear(),
+                count: 10, start: index * width, end: (index + 0.8) * width,
+            };
+        });
+    };
+    /** Checks that no two labels shown touch, at a given drawing width and range. */
+    const noOverlap = (ticks: { tickvals: number[]; ticktext: string[] }, range: [number, number], widthPx: number) => {
+        const pixel = (place: number) => ((place - range[0]) / (range[1] - range[0])) * widthPx;
+        for (let index = 1; index < ticks.tickvals.length; index++) {
+            const gap = pixel(ticks.tickvals[index]) - pixel(ticks.tickvals[index - 1]);
+            const room = (estimateLabelWidth(ticks.ticktext[index], FONT) + estimateLabelWidth(ticks.ticktext[index - 1], FONT)) / 2;
+            expect(gap).toBeGreaterThanOrEqual(room);
+        }
+    };
+
+    it('thins many nights in a narrow plot so the labels do not overlap, keeping the first and last', () => {
+        const nights = nightsOf(20);
+        const range: [number, number] = [FULL_X_RANGE[0], FULL_X_RANGE[1]];
+        const ticks = pickNightLabels(nights, range, 280, FONT);
+        expect(ticks.tickvals.length).toBeGreaterThan(1);
+        expect(ticks.tickvals.length).toBeLessThan(20);
+        noOverlap(ticks, range, 280);
+        expect(ticks.tickvals[0]).toBeCloseTo((nights[0].start + nights[0].end) / 2);
+        expect(ticks.tickvals[ticks.tickvals.length - 1]).toBeCloseTo((nights[19].start + nights[19].end) / 2);
+        expect(ticks.ticktext.every((text) => !text.includes('<br>') && !/frame/.test(text))).toBe(true);
+    });
+
+    it('shows more labels when zoomed in, and only the nights in view', () => {
+        const nights = nightsOf(20);
+        const full = pickNightLabels(nights, [FULL_X_RANGE[0], FULL_X_RANGE[1]], 280, FONT);
+        const zoomed = pickNightLabels(nights, [0, 0.5], 280, FONT);
+        const density = (ticks: { tickvals: number[] }, span: number) => ticks.tickvals.length / span;
+        expect(density(zoomed, 0.5)).toBeGreaterThan(density(full, 1.02));
+        expect(zoomed.tickvals.every((place) => place >= 0 && place <= 0.5)).toBe(true);
+        noOverlap(zoomed, [0, 0.5], 280);
+    });
+
+    it('adds the year on the first label and where the year changes', () => {
+        const nights = nightsOf(14);
+        const ticks = pickNightLabels(nights, [FULL_X_RANGE[0], FULL_X_RANGE[1]], 4000, FONT);
+        expect(ticks.ticktext).toHaveLength(14);
+        expect(ticks.ticktext[0]).toMatch(/ '23$/);
+        expect(ticks.ticktext[1]).not.toMatch(/'/);
+        // The night after Dec 29, 2023 is Jan 5, 2024.
+        const firstOf2024 = nights.findIndex((night) => night.year === 2024);
+        expect(ticks.ticktext[firstOf2024]).toMatch(/ '24$/);
+        expect(ticks.ticktext[firstOf2024 + 1]).not.toMatch(/'/);
+    });
+
+    it('draws the labels flat in the chart', () => {
+        const frames = report().frames!;
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(frames)} selectedPath={null} onSelectFrame={() => {}} />);
+        const xaxis = plotProps.current!.layout.xaxis;
+        expect(xaxis.tickangle).toBe(0);
+        expect(xaxis.ticktext.length).toBe(xaxis.tickvals.length);
     });
 });

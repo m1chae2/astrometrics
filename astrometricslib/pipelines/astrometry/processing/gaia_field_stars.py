@@ -22,7 +22,6 @@ cache alone.
 """
 
 import logging
-import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -39,6 +38,7 @@ from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
 from astrometricslib.pipelines.shared.header_wcs import image_corners_on_sky
+from astrometricslib.utilities.table_cells import optional_float
 
 logger = logging.getLogger(__name__)
 
@@ -144,26 +144,6 @@ def _cache_rows(table: Table) -> list[tuple]:
         ``(source_id, ra, dec, G, designation, pmra, pmdec)`` per star, with
         `None` for an unknown proper motion.
     """
-
-    def _number(value: Any) -> float | None:
-        """Give a finite float, or `None`.
-
-        Parameters
-        ----------
-        value : `Any`
-            A table cell.
-
-        Returns
-        -------
-        number : `float` or `None`
-            The value, or `None` when it is masked or not finite.
-        """
-        try:
-            number = float(value)
-        except TypeError, ValueError:
-            return None
-        return number if math.isfinite(number) else None
-
     return [
         (
             str(row["source_id"]),
@@ -171,8 +151,8 @@ def _cache_rows(table: Table) -> list[tuple]:
             float(row["dec"]),
             float(row["phot_g_mean_mag"]),
             str(row["designation"]),
-            _number(row["pmra"]),
-            _number(row["pmdec"]),
+            optional_float(row["pmra"]),
+            optional_float(row["pmdec"]),
         )
         for row in table
     ]

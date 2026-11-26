@@ -7,10 +7,10 @@ neither script has to import the other.
 from enum import StrEnum
 
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.utilities.gaia_record_ids import GAIA_DR3_PREFIX
 
-_GAIA_PREFIX = "Gaia DR3 "
 # The id given to a Gaia star with no source number: made from its position.
-_SYNTHETIC_GAIA_PREFIX = "Gaia DR3 J"
+_SYNTHETIC_GAIA_PREFIX = f"{GAIA_DR3_PREFIX}J"
 _POSITION_ONLY_PREFIX = "FIELD_J"
 _SPECTROSCOPY_COPY_SUFFIX = "::spectroscopy"
 
@@ -42,7 +42,7 @@ def kind_of_star_id(star_id: str) -> StarKind:
         return StarKind.SKIPPED
     if star_id.startswith(_SYNTHETIC_GAIA_PREFIX):
         return StarKind.SKIPPED
-    if star_id.startswith(_GAIA_PREFIX) and star_id[len(_GAIA_PREFIX) :].isdigit():
+    if star_id.startswith(GAIA_DR3_PREFIX) and star_id[len(GAIA_DR3_PREFIX) :].isdigit():
         return StarKind.GAIA_SOURCE
     return StarKind.SIMBAD_NAME
 

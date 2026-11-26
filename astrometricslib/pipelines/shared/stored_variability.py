@@ -33,6 +33,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import vstack
 
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.known_variability import (
     KnownVariability,
     classify_gaia_variable_flag,
@@ -47,6 +48,7 @@ from astrometricslib.pipelines.shared.simbad_object_types import (
 )
 from astrometricslib.pipelines.shared.star_kinds import stored_position_degrees
 from astrometricslib.pipelines.shared.variable_star_catalogs import (
+    MATCH_RADIUS_ARCSEC,
     build_position_table,
     gaia_flags_from_classes,
     group_into_fields,
@@ -56,12 +58,6 @@ from astrometricslib.pipelines.shared.variable_star_catalogs import (
 )
 
 logger = logging.getLogger(__name__)
-
-# How far a stored SIMBAD row may lie from a star and still be that star, in
-# arcseconds. The same 3 arcseconds as the VSX match (`MATCH_RADIUS_ARCSEC`
-# is 3 pixel scales at the reference setup); a fixed value is used here
-# because no plate scale is at hand.
-SIMBAD_STORED_MATCH_ARCSEC = 3.0
 
 
 @dataclass
@@ -196,8 +192,11 @@ def _fill_simbad(stars: Sequence[StellarObject], simbad: Any, report: Variabilit
         np.ma.filled(np.ma.asarray(table[dec_column], dtype=float), np.nan) * u.deg,
     )
     index, separation, _ = sky.match_to_catalog_sky(entries)
+    # The same radius as the VSX and Gaia matches; it follows the run's plate
+    # scale (see `variable_star_catalogs.MATCH_RADIUS_ARCSEC`).
+    match_radius_arcsec = float(resolve(MATCH_RADIUS_ARCSEC).value)
     for star, entry_index, distance in zip(needing, index, separation.arcsec, strict=True):
-        if distance <= SIMBAD_STORED_MATCH_ARCSEC:
+        if distance <= match_radius_arcsec:
             types = read_simbad_object_types(table[int(entry_index)])
             if types:
                 star.simbad_object_types = types

@@ -1,9 +1,11 @@
 """What `Processing.identify_stack` returns: the named stars of one stack.
 
 Each star the stack's own star finder detected gets a name: the most
-familiar catalog designation (a proper name, a Bayer or Flamsteed name, an HD,
-HIP or Tycho number, then ``Gaia DR3 <id>``), or ``Unnamed star`` when no
-catalog star is close. Gaia stars bright enough to be seen but with no
+familiar catalog designation (a proper name, a Bayer or Flamsteed name, an HD
+or HIP number, then survey numbers, then ``Gaia DR3 <id>``), or
+``Unnamed star`` when no catalog star is close. Each named star also carries
+the id the library keeps its record under, so a viewer needs no guessing to
+find the record. Gaia stars bright enough to be seen but with no
 detection are listed too, so a viewer can show what the finder missed.
 Nothing here is stored in the target's star catalog. Every number is a plain
 Python float, int, bool or string, so it can be sent to the app as it is.
@@ -40,8 +42,13 @@ class IdentifiedStar(BaseModel):
     name_source : `str`
         ``simbad``, ``gaia`` or ``none``: where the name came from.
     aliases : `list` [`str`]
-        The other names SIMBAD lists for the star (Gaia numbers are left
-        out), most familiar first.
+        The familiar other names SIMBAD lists for the star, most familiar
+        first, as a library record keeps them.
+    library_id : `str` or `None`
+        The id the library saves (or will save) the star's record under:
+        SIMBAD's record id for a star SIMBAD names, else ``Gaia DR3 <id>``.
+        `None` for a star no catalog names. A record exists under it only
+        once a run measured the star.
     """
 
     id: str
@@ -55,6 +62,7 @@ class IdentifiedStar(BaseModel):
     gaia_source_id: str | None = None
     name_source: str = "none"
     aliases: list[str] = []
+    library_id: str | None = None
 
 
 class StackIdentification(BaseModel):

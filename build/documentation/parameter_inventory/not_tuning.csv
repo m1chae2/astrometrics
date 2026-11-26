@@ -187,8 +187,8 @@ astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_VIZIER_T
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE_SOLVE_SOURCES,Decided not tuning in the #175 review (AST-D05): speed cap; the brightest stars are enough to solve
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
+astrometricslib/pipelines/shared/catalog_star_identity.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
+astrometricslib/pipelines/shared/catalog_star_identity.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
@@ -296,7 +296,6 @@ astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,R
 astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_LIMITS,Reply size limits
 astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_MAXIMUM_RADIUS_DEGREES,Reply size cap on query radius
 astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
-astrometricslib/pipelines/shared/stored_variability.py,SIMBAD_STORED_MATCH_ARCSEC,Match radius to a stored SIMBAD row; same 3 arcsecond rule as the VSX match (AST-12)
 astrometricslib/pipelines/shared/target_overview.py,MAXIMUM_FRAME_ROWS,Reply row cap
 astrometricslib/pipelines/shared/target_overview.py,QUALITY_LIST_LENGTH,Reply list length
 astrometricslib/pipelines/shared/target_overview.py,describe_target.include_frames,Count of frames to list; 0 means none

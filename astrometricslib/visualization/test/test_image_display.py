@@ -24,7 +24,6 @@ from astrometricslib.api.visualization import Visualization
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.models.stack_identification import IdentifiedStar, StackIdentification
 from astrometricslib.models.target import ViewableImage
-from astrometricslib.visualization.image_display import catalog_keys_of_star
 
 STAR_POSITIONS = ((20.0, 30.0), (60.0, 15.0), (45.0, 70.0), (80.0, 85.0))
 """Column and row (0-based) of each synthetic star."""
@@ -93,11 +92,11 @@ def _identification(path: Path) -> StackIdentification:
     stars = [
         IdentifiedStar(
             id="detection-0", name="Gaia DR3 111", kind="matched", x=20.0, y=30.0, ra_deg=1.0, dec_deg=1.0,
-            gaia_source_id="111",
+            gaia_source_id="111", library_id="Gaia DR3 111",
         ),
         IdentifiedStar(
             id="detection-1", name="HD 222", kind="matched", x=60.0, y=15.0, ra_deg=1.0, dec_deg=1.0,
-            gaia_source_id="222",
+            gaia_source_id="222", library_id="HD 222",
         ),
         IdentifiedStar(
             id="detection-2", name="Unnamed star", kind="unmatched", x=45.0, y=70.0, ra_deg=1.0, dec_deg=1.0,
@@ -201,7 +200,7 @@ def test_a_figure_names_only_the_targets_stars_with_photometry(
 def test_without_a_target_the_stars_are_asked_for_by_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With no target, the stack's possible library ids are looked up."""
+    """With no target, the stack's library ids are looked up."""
     from astrometricslib.pipelines.astrometry.processing import stack_identification
 
     path = _synthetic_stack(tmp_path)
@@ -214,9 +213,7 @@ def test_without_a_target_the_stars_are_asked_for_by_id(
     figure = _visualization(stars).render_fits(str(path), kind="figure", overlays=["stars"])
 
     assert _star_names_drawn(figure) == ["Gaia DR3 111"]
-    asked_ids = stars.query.call_args.kwargs["ids"]
-    assert "Gaia DR3 111" in asked_ids and "HD 222" in asked_ids
-    assert not any(key.startswith("detection-") for key in asked_ids)
+    assert stars.query.call_args.kwargs["ids"] == ["Gaia DR3 111", "HD 222"]
 
 
 def test_the_title_says_why_a_stack_has_no_names(tmp_path: Path) -> None:
@@ -291,11 +288,3 @@ def test_a_missing_file_is_refused(tmp_path: Path) -> None:
     """A path with no file raises `NotFoundError`."""
     with pytest.raises(NotFoundError):
         _visualization().render_fits(str(tmp_path / "missing.fits"), kind="figure")
-
-
-def test_catalog_keys_follow_the_viewers_rule() -> None:
-    """The keys are the Gaia name, the name and a non-stack id, no repeats."""
-    star = SimpleNamespace(id="detection-4", name="Vega", gaia_source_id="999")
-    assert catalog_keys_of_star(star) == ["Gaia DR3 999", "Vega"]
-    unnamed = SimpleNamespace(id="HIP 5", name="Unnamed star", gaia_source_id=None)
-    assert catalog_keys_of_star(unnamed) == ["HIP 5"]

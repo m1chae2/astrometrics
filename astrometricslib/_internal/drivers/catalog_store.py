@@ -42,6 +42,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.gaia_record_ids import gaia_record_id
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +226,7 @@ def _star_tuple(row: Sequence[Any], include_proper_motion: bool) -> tuple:
         as the cache has always returned it, plus the proper motion if asked.
     """
     source_id = str(row[0])
-    star = (source_id, row[1], row[2], row[3], f"Gaia DR3 {source_id}")
+    star = (source_id, row[1], row[2], row[3], gaia_record_id(source_id))
     return (*star, row[4], row[5]) if include_proper_motion else star
 
 

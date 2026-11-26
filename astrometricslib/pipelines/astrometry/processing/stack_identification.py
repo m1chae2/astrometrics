@@ -17,10 +17,12 @@ has (step 6). The steps are:
    complete tiles are read. Gaia positions are moved to the stack's date.
 4. **Matching.** Each detection takes the nearest Gaia star within the
    catalog match radius. When SIMBAD can be asked, its stars in the field are
-   matched the same way, and a detection takes the most familiar designation
-   SIMBAD lists (see `star_designations`). Offline, names are Gaia's only,
-   and a note says why. A detection with no catalog star is
-   ``Unnamed star``.
+   matched the same way. The matching and naming are the ones an astrometry
+   run uses (`catalog_matching`, `catalog_star_identity.name_simbad_star`),
+   so a detection takes the same most familiar name, and the same library id
+   (``library_id``), that the library gives the star. Offline, names are
+   Gaia's only, and a note says why. A detection with no catalog star is
+   ``Unnamed star`` and has no library id.
 5. **Catalog stars with no detection.** Gaia stars inside the stack that are
    one magnitude brighter than the predicted detection limit (where nearly
    every isolated star is found), but have no detection within the match
@@ -32,7 +34,9 @@ has (step 6). The steps are:
 
 The result is saved next to the stack (``<stack>_identification.json``) with
 the stack's size and modification time, and `read_stack_identification`
-returns it while the stack is unchanged.
+returns it while the stack is unchanged. A file saved before stars carried a
+library id gets one when read, from the star's Gaia number or its SIMBAD
+name.
 """
 
 import logging
@@ -52,6 +56,10 @@ from astrometricslib.foundation.errors import AstrometricsError, InvalidArgument
 from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stack_identification import IdentifiedStar, StackIdentification
+from astrometricslib.pipelines.astrometry.processing.catalog_matching import (
+    nearest_catalog_entries,
+    pixels_to_sky,
+)
 from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     TileFetcher,
@@ -68,18 +76,21 @@ from astrometricslib.pipelines.astrometry.processing.star_identifier import (
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import refine_wcs_with_gaia
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
-    order_names_by_familiarity,
+    SimbadStarNames,
+    name_simbad_star,
 )
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+from astrometricslib.pipelines.shared.simbad_object_types import simbad_row_identifiers, without_name_prefix
 from astrometricslib.pipelines.shared.stack_sidecar import (
     read_stamped_record,
     sidecar_path,
     write_stamped_record,
 )
-from astrometricslib.pipelines.shared.star_designations import most_familiar_designation, readable_designation
+from astrometricslib.utilities.gaia_record_ids import GAIA_DR3_PREFIX, gaia_record_id
 
 __all__ = [
     "IDENTIFICATION_SIDECAR_SUFFIX",
+    "UNNAMED_STAR",
     "StackIdentificationStoppedError",
     "identify_stack_stars",
     "read_stack_identification",
@@ -110,7 +121,8 @@ CATALOG_ONLY_LIMIT = 3000
 # choice; it changes no name.
 CATALOG_ONLY_MARGIN_MAG = 1.0
 
-# The name of a detection no catalog star is close to.
+# The name of a detection no catalog star is close to. The library's one copy
+# of this text; the viewer keeps its own display string.
 UNNAMED_STAR = "Unnamed star"
 
 # The share of the work each step stands for, for the progress report.
@@ -146,10 +158,41 @@ def read_stack_identification(stack_path: str) -> StackIdentification | None:
     if record is None:
         return None
     try:
-        return StackIdentification.model_validate(record["identification"])
+        identification = StackIdentification.model_validate(record["identification"])
     except (ValueError, KeyError, TypeError) as error:
         logger.debug("Could not read the saved identification %s: %s", saved, error)
         return None
+    for star in identification.stars:
+        if star.library_id is None and star.kind != "unmatched":
+            # A file saved before stars carried a library id.
+            star.library_id = _library_id(
+                star.gaia_source_id, star.name if star.name_source == "simbad" else None
+            )
+    return identification
+
+
+def _library_id(gaia_source_id: str | None, simbad_record_id: str | None) -> str | None:
+    """Give the id the library saves (or will save) a named star under.
+
+    It follows the save rule of an astrometry run: a star SIMBAD names takes
+    SIMBAD's record id (see `catalog_star_identity.name_simbad_star`), and
+    any other star with a Gaia number is saved as ``Gaia DR3 <number>``.
+
+    Parameters
+    ----------
+    gaia_source_id : `str` or `None`
+        The Gaia DR3 number of the star's Gaia match, if any.
+    simbad_record_id : `str` or `None`
+        The record id of the star's SIMBAD match, if any.
+
+    Returns
+    -------
+    library_id : `str` or `None`
+        The id, or `None` for a star no catalog names.
+    """
+    if simbad_record_id:
+        return simbad_record_id
+    return gaia_record_id(gaia_source_id) if gaia_source_id else None
 
 
 def _save(stack_path: str, identification: StackIdentification) -> None:
@@ -258,13 +301,15 @@ def _counting_fetcher(
 
 def _simbad_names(
     identifier: StarIdentifier, wcs: WCS, width: int, height: int
-) -> tuple[SkyCoord | None, list[str], list[str | None], str, list[list[str]]]:
-    """Ask SIMBAD for the stars of the field and their familiar names.
+) -> tuple[SkyCoord | None, list[SimbadStarNames], str]:
+    """Ask SIMBAD for the stars of the field and name each one.
 
     SIMBAD can return more than one row for one star. Rows with the same
     Gaia DR3 number are joined into one star that holds every identifier of
     them, and the stars are put in a fixed order (by position), so the name
-    chosen for a star does not depend on the order of SIMBAD's rows.
+    chosen for a star does not depend on the order of SIMBAD's rows. Each
+    star is named by the step an astrometry run uses
+    (`catalog_star_identity.name_simbad_star`).
 
     Parameters
     ----------
@@ -279,19 +324,13 @@ def _simbad_names(
     -------
     coords : `SkyCoord` or `None`
         SIMBAD's star positions, or `None` when there are none.
-    names : `list` [`str`]
-        The most familiar designation of each (see
-        `most_familiar_designation`).
-    gaia_ids : `list` [`str` or `None`]
-        The Gaia DR3 source ID SIMBAD lists for each, if any.
+    names : `list` [`SimbadStarNames`]
+        The record id, most familiar name, Gaia number and aliases of each.
     note : `str`
         Why there are no SIMBAD names; empty when there are.
-    aliases : `list` [`list` [`str`]]
-        The other names of each star, most familiar first, without the name
-        itself and without Gaia numbers (DR1, DR2 and DR3).
     """
     if network_is_offline():
-        return None, [], [], "Offline: the names come from Gaia only, because SIMBAD cannot be asked.", []
+        return None, [], "Offline: the names come from Gaia only, because SIMBAD cannot be asked."
     center = wcs.pixel_to_world(width / 2.0, height / 2.0)
     corner = wcs.pixel_to_world(0.0, 0.0)
     radius = float(center.separation(corner).deg) * 1.02
@@ -303,53 +342,38 @@ def _simbad_names(
         logger.info("SIMBAD could not be asked for the stack's names: %s", error)
         table, coords = None, None
     if table is None or coords is None or len(table) == 0:
-        return None, [], [], "SIMBAD did not answer, so the names come from Gaia only.", []
-    ids_column = next((name for name in ("ids", "IDS") if name in table.colnames), None)
-    main_column = next((name for name in ("main_id", "MAIN_ID") if name in table.colnames), None)
-    # One entry per star: [identifiers, ra, dec], keyed by the Gaia number or
-    # (for a star with none) by the row number.
+        return None, [], "SIMBAD did not answer, so the names come from Gaia only."
+    # One entry per star: [main ids, identifiers, position], keyed by the
+    # Gaia number or (for a star with none) by the row number.
     stars: dict[str, list[Any]] = {}
     for row_number, row in enumerate(table):
-        identifiers: list[str] = []
-        if ids_column is not None:
-            raw = row[ids_column]
-            text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-            identifiers = [part.strip() for part in text.split("|") if part.strip()]
-        if not identifiers and main_column is not None:
-            identifiers = [str(row[main_column])]
-        gaia = next((part for part in identifiers if part.startswith("Gaia DR3 ")), None)
+        main_id, identifiers = simbad_row_identifiers(row)
+        gaia = next((part for part in identifiers if part.startswith(GAIA_DR3_PREFIX)), None)
         key = f"gaia {gaia.split()[-1]}" if gaia else f"row {row_number}"
         position = (float(coords[row_number].ra.deg), float(coords[row_number].dec.deg))
         if key in stars:
-            stars[key][0].extend(identifiers)
-            stars[key][1] = min(stars[key][1], position)
+            stars[key][0].append(main_id)
+            stars[key][1].extend(identifiers)
+            stars[key][2] = min(stars[key][2], position)
         else:
-            stars[key] = [list(identifiers), position]
+            stars[key] = [[main_id], list(identifiers), position]
     ordered = sorted(
         (
-            (sorted(set(identifiers)), position, key[5:] if key.startswith("gaia ") else None)
-            for key, (identifiers, position) in stars.items()
+            (sorted(set(identifiers)), position, min(main_ids))
+            for main_ids, identifiers, position in stars.values()
         ),
         key=lambda star: (star[1], star[0]),
     )
-    names: list[str] = []
-    gaia_ids: list[str | None] = []
-    aliases: list[list[str]] = []
-    for identifiers, _, gaia_id in ordered:
-        name = most_familiar_designation(identifiers) or UNNAMED_STAR
-        names.append(name)
-        gaia_ids.append(gaia_id)
-        readable = [readable_designation(item) for item in identifiers if not item.startswith("Gaia DR")]
-        aliases.append([item for item in order_names_by_familiarity(readable) if item != name])
+    names = [name_simbad_star(main_id, identifiers) for identifiers, _, main_id in ordered]
     sorted_coords = SkyCoord(
         ra=[position[0] for _, position, _ in ordered] * u.deg,
         dec=[position[1] for _, position, _ in ordered] * u.deg,
     )
-    return sorted_coords, names, gaia_ids, "", aliases
+    return sorted_coords, names, ""
 
 
 def _record_simbad_aliases(
-    config: Any, stars: list[IdentifiedStar], simbad_gaia_ids: list[str | None]
+    config: Any, stars: list[IdentifiedStar], simbad_names: list[SimbadStarNames]
 ) -> int:
     """Add the SIMBAD names of the named stars to their saved star records.
 
@@ -364,8 +388,8 @@ def _record_simbad_aliases(
         The settings, which say where the star catalog is.
     stars : `list` [`IdentifiedStar`]
         The identified stars, with their SIMBAD names and aliases.
-    simbad_gaia_ids : `list` [`str` or `None`]
-        The Gaia numbers SIMBAD lists. A star matched only by position, whose
+    simbad_names : `list` [`SimbadStarNames`]
+        SIMBAD's stars of the field. A star matched only by position, whose
         Gaia number SIMBAD does not list, is not trusted to be the same star.
 
     Returns
@@ -376,11 +400,11 @@ def _record_simbad_aliases(
     """
     from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
-    listed = {gaia for gaia in simbad_gaia_ids if gaia}
+    listed = {str(names.gaia_source_id) for names in simbad_names if names.gaia_source_id is not None}
     wanted: dict[str, list[str]] = {}
     for star in stars:
         if star.gaia_source_id in listed and star.name_source == "simbad" and star.aliases:
-            wanted[f"Gaia DR3 {star.gaia_source_id}"] = [star.name, *star.aliases]
+            wanted[gaia_record_id(star.gaia_source_id)] = [star.name, *star.aliases]
     if not wanted:
         return 0
     try:
@@ -388,7 +412,7 @@ def _record_simbad_aliases(
         records = catalog_access.get_by_ids("stellar_catalog", sorted(wanted))
         gained: dict[str, list[str]] = {}
         for record in records:
-            known = {readable_designation(name) for name in (record.id, record.name, *record.aliases) if name}
+            known = {without_name_prefix(name) for name in (record.id, record.name, *record.aliases) if name}
             missing = [name for name in wanted[record.id] if name not in known]
             if missing:
                 gained[record.id] = list(dict.fromkeys(missing))
@@ -411,7 +435,7 @@ def _record_simbad_aliases(
                 The saved record with the new aliases.
             """
             target = existing if existing is not None else updated
-            have = {readable_designation(name) for name in (target.id, target.name, *target.aliases) if name}
+            have = {without_name_prefix(name) for name in (target.id, target.name, *target.aliases) if name}
             target.aliases = [*target.aliases, *(name for name in gained[updated.id] if name not in have)]
             return target
 
@@ -675,18 +699,14 @@ def identify_stack_stars(
         )
 
     _report(progress, _PROGRESS_TILES_DONE, "Asking SIMBAD for the familiar names")
-    simbad_coords, simbad_names, simbad_gaia_ids, simbad_note, simbad_aliases = _simbad_names(
-        identifier, wcs, width, height
-    )
+    simbad_coords, simbad_names, simbad_note = _simbad_names(identifier, wcs, width, height)
     if simbad_note:
         notes.append(simbad_note)
     _check(should_stop)
     _report(progress, _PROGRESS_SIMBAD_DONE, "Matching the detections to the catalogs")
 
-    stars = _match(
-        detections, wcs, gaia_table, gaia_coords, simbad_coords, simbad_names, simbad_gaia_ids, simbad_aliases
-    )
-    alias_records_updated = _record_simbad_aliases(config, stars, simbad_gaia_ids)
+    stars = _match(detections, wcs, gaia_table, gaia_coords, simbad_coords, simbad_names)
+    alias_records_updated = _record_simbad_aliases(config, stars, simbad_names)
     predicted_limit = (
         float(prediction.limiting_magnitude)
         if prediction is not None and prediction.limiting_magnitude is not None
@@ -721,47 +741,36 @@ def identify_stack_stars(
     return identification
 
 
-def _nearest(
-    coords: SkyCoord, catalog: SkyCoord | None, radius_arcsec: float
-) -> tuple[np.ndarray, np.ndarray]:
-    """Find each position's nearest catalog star within a radius.
-
-    Parameters
-    ----------
-    coords : `SkyCoord`
-        The positions.
-    catalog : `SkyCoord` or `None`
-        The catalog.
-    radius_arcsec : `float`
-        The match radius.
-
-    Returns
-    -------
-    index, found : `numpy.ndarray`
-        The catalog index of each position's nearest star, and whether it is
-        within the radius.
-    """
-    if catalog is None or len(catalog) == 0 or len(coords) == 0:
-        return np.zeros(len(coords), dtype=int), np.zeros(len(coords), dtype=bool)
-    index, separation, _ = coords.match_to_catalog_sky(catalog)
-    return np.asarray(index, dtype=int), np.asarray(separation.arcsec) < radius_arcsec
-
-
 def _match(
     detections: list[Any],
     wcs: WCS,
     gaia_table: Any,
     gaia_coords: SkyCoord | None,
     simbad_coords: SkyCoord | None,
-    simbad_names: list[str],
-    simbad_gaia_ids: list[str | None],
-    simbad_aliases: list[list[str]],
+    simbad_names: list[SimbadStarNames],
 ) -> list[IdentifiedStar]:
-    """Give each detection its catalog star and name.
+    """Give each detection its catalog star, name and library id.
 
     A detection whose Gaia star SIMBAD lists by Gaia number takes that
     SIMBAD star's name; otherwise it takes the nearest SIMBAD star within the
-    match radius, and otherwise the Gaia number.
+    match radius, and otherwise the Gaia number. The detections are placed on
+    the sky through the full plate solution, distortion terms included
+    (`catalog_matching.pixels_to_sky`).
+
+    Parameters
+    ----------
+    detections : `list`
+        The stack's detected stars (1-based ``x`` and ``y``).
+    wcs : `astropy.wcs.WCS`
+        The stack's plate solution.
+    gaia_table : `astropy.table.Table` or `None`
+        The Gaia stars of the filled tiles.
+    gaia_coords : `SkyCoord` or `None`
+        Their positions at the stack's date, in the table's order.
+    simbad_coords : `SkyCoord` or `None`
+        SIMBAD's star positions.
+    simbad_names : `list` [`SimbadStarNames`]
+        The names of SIMBAD's stars, in the order of `simbad_coords`.
 
     Returns
     -------
@@ -773,37 +782,42 @@ def _match(
     radius = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
     pixel_x = np.array([detection.x - 1.0 for detection in detections])
     pixel_y = np.array([detection.y - 1.0 for detection in detections])
-    ra, dec = wcs.wcs_pix2world(pixel_x, pixel_y, 0)
+    ra, dec = pixels_to_sky(wcs, pixel_x, pixel_y)
     coords = SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
-    gaia_index, gaia_found = _nearest(coords, gaia_coords, radius)
-    simbad_index, simbad_found = _nearest(coords, simbad_coords, radius)
-    simbad_by_gaia = {gaia: index for index, gaia in enumerate(simbad_gaia_ids) if gaia}
+    gaia_index, gaia_separation = nearest_catalog_entries(coords, gaia_coords)
+    simbad_index, simbad_separation = nearest_catalog_entries(coords, simbad_coords)
+    simbad_by_gaia = {
+        str(names.gaia_source_id): index
+        for index, names in enumerate(simbad_names)
+        if names.gaia_source_id is not None
+    }
     stars: list[IdentifiedStar] = []
     for number in range(len(detections)):
         source_id = g_mag = None
         star_ra, star_dec = float(ra[number]), float(dec[number])
-        if gaia_found[number] and gaia_table is not None and gaia_coords is not None:
+        if gaia_separation[number] < radius and gaia_table is not None and gaia_coords is not None:
             row = gaia_table[int(gaia_index[number])]
             source_id = str(row["source_id"])
             magnitude = float(row["phot_g_mean_mag"])
             g_mag = magnitude if math.isfinite(magnitude) else None
             star_ra = float(gaia_coords[int(gaia_index[number])].ra.deg)
             star_dec = float(gaia_coords[int(gaia_index[number])].dec.deg)
-        name, name_source, aliases = UNNAMED_STAR, "none", []
+        chosen: SimbadStarNames | None = None
         if source_id is not None and source_id in simbad_by_gaia:
-            chosen = simbad_by_gaia[source_id]
-            name, name_source, aliases = simbad_names[chosen], "simbad", simbad_aliases[chosen]
-        elif simbad_found[number]:
-            chosen = int(simbad_index[number])
-            name, name_source, aliases = simbad_names[chosen], "simbad", simbad_aliases[chosen]
+            chosen = simbad_names[simbad_by_gaia[source_id]]
+        elif simbad_separation[number] < radius:
+            chosen = simbad_names[int(simbad_index[number])]
+        if chosen is not None:
+            name, name_source, aliases = chosen.name, "simbad", list(chosen.aliases)
         elif source_id is not None:
-            name, name_source = f"Gaia DR3 {source_id}", "gaia"
-        kind = "matched" if name_source != "none" else "unmatched"
+            name, name_source, aliases = gaia_record_id(source_id), "gaia", []
+        else:
+            name, name_source, aliases = UNNAMED_STAR, "none", []
         stars.append(
             IdentifiedStar(
                 id=f"detection-{number}",
                 name=name,
-                kind=kind,
+                kind="matched" if name_source != "none" else "unmatched",
                 x=float(pixel_x[number]),
                 y=float(pixel_y[number]),
                 ra_deg=star_ra,
@@ -811,7 +825,8 @@ def _match(
                 g_mag=g_mag,
                 gaia_source_id=source_id,
                 name_source=name_source,
-                aliases=list(aliases),
+                aliases=aliases,
+                library_id=_library_id(source_id, chosen.record_id if chosen is not None else None),
             )
         )
     return stars
@@ -850,7 +865,8 @@ def _catalog_only(
         if stars
         else None
     )
-    _, near_detection = _nearest(coords, detected, float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value))
+    _, detection_separation = nearest_catalog_entries(coords, detected)
+    near_detection = detection_separation < float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
     order = np.argsort(magnitudes[bright])
     found: list[IdentifiedStar] = []
     for position in order:
@@ -865,7 +881,7 @@ def _catalog_only(
         found.append(
             IdentifiedStar(
                 id=f"gaia-{source_id}",
-                name=f"Gaia DR3 {source_id}",
+                name=gaia_record_id(source_id),
                 kind="catalog_only",
                 x=float(pixel_x[position]),
                 y=float(pixel_y[position]),
@@ -874,6 +890,7 @@ def _catalog_only(
                 g_mag=float(magnitudes[bright[position]]),
                 gaia_source_id=source_id,
                 name_source="gaia",
+                library_id=gaia_record_id(source_id),
             )
         )
     return found

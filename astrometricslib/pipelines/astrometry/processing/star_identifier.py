@@ -57,6 +57,10 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.astrometry.processing.catalog_matching import (
+    nearest_catalog_entries,
+    pixels_to_sky,
+)
 from astrometricslib.pipelines.astrometry.processing.extended_catalog_entry import (
     is_extended_catalog_entry,
     is_extended_object_type,
@@ -77,28 +81,24 @@ from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
     record_plate_scale,
     refine_wcs_with_gaia,
 )
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import CatalogBand, catalog_band_of
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
-    display_name_rank,
     gaia_dr3_source_id_from_names,
-    order_names_by_familiarity,
+    name_simbad_star,
 )
 from astrometricslib.pipelines.shared.simbad_object_types import (
     STAR_REGION_VOTABLE_FIELDS,
     read_simbad_object_types,
+    simbad_row_identifiers,
 )
 from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
 from astrometricslib.utilities.exceptions import DATA_ERRORS, PlateSolveFailedError
+from astrometricslib.utilities.gaia_record_ids import gaia_record_id
 from astrometricslib.utilities.solar_system_targets import is_solar_system_target
+from astrometricslib.utilities.table_cells import optional_float
 
 logger = logging.getLogger(__name__)
-
-# The SIMBAD names kept as a star's aliases: proper, Bayer, Flamsteed and
-# variable-star names, and the bright-star catalogs (rank 0 and 1 of
-# `display_name_rank`). At most this many are kept, so the record stays
-# small. Not tuning: a choice of what to show, not a measurement.
-_ALIAS_NAME_RANK_LIMIT = 1
-_MAXIMUM_ALIASES = 6
 
 # A centre star matched to a catalog star farther than this from the position
 # hint is reported as a probable mislabel. Only a warning, nothing is changed
@@ -656,29 +656,6 @@ def _brightest_pixel(data: Any) -> float | None:
     return peak if math.isfinite(peak) else None
 
 
-def _optional_float(value: Any) -> float | None:
-    """Turn a catalog table value into a float, or `None` if it has no value.
-
-    Parameters
-    ----------
-    value : `Any`
-        A table cell: a number, `None`, or an astropy masked value.
-
-    Returns
-    -------
-    number : `float` or `None`
-        The value, or `None` when it is missing, masked, not a number, or
-        not finite.
-    """
-    if value is None or (hasattr(value, "mask") and bool(np.all(value.mask))):
-        return None
-    try:
-        number = float(value)
-    except TypeError, ValueError:
-        return None
-    return number if math.isfinite(number) else None
-
-
 def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
     """Read a star's brightness from a catalog row, if the catalog has one.
 
@@ -703,16 +680,8 @@ def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None
         The magnitude, or `None` if the catalog has no usable value.
     """
     for column_name in column_names:
-        if column_name not in match.colnames:
-            continue
-        value = match[column_name]
-        if value is None or (hasattr(value, "mask") and bool(value.mask)):
-            return None
-        try:
-            magnitude = float(value)
-        except ValueError, TypeError:
-            return None
-        return magnitude if math.isfinite(magnitude) else None
+        if column_name in match.colnames:
+            return optional_float(match[column_name])
     return None
 
 
@@ -875,16 +844,18 @@ def read_observation_time(header: Any) -> Time | None:
 
 
 def estimate_faintest_detected_magnitude(stellar_objects: list[StellarObject]) -> float | None:
-    """Estimate the catalog magnitude of the faintest detected star of a frame.
+    """Estimate the Gaia G magnitude of the faintest detected star of a frame.
 
-    The detected stars that a catalog identified have both a measured flux
-    and a catalog magnitude. Magnitude is ``zero_point - 2.5 * log10(flux)``,
-    so each such star gives a zero point, and the median is the frame's. The
-    faint end is the flux that 99 percent of the detections exceed
-    (`FAINT_END_PERCENTILE`), not the single faintest one, because the very
-    faintest detections are mostly noise peaks. It is only a check of the
-    predicted query depth (see `gaia_depth.depth_exceeded`); it does not set
-    the depth.
+    The detected stars that Gaia identified have both a measured flux and a
+    Gaia G magnitude. Magnitude is ``zero_point - 2.5 * log10(flux)``, so
+    each such star gives a G zero point, and the median is the frame's. Stars
+    SIMBAD named carry a V magnitude and are left out (see
+    `catalog_zero_point.catalog_band_of`), so the answer is in the G band the
+    query depth is set in. The faint end is the flux that 99 percent of the
+    detections exceed (`FAINT_END_PERCENTILE`), not the single faintest one,
+    because the very faintest detections are mostly noise peaks. It is only
+    a check of the predicted query depth (see `gaia_depth.depth_exceeded`);
+    it does not set the depth.
 
     Parameters
     ----------
@@ -896,17 +867,23 @@ def estimate_faintest_detected_magnitude(stellar_objects: list[StellarObject]) -
     magnitude : `float` or `None`
         The estimate, or `None` when fewer than
         `MINIMUM_STARS_FOR_DEPTH_ESTIMATE` stars have both a positive flux
-        and a catalog magnitude.
+        and a Gaia G magnitude.
     """
     fluxes: list[float] = []
     zero_points: list[float] = []
     for star in stellar_objects:
-        flux = _optional_float(star.flux)
+        flux = optional_float(star.flux)
         if flux is None or flux <= 0:
             continue
         fluxes.append(flux)
-        magnitude = _optional_float(star.magnitude)
-        if star.is_catalog_identified and magnitude is not None:
+        # Only Gaia G magnitudes give a G zero point: a SIMBAD match carries a
+        # V magnitude, which differs from G by the star's color.
+        magnitude = optional_float(star.magnitude)
+        if (
+            star.is_catalog_identified
+            and magnitude is not None
+            and catalog_band_of(star) is CatalogBand.GAIA_G
+        ):
             zero_points.append(magnitude + 2.5 * math.log10(flux))
     if len(zero_points) < resolve(MINIMUM_STARS_FOR_DEPTH_ESTIMATE).value:
         return None
@@ -1919,8 +1896,8 @@ class StarIdentifier:
             if x is None or y is None:
                 continue
             try:
-                ra, dec = wcs.wcs_pix2world(x, y, 0)
-                sky_positions[id(stellar_object)] = (float(ra), float(dec))
+                ra, dec = pixels_to_sky(wcs, x, y)
+                sky_positions[id(stellar_object)] = (float(ra[0]), float(dec[0]))
             except DATA_ERRORS as e:
                 logger.warning("Failed to project pixel (%s, %s) to sky: %s", x, y, e)
 
@@ -1945,6 +1922,50 @@ class StarIdentifier:
             ra_center, dec_center = bbox_center.ra.deg, bbox_center.dec.deg
 
         return sky_positions, ra_center, dec_center, query_radius_deg
+
+    def _nearest_entries(
+        self,
+        stellar_objects: list[StellarObject],
+        sky_positions: dict[int, tuple[float, float]],
+        catalog: SkyCoord | None,
+    ) -> dict[int, tuple[int, float]]:
+        """Find each placed star's nearest catalog entry and keep its distance.
+
+        The shared matching step (`catalog_matching.nearest_catalog_entries`)
+        runs once for all the stars. Each distance is also kept for the plate
+        solution check (see `nearest_catalog_separations_arcsec`).
+
+        Parameters
+        ----------
+        stellar_objects : `list` [`StellarObject`]
+            The stars to match.
+        sky_positions : `dict`
+            Maps `id(stellar_object)` to its `(ra, dec)` in degrees; stars
+            without a position are skipped.
+        catalog : `SkyCoord` or `None`
+            The catalog's positions, or `None` when there is no catalog.
+
+        Returns
+        -------
+        nearest : `dict` [`int`, `tuple` [`int`, `float`]]
+            For each placed star, by `id(stellar_object)`, the catalog index
+            of its nearest entry and the distance in arcseconds. Empty when
+            there is no catalog.
+        """
+        placed = [star for star in stellar_objects if id(star) in sky_positions]
+        if catalog is None or not placed:
+            return {}
+        coords = SkyCoord(
+            ra=[sky_positions[id(star)][0] for star in placed] * u.deg,
+            dec=[sky_positions[id(star)][1] for star in placed] * u.deg,
+        )
+        indices, separations = nearest_catalog_entries(coords, catalog)
+        nearest: dict[int, tuple[int, float]] = {}
+        for star, index, separation in zip(placed, indices, separations, strict=True):
+            if math.isfinite(separation):
+                self._record_nearest_catalog_distance(star, float(separation))
+                nearest[id(star)] = (int(index), float(separation))
+        return nearest
 
     def _match_stars_against_simbad(
         self,
@@ -1980,6 +2001,9 @@ class StarIdentifier:
             len(stellar_objects),
             len(simbad_coords) if simbad_coords is not None else 0,
         )
+        nearest = self._nearest_entries(
+            stellar_objects, sky_positions, simbad_coords if result_table is not None else None
+        )
         for stellar_object in stellar_objects:
             position = sky_positions.get(id(stellar_object))
             if position is None:
@@ -1987,30 +2011,21 @@ class StarIdentifier:
                 unmatched_after_simbad.append(stellar_object)
                 continue
             ra, dec = position
-
-            star_coord = SkyCoord(ra * u.deg, dec * u.deg)
-
-            if simbad_coords is not None and result_table is not None:
-                idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
-                self._record_nearest_catalog_distance(stellar_object, float(np.ravel(d2d.arcsec)[0]))
-                if d2d < match_radius_arcsec * u.arcsec:
-                    is_ambiguous = _is_unresolved_match(star_coord, simbad_coords)
-                    idx = brightest_unresolved_entry_index(
-                        star_coord, int(np.ravel(idx)[0]), simbad_coords, result_table
-                    )
-                    self._apply_simbad_match(stellar_object, result_table[idx], ra, dec)
-                    # The separation between where the solved WCS put this
-                    # star and where the catalog says it is, which is the
-                    # only direct measure of how good the solution is.
-                    # match_to_catalog_sky returns an array-like even for
-                    # a single coordinate, so ravel before taking a scalar.
-                    separation_arcsec = float(np.ravel(d2d.arcsec)[0])
-                    self.catalog_match_separations_arcsec.append(separation_arcsec)
-                    stellar_object.catalog_match_quality = assess_match_quality(
-                        "simbad", separation_arcsec, is_ambiguous=is_ambiguous
-                    )
-                    logger.info("  SIMBAD match: %s at (%.4f, %.4f)", stellar_object.name, ra, dec)
-                    continue
+            index, separation_arcsec = nearest.get(id(stellar_object), (0, math.inf))
+            if separation_arcsec < match_radius_arcsec:
+                star_coord = SkyCoord(ra * u.deg, dec * u.deg)
+                is_ambiguous = _is_unresolved_match(star_coord, simbad_coords)
+                index = brightest_unresolved_entry_index(star_coord, index, simbad_coords, result_table)
+                self._apply_simbad_match(stellar_object, result_table[index], ra, dec)
+                # The separation between where the solved WCS put this star
+                # and where the catalog says it is, which is the only direct
+                # measure of how good the solution is.
+                self.catalog_match_separations_arcsec.append(separation_arcsec)
+                stellar_object.catalog_match_quality = assess_match_quality(
+                    "simbad", separation_arcsec, is_ambiguous=is_ambiguous
+                )
+                logger.info("  SIMBAD match: %s at (%.4f, %.4f)", stellar_object.name, ra, dec)
+                continue
 
             # SIMBAD had no match — record sky position and defer to Gaia.
             stellar_object.right_ascension = ra
@@ -2076,23 +2091,18 @@ class StarIdentifier:
                 len(unmatched_after_simbad),
                 len(gaia_coords),
             )
+            nearest = self._nearest_entries(unmatched_after_simbad, sky_positions, gaia_coords)
             for stellar_object in unmatched_after_simbad:
                 ra, dec = sky_positions.get(id(stellar_object), (None, None))
                 if ra is None:
                     still_unmatched.append(stellar_object)
                     continue
-
-                star_coord = SkyCoord(ra * u.deg, dec * u.deg)
-                idx, d2d, _ = star_coord.match_to_catalog_sky(gaia_coords)
-                self._record_nearest_catalog_distance(stellar_object, float(np.ravel(d2d.arcsec)[0]))
-
-                if d2d < match_radius_arcsec * u.arcsec:
-                    row = gaia_table[idx]
-                    self._apply_gaia_match(stellar_object, row, ra, dec)
+                index, separation_arcsec = nearest.get(id(stellar_object), (0, math.inf))
+                if separation_arcsec < match_radius_arcsec:
+                    self._apply_gaia_match(stellar_object, gaia_table[index], ra, dec)
                     # Same reason as the SIMBAD match above: the residual
                     # RMS must cover every catalog match, not just
                     # whichever catalog happened to resolve a star first.
-                    separation_arcsec = float(np.ravel(d2d.arcsec)[0])
                     self.catalog_match_separations_arcsec.append(separation_arcsec)
                     # Gaia matching runs no unresolved-companion check
                     # today (see _is_unresolved_match/
@@ -2617,41 +2627,14 @@ class StarIdentifier:
         stellar_mask = np.array(stellar_mask, dtype=bool)
         return result_table[stellar_mask]
 
-    def _apply_simbad_match(self, stellar_object, match, ra, dec) -> None:  # ruff: ignore[missing-type-function-argument]
-        """Copy the star details from SIMBAD into our star object."""
-        main_id = "Unknown"
-        for col in ["main_id", "MAIN_ID", "ID", "id"]:
-            if col in match.colnames:
-                main_id = match[col]
-                break
+    def _apply_simbad_match(self, stellar_object: StellarObject, match: Any, ra: float, dec: float) -> None:
+        """Copy the star details from SIMBAD into our star object.
 
-        if isinstance(main_id, bytes):
-            main_id = main_id.decode("utf-8")
-
-        common_name = None
-        gaia_dr3_source_id = None
-        familiar_ids: list[str] = []
-        ids_col = next((c for c in ["IDS", "ids"] if c in match.colnames), None)
-        if ids_col:
-            all_ids = match[ids_col]
-            if isinstance(all_ids, bytes):
-                all_ids = all_ids.decode("utf-8")
-            id_list = [i.strip() for i in str(all_ids).split("|")]
-            # SIMBAD lists the star's Gaia DR3 name among its identifiers.
-            # The number becomes the star's saved id (see below), and the
-            # Gaia XP spectrum check needs it too.
-            gaia_dr3_source_id = gaia_dr3_source_id_from_names(id_list)
-            for ident in id_list:
-                if ident.startswith("NAME "):
-                    common_name = ident.replace("NAME ", "").strip()
-                    break
-            # Only the names a reader may know the star by are kept as
-            # aliases, not every survey number SIMBAD lists.
-            familiar_ids = [
-                ident
-                for ident in id_list
-                if not ident.startswith("NAME ") and display_name_rank(ident) <= _ALIAS_NAME_RANK_LIMIT
-            ]
+        The id, name and aliases come from the naming step both
+        identification paths share (`catalog_star_identity.name_simbad_star`).
+        """
+        main_id, identifiers = simbad_row_identifiers(match)
+        names = name_simbad_star(main_id or "Unknown", identifiers)
 
         spectral_type = "Unknown"
         for col in ["SP_TYPE", "sp_type"]:
@@ -2668,18 +2651,10 @@ class StarIdentifier:
         blue_magnitude = _read_catalog_magnitude(match, ["B", "FLUX_B", "flux_b", "flux(B)"])
 
         stellar_object.simbad_object_types = read_simbad_object_types(match)
-        stellar_object.gaia_dr3_source_id = gaia_dr3_source_id
-        stellar_object.name = common_name if common_name else str(main_id)
-        # A star Gaia DR3 lists is saved under its Gaia number, which every
-        # star in a field has and which never changes; the SIMBAD names stay
-        # its display name and aliases. A star Gaia does not list (the
-        # brightest ones) keeps its SIMBAD main id.
-        stellar_object.id = f"Gaia DR3 {gaia_dr3_source_id}" if gaia_dr3_source_id else str(main_id)
-        stellar_object.aliases = [
-            name
-            for name in order_names_by_familiarity([str(main_id), *familiar_ids])
-            if name not in (stellar_object.id, stellar_object.name)
-        ][:_MAXIMUM_ALIASES]
+        stellar_object.gaia_dr3_source_id = names.gaia_source_id
+        stellar_object.name = names.name
+        stellar_object.id = names.record_id
+        stellar_object.aliases = list(names.aliases)
         stellar_object.spectral_type = str(spectral_type)
         stellar_object.stellar_spectral_type = str(spectral_type)
         stellar_object.magnitude = magnitude
@@ -2710,9 +2685,9 @@ class StarIdentifier:
                     break
 
         if not source_id:
-            source_id = f"Gaia DR3 J{ra:.4f}{dec:+.4f}"
+            source_id = gaia_record_id(f"J{ra:.4f}{dec:+.4f}")
         elif not source_id.startswith("Gaia"):
-            source_id = f"Gaia DR3 {source_id}"
+            source_id = gaia_record_id(source_id)
 
         # Stays None when Gaia has no G-band value for this star.
         magnitude = _read_catalog_magnitude(match, ["phot_g_mean_mag", "PHOT_G_MEAN_MAG", "g_mag"])

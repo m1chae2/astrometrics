@@ -2,7 +2,7 @@
 
 Description: The depth is predicted from the image header (see
 `gaia_depth.predict_gaia_depth_from_header`). The faintest detected star's
-magnitude is estimated from the catalog-matched stars only to check that
+G magnitude is estimated from the Gaia-matched stars only to check that
 prediction: a fainter star records the flag ``gaia_depth_exceeded``. These
 tests use stand-in Gaia stars, so no cache or network is needed.
 """
@@ -11,6 +11,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.gaia_depth import GaiaDepthPrediction
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
@@ -19,7 +20,7 @@ from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field
 ZERO_POINT = 24.0
 
 
-def make_star(flux: float, magnitude: float | None) -> StellarObject:
+def make_star(flux: float, magnitude: float | None, catalog: str = "gaia") -> StellarObject:
     """Build a detected star with a flux and maybe a catalog magnitude.
 
     Parameters
@@ -28,6 +29,9 @@ def make_star(flux: float, magnitude: float | None) -> StellarObject:
         The measured flux.
     magnitude : `float` or `None`
         The catalog magnitude. `None` leaves the star unidentified.
+    catalog : `str`, optional
+        The catalog that matched the star: ``"gaia"`` (a G magnitude) or
+        ``"simbad"`` (a V magnitude).
 
     Returns
     -------
@@ -38,6 +42,7 @@ def make_star(flux: float, magnitude: float | None) -> StellarObject:
     if magnitude is not None:
         star.magnitude = magnitude
         star.is_catalog_identified = True
+        star.catalog_match_quality = assess_match_quality(catalog, 0.5)
     return star
 
 
@@ -179,3 +184,17 @@ def test_an_unknown_camera_gives_the_fallback_depth() -> None:
     # An unknown camera has only the generic profile, which is not used.
     assert prediction.is_fallback
     assert prediction.reason == "no camera profile"
+
+
+def test_simbad_v_magnitudes_do_not_set_the_g_estimate() -> None:
+    """Stars SIMBAD named carry V, not G, so they give no zero point."""
+    gaia_stars = stars_with_depth(16.0)
+    simbad_stars = [
+        make_star(star.flux, star.magnitude - 3.0, "simbad") for star in gaia_stars if star.magnitude
+    ]
+
+    assert star_identifier_module.estimate_faintest_detected_magnitude(simbad_stars) is None
+    assert star_identifier_module.estimate_faintest_detected_magnitude([
+        *gaia_stars,
+        *simbad_stars,
+    ]) == pytest.approx(star_identifier_module.estimate_faintest_detected_magnitude(gaia_stars))

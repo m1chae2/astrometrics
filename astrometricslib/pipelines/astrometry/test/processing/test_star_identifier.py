@@ -109,7 +109,7 @@ def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch:
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
-    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+    fake_wcs.all_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
 
     identifier._identify_stars_with_simbad(
         wcs=fake_wcs, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
@@ -166,7 +166,7 @@ def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch: p
     # Both stars map to Vega's own coordinates for this test; the
     # point is that the API attempts to identify both, not just the
     # one nearest the image center.
-    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+    fake_wcs.all_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
 
     result = identifier.identify_stars_with_wcs(stellar_objects, fake_wcs, width=1000, height=1000)
 
@@ -204,7 +204,7 @@ def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch: pytest.
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
-    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+    fake_wcs.all_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
 
     identifier._identify_stars_with_simbad(
         wcs=fake_wcs, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
@@ -543,7 +543,7 @@ def test_nearest_catalog_distances_include_far_stars_and_take_the_closer_catalog
         stellar_objects.append(star)
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
-    fake_wcs.wcs_pix2world.side_effect = lambda x, _y, _origin: (
+    fake_wcs.all_pix2world.side_effect = lambda x, _y, _origin: (
         float(stars_sky[int(x)].ra.deg),
         float(stars_sky[int(x)].dec.deg),
     )

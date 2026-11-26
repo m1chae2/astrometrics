@@ -655,19 +655,23 @@ class TargetService:
             logger.exception("Failed to save targets")
             raise
 
-    def get_frame_header(self, target_id: str, frame_path: str) -> list[dict[str, str]]:
-        """Read full FITS headers for a specified frame record.
+    def get_frame_header(self, target_id: str, frame_path: str) -> dict[str, Any]:
+        """Read a frame's FITS header and the turn that shows it as the stack.
 
         Scoped to the target index.
 
         Returns
         -------
-        result : `list` of `dict` of `str`
-            FITS header key/value pairs for the specified frame. Empty when
-            the file is no longer on disk: a stack that was moved or deleted
-            is a normal state for a target record, not a server error (a
-            server error would be logged and shown as a failed request every
-            time the target is opened).
+        result : `dict`
+            ``entries``, the FITS header key/value pairs of the frame, and
+            ``displayTurn``, the quarter turn (0, 90, 180 or 270 degrees,
+            clockwise) the viewer shows the frame with so it looks the same
+            way round as the target's stack (the library decides it,
+            `targets.display_turn`). Empty entries and no turn when the file
+            is no longer on disk: a stack that was moved or deleted is a
+            normal state for a target record, not a server error (a server
+            error would be logged and shown as a failed request every time
+            the target is opened).
 
         Raises
         ------
@@ -678,10 +682,11 @@ class TargetService:
         if not target:
             raise NotFoundError(f"Target not found: {target_id}")
         try:
-            return self.astrometrics.targets.get_header(frame_path, target=target)
+            entries = self.astrometrics.targets.get_header(frame_path, target=target)
         except NotFoundError:
             logger.debug("Frame file for %s is missing, returning an empty header: %s", target_id, frame_path)
-            return []
+            return {"entries": [], "displayTurn": 0}
+        return {"entries": entries, "displayTurn": self.astrometrics.targets.display_turn(frame_path, target)}
 
     def refresh_target_images_by_id(self, target_id: str, prune_missing: bool = False) -> None:
         """RPC wrapper to trigger frame scans on a target.

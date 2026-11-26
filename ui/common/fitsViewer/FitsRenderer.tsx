@@ -8,7 +8,7 @@ import { useFitsLoader, ParsedFitsData } from './hooks/useFitsLoader';
 import { fitScaleFor, useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
 import { usePreviewBitmap } from './hooks/usePreviewBitmap';
-import { useBitmapTurn } from './hooks/useBitmapTurn';
+import { useFrameTurn } from './hooks/useFrameTurn';
 import { PixelReadout } from './PixelReadout';
 import { StarProfilePanel, SET_DISPLAY_TO_LINEAR_MESSAGE } from './StarProfilePanel';
 import type { StarProfileView } from './StarProfilePanel';
@@ -19,8 +19,8 @@ import { useStarIdentity } from './hooks/useStarIdentity';
 import { buildDetectionPaths } from './utils/detectionMarkers';
 import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
 import type { FileCell } from './utils/pixelQuery';
-import { baseToTurned, describeTurn, fitsPixelToTurnedPicture, rowOrderProbeCell, turnedSize, turnStep, turnToMatchStack } from './displayTurn';
-import type { QuarterTurn, StackOrientation } from './displayTurn';
+import { baseToTurned, describeTurn, fitsPixelToTurnedPicture, rowOrderProbeCell, turnedSize, turnStep } from './displayTurn';
+import type { QuarterTurn } from './displayTurn';
 import { Badge } from '../components/Badge';
 import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
@@ -209,11 +209,11 @@ export interface FitsRendererProps {
   /** A sentence about the picture shown in the star profile panel, for example that it is already stretched. */
   starProfilePictureNote?: string;
   /**
-   * The target's stack orientation. A raw frame is then shown turned by the quarter turn that makes it
-   * match the stack (display only), so frames from both sides of a meridian flip look the same way round.
-   * Leave it out to show every frame as it is stored.
+   * True to show each frame turned by the quarter turn that makes it match the target's stack (display
+   * only), so frames from both sides of a meridian flip look the same way round. The backend decides the
+   * turn for the file `resolveMeasurePath` names. Leave it out to show every frame as it is stored.
    */
-  stackOrientation?: StackOrientation | null;
+  matchStackTurn?: boolean;
   /**
    * A star to put at the center of the view each time a picture is drawn. The place is a position of the
    * file, so the viewer finds it on the turned or redrawn picture. The caller gives the star of the
@@ -290,7 +290,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     resolveMeasurePath,
     noPixelDataMessage = SET_DISPLAY_TO_LINEAR_MESSAGE,
     starProfilePictureNote,
-    stackOrientation = null,
+    matchStackTurn = false,
     focusStar = null,
     restoreView = null,
     onViewChange,
@@ -340,20 +340,12 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const previewDrawn = previewObject !== null && drawnObject === previewObject;
   const firstFrameDrawn = mainDrawn || previewDrawn;
 
-  // A raw frame is shown turned to match the stack; the file itself is never changed.
-  const stackOrientationRef = useRef(stackOrientation);
-  stackOrientationRef.current = stackOrientation;
-  // A decoded FITS image knows its own header. A picture the backend drew (Auto Stretch, or the
-  // preview) gets the same turn from the header of the file behind it, and waits for it.
-  const bitmapTurn = useBitmapTurn(
-    currentKey, stackOrientation, selectedTarget, resolveMeasurePath, !(mainReady && parsedData)
-  );
-  const turn: QuarterTurn = React.useMemo(
-    () => (mainReady && parsedData ? turnToMatchStack(parsedData.header, stackOrientation) : bitmapTurn.turn),
-    [mainReady, parsedData, stackOrientation, bitmapTurn.turn]
-  );
-  const bitmapTurnRef = useRef<QuarterTurn>(0);
-  bitmapTurnRef.current = turn;
+  // A raw frame is shown turned to match the stack; the file itself is never changed. The backend
+  // decides the turn of the file behind the picture, and the picture waits for it.
+  const frameTurn = useFrameTurn(currentKey, selectedTarget, resolveMeasurePath, matchStackTurn);
+  const turn: QuarterTurn = frameTurn.turn;
+  const turnRef = useRef<QuarterTurn>(0);
+  turnRef.current = turn;
   // The size of the picture as shown: the file's width and height, swapped for a quarter turn.
   const shownSize = parsedData ? turnedSize(parsedData.w, parsedData.h, turn) : { w: 0, h: 0 };
 
@@ -392,8 +384,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       }
     }
     const geometry: ImageGeometry = 'imageId' in drawn
-      ? { width: drawn.w, height: drawn.h, header: drawn.header, turn: turnToMatchStack(drawn.header, stackOrientationRef.current) }
-      : { width: drawn.width, height: drawn.height, turn: bitmapTurnRef.current };
+      ? { width: drawn.w, height: drawn.h, header: drawn.header, turn: turnRef.current }
+      : { width: drawn.width, height: drawn.height, turn: turnRef.current };
     lastImageRef.current = { object: drawn, target, isMain: !isPreview, geometry };
     setDrawnObject(drawn);
   }, []);
@@ -518,8 +510,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
   // Automatically draw with AutoStretch (handled in worker for FITS)
   useCanvasDrawer(
-    canvasRef, workerRef, mainReady ? parsedData : null,
-    bitmapTurn.ready || (mainReady && parsedData) ? (mainReady ? bitmap : previewBitmap) : null,
+    canvasRef, workerRef, mainReady && frameTurn.ready ? parsedData : null,
+    frameTurn.ready ? (mainReady ? bitmap : previewBitmap) : null,
     handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters, handleDrawn, turn
   );
 
@@ -1219,7 +1211,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.resolveMeasurePath === nextProps.resolveMeasurePath &&
     prevProps.noPixelDataMessage === nextProps.noPixelDataMessage &&
     prevProps.starProfilePictureNote === nextProps.starProfilePictureNote &&
-    prevProps.stackOrientation === nextProps.stackOrientation &&
+    prevProps.matchStackTurn === nextProps.matchStackTurn &&
     prevProps.restoreView === nextProps.restoreView
   );
 });

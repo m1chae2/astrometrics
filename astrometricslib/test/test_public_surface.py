@@ -270,6 +270,7 @@ SUB_API_MEMBERS = {
         "sessions",
         "create",
         "delete",
+        "display_turn",
         "delete_images",
         "get",
         "get_frame",

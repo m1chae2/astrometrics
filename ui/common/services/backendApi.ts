@@ -48,6 +48,14 @@ import {
 
 /** Summary of one persisted observation session, from execution:list_sessions. */
 /** Answer to a request to stop a stacking job. */
+/** The answer of `target:get_frame_header`: the header and the turn that shows the frame like the stack. */
+export interface FrameHeaderAnswer {
+    /** The FITS header cards. */
+    entries: FitsHeaderEntry[];
+    /** The quarter turn (0, 90, 180 or 270 degrees, clockwise) the viewer shows the frame with. */
+    displayTurn: number;
+}
+
 export interface CancelProcessingResult {
     /** `cancelled`, `other_process` (the job runs in another program) or `none`. */
     status: string;
@@ -193,7 +201,7 @@ export interface ActionRegistry {
     "target:add_data": { payload: { target_id: string; image_file: string }; response: boolean };
     "target:send_to_phone": { payload: { target_id: string }; response: { path: string; method: string; device?: string } };
     "target:refresh": { payload: { target_id: string; prune_missing?: boolean }; response: void };
-    "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FitsHeaderEntry[] };
+    "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FrameHeaderAnswer };
 
     // Astronomy & Stellar Library
     "astronomy:get_status": { payload: { target_id: string }; response: ObjectVisibility };

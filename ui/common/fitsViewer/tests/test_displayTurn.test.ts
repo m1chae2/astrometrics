@@ -1,71 +1,27 @@
 /**
  * @file test_displayTurn.test.ts
- * @description Tests how a raw frame is turned to match its stack: the turn worked out from the header
- * (NGC 7331's two sides of the meridian flip), the steps that move a point between the file and the
- * turned picture, the file pixel the worker names under a turned picture, the Detections marker and the
+ * @description Tests how a raw frame is shown turned to match its stack (the backend decides the turn;
+ * its rule is tested in the library): the note, the turn read from the backend, the steps that move a
+ * point between the file and the turned picture, the file pixel the worker names under a turned picture, the Detections marker and the
  * view carry-over under a turn, and the screen direction names.
  */
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
-  baseToTurned, describeTurn, fitsPixelToTurnedPicture, frameNorthAngleDegrees, nearestQuarterTurn, rowOrderProbeCell,
-  turnRgbaPixels, turnStep, turnToMatchStack, turnedCellToFileCell, turnedPictureToFitsPixel, turnedSize, turnedToBase,
+  asQuarterTurn, baseToTurned, describeTurn, fitsPixelToTurnedPicture, rowOrderProbeCell,
+  turnRgbaPixels, turnStep, turnedCellToFileCell, turnedPictureToFitsPixel, turnedSize, turnedToBase,
 } from '../displayTurn';
-import type { StackOrientation } from '../displayTurn';
 import { pointerToFileCell } from '../utils/pixelQuery';
 import { detectionScreenPosition } from '../utils/detectionMarkers';
 import { fractionAtSky, fractionToFitsPixel, skyAtFraction } from '../utils/transformUtils';
 import { screenDirection } from '../utils/starRing';
 
-/** NGC 7331's stack: north at 344 degrees on screen, matching the frames from the east side of the pier. */
-const STACK: StackOrientation = { upAngleDegrees: 344, pierSide: 'EAST' };
-
-/** A raw NGC 7331 frame from the west side of the pier (frames 001 to 045). */
-const FRAME_001 = { ROWORDER: 'TOP-DOWN', CROTA2: 16.2, PIERSIDE: 'WEST' };
-
-/** A raw NGC 7331 frame from the east side of the pier (frames 046 to 135). */
-const FRAME_080 = { ROWORDER: 'TOP-DOWN', CROTA2: 196.1, PIERSIDE: 'EAST' };
-
-describe('turn to match the stack', () => {
-  /** Frame 001 is half a turn from the stack. */
-  it('turns the west-side frame by 180 degrees', () => {
-    expect(turnToMatchStack(FRAME_001, STACK)).toBe(180);
-  });
-
-  /** Frame 080 already matches. */
-  it('leaves the east-side frame as it is', () => {
-    expect(turnToMatchStack(FRAME_080, STACK)).toBe(0);
-  });
-
-  /** The capture rotation is read with the row order in mind. */
-  it('reads the north angle from CROTA2 and the row order', () => {
-    expect(frameNorthAngleDegrees(FRAME_080)).toBeCloseTo(343.9, 5);
-    expect(frameNorthAngleDegrees({ CROTA2: 30 })).toBe(30);
-    expect(frameNorthAngleDegrees({ ROWORDER: 'TOP-DOWN' })).toBeNull();
-  });
-
-  /** Quarter turns come out of a rotation a quarter of a circle apart. */
-  it('rounds to the nearest quarter turn', () => {
-    expect(turnToMatchStack({ ROWORDER: 'TOP-DOWN', CROTA2: 196.1 - 90 }, STACK)).toBe(270);
-    expect(turnToMatchStack({ ROWORDER: 'TOP-DOWN', CROTA2: 196.1 + 90 }, STACK)).toBe(90);
-    expect(nearestQuarterTurn(-44)).toBe(0);
-    expect(nearestQuarterTurn(-46)).toBe(270);
-    expect(nearestQuarterTurn(360 + 179.7)).toBe(180);
-  });
-
-  /** Without CROTA2 the pier side decides. */
-  it('falls back to the pier side when there is no CROTA2', () => {
-    expect(turnToMatchStack({ ROWORDER: 'TOP-DOWN', PIERSIDE: 'WEST' }, STACK)).toBe(180);
-    expect(turnToMatchStack({ ROWORDER: 'TOP-DOWN', PIERSIDE: 'EAST' }, STACK)).toBe(0);
-    expect(turnToMatchStack({ ROWORDER: 'TOP-DOWN' }, STACK)).toBe(0);
-    expect(turnToMatchStack({ PIERSIDE: 'WEST' }, { upAngleDegrees: 344, pierSide: null })).toBe(0);
-  });
-
-  /** No stack, no turn. A frame with its own plate solution or already turned to north is left alone. */
-  it('does not turn without a stack, for a solved frame or for a frame already turned', () => {
-    expect(turnToMatchStack(FRAME_001, null)).toBe(0);
-    expect(turnToMatchStack(undefined, STACK)).toBe(0);
-    expect(turnToMatchStack({ ...FRAME_001, PLTSOLVD: 1 }, STACK)).toBe(0);
-    expect(turnToMatchStack({ ...FRAME_001, QTURN: 180 }, STACK)).toBe(0);
+describe('the turn the backend gives', () => {
+  /** Only a quarter turn is used; anything else shows the frame as it is. */
+  it('reads only 0, 90, 180 and 270', () => {
+    expect(asQuarterTurn(180)).toBe(180);
+    expect(asQuarterTurn(90)).toBe(90);
+    expect(asQuarterTurn(45)).toBe(0);
+    expect(asQuarterTurn(undefined)).toBe(0);
   });
 
   /** The note names the turn. */

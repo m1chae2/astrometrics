@@ -2,14 +2,13 @@
  * @file test_displayTurnBitmap.test.tsx
  * @description Tests the display turn on the pictures the backend already drew (Auto Stretch and the
  * preview): the drawer turns the bitmap by a quarter turn with the same mapping as the FITS path, and
- * the viewer finds the turn from the header of the file behind the picture, holds the picture until
+ * the viewer asks the backend for the turn of the file behind the picture, holds the picture until
  * the turn is known, and keeps both the turn and the view when the mode switches between Linear and
  * Auto Stretch.
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import type { StackOrientation } from '../displayTurn';
 import { baseToTurned } from '../displayTurn';
 
 type Header = Record<string, string | number>;
@@ -23,17 +22,17 @@ const loaderState = {
 };
 /** What the stand-in drawer was given: the bitmap (or null) and the turn, for each draw. */
 const drawCalls: Array<{ bitmap: unknown; turn: number }> = [];
-const headerCalls: string[] = [];
-let headerForPath: Record<string, Header> = {};
+const turnCalls: string[] = [];
+let turnForPath: Record<string, number> = {};
 
 vi.mock('../hooks/useFitsLoader', () => ({
   useFitsLoader: () => ({ ...loaderState, workerRef: { current: null } }),
 }));
 vi.mock('../../services/targetService', () => ({
-  /** Stand-in header lookup: the header of each path set by the test, as key and value entries. */
-  fetchTargetFrameHeader: async (_target: string, path: string) => {
-    headerCalls.push(path);
-    return Object.entries(headerForPath[path] ?? {}).map(([key, value]) => ({ key, value }));
+  /** Stand-in turn lookup: the turn the backend gives each path, set by the test. */
+  fetchFrameDisplayTurn: async (_target: string, path: string) => {
+    turnCalls.push(path);
+    return turnForPath[path] ?? 0;
   },
 }));
 vi.mock('../hooks/useCanvasDrawer', async () => {
@@ -68,7 +67,6 @@ import { setQuarterTurnTransform } from '../hooks/useCanvasDrawer';
 
 const VIEW_WIDTH = 1000;
 const VIEW_HEIGHT = 800;
-const STACK: StackOrientation = { upAngleDegrees: 344, pierSide: 'EAST' };
 const WEST_FRAME: Header = { ROWORDER: 'TOP-DOWN', CROTA2: 16.2, PIERSIDE: 'WEST' };
 
 /**
@@ -82,7 +80,7 @@ function viewer(key: string) {
   return (
     <FitsRenderer
       imageUrl={key} imageBlob={null} frameInfo={null} loading={false} error={null}
-      selectedTarget="NGC 7331" autoPanTrigger={0} stackOrientation={STACK} resolveMeasurePath={resolve}
+      selectedTarget="NGC 7331" autoPanTrigger={0} matchStackTurn resolveMeasurePath={resolve}
     />
   );
 }
@@ -144,8 +142,9 @@ describe('the bitmap drawer with a turn', () => {
 describe('Auto Stretch pictures shown turned to match the stack', () => {
   beforeEach(() => {
     drawCalls.length = 0;
-    headerCalls.length = 0;
-    headerForPath = { '/frames/frame-001.fits': WEST_FRAME };
+    turnCalls.length = 0;
+    // Frame 001 of NGC 7331 is from the west side of the pier: the backend turns it half a turn.
+    turnForPath = { '/frames/frame-001.fits': 180 };
     loaderState.errorMessage = null;
     loaderState.phase = 'ready';
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => VIEW_WIDTH });
@@ -166,7 +165,7 @@ describe('Auto Stretch pictures shown turned to match the stack', () => {
     loaderState.loadedKey = '/auto-001.jpg';
     render(viewer('/auto-001.jpg'));
     expect((await screen.findByTestId('turn-note')).textContent).toBe('Shown turned 180° to match the stack');
-    expect(headerCalls).toEqual(['/frames/frame-001.fits']);
+    expect(turnCalls).toEqual(['/frames/frame-001.fits']);
     const draws = drawCalls.filter((call) => call.bitmap !== null);
     expect(draws.length).toBeGreaterThan(0);
     // Nothing was drawn before the turn was known: every draw of the bitmap is turned.

@@ -6,14 +6,13 @@ import { ImageProcessingProvider, useImageProcessingContext } from './context/Im
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useViewerState } from './hooks/useViewerState';
 import { useBlinkPair, useBlinkPreload } from './hooks/useBlinkPair';
-import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
+import { usePersistentFlag, usePersistentText } from '../common/hooks/usePersistentFlag';
 import { ImageProcessingLayout } from './ImageProcessingLayout';
 import { RadioListManager } from '../common/radioList/RadioListManager';
 import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { ListActions } from '../common/components/ListActions';
 import { FitsRendererHandle } from '../common/fitsViewer/FitsViewerManager';
 import { ViewerPanelContainer } from './components/ViewerPanelContainer';
-import { useStackOrientation } from './hooks/useStackOrientation';
 import { FrameAnalysisPanel } from './components/FrameAnalysisPanel';
 import { addTargetData, createTarget, fetchTargetObject } from '../common/services/targetService';
 import { useQuery } from '@tanstack/react-query';
@@ -141,8 +140,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // A stack that is waiting to be shown counts as something to load, so a target with a stack
   // but no raw frames settles once the stack is on screen.
   const preferredStack = stackedImage ?? stackedSpectralTarget;
-  // Raw frames are shown turned to match the stack, so the two sides of a meridian flip look alike.
-  const stackOrientation = useStackOrientation(selectedTarget, stackedImage ?? null);
   const hasFrameToAutoLoad = (lightFrames.length > 0 || preferredStack !== null) && !selectedFile;
   const isViewerSettled = !loading && (
     !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || imageBlob !== null || error !== null
@@ -170,22 +167,14 @@ const ImageProcessingDisplayInner: React.FC = () => {
   const [controlsCollapsed, setControlsCollapsed] = usePersistentFlag('astrometrics:imageProcessing:controlsCollapsed', false);
   // The whole left column (filters, target list, target controls) folds to a thin strip.
   const [targetListCollapsed, setTargetListCollapsed] = usePersistentFlag('astrometrics:imageProcessing:targetListCollapsed', false);
-  const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // The Astrometry overlay starts off; a hand-off asks for it on (see the `targetSelected` consumer below).
+  const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(false);
   const overlayTargetRef = useRef<string | null>(null);
 
-  const [selectedStarId, setSelectedStarId] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('astrometrics:imageProcessingSelectedStar');
-    } catch {
-      return null;
-    }
-  });
+  // The star picked on the picture, kept across a refresh.
+  const [selectedStarId, setSelectedStarId] = usePersistentText(
+    'astrometrics:imageProcessing:selectedStar', null, { legacyKey: 'astrometrics:imageProcessingSelectedStar' },
+  );
 
   const pendingEnableAstrometryRef = useRef<boolean>(false);
 
@@ -240,15 +229,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     // different file of the same target keeps it as it is.
     const targetChanged = overlayTargetRef.current !== selectedTarget;
     overlayTargetRef.current = selectedTarget;
-    let shouldEnable = pendingEnableAstrometryRef.current;
-    try {
-      if (localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true') {
-        shouldEnable = true;
-        localStorage.removeItem('astrometrics:enableAstrometryOverlay');
-      }
-    } catch {
-      // Ignore
-    }
+    const shouldEnable = pendingEnableAstrometryRef.current;
     pendingEnableAstrometryRef.current = false;
 
     if (shouldEnable) {
@@ -453,14 +434,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
     setSelectedStarId(selectionKey);
     // Remember the view, so the "Back to image" button (or any way back) lands on the same spot.
     persistView({ returnPending: true, arrivedFromStar: selectionKey, arrivedFromRecord: recordId });
-    try {
-      localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectionKey);
-      localStorage.setItem('planetariumSelectedStar', recordId);
-    } catch {
-      // Ignore
-    }
 
-    navigateToElement({
+    // The hand-off store carries the star to the Astronomy Manager, which may be hidden or in another window.
+    void navigateToElement({
       targetDisplay: 'Astronomy Manager',
       targetElement: 'spectrumViewer',
       action: 'astronomySelectStar',
@@ -470,16 +446,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
         type: 'info',
         title: 'Astrometry',
       },
-    }).then((result) => {
-      if (!result.handledRemotely) {
-        try {
-          localStorage.setItem('appMode', 'Astronomy Manager');
-        } catch {
-          // Ignore
-        }
-      }
     });
-  }, [persistView, selectedTarget]);
+  }, [persistView, selectedTarget, setSelectedStarId]);
 
   // Merge remote targets into the list if they don't exist locally
   const allItems = useMemo(() => {
@@ -568,13 +536,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     },
     identification: stackIdentification,
     onFound: (star, view) => {
-      const selectionKey = star.id || star.name;
-      setSelectedStarId(selectionKey);
-      try {
-        localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectionKey);
-      } catch {
-        // The selection still shows; it is only not remembered.
-      }
+      setSelectedStarId(star.id || star.name);
       if (view) setRestoreView(view);
     },
   });
@@ -787,7 +749,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       overlayReason={overlayReason}
       onStarClick={handleStarClick}
       selectedStarId={selectedStarId}
-      stackOrientation={stackOrientation}
+      // Raw frames are shown turned to match the stack, so the two sides of a meridian flip look alike.
+      matchStackTurn={Boolean(stackedImage)}
       blink={blink}
       shownFile={blink.shownPath}
       focusStar={blink.focusFor(loadedPath)}

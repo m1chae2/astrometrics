@@ -436,25 +436,78 @@ class TargetCatalog:
         -------
         header_cards : `list` [`dict` [`str`, `str`]]
             The header cards, each with ``key``, ``value`` and ``comment``.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If ``target`` is given and the file does not belong to it.
+            When ``target`` is given and the file does not belong to it,
+            `InvalidArgumentError` is raised.
         """
         if target is not None:
-            resolved = resolve_target(self, target)
-            belongs_to_target = any(frame.path == path for frame in resolved.frames) or path in (
-                resolved.stacking.processed_image,
-                resolved.stacking.stacked_image,
-                resolved.spectral_stacking.stacked_image,
-            )
-            if not belongs_to_target:
-                raise InvalidArgumentError(f"Path {path} does not belong to target {resolved.id}")
+            self._check_belongs(path, resolve_target(self, target))
 
         from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_fits_header(path)
+
+    @staticmethod
+    def _check_belongs(path: str, target: Target) -> None:
+        """Refuse a file that is not one of a target's frames or stacks.
+
+        Parameters
+        ----------
+        path : `str`
+            The file.
+        target : `Target`
+            The target it must belong to.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the file is not one of the target's frames or stacks.
+        """
+        belongs_to_target = any(frame.path == path for frame in target.frames) or path in (
+            target.stacking.processed_image,
+            target.stacking.stacked_image,
+            target.spectral_stacking.stacked_image,
+        )
+        if not belongs_to_target:
+            raise InvalidArgumentError(f"Path {path} does not belong to target {target.id}")
+
+    def display_turn(self, path: str, target: str | Target) -> int:
+        """Say how far to turn a frame on screen to match the target's stack.
+
+        Frames taken on the two sides of a meridian flip are upside down from
+        each other. A viewer shows each raw frame turned by a quarter turn
+        (clockwise) so it looks the same way round as the target's imaging
+        stack: the stack's rotation from its plate solution minus the frame's
+        capture rotation (``CROTA2``), rounded to a quarter turn, or half a
+        turn for a frame from the other side of the pier (``PIERSIDE``) when
+        it has no ``CROTA2``. The turn is for display only. A stack with no
+        plate solution, a frame with its own plate solution, a frame already
+        turned to north and a file that cannot be read all give 0.
+
+        Parameters
+        ----------
+        path : `str`
+            The frame, one of the target's frames or stacks.
+        target : `str` or `Target`
+            The target.
+
+        Returns
+        -------
+        turn : `int`
+            0, 90, 180 or 270 degrees, clockwise. A file that does not belong
+            to the target raises `InvalidArgumentError`.
+        """
+        from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+        from astrometricslib.pipelines.stacking.post_processing.display_turn import display_turn_degrees
+
+        resolved = resolve_target(self, target)
+        self._check_belongs(path, resolved)
+        stack_path = resolved.stacking.stacked_image
+        if not stack_path:
+            return 0
+        try:
+            return display_turn_degrees(read_header(path), read_header(stack_path))
+        except FITS_READ_ERRORS:
+            return 0
 
     def read_frame_header(self, path: str) -> fits.Header:
         """Read the header of a FITS file with its values typed.

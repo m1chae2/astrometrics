@@ -4,7 +4,7 @@
  * Aligns with the Google TypeScript Style Guide.
  */
 
-import { callBackend, TargetCameraIndex } from './backendApi';
+import { callBackend, FrameHeaderAnswer, TargetCameraIndex } from './backendApi';
 import { reportError } from '../utils/reportError';
 import { emitToast } from '../utils/emitToast';
 import {
@@ -301,6 +301,33 @@ export async function fetchVisibleTargets(): Promise<ObjectVisibility[]> {
 
 
 /**
+ * Asks the backend for a frame's header and the turn that shows it the same way round as the stack.
+ * @param targetId The identifier of the target.
+ * @param framePath The system file path to the FITS frame.
+ * @param options Set `silent` for an optional lookup: a failure is thrown without a toast or an error report.
+ * @return The backend's answer.
+ */
+async function fetchFrameHeaderAnswer(
+    targetId: string,
+    framePath: string,
+    options?: { silent?: boolean }
+): Promise<FrameHeaderAnswer> {
+    try {
+        const data = await callBackend(
+            "target:get_frame_header",
+            { target_id: targetId, frame_path: framePath },
+            options?.silent ? { silent: true } : undefined
+        );
+        return data ?? { entries: [], displayTurn: 0 };
+    } catch (err: unknown) {
+        if (!options?.silent) {
+            reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        }
+        throw err;
+    }
+}
+
+/**
  * Fetches the FITS header info for a specific frame of a target.
  * @param targetId The identifier of the target.
  * @param framePath The system file path to the FITS frame.
@@ -313,19 +340,21 @@ export async function fetchTargetFrameHeader(
     framePath: string,
     options?: { silent?: boolean }
 ): Promise<FitsHeaderEntry[]> {
-    try {
-        const data = await callBackend(
-            "target:get_frame_header",
-            { target_id: targetId, frame_path: framePath },
-            options?.silent ? { silent: true } : undefined
-        );
-        return (data || []) as FitsHeaderEntry[];
-    } catch (err: unknown) {
-        if (!options?.silent) {
-            reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        }
-        throw err;
-    }
+    const answer = await fetchFrameHeaderAnswer(targetId, framePath, options);
+    return answer.entries ?? [];
+}
+
+/**
+ * Fetches the quarter turn that shows a frame the same way round as the target's stack. The backend
+ * (the library) decides it from the frame's and the stack's headers; frames from the two sides of a
+ * meridian flip are upside down from each other.
+ * @param targetId The identifier of the target.
+ * @param framePath The system file path to the FITS frame.
+ * @return 0, 90, 180 or 270 degrees, clockwise. A failure is thrown without a toast.
+ */
+export async function fetchFrameDisplayTurn(targetId: string, framePath: string): Promise<number> {
+    const answer = await fetchFrameHeaderAnswer(targetId, framePath, { silent: true });
+    return answer.displayTurn ?? 0;
 }
 
 /**

@@ -1,14 +1,13 @@
 /**
  * @file test_displayTurnViewer.test.tsx
- * @description Tests the viewer with a stack orientation: a raw frame from the other side of the pier is
- * shown turned (with a note, and a drawer told to turn it), a frame that already matches is not, and the
- * zoom and the point at the center of the view are kept when the viewer switches between a turned and an
- * unturned frame.
+ * @description Tests the viewer with turning on: a raw frame the backend says to turn (the other side of
+ * the pier) is shown turned (with a note, and a drawer told to turn it), a frame that already matches is
+ * not, and the zoom and the point at the center of the view are kept when the viewer switches between a
+ * turned and an unturned frame.
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { StackOrientation } from '../displayTurn';
 
 type Header = Record<string, string | number>;
 /** What the stand-in loader reports; each test sets it before rendering. */
@@ -47,26 +46,32 @@ vi.mock('../hooks/useCanvasDrawer', async () => {
   };
 });
 
+/** The turn the backend gives each frame (NGC 7331: frame 001 is from the west side of the pier). */
+const BACKEND_TURNS: Record<string, number> = { '/001.fits': 180, '/080.fits': 0 };
+vi.mock('../../services/targetService', () => ({
+  fetchFrameDisplayTurn: vi.fn(async (_target: string, path: string) => BACKEND_TURNS[path] ?? 0),
+}));
+
 import { FitsRenderer } from '../FitsRenderer';
 
 const VIEW_WIDTH = 1000;
 const VIEW_HEIGHT = 800;
-const STACK: StackOrientation = { upAngleDegrees: 344, pierSide: 'EAST' };
 const WEST_FRAME: Header = { ROWORDER: 'TOP-DOWN', CROTA2: 16.2, PIERSIDE: 'WEST' };
 const EAST_FRAME: Header = { ROWORDER: 'TOP-DOWN', CROTA2: 196.1, PIERSIDE: 'EAST' };
 
 /**
  * Renders the viewer for one frame.
  *
- * @param url The frame's address, which is its key.
- * @param stack The stack's orientation.
+ * @param url The frame's address, which is its key and its file path.
+ * @param matchStackTurn Whether frames are turned to match the stack.
  * @returns The element to render.
  */
-function viewer(url: string, stack: StackOrientation | null = STACK) {
+function viewer(url: string, matchStackTurn = true) {
   return (
     <FitsRenderer
       imageUrl={url} imageBlob={null} frameInfo={null} loading={false} error={null}
-      selectedTarget="NGC 7331" autoPanTrigger={0} stackOrientation={stack}
+      selectedTarget="NGC 7331" autoPanTrigger={0} matchStackTurn={matchStackTurn}
+      resolveMeasurePath={async () => url}
     />
   );
 }
@@ -129,10 +134,10 @@ describe('raw frames shown turned to match the stack', () => {
     expect(screen.queryByTestId('turn-note')).toBeNull();
   });
 
-  /** No stack means no turn. */
+  /** With turning off (no stack), nothing is turned. */
   it('does not turn without a stack', async () => {
     loadFrame('/001.fits', WEST_FRAME);
-    const { container } = render(viewer('/001.fits', null));
+    const { container } = render(viewer('/001.fits', false));
     await waitFor(() => expect(readView(container).zoom).toBeGreaterThan(0));
     expect(turnsAsked[turnsAsked.length - 1]).toBe(0);
     expect(screen.queryByTestId('turn-note')).toBeNull();

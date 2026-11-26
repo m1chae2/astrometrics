@@ -19,6 +19,10 @@ const loaderState = {
   loadedKey: null as null | string,
   workerRef: { current: null as unknown },
 };
+// The backend turns the west-side frame half a turn to match the east-side stack.
+vi.mock('../../services/targetService', () => ({
+  fetchFrameDisplayTurn: async () => 180,
+}));
 vi.mock('../hooks/useFitsLoader', () => ({
   useFitsLoader: () => ({ ...loaderState }),
 }));
@@ -176,12 +180,11 @@ describe('focus star', () => {
 
   /** A frame turned half a revolution shows its star at the mirrored place of the picture, where the other frame has it. */
   it('puts the star of a half-turned frame where the other frame has it on screen', async () => {
-    const stackOrientation = { upAngleDegrees: 0, pierSide: 'EAST' };
     loadFits('/typical.fits', { PIERSIDE: 'WEST' });
     const { container } = render(
       <FitsRenderer
         imageUrl="/typical.fits" imageBlob={null} frameInfo={null} loading={false} error={null}
-        selectedTarget="M 81" autoPanTrigger={0} stackOrientation={stackOrientation}
+        selectedTarget="M 81" autoPanTrigger={0} matchStackTurn resolveMeasurePath={async () => '/typical.fits'}
         focusStar={{ x: 601, y: 451, width: FILE_WIDTH, height: FILE_HEIGHT, key: 'typical', scale: 4 }}
       />
     );

@@ -5,7 +5,6 @@ import type { FitsRendererHandle } from './FitsRenderer';
 
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { StretchParameters } from '../types/backendTypes';
-import type { StackOrientation } from './displayTurn';
 import type { FocusStar, RestoreView } from './FitsRenderer';
 import type { SavedViewport } from '../utils/imageViewStore';
 
@@ -62,8 +61,8 @@ interface Props {
   noPixelDataMessage?: string;
   /** A sentence about the picture shown in the star profile panel; see `FitsRenderer`. */
   starProfilePictureNote?: string;
-  /** The target's stack orientation; raw frames are shown turned to match it. See `FitsRenderer`. */
-  stackOrientation?: StackOrientation | null;
+  /** True to show raw frames turned to match the target's stack; see `FitsRenderer`. */
+  matchStackTurn?: boolean;
   /** A star to put at the center of the view whenever a picture is drawn; see `FitsRenderer`. */
   focusStar?: FocusStar | null;
   /** A saved view to put back; see `FitsRenderer`. */
@@ -100,7 +99,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   resolveMeasurePath,
   noPixelDataMessage,
   starProfilePictureNote,
-  stackOrientation,
+  matchStackTurn,
   focusStar,
   restoreView,
   onViewChange,
@@ -132,7 +131,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         resolveMeasurePath={resolveMeasurePath}
         noPixelDataMessage={noPixelDataMessage}
         starProfilePictureNote={starProfilePictureNote}
-        stackOrientation={stackOrientation}
+        matchStackTurn={matchStackTurn}
         focusStar={focusStar}
         restoreView={restoreView}
         onViewChange={onViewChange}

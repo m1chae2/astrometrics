@@ -316,15 +316,23 @@ export async function fetchAstrometryOverlayStars(
 }
 
 /**
- * Asks, in one call, for the ids of a target's stars that have photometry (a light curve).
- * Single-frame detections are left out, as in the Astronomy Manager's list.
+ * Reads the target's stars that have photometry, with the names the star lists show.
  *
- * @param targetId The target whose stars are wanted.
- * @returns The star ids with photometry. Empty when the target has none.
+ * The Astrometry overlay labels each star with this name, so a star reads the same on the
+ * image as in the Astronomy Manager's lists.
+ *
+ * @param targetId The target.
+ * @returns Each star's library id mapped to its record's name (its id when it has no name).
  */
-export async function fetchPhotometryStarIds(targetId: string): Promise<string[]> {
-    if (!targetId || targetId.trim() === '') return [];
+export async function fetchPhotometryStarNames(targetId: string): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (!targetId || targetId.trim() === '') return names;
     const rows = await callBackend("astronomy:list", { target_id: targetId.trim(), filter_type: 'photometry', limit: 0 });
-    return Array.isArray(rows) ? rows.map((row) => row.id).filter((id): id is string => typeof id === 'string' && id !== '') : [];
+    if (!Array.isArray(rows)) return names;
+    for (const row of rows) {
+        if (typeof row.id !== 'string' || row.id === '') continue;
+        names.set(row.id, typeof row.name === 'string' && row.name !== '' ? row.name : row.id);
+    }
+    return names;
 }
 

@@ -122,8 +122,11 @@ def check_overlays(overlays: Sequence[str] | str | None) -> tuple[str, ...]:
     return names
 
 
-def _photometry_star_ids(stars: StellarCatalog, keys: list[str], target_id: str | None) -> set[str]:
-    """Find which library ids name stars that have photometry.
+def _photometry_star_names(stars: StellarCatalog, keys: list[str], target_id: str | None) -> dict[str, str]:
+    """Find the library stars with photometry and the names the lists show.
+
+    The overlay labels a star with its library record's name, so a star reads
+    the same on the image as in the Astronomy Manager's lists.
 
     Parameters
     ----------
@@ -137,16 +140,22 @@ def _photometry_star_ids(stars: StellarCatalog, keys: list[str], target_id: str 
 
     Returns
     -------
-    ids : `set` [`str`]
-        The ids that have photometry.
+    names : `dict` [`str`, `str`]
+        Each id that has photometry, mapped to its record's name (its id
+        when the record has no name).
     """
     if target_id:
-        answer = stars.query(target_id=target_id, has_photometry=True, detail="ids", limit=None)
+        answer = stars.query(target_id=target_id, has_photometry=True, detail="summary", limit=None)
     elif keys:
-        answer = stars.query(ids=keys, has_photometry=True, detail="ids", limit=None)
+        answer = stars.query(ids=keys, has_photometry=True, detail="summary", limit=None)
     else:
-        return set()
-    return set(answer.ids or [])
+        return {}
+    names: dict[str, str] = {}
+    for row in answer.stars or []:
+        star_id = row.get("id")
+        if isinstance(star_id, str) and star_id:
+            names[star_id] = str(row.get("name") or star_id)
+    return names
 
 
 def collect_overlay_marks(
@@ -241,13 +250,13 @@ def _named_star_marks(
     if identification is None:
         return "no star names (identify the stack first)"
     library_ids = list(dict.fromkeys(star.library_id for star in identification.stars if star.library_id))
-    with_photometry = _photometry_star_ids(stars, library_ids, target_id)
+    with_photometry = _photometry_star_names(stars, library_ids, target_id)
     if not with_photometry:
         return "no stars with photometry yet (run Analyze Target)"
     shown = 0
     for star in identification.stars:
         if star.library_id in with_photometry:
-            marks.append(OverlayMark("stars", star.x, star.y, star.name))
+            marks.append(OverlayMark("stars", star.x, star.y, with_photometry[star.library_id]))
             shown += 1
     return f"{shown:,} {'star' if shown == 1 else 'stars'} with photometry"
 

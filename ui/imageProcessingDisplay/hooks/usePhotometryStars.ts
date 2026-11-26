@@ -2,13 +2,14 @@
  * @file usePhotometryStars.ts
  * @description Keeps only the stack's named stars that have photometry (a light curve), so every star the
  * Astrometry overlay draws on a stack opens in the Astronomy Manager with a light curve. It asks the
- * backend once for the ids of the target's stars with photometry and keeps the stars whose library id
- * (`libraryId`, set by the library when it named the stack) is one of them. It also writes the count
- * line for the viewer.
+ * backend once for the target's stars with photometry and keeps the stars whose library id
+ * (`libraryId`, set by the library when it named the stack) is one of them. Each kept star is labelled
+ * with its library record's name, so the overlay and the Astronomy Manager's lists show the same name.
+ * It also writes the count line for the viewer.
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchPhotometryStarIds, type AstrometryOverlayStar } from '../../common/services/astronomyService';
+import { fetchPhotometryStarNames, type AstrometryOverlayStar } from '../../common/services/astronomyService';
 
 /** The note shown when the target has no star with photometry yet. */
 export const NO_PHOTOMETRY_NOTE = 'No stars with photometry yet: run Analyze Target';
@@ -49,8 +50,8 @@ export function usePhotometryStars(
   enabled: boolean,
 ): PhotometryStarsView {
   const query = useQuery({
-    queryKey: ['photometryStarIds', targetId],
-    queryFn: () => fetchPhotometryStarIds(targetId as string),
+    queryKey: ['photometryStarNames', targetId],
+    queryFn: () => fetchPhotometryStarNames(targetId as string),
     enabled: Boolean(targetId) && enabled,
     staleTime: 30_000,
   });
@@ -58,10 +59,11 @@ export function usePhotometryStars(
   return useMemo(() => {
     if (!enabled) return { stars: [], countText: null, isLoading: false };
     if (!query.data) return { stars: [], countText: null, isLoading: query.isFetching || query.isPending };
-    const withPhotometry = new Set(query.data);
+    const withPhotometry = query.data;
     const shown: AstrometryOverlayStar[] = [];
     for (const star of stars) {
-      if (star.libraryId && withPhotometry.has(star.libraryId)) shown.push(star);
+      const recordName = star.libraryId ? withPhotometry.get(star.libraryId) : undefined;
+      if (recordName !== undefined) shown.push({ ...star, name: recordName });
     }
     // Before the stack's names are read there is nothing to count yet.
     const countText = stars.length > 0 || withPhotometry.size === 0

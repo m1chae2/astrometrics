@@ -29,16 +29,24 @@ describe('usePhotometryStars', () => {
     beforeEach(() => callBackendMock.mockReset());
 
     it('keeps only the stars with photometry, from one request', async () => {
-        callBackendMock.mockResolvedValue([{ id: 'Gaia DR3 22' }, { id: 'Some other star' }]);
+        callBackendMock.mockResolvedValue([{ id: 'Gaia DR3 22', name: 'V* XY Peg' }, { id: 'Some other star' }]);
         const { result } = renderHook(() => usePhotometryStars(stars, 'NGC 7331', true), { wrapper });
         await waitFor(() => expect(result.current.stars).toHaveLength(1));
-        expect(result.current.stars[0].name).toBe('TYC 1-2-3');
+        // The overlay shows the library record's name, the same name the star lists show.
+        expect(result.current.stars[0].name).toBe('V* XY Peg');
         expect(result.current.stars[0].libraryId).toBe('Gaia DR3 22');
         expect(result.current.countText).toBe('Showing 1 star with photometry');
         expect(callBackendMock).toHaveBeenCalledTimes(1);
         expect(callBackendMock).toHaveBeenCalledWith('astronomy:list', {
             target_id: 'NGC 7331', filter_type: 'photometry', limit: 0,
         });
+    });
+
+    it('labels a star whose record has no name with its library id', async () => {
+        callBackendMock.mockResolvedValue([{ id: 'Gaia DR3 22' }]);
+        const { result } = renderHook(() => usePhotometryStars(stars, 'NGC 7331', true), { wrapper });
+        await waitFor(() => expect(result.current.stars).toHaveLength(1));
+        expect(result.current.stars[0].name).toBe('Gaia DR3 22');
     });
 
     it('matches a star by its library id only, never by guessing from its name', async () => {

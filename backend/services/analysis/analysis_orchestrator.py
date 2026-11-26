@@ -150,7 +150,8 @@ def _identification_payload(identification: Any) -> dict[str, Any]:
     -------
     payload : `dict`
         ``stars`` in the overlay layout, placed on the viewer's copy of the
-        stack (moved by its crop offset), the counts, ``solutionReused``,
+        stack (moved by its crop offset), each with its ``libraryId`` (the
+        id of its library record, or `None`), the counts, ``solutionReused``,
         ``gaiaDepth``, ``catalogOnlyLimit``, ``gaiaTilesMissing``,
         ``simbadUsed`` and ``notes``.
     """
@@ -176,6 +177,7 @@ def _identification_payload(identification: Any) -> dict[str, Any]:
             "gMag": star.g_mag,
             "gaiaSourceId": star.gaia_source_id,
             "nameSource": star.name_source,
+            "libraryId": star.library_id,
         }
         for star in identification.stars
     ]

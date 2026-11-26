@@ -31,7 +31,8 @@ def _identification() -> SimpleNamespace:
         One matched star, no notes.
     """
     star = SimpleNamespace(id="detection-0", name="Vega", kind="matched", x=1.0, y=2.0, ra_deg=279.2,
-                           dec_deg=38.8, g_mag=0.1, gaia_source_id="123", name_source="simbad")  # fmt: skip
+                           dec_deg=38.8, g_mag=0.1, gaia_source_id="123", name_source="simbad",
+                           library_id="* alf Lyr")  # fmt: skip
     return SimpleNamespace(
         width=10, height=10, stars=[star], matched_count=1, unmatched_count=0, catalog_only_count=0,
         solution_reused=True, gaia_depth=20.0, catalog_only_limit=19.0, gaia_tiles_missing=0,
@@ -124,6 +125,8 @@ def test_the_job_is_an_analysis_job_with_progress_and_a_result(tmp_path: Path) -
     assert not answer["running"]
     assert answer["identification"]["stars"][0]["name"] == "Vega"
     assert answer["identification"]["stars"][0]["matchKind"] == "matched"
+    # The overlay finds the star's library record by this id.
+    assert answer["identification"]["stars"][0]["libraryId"] == "* alf Lyr"
     # It is not taken for the target's analysis result.
     assert orchestrator.get_analysis_results("M 99") is None
 

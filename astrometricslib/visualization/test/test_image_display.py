@@ -186,14 +186,17 @@ def test_a_figure_names_only_the_targets_stars_with_photometry(
         stack_identification, "read_stack_identification", lambda stack: _identification(path)
     )
     stars = MagicMock()
-    stars.query.return_value = SimpleNamespace(ids=["HD 222"])
+    stars.query.return_value = SimpleNamespace(stars=[{"id": "HD 222", "name": "* bet Cas"}])
 
     figure = _visualization(stars).render_fits(
         str(path), target="Test Field", kind="figure", overlays="stars"
     )
 
-    assert _star_names_drawn(figure) == ["HD 222"]
-    stars.query.assert_called_once_with(target_id="Test Field", has_photometry=True, detail="ids", limit=None)
+    # The label is the record's name, as the Astronomy Manager lists show.
+    assert _star_names_drawn(figure) == ["* bet Cas"]
+    stars.query.assert_called_once_with(
+        target_id="Test Field", has_photometry=True, detail="summary", limit=None
+    )
     assert "1 star with photometry" in figure.axes[0].get_title()
 
 
@@ -208,7 +211,7 @@ def test_without_a_target_the_stars_are_asked_for_by_id(
         stack_identification, "read_stack_identification", lambda stack: _identification(path)
     )
     stars = MagicMock()
-    stars.query.return_value = SimpleNamespace(ids=["Gaia DR3 111"])
+    stars.query.return_value = SimpleNamespace(stars=[{"id": "Gaia DR3 111", "name": None}])
 
     figure = _visualization(stars).render_fits(str(path), kind="figure", overlays=["stars"])
 

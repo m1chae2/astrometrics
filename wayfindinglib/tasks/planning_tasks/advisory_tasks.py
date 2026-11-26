@@ -71,7 +71,7 @@ def build_advisory(
     """
     check_choice("kind", kind, tuple(ADVISORY_ARGUMENTS))
     reject_unused_arguments(kind, ADVISORY_ARGUMENTS, {"target": True, "object_id": object_id is not None})
-    resolved = astrometrics.targets.resolve(target)
+    resolved = astrometrics.targets.get(target, refresh=True, required=True)
     if kind == "quality":
         from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 

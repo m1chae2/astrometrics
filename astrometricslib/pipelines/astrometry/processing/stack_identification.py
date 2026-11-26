@@ -34,9 +34,11 @@ has (step 6). The steps are:
 
 The result is saved next to the stack (``<stack>_identification.json``) with
 the stack's size and modification time, and `read_stack_identification`
-returns it while the stack is unchanged. A file saved before stars carried a
-library id gets one when read, from the star's Gaia number or its SIMBAD
-name.
+returns it while the stack is unchanged. Star positions are 1-based pixels
+(the center of the first pixel is 1, 1), as in FITS and DS9. A file saved
+before stars carried a library id gets one when read, from the star's Gaia
+number or its SIMBAD name. A file of the previous layout, which kept 0-based
+positions, is moved to 1-based pixels when read.
 """
 
 import logging
@@ -103,8 +105,10 @@ logger = logging.getLogger(__name__)
 # What follows the stack's name (without .fits) in the saved result's name.
 IDENTIFICATION_SIDECAR_SUFFIX = "_identification.json"
 
-# Raise this when the layout of the saved file changes.
-IDENTIFICATION_FILE_VERSION = 3
+# Raise this when the layout of the saved file changes. Version 4 keeps the
+# star positions in 1-based pixels; version 3 kept them 0-based.
+IDENTIFICATION_FILE_VERSION = 4
+_ZERO_BASED_FILE_VERSION = 3
 
 # The key that holds the stack's stamp (size and modification time) in the
 # saved file.
@@ -157,6 +161,11 @@ def read_stack_identification(stack_path: str) -> StackIdentification | None:
     """
     saved = sidecar_path(stack_path, IDENTIFICATION_SIDECAR_SUFFIX)
     record = read_stamped_record(saved, stack_path, IDENTIFICATION_FILE_VERSION, _STAMP_KEY)
+    shift = 0.0
+    if record is None:
+        # A file of the previous layout holds 0-based positions.
+        record = read_stamped_record(saved, stack_path, _ZERO_BASED_FILE_VERSION, _STAMP_KEY)
+        shift = 1.0
     if record is None:
         return None
     try:
@@ -164,6 +173,9 @@ def read_stack_identification(stack_path: str) -> StackIdentification | None:
     except (ValueError, KeyError, TypeError) as error:
         logger.debug("Could not read the saved identification %s: %s", saved, error)
         return None
+    for star in identification.stars:
+        star.x += shift
+        star.y += shift
     for star in identification.stars:
         if star.library_id is None and star.kind != "unmatched":
             # A file saved before stars carried a library id.
@@ -820,8 +832,8 @@ def _match(
                 id=f"detection-{number}",
                 name=name,
                 kind="matched" if name_source != "none" else "unmatched",
-                x=float(pixel_x[number]),
-                y=float(pixel_y[number]),
+                x=float(pixel_x[number]) + 1.0,
+                y=float(pixel_y[number]) + 1.0,
                 ra_deg=star_ra,
                 dec_deg=star_dec,
                 g_mag=g_mag,
@@ -885,8 +897,8 @@ def _catalog_only(
                 id=f"gaia-{source_id}",
                 name=gaia_record_id(source_id),
                 kind="catalog_only",
-                x=float(pixel_x[position]),
-                y=float(pixel_y[position]),
+                x=float(pixel_x[position]) + 1.0,
+                y=float(pixel_y[position]) + 1.0,
                 ra_deg=float(coords[position].ra.deg),
                 dec_deg=float(coords[position].dec.deg),
                 g_mag=float(magnitudes[bright[position]]),

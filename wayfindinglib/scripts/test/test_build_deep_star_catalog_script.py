@@ -241,7 +241,7 @@ def imaged_fields(monkeypatch: pytest.MonkeyPatch, fields: list[dict]) -> None:
     monkeypatch : `pytest.MonkeyPatch`
         The test's patcher.
     fields : `list` [`dict`]
-        The fields, each with ``right_ascension_deg``, ``declination_deg`` and
+        The fields, each with ``ra_deg``, ``dec_deg`` and
         ``target_ids``.
     """
     centers = [FieldCenter(frames_examined=1, **field) for field in fields]
@@ -319,8 +319,8 @@ def test_near_targets_uses_the_fields_the_library_has_imaged(
 ) -> None:
     """--near-targets draws a circle around every imaged field."""
     fields = [
-        {"right_ascension_deg": 315.13, "declination_deg": 68.57, "target_ids": ["NGC 7023"]},
-        {"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]},
+        {"ra_deg": 315.13, "dec_deg": 68.57, "target_ids": ["NGC 7023"]},
+        {"ra_deg": 250.42, "dec_deg": 36.46, "target_ids": ["M 13"]},
     ]
     imaged_fields(monkeypatch, fields)
 
@@ -359,7 +359,7 @@ def test_near_and_near_targets_can_be_combined(
     fake_environment: _FakeGaia, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Both kinds of place add up."""
-    fields = [{"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]}]
+    fields = [{"ra_deg": 250.42, "dec_deg": 36.46, "target_ids": ["M 13"]}]
     imaged_fields(monkeypatch, fields)
 
     script.run_catalog_build(["--dry-run", "--healpix-level", "4", "--near-targets", *NEAR_ARGUMENTS])

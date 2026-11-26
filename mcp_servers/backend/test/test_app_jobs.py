@@ -112,18 +112,6 @@ async def test_stack_sends_exact_frames_as_the_buttons_frame_list(monkeypatch: p
 
 
 @pytest.mark.anyio
-async def test_a_stack_plan_comes_back_as_the_backend_gave_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A plan starts no job, so it carries no hint to follow one."""
-    plan = {"status": "plan", "plan": {"frames_selected": 12, "first_file": "a", "last_file": "b"}}
-    requests = fake_backend(monkeypatch, {"processing:stack": plan})
-
-    reply = await app_jobs.tool_processing_stack("M 13", plan_only=True)
-
-    assert requests[0]["params"] == {"target_id": "M 13", "plan_only": True}
-    assert reply == plan
-
-
-@pytest.mark.anyio
 async def test_identify_stack_starts_the_astrometry_buttons_job(monkeypatch: pytest.MonkeyPatch) -> None:
     """A given stack goes straight to ``analysis:identify_stack``."""
     requests = fake_backend(monkeypatch, {"analysis:identify_stack": {"status": "started", "jobId": "job-9"}})

@@ -83,8 +83,8 @@ def _with_hint(reply: Any, hint: str) -> Any:
         "Stack a target's frames in the app, as its Stack button does. The app runs it as a stacking job: "
         "it shows in the job list with its progress and log, and the person can cancel it there. Choose "
         "kind (imaging or spectral, never mixed), and optionally a filter, a file range, a time range, a "
-        "camera and a focal length, or give the exact frames. Run it with plan_only true first to see "
-        "which frames it would use. It sets bad frames aside (never deletes them), keeps one previous "
+        "camera and a focal length, or give the exact frames. A choice that matches no frame is refused "
+        "before a job starts. It sets bad frames aside (never deletes them), keeps one previous "
         "stack, and saves the target. Read the result with processing_stack_summary. Needs the app's "
         "backend to be running."
     ),
@@ -108,7 +108,6 @@ def _with_hint(reply: Any, hint: str) -> Any:
                 "items": {"type": "string"},
                 "description": "The exact frame paths to stack, instead of the choices above.",
             },
-            "plan_only": {"type": "boolean", "description": "Only list the chosen frames. Default false."},
             "force": {"type": "boolean", "description": "Stack again even if nothing changed."},
             "denoise": {"type": "boolean", "description": "Run or skip Cosmic Clarity for this preview."},
             "denoise_strength": {
@@ -134,13 +133,12 @@ async def tool_processing_stack(
     camera_id: str | None = None,
     focal_length_mm: float | None = None,
     frames: list[str] | None = None,
-    plan_only: bool = False,
     force: bool = False,
     denoise: bool | None = None,
     denoise_strength: float | None = None,
     star_toning: bool | None = None,
 ) -> Any:
-    """Start a stacking job in the app, or list the frames it would use.
+    """Start a stacking job in the app.
 
     Parameters
     ----------
@@ -156,8 +154,6 @@ async def tool_processing_stack(
         Only frames taken at this focal length.
     frames : `list` [`str`], optional
         The exact frame paths to stack.
-    plan_only : `bool`, optional
-        Only list the chosen frames.
     force : `bool`, optional
         Stack again even if nothing changed.
     denoise, star_toning : `bool`, optional
@@ -168,9 +164,9 @@ async def tool_processing_stack(
     Returns
     -------
     reply : `Any`
-        The backend's ``processing:stack`` answer: ``status`` (``started``,
-        ``already_running`` or ``plan``), ``jobId`` and ``logFile``, or the
-        ``plan``. A started job's reply says how to follow it.
+        The backend's ``processing:stack`` answer: ``status`` (``started``
+        or ``already_running``), ``jobId`` and ``logFile``. A started job's
+        reply says how to follow it.
     """
     parameters = _without_empty({
         "target_id": target,
@@ -183,15 +179,12 @@ async def tool_processing_stack(
         "until": until,
         "camera_id": camera_id,
         "focal_length_mm": focal_length_mm,
-        "plan_only": plan_only or None,
         "force": force or None,
         "denoise": denoise,
         "denoise_strength": denoise_strength,
         "star_toning": star_toning,
     })
     reply = await execute_rpc("processing:stack", parameters)
-    if plan_only:
-        return reply
     return _with_hint(reply, FOLLOW_A_JOB + " The result is in processing_stack_summary once it ends.")
 
 

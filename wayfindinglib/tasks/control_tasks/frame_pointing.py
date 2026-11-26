@@ -25,7 +25,7 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.exceptions import FITS_READ_ERRORS, InvalidArgumentError
+from astrometricslib.exceptions import FITS_READ_ERRORS, InvalidArgumentError, NotFoundError
 from astrometricslib.parameters import resolve_parameter
 from wayfindinglib._internal.coordinates import parse_coordinate_string
 from wayfindinglib.analytics.alignment_sessions import SLEW_ERROR_ARCSEC
@@ -168,7 +168,7 @@ def record_frame_pointing_errors(context: ControlContext, paths: list[str]) -> i
         try:
             header = context.astrometrics.targets.read_frame_header(path)
             attempt = pointing_error_from_header(header, path)
-        except FITS_READ_ERRORS as error:
+        except (NotFoundError, *FITS_READ_ERRORS) as error:
             logger.debug("Skipping %s: %s", path, error)
             continue
         if attempt is None:

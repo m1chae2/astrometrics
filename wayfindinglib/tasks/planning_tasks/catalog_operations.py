@@ -212,7 +212,7 @@ def _targets_within_radius(astrometrics: Astrometrics, center: SkyCoord, radius_
             positions = cached[1]
 
     if positions is None:
-        loaded_targets = astrometrics.targets.list()
+        loaded_targets = astrometrics.targets.query(detail="objects", limit=None).objects
         positions = _parse_target_positions(loaded_targets)
         if version is not None:
             with _target_position_cache_lock:

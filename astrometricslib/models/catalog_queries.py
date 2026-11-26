@@ -3,9 +3,9 @@
 The three catalogs each have one general lookup, `query`, that reads and
 never changes anything. These structures are what those lookups return:
 
-- `TargetQueryResult` from `TargetCatalog.query`: target rows, one target's
-  full record, the cameras used, the observing nights, or each target's
-  frames per camera.
+- `TargetQueryResult` from `TargetCatalog.query`: target rows, full `Target`
+  records, one target's full record, the cameras used, the observing
+  nights, or each target's frames per camera.
 - `StarQueryResult` from `StellarCatalog.query`: star ids, summary rows,
   analysis records, full star records, class counts, per-target star
   counts (`TargetStarCount`), the stars drawn over a target's image
@@ -25,6 +25,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.target import Target
 
 __all__ = [
     "CalibrationQueryResult",
@@ -48,6 +49,8 @@ class TargetQueryResult(BaseModel):
     truncated: bool | None = None
     # detail="summary": one short row per target.
     targets: list[dict[str, Any]] | None = None
+    # detail="objects": the full `Target` records, in stored order.
+    objects: list[Target] | None = None
     # detail="full": one target's record, with its frames grouped.
     target: dict[str, Any] | None = None
     # detail="cameras": each camera name and how many frames it took.

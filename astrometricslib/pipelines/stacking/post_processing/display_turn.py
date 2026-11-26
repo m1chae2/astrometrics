@@ -25,11 +25,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
-from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
-from astrometricslib.pipelines.stacking.post_processing.quarter_turn import (
-    QUARTER_TURN_KEYWORD,
-    up_angle_degrees,
-)
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, up_angle_degrees
+from astrometricslib.pipelines.stacking.post_processing.quarter_turn import QUARTER_TURN_KEYWORD
 
 __all__ = ["display_turn_degrees", "frame_north_angle_degrees", "nearest_quarter_turn"]
 

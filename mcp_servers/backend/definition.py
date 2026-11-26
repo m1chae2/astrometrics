@@ -130,7 +130,7 @@ def suggest_remediation(tool_name: str, message: str) -> dict[str, Any]:
     if "target" in text and "not found" in text:
         return {
             "suggestion": "Target names are case-sensitive. Verify exact catalog identifier.",
-            "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_list', {})",
+            "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_query', {})",
         }
     if "disconnected" in text or "not connected" in text or "indi" in text:
         return {

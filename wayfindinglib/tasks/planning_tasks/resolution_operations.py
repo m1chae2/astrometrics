@@ -45,7 +45,7 @@ def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | Ste
         If SIMBAD returns coordinates that cannot be read.
     """
     # 1. Search local targets
-    targets = sky._astrometrics.targets.list()
+    targets = sky._astrometrics.targets.query(detail="objects", limit=None).objects
     for target in targets:
         is_name_match = target.id == target_name or (
             target.common_name and target.common_name.lower() == target_name.lower()
@@ -159,7 +159,7 @@ def get_sources(
     # ra_deg/dec_deg/radius_deg via a batched SkyCoord separation check
     # (see its own docstring), so it's used for both branches below --
     # there used to be a separate "not include_catalog" fast path that
-    # returned sky._astrometrics.targets.list() and .stellar_objects
+    # returned every stored target and star
     # directly, unfiltered by radius_deg. That meant every viewport-scoped
     # Planetarium query (which always calls this with include_catalog=False)
     # fetched and serialized the entire local catalog instead of just

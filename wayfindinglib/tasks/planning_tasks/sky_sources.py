@@ -242,7 +242,11 @@ def collect_sky_sources(
     found = resolution_operations.get_sources(
         sky, ra_deg, dec_deg, radius_deg, include_catalog=include_online, include_stars=False
     )
-    local_target_ids = {target.id for target in sky._astrometrics.targets.list()} if include_online else set()
+    local_target_ids = (
+        {target.id for target in sky._astrometrics.targets.query(detail="objects", limit=None).objects}
+        if include_online
+        else set()
+    )
 
     targets: list[SkySource] = []
     online: list[Any] = []

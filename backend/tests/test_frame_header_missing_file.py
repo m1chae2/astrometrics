@@ -16,8 +16,8 @@ from astrometricslib.exceptions import NotFoundError
 from backend.services.data.target_service import TargetService
 
 
-def _service(get_header: Callable[..., Any]) -> TargetService:
-    """Build a service whose target API uses the given `get_header`.
+def _service(read_cards: Callable[..., Any]) -> TargetService:
+    """Build a service whose target API reads cards with the given function.
 
     Returns
     -------
@@ -27,7 +27,7 @@ def _service(get_header: Callable[..., Any]) -> TargetService:
     service = TargetService.__new__(TargetService)
     targets = SimpleNamespace(
         get=lambda target_id: SimpleNamespace(id=target_id),
-        get_header=get_header,
+        read_frame_header=lambda path, target, as_cards: read_cards(path, target),
         display_turn=lambda path, target: 180,
     )
     service.astrometrics = SimpleNamespace(targets=targets)

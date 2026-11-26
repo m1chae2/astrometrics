@@ -138,11 +138,15 @@ def test_has_spectra_filters(catalog: StellarCatalog) -> None:
     assert answer.ids == ["S000", "S005", "S010", "S015", "S020", "S025"]
 
 
-def test_limits_are_capped(catalog: StellarCatalog) -> None:
-    """A huge limit is cut to the cap, and full records to 10."""
-    assert len(catalog.query(limit=10_000).stars) == 30
+def test_a_limit_above_the_cap_is_refused_and_the_default_is_cut(catalog: StellarCatalog) -> None:
+    """A limit outside the detail's range raises; the default 50 is cut."""
+    for detail, limit in (("summary", 10_000), ("objects", 500), ("summary", 0)):
+        with pytest.raises(InvalidArgumentError, match="limit"):
+            catalog.query(detail=detail, limit=limit)
+    with pytest.raises(InvalidArgumentError, match="offset"):
+        catalog.query(offset=-1)
     catalog._catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
-    assert len(catalog.query(detail="objects", limit=500).objects) == 10
+    assert len(catalog.query(detail="objects").objects) == 10
 
 
 def test_bad_requests_are_errors(catalog: StellarCatalog) -> None:

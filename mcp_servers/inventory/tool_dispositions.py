@@ -147,20 +147,14 @@ DECISIONS = {
     "star_get_spectrum": ToolDecision(
         "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     ),
-    "target_get_stars": ToolDecision(
-        "withhold", "A script convenience, uncapped. The AI reads a target's stars through star_query."
-    ),
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
     ),
     "processing_plate_solve": ToolDecision(
-        "fix",
-        "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale.",
-    ),
-    "processing_run_spectroscopy_by_session": ToolDecision(
-        "fix",
-        "Needs Python objects, so it cannot be called through MCP. Consider making it a stage "
-        "of pipeline_run.",
+        "keep",
+        "Since 2026-11-26 (#199) returns a PlateSolution: the image center, pixel scale, rotation and the "
+        "sky map's header cards. Solves one image in memory and writes nothing.",
+        tool_class="compute",
     ),
     "processing_list_preview_bright_objects": ToolDecision(
         "withhold",
@@ -357,11 +351,11 @@ DECISIONS = {
         "keep",
         "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack "
         "button does, choosing imaging or spectral frames, a filter and a file or time range. "
-        "plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad "
-        "frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since "
-        "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack. Since "
-        "2026-11-21 the astrometrics-backend server serves it through processing:stack, the Stack "
-        "button's own job, so it shows in the job list and the app's Cancel reaches it.",
+        "A choice that matches no frame is refused before a job starts. It runs the app's own stage: "
+        "sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the "
+        "target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to "
+        "stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the "
+        "Stack button's own job, so it shows in the job list and the app's Cancel reaches it.",
         "process",
     ),
     "target_imaged_field_centers": ToolDecision(
@@ -740,19 +734,16 @@ DECISIONS = {
         "With save on, it writes a measured gain and read noise into the camera profile in the "
         "configuration file. The AI is read-only.",
     ),
-    "target_get_header": ToolDecision("keep", "Reads one FITS header."),
     "target_display_turn": ToolDecision(
         "drop",
         "Built 2026-11-26 for the image viewer: the quarter turn that shows a raw frame the same way round "
         "as its stack, for display only. Of no use to an AI client.",
     ),
     "target_read_frame_header": ToolDecision(
-        "drop",
-        "Reads a header from any path with typed values. target_get_header already serves an AI client.",
-    ),
-    "target_read_saved": ToolDecision(
-        "drop",
-        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
+        "keep",
+        "Reads one FITS header. Since 2026-11-26 (#199) it is the one header reader (target_get_header "
+        "is gone); an AI client passes as_cards=true for key, value and comment text.",
+        tool_class="observe",
     ),
     "target_select_frames": ToolDecision(
         "drop",
@@ -788,10 +779,6 @@ DECISIONS = {
     "processing_predict_stack_weights": ToolDecision(
         "drop",
         "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",
-    ),
-    "target_resolve": ToolDecision(
-        "drop",
-        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
     ),
     "docs_get": ToolDecision("keep", "Reads documentation."),
     "ui_run_tests": ToolDecision("keep", "Developer check."),
@@ -922,7 +909,6 @@ DECISIONS = {
     ),
     # ---- Replaced by a broader tool ----
     "target_get": ToolDecision("drop", "Replaced by target_query."),
-    "target_list": ToolDecision("drop", "Replaced by target_query."),
     "backend_health_check": ToolDecision("drop", "Replaced by app_status."),
     "ui_navigate_mode": ToolDecision("drop", "Replaced by app_controls."),
 }

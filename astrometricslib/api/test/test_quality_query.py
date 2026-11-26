@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import Astrometrics
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+from astrometricslib._internal.testing import astrometrics_with_drivers
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
@@ -249,7 +249,7 @@ def test_the_root_object_holds_the_quality_child() -> None:
 
     from astrometricslib import AppConfiguration
 
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     assert isinstance(astrometrics.quality, QualityRecords)
     assert astrometrics.quality._targets is astrometrics.targets
     assert not hasattr(astrometrics.processing, "diagnostics")

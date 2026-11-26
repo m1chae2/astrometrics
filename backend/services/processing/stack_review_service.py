@@ -391,10 +391,10 @@ class StackReviewService:
             frames = self._frames_from_list(target_id, image_files)
         processing = self._astrometrics.processing
         if frames:
-            # A plan with the frame list runs the library's frame-list checks
-            # (for example a mix of imaging and spectral frames) and stacks
-            # nothing, so a bad list is refused before a job starts.
-            processing.stack(target_id, frames=frames, plan_only=True, register_job=False)
+            # The frame choice alone runs the library's frame-list checks
+            # (for example a mix of imaging and spectral frames) and reads no
+            # frame, so a bad list is refused before a job starts.
+            processing.predict_stack(target_id, frames=frames, checks=False)
         return self._start(
             lambda: processing.predict_stack(
                 target_id,

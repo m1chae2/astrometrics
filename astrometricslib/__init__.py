@@ -168,10 +168,8 @@ class Astrometrics:
     ----------
     config : `AppConfiguration`, optional
         The application settings. If not given, the default settings are
-        loaded.
-    catalog_access : `AbstractCatalogAccess`, optional
-        The database used to save and load data. If not given, a default
-        one is built from ``config``.
+        loaded. The database the library reads and writes is the one these
+        settings name.
 
     Attributes
     ----------
@@ -192,20 +190,16 @@ class Astrometrics:
 
     Notes
     -----
-    The outside programs and services the library talks to (the plate
-    solver, Siril, SIMBAD and the Gaia services) cannot be swapped through
-    this signature. A test swaps them through
+    The database and the outside programs and services the library talks
+    to (the plate solver, Siril, SIMBAD and the Gaia services) cannot be
+    swapped through this signature. A test swaps them through
     `astrometricslib._internal.testing.astrometrics_with_drivers`.
     """
 
-    def __init__(
-        self,
-        config: AppConfiguration | None = None,
-        catalog_access: AbstractCatalogAccess | None = None,
-    ) -> None:
+    def __init__(self, config: AppConfiguration | None = None) -> None:
         from astrometricslib._internal.drivers.driver_set import Drivers
 
-        self._build(config, catalog_access, Drivers())
+        self._build(config, None, Drivers())
 
     def _build(
         self,
@@ -239,7 +233,9 @@ class Astrometrics:
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
-        self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
+        self.targets = TargetCatalog(
+            self.config, self._catalog_access, drivers=drivers, quality=lambda: self.quality
+        )
         self.stars = StellarCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
             self.config, self._catalog_access, targets=self.targets, drivers=drivers

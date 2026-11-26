@@ -668,7 +668,7 @@ class StellarService:
             picture's top-left corner).
         """
         pictures = []
-        for target in self.astrometrics.targets.list():
+        for target in self.astrometrics.targets.query(detail="objects", limit=None).objects:
             entry = self._stack_sky_pictures.entry_for(target)
             if entry is not None:
                 pictures.append(entry)
@@ -774,13 +774,10 @@ class StellarService:
 
     def add_object(self, new_object: StellarObject) -> None:
         """Add or update a stellar object."""
-        self.astrometrics.stars.create(
-            new_object.id,
-            ra=getattr(new_object, "right_ascension", None),
-            dec=getattr(new_object, "declination", None),
-        )
-        updates = new_object.serialize()
-        self.astrometrics.stars.update(new_object.id, updates)
+        # The position goes in with the other fields, by field name, so it is
+        # stored as the record holds it (degrees or sexagesimal text).
+        self.astrometrics.stars.create(new_object.id)
+        self.astrometrics.stars.update(new_object.id, new_object.model_dump(exclude={"id"}))
 
     def delete_object(self, star_id: str) -> bool:
         """Remove a stellar object from the database.

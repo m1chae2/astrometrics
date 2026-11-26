@@ -170,7 +170,10 @@ def main(argv: list[str] | None = None) -> int:
         logging.INFO
     )
     astrometrics = Astrometrics()
-    everything = [astrometrics.targets.get(listed.id) for listed in astrometrics.targets.list()]
+    everything = [
+        astrometrics.targets.get(listed.id)
+        for listed in astrometrics.targets.query(detail="objects", limit=None).objects
+    ]
     selected = select_targets([t for t in everything if t], arguments.targets, arguments.camera)
     failures = 0
     for target in selected:

@@ -35,11 +35,9 @@ from wayfindinglib.tasks.control_tasks.imaging_capture import READOUT_SECONDS
 from wayfindinglib.tasks.control_tasks.pointing_correction import compute_pointing_correction
 
 if TYPE_CHECKING:
-    from astropy.wcs import WCS
-
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["SETTLE_SECONDS", "center_on", "solved_center"]
+__all__ = ["SETTLE_SECONDS", "center_on"]
 
 logger = logging.getLogger(__name__)
 
@@ -49,36 +47,6 @@ and readout, in seconds. The frame may cross a slow Wi-Fi link."""
 
 SETTLE_SECONDS = 1.5
 """Wait after a slew before the centering frame, so the mount is still."""
-
-
-def solved_center(wcs: WCS, image_shape: tuple[int, ...] | None = None) -> tuple[float, float]:
-    """Return the sky position at the middle of a plate-solved image.
-
-    The world coordinate system (WCS) is the FITS header block that maps
-    pixels to sky positions. Its reference point (``CRVAL``) is often not
-    the image center, so the center pixel is converted when the image
-    size is known.
-
-    Parameters
-    ----------
-    wcs : `astropy.wcs.WCS`
-        The plate solution.
-    image_shape : `tuple` [`int`, ...], optional
-        The image's (rows, columns). Taken from the solution when omitted.
-
-    Returns
-    -------
-    ra_deg, dec_deg : `float`
-        The center's right ascension (0 to 360) and declination, in
-        degrees.
-    """
-    shape = image_shape or (tuple(reversed(wcs.pixel_shape)) if wcs.pixel_shape else None)
-    if shape:
-        rows, columns = shape[0], shape[1]
-        ra_deg, dec_deg = wcs.all_pix2world([[(columns - 1) / 2.0, (rows - 1) / 2.0]], 0)[0]
-    else:
-        ra_deg, dec_deg = wcs.wcs.crval[0], wcs.wcs.crval[1]
-    return float(ra_deg) % 360.0, float(dec_deg)
 
 
 def _centering_image_path(context: ControlContext) -> Path:
@@ -151,10 +119,10 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     PlateSolveFailedError
         If the star pattern could not be matched.
     """
-    wcs = context.astrometrics.processing.plate_solve(str(path))
-    if wcs is None:
+    solution = context.astrometrics.processing.plate_solve(str(path))
+    if solution is None:
         raise PlateSolveFailedError(f"No plate solution for {path.name}.")
-    return solved_center(wcs)
+    return solution.ra_deg, solution.dec_deg
 
 
 def _record(

@@ -78,7 +78,9 @@ def _make_service(stars: _Stars, planning_sources: list | None = None) -> Stella
     service : `StellarService`
         A service whose star catalog is `stars`.
     """
-    astrometrics = SimpleNamespace(stars=stars, targets=SimpleNamespace(list=lambda: []))
+    astrometrics = SimpleNamespace(
+        stars=stars, targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[]))
+    )
     wayfinder = MagicMock()
     wayfinder.planning.query_sources.return_value = SimpleNamespace(sources=planning_sources or [])
     return StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=wayfinder)

@@ -210,7 +210,11 @@ def run_benchmark(argv: list[str] | None = None) -> int:
     focal_length_mm = arguments.focal_length_mm or astrometrics.config.get_primary_focal_length_mm()
 
     wanted = {target_id.strip().casefold() for target_id in arguments.target_ids}
-    targets = [target for target in astrometrics.targets.list() if target.id.casefold() in wanted]
+    targets = [
+        target
+        for target in astrometrics.targets.query(detail="objects", limit=None).objects
+        if target.id.casefold() in wanted
+    ]
     if not targets:
         print("None of the requested targets exist in the catalog.", flush=True)
         return 2

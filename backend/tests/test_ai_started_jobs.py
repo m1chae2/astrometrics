@@ -31,20 +31,6 @@ from backend.services.processing.image_processing_service import (
 from backend.services.processing.job_service import JobService
 
 
-class _Plan:
-    """A stand-in for the library's `StackResult` of a plan."""
-
-    def model_dump(self, mode: str = "python") -> dict[str, Any]:
-        """Give the plan as plain data.
-
-        Returns
-        -------
-        plan : `dict` [`str`, `Any`]
-            Twelve frames of one camera.
-        """
-        return {"target_id": "M 13", "kind": "imaging", "frames_selected": 12, "plan_only": True}
-
-
 def _stacking_service(tmp_path: Path) -> tuple[ImageProcessingService, MagicMock, JobService]:
     """Build the stacking service with a real job list and a stand-in library.
 
@@ -59,7 +45,6 @@ def _stacking_service(tmp_path: Path) -> tuple[ImageProcessingService, MagicMock
         The service, the stand-in ``processing`` API and the job service.
     """
     processing = MagicMock()
-    processing.stack.return_value = _Plan()
     config = MagicMock()
     config.get_logs_path.return_value = tmp_path
     job_service = JobService(JobStore(str(tmp_path / "jobs.db")))
@@ -76,7 +61,7 @@ def _stacking_service(tmp_path: Path) -> tuple[ImageProcessingService, MagicMock
 def test_a_stack_chosen_by_frame_choice_is_the_stack_buttons_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The frame choice is checked with a plan, then one stacking job starts.
+    """The frame choice is checked first, then one stacking job starts.
 
     The job is the one the Stack button starts: same type, same row.
     """
@@ -101,8 +86,8 @@ def test_a_stack_chosen_by_frame_choice_is_the_stack_buttons_job(
     reply = service.process_target("M 13", kind="imaging", filter_name="L", first_file="013", force=True)
 
     assert reply["status"] == "started"
-    processing.stack.assert_called_once_with(
-        "M 13", plan_only=True, register_job=False, kind="imaging", filter_name="L", first_file="013"
+    processing.predict_stack.assert_called_once_with(
+        "M 13", checks=False, kind="imaging", filter_name="L", first_file="013"
     )
     job = job_service.get_job(reply["jobId"])
     assert (job.job_type, job.target_id, job.status) == ("stacking", "M 13", "started")
@@ -116,16 +101,6 @@ def test_a_stack_chosen_by_frame_choice_is_the_stack_buttons_job(
     assert job_service.get_job(reply["jobId"]).status == "completed"
 
 
-def test_a_stack_plan_starts_no_job(tmp_path: Path) -> None:
-    """``plan_only`` answers with the library's plan and records nothing."""
-    service, _, job_service = _stacking_service(tmp_path)
-
-    reply = service.process_target("M 13", plan_only=True)
-
-    assert reply == {"status": "plan", "plan": _Plan().model_dump()}
-    assert job_service.get_recent_jobs() == []
-
-
 def test_a_frame_list_and_a_frame_choice_are_refused_together(tmp_path: Path) -> None:
     """The Stack button's list and a frame choice cannot be mixed."""
     service, processing, job_service = _stacking_service(tmp_path)
@@ -133,7 +108,7 @@ def test_a_frame_list_and_a_frame_choice_are_refused_together(tmp_path: Path) ->
     with pytest.raises(InvalidArgumentError, match="not both"):
         service.process_target("M 13", image_files=["/lights/a.fits"], filter_name="L")
 
-    processing.stack.assert_not_called()
+    processing.predict_stack.assert_not_called()
     assert job_service.get_recent_jobs() == []
 
 
@@ -142,7 +117,7 @@ def test_a_mixed_frame_list_is_refused_and_starts_no_job(tmp_path: Path) -> None
     service, processing, job_service = _stacking_service(tmp_path)
     frames = [SimpleNamespace(path="/lights/a.fits"), SimpleNamespace(path="/lights/b.fits")]
     service._target_service.get_targets.return_value = SimpleNamespace(frames=frames)
-    processing.stack.side_effect = InvalidArgumentError(
+    processing.predict_stack.side_effect = InvalidArgumentError(
         "These frames mix imaging and spectral frames (1 imaging, 1 spectral). "
         "Select only one kind and stack again."
     )

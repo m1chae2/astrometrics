@@ -428,12 +428,19 @@ def test_one_target_still_refuses_the_batch_only_callback(
     assert len(recorder.calls) == 1
 
 
-def test_plate_solve_returns_the_solved_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`plate_solve` asks the star identifier to solve and returns its WCS."""
+def test_plate_solve_returns_the_center_scale_and_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`plate_solve` asks the star identifier to solve and describes it."""
+    from astropy.wcs import WCS
+
     from astrometricslib.pipelines.astrometry.processing import star_identifier
 
     calls: list[tuple[str, bool]] = []
-    solved = object()
+    solved = WCS(naxis=2)
+    solved.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    solved.wcs.crval = [150.0, 30.0]
+    solved.wcs.crpix = [50.5, 40.5]
+    solved.wcs.cdelt = [-2 / 3600, 2 / 3600]
+    solved.pixel_shape = (100, 80)
 
     class FakeIdentifier:
         """Stands in for `StarIdentifier` and records each request."""
@@ -454,5 +461,10 @@ def test_plate_solve_returns_the_solved_mapping(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(star_identifier, "StarIdentifier", FakeIdentifier)
 
-    assert ProcessingPipelines(AppConfiguration(), MagicMock()).plate_solve("/frames/one.fits") is solved
+    solution = ProcessingPipelines(AppConfiguration(), MagicMock()).plate_solve("/frames/one.fits")
+
+    assert (solution.ra_deg, solution.dec_deg) == pytest.approx((150.0, 30.0))
+    assert solution.pixel_scale_arcsec == pytest.approx(2.0)
+    assert solution.rotation_deg == pytest.approx(0.0)
+    assert (solution.width, solution.height) == (100, 80)
     assert calls == [("/frames/one.fits", True)]

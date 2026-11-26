@@ -40,7 +40,13 @@ def test_code_that_deletes_is_refused(code: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "code", ["x = 1 + 2", "astrometrics.targets.list()", "print('hello world')", "def broken(:"]
+    "code",
+    [
+        "x = 1 + 2",
+        "astrometrics.targets.query(detail='objects', limit=None).objects",
+        "print('hello world')",
+        "def broken(:",
+    ],
 )
 def test_harmless_code_passes(code: str) -> None:
     """Ordinary code, and code with a syntax error, is not refused."""

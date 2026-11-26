@@ -196,8 +196,8 @@ def _choose_search_circles(
         field_centers = Astrometrics(config).targets.imaged_field_centers(register_job=False).centers
         for field_center in field_centers:
             circles.append((
-                field_center.right_ascension_deg,
-                field_center.declination_deg,
+                field_center.ra_deg,
+                field_center.dec_deg,
                 arguments.near_targets_radius_degrees,
             ))
         print(f"\nFound {len(field_centers)} imaged field(s) in the library.")

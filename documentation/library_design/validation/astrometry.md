@@ -222,7 +222,7 @@ print(refinement.applied, refinement.star_count, np.median(errors), errors.max()
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-for target in astrometrics.targets.list():
+for target in astrometrics.targets.query(detail="objects", limit=None).objects:
     summary = target.quality.astrometry
     if summary is None:
         continue
@@ -270,7 +270,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 rows = []
-for target in astrometrics.targets.list():
+for target in astrometrics.targets.query(detail="objects", limit=None).objects:
     summary = target.quality.astrometry
     if summary is None:
         continue

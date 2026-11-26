@@ -108,7 +108,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  for target in astro.targets.list():
+  for target in astro.targets.query(detail="objects", limit=None).objects:
       preview = astro.processing.predict_stack(target.id)
       if preview.frames_selected:
           print(target.id, len(preview.set_aside), preview.frames_selected, preview.warnings)

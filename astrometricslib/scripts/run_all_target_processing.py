@@ -1324,7 +1324,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         print(f"Wrote {row_count} row(s) to {arguments.review_list}.")
         return
 
-    targets = astrometrics.targets.list()
+    targets = astrometrics.targets.query(detail="objects", limit=None).objects
     if not targets:
         print("No targets found in the database catalog.")
         return

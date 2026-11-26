@@ -31,7 +31,7 @@ def run_batch_processing() -> None:
     print("Initializing Astrometrics...")
     astrometrics = Astrometrics()
 
-    targets = astrometrics.targets.list()
+    targets = astrometrics.targets.query(detail="objects", limit=None).objects
     if not targets:
         print("No targets found in the database catalog.")
         return

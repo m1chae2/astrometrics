@@ -38,14 +38,30 @@ def _make_catalog() -> TargetCatalog:
     return TargetCatalog(config, catalog_access)
 
 
-def test_list_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the return value passes through unchanged."""
+def test_query_objects_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ``detail="objects"`` passes the stored targets through, paged."""
     catalog = _make_catalog()
-    mock = MagicMock(return_value=["a target"])
+    targets = [Target(id="M1"), Target(id="M2"), Target(id="M3")]
+    mock = MagicMock(return_value=targets)
     monkeypatch.setattr(target_records, "list_targets", mock)
 
-    assert catalog.list() == ["a target"]
-    mock.assert_called_once_with(catalog)
+    every = catalog.query(detail="objects", limit=None)
+    page = catalog.query(detail="objects", limit=1, offset=1)
+
+    assert every.objects == targets and every.objects[0] is targets[0]
+    assert (every.total_matching, every.truncated) == (3, False)
+    assert page.objects == [targets[1]] and page.truncated
+    mock.assert_called_with(catalog)
+
+
+def test_query_refuses_a_limit_out_of_range_instead_of_clamping() -> None:
+    """A ``limit`` or ``offset`` outside its range raises, never clamps."""
+    catalog = _make_catalog()
+    for bad in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        with pytest.raises(InvalidArgumentError):
+            catalog.query(**bad)
+    with pytest.raises(InvalidArgumentError, match="does not use"):
+        catalog.query(detail="objects", text="M")
 
 
 def test_get_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -233,7 +249,7 @@ def test_camera_query_delegates_with_the_full_target_list(monkeypatch: pytest.Mo
     """Verify `query(detail="cameras")` gets this catalog's own targets."""
     catalog = _make_catalog()
     targets = [Target(id="M13")]
-    monkeypatch.setattr(catalog, "list", lambda: targets)
+    monkeypatch.setattr(target_records, "list_targets", lambda _catalog: targets)
     mock = MagicMock(return_value={"ASI294": 3})
     monkeypatch.setattr(frame_statistics, "list_camera_names", mock)
 
@@ -243,8 +259,8 @@ def test_camera_query_delegates_with_the_full_target_list(monkeypatch: pytest.Mo
     mock.assert_called_once_with(targets)
 
 
-class TestGetHeader:
-    """Behavior tests for get_header's target-ownership check."""
+class TestReadFrameHeaderCards:
+    """Behavior tests for read_frame_header's cards and ownership check."""
 
     def test_reads_the_header_when_no_target_is_given(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify a bare path read skips the ownership check entirely."""
@@ -252,7 +268,7 @@ class TestGetHeader:
         mock = MagicMock(return_value=[{"KEY": "VALUE"}])
         monkeypatch.setattr(image_conversions, "get_fits_header", mock)
 
-        result = catalog.get_header("/fake.fits")
+        result = catalog.read_frame_header("/fake.fits", as_cards=True)
 
         assert result == [{"KEY": "VALUE"}]
         mock.assert_called_once_with("/fake.fits")
@@ -266,7 +282,7 @@ class TestGetHeader:
         mock = MagicMock(return_value=[])
         monkeypatch.setattr(image_conversions, "get_fits_header", mock)
 
-        catalog.get_header("/stack.fits", target=target)
+        catalog.read_frame_header("/stack.fits", target=target, as_cards=True)
 
         mock.assert_called_once_with("/stack.fits")
 
@@ -276,7 +292,7 @@ class TestGetHeader:
         target = Target(id="M13")
 
         with pytest.raises(InvalidArgumentError, match="does not belong to target"):
-            catalog.get_header("/unrelated.fits", target=target)
+            catalog.read_frame_header("/unrelated.fits", target=target)
 
 
 def test_read_frame_header_returns_typed_values_from_the_first_header(tmp_path: Path) -> None:
@@ -293,7 +309,17 @@ def test_read_frame_header_returns_typed_values_from_the_first_header(tmp_path: 
     assert header["CRVAL1"] == pytest.approx(150.5)
 
 
-def test_read_frame_header_raises_a_fits_read_error_for_a_missing_file(tmp_path: Path) -> None:
-    """A missing file raises a FITS_READ_ERRORS error."""
-    with pytest.raises(FITS_READ_ERRORS):
+def test_read_frame_header_raises_not_found_for_a_missing_file(tmp_path: Path) -> None:
+    """A missing file raises `NotFoundError`, typed or as cards."""
+    with pytest.raises(NotFoundError):
         _make_catalog().read_frame_header(str(tmp_path / "missing.fits"))
+    with pytest.raises(NotFoundError):
+        _make_catalog().read_frame_header(str(tmp_path / "missing.fits"), as_cards=True)
+
+
+def test_read_frame_header_raises_a_fits_read_error_for_a_damaged_file(tmp_path: Path) -> None:
+    """A file that is not FITS raises a FITS_READ_ERRORS error."""
+    path = tmp_path / "broken.fits"
+    path.write_bytes(b"not a fits file")
+    with pytest.raises(FITS_READ_ERRORS):
+        _make_catalog().read_frame_header(str(path))

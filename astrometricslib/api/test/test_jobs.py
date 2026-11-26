@@ -121,11 +121,13 @@ def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
     assert job.looks_stale is False
 
 
-def test_limit_is_clamped(jobs: Jobs) -> None:
-    """A limit below 1 or above the maximum is brought into range."""
+def test_a_limit_out_of_range_is_refused(jobs: Jobs) -> None:
+    """A limit below 1 or above the maximum raises; it is never clamped."""
     assert jobs.query(limit=2).count == 2
-    assert jobs.query(limit=0).count == 1
-    assert jobs.query(limit=10**6).count == 4
+    assert jobs.query(limit=MAXIMUM_JOBS).count == 4
+    for bad in ({"limit": 0}, {"limit": MAXIMUM_JOBS + 1}, {"limit": None}, {"offset": -1}):
+        with pytest.raises(InvalidArgumentError):
+            jobs.query(**bad)
     assert MAXIMUM_JOBS == 50
 
 
@@ -162,8 +164,13 @@ def test_log_tail_returns_the_last_lines_oldest_first(jobs: Jobs) -> None:
 
 
 def test_log_tail_is_capped_and_lines_are_cut(jobs: Jobs) -> None:
-    """The tail never exceeds the maximum, and a long line is shortened."""
-    assert jobs.query(job_id="job-a", detail="log_tail", lines=10**6).log_lines_shown == MAXIMUM_LOG_LINES
+    """Asking past the maximum raises, and a long line is shortened."""
+    assert (
+        jobs.query(job_id="job-a", detail="log_tail", lines=MAXIMUM_LOG_LINES).log_lines_shown
+        <= MAXIMUM_LOG_LINES
+    )
+    with pytest.raises(InvalidArgumentError):
+        jobs.query(job_id="job-a", detail="log_tail", lines=10**6)
     long_line = jobs.query(job_id="job-b", detail="log_tail").log_lines[0].text
     assert len(long_line) == MAXIMUM_TEXT_LENGTH
 

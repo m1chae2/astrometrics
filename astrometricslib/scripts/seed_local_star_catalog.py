@@ -98,7 +98,7 @@ def run_catalog_seeding(argv: list[str] | None = None) -> int:
     configure_logging("seed_local_star_catalog", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
-    targets = astrometrics.targets.list()
+    targets = astrometrics.targets.query(detail="objects", limit=None).objects
     if arguments.target_ids:
         requested_ids = set(arguments.target_ids)
         targets = [target for target in targets if target.id in requested_ids]

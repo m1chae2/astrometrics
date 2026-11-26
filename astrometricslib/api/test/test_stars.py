@@ -346,3 +346,30 @@ class TestFindOrCreateByPosition:
 
         assert created.id == "Star_2"
         assert created.name == "Star_2"
+
+
+def test_create_takes_icrs_degrees_and_refuses_text_or_out_of_range() -> None:
+    """A new star keeps its degrees; text or a bad angle is refused."""
+    from astrometricslib.foundation.errors import InvalidArgumentError
+
+    catalog = _make_catalog()
+    catalog.get = MagicMock(return_value=None)
+
+    star = catalog.create("Test Star", ra_deg=279.23, dec_deg=38.78)
+
+    assert (star.right_ascension, star.declination) == (279.23, 38.78)
+    for bad in ({"ra_deg": "18:36:56"}, {"ra_deg": 400.0}, {"dec_deg": -91.0}):
+        with pytest.raises(InvalidArgumentError):
+            catalog.create("Test Star", **bad)
+
+
+def test_update_refuses_an_unknown_field_and_changes_nothing() -> None:
+    """A misspelled field name raises instead of being ignored."""
+    from astrometricslib.foundation.errors import InvalidArgumentError
+
+    catalog = _make_catalog()
+    catalog.get = MagicMock(return_value=StellarObject(id="S1"))
+
+    with pytest.raises(InvalidArgumentError, match="spectralType"):
+        catalog.update("S1", {"spectralType": "G2V"})
+    catalog._catalog_access.merge_and_record.assert_not_called()

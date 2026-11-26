@@ -160,7 +160,6 @@ def run_stack(
     chosen: list[FrameRecord],
     *,
     kind: StackKind,
-    plan_only: bool,
     force: bool,
     preview_settings: PreviewSettings,
     siril: SirilOptions,
@@ -171,7 +170,7 @@ def run_stack(
     measured_at: datetime | None = None,
     quality_recording: FrameQualityRecording | None = None,
 ) -> StackResult:
-    """Stack the chosen frames, or only report the plan.
+    """Stack the chosen frames.
 
     Parameters
     ----------
@@ -182,8 +181,6 @@ def run_stack(
         The frames to stack, from `choose_frames_to_stack`.
     kind : {"imaging", "spectral"}
         Which kind of frames they are.
-    plan_only : `bool`
-        Only report the frames. Nothing is stacked or saved.
     force : `bool`
         Rebuild even if nothing changed since the stack on disk was made.
     preview_settings : `PreviewSettings`
@@ -211,7 +208,7 @@ def run_stack(
     Returns
     -------
     result : `StackResult`
-        The frames chosen and, unless ``plan_only``, the stack made.
+        The frames chosen and the stack made.
 
     Raises
     ------
@@ -227,8 +224,6 @@ def run_stack(
         first_file=os.path.basename(chosen[0].path),
         last_file=os.path.basename(chosen[-1].path),
     )
-    if plan_only:
-        return result.model_copy(update={"plan_only": True, "note": "Nothing was stacked or saved."})
 
     from astrometricslib.pipelines.stacking import stage as stacking_stage
 

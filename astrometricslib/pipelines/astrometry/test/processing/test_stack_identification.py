@@ -207,6 +207,42 @@ def test_the_result_is_saved_and_read_back_until_the_stack_changes(
     assert module.read_stack_identification(path) is None
 
 
+def test_star_positions_are_one_based_pixels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detections keep their 1-based pixels; missed catalog stars get them."""
+    path = _stack(tmp_path)
+    _setup(monkeypatch, path)
+
+    result = module.identify_stack_stars(path, config=None)
+
+    assert (result.stars[0].x, result.stars[0].y) == pytest.approx((51.0, 51.0))
+    assert (result.stars[3].x, result.stars[3].y) == pytest.approx((31.0, 171.0), abs=1e-6)
+
+
+def test_a_file_of_the_zero_based_layout_is_moved_to_one_based_pixels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A version 3 file, which kept 0-based positions, reads as 1-based."""
+    path = _stack(tmp_path)
+    _setup(monkeypatch, path)
+    result = module.identify_stack_stars(path, config=None)
+    old = result.model_copy(deep=True)
+    for star in old.stars:
+        star.x -= 1.0
+        star.y -= 1.0
+    module.write_stamped_record(
+        module.sidecar_path(path, module.IDENTIFICATION_SIDECAR_SUFFIX),
+        path,
+        3,
+        module._STAMP_KEY,
+        {"identification": old.model_dump()},
+    )
+
+    read = module.read_stack_identification(path)
+
+    assert [star.x for star in read.stars] == pytest.approx([star.x for star in result.stars])
+    assert [star.y for star in read.stars] == pytest.approx([star.y for star in result.stars])
+
+
 def test_a_single_frame_is_refused(tmp_path: Path) -> None:
     """Raw frames never get this treatment."""
     path = _stack(tmp_path, frames=1)

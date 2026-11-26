@@ -255,8 +255,8 @@ def select_target_light_frames(
     filter_name: str | None = None,
     first_file: str | None = None,
     last_file: str | None = None,
-    since: str | None = None,
-    until: str | None = None,
+    since: Any = None,
+    until: Any = None,
     limit: int | None = None,
 ) -> list[Any]:
     """Pick a target's timed light frames by filter, range, time and count.
@@ -267,8 +267,9 @@ def select_target_light_frames(
         A target's frame records.
     filter_name, first_file, last_file : `str` or `None`
         As in `FrameSelection`.
-    since, until : `str` or `None`
-        ISO 8601 times (no offset means UTC) that bound when the frames began.
+    since, until : `str`, `datetime`, `Time` or `None`
+        The times that bound when the frames began: ISO 8601 text (no offset
+        means UTC), a `datetime` or an astropy `Time`.
     limit : `int` or `None`
         How many frames to keep. With a file or time bound these are the
         first frames in the range, otherwise the newest. `None` keeps all.
@@ -281,19 +282,19 @@ def select_target_light_frames(
     Raises
     ------
     InvalidArgumentError
-        If ``since`` or ``until`` is not an ISO 8601 time, or ``limit`` is
+        If ``since`` or ``until`` cannot be read as a time, or ``limit`` is
         less than 1.
     """
-    try:
-        selection = FrameSelection(
-            filter_name=filter_name,
-            first_file=first_file,
-            last_file=last_file,
-            since=parse_iso_time(since),
-            until=parse_iso_time(until),
-        )
-    except ValueError as error:
-        raise InvalidArgumentError(f"since and until must be ISO 8601 times: {error}") from error
+    # The shared argument reader imports this module, so it is imported here.
+    from astrometricslib.pipelines.shared.api_arguments import to_epoch_seconds
+
+    selection = FrameSelection(
+        filter_name=filter_name,
+        first_file=first_file,
+        last_file=last_file,
+        since=to_epoch_seconds(since, "since"),
+        until=to_epoch_seconds(until, "until"),
+    )
     if limit is not None and limit < 1:
         raise InvalidArgumentError("limit must be at least 1.")
     lights = [frame for frame in frames if str(frame.role).upper() == "LIGHT"]

@@ -308,7 +308,7 @@ class ObservationPlanning:
         target : `Target`
             The library target.
         """
-        return self._astrometrics.targets.resolve(target)
+        return self._astrometrics.targets.get(target, refresh=True, required=True)
 
     def _package(self, package_id: str) -> ObservationPackage:
         """Load one recorded observation package.
@@ -2925,7 +2925,9 @@ class ObservationPlanning:
         targets = (
             list(dict.fromkeys(target_ids))
             if target_ids is not None
-            else [target.id for target in self._astrometrics.targets.list()]
+            else [
+                target.id for target in self._astrometrics.targets.query(detail="objects", limit=None).objects
+            ]
         )
         reader = TargetFrameReader(self._astrometrics)
         noise_by_target: dict[str, Any] = {}

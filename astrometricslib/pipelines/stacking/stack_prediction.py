@@ -184,6 +184,41 @@ def _predicted_frames(screening: FrameScreening) -> tuple[list[PredictedFrame], 
     return set_aside, flagged
 
 
+def list_chosen_frames(
+    target: Target, chosen: list[FrameRecord], kind: Literal["imaging", "spectral"]
+) -> StackPrediction:
+    """Report the frame choice alone, without the frame checks.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to stack. It is not changed.
+    chosen : `list` [`FrameRecord`]
+        The frames the stack would be given.
+    kind : {"imaging", "spectral"}
+        Which kind of frames they are.
+
+    Returns
+    -------
+    prediction : `StackPrediction`
+        The count, camera and first and last file of the chosen frames. No
+        frame is set aside or flagged and no calibration is chosen, because
+        no check ran.
+    """
+    return StackPrediction(
+        target_id=target.id,
+        kind=kind,
+        camera=next(iter(split_frames_by_camera(chosen)), None),
+        frames_selected=len(chosen),
+        frames_kept=len(chosen),
+        first_file=os.path.basename(chosen[0].path) if chosen else "",
+        last_file=os.path.basename(chosen[-1].path) if chosen else "",
+        checks_run=False,
+        nothing_left=not chosen,
+        note="Only the frames were chosen: no frame check ran. Nothing was stacked, moved, stored or saved.",
+    )
+
+
 def predict_stack(
     target: Target,
     chosen: list[FrameRecord],
@@ -228,6 +263,8 @@ def predict_stack(
         camera=next(iter(split_frames_by_camera(chosen)), None),
         frames_selected=len(chosen),
         frames_kept=len(screening.frames),
+        first_file=os.path.basename(chosen[0].path) if chosen else "",
+        last_file=os.path.basename(chosen[-1].path) if chosen else "",
         set_aside=set_aside,
         flagged=flagged,
         groups=groups,

@@ -33,6 +33,7 @@ import importlib
 from pathlib import Path
 
 import astrometricslib
+from astrometricslib._internal.testing import astrometrics_with_drivers
 
 # The public surface. Changing this set on purpose -- adding, removing, or
 # renaming an export -- is a real, visible change to the library's contract
@@ -275,15 +276,10 @@ SUB_API_MEMBERS = {
         "delete_images",
         "get",
         "get_frame",
-        "get_header",
-        "get_stars",
         "imaged_field_centers",
-        "list",
         "query",
         "read_frame_header",
-        "read_saved",
         "reindex_frames",
-        "resolve",
         "save",
         "select_frames",
     },
@@ -310,7 +306,6 @@ SUB_API_MEMBERS = {
         "list_preview_bright_objects",
         "process_target",
         "remake_preview",
-        "run_spectroscopy_by_session",
         "measure_noise",
         "open_in_siril",
         "plate_solve",
@@ -397,7 +392,7 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
     """`Astrometrics` has no methods: only settings, storage and sub-APIs."""
     from unittest.mock import MagicMock
 
-    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert _public_members(astrometrics) == {
         "config",
         "jobs",
@@ -413,7 +408,7 @@ def test_each_sub_api_offers_exactly_its_pinned_members() -> None:
     """Every sub-API's public members match the pinned list."""
     from unittest.mock import MagicMock
 
-    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     for path, expected in SUB_API_MEMBERS.items():
         instance = astrometrics
         for part in path.split("."):
@@ -421,11 +416,18 @@ def test_each_sub_api_offers_exactly_its_pinned_members() -> None:
         assert _public_members(instance) == expected, path
 
 
+def test_the_root_takes_only_the_settings() -> None:
+    """`Astrometrics(config)` exposes no private storage or driver type."""
+    import inspect
+
+    assert list(inspect.signature(astrometricslib.Astrometrics).parameters) == ["config"]
+
+
 def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
     """The sub-APIs share the children they are built with."""
     from unittest.mock import MagicMock
 
-    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert astrometrics.processing._targets is astrometrics.targets
     assert astrometrics.quality._targets is astrometrics.targets
     assert astrometrics.processing.calibration._targets is astrometrics.targets

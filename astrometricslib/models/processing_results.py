@@ -5,8 +5,8 @@ runs the analysis stages. Each of those returns one of these structures, so a
 caller reads named fields instead of
 guessing at the keys of a dictionary.
 
-- `StackResult` says which frames were chosen and, unless only a plan was
-  asked for, where the stack went and its quality summary.
+- `StackResult` says which frames were chosen, where the stack went and its
+  quality summary.
 - `PreviewRemakeResult` says where the new preview picture went and which
   steps made it.
 - `ProcessTargetResult` holds one target's result from each analysis stage
@@ -53,12 +53,10 @@ class StackResult(BaseModel):
     frames_selected: int
     first_file: str
     last_file: str
-    # True when only the frame choice was reported and nothing was stacked.
-    plan_only: bool = False
-    # Where the stack is. None for a plan, or when stacking made no image.
+    # Where the stack is. None when stacking made no image.
     stacked_path: str | None = None
     # The new stack's quality summary (rejected fraction, star sharpness
-    # against the inputs, gates). None for a plan. Its warnings are listed by
+    # against the inputs, gates). Its warnings are listed by
     # `Jobs.query(job_id=..., detail="warnings")`.
     quality_summary: StackQualitySummary | None = None
     note: str = ""
@@ -74,7 +72,7 @@ class StackResult(BaseModel):
         Returns
         -------
         activity_id : `str` or `None`
-            The run's id, or `None` for a plan or a run with no provenance.
+            The run's id, or `None` for a run with no provenance.
         """
         if self.quality_summary is None:
             return None
@@ -323,6 +321,12 @@ class StackPrediction(BaseModel):
     camera: str | None = None
     frames_selected: int
     frames_kept: int
+    # The file names of the first and last chosen frame ("" when none).
+    first_file: str = ""
+    last_file: str = ""
+    # False when only the frame choice was made (``checks=False``): nothing
+    # below was looked at, so no frame is set aside or flagged.
+    checks_run: bool = True
     set_aside: list[PredictedFrame] = Field(default_factory=list)
     flagged: list[PredictedFrame] = Field(default_factory=list)
     groups: list[PredictedGroup] = Field(default_factory=list)

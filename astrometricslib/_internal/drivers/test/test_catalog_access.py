@@ -11,9 +11,10 @@ from unittest.mock import MagicMock
 
 from pytest_mock import MockerFixture
 
-from astrometricslib import Astrometrics, StellarObject, Target
+from astrometricslib import StellarObject, Target
 from astrometricslib._internal.drivers import AbstractCatalogAccess, CatalogAccess
 from astrometricslib._internal.drivers.catalog_access import holds_measurements
+from astrometricslib._internal.testing import astrometrics_with_drivers
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult
 
 
@@ -106,10 +107,10 @@ def test_disk_butler_instantiation() -> None:
 def test_mock_catalog_access_injection() -> None:
     """Verify a mock CatalogAccess can be injected into the facade."""
     mock_catalog_access = MockCatalogAccess()
-    astrometrics = Astrometrics(catalog_access=mock_catalog_access)
+    astrometrics = astrometrics_with_drivers(catalog_access=mock_catalog_access)
 
     # Verify hydration used the mock catalog_access
-    targets = astrometrics.targets.list()
+    targets = astrometrics.targets.query(detail="objects", limit=None).objects
     assert len(targets) == 2
     assert targets[0].id == "M 31"
     assert targets[1].id == "Orion"

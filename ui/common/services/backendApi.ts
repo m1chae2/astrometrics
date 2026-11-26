@@ -370,11 +370,9 @@ export interface ActionRegistry {
     "processing:stack": {
         payload: {
             target_id: string; image_files?: string[]; log_file?: string;
-            plan_only?: boolean; camera_id?: string; focal_length_mm?: number; filter_name?: string;
+            camera_id?: string; focal_length_mm?: number; filter_name?: string;
         };
-        response: ProcessStatus & {
-            plan?: { frames_selected: number; first_file: string; last_file: string; camera: string | null; kind: string };
-        };
+        response: ProcessStatus;
     };
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
     "processing:cancel": { payload: { target_id: string }; response: CancelProcessingResult };

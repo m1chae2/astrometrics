@@ -1,9 +1,10 @@
 """Purpose: Build an `Astrometrics` with fake drivers, for tests only.
 
-Description: `Astrometrics(...)` takes no driver arguments, so a program
-always runs the built-in plate solver, stacking program and catalog clients.
-A test that needs a fake one builds the root with `astrometrics_with_drivers`.
-Only tests, and the library's own scripts, may import this module.
+Description: `Astrometrics(config)` takes no driver or database arguments, so
+a program always runs the built-in plate solver, stacking program and catalog
+clients over the database its settings name. A test that needs a fake one, or
+a stand-in database, builds the root with `astrometrics_with_drivers`. Only
+tests, and the library's own scripts, may import this module.
 """
 
 from __future__ import annotations

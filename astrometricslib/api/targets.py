@@ -10,7 +10,7 @@ arguments and hand off.
 import builtins
 from collections.abc import Callable, Sequence
 from datetime import date
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from astropy.io import fits
 
@@ -22,16 +22,20 @@ from astrometricslib.foundation.jobs.runner import background_job, registered_jo
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
-from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
+    TimeInput,
     check_choice,
+    check_limit,
     reject_unused_arguments,
     resolve_target,
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.pipelines.shared.target_sessions import TargetSession, derive_target_sessions
+
+if TYPE_CHECKING:
+    from astrometricslib.api.quality import QualityRecords
 
 __all__ = [
     "TargetCatalog",
@@ -40,7 +44,7 @@ __all__ = [
     "frame_is_spectral",
 ]
 
-QUERY_DETAILS = ("summary", "full", "cameras", "nights", "camera_index")
+QUERY_DETAILS = ("summary", "objects", "full", "cameras", "nights", "camera_index")
 """The kinds of answer `TargetCatalog.query` gives."""
 
 _QUERY_ARGUMENTS = {
@@ -57,6 +61,7 @@ _QUERY_ARGUMENTS = {
         "limit",
         "offset",
     ),
+    "objects": ("limit", "offset"),
     "full": ("target_id", "include_frames"),
     "cameras": (),
     "nights": (),
@@ -69,7 +74,8 @@ class TargetCatalog:
 
     A target is a place on the sky that the observatory images. It anchors
     all the data about that place: the raw frames, the stacks, and the
-    analysis results. Use `get` for a `Target` to work with, and `query`
+    analysis results. Use `get` for a `Target` to work with,
+    ``query(detail="objects", limit=None)`` for every `Target`, and `query`
     for short descriptions that a person reads. A method
     that takes a target accepts its id or the `Target`; an id that names no
     target raises `NotFoundError`.
@@ -85,13 +91,22 @@ class TargetCatalog:
         The outside services to use. `create` with ``from_catalog`` asks the
         SIMBAD driver for a position. The built-in driver is used when
         omitted.
+    quality : `Callable`, optional
+        Gives the `QualityRecords` whose `forget` `delete_images` calls. One
+        is built over the same settings and storage when omitted.
     """
 
     def __init__(
-        self, config: AppConfiguration, storage: AbstractCatalogAccess, *, drivers: Drivers | None = None
+        self,
+        config: AppConfiguration,
+        storage: AbstractCatalogAccess,
+        *,
+        drivers: Drivers | None = None,
+        quality: Callable[[], QualityRecords] | None = None,
     ) -> None:
         self._config = config
         self._drivers = drivers or Drivers()
+        self._quality_provider = quality
         self._catalog_access = storage
         from astrometricslib.pipelines.shared import target_records
 
@@ -104,70 +119,86 @@ class TargetCatalog:
         target_records.remember_stored_state(self, self._targets)
         target_records.record_listed_state(self, version)
 
-    # -- Create, read, save, delete ------------------------------------------
-
-    def list(self) -> builtins.list[Target]:
-        """Return every target, reading what other programs have saved.
-
-        A target this catalog already holds keeps its object, so code that
-        is still editing it does not lose its changes.
+    def _quality(self) -> QualityRecords:
+        """Give the quality records that learn of the deleted frames.
 
         Returns
         -------
-        targets : `list` [`Target`]
-            Every target in the catalog.
+        quality : `QualityRecords`
+            The shared one, or one built over this catalog's settings.
         """
-        from astrometricslib.pipelines.shared import target_records
+        if self._quality_provider is not None:
+            return self._quality_provider()
+        from astrometricslib.api.quality import QualityRecords
 
-        return target_records.list_targets(self)
+        return QualityRecords(self._config, self._catalog_access, targets=self)
 
-    def get(self, target_id: str, refresh: bool = False) -> Target | None:
+    # -- Create, read, save, delete ------------------------------------------
+
+    def get(
+        self,
+        target: str | Target,
+        refresh: bool | Literal["storage"] = False,
+        *,
+        required: bool = False,
+    ) -> Target | None:
         """Find one target by its id, allowing small differences in spelling.
 
         Parameters
         ----------
-        target_id : `str`
-            The target id. Underscores, spaces and capital letters may
-            differ from the stored id.
-        refresh : `bool`, optional
-            Bring the target up to date with storage first, so a target
-            that another program added or changed is seen. Only that
+        target : `str` or `Target`
+            The target id, or a `Target`, which is returned as it is.
+            Underscores, spaces and capital letters may differ from the
+            stored id.
+        refresh : `bool` or ``"storage"``, optional
+            `True` brings the target up to date with storage first, so a
+            target that another program added or changed is seen. Only that
             target's row is read, and nothing is read when nothing has been
             written since the last read. A target this catalog does not hold
             yet makes it read all the targets. Unsaved edits to the held
-            target are kept. Defaults to `False`, which uses the targets held
-            in memory.
+            target are kept. ``"storage"`` reads the saved record straight
+            from storage and leaves the targets held in memory alone: use it
+            to check what a save really wrote, as another program would see
+            it. It needs the exact id. Defaults to `False`, which uses the
+            targets held in memory.
+        required : `bool`, optional
+            Raise `NotFoundError` instead of returning `None` when no target
+            matches. Defaults to `False`.
 
         Returns
         -------
         target : `Target` or `None`
-            The matching target, or `None` if no target matches.
+            The matching target, or `None` if no target matches and
+            ``required`` is `False`.
+
+        Raises
+        ------
+        NotFoundError
+            If ``required`` is `True` and no target matches.
+        InvalidArgumentError
+            If ``target`` is neither a non-empty id nor a `Target`, or
+            ``refresh`` is not `True`, `False` or ``"storage"``.
         """
+        from astrometricslib.foundation.errors import NotFoundError
         from astrometricslib.pipelines.shared import target_records
 
-        if refresh:
-            target_records.refresh_target(self, target_id)
-        return target_records.get_target(self, target_id)
-
-    def read_saved(self, target_id: str) -> Target | None:
-        """Read one target's saved record straight from storage.
-
-        The targets held in memory are not used. Use this to check what a
-        save really wrote, as another program would see it.
-
-        Parameters
-        ----------
-        target_id : `str`
-            The exact id of the target.
-
-        Returns
-        -------
-        target : `Target` or `None`
-            The stored target, or `None` if nothing is stored under that id.
-        """
-        from astrometricslib.pipelines.shared import target_records
-
-        return target_records.read_saved_target(self, target_id)
+        if isinstance(target, Target):
+            return target
+        if not isinstance(target, str) or not target.strip():
+            raise InvalidArgumentError("target must be a target id or a Target.")
+        if refresh == "storage":
+            found = target_records.read_saved_target(self, target)
+        elif isinstance(refresh, bool):
+            if refresh:
+                target_records.refresh_target(self, target)
+            found = target_records.get_target(self, target)
+        else:
+            raise InvalidArgumentError(
+                "refresh must be True, False or 'storage'.", details={"refresh": refresh}
+            )
+        if found is None and required:
+            raise NotFoundError(f"No target with id {target!r} in the library.", details={"target": target})
+        return found
 
     def create(self, target_id: str, from_catalog: bool = False) -> Target:
         """Create a target, find its frames on disk, and save it.
@@ -419,33 +450,6 @@ class TargetCatalog:
             )
         return ReindexReport(targets=changes)
 
-    def get_header(self, path: str, target: str | Target | None = None) -> builtins.list[dict[str, str]]:
-        """Read the header of a FITS image file.
-
-        When ``target`` is given, the file must belong to that target: one
-        of its frames, or one of its stacks.
-
-        Parameters
-        ----------
-        path : `str`
-            Path to the FITS file to read.
-        target : `str` or `Target`, optional
-            The target the file must belong to.
-
-        Returns
-        -------
-        header_cards : `list` [`dict` [`str`, `str`]]
-            The header cards, each with ``key``, ``value`` and ``comment``.
-            When ``target`` is given and the file does not belong to it,
-            `InvalidArgumentError` is raised.
-        """
-        if target is not None:
-            self._check_belongs(path, resolve_target(self, target))
-
-        from astrometricslib.pipelines.shared import image_conversions
-
-        return image_conversions.get_fits_header(path)
-
     @staticmethod
     def _check_belongs(path: str, target: Target) -> None:
         """Refuse a file that is not one of a target's frames or stacks.
@@ -509,28 +513,57 @@ class TargetCatalog:
         except FITS_READ_ERRORS:
             return 0
 
-    def read_frame_header(self, path: str) -> fits.Header:
-        """Read the header of a FITS file with its values typed.
+    def read_frame_header(
+        self, path: str, target: str | Target | None = None, as_cards: bool = False
+    ) -> fits.Header | builtins.list[dict[str, str]]:
+        """Read the first header of a FITS file.
 
         This reads the first block (HDU 0) of the file, where cameras and
         capture software write their notes. It does not read the pixels.
-        Unlike `get_header`, it does not check the file against a target,
-        and it keeps each value as a number, text or flag, not as text.
 
         Parameters
         ----------
         path : `str`
             Path to the FITS file.
+        target : `str` or `Target`, optional
+            The target the file must belong to: one of its frames, or one of
+            its stacks. Left out, any file is read.
+        as_cards : `bool`, optional
+            Give the header as text cards for a person or a reply, instead of
+            with typed values. Defaults to `False`.
 
         Returns
         -------
-        header : `astropy.io.fits.Header`
-            A copy of the file's first header. It can be used like a
-            dictionary, for example ``header.get("FILTER")``.
-        """
-        # A missing, cut-off or damaged file raises one of FITS_READ_ERRORS.
-        from astrometricslib._internal.drivers.fits_access import read_header
+        header : `astropy.io.fits.Header` or `list` [`dict` [`str`, `str`]]
+            A copy of the file's first header, with each value a number,
+            text or flag. It can be used like a dictionary, for example
+            ``header.get("FILTER")``. With ``as_cards``, a list of cards,
+            each with ``key``, ``value`` and ``comment`` as text.
 
+        Raises
+        ------
+        NotFoundError
+            If the file does not exist.
+
+        Notes
+        -----
+        Also raises `NotFoundError` if ``target`` names no target,
+        `InvalidArgumentError` if the file does not belong to ``target``, and
+        one of `astrometricslib.exceptions.FITS_READ_ERRORS` if the file is
+        cut off or damaged.
+        """
+        import os
+
+        from astrometricslib._internal.drivers.fits_access import read_header
+        from astrometricslib.foundation.errors import NotFoundError
+        from astrometricslib.pipelines.shared import image_conversions
+
+        if target is not None:
+            self._check_belongs(path, resolve_target(self, target))
+        if as_cards:
+            return image_conversions.get_fits_header(path)
+        if not os.path.exists(path):
+            raise NotFoundError(f"File not found: {path}")
         return read_header(path, first_hdu_only=True)
 
     def select_frames(
@@ -539,8 +572,8 @@ class TargetCatalog:
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: str | None = None,
-        until: str | None = None,
+        since: TimeInput = None,
+        until: TimeInput = None,
         limit: int | None = None,
     ) -> builtins.list[FrameRecord]:
         """Pick a target's light frames by filter, file name range and time.
@@ -558,14 +591,14 @@ class TargetCatalog:
             Keep frames whose file name sorts from ``first_file`` to
             ``last_file``. A short bound such as ``"013"`` is matched
             against the frame number at the end of the name.
-        since, until : `str`, optional
+        since, until : `str`, `datetime` or `Time`, optional
             Keep frames that began from ``since`` to ``until``. Each is an
-            ISO 8601 time such as ``"2026-10-03T21:30:00-06:00"``; no offset
-            means UTC.
-        limit : `int`, optional
-            How many frames to keep. With a file or time bound these are the
-            first frames in the range; without one they are the newest.
-            Omit it to keep every match.
+            ISO 8601 time such as ``"2026-10-03T21:30:00-06:00"``, a
+            `datetime` or an astropy `Time`; no offset means UTC.
+        limit : `int` or `None`, optional
+            How many frames to keep, at least 1. With a file or time bound
+            these are the first frames in the range; without one they are
+            the newest. `None` (the default) keeps every match.
 
         Returns
         -------
@@ -575,7 +608,7 @@ class TargetCatalog:
         Notes
         -----
         Raises `NotFoundError` if the target does not exist, and
-        `InvalidArgumentError` if ``since`` or ``until`` is not an ISO 8601
+        `InvalidArgumentError` if ``since`` or ``until`` cannot be read as a
         time or ``limit`` is less than 1.
         """
         from astrometricslib.pipelines.shared.quality import frame_selection
@@ -590,57 +623,6 @@ class TargetCatalog:
             until=until,
             limit=limit,
         )
-
-    def resolve(self, target: str | Target) -> Target:
-        """Turn a target id into the `Target` it names.
-
-        A `Target` is returned as it is. An id is matched loosely, as `get`
-        does, after reading the stored targets again so that a target
-        another program added is seen.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            A target id or a `Target`.
-
-        Returns
-        -------
-        resolved : `Target`
-            The target.
-
-        Notes
-        -----
-        Raises `NotFoundError` if no target has that id, and
-        `InvalidArgumentError` if ``target`` is neither text nor a `Target`.
-        """
-        return resolve_target(self, target)
-
-    def get_stars(self, target: str | Target) -> builtins.list[StellarObject]:
-        """Read every star the library holds for a target.
-
-        This is the short form of ``StellarCatalog.query`` with the target
-        selected, the full records asked for and no cap on the count. Use
-        ``StellarCatalog.query`` when you need a filter, an order or a
-        smaller answer. Single-frame detections are left out, as they are
-        in that query.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            A target id or a `Target`.
-
-        Returns
-        -------
-        stars : `list` [`StellarObject`]
-            The target's stars, in id order. Empty if the target has none.
-        """
-        from astrometricslib.pipelines.shared.star_catalog_queries import StarQuery, run_star_query
-
-        resolved = self.resolve(target)
-        answer = run_star_query(
-            self._catalog_access, StarQuery(target_id=resolved.id), "objects", None, 0, None
-        )
-        return answer.objects or []
 
     def add_frames(self, paths: Sequence[str], target: str | Target, *, telescope: str) -> builtins.list[str]:
         """Move new image files into the library, under a target.
@@ -749,7 +731,7 @@ class TargetCatalog:
         target : `str` or `Target`, optional
             Also remove the matching frame records from this target, save
             it, and forget the stored quality measurements of the deleted
-            frames (`QualityRecords.forget`). Without a target the
+            frames (through `QualityRecords.forget`). Without a target the
             measurements stay, because a frame is named by its target.
 
         Returns
@@ -758,15 +740,12 @@ class TargetCatalog:
             ``deleted`` (the paths removed) and ``failed`` (each path that
             could not be removed, with the reason).
         """
-        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared import image_conversions
 
         resolved = resolve_target(self, target) if target is not None else None
         outcome = image_conversions.delete_images(paths, self, resolved.id if resolved is not None else None)
         if resolved is not None and outcome["deleted"]:
-            QualityStore(quality_database_path(self._config)).delete_frame_measurements([
-                resolved.frame_subject_id(str(path)) for path in outcome["deleted"]
-            ])
+            self._quality().forget([resolved.frame_subject_id(str(path)) for path in outcome["deleted"]])
         return ImageDeletionResult(
             deleted=[str(path) for path in outcome["deleted"]],
             failed=[
@@ -787,11 +766,11 @@ class TargetCatalog:
         radius_deg: float | None = None,
         object_type: Literal["solar_system", "messier", "ngc", "ic", "comet", "calibration", "star"]
         | None = None,
-        detail: Literal["summary", "full", "cameras", "nights", "camera_index"] = "summary",
+        detail: Literal["summary", "objects", "full", "cameras", "nights", "camera_index"] = "summary",
         include_frames: int = 0,
         sort: Literal["newest", "name", "separation"] = "newest",
         include_empty: bool = False,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> TargetQueryResult:
         """Describe targets in short records. Nothing is changed.
@@ -806,6 +785,7 @@ class TargetCatalog:
         - ``"summary"``: ``target_id``, ``text``, ``camera_id``, ``ra_deg``,
           ``dec_deg``, ``radius_deg``, ``object_type``, ``sort``,
           ``include_empty``, ``limit``, ``offset``.
+        - ``"objects"``: ``limit`` and ``offset``.
         - ``"full"``: ``target_id`` (needed) and ``include_frames``.
         - ``"cameras"``, ``"nights"`` and ``"camera_index"``: none.
 
@@ -834,7 +814,11 @@ class TargetCatalog:
             ``"star"`` (any other name). Each row carries its
             ``object_type``.
         detail : `str`, optional
-            ``"summary"`` (default): one row per target. ``"full"``: one
+            ``"summary"`` (default): one row per target. ``"objects"``: every
+            target as a full `Target` record, in ``objects``, in the order
+            they are stored, after reading what other programs have saved (a
+            target this catalog already holds keeps its object, so code that
+            is still editing it does not lose its changes). ``"full"``: one
             target's record with grouped frames, stack paths and flags, and
             condensed quality summaries. ``"cameras"``: the cameras used and
             how many frames each took. ``"nights"``: for each observing
@@ -843,7 +827,7 @@ class TargetCatalog:
             configured camera and the newest frame time.
         include_frames : `int`, optional
             With ``"full"``, also list this many of the newest light frames
-            (at most 50), with their measurements.
+            (0 to 50), with their measurements.
         sort : `str`, optional
             ``"newest"`` (default, by the last frame taken), ``"name"``, or
             ``"separation"`` (nearest the centre first; needs a region
@@ -851,22 +835,24 @@ class TargetCatalog:
         include_empty : `bool`, optional
             Also list targets with no frames, such as the placeholders the
             calibration folders create. Off by default.
-        limit : `int`, optional
-            How many rows to return, from 1 to 200. Defaults to 50.
+        limit : `int` or `None`, optional
+            How many rows or targets to return, from 1 to 200. Defaults to
+            50. `None` returns every match.
         offset : `int`, optional
-            How many rows to skip, for paging.
+            How many rows or targets to skip, for paging, at least 0.
 
         Returns
         -------
         answer : `TargetQueryResult`
-            The rows, record, cameras, nights or camera index, with
+            The rows, targets, record, cameras, nights or camera index, with
             ``total_matching`` and whether a list was cut.
 
         Raises
         ------
         InvalidArgumentError
             If the detail or sort is unknown, an argument the detail does
-            not use is given, or a region search is incomplete.
+            not use is given, a region search is incomplete, or ``limit``,
+            ``offset`` or ``include_frames`` is out of range.
         NotFoundError
             If ``detail="full"`` names no target.
         """
@@ -875,6 +861,9 @@ class TargetCatalog:
 
         check_choice("detail", detail, QUERY_DETAILS)
         check_choice("sort", sort, ("newest", "name", "separation"))
+        check_limit(limit, 1, 200)
+        check_limit(offset, 0, None, name="offset", allow_none=False)
+        check_limit(include_frames, 0, 50, name="include_frames", allow_none=False)
         if object_type is not None:
             check_choice("object_type", object_type, tuple(kind.value for kind in TargetObjectType))
         reject_unused_arguments(
@@ -903,6 +892,18 @@ class TargetCatalog:
         if sort == "separation" and radius_deg is None:
             raise InvalidArgumentError(
                 "sort='separation' needs a region search (ra_deg, dec_deg and radius_deg)."
+            )
+        if detail == "objects":
+            from astrometricslib.pipelines.shared import target_records
+
+            everything = target_records.list_targets(self)
+            end = None if limit is None else offset + limit
+            return TargetQueryResult(
+                detail=detail,
+                total_matching=len(everything),
+                offset=offset,
+                truncated=end is not None and end < len(everything),
+                objects=everything[offset:end],
             )
         targets = self._look_at_every_target()
 
@@ -940,14 +941,13 @@ class TargetCatalog:
             rows.sort(key=lambda row: row["separation_deg"])
         else:
             rows.sort(key=lambda row: row["last_frame"] or "", reverse=True)
-        limit = max(1, min(int(limit), 200))
-        offset = max(0, int(offset))
+        end = None if limit is None else offset + limit
         return TargetQueryResult(
             detail=detail,
             total_matching=len(rows),
             offset=offset,
-            truncated=offset + limit < len(rows),
-            targets=rows[offset : offset + limit],
+            truncated=end is not None and end < len(rows),
+            targets=rows[offset:end],
         )
 
     def _look_at_every_target(self) -> builtins.list[Target]:
@@ -959,9 +959,11 @@ class TargetCatalog:
             Every target. Looking is not editing, so none is saved later
             because of this read.
         """
+        from astrometricslib.pipelines.shared import target_records
+
         touched_before = set(self._touched_target_ids)
         try:
-            return self.list()
+            return target_records.list_targets(self)
         finally:
             self._touched_target_ids = touched_before
 
@@ -997,8 +999,8 @@ class TargetCatalog:
             return ImagedFieldCenters(
                 centers=[
                     FieldCenter(
-                        right_ascension_deg=float(center["right_ascension_deg"]),
-                        declination_deg=float(center["declination_deg"]),
+                        ra_deg=float(center["right_ascension_deg"]),
+                        dec_deg=float(center["declination_deg"]),
                         target_ids=[str(target_id) for target_id in center["target_ids"]],
                         frames_examined=int(center["frames_examined"]),
                     )

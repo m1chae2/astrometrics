@@ -1896,6 +1896,8 @@ export interface SkySource {
   stackedImage?: string | null;
   /** A target's field of view, as saved on the target. */
   fieldOfView?: string | null;
+  /** A target's catalog size: SIMBAD's major axis of the object, in arcminutes. None for a star, a planet, or an object the catalog gives no size for. */
+  majorAxisArcmin?: number | null;
   /** Check if the magnitude is a real catalog magnitude. */
   hasCatalogMagnitude?: boolean;
 }
@@ -6593,6 +6595,7 @@ export const RPC_METHODS = [
   "system:save",
   "terminal:execute",
   "terminal:get_workspace",
+  "terminal:get_preloaded_objects",
   "terminal:get_recent_runs",
   "terminal:completions",
   "terminal:list_recipes",
@@ -6601,12 +6604,14 @@ export const RPC_METHODS = [
   "terminal:read_script",
   "terminal:save_script",
   "terminal:reset_workspace",
+  "terminal:stop",
   "docs:list_topics",
   "docs:search_topics",
   "docs:get_topic",
   "ui:editor_get",
   "ui:editor_set",
   "ui:navigate",
+  "ui:set_selection",
   "ui:inspect_variable",
   "handoff:get_state",
   "handoff:update_state",
@@ -6730,6 +6735,8 @@ export const RPC_METHODS = [
   "planetarium:list_catalog_drivers",
   "planetarium:get_deep_catalog_status",
   "planetarium:get_constellation_lines",
+  "planetarium:get_class_stars",
+  "planetarium:get_stack_pictures",
   "imaging:capture",
   "imaging:get_active_jobs",
   "imaging:stop_capture",

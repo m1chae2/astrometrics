@@ -313,6 +313,19 @@ export async function fetchAstrometryOverlayStars(
 }
 
 /**
+ * Asks, in one call, for the ids of a target's stars that have photometry (a light curve).
+ * Single-frame detections are left out, as in the Astronomy Manager's list.
+ *
+ * @param targetId The target whose stars are wanted.
+ * @returns The star ids with photometry. Empty when the target has none.
+ */
+export async function fetchPhotometryStarIds(targetId: string): Promise<string[]> {
+    if (!targetId || targetId.trim() === '') return [];
+    const rows = await callBackend("astronomy:list", { target_id: targetId.trim(), filter_type: 'photometry', limit: 0 });
+    return Array.isArray(rows) ? rows.map((row) => row.id).filter((id): id is string => typeof id === 'string' && id !== '') : [];
+}
+
+/**
  * Asks which of some star ids have a record in the library, in one call.
  *
  * @param starIds The ids to look for.

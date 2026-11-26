@@ -386,3 +386,86 @@ def test_second_run_does_not_capture_the_first_runs_figure() -> None:
     redraw = service.execute_structured("plt.figure(1).axes[0].plot([3, 2, 1])")
     plt.close("all")
     assert [item["figure_id"] for item in redraw["interactive_plots"]] == [1]
+
+
+def test_console_preloads_only_the_public_objects() -> None:
+    """The console holds the public library objects, not the app's services."""
+    from types import SimpleNamespace
+
+    container = SimpleNamespace(
+        astrometrics=object(),
+        wayfinder=object(),
+        target_service=object(),
+        job_service=object(),
+        stellar_object_service=object(),
+        telescope_service=object(),
+    )
+    service = ScriptingService(container)
+    names = {name for name in service.console.locals if not name.startswith("_")}
+    assert names == {
+        "astrometrics",
+        "wayfinder",
+        "np",
+        "plt",
+        "fits",
+        "help",
+        "list_commands",
+        "inspect_api",
+        "doc",
+        "show",
+        "selection",
+    }
+    assert service.console.locals["astrometrics"] is container.astrometrics
+    assert service.get_workspace_manifest() == []
+    help_text = service.execute("help")
+    assert "astrometrics" in help_text and "fits" in help_text
+    assert "target_service" not in help_text and "job_service" not in help_text
+
+
+def test_preloaded_objects_name_their_types() -> None:
+    """Each preloaded object comes with its type and whether it is there."""
+    service = ScriptingService()
+    objects = {entry["name"]: entry for entry in service.get_preloaded_objects()}
+    assert list(objects) == ["astrometrics", "wayfinder", "np", "plt", "fits", "selection", "show", "doc"]
+    assert objects["show"]["type"] == "function" and objects["selection"]["type"] == "ConsoleSelection"
+    assert objects["np"]["type"] == "numpy" and objects["np"]["available"]
+    assert objects["fits"]["type"] == "astropy.io.fits"
+    assert objects["astrometrics"]["available"] is False
+    assert all(entry["description"] for entry in objects.values())
+
+
+def test_help_with_an_object_prints_only_its_public_api() -> None:
+    """help(obj) gives the docstring and public methods, no private names."""
+    service = ScriptingService()
+    service.execute(
+        "class Sample:\n"
+        '    """A sample object."""\n'
+        "    def measure(self, size):\n"
+        '        """Measure something."""\n'
+        "    def _hidden(self):\n"
+        '        """Private."""\n'
+        "sample = Sample()\n"
+    )
+    text = service.execute("help(sample)")
+    assert "A sample object." in text
+    assert "measure(size)" in text and "Measure something." in text
+    assert "_hidden" not in text
+
+
+def test_recipes_include_the_tutorial_notebooks_as_scripts() -> None:
+    """Each tutorial notebook is a recipe, turned into a console script."""
+    service = ScriptingService()
+    recipes = {recipe["id"]: recipe for recipe in service.list_recipes()}
+    notebook = recipes["08_visualization"]
+    assert notebook["kind"] == "notebook"
+    assert notebook["category"] == "astrometrics"
+    assert notebook["name"] == "8. Visualization"
+    assert recipes["tune_parameters"]["kind"] == "script"
+    assert recipes["remote_image_ingestion"]["category"] == "wayfinding"
+
+    recipe = service.get_recipe("08_visualization")
+    assert recipe["filename"] == "08_visualization.py"
+    compile(recipe["code"], recipe["filename"], "exec")
+    code_lines = [line.strip() for line in recipe["code"].splitlines()]
+    assert "astrometrics = Astrometrics()" not in code_lines
+    assert any(line.startswith("# astrometrics = Astrometrics()") for line in code_lines)

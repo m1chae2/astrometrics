@@ -114,7 +114,7 @@ DECISIONS = {
     ),
     "terminal_add_script": ToolDecision(
         "keep",
-        "Built 2026-11-15. Saves a new script to the Command Console's User Scripts for the person to "
+        "Built 2026-11-15. Saves a new script to the Command Console's My scripts list for the person to "
         "review and run. It cannot run it or replace a script.",
     ),
     "terminal_get_workspace": ToolDecision("withhold", "Console only. Has no use without the code runner."),

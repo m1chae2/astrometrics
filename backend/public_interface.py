@@ -100,6 +100,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Python terminal and its documentation
     "terminal:execute",
     "terminal:get_workspace",
+    "terminal:get_preloaded_objects",
     "terminal:get_recent_runs",
     "terminal:completions",
     "terminal:list_recipes",
@@ -108,6 +109,7 @@ RPC_METHODS: tuple[str, ...] = (
     "terminal:read_script",
     "terminal:save_script",
     "terminal:reset_workspace",
+    "terminal:stop",
     "docs:list_topics",
     "docs:search_topics",
     "docs:get_topic",
@@ -115,6 +117,7 @@ RPC_METHODS: tuple[str, ...] = (
     "ui:editor_get",
     "ui:editor_set",
     "ui:navigate",
+    "ui:set_selection",
     "ui:inspect_variable",
     # Hand-off of the workspace to a paired phone
     "handoff:get_state",
@@ -280,6 +283,8 @@ RPC_METHODS: tuple[str, ...] = (
     "planetarium:list_catalog_drivers",
     "planetarium:get_deep_catalog_status",
     "planetarium:get_constellation_lines",
+    "planetarium:get_class_stars",
+    "planetarium:get_stack_pictures",
     # Camera capture
     "imaging:capture",
     "imaging:get_active_jobs",

@@ -55,6 +55,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Python terminal and its documentation
     "terminal:execute": ("scripting_service", "execute_structured"),
     "terminal:get_workspace": ("scripting_service", "get_workspace_manifest"),
+    # The public objects the console preloads (astrometrics, np, ...).
+    "terminal:get_preloaded_objects": ("scripting_service", "get_preloaded_objects"),
     # The last few console runs (text and figure files), read-only.
     "terminal:get_recent_runs": ("scripting_service", "get_recent_runs"),
     "terminal:completions": ("scripting_service", "get_completions"),
@@ -64,6 +66,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "terminal:read_script": ("scripting_service", "read_user_script"),
     "terminal:save_script": ("scripting_service", "save_user_script"),
     "terminal:reset_workspace": ("scripting_service", "reset_workspace"),
+    # Ctrl+C in the terminal: stops the console code running now.
+    "terminal:stop": ("scripting_service", "stop_runs"),
     "docs:list_topics": ("scripting_service", "list_doc_topics"),
     "docs:search_topics": ("scripting_service", "search_doc_topics"),
     "docs:get_topic": ("scripting_service", "get_doc_topic"),
@@ -71,6 +75,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "ui:editor_get": ("scripting_service", "get_editor_buffer"),
     "ui:editor_set": ("scripting_service", "set_editor_buffer"),
     "ui:navigate": ("handoff_service", "navigate"),
+    # What is picked in Image Processing, read by the console's `selection`.
+    "ui:set_selection": ("app_selection_service", "set_selection"),
     "ui:inspect_variable": ("handoff_service", "inspect_variable"),
     # Hand-off of the workspace to a paired phone
     "handoff:get_state": ("handoff_service", "get_state"),
@@ -253,6 +259,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "planetarium:list_catalog_drivers": ("stellar_service", "list_catalog_drivers"),
     "planetarium:get_deep_catalog_status": ("stellar_service", "deep_catalog_status"),
     "planetarium:get_constellation_lines": ("stellar_service", "get_constellation_lines"),
+    "planetarium:get_class_stars": ("stellar_service", "get_class_star_colors"),
+    "planetarium:get_stack_pictures": ("stellar_service", "get_stack_sky_pictures"),
     # Camera capture
     "imaging:capture": ("imaging_service", "capture_sequence"),
     "imaging:get_active_jobs": ("imaging_service", "get_active_capture_jobs"),

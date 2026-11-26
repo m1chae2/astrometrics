@@ -105,7 +105,7 @@
       "category": "app",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-11-15. Saves a new script to the Command Console's User Scripts for the person to review and run. It cannot run it or replace a script."
+      "note": "Built 2026-11-15. Saves a new script to the Command Console's My scripts list for the person to review and run. It cannot run it or replace a script."
     },
     "terminal_get_recent_runs": {
       "tool_class": "observe",

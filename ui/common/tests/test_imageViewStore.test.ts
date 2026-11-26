@@ -37,7 +37,7 @@ describe('imageViewStore', () => {
   it('marks the view as put back and forgets the star it came from, keeping the rest', () => {
     saveImageView(RECORD);
     markImageViewReturned();
-    expect(loadImageView()).toEqual({ ...RECORD, returnPending: false, arrivedFromStar: null });
+    expect(loadImageView()).toEqual({ ...RECORD, returnPending: false, arrivedFromStar: null, arrivedFromRecord: null });
   });
 
   it('forgets the view', () => {

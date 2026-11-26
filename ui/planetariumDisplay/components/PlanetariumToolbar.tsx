@@ -4,7 +4,9 @@
  *
  * Renders a row of labelled checkboxes for toggling sky map overlays, a Date and
  * Time button to open the simulation time modal, and a live FOV readout.
- * The session picker is the shared SessionPicker.
+ * The session picker is the shared SessionPicker. The row is the shared compact
+ * Toolbar, so it has the same text size, gaps and dividers as the other
+ * displays' toolbars (such as the FITS Viewer bar).
  */
 
 import React from 'react';
@@ -13,6 +15,8 @@ import { PlanningTimeIndicator } from '../../common/components/PlanningTimeIndic
 import { SessionPicker, type SessionPickerOption } from '../../common/components/SessionPicker';
 import { Button } from '../../common/components/Button';
 import { Checkbox } from '../../common/components/Checkbox';
+import { Slider } from '../../common/components/Slider';
+import { Toolbar, ToolbarDivider, ToolbarGroup, ToolbarLabel, ToolbarValue } from '../../common/components/Toolbar';
 
 /**
  * Props for PlanetariumToolbar.
@@ -51,6 +55,12 @@ interface Props {
   selectedSessionId?: string | null;
   /** Callback when user selects a different session. */
   onSelectSession?: (sessionId: string | null) => void;
+  /** Show each target's stack picture on the sky (the Images layer). */
+  showImages?: boolean;
+  onToggleImages?: (value: boolean) => void;
+  /** Opacity of the stack pictures, from 0 to 1. */
+  imagesOpacity?: number;
+  onImagesOpacityChange?: (value: number) => void;
   /** Current field of view in degrees, displayed as a readout. */
   currentFOV: number;
   /** Opens the date/time simulation modal. */
@@ -90,6 +100,10 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   onSelectSession,
   currentFOV,
   onOpenTimeModal,
+  showImages = false,
+  onToggleImages,
+  imagesOpacity = 0.8,
+  onImagesOpacityChange,
 }) => {
   /**
    * Builds the display label for a historical session option, e.g.
@@ -108,9 +122,10 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   };
 
   // The shared picker offers "All Sessions (Cumulative)" first, but only when there are sessions to add up.
+  // Listed under two small headings, like the Layers menu: the whole-history choices, then each night.
   const sessionOptions: SessionPickerOption[] = [
-    ...(availableSessions.length > 0 ? [{ id: 'all', label: 'All Sessions (Cumulative)' }] : []),
-    ...availableSessions.map((s) => ({ id: s.sessionId, label: getSessionLabel(s) })),
+    ...(availableSessions.length > 0 ? [{ id: 'all', label: 'All Sessions (Cumulative)', group: 'Selection' }] : []),
+    ...availableSessions.map((s) => ({ id: s.sessionId, label: getSessionLabel(s), group: 'Nights' })),
   ];
 
   const passiveLayers = [
@@ -125,10 +140,11 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   const rigOverlays = [
     { label: 'Telescope', checked: showTelescope, onChange: onToggleTelescope },
     { label: 'FOV Outline', checked: showFOV, onChange: onToggleFOV },
+    ...(onToggleImages ? [{ label: 'Images', checked: showImages, onChange: onToggleImages }] : []),
   ];
 
   return (
-    <div className="planetarium-toolbar">
+    <Toolbar className="planetarium-toolbar" ariaLabel="Sky map">
       {/* Group 1: Passive Sky Layers Popover */}
       <Popover
         className="planetarium-toolbar__popover-container"
@@ -154,46 +170,71 @@ export const PlanetariumToolbar: React.FC<Props> = ({
             {passiveLayers.map(({ label, checked, onChange }) => (
               <Checkbox
                 key={label}
-                className="planetarium-toolbar__item"
+                size="compact"
                 label={label}
                 checked={checked}
                 onChange={(e) => onChange(e.target.checked)}
               />
             ))}
+            {onImagesOpacityChange && (
+              <>
+                <div className="planetarium-toolbar__popover-header">
+                  Stack Images
+                </div>
+                <label className="planetarium-toolbar__slider-row">
+                  <span>Opacity</span>
+                  <Slider
+                    min="5"
+                    max="100"
+                    step="5"
+                    value={Math.round(imagesOpacity * 100)}
+                    disabled={!showImages}
+                    aria-label="Image opacity"
+                    onChange={(event) => onImagesOpacityChange(Number(event.target.value) / 100)}
+                  />
+                  <span className="planetarium-toolbar__slider-value">{Math.round(imagesOpacity * 100)}%</span>
+                </label>
+              </>
+            )}
           </div>
         )}
       </Popover>
 
-      <div className="planetarium-toolbar__divider" />
+      <ToolbarDivider />
 
       {/* Group 2: Observation & Hardware Overlays */}
-      <div className="planetarium-toolbar__group">
+      <ToolbarGroup>
         {rigOverlays.map(({ label, checked, onChange }) => (
           <Checkbox
             key={label}
-            className="planetarium-toolbar__item"
+            size="compact"
             label={label}
             checked={checked}
             onChange={(e) => onChange(e.target.checked)}
           />
         ))}
-      </div>
+      </ToolbarGroup>
 
       {/* Group 3: Session Selector — alignment is always active, so this is always shown. */}
-      <div className="planetarium-toolbar__divider" />
-      <SessionPicker
-        label="Session"
-        liveLabel="No Session Selected"
-        options={sessionOptions}
-        selectedId={selectedSessionId}
-        onSelect={(sessionId) => onSelectSession?.(sessionId)}
-      />
+      <ToolbarDivider />
+      <ToolbarGroup>
+        <ToolbarLabel>Session</ToolbarLabel>
+        <SessionPicker
+          label="Session"
+          size="compact"
+          liveLabel="No Session Selected"
+          liveGroup="Selection"
+          options={sessionOptions}
+          selectedId={selectedSessionId}
+          onSelect={(sessionId) => onSelectSession?.(sessionId)}
+        />
+      </ToolbarGroup>
 
-      <div className="planetarium-toolbar__divider" />
+      <ToolbarDivider />
 
       {/* Group 4: Time & Readouts */}
-      <div className="planetarium-toolbar__group">
-        <PlanningTimeIndicator />
+      <ToolbarGroup>
+        <PlanningTimeIndicator size="compact" />
         <Button
           variant="secondary"
           size="small"
@@ -202,11 +243,16 @@ export const PlanetariumToolbar: React.FC<Props> = ({
         >
           Date &amp; Time
         </Button>
+      </ToolbarGroup>
 
-        <div className="planetarium-toolbar__readout">
-          FOV {currentFOV.toFixed(1)}&deg;
-        </div>
-      </div>
-    </div>
+      <ToolbarDivider />
+
+      <ToolbarGroup>
+        <ToolbarLabel>FOV</ToolbarLabel>
+        <ToolbarValue ariaLabel={`Field of view ${currentFOV.toFixed(1)} degrees`} title="Field of view">
+          {currentFOV.toFixed(1)}&deg;
+        </ToolbarValue>
+      </ToolbarGroup>
+    </Toolbar>
   );
 };

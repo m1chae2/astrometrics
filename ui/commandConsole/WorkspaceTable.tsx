@@ -1,10 +1,14 @@
 /**
  * @file WorkspaceTable.tsx
- * @description Component displaying active workspace variables (MATLAB-style Workspace viewer) plus pinned system objects.
+ * @description The Command Console's Workspace table. It lists the names the console has ready
+ * at the start (such as `astrometrics`, `selection` and `show`) at the top, then the variables
+ * your code made. The columns keep fixed shares of the width, so a long value never squeezes the
+ * Name and Type columns; a cut-off cell shows its full text on hover.
  */
 import React from 'react';
-import { Button } from '../common/components/Button';
+import type { ActionRegistry } from '../common/services/backendApi';
 
+/** One variable your code made, as `terminal:get_workspace` lists it. */
 export interface WorkspaceVariable {
   name: string;
   type: string;
@@ -14,85 +18,71 @@ export interface WorkspaceVariable {
   summary: string;
 }
 
+/** One name the console has ready at the start, as `terminal:get_preloaded_objects` lists it. */
+export type PreloadedObject = ActionRegistry['terminal:get_preloaded_objects']['response'][number];
+
+/** Props for WorkspaceTable. */
 interface WorkspaceTableProps {
+  /** The variables your code made. */
   variables: WorkspaceVariable[];
-  onSelectVariable?: (variable: WorkspaceVariable) => void;
-  onRefresh?: () => void;
+  /** The names the console has ready at the start. */
+  preloadedObjects: PreloadedObject[];
 }
 
-const PINNED_SYSTEM_OBJECTS = [
-  { name: 'targets', type: 'TargetService', desc: 'Target catalog & frame access' },
-  { name: 'stars', type: 'StellarService', desc: 'Stellar catalog, photometry, & spectra' },
-  { name: 'jobs', type: 'JobService', desc: 'Pipeline jobs & logs database' },
-  { name: 'telescope', type: 'TelescopeService', desc: 'Mount motion, parking, & status' },
-  { name: 'imaging', type: 'ImagingService', desc: 'Camera capture sequences' },
-  { name: 'guiding', type: 'GuidingService', desc: 'Auto-guiding loop & calibration' },
-  { name: 'np', type: 'module', desc: 'NumPy scientific computing' },
-  { name: 'plt', type: 'module', desc: 'Matplotlib headless figure plotting' },
-];
+/**
+ * Builds the text of the Shape / Size cell for one variable.
+ *
+ * @param variable The variable.
+ * @returns The array shape and data type, or the size in bytes.
+ */
+function shapeOrSize(variable: WorkspaceVariable): string {
+  if (variable.shape) return `${variable.shape} (${variable.dtype || ''})`;
+  return `${variable.size_bytes} B`;
+}
 
-export const WorkspaceTable: React.FC<WorkspaceTableProps> = ({
-  variables,
-  onSelectVariable,
-  onRefresh,
-}) => {
-  return (
-    <div className="workspace-table-container">
-      <div className="console-panel__header">
-        <span className="console-panel__title">
-          Workspace ({variables.length + PINNED_SYSTEM_OBJECTS.length})
-        </span>
-        <div className="console-panel__actions">
-          {onRefresh && (
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={onRefresh}
-              title="Refresh Workspace"
-            >
-              Refresh
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="console-panel__body">
-        <table className="workspace-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Shape / Size</th>
-              <th>Value / Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* Pinned system objects */}
-            {PINNED_SYSTEM_OBJECTS.map((obj) => (
-              <tr key={obj.name} className="pinned" title="Pinned System Object">
-                <td style={{ fontWeight: 600 }}>{obj.name}</td>
-                <td>{obj.type}</td>
-                <td style={{ color: 'var(--text-dim)' }}>Built-in</td>
-                <td style={{ color: 'var(--text-dim)' }}>{obj.desc}</td>
-              </tr>
-            ))}
-
-            {/* Dynamic user variables */}
-            {variables.map((v) => (
-              <tr
-                key={v.name}
-                onClick={() => onSelectVariable?.(v)}
-                style={{ cursor: onSelectVariable ? 'pointer' : 'default' }}
-              >
-                <td style={{ fontWeight: 500 }}>{v.name}</td>
-                <td style={{ color: 'var(--term-yellow)' }}>{v.type}</td>
-                <td>{v.shape ? `${v.shape} (${v.dtype || ''})` : `${v.size_bytes} B`}</td>
-                <td title={v.summary}>{v.summary}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
+/**
+ * Shows the Workspace table.
+ *
+ * @param props See `WorkspaceTableProps`.
+ * @returns The table.
+ */
+export const WorkspaceTable: React.FC<WorkspaceTableProps> = ({ variables, preloadedObjects }) => (
+  <table className="workspace-table">
+    <colgroup>
+      <col className="workspace-table__col--name" />
+      <col className="workspace-table__col--type" />
+      <col className="workspace-table__col--size" />
+      <col />
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Shape / Size</th>
+        <th>Value / Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {preloadedObjects.map((preloaded) => (
+        <tr
+          key={preloaded.name}
+          className={`workspace-table__row--preloaded${preloaded.available ? '' : ' workspace-table__row--unavailable'}`}
+          title={preloaded.available ? 'Ready when the console starts' : 'Not available in this install'}
+        >
+          <td className="workspace-table__name" title={preloaded.name}>{preloaded.name}</td>
+          <td title={preloaded.type}>{preloaded.type}</td>
+          <td className="workspace-table__muted">{preloaded.available ? 'Built-in' : 'Not available'}</td>
+          <td className="workspace-table__muted" title={preloaded.description}>{preloaded.description}</td>
+        </tr>
+      ))}
+      {variables.map((variable) => (
+        <tr key={variable.name}>
+          <td className="workspace-table__name" title={variable.name}>{variable.name}</td>
+          <td className="workspace-table__type" title={variable.type}>{variable.type}</td>
+          <td title={shapeOrSize(variable)}>{shapeOrSize(variable)}</td>
+          <td title={variable.summary}>{variable.summary}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);

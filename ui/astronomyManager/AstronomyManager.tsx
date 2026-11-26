@@ -19,6 +19,7 @@ import { chooseTargetForStar, readHandedOffStar as readHandoffPayload, HandedOff
 import './styles/astronomyManager.css';
 import { Tabs } from '../common/components/Tabs';
 import { Button } from '../common/components/Button';
+import { CollapsibleColumn, useCollapsibleColumn } from '../common/components/CollapsibleColumn';
 
 /** localStorage key under which Planetarium (and the image viewer) hand a star to this panel. */
 import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
@@ -251,89 +252,111 @@ export const AstronomyManager: React.FC = () => {
     setSelectedTimestamps(next);
   };
 
+  // The whole left column folds to a thin strip, like Image Processing's; the choice is remembered for this viewer.
+  const [browserCollapsed, setBrowserCollapsed] = useCollapsibleColumn('astrometrics:astronomyManager:targetListCollapsed');
+  const browserStripTitle = navigationMode === 'target' ? 'Targets' : 'Spectral classes';
+  const browserSelectedLabel = navigationMode === 'target'
+    ? targetBrowser.items.find((item) => item.id === selectedTarget)?.label
+    : spectralClassBrowser.items.find((item) => item.id === selectedSpectralClass)?.id;
+  // The star picked in the star list, shown on the strip after the target or class.
+  const browserSelectedStar = starList.items.find((item) => item.value === selectedSpectrum)?.label;
+
   const leftPanel = (
-    <div className="astronomy-display__browser">
-      <div className="astronomy-display__mode-toggle">
-        <Tabs
-          idPrefix="navigation-mode"
-          ariaLabel="Browse by"
-          selectedId={navigationMode}
-          onChange={(modeId) => setNavigationMode(modeId as typeof navigationMode)}
-          tabs={[
-            { id: 'target', label: 'By target' },
-            { id: 'spectralClass', label: 'By spectral class' },
-          ]}
+    <CollapsibleColumn
+      collapsed={browserCollapsed}
+      onCollapsedChange={setBrowserCollapsed}
+      stripTitle={browserStripTitle}
+      selectedLabel={browserSelectedLabel}
+      selectedDetail={browserSelectedStar}
+      showLabel={navigationMode === 'target' ? 'Show target list' : 'Show class list'}
+    >
+      <div className="astronomy-display__browser">
+        <div className="astronomy-display__mode-toggle">
+          <Tabs
+            idPrefix="navigation-mode"
+            ariaLabel="Browse by"
+            selectedId={navigationMode}
+            onChange={(modeId) => setNavigationMode(modeId as typeof navigationMode)}
+            tabs={[
+              { id: 'target', label: 'By target' },
+              { id: 'spectralClass', label: 'By spectral class' },
+            ]}
+          />
+        </div>
+
+        {navigationMode === 'target' ? (
+          <RadioListManager
+            title="Targets"
+            className="astronomy-display__primary-list"
+            onCollapsedChange={setBrowserCollapsed}
+            hideLabel="Hide target list"
+            items={targetBrowser.items}
+            selectedId={selectedTarget}
+            pendingId={selectedTarget}
+            onSelect={setSelectedTarget}
+            filterText={targetBrowser.filterText}
+            onFilterOptionChange={() => {}}
+            onFilterTextChange={targetBrowser.setFilterText}
+            filterPlaceholder="Search targets..."
+            isLoading={targetBrowser.isLoading}
+            loadingMessage="Loading targets"
+            emptyMessage="No targets found."
+            isError={targetBrowser.isError}
+            errorMessage="Could not load the targets."
+            onRetry={targetBrowser.retry}
+          />
+        ) : (
+          <RadioListManager
+            title="Spectral classes"
+            className="astronomy-display__primary-list"
+            onCollapsedChange={setBrowserCollapsed}
+            hideLabel="Hide class list"
+            items={spectralClassBrowser.items}
+            selectedId={selectedSpectralClass}
+            pendingId={selectedSpectralClass}
+            onSelect={setSelectedSpectralClass}
+            filterText={spectralClassBrowser.filterText}
+            onFilterOptionChange={() => {}}
+            onFilterTextChange={spectralClassBrowser.setFilterText}
+            filterPlaceholder="Search classes..."
+            isLoading={spectralClassBrowser.isLoading}
+            loadingMessage="Scanning the catalog for spectral classes…"
+            emptyMessage="No spectral classes found."
+            isError={spectralClassBrowser.isError}
+            errorMessage="Could not load the spectral classes."
+            onRetry={spectralClassBrowser.retry}
+          />
+        )}
+
+        <RadioListManager
+          title={starListTitle}
+          className="astronomy-display__star-list"
+          items={starList.items}
+          selectedId={selectedSpectrum}
+          pendingId={pendingId}
+          onSelect={isSpectralClassScoped ? setPendingId : starsByTarget.selectStar}
+          onFilterOptionChange={() => {}}
+          filterText={starList.filterText}
+          onFilterTextChange={starList.setFilterText}
+          legend={
+            <>
+              <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+              <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+            </>
+          }
+          isLoading={starList.isLoading}
+          loadingMessage="Loading stars"
+          emptyMessage="No stars found for this selection."
+          isError={starList.isError}
+          errorMessage="Could not load the stars."
+          onRetry={starList.retry}
+          page={isSpectralClassScoped ? undefined : starsByTarget.page}
+          onPageChange={isSpectralClassScoped ? undefined : starsByTarget.setPage}
+          hasMore={isSpectralClassScoped ? false : starsByTarget.hasMore}
+          totalPages={isSpectralClassScoped ? undefined : starsByTarget.totalPages}
         />
       </div>
-
-      {navigationMode === 'target' ? (
-        <RadioListManager
-          title="Targets"
-          className="astronomy-display__primary-list"
-          items={targetBrowser.items}
-          selectedId={selectedTarget}
-          pendingId={selectedTarget}
-          onSelect={setSelectedTarget}
-          filterText={targetBrowser.filterText}
-          onFilterOptionChange={() => {}}
-          onFilterTextChange={targetBrowser.setFilterText}
-          filterPlaceholder="Search targets..."
-          isLoading={targetBrowser.isLoading}
-          loadingMessage="Loading targets"
-          emptyMessage="No targets found."
-          isError={targetBrowser.isError}
-          errorMessage="Could not load the targets."
-          onRetry={targetBrowser.retry}
-        />
-      ) : (
-        <RadioListManager
-          title="Spectral classes"
-          className="astronomy-display__primary-list"
-          items={spectralClassBrowser.items}
-          selectedId={selectedSpectralClass}
-          pendingId={selectedSpectralClass}
-          onSelect={setSelectedSpectralClass}
-          filterText={spectralClassBrowser.filterText}
-          onFilterOptionChange={() => {}}
-          onFilterTextChange={spectralClassBrowser.setFilterText}
-          filterPlaceholder="Search classes..."
-          isLoading={spectralClassBrowser.isLoading}
-          loadingMessage="Scanning the catalog for spectral classes…"
-          emptyMessage="No spectral classes found."
-          isError={spectralClassBrowser.isError}
-          errorMessage="Could not load the spectral classes."
-          onRetry={spectralClassBrowser.retry}
-        />
-      )}
-
-      <RadioListManager
-        title={starListTitle}
-        className="astronomy-display__star-list"
-        items={starList.items}
-        selectedId={selectedSpectrum}
-        pendingId={pendingId}
-        onSelect={isSpectralClassScoped ? setPendingId : starsByTarget.selectStar}
-        onFilterOptionChange={() => {}}
-        filterText={starList.filterText}
-        onFilterTextChange={starList.setFilterText}
-        legend={
-          <>
-            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
-            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
-          </>
-        }
-        isLoading={starList.isLoading}
-        loadingMessage="Loading stars"
-        emptyMessage="No stars found for this selection."
-        isError={starList.isError}
-        errorMessage="Could not load the stars."
-        onRetry={starList.retry}
-        page={isSpectralClassScoped ? undefined : starsByTarget.page}
-        onPageChange={isSpectralClassScoped ? undefined : starsByTarget.setPage}
-        hasMore={isSpectralClassScoped ? false : starsByTarget.hasMore}
-        totalPages={isSpectralClassScoped ? undefined : starsByTarget.totalPages}
-      />
-    </div>
+    </CollapsibleColumn>
   );
 
   const rightPanel = (
@@ -361,7 +384,7 @@ export const AstronomyManager: React.FC = () => {
 
   const centerPanel = (
     <div className="astronomy-display__plots">
-      <StarSummaryCard astronomyData={astronomyData} starId={selectedSpectrum || pendingId} />
+      <StarSummaryCard astronomyData={astronomyData} starId={selectedSpectrum || pendingId} selectedTargetId={navigationMode === 'target' ? selectedTarget : ''} />
       {isStarLoaded && !hasSpectrum ? (
         <SectionPanel title="Spectrum" className="astronomy-display__panel--collapsed">
           <div className="astronomy-display__collapsed-note">No spectrum has been recorded for this star.</div>

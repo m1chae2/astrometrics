@@ -46,6 +46,23 @@ export interface SavedImageView {
   returnPending: boolean;
   /** The star the person opened in the Astronomy Manager from the picture, or null. */
   arrivedFromStar: string | null;
+  /** The library record of that star (the id the Astronomy Manager shows it under), or null when not known. */
+  arrivedFromRecord?: string | null;
+}
+
+/**
+ * The extra fields of a `targetSelected` hand-off to Image Processing that ask it to show one star: the target's
+ * main stack with the Astrometry overlay on, the star selected, and the view centered and zoomed on it.
+ */
+export interface StarFocusHandoff {
+  /** The target to open. */
+  targetId: string;
+  /** Turns the Astrometry overlay on. */
+  enableAstrometry: true;
+  /** The star's library record id, matched against the stack's named stars by their catalog keys. */
+  focusLibraryStarId: string;
+  /** The star's name, for the note shown when the stack does not name it. */
+  focusStarName?: string;
 }
 
 /**
@@ -69,7 +86,8 @@ function isSavedImageView(value: unknown): value is SavedImageView {
     && typeof record.detections === 'boolean'
     && viewportOk
     && typeof record.returnPending === 'boolean'
-    && (record.arrivedFromStar === null || typeof record.arrivedFromStar === 'string');
+    && (record.arrivedFromStar === null || typeof record.arrivedFromStar === 'string')
+    && (record.arrivedFromRecord === undefined || record.arrivedFromRecord === null || typeof record.arrivedFromRecord === 'string');
 }
 
 /**
@@ -109,7 +127,7 @@ export function saveImageView(record: SavedImageView): void {
 export function markImageViewReturned(): void {
   const record = loadImageView();
   if (!record || (!record.returnPending && record.arrivedFromStar === null)) return;
-  saveImageView({ ...record, returnPending: false, arrivedFromStar: null });
+  saveImageView({ ...record, returnPending: false, arrivedFromStar: null, arrivedFromRecord: null });
 }
 
 /**

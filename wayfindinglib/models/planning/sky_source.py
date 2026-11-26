@@ -91,6 +91,12 @@ class SkySource(BaseModel):
     field_of_view: str | None = Field(
         default=None, alias="fieldOfView", description="A target's field of view, as saved on the target."
     )
+    major_axis_arcmin: float | None = Field(
+        default=None,
+        alias="majorAxisArcmin",
+        description="A target's catalog size: SIMBAD's major axis of the object, in arcminutes. None for a "
+        "star, a planet, or an object the catalog gives no size for.",
+    )
 
     @computed_field(alias="hasCatalogMagnitude")
     @property

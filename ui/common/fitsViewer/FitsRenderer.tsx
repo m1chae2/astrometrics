@@ -18,6 +18,7 @@ import { useDetections } from './hooks/useDetections';
 import { useStarIdentity } from './hooks/useStarIdentity';
 import { buildDetectionPaths } from './utils/detectionMarkers';
 import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
+import type { FileCell } from './utils/pixelQuery';
 import { baseToTurned, describeTurn, fitsPixelToTurnedPicture, rowOrderProbeCell, turnedSize, turnStep, turnToMatchStack } from './displayTurn';
 import type { QuarterTurn, StackOrientation } from './displayTurn';
 import { Badge } from '../components/Badge';
@@ -141,6 +142,16 @@ export const STAR_SEARCH_MIN_PX = 3;
 /** Largest search radius sent to the backend, in image pixels (the backend caps it at 50 too). */
 export const STAR_SEARCH_MAX_PX = 50;
 
+/**
+ * Turns the star search distance of a click (6 screen pixels) into image pixels at a zoom.
+ *
+ * @param screenPixelsPerFilePixel The zoom, in screen pixels per image pixel.
+ * @returns The search radius, from 3 to 50 image pixels.
+ */
+export function searchRadiusAtScale(screenPixelsPerFilePixel: number): number {
+  return Math.min(STAR_SEARCH_MAX_PX, Math.max(STAR_SEARCH_MIN_PX, STAR_SEARCH_SCREEN_PX / screenPixelsPerFilePixel));
+}
+
 /** Radius, in screen pixels, of the small marker drawn when the profile does not look like a star. */
 const NOT_A_STAR_MARKER_RADIUS_PX = 4;
 
@@ -226,6 +237,18 @@ export interface RestoreView {
   key: string;
   /** The point at the center and the zoom. */
   view: SavedViewport;
+  /**
+   * Screen pixels per picture pixel to zoom to, in place of `view.zoomOverFit`, for example to show one star
+   * and the sky around it at the same size on any window.
+   */
+  scale?: number;
+  /** The picture's width in pixels that `scale` refers to, used until the file's own size is known. */
+  pictureWidth?: number;
+  /**
+   * Also picks the star at the new center, the same as a click there: the star profile panel opens for it.
+   * It waits until the file's pixels are drawn, and is done once for each key.
+   */
+  pickStar?: boolean;
 }
 
 /** The longest, in milliseconds, the picture stays hidden while it waits for a view to be put back. */
@@ -458,9 +481,14 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     if (sameRequest && Date.now() - last.at > RESTORE_REAPPLY_WINDOW_MS) return;
     lastRestoreRef.current = { key: restoreView.key, w: drawnSize.w, h: drawnSize.h, at: sameRequest ? last.at : Date.now() };
     const { x, y, zoomOverFit } = restoreView.view;
-    placeCenter({ x, y }, { force: true, scale: zoomOverFit * fitScale });
+    // A zoom given in screen pixels per picture pixel is turned into screen pixels per drawn pixel.
+    const pictureWidth = shownSize.w || restoreView.pictureWidth || 0;
+    const scale = restoreView.scale !== undefined && pictureWidth > 0
+      ? (restoreView.scale * pictureWidth) / drawnSize.w
+      : zoomOverFit * fitScale;
+    placeCenter({ x, y }, { force: true, scale });
     setAppliedRestoreKey(restoreView.key);
-  }, [restoreView, firstFrameDrawn, drawnSize.w, drawnSize.h, placeCenter]);
+  }, [restoreView, firstFrameDrawn, drawnSize.w, drawnSize.h, placeCenter, shownSize.w]);
   // A view that cannot be put back (the picture never draws) must not leave the picture hidden.
   useEffect(() => {
     if (!restoreKey || !restoreHidesPicture) return undefined;
@@ -674,9 +702,26 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
    * @param imageWidth Width of the picture as shown, in pixels.
    * @returns The search radius, from 3 to 50 image pixels.
    */
-  const searchRadiusFor = (imageWidth: number): number => {
-    const screenPixelsPerFilePixel = (drawnSize.w / imageWidth) * effectiveZoom;
-    return Math.min(STAR_SEARCH_MAX_PX, Math.max(STAR_SEARCH_MIN_PX, STAR_SEARCH_SCREEN_PX / screenPixelsPerFilePixel));
+  const searchRadiusFor = (imageWidth: number): number => searchRadiusAtScale((drawnSize.w / imageWidth) * effectiveZoom);
+
+  /**
+   * Measures the star at one cell of the picture as shown and opens the star profile for it. A click and a
+   * requested pick (`restoreView.pickStar`) both come here, so they open the same panel the same way.
+   *
+   * @param cell The cell of the picture as shown.
+   * @param searchRadiusPx How far, in image pixels, the center may snap to a star.
+   */
+  const measureCell = async (cell: FileCell, searchRadiusPx: number) => {
+    const worker = workerRef.current;
+    if (!parsedData || !worker) return;
+    // The reading names the file's own pixel; the probe (the picture's top-left base corner) tells the row order.
+    const [reading, topRowReading] = await Promise.all([
+      askWorkerForPixel(worker, parsedData.imageId, cell),
+      askWorkerForPixel(worker, parsedData.imageId, rowOrderProbeCell(parsedData.w, parsedData.h, turn)),
+    ]);
+    if (!reading) return;
+    followedKeyRef.current = currentKey;
+    starProfile.measureAt({ x: reading.x, y: reading.y, firstRowAtTop: topRowReading?.y === 1, searchRadiusPx, turn });
   };
 
   const measureStarAt = async (pointerX: number, pointerY: number) => {
@@ -690,17 +735,27 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     }
     const cell = pointerToFileCell(pointerX, pointerY, parsedData, drawnSize, effectiveZoom, panX, panY, turn);
     if (!cell) return;
-    // The reading names the file's own pixel; the probe (the picture's top-left base corner) tells the row order.
-    const [reading, topRowReading] = await Promise.all([
-      askWorkerForPixel(worker, parsedData.imageId, cell),
-      askWorkerForPixel(worker, parsedData.imageId, rowOrderProbeCell(parsedData.w, parsedData.h, turn)),
-    ]);
-    if (!reading) return;
     // The center may snap to a star within about 6 screen pixels of the click, so the search radius follows the zoom.
-    const searchRadiusPx = searchRadiusFor(shownSize.w);
-    followedKeyRef.current = currentKey;
-    starProfile.measureAt({ x: reading.x, y: reading.y, firstRowAtTop: topRowReading?.y === 1, searchRadiusPx, turn });
+    await measureCell(cell, searchRadiusFor(shownSize.w));
   };
+
+  // A view put back with `pickStar` picks the star at its center once the file's pixels are drawn, as a click there would.
+  const pickedRestoreKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!restoreView?.pickStar || appliedRestoreKey !== restoreView.key || !mainDrawn || !parsedData) return;
+    if (pickedRestoreKeyRef.current === restoreView.key) return;
+    pickedRestoreKeyRef.current = restoreView.key;
+    const shown = turnedSize(parsedData.w, parsedData.h, turn);
+    const cell: FileCell = {
+      column: Math.min(shown.w - 1, Math.max(0, Math.floor(restoreView.view.x * shown.w))),
+      rowFromTop: Math.min(shown.h - 1, Math.max(0, Math.floor(restoreView.view.y * shown.h))),
+    };
+    // The zoom the view was asked for, which the state may not show yet.
+    const screenPixelsPerFilePixel = restoreView.scale ?? (drawnSize.w / shown.w) * effectiveZoom;
+    void measureCell(cell, searchRadiusAtScale(screenPixelsPerFilePixel));
+    // measureCell reads the newest image and settings when it runs; the pick is keyed by the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreView, appliedRestoreKey, mainDrawn, parsedData]);
 
   // When another image is drawn while a star is pinned, find the star on it (once per image).
   const followProfile = starProfile.follow;

@@ -2,11 +2,16 @@
  * @file DocViewer.tsx
  * @description Markdown documentation viewer for inspecting library architecture and notebook tutorials in the Command Console.
  * Intercepts internal and external links to prevent app reloading and allow seamless topic navigation.
+ * An API reference line that ends in an anchor mark, such as `{#api-TargetCatalog-delete_images}`,
+ * gets that anchor as its `id` (the mark itself is not shown), so other parts of the console can
+ * jump to it.
  */
-import React, { useMemo } from 'react';
+import React, { createContext, useContext, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 import { Skeleton } from '../common/components/Skeleton';
+
+/** One documentation topic in the picker. */
 export interface DocTopicItem {
   id: string;
   title: string;
@@ -14,13 +19,77 @@ export interface DocTopicItem {
   category: string;
 }
 
+/** Props for DocViewer. */
 interface DocViewerProps {
+  /** Every documentation topic, for following links between topics. */
   topics: DocTopicItem[];
+  /** The id of the topic shown, or null before one is picked. */
   selectedTopicId: string | null;
+  /** The text of the topic shown, in Markdown. */
   content: string;
+  /** True while the topic is read. */
   loading?: boolean;
+  /** Called with the id of the topic a link opens. */
   onSelectTopic: (topicId: string) => void;
+  /** The anchor of the entry to light up for a moment, or null for none. */
+  highlightedAnchorId?: string | null;
 }
+
+/** The anchor mark at the end of an API reference line, such as ` {#api-TargetCatalog-delete_images}`. */
+const ANCHOR_MARK = /\s*\{#(api-[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)?)\}\s*$/;
+
+/**
+ * Takes the anchor mark off the end of a heading or list item.
+ *
+ * @param children The rendered children of the heading or list item.
+ * @returns The anchor, if the last piece of text ended with one, and the children without the mark.
+ */
+export function splitEntryAnchor(children: React.ReactNode): { anchorId: string | null; children: React.ReactNode } {
+  const pieces = React.Children.toArray(children);
+  const last = pieces[pieces.length - 1];
+  if (typeof last !== 'string') return { anchorId: null, children };
+  const match = last.match(ANCHOR_MARK);
+  if (!match || match.index === undefined) return { anchorId: null, children };
+  const rest = last.slice(0, match.index);
+  return { anchorId: match[1], children: rest ? [...pieces.slice(0, -1), rest] : pieces.slice(0, -1) };
+}
+
+/** The props React Markdown passes to a custom element, with the syntax-tree node it adds. */
+type MarkdownElementProps<T extends HTMLElement> = React.HTMLAttributes<T> & { node?: unknown };
+
+/**
+ * The anchor of the entry to light up. A context, so the renderers stay the same and the page is
+ * not redrawn from scratch (which would lose the find-in-page marks) when it changes.
+ */
+const HighlightedAnchorContext = createContext<string | null>(null);
+
+/**
+ * Makes a renderer for a heading or list item that turns a trailing anchor mark into the element's id.
+ *
+ * @param Tag The element to draw: `h3`, `h4` or `li`.
+ * @returns The renderer for React Markdown.
+ */
+function anchoredElement(Tag: 'h3' | 'h4' | 'li') {
+  const AnchoredElement = ({ node: _node, children, className, ...props }: MarkdownElementProps<HTMLElement>) => {
+    const highlightedAnchorId = useContext(HighlightedAnchorContext);
+    const { anchorId, children: shown } = splitEntryAnchor(children);
+    const classes = [
+      className,
+      anchorId ? 'doc-viewer__entry' : '',
+      anchorId && anchorId === highlightedAnchorId ? 'doc-viewer__entry--flash' : '',
+    ].filter(Boolean).join(' ');
+    return (
+      <Tag {...props} id={anchorId ?? props.id} className={classes || undefined}>
+        {shown}
+      </Tag>
+    );
+  };
+  AnchoredElement.displayName = `Anchored(${Tag})`;
+  return AnchoredElement;
+}
+
+/** The renderers for the elements that can hold an anchor mark. */
+const ANCHORED_ELEMENTS = { h3: anchoredElement('h3'), h4: anchoredElement('h4'), li: anchoredElement('li') };
 
 /**
  * Normalizes relative target links against known documentation topics.
@@ -130,18 +199,26 @@ function preprocessAdmonitions(rawMarkdown: string): string {
     });
 }
 
+/**
+ * Draws one documentation topic from its Markdown text.
+ *
+ * @param props See `DocViewerProps`.
+ * @returns The page, a loading placeholder, or a hint to pick a topic.
+ */
 export const DocViewer: React.FC<DocViewerProps> = ({
   topics,
   selectedTopicId,
   content,
   loading = false,
   onSelectTopic,
+  highlightedAnchorId = null,
 }) => {
   const processedContent = useMemo(() => preprocessAdmonitions(content), [content]);
 
   // Custom link renderer to intercept clicks and prevent app reload
   const markdownComponents = useMemo(() => ({
-    a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+    ...ANCHORED_ELEMENTS,
+    a: ({ href, children, node: _node, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }) => {
       const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
         if (!href) return;
 
@@ -189,11 +266,13 @@ export const DocViewer: React.FC<DocViewerProps> = ({
         <Skeleton variant="list" count={8} lines={3} label="Loading the documentation topic" />
       ) : processedContent ? (
         <div className="doc-viewer">
-          <ReactMarkdown components={markdownComponents}>{processedContent}</ReactMarkdown>
+          <HighlightedAnchorContext.Provider value={highlightedAnchorId}>
+            <ReactMarkdown components={markdownComponents}>{processedContent}</ReactMarkdown>
+          </HighlightedAnchorContext.Provider>
         </div>
       ) : (
-        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '60px', width: '100%' }}>
-          Select a guide or tutorial from the Docs tab on the left to read.
+        <div className="doc-viewer__empty">
+          Pick a topic, or search the documentation, to read it here.
         </div>
       )}
     </div>

@@ -27,6 +27,7 @@ from astrometricslib.drivers import (
 )
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
+from backend.services.data.stack_sky_pictures import StackSkyPictures
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ class StellarService:
         # RPC worker thread, and shares identical concurrent ones.
         self._heavy_reads = HeavyReadLimiter()
         self._socket_manager = None
+        self._stack_sky_pictures = StackSkyPictures(resolve_mounted_path)
 
     def set_socket_manager(self, socket_manager: Any) -> None:
         """Give this service a socket manager to notify the UI through.
@@ -602,6 +604,76 @@ class StellarService:
             ),
         )
 
+    def get_class_star_colors(self) -> list[dict[str, Any]]:
+        """List the stars in the spectral class lists, and their color facts.
+
+        The Planetarium draws these stars in their own color when its left
+        panel browses by spectral class: every star with a catalog spectral
+        class (the stars the class lists count) and every star with a
+        spectrum. A star's color comes from the spectral type our own
+        spectrum gave, else the catalog type, else the catalog B-V color.
+        The screen picks the color; this only gathers the facts.
+
+        Returns
+        -------
+        stars : `list` [`dict`]
+            One row per star, with the summary row keys (``id``, ``name``,
+            ``ra``, ``dec``, ``magnitude``, ``hasCatalogMagnitude``,
+            ``spectralType``, ``hasSpectra``, ``hasPhotometry`` and
+            ``targetIds``) plus ``ownSpectralType`` (the type our spectrum
+            matched, empty when none) and ``bMinusV`` (`None` when unknown;
+            only read for stars with a spectrum).
+        """
+
+        def compute() -> list[dict[str, Any]]:
+            stars = self.astrometrics.stars
+            rows_by_id: dict[str, dict[str, Any]] = {}
+            for spectral_class in self.get_spectral_class_summary():
+                letter = spectral_class["spectralClass"]
+                for row in stars.query(spectral_class=letter, detail="summary", limit=None).stars or []:
+                    rows_by_id.setdefault(row["id"], row)
+            for row in stars.query(has_spectra=True, detail="summary", limit=None).stars or []:
+                rows_by_id.setdefault(row["id"], row)
+            # Our own spectral type and the B-V color are kept in the full
+            # record, so they are read only for the stars with a spectrum.
+            analyses = stars.query(has_spectra=True, detail="analysis", limit=None).stars or []
+            analysis_by_id = {row["id"]: row for row in analyses}
+            answer = []
+            for star_id, summary in rows_by_id.items():
+                analysis = analysis_by_id.get(star_id, {})
+                spectrum = analysis.get("spectrum") or {}
+                answer.append({
+                    **summary,
+                    "ownSpectralType": spectrum.get("own_spectral_type") or "",
+                    "bMinusV": analysis.get("b_minus_v"),
+                })
+            return answer
+
+        return self._cached_catalog_answer("class_star_colors", compute)
+
+    def get_stack_sky_pictures(self) -> list[dict[str, Any]]:
+        """List each target's stack picture with where it lies on the sky.
+
+        For the Planetarium's Images layer. A target is listed only when it
+        has a stretched stack with a plate solution and a picture file; the
+        rest are left out. Each stack's header is read once and kept until
+        the stack or its picture changes (see `StackSkyPictures`).
+
+        Returns
+        -------
+        pictures : `list` [`dict`]
+            One entry per target with a placed picture: ``targetId``,
+            ``picturePath``, ``width``, ``height``, ``gridSize`` and
+            ``grid`` (``[ra, dec]`` pairs in degrees, row by row from the
+            picture's top-left corner).
+        """
+        pictures = []
+        for target in self.astrometrics.targets.list():
+            entry = self._stack_sky_pictures.entry_for(target)
+            if entry is not None:
+                pictures.append(entry)
+        return pictures
+
     def save_objects(self) -> str:
         """Report that the stellar catalog is saved; there is nothing to do.
 
@@ -835,7 +907,10 @@ class StellarService:
     def get_planetarium_targets(self) -> list[dict]:
         """List every library target that has coordinates, for the sky map.
 
-        A target with no stack shows its longest LIGHT frame instead.
+        A target with no stack shows its longest LIGHT frame instead. Each
+        target also carries its catalog size (``majorAxisArcmin``, SIMBAD's
+        major axis), when the library has one, so the map can draw a marker
+        the size of the object.
 
         Returns
         -------
@@ -963,9 +1038,12 @@ class StellarService:
         Parameters
         ----------
         objects : `list` [`dict`]
-            Each with ``id`` and ``type``. A ``"star"`` is read from the
-            library's stars; any other type is looked up by name in the
-            library, then SIMBAD.
+            Each with ``id`` and ``type``, and optionally ``ra`` and
+            ``dec`` in degrees. A ``"star"`` is read from the library's
+            stars; a star the library does not hold (a background catalog
+            star) is placed by its ``ra`` and ``dec`` when they are given.
+            Any other type is looked up by name in the library, then
+            SIMBAD.
         time : `str`, optional
             ISO 8601 moment. Defaults to now.
         end : `str`, optional
@@ -978,7 +1056,8 @@ class StellarService:
         -------
         visibility : `list` [`dict`]
             One `ObjectVisibility` per object found, with its meridian
-            status. A star the library does not hold is left out.
+            status. A star the library does not hold, sent without a
+            position, is left out.
         """
         resolved: list[Any] = []
         for object_entry in objects:
@@ -986,6 +1065,14 @@ class StellarService:
                 star = self.get_object(object_entry.get("id"))
                 if star is not None:
                     resolved.append(star)
+                elif isinstance(object_entry.get("ra"), int | float) and isinstance(
+                    object_entry.get("dec"), int | float
+                ):
+                    resolved.append({
+                        "id": object_entry.get("id"),
+                        "ra_deg": float(object_entry["ra"]),
+                        "dec_deg": float(object_entry["dec"]),
+                    })
             else:
                 resolved.append(object_entry.get("id"))
         if not resolved:

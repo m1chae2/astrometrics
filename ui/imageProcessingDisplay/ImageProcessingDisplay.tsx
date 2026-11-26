@@ -28,10 +28,14 @@ import { peekHandoffs, useHandoffConsumer } from '../common/utils/displayHandoff
 import {
   loadImageView, markImageViewReturned, RETURN_TO_IMAGE_ACTION, saveImageView,
 } from '../common/utils/imageViewStore';
-import type { SavedImageView, SavedViewport } from '../common/utils/imageViewStore';
+import type { SavedImageView, SavedViewport, StarFocusHandoff } from '../common/utils/imageViewStore';
 import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
+import { isStarSelected } from '../common/fitsViewer/FitsRenderer';
+import { publishedStarFromOverlay, useSelectionPublisher } from '../common/hooks/useSelectionPublisher';
 import type { DisplayMode } from '../common/fitsViewer/displayMode';
 import { useLibraryStars } from './hooks/useLibraryStars';
+import { useStarFocusRequest, type StarFocusRequest } from './hooks/useStarFocusRequest';
+import { usePhotometryStars } from './hooks/usePhotometryStars';
 import { useStackIdentification } from './hooks/useStackIdentification';
 import { isStackChoicePath, stackFilterMatch } from './utils/stackChoices';
 
@@ -188,7 +192,11 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // Clear target search filter and pick up incoming star / overlay settings when
   // navigated to a specific target. The request waits in the hand-off store, so
   // it also arrives when this display was hidden or paused when it was sent.
-  useHandoffConsumer<string | { targetId?: string; enableAstrometry?: boolean; starId?: string }>(
+  // Set below, once the pieces it needs exist: shows one star asked for by the Astronomy Manager's "Back to image".
+  const starFocusRequestRef = useRef<(request: StarFocusRequest) => void>(() => undefined);
+  // Set below too: shows one file asked for by the Command Console's show(target=..., path=...), once the target's files load.
+  const fileRequestRef = useRef<(targetId: string, filePath: string) => void>(() => undefined);
+  useHandoffConsumer<string | { targetId?: string; enableAstrometry?: boolean; starId?: string; filePath?: string } & Partial<StarFocusHandoff>>(
     'Image Processing',
     'targetSelected',
     (raw) => {
@@ -205,6 +213,11 @@ const ImageProcessingDisplayInner: React.FC = () => {
         }
         if (raw.starId) {
           setSelectedStarId(raw.starId);
+        }
+        if (targetId && raw.focusLibraryStarId) {
+          starFocusRequestRef.current({ targetId, recordId: raw.focusLibraryStarId, starName: raw.focusStarName ?? '' });
+        } else if (targetId && raw.filePath) {
+          fileRequestRef.current(targetId, raw.filePath);
         }
       }
     }
@@ -273,12 +286,25 @@ const ImageProcessingDisplayInner: React.FC = () => {
     },
     [showAstrometryOverlay, selectedTarget, isStackShown, stackIdentification.stars, overlayQuery.data]
   );
-  // One call says which of these stars the library has a record of; only those can open in the Astronomy Manager.
-  const overlayStars = useLibraryStars(namedOverlayStars, `${selectedTarget ?? ''}|${selectedFile ?? ''}`);
+  // On a stack, only the named stars with photometry are drawn, so each one opens in the Astronomy
+  // Manager with a light curve. One call reads the target's stars with photometry.
+  const photometryStars = usePhotometryStars(
+    isStackShown ? namedOverlayStars : [], selectedTarget, showAstrometryOverlay && isStackShown
+  );
+  // On a raw frame, one call says which stars the library has a record of; only those can open in
+  // the Astronomy Manager.
+  const libraryStars = useLibraryStars(
+    isStackShown ? [] : namedOverlayStars, `${selectedTarget ?? ''}|${selectedFile ?? ''}`
+  );
+  const overlayStars = isStackShown ? photometryStars.stars : libraryStars;
   const overlayReason: string | null = isStackShown
-    ? stackIdentification.statusText
+    ? ([photometryStars.countText, stackIdentification.statusText].filter(Boolean).join('. ') || null)
     : overlayQuery.data?.reason ?? null;
-  const isLoadingOverlay = !isStackShown && overlayQuery.isFetching && showAstrometryOverlay;
+  // A stack shows the loading state while its names are read or made, so a switched-on button with
+  // nothing drawn yet says it is working.
+  const isLoadingOverlay = showAstrometryOverlay && (isStackShown
+    ? stackIdentification.running || !stackIdentification.isLoaded || photometryStars.isLoading
+    : overlayQuery.isFetching);
 
   // The first click on a stack without saved names starts the job that makes them.
   const wantStackNamesRef = useRef(false);
@@ -357,7 +383,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
    * @param options `returnPending` is true when the screen is being left; `arrivedFromStar` names the star that
    *   was opened from the picture (left out, the star already recorded is kept while the screen is being left).
    */
-  const persistView = React.useCallback((options: { returnPending: boolean; arrivedFromStar?: string | null }) => {
+  const persistView = React.useCallback((options: { returnPending: boolean; arrivedFromStar?: string | null; arrivedFromRecord?: string | null }) => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -367,7 +393,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
     const arrivedFromStar = options.arrivedFromStar !== undefined
       ? options.arrivedFromStar
       : options.returnPending ? loadImageView()?.arrivedFromStar ?? null : null;
-    saveImageView({ ...snapshot, view: latestViewRef.current, returnPending: options.returnPending, arrivedFromStar });
+    const arrivedFromRecord = options.arrivedFromRecord !== undefined
+      ? options.arrivedFromRecord
+      : options.returnPending ? loadImageView()?.arrivedFromRecord ?? null : null;
+    saveImageView({ ...snapshot, view: latestViewRef.current, returnPending: options.returnPending, arrivedFromStar, arrivedFromRecord });
   }, []);
   // The viewer reports each change of zoom or center; the record is written once the view rests.
   const handleViewChange = React.useCallback((view: SavedViewport) => {
@@ -423,7 +452,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
     setSelectedStarId(selectionKey);
     // Remember the view, so the "Back to image" button (or any way back) lands on the same spot.
-    persistView({ returnPending: true, arrivedFromStar: selectionKey });
+    persistView({ returnPending: true, arrivedFromStar: selectionKey, arrivedFromRecord: recordId });
     try {
       localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectionKey);
       localStorage.setItem('planetariumSelectedStar', recordId);
@@ -514,6 +543,80 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (filters.optic !== null) setSelectedOptic(filters.optic);
     pickFile(choice.stackedImage);
   }, [stackChoices, setChosenStackKey, allFiles, fileBrowserCamera, setFileBrowserCamera, setSelectedOptic, pickFile]);
+
+  // "Back to image" from the Astronomy Manager for a star (maybe of another target): show the target's main
+  // stack, select the star and zoom in on it. This wins over the view saved when the screen was left.
+  const starFocus = useStarFocusRequest({
+    selectedTarget,
+    isLoadingFiles,
+    mainStackPath: stackedImage ?? null,
+    isStackShown,
+    // A file of this target, not one left over from the target shown before.
+    hasChosenFile: Boolean(selectedFile) && (
+      selectedFile === stackedImage || selectedFile === stackedSpectralTarget
+      || isStackChoicePath(stackChoices, selectedFile) || allFiles.some((file) => file.path === selectedFile)
+    ),
+    showMainStack: () => {
+      const main = stackChoices.find((choice) => choice.isMain);
+      if (main) {
+        handleChooseStack(main.configurationKey);
+        return;
+      }
+      stackShownRef.current = true;
+      setChosenStackKey(null);
+      pickFile(stackedImage ?? null);
+    },
+    identification: stackIdentification,
+    onFound: (star, view) => {
+      const selectionKey = star.id || star.name;
+      setSelectedStarId(selectionKey);
+      try {
+        localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectionKey);
+      } catch {
+        // The selection still shows; it is only not remembered.
+      }
+      if (view) setRestoreView(view);
+    },
+  });
+  // A star the stack does not name is a short status, not an error.
+  useEffect(() => {
+    if (starFocus.note) emitToast(starFocus.note, 'info', 'Astrometry');
+  }, [starFocus.note]);
+  // A layout effect runs before every plain effect, so a request waiting at mount reaches this function.
+  const requestStarFocus = starFocus.request;
+  React.useLayoutEffect(() => {
+    starFocusRequestRef.current = (request) => {
+      setPendingRestore(null);
+      requestStarFocus(request);
+    };
+  }, [requestStarFocus]);
+
+  // The Command Console's show(target=..., path=...) asks for one file. It is put back the same way as a saved
+  // view (once the target's files have loaded), keeping the display mode and overlays as they are now.
+  React.useLayoutEffect(() => {
+    fileRequestRef.current = (targetId, filePath) => {
+      setPendingRestore({
+        ...snapshotRef.current, target: targetId, file: filePath, view: null, returnPending: false, arrivedFromStar: null,
+      });
+    };
+  }, []);
+
+  // --- What is picked, for the Command Console's `selection` object ---
+  // The selected star is sent only while it is one of the overlay's stars on the shown picture, so a star
+  // remembered from another file or target is never sent. The drawn stars come first, since they carry the library id.
+  const selectedOverlayStar = useMemo(() => {
+    if (!selectedStarId) return null;
+    return overlayStars.find((star) => isStarSelected(star, selectedStarId))
+      ?? namedOverlayStars.find((star) => isStarSelected(star, selectedStarId))
+      ?? null;
+  }, [selectedStarId, overlayStars, namedOverlayStars]);
+  const isSpectralStackShown = Boolean(selectedFile && stackedSpectralTarget && selectedFile === stackedSpectralTarget);
+  useSelectionPublisher({
+    target: selectedTarget || null,
+    path: selectedFile || null,
+    kind: selectedFile ? (isStackShown || isSpectralStackShown ? 'stack' : 'frame') : null,
+    star: publishedStarFromOverlay(selectedOverlayStar),
+  });
 
   // --- Action Handlers ---
 

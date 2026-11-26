@@ -4,6 +4,7 @@
  */
 
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
+import { refreshStarColors, starColorRgb } from '../utils/starColor';
 
 /**
  * Radius of the selection reticle circle drawn around a selected star, in pixels.
@@ -30,6 +31,19 @@ export const STAR_RETICLE_RADIUS_PX = 10;
  * context.arc() antialiasing, which doesn't have this failure mode.
  */
 export const STAR_MARKER_RADIUS_PX = 2.0;
+
+/**
+ * Radius, in pixels, of a star drawn in its class color in the "By spectral class" mode.
+ * A 2 px dot is too small for its color to read at a wide view, so a colored dot is a little
+ * bigger. Chosen by eye, not measured.
+ */
+export const CLASS_STAR_MARKER_RADIUS_PX = 3.0;
+
+/**
+ * Lowest opacity of a star drawn in its class color. A faint star at the normal opacity floor
+ * looks gray whatever its color, so a colored dot never goes below this. Chosen by eye.
+ */
+export const CLASS_STAR_MIN_BRIGHTNESS = 0.8;
 
 /** Opacity floor for the faintest displayed stars -- never fully invisible, since a star at this floor already passed the limiting-magnitude cutoff to be shown at all. */
 export const STAR_MIN_BRIGHTNESS = 0.35;
@@ -79,13 +93,59 @@ export const NAKED_EYE_LIMITING_MAGNITUDE = 6.0;
  * ~12. That catalog itself stops at DEEP_STAR_MAX_MAGNITUDE, so at the
  * deepest zooms only the user's own library stars go fainter than that.
  */
-export const MAX_ZOOM_LIMITING_MAGNITUDE = 22.0;
+export const MAX_ZOOM_LIMITING_MAGNITUDE = 19.0;
 
 /** FOV, in degrees, at which the naked-eye limiting magnitude applies. Matches the app's documented default FOV. */
 export const NAKED_EYE_REFERENCE_FOV_DEG = 90.0;
 
-/** FOV, in degrees, at which the full catalog-depth limiting magnitude applies. */
-export const MAX_ZOOM_REFERENCE_FOV_DEG = 0.5;
+/**
+ * FOV, in degrees, at which the full catalog-depth limiting magnitude applies. Set so the
+ * limit grows slowly with zoom: about 9.4 at 15 degrees, 13.3 at 2 degrees and 15.9 at 0.5
+ * degrees, so a wide view stays sparse and fainter stars come in as the view narrows. The
+ * user asked for fewer stars at once (2026-11-25); chosen by eye, not measured.
+ */
+export const MAX_ZOOM_REFERENCE_FOV_DEG = 0.1;
+
+/**
+ * Most star dots drawn per million screen pixels, brightest first: about 1,500 on a
+ * 1920 x 1000 sky view. It keeps a dense part of the sky (the Milky Way, a target's own
+ * detections) from turning into a solid mass; the selected star and a small chosen class
+ * always count in. Chosen by eye, not measured.
+ */
+export const MAX_STARS_PER_MEGAPIXEL = 800;
+
+/** One star that passed the drawing rule, with its place on screen. */
+export interface DrawableStar {
+  source: ProjectionContext['sources'][number];
+  x: number;
+  y: number;
+}
+
+/**
+ * Keeps at most MAX_STARS_PER_MEGAPIXEL stars per million screen pixels, brightest first.
+ *
+ * One rule for every star layer (the bright and deep catalogs and the user's own stars),
+ * applied after the magnitude limit, so the number of dots grows with zoom but never crowds
+ * the view. The selected star and stars marked `alwaysShow` are always kept.
+ *
+ * @param {DrawableStar[]} stars The stars that passed the drawing rule and are on screen.
+ * @param {number} width The canvas width in pixels.
+ * @param {number} height The canvas height in pixels.
+ * @param {string} [selectedId] The selected object's id.
+ * @returns {DrawableStar[]} The stars to draw.
+ */
+export function limitStarDensity(stars: DrawableStar[], width: number, height: number, selectedId?: string): DrawableStar[] {
+  const cap = Math.max(1, Math.round((width * height) / 1e6 * MAX_STARS_PER_MEGAPIXEL));
+  if (stars.length <= cap) return stars;
+  const isKept = (star: DrawableStar) => !!star.source.alwaysShow || (!!selectedId && star.source.id === selectedId);
+  const kept = stars.filter(isKept);
+  const ranked = stars.filter((star) => !isKept(star));
+  // Brightest first; a star with no catalog magnitude counts as faint.
+  const rankOf = (star: DrawableStar) => catalogMagnitudeOf(star.source)
+    ?? (star.source.catalogSource && typeof star.source.magnitude === 'number' ? star.source.magnitude : 99);
+  ranked.sort((first, second) => rankOf(first) - rankOf(second));
+  return [...ranked.slice(0, Math.max(0, cap - kept.length)), ...kept];
+}
 
 /**
  * Computes the faintest star magnitude that should be visible at the
@@ -196,17 +256,23 @@ export function formatCatalogMagnitude(source: SourceMagnitude, decimals: number
  * @param {boolean} showCatalog - Whether the user's own cataloged (non-Hipparcos) sources should display.
  * @param {number} limitingMagnitude - Faintest magnitude to display at the current FOV (see computeLimitingMagnitude).
  * @param {number} fovDegrees - Current viewport field of view, in degrees.
+ * @param {string} [selectedId] - The selected object's id; that star always shows.
  * @returns {boolean} True if this source should be rendered as a star point.
  */
 export function isDisplayableStar(
-  source: { ra: number; dec: number; type?: string; catalogSource?: string } & SourceMagnitude,
+  source: { id?: string; ra: number; dec: number; type?: string; catalogSource?: string; colorClass?: string; alwaysShow?: boolean } & SourceMagnitude,
   showStars: boolean,
   showCatalog: boolean,
   limitingMagnitude: number,
   fovDegrees: number,
+  selectedId?: string,
 ): boolean {
   if (source.ra === 0 && source.dec === 0) return false;
   if (source.type !== 'star') return false;
+  // The selected star, and a star of a small chosen spectral class (see useClassStarSources),
+  // always show, whatever the zoom.
+  if (selectedId !== undefined && selectedId !== '' && source.id === selectedId) return true;
+  if (source.alwaysShow) return true;
 
   if (source.catalogSource === 'hipparcos' || source.catalogSource === 'deep_stars') {
     const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
@@ -214,13 +280,17 @@ export function isDisplayableStar(
     return showStars;
   }
 
+  // The user's own stars follow the same zoom rule as the catalog layers: a star shows once the
+  // view is narrow enough for its magnitude; one with no catalog magnitude counts as faint.
   const catalogMagnitude = catalogMagnitudeOf(source);
   if (catalogMagnitude !== null) {
     if (catalogMagnitude > limitingMagnitude) return false;
   } else if (fovDegrees > UNCATALOGED_STAR_MAX_FOV_DEG) {
     return false;
   }
-  return showCatalog;
+  // A star in its class color is one the spectral class list shows, so the Deep Catalog
+  // switch does not hide it.
+  return source.colorClass ? true : showCatalog;
 }
 
 
@@ -239,7 +309,11 @@ export function isDisplayableStar(
  * @param {number} fovDegrees - Current viewport field of view, in degrees.
  * @returns {number} Opacity in [0, STAR_MAX_BRIGHTNESS].
  */
-export function computeSourceBrightness(source: SourceMagnitude, fovDegrees: number): number {
+export function computeSourceBrightness(source: SourceMagnitude & { colorClass?: string }, fovDegrees: number): number {
+  if (source.colorClass) {
+    const shade = catalogMagnitudeOf(source);
+    return Math.max(CLASS_STAR_MIN_BRIGHTNESS, shade === null ? 0 : computeStarBrightness(shade));
+  }
   const magnitude = catalogMagnitudeOf(source);
   if (magnitude !== null) return computeStarBrightness(magnitude);
 
@@ -247,6 +321,16 @@ export function computeSourceBrightness(source: SourceMagnitude, fovDegrees: num
     (UNCATALOGED_STAR_MAX_FOV_DEG - fovDegrees) /
     (UNCATALOGED_STAR_MAX_FOV_DEG - UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG);
   return STAR_MIN_BRIGHTNESS * Math.max(0, Math.min(1, fadeProgress));
+}
+
+/**
+ * The radius a star's dot is drawn at: bigger for a star in its class color, so the color reads.
+ *
+ * @param {{ colorClass?: string }} source - The star.
+ * @returns {number} The radius in pixels.
+ */
+export function starMarkerRadius(source: { colorClass?: string }): number {
+  return source.colorClass ? CLASS_STAR_MARKER_RADIUS_PX : STAR_MARKER_RADIUS_PX;
 }
 
 /**
@@ -258,10 +342,22 @@ export function computeSourceBrightness(source: SourceMagnitude, fovDegrees: num
  * @param {CanvasRenderingContext2D} context - The 2D rendering context.
  * @param {number} pointX - Screen-space X of the selected star's center.
  * @param {number} pointY - Screen-space Y of the selected star's center.
+ * @param {string} [colorClass] - The star's color class in the spectral class mode; the reticle then
+ *   takes the star's class color. Without one it is light blue.
  * @returns {void}
  */
-export function drawStarSelectionReticle(context: CanvasRenderingContext2D, pointX: number, pointY: number): void {
-  context.strokeStyle = 'rgba(173, 216, 230, 0.85)';
+export function drawStarSelectionReticle(
+  context: CanvasRenderingContext2D,
+  pointX: number,
+  pointY: number,
+  colorClass?: string,
+): void {
+  if (colorClass) {
+    const [red, green, blue] = starColorRgb(colorClass);
+    context.strokeStyle = `rgba(${red}, ${green}, ${blue}, 0.9)`;
+  } else {
+    context.strokeStyle = 'rgba(173, 216, 230, 0.85)';
+  }
   context.lineWidth = 1.5;
 
   context.beginPath();
@@ -297,6 +393,7 @@ export class StarOverlay implements PlanetariumOverlay {
 
   /**
    * Draws visible stars as small fixed-size points shaded by brightness, and outlines the active selection.
+   * A star with a color class (the spectral class mode) is drawn in its class color; others are white.
    *
    * @param {CanvasRenderingContext2D} context - The 2D rendering context.
    * @param {ProjectionContext} projectionContext - Projection context.
@@ -311,6 +408,7 @@ export class StarOverlay implements PlanetariumOverlay {
 
     // Filter sources to displayable stars, routing by catalogSource for online drivers
     // and hiding stars fainter than the current FOV's limiting magnitude
+    refreshStarColors();
     const limitingMagnitude = computeLimitingMagnitude(projectionContext.fov);
     const stars = projectionContext.sources.filter(source =>
       isDisplayableStar(
@@ -319,23 +417,31 @@ export class StarOverlay implements PlanetariumOverlay {
         projectionContext.showCatalog,
         limitingMagnitude,
         projectionContext.fov,
+        projectionContext.selectedTargetId,
       ),
     );
 
-    stars.forEach(source => {
+    const onScreen: DrawableStar[] = [];
+    for (const source of stars) {
       const point = projectionContext.projectCoords(source.ra, source.dec);
-      if (!point.visible) return;
+      if (point.visible) onScreen.push({ source, x: point.x, y: point.y });
+    }
+    const drawn = limitStarDensity(onScreen, projectionContext.width, projectionContext.height, projectionContext.selectedTargetId);
+
+    drawn.forEach(({ source, x, y }) => {
+      const point = { x, y };
 
       const brightness = computeSourceBrightness(source, projectionContext.fov);
 
-      context.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+      const [red, green, blue] = starColorRgb(source.colorClass);
+      context.fillStyle = `rgba(${red}, ${green}, ${blue}, ${brightness})`;
       context.beginPath();
-      context.arc(point.x, point.y, STAR_MARKER_RADIUS_PX, 0, 2 * Math.PI);
+      context.arc(point.x, point.y, starMarkerRadius(source), 0, 2 * Math.PI);
       context.fill();
 
       // Selection crosshair
       if (projectionContext.selectedTargetId && source.id === projectionContext.selectedTargetId) {
-        drawStarSelectionReticle(context, point.x, point.y);
+        drawStarSelectionReticle(context, point.x, point.y, source.colorClass);
       }
     });
   }

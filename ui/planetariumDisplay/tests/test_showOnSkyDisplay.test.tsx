@@ -49,6 +49,15 @@ vi.mock('../hooks/useAlignmentSessionData', () => ({
     activeAlignmentTargets: [], activePolarAlignment: null,
   }),
 }));
+vi.mock('../hooks/useStackPictures', () => ({
+  useStackPictures: () => ({
+    showImages: false, setShowImages: vi.fn(), opacity: 0.8, setOpacity: vi.fn(),
+    pictures: [], getDrawable: () => null, loadedVersion: 0,
+  }),
+}));
+vi.mock('../hooks/useClassStarSources', () => ({
+  useClassStarSources: () => ({ sources: [], totalCount: 0, isLoading: false, isError: false, retry: vi.fn() }),
+}));
 vi.mock('../hooks/useTrackingRiskMap', () => ({ useTrackingRiskMap: () => ({ trackingRisk: null }) }));
 vi.mock('../hooks/useSourceMerging', () => ({
   useSourceMerging: () => ({

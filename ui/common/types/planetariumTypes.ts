@@ -39,6 +39,40 @@ export interface PlanetariumSource {
   alignmentAttempt?: import('./backendTypes').AlignmentAttempt;
   /** The library's per-target alignment session when type === 'alignment'. */
   alignmentSession?: import('./backendTypes').AlignmentTargetSession;
+  /**
+   * The star color class to draw this star in ('O' to 'M', 'C', 'W', or 'none' for gray).
+   * Set only on the stars shown in the "By spectral class" mode; other
+   * stars have none and are drawn white.
+   */
+  colorClass?: string;
+  /** Draw this star whatever the zoom (a star of a small chosen spectral class). */
+  alwaysShow?: boolean;
+}
+
+/**
+ * One library star of the spectral class lists (or with a spectrum), as
+ * `planetarium:get_class_stars` sends it.
+ *
+ * Carries what decides the star's drawn color: our own spectrum's type, the
+ * catalog type and the catalog B-V color.
+ */
+export interface ClassStarColorRow {
+  id: string;
+  name: string;
+  ra: number | null;
+  dec: number | null;
+  magnitude: number | null;
+  /** The library's verdict that `magnitude` is a real catalog magnitude. */
+  hasCatalogMagnitude?: boolean;
+  /** The catalog spectral type, empty when unknown. */
+  spectralType: string;
+  /** The spectral type our own spectrum matched, empty when none. */
+  ownSpectralType: string;
+  /** The catalog B-V color, null when unknown. */
+  bMinusV: number | null;
+  hasSpectra: boolean;
+  hasPhotometry: boolean;
+  targetIds?: string[];
 }
 
 /**
@@ -68,6 +102,15 @@ export interface PlanetariumTarget {
   dec: number;
   stackedImage?: string;
   fieldOfView?: string;
+  /** The object's catalog size (SIMBAD's major axis) in arcminutes; null or absent when unknown. */
+  majorAxisArcmin?: number | null;
+  /**
+   * The object's catalog minor axis in arcminutes. The library does not record it yet, so the
+   * backend does not send it; with it and `positionAngleDeg` the map draws the object's ellipse.
+   */
+  minorAxisArcmin?: number | null;
+  /** The direction of the major axis, in degrees east of north. Not sent yet (see `minorAxisArcmin`). */
+  positionAngleDeg?: number | null;
 }
 
 /**
@@ -93,4 +136,25 @@ export interface ConstellationLineSegment {
   dec1: number;
   ra2: number;
   dec2: number;
+}
+
+/**
+ * One target's stack picture and where it lies on the sky, as
+ * `planetarium:get_stack_pictures` sends it.
+ *
+ * `grid` holds `gridSize` x `gridSize` `[ra, dec]` pairs in degrees, row by
+ * row from the picture's top-left corner to its bottom-right corner (pixel
+ * edges), so grid point (row i, column j) is picture point
+ * (j / (gridSize - 1) * width, i / (gridSize - 1) * height).
+ */
+export interface StackSkyPicture {
+  targetId: string;
+  /** The picture file on the backend's computer; load it with `resolveImageSrc`. */
+  picturePath: string;
+  /** The picture's size in pixels. */
+  width: number;
+  height: number;
+  /** Points along each side of the grid, edges included. */
+  gridSize: number;
+  grid: [number, number][];
 }

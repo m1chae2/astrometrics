@@ -11,6 +11,8 @@ vi.mock('../../common/services/backendApi', () => ({
 vi.mock('../../common/context/AstrometricsContext', () => ({
     useAstrometrics: () => ({ connected: true, activeJobs: [] }),
 }));
+const emitToastMock = vi.fn();
+vi.mock('../../common/utils/emitToast', () => ({ emitToast: (...args: unknown[]) => emitToastMock(...args) }));
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () => undefined }));
 vi.mock('../../common/context/TargetContext', () => ({
     useTargetContext: () => ({
@@ -52,6 +54,7 @@ import { ImageProcessingDisplay } from '../ImageProcessingDisplay';
 import { IMAGE_VIEW_STORAGE_KEY, loadImageView, saveImageView } from '../../common/utils/imageViewStore';
 import type { SavedImageView } from '../../common/utils/imageViewStore';
 import { postHandoff } from '../../common/utils/displayHandoffStore';
+import { STAR_FOCUS_SCALE } from '../hooks/useStarFocusRequest';
 
 /** Two raw frames; the second has the longer exposure. */
 const RAW_FILES = [
@@ -72,6 +75,21 @@ function answerFiles(stackedImage: string | null, gate?: Promise<void>) {
         }
         if (method === 'calibration:query') return { darks: [], biases: [], flats: [] };
         return null;
+    });
+}
+
+/** Adds saved star names for the stack (and no photometry) to what the backend returns. */
+function answerStackNames(stars: Record<string, unknown>[]) {
+    const files = callBackendMock.getMockImplementation() as (method: string) => Promise<unknown>;
+    callBackendMock.mockImplementation(async (method: string) => {
+        if (method === 'analysis:get_stack_identification') {
+            return {
+                running: false, jobId: null, progress: null, message: null, error: null,
+                identification: { stars, matchedCount: stars.length, unmatchedCount: 0, catalogOnlyCount: 0, solutionReused: true, notes: [] },
+            };
+        }
+        if (method === 'astronomy:list') return [];
+        return files(method);
     });
 }
 
@@ -137,6 +155,37 @@ describe('Image Processing saved view', () => {
         await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('/stack/M81.fits'));
         expect(viewerProps.restoreView ?? null).toBeNull();
         expect(loadImageView()?.returnPending).toBe(false);
+    });
+
+    it('shows a star asked for by "Back to image": main stack, star selected, centered and zoomed, over the saved view', async () => {
+        answerFiles('/stack/M81.fits');
+        answerStackNames([{ id: 'det-1', name: 'HD 1', gaiaSourceId: '42', x: 250, y: 100, referenceWidth: 1000, referenceHeight: 500 }]);
+        saveImageView(SAVED);
+        postHandoff('Image Processing', 'targetSelected', {
+            targetId: 'M 81', enableAstrometry: true, focusLibraryStarId: 'HD 1', focusStarName: 'HD 1',
+        });
+        renderDisplay();
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('/stack/M81.fits'));
+        await waitFor(() => expect(viewerProps.restoreView).toMatchObject({
+            view: { x: 0.25, y: 0.2 }, scale: STAR_FOCUS_SCALE, pictureWidth: 1000, pickStar: true,
+        }));
+        expect(viewerProps.selectedStarId).toBe('det-1');
+        expect(viewerProps.showOverlay).toBe(true);
+        expect(loadImageView()?.returnPending).toBe(false);
+    });
+
+    it('still opens the stack, with a short note, when the stack does not name the star', async () => {
+        answerFiles('/stack/M81.fits');
+        answerStackNames([{ id: 'det-1', name: 'HD 1', x: 250, y: 100, referenceWidth: 1000, referenceHeight: 500 }]);
+        postHandoff('Image Processing', 'targetSelected', {
+            targetId: 'M 81', enableAstrometry: true, focusLibraryStarId: 'HD 999', focusStarName: 'HD 999',
+        });
+        renderDisplay();
+        await waitFor(() => expect(emitToastMock).toHaveBeenCalledWith(
+            'HD 999 is not among the named stars of this stack.', 'info', 'Astrometry'
+        ));
+        expect(screen.getByTestId('selected').textContent).toBe('/stack/M81.fits');
+        expect(viewerProps.restoreView ?? null).toBeNull();
     });
 
     it('keeps working when storage holds something that is not a saved view', async () => {

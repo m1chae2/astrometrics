@@ -18,6 +18,14 @@ import { useDeepCatalogStatus } from './useDeepCatalogStatus';
 import { computeLimitingMagnitude, DEEP_STAR_MAX_MAGNITUDE, UNCATALOGED_STAR_MAX_FOV_DEG } from '../layers/StarOverlay';
 import { PlanetariumTarget } from '../../common/types/planetariumTypes';
 
+/**
+ * Widest view, in degrees, at which a partly downloaded deep-star catalog is drawn. The
+ * downloaded patches around the imaged targets are several degrees across, so below this the
+ * view sits inside one. Chosen from the user's library (2026-11-25: 83 patches, around the
+ * imaged targets only), not measured per patch.
+ */
+export const PARTIAL_DEEP_CATALOG_MAX_FOV_DEG = 5;
+
 /** Return shape of useSourceMerging. */
 export interface SourceMergingResult {
   /** Star sources for the current viewport, deduplicated across local/bright/deep catalogs. */
@@ -107,10 +115,14 @@ export const useSourceMerging = (
     () => Math.min(Math.ceil(limitingMagnitude), deepCatalogMagnitudeLimit),
     [limitingMagnitude, deepCatalogMagnitudeLimit],
   );
+  // A partly downloaded deep catalog covers only some patches of sky, so at a wide view its
+  // edges would show as dense patches. It is then used only at a narrow view, where the
+  // patch around a target fills the screen. A complete catalog is used at every view.
+  const deepLayerOn = showStars && (deepCatalogStatus?.complete === true || currentFOV <= PARTIAL_DEEP_CATALOG_MAX_FOV_DEG);
   const { onlineSources: deepStarSources } = useOnlineCatalogSources(
     raValue, decValue, queryRadius,
     deepStarDrivers,
-    showStars,
+    deepLayerOn,
     // A local lookup, so only a short wait to skip the steps of one gesture, not the 300 ms a remote query needs.
     { limitingMagnitude: deepStarLimitingMagnitude, debounceMilliseconds: LOCAL_CATALOG_QUERY_DEBOUNCE_MS },
   );

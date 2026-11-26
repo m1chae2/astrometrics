@@ -417,10 +417,10 @@
   flex: 1;
 }
 
-/* The list takes the keyboard focus after a click so the arrow keys can move through it. */
+/* The list takes the keyboard focus after a click so the arrow keys can move through it. The highlighted
+   row already shows where the keys are, so the list itself draws no focus outline. */
 .file-browser__list:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: -2px;
+  outline: none;
 }
 
 .file-browser__list {

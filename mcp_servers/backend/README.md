@@ -23,19 +23,19 @@ The profile offers these backend tools:
 - `app_status` reports health, connections, system resources, the telescope, guiding, INDI devices and properties, and running jobs. The running jobs come from the `processing:active_jobs` RPC method. A section that fails holds an error record, and the other sections still answer.
 - `app_controls` switches the view.
 - `docs_get` reads a documentation topic.
-- `terminal_add_script` lets an AI add a new Python script to the Command Console's User Scripts list.
+- `terminal_add_script` lets an AI add a new Python script to the Command Console's My scripts list.
 - `terminal_get_recent_runs(limit=1, include_plots=True)` lets an AI read the results of scripts the person ran in the Command Console.
 
 The profile also offers the five tools that start a job in the app (see the next section).
 
-`terminal_add_script` only adds a script: the AI cannot run it. The person opens the script in Command Console > User Scripts, reads it, and presses Run. The tool:
+`terminal_add_script` only adds a script: the AI cannot run it. The person opens the script in Command Console > Scripts > My scripts, reads it, and presses Run. The tool:
 
 - takes a plain file name that ends in `.py` (letters, digits, `_` and `-`, no folders), the script text and an optional description;
 - refuses a name that is already in the list, and says which file it is, so it never replaces a script;
 - puts a comment block at the top that says an AI client added the script, the date, and the description;
 - saves through the `terminal:list_scripts` and `terminal:save_script` RPC methods and calls no method that runs code.
 
-The Command Console reads its script list when it opens. Saving a script also sends the `scripts:changed` event, so an open console reloads its User Scripts list at once. Its class is `author`, which the profile offers.
+The Command Console reads its script list when it opens. Saving a script also sends the `scripts:changed` event, so an open console reloads its My scripts list at once. Its class is `author`, which the profile offers.
 
 `terminal_get_recent_runs` is read-only (class `observe`). It calls the `terminal:get_recent_runs` RPC method and returns the newest runs first, from 1 to 20 (default 1). Each run has its time, label, source, code, status, printed text (`stdout`), error text (`stderr`) and figure file paths. The backend keeps no workspace variables. With `include_plots`, each figure also comes back as a real MCP image (PNG), after the text, in run order. A figure wider than 1200 pixels is shrunk. The tool reads only `.png` files inside the app's scratch folder. A figure file that is gone or outside that folder is listed under `plot_images.problems` instead of as an image.
 

@@ -17,8 +17,87 @@ import { useMosaicPreview } from '../hooks/useMosaicPreview';
 import { useTargetPackage } from '../hooks/useTargetPackage';
 import { Button } from '../../common/components/Button';
 import { NumberInput } from '../../common/components/NumberInput';
+import { InfoButton } from '../../common/components/InfoButton';
 
 import { Skeleton } from '../../common/components/Skeleton';
+/**
+ * How long the panel takes to extend down or fold back up, in milliseconds. Matches
+ * `--motion-duration-panel` in theme.css, which times the transition itself. A close also
+ * ends after this long (plus a little) if the browser sends no transition end.
+ */
+export const FRAMING_REVEAL_MS = 240;
+
+/**
+ * Where the panel is in its open and close movement.
+ * - "closed": not on screen.
+ * - "opening": on screen, folded, about to extend (one frame).
+ * - "open": extended.
+ * - "closing": folding back up; it leaves the screen when the fold ends.
+ */
+export type RevealPhase = 'closed' | 'opening' | 'open' | 'closing';
+
+/**
+ * Whether the viewer asked the system for less motion.
+ *
+ * @returns True when `prefers-reduced-motion: reduce` matches.
+ */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * Runs the panel's open and close movement.
+ *
+ * Opening puts the panel on screen folded, then extends it on the next frame, so the
+ * transition has a start. Closing keeps it on screen while it folds and takes it away when
+ * the fold ends (or after `FRAMING_REVEAL_MS` if no transition end comes). Opening again
+ * while it folds simply extends it again. With reduced motion asked for, both are instant.
+ *
+ * @param isOpen Whether the panel should be open.
+ * @returns The phase and the handler for the wrapper's transition end.
+ */
+export function useRevealPhase(isOpen: boolean): { phase: RevealPhase; onTransitionEnd: (event: React.TransitionEvent) => void } {
+  const [phase, setPhase] = useState<RevealPhase>(isOpen ? 'open' : 'closed');
+
+  useEffect(() => {
+    const reduced = prefersReducedMotion();
+    if (isOpen) {
+      setPhase((current) => {
+        if (current === 'open') return current;
+        // From closed, start folded so the extend has somewhere to start; while closing, reverse.
+        return current === 'closed' && !reduced ? 'opening' : 'open';
+      });
+      return undefined;
+    }
+    if (reduced) {
+      setPhase('closed');
+      return undefined;
+    }
+    setPhase((current) => (current === 'closed' ? current : 'closing'));
+    const fallback = setTimeout(() => {
+      setPhase((current) => (current === 'closing' ? 'closed' : current));
+    }, FRAMING_REVEAL_MS + 60);
+    return () => clearTimeout(fallback);
+  }, [isOpen]);
+
+  // One frame after it appears folded, extend it.
+  useEffect(() => {
+    if (phase !== 'opening') return undefined;
+    const frame = requestAnimationFrame(() => {
+      setPhase((current) => (current === 'opening' ? 'open' : current));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [phase]);
+
+  const onTransitionEnd = (event: React.TransitionEvent) => {
+    if (event.target !== event.currentTarget || event.propertyName !== 'grid-template-rows') return;
+    setPhase((current) => (current === 'closing' ? 'closed' : current));
+  };
+
+  return { phase, onTransitionEnd };
+}
+
 /** Props of the framing panel. */
 interface FramingPanelProps {
   /** The chosen target's name, or null when none is chosen. */
@@ -27,6 +106,10 @@ interface FramingPanelProps {
   center: { ra: number; dec: number } | null;
   /** Called with the corners to outline on the sky map (empty when the panel is closed). */
   onFramingPanelsChange: (panels: FramingPanelCorners[]) => void;
+  /** Whether the panel is open. It is opened by the Framing button on the selected object's info card. */
+  isOpen: boolean;
+  /** Called when the panel's Close button is pressed. */
+  onClose: () => void;
 }
 
 /**
@@ -44,24 +127,21 @@ function parseNumber(text: string, fallback: number): number {
 /**
  * The framing panel: grid inputs, panel numbers, and Send framing to package.
  *
- * @param props The target, its center, and the callback for the corners to draw.
+ * Nothing is shown while it is closed.
+ *
+ * @param props The target, its center, whether it is open, and the callbacks for the corners to draw and for closing.
  * @returns The panel.
  */
-export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, onFramingPanelsChange }) => {
+export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, onFramingPanelsChange, isOpen, onClose }) => {
   const idPrefix = useId();
-  const [isOpen, setIsOpen] = useState(false);
-  // The open and close buttons are different elements; focus follows the swap.
-  const toggleButtonRef = useRef<HTMLButtonElement>(null);
-  const hasToggled = useRef(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // Focus moves to the Close button when the panel opens, so a keyboard user lands in it.
   useEffect(() => {
-    if (hasToggled.current) {
-      toggleButtonRef.current?.focus();
-    }
+    if (isOpen) closeButtonRef.current?.focus();
   }, [isOpen]);
-  const toggleOpen = (nextIsOpen: boolean) => {
-    hasToggled.current = true;
-    setIsOpen(nextIsOpen);
-  };
+  // The panel extends down when it opens and folds back up when it closes (see useRevealPhase).
+  const { phase, onTransitionEnd } = useRevealPhase(isOpen);
+  const isOnScreen = phase !== 'closed';
   const [rows, setRows] = useState(2);
   const [cols, setCols] = useState(2);
   const [overlap, setOverlap] = useState(20);
@@ -75,6 +155,8 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
 
   // The words that say what the rotation means, as the library gives them.
   const rotationConvention = panels.find((panel) => panel.rotation_convention)?.rotation_convention ?? null;
+  // A panel's rotation is shown only when one differs from the Rotation box; otherwise the column repeats it.
+  const showRotationColumn = panels.some((panel) => Math.abs((panel.rotation_deg ?? 0) - rotationDeg) > 0.05);
 
   // The corners the library returned, renamed to the names the sky map draws.
   const outlines = useMemo<FramingPanelCorners[]>(
@@ -109,25 +191,25 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
     });
   };
 
-  if (!isOpen) {
-    return (
-      <div className="framing-panel framing-panel--closed">
-        <Button variant="secondary" size="small" ref={toggleButtonRef} aria-expanded={false} onClick={() => toggleOpen(true)}>
-          Framing
-        </Button>
-      </div>
-    );
-  }
+  if (!isOnScreen) return null;
 
   return (
+    <div
+      className={`framing-reveal framing-reveal--${phase}`}
+      data-testid="framing-reveal"
+      data-phase={phase}
+      onTransitionEnd={onTransitionEnd}
+    >
+    <div className="framing-reveal__inner">
     <section
       className="framing-panel"
       aria-label="Framing"
       data-testid="framing-panel"
+      inert={!isOpen}
     >
       <header className="framing-panel__header">
         <h3 className="framing-panel__title">Framing{targetName ? `: ${targetName}` : ''}</h3>
-        <Button variant="secondary" size="small" ref={toggleButtonRef} aria-expanded={true} onClick={() => toggleOpen(false)}>
+        <Button variant="secondary" size="small" ref={closeButtonRef} onClick={onClose}>
           Close
         </Button>
       </header>
@@ -148,16 +230,18 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
           <NumberInput min={0} max={80} value={overlap}
             onChange={(event) => setOverlap(parseNumber(event.target.value, 0))} />
         </label>
-        <label>
-          Rotation (degrees)
-          <NumberInput min={-360} max={360} value={rotationDeg}
-            aria-describedby={rotationConvention !== null ? `${idPrefix}-convention` : undefined}
+        <div className="framing-panel__field">
+          <span className="framing-panel__field-label">
+            <label htmlFor={`${idPrefix}-rotation`}>Rotation (degrees)</label>
+            {/* What the angle means, in the library's words, behind the shared ⓘ button. */}
+            {rotationConvention !== null && (
+              <InfoButton text={rotationConvention} label="About the rotation" />
+            )}
+          </span>
+          <NumberInput id={`${idPrefix}-rotation`} min={-360} max={360} value={rotationDeg}
             onChange={(event) => setRotationDeg(parseNumber(event.target.value, 0))} />
-        </label>
+        </div>
       </div>
-      {rotationConvention !== null && (
-        <p id={`${idPrefix}-convention`} className="framing-panel__state">{rotationConvention}</p>
-      )}
 
       {center === null && <p className="framing-panel__state">Choose a target</p>}
       {center !== null && preview.isLoading && (
@@ -173,28 +257,30 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
         <p className="framing-panel__state">The library returned no panels. Change the grid size or overlap.</p>
       )}
 
-      {hasPanels && (
-        <table className="framing-panel__table">
-          <caption>Panel centers (RA and Dec in degrees); rotation in degrees</caption>
-          <thead>
-            <tr>
-              <th scope="col">Panel</th>
-              <th scope="col">RA (degrees)</th>
-              <th scope="col">Dec (degrees)</th>
-              <th scope="col">Rotation (degrees)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {panels.map((panel) => (
-              <tr key={panel.panel_id}>
-                <th scope="row">{panel.panel_id}</th>
-                <td>{panel.ra_deg.toFixed(4)}</td>
-                <td>{panel.dec_deg.toFixed(4)}</td>
-                <td>{(panel.rotation_deg ?? 0).toFixed(1)}</td>
+      {isOnScreen && center !== null && panels.length > 0 && (
+        <div className="framing-panel__table-scroll">
+          <table className="framing-panel__table">
+            <caption>Panel centers (degrees)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Panel</th>
+                <th scope="col">RA</th>
+                <th scope="col">Dec</th>
+                {showRotationColumn && <th scope="col">Rotation</th>}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {panels.map((panel) => (
+                <tr key={panel.panel_id}>
+                  <th scope="row">{panel.panel_id}</th>
+                  <td>{panel.ra_deg.toFixed(4)}</td>
+                  <td>{panel.dec_deg.toFixed(4)}</td>
+                  {showRotationColumn && <td>{(panel.rotation_deg ?? 0).toFixed(1)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <div className="framing-panel__send">
@@ -218,5 +304,7 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
         )}
       </div>
     </section>
+    </div>
+    </div>
   );
 };

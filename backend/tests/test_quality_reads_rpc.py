@@ -260,3 +260,18 @@ def test_calibration_query_accepts_the_match_arguments() -> None:
         temperature_c=-9.0,
     )
     catalog.query.assert_called_once()
+
+
+def test_visibility_places_a_star_the_library_does_not_hold_by_its_position() -> None:
+    """A background catalog star is placed by the position it is sent with."""
+    wayfinder = _wayfinder()
+    wayfinder.planning.get_visibility.return_value = SimpleNamespace(objects=[])
+    service = _stellar_service(wayfinder)
+    service.get_object = lambda star_id: None
+    service.get_visibility([{"id": "HIP 57477", "type": "star", "ra": 176.7317, "dec": 55.6283}])
+    assert wayfinder.planning.get_visibility.call_args.args == (
+        [{"id": "HIP 57477", "ra_deg": 176.7317, "dec_deg": 55.6283}],
+    )
+    wayfinder.planning.get_visibility.reset_mock()
+    assert service.get_visibility([{"id": "HIP 57477", "type": "star"}]) == []
+    wayfinder.planning.get_visibility.assert_not_called()

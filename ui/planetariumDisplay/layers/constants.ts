@@ -12,7 +12,7 @@ export const ALIGNMENT_HIT_RADIUS_PX = 24;
 /** Hit-test radius (px) for a star source on the canvas. */
 export const STAR_HIT_RADIUS_PX = 18;
 
-/** Extra hit-box margin (px) added around a target's dynamic reticle radius. */
+/** Extra hit-box margin (px) added around a target marker's radius. */
 export const TARGET_HIT_MARGIN_PX = 8;
 
 /** Alt-axis sampling step (deg) for the TrackingRiskOverlay heatmap dome. */

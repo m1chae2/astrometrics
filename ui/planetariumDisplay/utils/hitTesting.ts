@@ -10,9 +10,9 @@
 
 import { PlanetariumSource, PlanetariumTarget } from '../../common/types/planetariumTypes';
 import { getAltAz, projectAltAz, pixelsPerDegree } from './projectionMath';
-import { shouldOccludeBelowHorizon, parseTargetFovDegrees } from '../layers/overlayShared';
+import { shouldOccludeBelowHorizon, targetExtentDegrees } from '../layers/overlayShared';
 import { isDisplayableStar, computeLimitingMagnitude } from '../layers/StarOverlay';
-import { TARGET_RETICLE_MIN_PX } from '../layers/TargetOverlay';
+import { TARGET_MARKER_MIN_PX } from '../layers/targetMarkers';
 import { ALIGNMENT_HIT_RADIUS_PX, STAR_HIT_RADIUS_PX, TARGET_HIT_MARGIN_PX } from '../layers/constants';
 
 /**
@@ -53,9 +53,9 @@ export interface HitTestParams {
  * Finds the nearest visible celestial source or alignment sync point to a pixel click position.
  *
  * Alignment points take highest priority when within 16px radius.
- * Stars are matched within a fixed 18px radius. Targets use a dynamic reticle
- * radius derived from their fieldOfView metadata, with a minimum of 16px, plus
- * an 8px hit-box margin. When both a star and a target are within range, the
+ * Stars are matched within a fixed 18px radius. Targets use a radius from
+ * their catalog size (else their fieldOfView metadata), with a minimum of 16px,
+ * plus an 8px hit-box margin. When both a star and a target are within range, the
  * star is preferred. Sources below the horizon are excluded whenever the ground
  * overlay is showing, since they are visually hidden beneath it.
  *
@@ -135,11 +135,12 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
     const distance = Math.sqrt(Math.pow(point.x - clickX, 2) + Math.pow(point.y - clickY, 2));
 
     if (source.type === 'target') {
-      // Compute dynamic reticle radius from target fieldOfView metadata
-      const fovDeg = parseTargetFovDegrees(source as unknown as PlanetariumTarget);
+      // The hit area is the size the marker is drawn at: the catalog size, else the
+      // fieldOfView string, never smaller than the smallest selected marker.
+      const extentDeg = targetExtentDegrees(source as unknown as PlanetariumTarget);
       const scale = pixelsPerDegree(canvasWidth, canvasHeight, fov);
-      const sizePx = fovDeg * scale;
-      const targetRadius = Math.max(TARGET_RETICLE_MIN_PX, sizePx) / 2;
+      const sizePx = extentDeg * scale;
+      const targetRadius = Math.max(TARGET_MARKER_MIN_PX, sizePx) / 2;
 
       if (distance <= targetRadius + TARGET_HIT_MARGIN_PX && distance < minTargetDist) {
         minTargetDist = distance;

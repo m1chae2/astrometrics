@@ -39,7 +39,9 @@ import {
     CatalogSourcesResult,
     PlanetariumTarget,
     ObserverLocation,
-    ConstellationLineSegment
+    ConstellationLineSegment,
+    ClassStarColorRow,
+    StackSkyPicture
 } from '../types/planetariumTypes';
 
 
@@ -160,6 +162,14 @@ export interface CalibrationMeasurementStart {
 }
 
 /**
+ * What console code asked the app to do, returned with the run (see `terminal:execute`).
+ * `show` opens a target, star or file in a display; `doc` opens one entry of the API reference.
+ */
+export type ConsoleAppRequest =
+    | { kind: 'show'; display: 'Image Processing' | 'Astronomy Manager'; target: string | null; star_id: string | null; star_name: string | null; path: string | null }
+    | { kind: 'doc'; topic_id: string; anchor_id: string; qualified_name: string };
+
+/**
  * The payload and response of every RPC method the backend serves.
  *
  * The keys must be exactly the generated `RpcMethod` names from
@@ -202,12 +212,14 @@ export interface ActionRegistry {
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
-    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
+    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string; ra?: number; dec?: number }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: CatalogSourcesResult };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
+    "planetarium:get_class_stars": { payload: Record<string, never>; response: ClassStarColorRow[] };
+    "planetarium:get_stack_pictures": { payload: Record<string, never>; response: StackSkyPicture[] };
 
     // Equipment Configuration
     "observatory:list_cameras": { payload: Record<string, never>; response: EquipmentCameraProfile[] };
@@ -445,16 +457,21 @@ export interface ActionRegistry {
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
 
     // Terminal, Console & Documentation
-    "terminal:execute": { payload: { code_str: string; source?: string; label?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
+    // `status` is 'stopped' when Ctrl+C stopped the run. `app_requests` holds what the code asked the
+    // app to show with show(...) and doc(...), for the window that ran it.
+    "terminal:execute": { payload: { code_str: string; source?: string; label?: string }; response: { status: 'success' | 'error' | 'stopped'; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[]; app_requests?: ConsoleAppRequest[] } };
     "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:get_preloaded_objects": { payload: Record<string, never>; response: Array<{ name: string; type: string; description: string; available: boolean }> };
     "terminal:get_recent_runs": { payload: { limit?: number }; response: Array<{ ran_at: string; label: string; source: string; source_code: string; status: string; stdout: string; stderr: string; plot_paths: string[]; execution_time_ms: number }> };
     "terminal:completions": { payload: { text: string }; response: string[] };
-    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
+    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; kind: 'notebook' | 'script'; description: string; size_bytes: number }> };
     "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };
     "terminal:list_scripts": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; size_bytes: number; modified_at: number }> };
     "terminal:read_script": { payload: { filename: string }; response: { filename: string; code: string } };
     "terminal:save_script": { payload: { filename: string; content: string }; response: { filename: string; size_bytes: number; status: string } };
     "terminal:reset_workspace": { payload: Record<string, never>; response: any[] };
+    // Ctrl+C in the terminal: stops the console code running now; lists what was stopped.
+    "terminal:stop": { payload: Record<string, never>; response: { stopped: string[] } };
     "docs:list_topics": { payload: Record<string, never>; response: Array<{ id: string; title: string; path: string; category: string }> };
     "docs:search_topics": { payload: { query: string }; response: Array<{ id: string; title: string; path: string; category: string; snippet?: string }> };
     "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
@@ -462,6 +479,22 @@ export interface ActionRegistry {
     "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
     "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
     "ui:inspect_variable": { payload: { variable_name: string }; response: void };
+    /** Image Processing tells the backend what is picked now, for the Command Console's `selection` object. Pixels count from 0. */
+    "ui:set_selection": {
+        payload: {
+            target?: string | null;
+            path?: string | null;
+            kind?: 'stack' | 'frame' | null;
+            star?: { id?: string | null; name?: string | null; library_id?: string | null; ra?: number | null; dec?: number | null; x?: number | null; y?: number | null } | null;
+        };
+        response: {
+            target: string | null;
+            path: string | null;
+            kind: 'stack' | 'frame' | null;
+            star: { id: string | null; name: string | null; library_id: string | null; ra: number | null; dec: number | null; x: number | null; y: number | null } | null;
+            set_at: string | null;
+        };
+    };
 
     // Quality advice and night history (reads)
     "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
@@ -662,6 +695,8 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:get_performance_envelope',
     'planetarium:get_constellation_lines',
     'planetarium:get_sources',
+    'planetarium:get_class_stars',
+    'planetarium:get_stack_pictures',
     'planetarium:get_deep_catalog_status',
     'target:list',
     'target:get',

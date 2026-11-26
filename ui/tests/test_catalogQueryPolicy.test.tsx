@@ -96,7 +96,7 @@ describe('catalog query policy', () => {
 
     it('App.tsx invalidates every catalog query key on catalog:changed', () => {
         const source = readFileSync(resolve(__dirname, '../App.tsx'), 'utf8');
-        for (const key of ['astronomyList', 'astronomyCount', 'targetDataAvailability', 'spectralClassSummary', 'starsBySpectralClass']) {
+        for (const key of ['astronomyList', 'astronomyCount', 'targetDataAvailability', 'spectralClassSummary', 'starsBySpectralClass', 'classStarColors']) {
             expect(source).toContain(`invalidateQueries({ queryKey: ['${key}'] })`);
         }
         const client = newClient();

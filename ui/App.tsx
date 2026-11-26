@@ -1,6 +1,7 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback, Activity } from 'react';
 import { PanelErrorBoundary } from './common/components/PanelErrorBoundary';
 import { callBackend } from './common/services/backendApi';
+import { bumpCatalogVersion } from './common/utils/catalogVersionStore';
 import { isAffectedByMeasurement, QualityMeasuredPayload } from './common/queries/qualityQueryKeys';
 import { UI_EVENTS } from './common/types/backendTypes';
 import {
@@ -343,6 +344,9 @@ const AppContent: React.FC = () => {
           queryClient.invalidateQueries({ queryKey: ['targetDataAvailability'] });
           queryClient.invalidateQueries({ queryKey: ['spectralClassSummary'] });
           queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });
+          queryClient.invalidateQueries({ queryKey: ['classStarColors'] });
+          // The Planetarium's sky sources are kept outside the query cache; this makes it read them again.
+          bumpCatalogVersion();
         } else if (action === UI_EVENTS['plan:changed']) {
           // A plan write happened (maybe in another window): read the plans again.
           void queryClient.invalidateQueries({ queryKey: CURRENT_SESSION_QUERY_KEY });

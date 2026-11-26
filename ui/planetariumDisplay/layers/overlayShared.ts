@@ -23,6 +23,22 @@ export function parseTargetFovDegrees(target: PlanetariumTarget): number {
 }
 
 /**
+ * The size of a target on the sky: its catalog major axis when the library has one, else its
+ * field-of-view string (see {@link parseTargetFovDegrees}). The target markers are drawn at
+ * this size and the click test uses it, so a click anywhere on a marker picks its target.
+ *
+ * @param {PlanetariumTarget} target - The target.
+ * @returns {number} The size in degrees.
+ */
+export function targetExtentDegrees(target: PlanetariumTarget): number {
+  const majorAxisArcmin = target.majorAxisArcmin;
+  if (typeof majorAxisArcmin === 'number' && Number.isFinite(majorAxisArcmin) && majorAxisArcmin > 0) {
+    return majorAxisArcmin / 60.0;
+  }
+  return parseTargetFovDegrees(target);
+}
+
+/**
  * Determines whether any part of the ground could be visible in the current
  * viewport — i.e. whether the bottom edge of the field of view dips below the
  * horizon. When the whole viewport sits above the horizon there is no ground

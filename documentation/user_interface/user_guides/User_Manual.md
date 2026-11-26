@@ -217,26 +217,47 @@ The Image Controls panel has these buttons.
 
 ## Command Console
 
-**Purpose.** Run Python commands and scripts against the app's data and hardware, and read the documentation.
+**Purpose.** Try the Python API by hand or with an AI. Write and run scripts, run one line at a time, and read the documentation.
 
-**Layout.** Three resizable columns. The left column holds a tab panel and the Workspace table. The center column is a code editor. The right column holds the Terminal and Documentation tabs.
+**Layout.** The left column lists your scripts and the examples. Click the Scripts title to fold the column to a thin strip, which shows the name of the open script; click the strip to open it again. The center holds the Editor with its toolbar, the Workspace table under it, and the Terminal and Documentation tabs to the right. Drag the dividers to resize them. Figures open in their own windows.
 
 **Controls.**
 
 | Control | What it does |
 | --- | --- |
-| Scripts & Recipes tab | Lists your saved User Scripts and the built-in recipes. Click one to load it in the editor. + New starts a new script |
-| Docs tab | Lists the documentation topics, with a filter box that reads Filter documentation & APIs... |
-| Workspace table | Lists the variables in the console: Name, Type, Shape / Size and Value / Description. The refresh button reads them again. Built-in objects are pinned at the top |
-| Editor toolbar: Clear | Empties the editor |
-| Editor toolbar: Save Script | Saves the script under its file name |
-| Editor toolbar: Run Script (Ctrl+Enter) | Runs the script. The button reads Running... until it ends |
-| Terminal tab | Runs one Python line at a time. Press Enter to run. Tab completes a name. Up and Down recall earlier lines |
-| Terminal: Clear | Clears the history on screen. Variables are kept |
-| Terminal: Reset Workspace | Discards your variables and restores the built-in objects. History is kept |
-| Documentation tab | Shows the selected topic. Links between topics open inside the tab |
+| My scripts tab | Lists the scripts you saved, newest first. Click one to open it in the editor |
+| Examples tab | Lists the tutorial notebooks and example scripts, grouped by library (Astrometrics, Wayfinding). A badge shows each file's type: *.ipynb* for a Jupyter notebook, *.py* for a Python script. Long names wrap onto two lines. Click one to open it in the editor as a script |
+| Search box | Filters the tab that is shown |
+| Toolbar: Name | The file name the script is saved under. An example gets its own name with .py. In a narrow window the field gets narrower, so the toolbar stays on one row |
+| Toolbar: Run | Runs the whole script. Ctrl+Enter in the editor does the same. Run is off while code runs |
+| Toolbar: Save | Saves the script under the name. For an example the button reads Save as My Script and saves your own copy. Saving over another script asks first |
+| Toolbar: New | Starts a new, empty script |
+| Editor | Long lines wrap onto the next line, so you never scroll sideways |
+| Workspace | Lists the preloaded names first, then your variables: Name, Type, Shape / Size and Value / Description. It updates after each run. A cut-off cell shows its full text when you point at it. Click the Workspace title to fold it to its title bar, so the editor gets the height |
+| Terminal tab | Runs one Python line at a time. Press Enter to run. Tab completes a name. Up and Down recall earlier lines. The commands below run in the terminal itself |
+| Running line | While code runs, a line at the bottom of the terminal names the script (or *command* for a typed line), shows how long it has run, and says Ctrl+C to stop |
+| Documentation tab | Shows a topic. Pick one from Topic. The search box searches every topic and lists the ones that hold the text. Ctrl+F finds text in the topic shown. Links between topics open inside the tab. `doc name` in the terminal opens a name's entry here |
 
-The terminal starts with these names ready: `targets` (target catalog), `stars` (star catalog), `jobs` (job logs), `telescope` (mount control), `imaging` (camera sequencer), `np` (NumPy), `plt` (Matplotlib), and `help` and `doc(obj)` for help.
+**Terminal commands.** Type these alone on a line. A variable with the same name still works in Python, because only the exact line counts.
+
+| Command | What it does |
+| --- | --- |
+| `clear` or `clear()` | Clears the terminal screen. Your variables stay |
+| `clear('workspace')` | Clears your variables. The preloaded names stay |
+| `doc name` or `doc(name)` | Opens the Documentation tab at the entry for that name, such as `doc delete_images`, `doc TargetCatalog.delete_images` or `doc astrometrics.targets.delete_images`. When the name fits several entries, the terminal lists their full names. When it fits none, it suggests close names |
+| Ctrl+C | Stops the code that is running. The terminal prints *Stopped.* and keeps every variable set before the stop. Code waiting inside one long call, such as a long `time.sleep`, stops when that call returns |
+
+The top line of the terminal gives the Python version and these commands. Type `help` for the preloaded names, or `help(obj)` for help on a name.
+
+**Preloaded names.** The console starts with these names ready:
+
+| Name | What it is |
+| --- | --- |
+| `astrometrics`, `wayfinder` | The two libraries: processing and quality, and telescope control and planning |
+| `np`, `plt`, `fits` | NumPy, Matplotlib and the FITS module of Astropy |
+| `selection` | What is picked in Image Processing now. It is read-only and always current, also when Image Processing is in another window. It holds `target`, `path` (the stack or frame shown), `kind` (*stack* or *frame*), `star` and `set_at` (when it was picked). The star is the one picked with the Astrometry overlay: `name`, `ra` and `dec` in degrees (often empty on a raw frame), and `x` and `y`, the column and row of its center counted from 0, as NumPy counts. The Star Profile panel counts pixels from 1. Type `selection` for a short summary. Fields are empty (`None`) when nothing is picked |
+| `show(...)` | Opens something in the app when the run ends: `show(target="M 31")` opens the target in Image Processing, `show(target="M 31", star="Vega")` opens its stack with the star selected, `show(target="M 31", path=...)` shows that stack or frame (with no target, the target picked in Image Processing is used), and `show(star="Vega")` opens the star in the Astronomy Manager. `display="Astronomy Manager"` or `display="Image Processing"` picks the view. If another window shows that view, it shows the result; otherwise this window switches to it |
+| `doc(...)` | Opens the Documentation tab at a name's entry, as the `doc name` command does. It also takes an object, such as `doc(astrometrics.targets.delete_images)` |
 
 **Related settings.** The Displays box for Command Console in Settings > General turns this view on or off.
 

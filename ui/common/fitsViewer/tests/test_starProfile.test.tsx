@@ -4,7 +4,8 @@
  * ignored, the panel's X only hides it, a click names the same pixel as the pixel readout, an image with no pixel values says so and sends nothing,
  * the panel shows the fits, the clipped badge and a failed fit's reason, the slider moves the cut live with no
  * call to the backend, the click sends a search radius that follows the zoom, and a profile that is not a star
- * shows its reason and no fitted curve. Also the Detections toggle and overlay.
+ * shows its reason and no fitted curve. A view put back with `pickStar` opens the panel for the star at its center.
+ * Also the Detections toggle and overlay.
  */
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -451,6 +452,56 @@ function longMeasurement(length: number): StarProfileMeasurement {
     center_y: 120,
   });
 }
+
+describe('a star picked by a requested view', () => {
+  beforeEach(() => {
+    callBackendMock.mockReset();
+    callBackendMock.mockResolvedValue(makeMeasurement());
+    loaderState.parsedData = { imageId: 7, w: 200, h: 160, channels: 1, min: 0, max: 65535 };
+    loaderState.bitmap = null;
+    loaderState.loadedKey = '/static/M31.fits';
+    // The view is put back only in a container with a size.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 400 });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 320 });
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), stroke: vi.fn(), arc: vi.fn(),
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+  });
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
+  });
+
+  /** "Back to image" asks for the star at the new center; the panel opens for it as after a click there. */
+  it('opens the star profile for the star at the center, once', async () => {
+    const restoreView = {
+      key: 'star-focus-1', view: { x: 0.25, y: 0.25, zoomOverFit: 1, turn: 0 }, scale: 3, pictureWidth: 200, pickStar: true,
+    };
+    const { rerender } = render(
+      <FitsRenderer
+        imageUrl="/static/M31.fits" imageBlob={null} frameInfo={null} loading={false} error={null}
+        selectedTarget="M 31" autoPanTrigger={0} resolveMeasurePath={async () => '/stacks/M31.fits'} restoreView={restoreView}
+      />
+    );
+    await waitFor(() => expect(callBackendMock).toHaveBeenCalledTimes(1));
+    // Column 50 and row 40 from the top of the 200 by 160 picture: file pixel (51, 120). 6 screen pixels at 3x is 2, so 3.
+    expect(callBackendMock).toHaveBeenCalledWith(
+      'images:measure_star_profile',
+      expect.objectContaining({ path: '/stacks/M31.fits', x: 51, y: 120, search_radius_px: 3 }),
+      expect.anything(),
+    );
+    expect(await screen.findByTestId('star-profile-width')).toBeTruthy();
+    expect(screen.getByTestId('star-profile-marker')).toBeTruthy();
+    rerender(
+      <FitsRenderer
+        imageUrl="/static/M31.fits" imageBlob={null} frameInfo={null} loading={false} error={null}
+        selectedTarget="M 31" autoPanTrigger={0} resolveMeasurePath={async () => '/stacks/M31.fits'} restoreView={{ ...restoreView }}
+      />
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(callBackendMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('cut length', () => {
   beforeEach(() => {

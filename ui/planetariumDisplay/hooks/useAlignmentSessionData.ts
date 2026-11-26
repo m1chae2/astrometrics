@@ -2,9 +2,9 @@
  * @module useAlignmentSessionData
  * @fileoverview Fetches and tracks plate-solve alignment session history for the
  * Planetarium display: the list of past sessions, the currently-selected
- * historical session's targets and polar alignment, and the "active"
- * (historical-or-live) view of each. The targets come grouped, with their
- * tracking statistics, from the library.
+ * historical session's targets and polar alignment, and the view the sky map
+ * draws: the selected session, or nothing at all with "No Session Selected".
+ * The targets come grouped, with their tracking statistics, from the library.
  *
  * Extracted from PlanetariumDisplay to keep the root component focused on
  * layout/composition rather than backend session-data bookkeeping.
@@ -13,6 +13,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { callBackend } from '../../common/services/backendApi';
 import { AlignmentSessionSummary, AlignmentTargetSession, PolarAlignmentStatus } from '../../common/types/backendTypes';
+
+/** The empty target list, kept as one array so the sky map does not redraw for a new empty one. */
+const NO_ALIGNMENT_TARGETS: AlignmentTargetSession[] = [];
 
 /**
  * Telemetry fields this hook needs from live telescope status, kept minimal
@@ -31,9 +34,9 @@ export interface AlignmentSessionData {
   /** Currently selected historical session id, or null for live telemetry. */
   selectedSessionId: string | null;
   setSelectedSessionId: (id: string | null) => void;
-  /** Targets for the active view: historical session if selected, else live telemetry. */
+  /** Targets of the selected session (live telemetry while it loads); empty when no session is selected. */
   activeAlignmentTargets: AlignmentTargetSession[];
-  /** Polar alignment status for the active view: historical session if selected, else live telemetry. */
+  /** Polar alignment of the selected session (live telemetry while it loads); null when no session is selected. */
   activePolarAlignment: PolarAlignmentStatus | null;
 }
 
@@ -116,15 +119,20 @@ export const useAlignmentSessionData = (
     };
   }, [selectedSessionId]);
 
+  // With "No Session Selected" the sky shows no session at all: no pointings,
+  // sync markers, error arrows or polar alignment. The user picks a session
+  // in the toolbar to see one.
   const activeAlignmentTargets = useMemo(() => {
-    if (selectedSessionId && sessionAlignmentTargets !== null) {
+    if (!selectedSessionId) return NO_ALIGNMENT_TARGETS;
+    if (sessionAlignmentTargets !== null) {
       return sessionAlignmentTargets;
     }
-    return telemetry?.alignmentTargets ?? [];
+    return telemetry?.alignmentTargets ?? NO_ALIGNMENT_TARGETS;
   }, [selectedSessionId, sessionAlignmentTargets, telemetry?.alignmentTargets]);
 
   const activePolarAlignment = useMemo(() => {
-    if (selectedSessionId && sessionPolarAlignment !== null) {
+    if (!selectedSessionId) return null;
+    if (sessionPolarAlignment !== null) {
       return sessionPolarAlignment;
     }
     return telemetry?.polarAlignment ?? null;

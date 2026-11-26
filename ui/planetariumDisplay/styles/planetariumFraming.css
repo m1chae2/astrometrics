@@ -9,8 +9,8 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: var(--surface-floating);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
@@ -19,17 +19,45 @@
   font-family: var(--font-family-base);
 }
 
-.framing-panel--closed {
-  width: auto;
-  padding: 0;
-  background: none;
-  border: none;
+/* The panel extends down from the card above it when it opens and folds back up when it
+   closes. The wrapper's one row goes from 0fr to 1fr, so the panel's own height never jumps;
+   its content is clipped by the inner box meanwhile. FramingPanel.tsx (useRevealPhase) takes
+   it off screen when the fold ends. */
+.framing-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-duration-panel) var(--motion-ease-panel),
+    opacity var(--motion-duration-panel) var(--motion-ease-panel);
+}
+
+.framing-reveal--open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* The fold back runs the opening's curve backward over the same time, so it mirrors the opening. */
+.framing-reveal--closing {
+  pointer-events: none;
+  transition-timing-function: var(--motion-ease-panel-reverse), var(--motion-ease-panel-reverse);
+}
+
+.framing-reveal__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .framing-reveal {
+    transition: none;
+  }
 }
 
 .framing-panel__header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -42,15 +70,29 @@
 .framing-panel__inputs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: var(--space-1) var(--space-2);
 }
 
 .framing-panel__inputs label,
+.framing-panel__field,
 .framing-panel__send label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   color: var(--text-dim);
+}
+
+/* The Rotation label with its info button beside it. */
+.framing-panel__field-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* A big grid scrolls inside the table, so the panel itself keeps its height. */
+.framing-panel__table-scroll {
+  max-height: var(--framing-table-max-height);
+  overflow-y: auto;
 }
 
 .framing-panel__table {
@@ -62,13 +104,13 @@
 .framing-panel__table caption {
   text-align: left;
   color: var(--text-dim);
-  padding-bottom: 4px;
+  padding-bottom: var(--space-1);
 }
 
 .framing-panel__table th,
 .framing-panel__table td {
   text-align: left;
-  padding: 2px 4px;
+  padding: 1px var(--space-1);
 }
 
 .framing-panel__state,
@@ -80,7 +122,7 @@
 .framing-panel__send {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .framing-panel__rejection {

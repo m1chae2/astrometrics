@@ -1,9 +1,12 @@
 """Interactive Python scripting environment for the application.
 
-Allows users to execute scripts that interact with the backend
-services and scientific libraries, providing workspace manifests,
-code completions, figure exports, script recipes, documentation,
-and run scope loading.
+The Command Console runs the user's Python here. Its workspace holds the
+same public objects a script or notebook would use: ``astrometrics`` (the
+`astrometricslib.Astrometrics` object), ``wayfinder`` (the
+`wayfindinglib.Wayfinder` object), ``np``, ``plt`` and ``fits``. The app's
+internal services are not in it. The module also gives workspace lists, code
+completions, figure exports, script recipes (from the tutorial notebooks and
+scripts in ``documentation/notebooks/``), documentation and run history.
 """
 
 import code
@@ -16,6 +19,7 @@ import os
 import rlcompleter
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import traceback
@@ -27,6 +31,14 @@ from typing import Any
 from astrometricslib.drivers import scratch_directory
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from backend.services.infrastructure.agent_code_policy import AGENT_VISIBLE_NAMES, check_agent_code
+from backend.services.infrastructure.app_selection_service import AppSelection
+from backend.services.infrastructure.console_helpers import (
+    ConsoleRuns,
+    ConsoleSelection,
+    describe_show_request,
+    lookup_doc,
+    make_show_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +56,50 @@ CONSOLE_RUN_SOURCES = frozenset({"repl", "editor"})
 
 #: The longest label kept for a run, in characters.
 RECENT_RUN_LABEL_LIMIT = 80
+
+#: The objects the console preloads, with the line ``help`` prints for each.
+#: They are the public entry points a library user has in a script or a
+#: notebook. The app's internal services are deliberately not among them.
+PRELOADED_OBJECTS = {
+    "astrometrics": "Astrometrics: targets, stars, processing, quality and visualization",
+    "wayfinder": "Wayfinder: telescope control, planning, execution and review",
+    "np": "NumPy",
+    "plt": "Matplotlib pyplot (figures open in their own windows)",
+    "fits": "astropy.io.fits, for reading FITS files",
+    "selection": (
+        "What is picked in Image Processing now (read-only): target, path, kind (stack or frame) "
+        "and star (the Astrometry overlay pick: name, ra and dec in degrees, x and y as the 0-based "
+        "pixel column and row, as NumPy counts)"
+    ),
+    "show": 'show(target="M 31", star=..., path=...) opens it in Image Processing or the Astronomy Manager',
+    "doc": "doc(name) opens the name's entry in the Documentation tab; also typed as: doc name",
+}
+
+#: The commands the terminal itself handles. They are typed alone on a line
+#: and never reach Python, so a variable with the same name still works.
+TERMINAL_COMMANDS = {
+    "clear": "clears the terminal screen",
+    "clear('workspace')": "clears your variables (the preloaded names stay)",
+}
+
+#: The width ``help`` wraps its two-column list to, in characters.
+HELP_LINE_WIDTH = 78
+
+#: The width of the name column of ``help``'s list, in characters.
+HELP_NAME_WIDTH = 20
+
+#: The message a stopped run ends with.
+STOPPED_MESSAGE = "Stopped."
+
+#: Names the Workspace table leaves out: the preloaded objects and the help
+#: functions. The app shows the preloaded objects in its own pinned rows.
+HIDDEN_WORKSPACE_NAMES = frozenset({*PRELOADED_OBJECTS, "help", "list_commands", "inspect_api"})
+
+#: The longest docstring ``help(obj)`` prints, in characters.
+HELP_TEXT_LIMIT = 6000
+
+#: The folder that holds the tutorial notebooks and the recipe scripts.
+NOTEBOOKS_ROOT = Path(__file__).resolve().parents[3] / "documentation" / "notebooks"
 
 
 def _cut_text(text: str) -> str:
@@ -135,8 +191,161 @@ def inspect_api(obj_or_path: Any) -> dict[str, Any]:
     }
 
 
+def public_help_text(obj: Any) -> str:
+    """Write the help that ``help(obj)`` prints in the console.
+
+    It gives the object's signature and docstring, then each public method
+    or attribute with the first line of its docstring. Names that start
+    with ``_`` are private and are left out, so the text shows only the
+    public API.
+
+    Parameters
+    ----------
+    obj : `Any`
+        The object, class, function or module to describe.
+
+    Returns
+    -------
+    text : `str`
+        The help text.
+    """
+    info = inspect_api(obj)
+    doc = inspect.getdoc(obj) or "(no description)"
+    if len(doc) > HELP_TEXT_LIMIT:
+        doc = doc[:HELP_TEXT_LIMIT] + "\n... (cut; see the Documentation tab for the rest)"
+    lines = [f"{info['name']}{info['signature']}  [{info['type']}]", "", doc]
+    if info["methods"]:
+        lines += ["", "Public methods:"]
+        for method in info["methods"]:
+            first_line = method["summary"].splitlines()[0] if method["summary"] else ""
+            lines.append(f"  {method['name']}{method['signature']}")
+            if first_line:
+                lines.append(f"      {first_line}")
+    if not callable(obj) and not inspect.ismodule(obj):
+        attributes = [
+            name
+            for name in sorted(dir(obj))
+            if not name.startswith("_") and name not in {m["name"] for m in info["methods"]}
+        ]
+        if attributes:
+            lines += ["", "Public attributes: " + ", ".join(attributes)]
+    return "\n".join(lines)
+
+
+def _notebook_recipe_code(notebook_path: Path) -> tuple[str, str, str]:
+    """Turn a tutorial notebook into a console script.
+
+    The code cells become the script, in order. Each text cell becomes a
+    block of ``#`` comments above the code it explains. A line that makes a
+    new ``Astrometrics()`` or ``Wayfinder()`` object is turned into a
+    comment, because the console already holds the app's own objects under
+    those names; a second copy would open the library and the observatory
+    again.
+
+    Parameters
+    ----------
+    notebook_path : `Path`
+        The ``.ipynb`` file.
+
+    Returns
+    -------
+    title : `str`
+        The notebook's first heading, or its file name.
+    description : `str`
+        The first paragraph after that heading.
+    code : `str`
+        The script.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a notebook.
+    """
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    cells = notebook.get("cells")
+    if not isinstance(cells, list):
+        raise ValueError(f"{notebook_path.name} has no cells.")
+    title = notebook_path.stem.replace("_", " ")
+    description = ""
+    found_heading = False
+    script_lines = [
+        f'"""Recipe made from the tutorial notebook {notebook_path.relative_to(NOTEBOOKS_ROOT).as_posix()}.',
+        "",
+        "The console already holds `astrometrics` and `wayfinder`, so the",
+        "notebook's lines that make new ones are comments here.",
+        '"""',
+        "",
+    ]
+    for cell in cells:
+        source = cell.get("source", "")
+        text = "".join(source) if isinstance(source, list) else str(source)
+        if cell.get("cell_type") == "markdown":
+            paragraphs = [part.strip() for part in text.strip().split("\n\n") if part.strip()]
+            if paragraphs and paragraphs[0].startswith("#") and not found_heading:
+                found_heading = True
+                title = paragraphs[0].splitlines()[0].lstrip("#").strip()
+                if len(paragraphs) > 1:
+                    description = " ".join(paragraphs[1].split())
+            script_lines += [f"# {line}".rstrip() for line in text.strip().splitlines()]
+            script_lines.append("")
+        elif cell.get("cell_type") == "code":
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped in ("astrometrics = Astrometrics()", "wayfinder = Wayfinder()"):
+                    indent = line[: len(line) - len(line.lstrip())]
+                    line = f"{indent}# {stripped}  (the console already has this object)"
+                script_lines.append(line)
+            script_lines.append("")
+    return title, description, "\n".join(script_lines).rstrip() + "\n"
+
+
+def _two_column_lines(name: str, description: str) -> list[str]:
+    """Write one row of ``help``'s list, wrapped under its description.
+
+    Parameters
+    ----------
+    name : `str`
+        The left column, such as ``"astrometrics"``.
+    description : `str`
+        The right column.
+
+    Returns
+    -------
+    lines : `list` of `str`
+        The row; lines after the first start under the description.
+    """
+    indent = " " * (HELP_NAME_WIDTH + 2)
+    first_indent = f"  {name:<{HELP_NAME_WIDTH}}"
+    if len(first_indent) > len(indent):
+        # A long name gets its own line; the description starts under it.
+        return [
+            first_indent.rstrip(),
+            *textwrap.wrap(description, HELP_LINE_WIDTH, initial_indent=indent, subsequent_indent=indent),
+        ]
+    return textwrap.wrap(description, HELP_LINE_WIDTH, initial_indent=first_indent, subsequent_indent=indent)
+
+
+def _without_interrupt_traceback(text: str) -> str:
+    """Drop the ``KeyboardInterrupt`` traceback a stopped run printed last.
+
+    Parameters
+    ----------
+    text : `str`
+        The run's error output.
+
+    Returns
+    -------
+    text : `str`
+        The output without that last traceback; other output is kept.
+    """
+    if not text.rstrip().endswith("KeyboardInterrupt"):
+        return text
+    start = text.rfind("Traceback (most recent call last):")
+    return text[:start] if start != -1 else text
+
+
 class ScriptingService:
-    """Manage an interactive Python console with access to services."""
+    """Manage an interactive Python console over the public libraries."""
 
     class SmartPrinter:
         """Callable/reprable wrapper that lazily renders help text.
@@ -159,9 +368,19 @@ class ScriptingService:
             """
             return self.text_factory()
 
-        def __call__(self) -> None:
-            """Print the rendered text, for call-style invocation."""
-            print(self.text_factory())
+        def __call__(self, obj: Any = None) -> None:
+            """Print the help text, or the public help of one object.
+
+            Parameters
+            ----------
+            obj : `Any`, optional
+                The object to describe. With none, the list of preloaded
+                objects is printed.
+            """
+            if obj is None:
+                print(self.text_factory())
+            else:
+                print(public_help_text(obj))
 
     def __init__(self, container: Any = None) -> None:
         """Initialize the interactive scripting service.
@@ -173,6 +392,9 @@ class ScriptingService:
             infrastructure services.
         """
         self.container = container
+        # The runs going now: Ctrl+C in the terminal stops them, and show()
+        # and doc() add their requests to the app to them.
+        self._runs = ConsoleRuns()
         self.console = code.InteractiveConsole(locals=self._get_locals())
         self.completer = rlcompleter.Completer(self.console.locals)
         self.active_editor_code = ""
@@ -187,8 +409,8 @@ class ScriptingService:
 
         Rebuilds `console` and `completer` from scratch, so any
         variables the user defined or objects loaded into scope
-        (via `execute`) are dropped. The default built-in objects
-        (`targets`, `stars`, `np`, `plt`, ...) are restored.
+        (via `execute`) are dropped. The preloaded objects
+        (`astrometrics`, `wayfinder`, `np`, `plt`, `fits`) are restored.
 
         Returns
         -------
@@ -257,6 +479,13 @@ class ScriptingService:
     def _get_locals(self) -> dict[str, Any]:
         """Return the dictionary of objects available in the script scope.
 
+        The console offers what a script or notebook that uses the libraries
+        would have: the two public library objects (``astrometrics`` and
+        ``wayfinder``), NumPy (``np``), Matplotlib (``plt``) and Astropy's
+        FITS module (``fits``), plus ``help``, ``inspect_api`` and ``doc``.
+        The app's own services are not in the scope (see
+        `PRELOADED_OBJECTS`).
+
         Returns
         -------
         local_scope : `dict[str, Any]`
@@ -272,10 +501,11 @@ class ScriptingService:
             "help": help_obj,
             "list_commands": help_obj,
             "inspect_api": inspect_api,
-            "doc": inspect_api,
+            "doc": self._doc,
+            "show": self._show,
+            "selection": ConsoleSelection(self._current_selection),
         }
 
-        # Inject standard scientific packages
         try:
             import numpy as np
 
@@ -302,122 +532,209 @@ class ScriptingService:
             pass
 
         try:
-            import pandas as pd
+            from astropy.io import fits
 
-            local_scope["pd"] = pd
-        except ImportError:
-            pass
-
-        try:
-            import astropy
-
-            local_scope["astropy"] = astropy
+            local_scope["fits"] = fits
         except ImportError:
             pass
 
         if not self.container:
             return local_scope
 
-        local_scope["astrometrics"] = getattr(self.container, "astrometrics", None)
-        local_scope["wayfinder"] = getattr(self.container, "wayfinder", None)
-        if local_scope["wayfinder"] is not None:
-            local_scope["planner"] = local_scope["wayfinder"].planning
-            local_scope["observatory"] = local_scope["wayfinder"].control
-
-        # Standard system aliases for rapid scripting
-        aliases = {
-            "telescope_service": "telescope",
-            "image_processing_service": "image_processing",
-            "target_service": "target",
-            "sync_service": "sync",
-            "guiding_service": "guiding",
-            "imaging_service": "imaging",
-            "alignment_service": "alignment",
-            "target_imaging_executor": "executor",
-            "mosaic_service": "mosaic",
-            "ingestion_service": "ingestion",
-            "config_service": "config",
-            "system_status_service": "system",
-            "job_service": "jobs",
-            "stellar_object_service": "stars",
-        }
-
-        # Convenient plural shortcuts
-        target_srv = getattr(self.container, "target_service", None)
-        if target_srv:
-            local_scope["targets"] = target_srv
-
-        job_srv = getattr(self.container, "job_service", None)
-        if job_srv:
-            local_scope["jobs"] = job_srv
-
-        stellar_srv = getattr(self.container, "stellar_object_service", None)
-        if stellar_srv:
-            local_scope["stars"] = stellar_srv
-
-        for attr_name in dir(self.container):
-            if attr_name.startswith("_"):
-                continue
-
-            val = getattr(self.container, attr_name)
-            if val is None:
-                continue
-
-            if attr_name in aliases:
-                local_scope[aliases[attr_name]] = val
-            elif attr_name.endswith("_service"):
-                local_scope[attr_name] = val
-
+        # Only the libraries' public objects. The app's services (targets,
+        # telescope, jobs, ...) are left out: a script written here must also
+        # run in a notebook, where only the public libraries exist.
+        for name in ("astrometrics", "wayfinder"):
+            value = getattr(self.container, name, None)
+            if value is not None:
+                local_scope[name] = value
         return local_scope
 
     def _generate_help_text(self) -> str:
-        """Generate the help text string.
+        """Generate the help text that ``help`` prints with no argument.
 
         Returns
         -------
         help_text : `str`
-            The formatted list of available objects.
+            What each preloaded object is, then the names the user made.
         """
-        lines = ["Available objects:"]
-        current_locals = self.console.locals if hasattr(self, "console") else self._default_locals_keys()
-
-        for name in sorted(current_locals):
-            if not name.startswith("_"):
-                lines.append(f"  - {name}")
-        lines.append("\nUse dir(object_name) to see methods. Use inspect_api(obj) for signatures.")
+        current_locals = self.console.locals if hasattr(self, "console") else dict.fromkeys(PRELOADED_OBJECTS)
+        lines = ["Preloaded objects:"]
+        for name, description in PRELOADED_OBJECTS.items():
+            if name in current_locals:
+                lines.extend(_two_column_lines(name, description))
+        lines.append("\nTerminal commands (typed alone on a line):")
+        for name, description in TERMINAL_COMMANDS.items():
+            lines.extend(_two_column_lines(name, description))
+        own_names = sorted(
+            name for name in current_locals if not name.startswith("_") and name not in HIDDEN_WORKSPACE_NAMES
+        )
+        if own_names:
+            lines.append("\nYour variables:")
+            lines.extend(f"  {name}" for name in own_names)
+        lines.append("")
+        lines.extend(
+            textwrap.wrap(
+                "help(obj) prints an object's description and public methods. Tab completes names. "
+                "inspect_api(obj) gives the same as data. Ctrl+C in the terminal stops a run.",
+                HELP_LINE_WIDTH,
+            )
+        )
+        lines.append(
+            'Example: astrometrics.visualization.render_fits("/path/to/stack.fits", kind="figure", '
+            'overlays=["detections", "stars"])'
+        )
         return "\n".join(lines)
 
+    def _current_selection(self) -> AppSelection:
+        """Return what is picked in Image Processing now.
+
+        Returns
+        -------
+        selection : `AppSelection`
+            The latest selection, or an empty one when the console has no
+            app container.
+        """
+        service = getattr(self.container, "app_selection_service", None) if self.container else None
+        return service.current() if service is not None else AppSelection()
+
+    def _find_star(self, text: str) -> tuple[str, str] | None:
+        """Look a star up in the library by its name or id.
+
+        Parameters
+        ----------
+        text : `str`
+            Such as ``"Vega"``.
+
+        Returns
+        -------
+        star : `tuple` of `str` or `None`
+            The star's library id and name, or `None` when it is not there.
+        """
+        astrometrics = getattr(self.container, "astrometrics", None) if self.container else None
+        if astrometrics is None:
+            return None
+        star = astrometrics.stars.get(text)
+        if star is None:
+            return None
+        return star.id, star.name or star.id
+
+    def _show(
+        self,
+        target: str | None = None,
+        *,
+        star: str | None = None,
+        path: str | None = None,
+        display: str | None = None,
+    ) -> None:
+        """Open a target, star or file in the app (the console's ``show``).
+
+        With no ``display``, a target or a file opens in Image Processing (a
+        star given with a target is selected on the target's stack) and a
+        star alone opens in the Astronomy Manager. When another window
+        already shows that display, that window shows it; otherwise this
+        window switches to it. The app does it when the run ends.
+
+        Parameters
+        ----------
+        target : `str`, optional
+            The target, such as ``"M 31"``.
+        star : `str`, optional
+            A star's name or library id, such as ``"Vega"``.
+        path : `str`, optional
+            A stack or frame to show in Image Processing. With no
+            ``target``, the target picked in Image Processing is used.
+        display : `str`, optional
+            ``"Image Processing"`` or ``"Astronomy Manager"``.
+
+        Notes
+        -----
+        `make_show_request` raises `TypeError` when no target, star or path
+        is given, and `ValueError` when the arguments do not fit together
+        or the star is not in the library. The user reads it in the
+        terminal like any other error in their code.
+        """
+        request = make_show_request(
+            target=target,
+            star=star,
+            path=path,
+            display=display,
+            selection=self._current_selection(),
+            find_star=self._find_star,
+        )
+        if self._runs.add_app_request(request):
+            print(describe_show_request(request))
+        else:
+            print("show() opens things only from a Command Console run.")
+
+    def _doc(self, name: Any) -> None:
+        """Open a name's reference entry in the Documentation tab (``doc``).
+
+        Parameters
+        ----------
+        name : `Any`
+            A name such as ``"delete_images"``,
+            ``"TargetCatalog.delete_images"`` or
+            ``"astrometrics.targets.delete_images"``, or the object itself.
+            When a bare method name fits several classes, the full names
+            are listed and nothing opens.
+        """
+        from backend.services.infrastructure import api_doc_generator
+
+        find_entries = getattr(api_doc_generator, "find_doc_entries", None)
+        if find_entries is None:
+            print("The documentation index is not available.")
+            return
+        lookup = lookup_doc(name, self.console.locals, find_entries)
+        shown_name = name if isinstance(name, str) else getattr(name, "__name__", repr(name))
+        if not lookup.matches:
+            line = f"No documentation found for {shown_name}."
+            if lookup.suggestions:
+                line += " Close names: " + ", ".join(lookup.suggestions) + "."
+            print(line)
+            return
+        if len(lookup.matches) > 1:
+            print(f"{shown_name} is documented in {len(lookup.matches)} places. Use the full name:")
+            for number, entry in enumerate(lookup.matches, start=1):
+                print(f"  {number}. doc {entry['qualified_name']}")
+            return
+        entry = lookup.matches[0]
+        request = {
+            "kind": "doc",
+            "topic_id": entry["topic_id"],
+            "anchor_id": entry["anchor_id"],
+            "qualified_name": entry["qualified_name"],
+        }
+        if self._runs.add_app_request(request):
+            print(f"Opening {entry['qualified_name']} in the Documentation tab.")
+        else:
+            print(f"{entry['qualified_name']} is in the documentation topic {entry['topic_id']}.")
+
+    def stop_runs(self) -> dict[str, Any]:
+        """Stop the console code that is running now (Ctrl+C in the terminal).
+
+        The code stops at its next Python step with `KeyboardInterrupt`; a
+        long call inside a C library (one long ``time.sleep``, a large NumPy
+        sum) ends first. Threads the code started itself are not stopped.
+        The workspace keeps every variable set before the stop.
+
+        Returns
+        -------
+        result : `dict`
+            ``stopped``: the labels of the runs that were stopped (empty when
+            nothing was running).
+        """
+        return self._runs.stop()
+
     def _default_locals_keys(self) -> list[str]:
-        """Return the default fallback keys exposed in locals.
+        """Return the names the console preloads.
 
         Returns
         -------
         keys : `list` of `str`
-            List of variable names available in locals.
+            The preloaded names, helpers included.
         """
-        return [
-            "help",
-            "list_commands",
-            "np",
-            "plt",
-            "pd",
-            "astropy",
-            "astrometrics",
-            "wayfinder",
-            "targets",
-            "stars",
-            "jobs",
-            "telescope",
-            "imaging",
-            "guiding",
-            "image_processing",
-            "observatory",
-            "planner",
-            "executor",
-            "sync",
-            "config",
-            "system",
-        ]
+        return sorted(HIDDEN_WORKSPACE_NAMES)
 
     def help(self) -> None:
         """Print available commands and objects."""
@@ -510,38 +827,11 @@ class ScriptingService:
         -------
         variables : `list` of `dict`
             List of variable summaries including name, type, shape,
-            dtype, size in bytes, and human-friendly string preview.
+            dtype, size in bytes, and human-friendly string preview. The
+            preloaded objects are left out; the app lists them itself.
         """
         manifest = []
-        ignored_names = {
-            "help",
-            "list_commands",
-            "inspect_api",
-            "doc",
-            "astrometrics",
-            "wayfinder",
-            "telescope",
-            "image_processing",
-            "target",
-            "targets",
-            "sync",
-            "guiding",
-            "imaging",
-            "alignment",
-            "observatory",
-            "planner",
-            "executor",
-            "mosaic",
-            "ingestion",
-            "config",
-            "system",
-            "jobs",
-            "stars",
-            "np",
-            "plt",
-            "pd",
-            "astropy",
-        }
+        ignored_names = HIDDEN_WORKSPACE_NAMES
 
         local_scope = self.console.locals
         for name, val in local_scope.items():
@@ -566,6 +856,37 @@ class ScriptingService:
                 "summary": summary,
             })
         return manifest
+
+    def get_preloaded_objects(self) -> list[dict[str, Any]]:
+        """List the public objects the console preloads, for the pinned rows.
+
+        Returns
+        -------
+        objects : `list` of `dict`
+            One entry per object in `PRELOADED_OBJECTS` order: ``name``,
+            ``type`` (its class or module name, or `None` when it is not in
+            the console), ``description`` and ``available`` (whether the
+            console holds it now; ``astrometrics`` and ``wayfinder`` are
+            missing when the console has no app container).
+        """
+        objects = []
+        for name, description in PRELOADED_OBJECTS.items():
+            value = self.console.locals.get(name)
+            if value is None:
+                type_name = None
+            elif inspect.ismodule(value):
+                type_name = value.__name__
+            elif inspect.ismethod(value) or inspect.isfunction(value):
+                type_name = "function"
+            else:
+                type_name = type(value).__name__
+            objects.append({
+                "name": name,
+                "type": type_name,
+                "description": description,
+                "available": value is not None,
+            })
+        return objects
 
     def _agent_scope(self) -> dict[str, Any]:
         """Return the reduced variable scope that agent code runs in.
@@ -626,9 +947,13 @@ class ScriptingService:
         Returns
         -------
         envelope : `dict[str, Any]`
-            Contains status, stdout, stderr, result, plots, and
-            updated workspace manifest. Only figures that are new in this
-            run, or got new parts in it, are returned. Runs that do not
+            Contains status (``"success"``, ``"error"``, or ``"stopped"``
+            when Ctrl+C stopped it), stdout, stderr, result, plots, the
+            updated workspace manifest, and ``app_requests``: what the code
+            asked the app to show with ``show`` and ``doc``, for the window
+            that ran it. A stopped run's output ends with "Stopped.". Only
+            figures that are new in this run, or got new parts in it, are
+            returned. Runs that do not
             come from a console (see `CONSOLE_RUN_SOURCES`) also broadcast
             ``terminal:plot_generated`` to the open windows. Agent code
             that breaks the rules in `agent_code_policy` is not run and
@@ -662,70 +987,99 @@ class ScriptingService:
         refusal = check_agent_code(code_str) if source == "agent" else None
         scope = self._agent_scope() if source == "agent" else self.console.locals
 
-        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
-            try:
-                plt = self.console.locals.get("plt")
+        stripped_code = code_str.strip()
+        run_label = label or (stripped_code.splitlines()[0][:RECENT_RUN_LABEL_LIMIT] if stripped_code else "")
+        run = self._runs.begin(run_label, source)
+        try:
+            with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+                try:
+                    plt = self.console.locals.get("plt")
 
-                if refusal:
-                    raise PermissionError(refusal)
-                if source == "agent":
-                    exec(code_str, scope)  # ruff: ignore[exec-builtin]
-                elif "\n" in code_str.strip():
-                    exec(code_str, scope)  # ruff: ignore[exec-builtin]
-                else:
-                    self.console.push(code_str)
+                    if refusal:
+                        raise PermissionError(refusal)
+                    if source == "agent":
+                        exec(code_str, scope)  # ruff: ignore[exec-builtin]
+                    elif "\n" in code_str.strip():
+                        exec(code_str, scope)  # ruff: ignore[exec-builtin]
+                    else:
+                        self.console.push(code_str)
 
-                if "result" in scope:
-                    raw_res = scope["result"]
-                    try:
-                        json.dumps(raw_res)
-                        result = raw_res
-                    except TypeError, OverflowError:
-                        result = str(raw_res)
+                    if "result" in scope:
+                        raw_res = scope["result"]
+                        try:
+                            json.dumps(raw_res)
+                            result = raw_res
+                        except TypeError, OverflowError:
+                            result = str(raw_res)
 
-                # Capture active figures for both interactive WebAgg display
-                # and fallback PNGs
-                if plt:
-                    # Forget the figures that were closed.
-                    open_numbers = set(plt.get_fignums())
-                    for closed in set(self._figure_signatures) - open_numbers:
-                        del self._figure_signatures[closed]
-                if plt and plt.get_fignums():
-                    from matplotlib._pylab_helpers import Gcf
+                    # Capture active figures for both interactive WebAgg
+                    # display and fallback PNGs
+                    if plt:
+                        # Forget the figures that were closed.
+                        open_numbers = set(plt.get_fignums())
+                        for closed in set(self._figure_signatures) - open_numbers:
+                            del self._figure_signatures[closed]
+                    if plt and plt.get_fignums():
+                        from matplotlib._pylab_helpers import Gcf
 
-                    for fignum in plt.get_fignums():
-                        fig = plt.figure(fignum)
-                        # A figure left open by an earlier run, and not
-                        # changed since, is not shown again.
-                        signature = self._figure_signature(fig)
-                        if self._figure_signatures.get(fignum) == signature:
-                            continue
-                        self._figure_signatures[fignum] = signature
-                        mgr = Gcf.get_fig_manager(fignum)
-                        if mgr:
-                            self.active_figure_managers[fignum] = mgr
-                        with tempfile.NamedTemporaryFile(
-                            suffix=".png", delete=False, dir=scratch_directory()
-                        ) as tmp_file:
-                            fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
-                            plots.append(tmp_file.name)
-                            # The interactive page draws the figure at this
-                            # size, so the app opens its window to fit it.
-                            width, height = fig.canvas.get_width_height()
-                            interactive_plots.append({
-                                "figure_id": fignum,
-                                "plot_path": tmp_file.name,
-                                "url": f"/figure/{fignum}",
-                                "width": int(width),
-                                "height": int(height),
-                            })
+                        for fignum in plt.get_fignums():
+                            fig = plt.figure(fignum)
+                            # A figure left open by an earlier run, and not
+                            # changed since, is not shown again.
+                            signature = self._figure_signature(fig)
+                            if self._figure_signatures.get(fignum) == signature:
+                                continue
+                            self._figure_signatures[fignum] = signature
+                            mgr = Gcf.get_fig_manager(fignum)
+                            if mgr:
+                                self.active_figure_managers[fignum] = mgr
+                            with tempfile.NamedTemporaryFile(
+                                suffix=".png", delete=False, dir=scratch_directory()
+                            ) as tmp_file:
+                                fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
+                                plots.append(tmp_file.name)
+                                # The interactive page draws the figure at this
+                                # size, so the app opens its window to fit it.
+                                width, height = fig.canvas.get_width_height()
+                                interactive_plots.append({
+                                    "figure_id": fignum,
+                                    "plot_path": tmp_file.name,
+                                    "url": f"/figure/{fignum}",
+                                    "width": int(width),
+                                    "height": int(height),
+                                })
 
-            except Exception:
-                # The error is in the caller's own code. It is recorded as
-                # the run's status, and its traceback is returned as stderr.
-                status = "error"
-                traceback.print_exc(file=stderr_buf)
-                logger.debug("Console code raised an error.", exc_info=True)
+                except KeyboardInterrupt:
+                    # Ctrl+C in the terminal stopped the run (see
+                    # `stop_runs`). It is not an error in the code.
+                    status = "stopped"
+                except Exception:
+                    # The error is in the caller's own code. It is recorded
+                    # as the run's status; its traceback is returned as
+                    # stderr.
+                    status = "error"
+                    traceback.print_exc(file=stderr_buf)
+                    logger.debug("Console code raised an error.", exc_info=True)
+
+        except KeyboardInterrupt:
+            # The stop arrived just after the code ended.
+            status = "stopped"
+        finally:
+            # Cancels a stop that is still waiting, so it cannot hit the
+            # thread's next task.
+            self._runs.finish(run)
+
+        stdout_text = stdout_buf.getvalue()
+        stderr_text = stderr_buf.getvalue()
+        if status == "success" and run.stop_asked and stderr_text.rstrip().endswith("KeyboardInterrupt"):
+            # A single line runs through the interactive console, which
+            # catches the stop itself and prints its traceback.
+            status = "stopped"
+        if status == "stopped":
+            stderr_text = _without_interrupt_traceback(stderr_text)
+            if stdout_text and not stdout_text.endswith("\n"):
+                stdout_text += "\n"
+            stdout_text += STOPPED_MESSAGE + "\n"
 
         execution_time_ms = int((time.time() - start_time) * 1000)
 
@@ -734,8 +1088,8 @@ class ScriptingService:
             source=source,
             label=label,
             status=status,
-            stdout=stdout_buf.getvalue(),
-            stderr=stderr_buf.getvalue(),
+            stdout=stdout_text,
+            stderr=stderr_text,
             plot_paths=plots,
             execution_time_ms=execution_time_ms,
         )
@@ -767,13 +1121,14 @@ class ScriptingService:
 
         return {
             "status": status,
-            "stdout": stdout_buf.getvalue(),
-            "stderr": stderr_buf.getvalue(),
+            "stdout": stdout_text,
+            "stderr": stderr_text,
             "result": result,
             "plots": plots,
             "interactive_plots": interactive_plots,
             "execution_time_ms": execution_time_ms,
             "workspace": self.get_workspace_manifest(),
+            "app_requests": run.app_requests,
         }
 
     def _remember_run(
@@ -803,7 +1158,7 @@ class ScriptingService:
         label : `str` or `None`
             A short name, or `None` to use the first line of the code.
         status : `str`
-            'success' or 'error'.
+            'success', 'error' or 'stopped'.
         stdout, stderr : `str`
             The printed text and the error text.
         plot_paths : `list` [`str`]
@@ -883,87 +1238,137 @@ class ScriptingService:
         return self.execute(command)
 
     def _get_recipe_dirs(self) -> list[Path]:
-        """Return list of recipe search paths in repo.
+        """Return the folders that hold the recipe scripts.
 
         Returns
         -------
         dirs : `list` of `Path`
-            Search directories for recipe scripts.
+            The ``scripts`` folders of the tutorial notebooks.
         """
-        repo_root = Path(__file__).resolve().parent.parent.parent.parent
         return [
-            repo_root / "documentation" / "notebooks" / "astrometrics" / "scripts",
-            repo_root / "documentation" / "notebooks" / "wayfinding" / "control" / "scripts",
-            repo_root / "documentation" / "notebooks" / "wayfinding" / "execution" / "scripts",
+            NOTEBOOKS_ROOT / "astrometrics" / "scripts",
+            NOTEBOOKS_ROOT / "wayfinding" / "control" / "scripts",
+            NOTEBOOKS_ROOT / "wayfinding" / "execution" / "scripts",
         ]
 
+    def _recipe_files(self) -> list[Path]:
+        """List every recipe file: the tutorial notebooks, then the scripts.
+
+        The notebooks are the ones a library user reads in
+        ``documentation/notebooks/``, so the console's recipes and the
+        notebooks show the same examples.
+
+        Returns
+        -------
+        files : `list` of `Path`
+            The ``.ipynb`` notebooks in sorted order, then the ``.py``
+            recipe scripts.
+        """
+        notebooks = (
+            sorted(path for path in NOTEBOOKS_ROOT.rglob("*.ipynb") if ".ipynb_checkpoints" not in path.parts)
+            if NOTEBOOKS_ROOT.exists()
+            else []
+        )
+        scripts = [
+            path
+            for recipe_dir in self._get_recipe_dirs()
+            if recipe_dir.exists()
+            for path in sorted(recipe_dir.glob("*.py"))
+            if path.name != "__init__.py"
+        ]
+        return [*notebooks, *scripts]
+
+    @staticmethod
+    def _recipe_category(path: Path) -> str:
+        """Name the library a recipe belongs to.
+
+        Parameters
+        ----------
+        path : `Path`
+            The recipe file.
+
+        Returns
+        -------
+        category : `str`
+            ``astrometrics`` or ``wayfinding``: the first folder under
+            ``documentation/notebooks/``.
+        """
+        try:
+            return path.relative_to(NOTEBOOKS_ROOT).parts[0]
+        except ValueError, IndexError:
+            return path.parent.name
+
     def list_recipes(self) -> list[dict[str, Any]]:
-        """List built-in script recipes available in documentation notebooks.
+        """List the built-in recipes: the tutorial notebooks and scripts.
 
         Returns
         -------
         recipes : `list` of `dict`
-            List of recipes with name, path, category, description,
-            and byte size.
+            One entry per recipe with ``id``, ``name``, ``filename``,
+            ``category`` (the library), ``kind`` (``notebook`` or
+            ``script``), ``description`` and ``size_bytes``.
         """
         recipes = []
-        for recipe_dir in self._get_recipe_dirs():
-            if not recipe_dir.exists():
-                continue
-            for py_file in sorted(recipe_dir.glob("*.py")):
-                if py_file.name == "__init__.py":
-                    continue
-
-                description = ""
-                try:
-                    content = py_file.read_text(encoding="utf-8")
+        for recipe_file in self._recipe_files():
+            description = ""
+            name = recipe_file.stem.replace("_", " ").title()
+            kind = "notebook" if recipe_file.suffix == ".ipynb" else "script"
+            try:
+                if kind == "notebook":
+                    name, description, _code = _notebook_recipe_code(recipe_file)
+                else:
+                    content = recipe_file.read_text(encoding="utf-8")
                     if content.startswith('"""') or content.startswith("'''"):
                         delim = '"""' if content.startswith('"""') else "'''"
                         parts = content.split(delim)
                         if len(parts) >= 2:
                             description = parts[1].strip().split("\n\n")[0]
-                except (OSError, ValueError) as exc:
-                    logger.debug("Failed to read recipe %s docstring: %s", py_file, exc)
-
-                category = recipe_dir.parent.name
-                recipes.append({
-                    "id": py_file.stem,
-                    "name": py_file.stem.replace("_", " ").title(),
-                    "filename": py_file.name,
-                    "category": category,
-                    "description": description[:160],
-                    "size_bytes": py_file.stat().st_size,
-                })
+            except (OSError, ValueError) as exc:
+                logger.debug("Failed to read recipe %s: %s", recipe_file, exc)
+                continue
+            recipes.append({
+                "id": recipe_file.stem,
+                "name": name,
+                "filename": recipe_file.name,
+                "category": self._recipe_category(recipe_file),
+                "kind": kind,
+                "description": " ".join(description.split())[:160],
+                "size_bytes": recipe_file.stat().st_size,
+            })
         return recipes
 
     def get_recipe(self, recipe_id: str) -> dict[str, Any]:
-        """Retrieve the code contents of a script recipe.
+        """Retrieve the code of a recipe, as a script the console can run.
+
+        A notebook comes back as one script (see `_notebook_recipe_code`).
 
         Parameters
         ----------
         recipe_id : `str`
-            Recipe identifier or filename stem.
+            Recipe identifier or file name.
 
         Returns
         -------
         data : `dict[str, Any]`
-            Recipe identifier, filename, and code text.
+            Recipe identifier, file name (``.py`` for a notebook too) and
+            code text.
 
         Raises
         ------
         NotFoundError
             If the requested recipe cannot be found.
         """
-        for recipe_dir in self._get_recipe_dirs():
-            if not recipe_dir.exists():
+        for recipe_file in self._recipe_files():
+            if recipe_file.stem != recipe_id and recipe_file.name != recipe_id:
                 continue
-            for py_file in recipe_dir.glob("*.py"):
-                if py_file.stem == recipe_id or py_file.name == recipe_id:
-                    return {
-                        "id": py_file.stem,
-                        "filename": py_file.name,
-                        "code": py_file.read_text(encoding="utf-8"),
-                    }
+            if recipe_file.suffix == ".ipynb":
+                _title, _description, code_text = _notebook_recipe_code(recipe_file)
+                return {"id": recipe_file.stem, "filename": f"{recipe_file.stem}.py", "code": code_text}
+            return {
+                "id": recipe_file.stem,
+                "filename": recipe_file.name,
+                "code": recipe_file.read_text(encoding="utf-8"),
+            }
         raise NotFoundError(f"Recipe {recipe_id!r} not found.")
 
     def _get_user_scripts_dir(self) -> Path:

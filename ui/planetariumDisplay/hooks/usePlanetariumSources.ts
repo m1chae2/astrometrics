@@ -18,6 +18,7 @@ import { callBackend } from '../../common/services/backendApi';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { LOCAL_CATALOG_QUERY_DEBOUNCE_MS } from './useOnlineCatalogSources';
 import { isCoveredByFetched, sameSources, SourceQueryShape } from '../utils/sourceRequestRule';
+import { useCatalogVersion } from '../../common/utils/catalogVersionStore';
 
 /**
  * Fetches local library PlanetariumSource objects within a circular sky region.
@@ -27,7 +28,8 @@ import { isCoveredByFetched, sameSources, SourceQueryShape } from '../utils/sour
  * current FOV by the parent component to preload sources at pan edges. The previous
  * sources stay on screen until the new ones arrive. Nothing is requested when the last
  * completed request already covers the new view (same sky or less, same magnitude limit or
- * shallower), as when zooming in, and an unchanged result keeps the same array.
+ * shallower), as when zooming in, and an unchanged result keeps the same array. A
+ * `catalog:changed` event from the backend (see catalogVersionStore) asks again for the same view.
  *
  * @func usePlanetariumSources
  * @param {number} ra - Query center Right Ascension in degrees.
@@ -55,6 +57,10 @@ export const usePlanetariumSources = (
   // The last request that completed. A new request that asks for less sky and no deeper
   // magnitude (zooming in) is already answered by it, so nothing is sent.
   const fetchedQueryRef = useRef<SourceQueryShape | null>(null);
+  // A change to the star catalog (a renamed star, say) makes the last answer stale, so the same
+  // view is asked again rather than counted as already covered.
+  const catalogVersion = useCatalogVersion();
+  const fetchedCatalogVersionRef = useRef(catalogVersion);
 
   useEffect(() => {
     const wantedQuery: SourceQueryShape = {
@@ -64,6 +70,10 @@ export const usePlanetariumSources = (
       limitingMagnitude,
       includeUncataloged: includeStarsWithoutCatalogMagnitude,
     };
+    if (fetchedCatalogVersionRef.current !== catalogVersion) {
+      fetchedCatalogVersionRef.current = catalogVersion;
+      fetchedQueryRef.current = null;
+    }
     if (isCoveredByFetched(fetchedQueryRef.current, wantedQuery)) {
       setLoading(false);
       return;
@@ -117,7 +127,7 @@ export const usePlanetariumSources = (
       clearTimeout(debounceTimer);
       abortController.abort();
     };
-  }, [ra, dec, radius, limitingMagnitude, includeStarsWithoutCatalogMagnitude]);
+  }, [ra, dec, radius, limitingMagnitude, includeStarsWithoutCatalogMagnitude, catalogVersion]);
 
   return { sources, loading, error };
 };

@@ -1025,8 +1025,17 @@ def build_script_header(description: str) -> str:
 @tool(
     "terminal_add_script",
     (
-        "Add a new Python script to the app's Command Console 'User Scripts' list for the person to "
-        "review and run. You cannot run it. It will not replace an existing script."
+        "Add a new Python script to the app's Command Console 'My scripts' list for the person to "
+        "review and run. You cannot run it. It will not replace an existing script. The console "
+        "preloads only the public objects a notebook would make: astrometrics (Astrometrics), wayfinder "
+        "(Wayfinder), np, plt and fits (astropy.io.fits), plus three console helpers: selection "
+        "(read-only: what is picked in Image Processing now, with target, path, kind ('stack' or "
+        "'frame'), star (name, ra, dec in degrees, x and y as 0-based pixel column and row) and set_at; "
+        "fields are None when nothing is picked), show(target=..., star=..., path=..., display=...) "
+        "(opens a target, star or file in Image Processing or the Astronomy Manager when the run ends) "
+        "and doc(name) (opens that name's API reference entry). The app's internal services are not "
+        "available. astrometrics.visualization.render_fits(path, kind='figure', overlays=['detections', "
+        "'stars']) draws a frame or stack with its detected and named stars."
     ),
     {
         "type": "object",
@@ -1098,9 +1107,9 @@ async def tool_terminal_add_script(filename: str, content: str, description: str
         "size_bytes": saved["size_bytes"],
         "status": saved["status"],
         "next_step": (
-            f"Tell the person to open Command Console > User Scripts, open {saved['filename']}, "
+            f"Tell the person to open Command Console > Scripts > My scripts, open {saved['filename']}, "
             "review it, and press Run. You cannot run it. An open Command Console shows the new "
-            "file in its User Scripts list right away."
+            "file in its My scripts list right away."
         ),
     }
 

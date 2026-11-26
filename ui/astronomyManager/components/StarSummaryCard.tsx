@@ -18,13 +18,16 @@ import { Button } from '../../common/components/Button';
 import { Badge } from '../../common/components/Badge';
 import { StarBadges } from '../../common/components/StarBadges';
 import { useArrivedFromImage } from '../../common/hooks/useArrivedFromImage';
-import { RETURN_TO_IMAGE_ACTION } from '../../common/utils/imageViewStore';
+import { loadImageView, RETURN_TO_IMAGE_ACTION } from '../../common/utils/imageViewStore';
+import { planBackToImage } from '../utils/backToImage';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
     astronomyData?: any;
     /** Currently selected star identifier. */
     starId?: string;
+    /** The target selected in the Targets list, used by "Back to image" when the star belongs to several targets. */
+    selectedTargetId?: string;
 }
 
 /**
@@ -52,6 +55,10 @@ function formatCoordinates(ra?: any, dec?: any): string {
  * @param dec Declination in degrees.
  * @param hasSpectra Whether spectroscopy data exists for this star.
  * @param hasPhotometry Whether photometry data exists for this star.
+ * @param card The star's card fields this display already holds (magnitude, whether it is a
+ *   catalog magnitude, and spectral type), so the Planetarium's card opens complete at once, and
+ *   the target picked in the Targets list (`targetId`), so the Planetarium opens that target's
+ *   star list with the star picked in it.
  * @returns {void}
  */
 function locateInPlanetarium(
@@ -60,12 +67,13 @@ function locateInPlanetarium(
     ra: number,
     dec: number,
     hasSpectra: boolean,
-    hasPhotometry: boolean
+    hasPhotometry: boolean,
+    card: { magnitude?: number; hasCatalogMagnitude?: boolean; spectralType?: string; targetId?: string } = {}
 ): void {
     navigateToElement({
         targetDisplay: 'Planetarium',
         action: 'locateStar',
-        payload: { id, name, ra, dec, hasSpectra, hasPhotometry },
+        payload: { id, name, ra, dec, hasSpectra, hasPhotometry, type: 'star', ...card },
     });
 }
 
@@ -124,6 +132,7 @@ function navigateToTarget(
 export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     astronomyData,
     starId,
+    selectedTargetId = '',
 }) => {
     const targetContext = useOptionalTargetContext();
     // Set when the person came here by clicking a star in the Image Processing picture.
@@ -152,9 +161,20 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                     <Button
                         variant="secondary"
                         size="small"
-                        title="Go back to the same place in the Image Processing picture"
+                        title="Show this star in its target's Image Processing picture"
                         onClick={() => {
-                            void navigateToElement({ targetDisplay: 'Image Processing', action: RETURN_TO_IMAGE_ACTION, payload: null });
+                            const plan = planBackToImage(
+                                loadImageView(),
+                                String(astronomyData?.id || starId || ''),
+                                String(name),
+                                targetIds,
+                                selectedTargetId,
+                            );
+                            if (plan.kind === 'restore') {
+                                void navigateToElement({ targetDisplay: 'Image Processing', action: RETURN_TO_IMAGE_ACTION, payload: null });
+                            } else {
+                                void navigateToElement({ targetDisplay: 'Image Processing', targetElement: 'fitsViewer', action: 'targetSelected', payload: plan.handoff });
+                            }
                         }}
                     >
                         Back to image
@@ -173,7 +193,13 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                             raNum,
                             decNum,
                             !!(astronomyData?.hasSpectra ?? astronomyData?.has_spectra),
-                            !!(astronomyData?.hasPhotometry ?? astronomyData?.has_photometry)
+                            !!(astronomyData?.hasPhotometry ?? astronomyData?.has_photometry),
+                            {
+                                magnitude: typeof astronomyData?.magnitude === 'number' ? astronomyData.magnitude : undefined,
+                                hasCatalogMagnitude: astronomyData?.hasCatalogMagnitude,
+                                spectralType: spectralType || undefined,
+                                targetId: selectedTargetId || undefined,
+                            }
                         )}
                     >
                         Locate in Planetarium

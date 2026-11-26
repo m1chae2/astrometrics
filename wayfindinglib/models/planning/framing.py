@@ -11,9 +11,8 @@ mosaic module without an import cycle.
 from pydantic import BaseModel, ConfigDict, Field
 
 ROTATION_CONVENTION_TEXT = (
-    "Degrees east of north, the way Ekos and KStars give it. At 0 the camera's up direction points north, "
-    "so the grid rows run along declination and the columns along right ascension. "
-    "A positive angle turns the camera's up direction toward east."
+    "Degrees east of north. At 0 the camera's up direction points north; "
+    "a positive angle turns it toward east."
 )
 """What a rotation means, in words. Screens show it as returned."""
 

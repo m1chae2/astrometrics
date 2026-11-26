@@ -1,12 +1,19 @@
 /**
  * @file TerminalPane.tsx
- * @description Interactive Python REPL terminal pane with discovery banner, command history, tab completion, and agent badges.
+ * @description The Command Console's terminal: runs one Python line at a time. It shows one
+ * short line about the commands, the history of commands and output, Tab completion, and a
+ * badge on lines an AI agent ran. While code runs, a line at the bottom names what runs and how
+ * long it has run; Ctrl+C anywhere in the terminal stops it.
  */
 import React, { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { callBackend } from '../common/services/backendApi';
-import { Button } from '../common/components/Button';
 import { TextInput } from '../common/components/TextInput';
+import { TERMINAL_INTRO, formatElapsed } from './terminalCommands';
 
+/** How often the running line updates its elapsed time, in milliseconds. */
+const ELAPSED_TICK_MS = 1000;
+
+/** One command in the terminal history, with its output. */
 export interface TerminalEntry {
   id: string;
   command: string;
@@ -16,16 +23,53 @@ export interface TerminalEntry {
   executionTimeMs?: number;
 }
 
+/** The code running now, as the running line shows it. */
+export interface RunningCode {
+  /** What runs: the script's name, or "command" for a typed line. */
+  label: string;
+  /** When it started, in milliseconds since 1970 (`Date.now()`). */
+  startedAt: number;
+}
+
+/** Props for TerminalPane. */
 interface TerminalPaneProps {
+  /** The commands run so far and their output, oldest first. */
   entries: TerminalEntry[];
+  /** Called with a line you typed and pressed Enter on. */
   onExecute: (command: string) => void;
-  onClear?: () => void;
-  onReset?: () => void;
-  isRunning?: boolean;
+  /** The code running now, or null. While it runs, Enter does not send another line. */
+  running?: RunningCode | null;
+  /** Called on Ctrl+C while code runs, to stop it. */
+  onStop?: () => void;
 }
 
 /**
- * Return the longest prefix shared by every string in `values`.
+ * Shows the running line: what runs, for how long, and how to stop it.
+ *
+ * @param props The running code.
+ * @returns The line, updated every second.
+ */
+const RunningLine: React.FC<{ running: RunningCode }> = ({ running }) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="terminal-running" role="status">
+      <span className="terminal-running__dot" aria-hidden="true" />
+      <span className="terminal-running__label">Running {running.label}</span>
+      <span className="terminal-running__time">{formatElapsed(now - running.startedAt)}</span>
+      <span className="terminal-running__hint">Ctrl+C to stop</span>
+    </div>
+  );
+};
+
+/**
+ * Returns the longest start that every string in `values` shares.
+ *
+ * @param values The strings to compare.
+ * @returns The shared start, or an empty string.
  */
 function longestCommonPrefix(values: string[]): string {
   if (values.length === 0) return '';
@@ -39,12 +83,17 @@ function longestCommonPrefix(values: string[]): string {
   return prefix;
 }
 
+/**
+ * Shows the terminal: a banner, the history of commands and output, and the entry line.
+ *
+ * @param props See `TerminalPaneProps`.
+ * @returns The terminal.
+ */
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   entries,
   onExecute,
-  onClear,
-  onReset,
-  isRunning = false,
+  running = null,
+  onStop,
 }) => {
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
@@ -64,7 +113,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const trimmed = input.trim();
-      if (!trimmed) return;
+      // One run at a time: the line stays in the box until the running code ends.
+      if (!trimmed || running) return;
 
       commandHistoryRef.current.push(trimmed);
       setHistoryIndex(null);
@@ -121,53 +171,25 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     }
   };
 
-  return (
-    <div className="terminal-pane" onClick={() => inputRef.current?.focus()}>
-      <div className="terminal-banner">
-        <div className="terminal-banner__title">Astrometrics Command Console (Python 3.14)</div>
-        <div>Scientific environment connected to observatory hardware & processing pipelines.</div>
-        <div className="terminal-banner__cheatsheet">
-          <div><code>targets</code>: Target catalog</div>
-          <div><code>stars</code>: Stellar catalog</div>
-          <div><code>jobs</code>: Job logs & metrics</div>
-          <div><code>telescope</code>: Mount control</div>
-          <div><code>imaging</code>: Camera sequencer</div>
-          <div><code>np</code>: NumPy</div>
-          <div><code>plt</code>: Matplotlib figure Agg</div>
-          <div><code>help</code> / <code>doc(obj)</code></div>
-        </div>
-      </div>
+  /**
+   * Stops the running code on Ctrl+C, anywhere in the terminal. With text selected, Ctrl+C
+   * copies it as usual instead.
+   *
+   * @param event The key press.
+   */
+  const handlePaneKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!running || !event.ctrlKey || event.key.toLowerCase() !== 'c') return;
+    const pageSelection = window.getSelection?.()?.toString() ?? '';
+    const target = event.target as HTMLInputElement;
+    const inputSelection = target === inputRef.current && target.selectionStart !== target.selectionEnd;
+    if (pageSelection || inputSelection) return;
+    event.preventDefault();
+    onStop?.();
+  };
 
-      {(onClear || onReset) && (
-        <div className="terminal-toolbar">
-          {onClear && (
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClear();
-              }}
-              title="Clear the terminal history shown above (variables are kept)"
-            >
-              Clear
-            </Button>
-          )}
-          {onReset && (
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onReset();
-              }}
-              title="Discard console-local variables and restore built-in objects (history is kept)"
-            >
-              Reset Workspace
-            </Button>
-          )}
-        </div>
-      )}
+  return (
+    <div className="terminal-pane" onClick={() => inputRef.current?.focus()} onKeyDown={handlePaneKeyDown}>
+      <div className="terminal-intro">{TERMINAL_INTRO}</div>
 
       <div className="terminal-history" ref={scrollContainerRef}>
         {entries.map((entry) => (
@@ -183,14 +205,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             {entry.stderr && <div className="terminal-entry__stderr">{entry.stderr}</div>}
           </div>
         ))}
-        {isRunning && (
-          <div className="terminal-entry">
-            <div style={{ color: 'var(--text-dim)', fontStyle: 'italic', paddingLeft: '18px' }}>
-              Executing command...
-            </div>
-          </div>
-        )}
       </div>
+
+      {running && <RunningLine running={running} />}
 
       {completionSuggestions.length > 0 && (
         <div className="terminal-completions">
@@ -214,7 +231,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         <span className="terminal-input-bar__prompt">&gt;&gt;&gt;</span>
         <TextInput
           ref={inputRef}
-          className="terminal-input-bar__input"
+          appearance="inline"
           value={input}
           onChange={(e) => {
             setInput(e.target.value);

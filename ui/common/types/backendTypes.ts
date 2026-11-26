@@ -168,10 +168,14 @@ export interface TelescopeStatus {
 
 /**
  * The camera and optic of a target's current stack.
+ *
+ * ``label`` is the stack's configuration key, such as
+ * ``ZWO ASI 533MM Pro@405mm``.
  */
 export interface StackConfigurationRef {
   camera?: string;
   focalLengthMm?: number | null;
+  label?: string;
 }
 
 /**

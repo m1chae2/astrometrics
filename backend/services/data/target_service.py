@@ -441,8 +441,10 @@ class TargetService:
         Returns
         -------
         configuration : `dict` or `None`
-            ``camera`` and ``focalLengthMm`` (whole millimeters or `None`) of
-            the preferred stack, or of the only stack. `None` when the target
+            ``camera``, ``focalLengthMm`` (whole millimeters or `None`) and
+            ``label`` (the library's configuration key, such as
+            ``ZWO ASI 533MM Pro@405mm``) of the preferred stack, or of the
+            only stack. `None` when the target
             has no stack by configuration, or several and none preferred.
         """
         configurations = list(target.stacking.stacks_by_configuration.values())
@@ -455,6 +457,7 @@ class TargetService:
         return {
             "camera": chosen[0].camera,
             "focalLengthMm": None if focal_length is None else round(float(focal_length)),
+            "label": chosen[0].configuration_key,
         }
 
     def get_frame_statuses(self, target_id: str) -> dict:

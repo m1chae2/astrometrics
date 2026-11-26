@@ -61,6 +61,16 @@
   min-height: 48px;
 }
 
+/* A row whose name may wrap to two lines and that also has a subtitle. */
+.selectable-list__item--three-line {
+  min-height: 64px;
+}
+
+/* Wrapping rows let their text break onto more than one line. */
+.selectable-list__item--wrap {
+  white-space: normal;
+}
+
 .selectable-list__label {
   display: inline-block;
   vertical-align: middle;
@@ -82,6 +92,25 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* A name that wraps onto a second line, then is cut off with "..." after it. It
+   comes after .selectable-list__label-text so it wins over that rule's nowrap.
+   It takes the free width, so the row's badges sit at the right end. */
+.selectable-list__label-text--wrap {
+  flex: 1 1 auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Space between a row's name and a badge from the item's badges list. */
+.selectable-list__row-badge {
+  flex-shrink: 0;
+  margin-left: 6px;
 }
 
 /* Label over a smaller subtitle, for lists whose rows carry a second line. */
@@ -137,6 +166,13 @@
 .selectable-list__badge--photometry {
   background-color: var(--list-orange); /* Subtle orange for photometry to distinguish from blue spectra */
   opacity: 0.85;
+}
+
+/* Muted badge for a target that is under the horizon: dim grey text, so it reads as a note, not an alarm. */
+.selectable-list__badge--below-horizon {
+  background-color: var(--list-badge-below-horizon);
+  color: var(--text-dim);
+  font-weight: normal;
 }
 
 .selectable-list__indicator--unprocessed {

@@ -4,3 +4,13 @@
     align-items: center;
     gap: 8px;
 }
+
+/* compact: the toolbar look, a small muted name then the value, like "Display  Linear". */
+.planning-time-indicator--compact {
+    gap: var(--space-1);
+    font-size: var(--small-font-size);
+}
+
+.planning-time-indicator__name {
+    color: var(--text-muted);
+}

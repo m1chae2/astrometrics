@@ -26,19 +26,19 @@ Every button, text field, checkbox and badge in the app comes from one of these 
 | A small status or tag | `Badge.tsx` with a `tone`: ok, warning, error, info, neutral, accent or purple. With `onClick` it is a button. `StatusChip` adds an icon and a word. |
 | One choice from a list | `PopoverSelect.tsx` (no native select anywhere). |
 | A main action with a few related actions behind an arrow | `SplitButton.tsx`. The left part is a `Button` (same `variant` and `size`); the arrow opens a menu of `options` and reports the picked id. `fill` spans the container (the main part grows, the arrow keeps its width). The menu is drawn in a portal under the control, or above it near the bottom of the window, using `useAnchoredMenu.ts`, which `PopoverSelect` shares. `busy` turns both parts off. A disabled option shows its `title` as the reason. |
-| Text, password or search | `TextInput.tsx` (`width="short"` or `"fill"`, `centered`, `size="small"` for a panel header or toolbar). |
+| Text, password or search | `TextInput.tsx` (`width="short"` or `"fill"`, `centered`, `size="small"` for a panel header or toolbar, `appearance="inline"` for a field with no edge or fill that is part of a line of text, such as the Command Console's entry line). |
 | A number | `NumberInput.tsx`. It takes the same props, plus `min`, `max` and `step`. |
 | A yes or no | `Checkbox.tsx`. Pass `label`, or `aria-label` for a box with no text. |
 | A range | `Slider.tsx`. |
 | A file picker | `FileInput.tsx`. Hide it and open it from a `Button`. |
 | Two or more views | `Tabs.tsx`. |
 
-The `btn` class family lives in `Button.css`: 36px tall, 14px text and 6px corners; the small size is 24px tall with 11px text. Text fields use `.entry` (`TextInput.css`): 38px tall with 6px corners; `size="small"` makes it 24px tall with 11px text (`.entry--small`), the same height as a small button and a compact `PopoverSelect`. Badge rules live in `Badge.css`. Checkboxes, radio buttons and sliders take the theme accent color.
+The `btn` class family lives in `Button.css`: 36px tall, 14px text and 6px corners; the small size is 24px tall with 11px text. Text fields use `.entry` (`TextInput.css`): 38px tall with 6px corners; `size="small"` makes it 24px tall with 11px text (`.entry--small`), the same height as a small button and a compact `PopoverSelect`. `appearance="inline"` (`.entry--inline`) drops the edge, fill and padding and takes the font and color of the line around it. Badge rules live in `Badge.css`. Checkboxes, radio buttons and sliders take the theme accent color.
 
 ### Lint rules
 
 - ESLint (`eslint.config.js`) fails a raw `<button>`, `<input>`, `<select>` or `<textarea>` in any `.tsx` file outside this folder and the tests. It also fails a `className` that holds the word `btn` or a `btn--` modifier (use `<Button variant size>`), and an inline `style` color (`color`, `background`, `backgroundColor`, `borderColor`, `fill` or `stroke`) that starts with `#`, `rgb` or `hsl`. Use a CSS class with theme tokens from `ui/common/styles/theme.css` instead.
-- Stylelint (`build/stylelint/selector-ownership.mjs`) gives each control's classes to one stylesheet: `.btn*` and `.btn-ghost*` to `Button.css`, `.tabs*` to `sharedComponents.css`, `.badge*` and `.status-chip*` to `Badge.css`, `.popover-select*` to `popoverSelect.css`, `.split-button*` to `splitButton.css`, `.entry*` to `TextInput.css` and `.checkbox*` to `Checkbox.css`. Any other stylesheet that names them, even in a descendant selector such as `.panel .btn`, fails, and so does a legacy one. To change a control for one screen, use a prop (`fit`, `truncate` and `fullWidth` on `Button`, `fill` on `PopoverSelect`, `width` on `TextInput`) or add a prop here. Give a layout `className` to the component and style that class instead.
+- Stylelint (`build/stylelint/selector-ownership.mjs`) gives each control's classes to one stylesheet: `.btn*` and `.btn-ghost*` to `Button.css`, `.tabs*` to `sharedComponents.css`, `.badge*` and `.status-chip*` to `Badge.css`, `.popover-select*` to `popoverSelect.css`, `.split-button*` to `splitButton.css`, `.entry*` to `TextInput.css`, `.checkbox*` to `Checkbox.css` and `.collapsible-column*` to `collapsibleColumn.css`. Any other stylesheet that names them, even in a descendant selector such as `.panel .btn`, fails, and so does a legacy one. To change a control for one screen, use a prop (`fit`, `truncate` and `fullWidth` on `Button`, `fill` on `PopoverSelect`, `width` and `appearance` on `TextInput`) or add a prop here. Give a layout `className` to the component and style that class instead.
 
 ### Allowed raw elements
 
@@ -46,7 +46,7 @@ These are the only raw controls. All of them are inside `ui/common/components/`,
 
 - The component files themselves: `Button.tsx`, `TextInput.tsx`, `Checkbox.tsx`, `Slider.tsx` and `FileInput.tsx` render the native element.
 - `Tabs.tsx` (a tab is a native button with `role="tab"` and its own arrow-key handling), `PopoverSelect.tsx` (its trigger and menu entries), `SplitButton.tsx` (its menu entries) and `InfoButton.tsx` (its trigger, which owns focus and the hover text): their look is a tab, a menu row or an info mark, not a regular button.
-- `SelectableList.tsx` draws one radio input per row. A list can hold thousands of rows, so each row is kept as light as possible.
+- `SelectableList.tsx` draws one radio input per row. A list can hold thousands of rows, so each row is kept as light as possible. A row can carry its own small badges (`badges`, drawn with `Badge`), and `wrapLabels` lets long names wrap onto two lines; every row then gets the taller height so the rows stay evenly spaced.
 
 ## Loading
 
@@ -61,6 +61,7 @@ Every panel on every display loads the same way, with `Skeleton.tsx`: grey place
 ## Other components
 
 - `SectionPanel.tsx`, `GenericDisplayLayout.tsx` and `TabView.tsx` lay out the displays.
+- `CollapsibleColumn.tsx` folds a display's left column to a thin strip with its title running down it and the selected item under it, such as "Targets" and "M 31". An optional second item, such as the star picked in the target's star list, follows the first ("Albireo · HD 338506"); a long note ends in an ellipsis, and the strip's hover text holds all of it. Clicking the strip, or pressing Enter on it, opens the column again. While the strip shows, `collapsibleColumn.css` narrows the display's left grid column, so the rest of the screen gets the room. `useCollapsibleColumn(key)` remembers the choice for this viewer. Image Processing and the Image Viewer get it through `RadioListManager`; the Astronomy Manager and the Planetarium wrap their whole column in it.
 - `BaseModal.tsx`, `ConfirmDialog.tsx`, `AddTargetModal.tsx`, `FitsHeaderModal.tsx` and `IngestFramesModal.tsx` are dialogs.
 - `SelectableList.tsx`, `ListActions.tsx` and `Popover.tsx` are controls.
 - `PopoverSelect.tsx` is the shared single-choice picker. It takes a label, a list of `{id, label, detail?}` and the picked id. Pass `emptyLabel` to add a first "nothing picked" choice that reports `null`. It is our own menu, so it follows the dark theme, unlike a native select. Use it instead of a native select: no screen in the app uses one now. `disabled` dims it, `size="compact"` makes a small toolbar-size button, and `placement="above"` opens the menu upward for a picker at the bottom of a panel. `SessionPicker.tsx` is `PopoverSelect` with a "Live" first choice. The Planetarium toolbar and the Observatory Manager use it.

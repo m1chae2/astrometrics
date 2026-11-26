@@ -94,3 +94,41 @@ describe('PopoverSelect menu placement', () => {
         expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
     });
 });
+
+describe('PopoverSelect compact menu', () => {
+    /** A compact picker opens the compact menu, with one heading per group. */
+    it('uses the compact menu and lists group headings', async () => {
+        const user = userEvent.setup();
+        render(
+            <PopoverSelect
+                label="Session"
+                size="compact"
+                emptyLabel="No Session Selected"
+                emptyGroup="Selection"
+                options={[
+                    { id: 'all', label: 'All Sessions', group: 'Selection' },
+                    { id: 'n1', label: '2026-11-04', group: 'Nights' },
+                    { id: 'n2', label: '2026-11-03', group: 'Nights' },
+                ]}
+                selectedId={null}
+                onSelect={() => undefined}
+            />,
+        );
+        await user.click(screen.getByRole('button', { name: 'Session: No Session Selected' }));
+        const menu = screen.getByRole('group', { name: 'Session' });
+        expect(menu.className).toContain('popover-select__menu--compact');
+        expect(Array.from(menu.children).map((child) => child.textContent)).toEqual([
+            'Selection', 'No Session Selected', 'All Sessions', 'Nights', '2026-11-04', '2026-11-03',
+        ]);
+    });
+
+    /** A regular picker keeps the regular menu and has no headings without groups. */
+    it('keeps the regular menu for a regular picker', async () => {
+        const user = userEvent.setup();
+        render(<PopoverSelect label="Camera" options={[{ id: 'a', label: 'A' }]} selectedId="a" onSelect={() => undefined} />);
+        await user.click(screen.getByRole('button', { name: 'Camera: A' }));
+        const menu = screen.getByRole('group', { name: 'Camera' });
+        expect(menu.className).not.toContain('popover-select__menu--compact');
+        expect(menu.querySelector('.popover-select__group')).toBeNull();
+    });
+});

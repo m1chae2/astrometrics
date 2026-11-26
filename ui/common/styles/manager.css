@@ -18,6 +18,14 @@
   margin-bottom: 8px;
 }
 
+/* A row of small controls (such as filter and sort pickers) under the search box. */
+.manager__filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* SelectableList styles when used inside SectionPanel */
 .manager__list-panel .panel__content {
   display: flex;
@@ -37,15 +45,7 @@
   flex: 0 0 auto;
 }
 
-/* A folded column is a thin strip, and the display's grid gives it only that much width. */
-.manager--collapsed {
-  width: 100%;
-  max-width: none;
-}
-
-.layout:has(.manager--collapsed) {
-  --layout-left-col-width: 36px;
-}
+/* A folded column is drawn by CollapsibleColumn (collapsibleColumn.css). */
 
 .manager__list {
   /* main list panel */

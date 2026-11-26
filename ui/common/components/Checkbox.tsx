@@ -6,7 +6,7 @@
 import React from 'react';
 import './Checkbox.css';
 
-export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
+export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
     /**
      * The visible label. The box sits inside the label, so a click on the text toggles it. Leave it
      * out for a box with no text, such as a table row selector, and then pass `aria-label`.
@@ -14,6 +14,8 @@ export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputE
     label?: React.ReactNode;
     /** A layout-only class. It goes on the label when there is one, otherwise on the box. */
     className?: string;
+    /** "regular" (the default), or "compact": a smaller box and the toolbar's small text, for toolbars. */
+    size?: 'regular' | 'compact';
 }
 
 /**
@@ -22,8 +24,9 @@ export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputE
  * @return The label with the box inside it, or the bare box when there is no label.
  */
 export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(({
-    label, className, disabled, ...nativeProps
+    label, className, disabled, size = 'regular', ...nativeProps
 }, ref) => {
+    const sizeClass = size === 'compact' ? ' checkbox--compact' : '';
     if (label === undefined || label === null) {
         return (
             <input
@@ -31,12 +34,12 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(({
                 ref={ref}
                 type="checkbox"
                 disabled={disabled}
-                className={`checkbox__input${className ? ` ${className}` : ''}`}
+                className={`checkbox__input${size === 'compact' ? ' checkbox__input--compact' : ''}${className ? ` ${className}` : ''}`}
             />
         );
     }
     return (
-        <label className={`checkbox${disabled ? ' checkbox--disabled' : ''}${className ? ` ${className}` : ''}`}>
+        <label className={`checkbox${sizeClass}${disabled ? ' checkbox--disabled' : ''}${className ? ` ${className}` : ''}`}>
             <input {...nativeProps} ref={ref} type="checkbox" disabled={disabled} className="checkbox__input" />
             <span className="checkbox__label">{label}</span>
         </label>

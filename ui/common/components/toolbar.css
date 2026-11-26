@@ -1,0 +1,39 @@
+/*
+ * Styles of Toolbar: one text size, even gaps and thin dividers for a row of
+ * compact controls. The label matches the FITS Viewer's "Display" label.
+ */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--small-font-size);
+}
+
+.toolbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The small muted word before a control, such as "Session". */
+.toolbar__label {
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.toolbar__value {
+  font-size: var(--small-font-size);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.toolbar__divider {
+  width: 1px;
+  height: 16px;
+  background: color-mix(in srgb, var(--white) 12%, transparent);
+}

@@ -37,6 +37,20 @@
     padding: 0;
 }
 
+/* A small control (such as a Back button) and the title, kept together at the left of the title row. */
+.panel__header-start {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.panel__header-start > .panel__title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .panel--no-padding > .panel__header {
     padding: 10px 12px 8px 12px;
     margin: 0;

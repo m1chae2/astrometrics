@@ -10,6 +10,8 @@ export interface RadioListFilteringProps {
     filterText: string;
     onFilterTextChange: (text: string) => void;
     placeholder?: string;
+    /** Optional row of small controls shown under the search box, such as filter and sort pickers. */
+    filterRow?: React.ReactNode;
 }
 
 /**
@@ -22,7 +24,15 @@ export const RadioListFiltering: React.FC<RadioListFilteringProps> = ({
     filterText,
     onFilterTextChange,
     placeholder = 'Enter name or ID...',
+    filterRow,
 }) => {
+    const searchBox = (
+        <TextInput
+            placeholder={placeholder}
+            value={filterText}
+            onChange={(e) => onFilterTextChange(e.target.value)}
+        />
+    );
     return (
         <div className="manager__filter">
             {options.length > 0 && (
@@ -33,11 +43,8 @@ export const RadioListFiltering: React.FC<RadioListFilteringProps> = ({
                     onSelect={(picked) => { if (picked !== null) onOptionChange(picked); }}
                 />
             )}
-            <TextInput
-                placeholder={placeholder}
-                value={filterText}
-                onChange={(e) => onFilterTextChange(e.target.value)}
-            />
+            {searchBox}
+            {filterRow && <div className="manager__filter-row">{filterRow}</div>}
         </div>
     );
 };

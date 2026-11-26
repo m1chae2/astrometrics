@@ -49,6 +49,8 @@ export const OWNERSHIP = [
     match: (name) => /^(skeleton|panel-body|updating-bar)($|--|__)/.test(name) },
   { component: 'Checkbox', ownerFile: 'ui/common/components/Checkbox.css',
     match: (name) => /^checkbox($|--|__)/.test(name) },
+  { component: 'CollapsibleColumn', ownerFile: 'ui/common/components/collapsibleColumn.css',
+    match: (name) => /^collapsible-column($|--|__)/.test(name) },
 ];
 
 /**

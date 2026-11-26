@@ -21,6 +21,11 @@ export interface PopoverSelectOption {
     detail?: string;
     /** A tooltip that explains the choice. Optional. It also becomes the button's tooltip while the choice is picked. */
     title?: string;
+    /**
+     * A small heading the entry is listed under, such as "Nights". Entries in a row with the same
+     * group share one heading. Optional; with no groups the menu has no headings.
+     */
+    group?: string;
 }
 
 export interface PopoverSelectProps {
@@ -37,13 +42,18 @@ export interface PopoverSelectProps {
      * that always has a pick. It is also the button text while `selectedId` is null.
      */
     emptyLabel?: string;
+    /** The heading the empty choice is listed under, when the menu has headings. Optional. */
+    emptyGroup?: string;
     /** The button text when nothing is picked and there is no empty choice. Defaults to "Choose". */
     placeholder?: string;
     /** Extra class names for the outer element, for layout. */
     className?: string;
     /** True to dim the button and stop it opening the menu. */
     disabled?: boolean;
-    /** "regular" (the default) matches `.entry`; "compact" is a small button for toolbars. */
+    /**
+     * "regular" (the default) matches `.entry`; "compact" is a small button for toolbars, with a
+     * compact menu (small text, tight rows) like the toolbars' other menus.
+     */
     size?: 'regular' | 'compact';
     /** Where the menu opens: "below" (the default) or "above" the button, for pickers at the bottom of a panel. */
     placement?: 'below' | 'above';
@@ -65,6 +75,7 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
     selectedId,
     onSelect,
     emptyLabel,
+    emptyGroup,
     placeholder = 'Choose',
     className = '',
     disabled = false,
@@ -85,7 +96,7 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
     const menu = isOpen && (
         <div
             ref={menuRef}
-            className={`popover-select__menu${fill ? ' popover-select__menu--fill' : ''}`}
+            className={`popover-select__menu${fill ? ' popover-select__menu--fill' : ''}${size === 'compact' ? ' popover-select__menu--compact' : ''}`}
             role="group"
             aria-label={label}
             style={{
@@ -101,6 +112,9 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
                 }
             }}
         >
+            {emptyLabel !== undefined && emptyGroup && (
+                <div className="popover-select__group" aria-hidden="true">{emptyGroup}</div>
+            )}
             {emptyLabel !== undefined && (
                 <button
                     type="button"
@@ -111,10 +125,17 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
                     {emptyLabel}
                 </button>
             )}
-            {options.map((option) => (
+            {options.map((option, index) => {
+                // A heading goes before the first entry of each group.
+                const previousGroup = index === 0
+                    ? (emptyLabel !== undefined ? emptyGroup : undefined)
+                    : options[index - 1].group;
+                const heading = option.group && option.group !== previousGroup ? option.group : null;
+                return (
+                <React.Fragment key={option.id}>
+                {heading && <div className="popover-select__group" aria-hidden="true">{heading}</div>}
                 <button
                     type="button"
-                    key={option.id}
                     className={`popover-select__option${selectedId === option.id ? ' popover-select__option--selected' : ''}`}
                     aria-pressed={selectedId === option.id}
                     title={option.title}
@@ -125,7 +146,9 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
                         <span className="popover-select__detail" title={option.detail}>{option.detail}</span>
                     )}
                 </button>
-            ))}
+                </React.Fragment>
+                );
+            })}
         </div>
     );
 

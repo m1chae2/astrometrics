@@ -8,6 +8,8 @@ export interface SectionPanelProps {
     children: React.ReactNode;
     className?: string;
     headerContent?: React.ReactNode;
+    /** Optional small control shown before the title, at the left end of the title row, such as a Back button. */
+    headerStart?: React.ReactNode;
     id?: string;
     style?: React.CSSProperties;
     fullHeight?: boolean;
@@ -43,6 +45,7 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
     children,
     className = '',
     headerContent,
+    headerStart,
     id,
     style,
     fullHeight = false,
@@ -68,17 +71,23 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
             </div>
         );
     }
+    const titleNode = onTitleClick ? (
+        <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-expanded={true}>
+            {title}
+        </Button>
+    ) : (
+        <span className="panel__title-text">{title}</span>
+    );
     return (
         <div id={id} className={`panel ${fullHeightClass} ${className}`} style={style}>
             {(title || headerContent) && (
                 <div className="panel__header">
-                    {onTitleClick ? (
-                        <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-expanded={true}>
-                            {title}
-                        </Button>
-                    ) : (
-                        <span>{title}</span>
-                    )}
+                    {headerStart ? (
+                        <span className="panel__header-start">
+                            {headerStart}
+                            {titleNode}
+                        </span>
+                    ) : titleNode}
                     {headerContent}
                 </div>
             )}

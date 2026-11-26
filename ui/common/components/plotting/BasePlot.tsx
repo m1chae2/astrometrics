@@ -149,5 +149,21 @@ export const BasePlot: React.FC<BasePlotProps> = ({
         }
     }, [data, layout, config, onClick]);
 
+    // Redraw to the container's size whenever it changes, for example when a side column of the
+    // display folds or unfolds. Plotly only follows the window's size on its own.
+    useEffect(() => {
+        const node = plotRef.current;
+        if (!node || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => {
+            enqueue('Plotly.Plots.resize', () => {
+                const P = plotlyRef.current;
+                if (!P || node.clientWidth === 0 || node.clientHeight === 0) return;
+                return P.Plots?.resize(node) as Promise<unknown> | void;
+            });
+        });
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, []);
+
     return <div ref={plotRef} style={style} className={className} data-testid={testId} />;
 };

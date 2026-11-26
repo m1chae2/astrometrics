@@ -54,10 +54,10 @@ describe('collapsible target column', () => {
         render(<Harness persist={false} />);
         screen.getByTitle('Hide target list').focus();
         await userEvent.keyboard('{Enter}');
-        expect(document.querySelector('.manager--collapsed')).not.toBeNull();
+        expect(document.querySelector('.collapsible-column--collapsed')).not.toBeNull();
         screen.getByTitle('Show target list').focus();
         await userEvent.keyboard('{Enter}');
-        expect(document.querySelector('.manager--collapsed')).toBeNull();
+        expect(document.querySelector('.collapsible-column--collapsed')).toBeNull();
     });
 
     it('remembers the folded state', async () => {

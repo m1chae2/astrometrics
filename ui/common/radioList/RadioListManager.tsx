@@ -2,6 +2,7 @@ import React from 'react';
 import { SelectableList, SelectableItem } from '../components/SelectableList';
 import { RadioListFiltering } from './RadioListFiltering';
 import { SectionPanel } from '../components/SectionPanel';
+import { CollapsibleColumn } from '../components/CollapsibleColumn';
 import '../styles/manager.css';
 import { Button } from '../components/Button';
 
@@ -19,6 +20,8 @@ export interface RadioListManagerProps {
     filterText?: string;
     onFilterTextChange?: (text: string) => void;
     filterPlaceholder?: string;
+    /** Optional row of small controls shown under the search box, such as filter and sort pickers. */
+    filterRow?: React.ReactNode;
 
     // Actions
     actions?: React.ReactNode;
@@ -43,6 +46,10 @@ export interface RadioListManagerProps {
     legend?: React.ReactNode;
     noWrapper?: boolean;
     title?: string;
+    /** Optional small control shown at the right end of the list panel's title row, such as a filter checkbox. */
+    headerContent?: React.ReactNode;
+    /** Optional small control shown before the list panel's title, such as a Back button. */
+    headerStart?: React.ReactNode;
     actionsTitle?: string;
 
     /** Whether `items` is still being fetched, for the empty-state message. */
@@ -72,6 +79,7 @@ export interface RadioListManagerProps {
 }
 
 const noopOptionChange = (): void => {};
+const noopCollapsedChange = (): void => {};
 
 /**
  * Generic Manager component that orchestrates filtering, list display, and actions.
@@ -88,6 +96,7 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     filterText = '',
     onFilterTextChange,
     filterPlaceholder,
+    filterRow,
     actions,
     topPanel,
     topPanelTitle = 'Filter',
@@ -100,6 +109,8 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     legend,
     noWrapper = false,
     title = 'List',
+    headerContent,
+    headerStart,
     actionsTitle = 'Controls',
     isLoading,
     loadingMessage,
@@ -123,6 +134,7 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                     filterText={filterText}
                     onFilterTextChange={onFilterTextChange}
                     placeholder={filterPlaceholder}
+                    filterRow={filterRow}
                 />
             )}
 
@@ -186,56 +198,48 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
         );
     }
 
-    if (onCollapsedChange && collapsed) {
-        // A thin strip: clicking it, or tabbing to it and pressing Enter, shows the column again.
-        const stripTitle = topPanel ? topPanelTitle : title;
-        const selectedLabel = items.find((item) => item.id === selectedId)?.label;
-        const fullStripLabel = selectedLabel ? `${stripTitle}, ${selectedLabel}` : stripTitle;
-        return (
-            <div className={`manager manager--collapsed panel-group ${className}`}>
-                <SectionPanel
-                    title={stripTitle}
-                    collapsedNote={selectedLabel}
-                    collapsed="right"
-                    onTitleClick={() => onCollapsedChange(false)}
-                    titleButtonLabel={selectedLabel ? fullStripLabel : showLabel}
-                    collapsedAriaLabel={selectedLabel ? fullStripLabel : undefined}
-                >
-                    {null}
-                </SectionPanel>
-            </div>
-        );
-    }
-
+    const stripTitle = topPanel ? topPanelTitle : title;
+    const selectedLabel = items.find((item) => item.id === selectedId)?.label;
     return (
-        <div className={`manager panel-group ${className}`}>
-            {topPanel && (
+        <CollapsibleColumn
+            collapsed={!!onCollapsedChange && collapsed}
+            onCollapsedChange={onCollapsedChange ?? noopCollapsedChange}
+            stripTitle={stripTitle}
+            selectedLabel={selectedLabel}
+            showLabel={showLabel}
+            className={className}
+        >
+            <div className={`manager panel-group ${className}`}>
+                {topPanel && (
+                    <SectionPanel
+                        title={topPanelTitle}
+                        className="flex-auto manager__top-panel"
+                        onTitleClick={onCollapsedChange ? () => onCollapsedChange(true) : undefined}
+                        titleButtonLabel={hideLabel}
+                    >
+                        {topPanel}
+                    </SectionPanel>
+                )}
+
                 <SectionPanel
-                    title={topPanelTitle}
-                    className="flex-auto manager__top-panel"
-                    onTitleClick={onCollapsedChange ? () => onCollapsedChange(true) : undefined}
+                    title={title}
+                    className="flex-fill flex-col manager__list-panel"
+                    onTitleClick={onCollapsedChange && !topPanel ? () => onCollapsedChange(true) : undefined}
                     titleButtonLabel={hideLabel}
+                    headerContent={headerContent}
+                    headerStart={headerStart}
                 >
-                    {topPanel}
+                    {content}
                 </SectionPanel>
-            )}
 
-            <SectionPanel
-                title={title}
-                className="flex-fill flex-col manager__list-panel"
-                onTitleClick={onCollapsedChange && !topPanel ? () => onCollapsedChange(true) : undefined}
-                titleButtonLabel={hideLabel}
-            >
-                {content}
-            </SectionPanel>
-
-            {actions && (
-                <SectionPanel title={actionsTitle} className="flex-auto manager__actions-panel">
-                    <div className="manager__actions">
-                        {actions}
-                    </div>
-                </SectionPanel>
-            )}
-        </div>
+                {actions && (
+                    <SectionPanel title={actionsTitle} className="flex-auto manager__actions-panel">
+                        <div className="manager__actions">
+                            {actions}
+                        </div>
+                    </SectionPanel>
+                )}
+            </div>
+        </CollapsibleColumn>
     );
 };

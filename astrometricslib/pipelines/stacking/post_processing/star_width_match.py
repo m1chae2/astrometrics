@@ -66,7 +66,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
+from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
 
 logger = logging.getLogger(__name__)
 
@@ -357,12 +357,10 @@ def _find_measurable_stars(image: np.ndarray) -> np.ndarray:
     )
     outer = float(resolve(STAR_WIDTH_MATCH_RADII_PIXELS).value[2])
     green = image[1]
-    sample = green[::4, ::4]
-    sample = sample[np.isfinite(sample) & (sample > 0.0)]
-    if sample.size < 100:
+    measured_sky = measure_sky_background(np.asarray(green, dtype=np.float64))
+    if measured_sky is None:
         return np.empty((0, 2))
-    sky = float(np.median(sample))
-    noise = float(robust_sigma(sample))
+    sky, noise = measured_sky
     if not noise > 0.0:
         return np.empty((0, 2))
     finder = DAOStarFinder(fwhm=finder_width, threshold=peak_sigmas * noise, exclude_border=True)

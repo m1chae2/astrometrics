@@ -45,6 +45,7 @@ from typing import Any
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.catalog_queries import OverlayStar
 from astrometricslib.models.stellar_source import StellarObject, has_catalog_magnitude
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.session_identification import header_is_plate_solved
 from astrometricslib.pipelines.shared.star_catalog_queries import (
     POSITION_ONLY_STAR_ID_PREFIX,
@@ -143,8 +144,6 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
     """
     if not image_path or not str(image_path).lower().endswith(FITS_SUFFIXES):
         return None, None, None, None
-    from astropy.wcs import WCS
-
     width = height = wcs = None
     try:
         header = read_header(image_path)
@@ -156,14 +155,11 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
     if header.get("NAXIS2") is not None:
         height = int(header["NAXIS2"])
     reason = None
-    try:
-        candidate = WCS(header, naxis=2)
-        if candidate.is_celestial and header_is_plate_solved(header):
-            wcs = candidate
-        elif candidate.is_celestial:
-            reason = POINTING_ONLY_REASON
-    except DATA_ERRORS:
-        wcs = None
+    candidate = celestial_wcs(header)
+    if candidate is not None and header_is_plate_solved(header):
+        wcs = candidate
+    elif candidate is not None:
+        reason = POINTING_ONLY_REASON
     return width, height, wcs, reason
 
 

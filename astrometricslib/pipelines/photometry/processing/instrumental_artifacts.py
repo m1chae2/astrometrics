@@ -47,6 +47,7 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     SKY_ANNULUS_OUTER_RADIUS_PX,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 __all__ = [
     "MINIMUM_UNSATURATED_FRACTION",
@@ -188,10 +189,6 @@ _MINIMUM_FRAMES_PER_GROUP = 3
 # sqrt(pi / 2) = 1.2533 times that of their mean.
 _MEDIAN_STANDARD_ERROR_FACTOR = 1.2533
 
-# 1.4826 times the median absolute deviation estimates the standard
-# deviation of normally distributed values.
-_MAD_TO_SIGMA = 1.4826
-
 
 def registration_step_threshold_px(frame_shifts_px: Sequence[tuple[float, float]]) -> float:
     """Find how large a change of the frame shift counts as a step.
@@ -220,7 +217,7 @@ def registration_step_threshold_px(frame_shifts_px: Sequence[tuple[float, float]
     shifts = np.asarray(frame_shifts_px, dtype=float)
     changes = np.hypot(np.diff(shifts[:, 0]), np.diff(shifts[:, 1]))
     median = float(np.median(changes))
-    spread = _MAD_TO_SIGMA * float(np.median(np.abs(changes - median)))
+    spread = robust_sigma(changes)
     return float(max(minimum_px, median + sigmas * spread))
 
 
@@ -362,7 +359,7 @@ def field_step_summary(
         if len(jumps) < _STEP_FIELD_MINIMUM_STARS:
             continue
         median = float(np.median(jumps))
-        spread = _MAD_TO_SIGMA * float(np.median(np.abs(np.asarray(jumps) - median)))
+        spread = robust_sigma(jumps)
         summary[timestamp] = (median, spread)
     return summary
 
@@ -461,7 +458,9 @@ def step_artifact_reason(
     ]
     if not residuals:
         return None
-    scatter = max(_MAD_TO_SIGMA * float(np.median(np.abs(np.concatenate(residuals)))), 1.0e-6)
+    # Each group's residuals are already about its own median, so the spread
+    # is taken about zero rather than about their joint median.
+    scatter = max(MAD_TO_SIGMA * float(np.median(np.abs(np.concatenate(residuals)))), 1.0e-6)
     total = float(np.sum((levels - levels.mean()) ** 2))
     if total <= 0.0:
         return None

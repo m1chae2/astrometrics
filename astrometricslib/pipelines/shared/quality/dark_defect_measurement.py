@@ -61,6 +61,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_DARK_OUTLIER_COUNT,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -369,8 +370,7 @@ def measure_dark_defects(
     if data.shape != reference.shape:
         raise ValueError("the frame and its set's reference differ in size")
     residual = data - reference
-    # 1.4826 turns the median absolute deviation into a standard deviation.
-    spread = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    spread = robust_sigma(residual)
     value_step = measure_value_step(data)
     # The last term (1 ADU) only matters for a frame with no read noise, no
     # spread and no value step.

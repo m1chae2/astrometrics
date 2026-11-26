@@ -422,13 +422,9 @@ def _extract_frame_spectra(
         wcs = frame_image.wcs if frame_image.wcs is not None and frame_image.wcs.is_celestial else None
 
         if wcs is None and session_wcs_header is not None:
-            import warnings
+            from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 
-            from astropy.wcs import WCS, FITSFixedWarning
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", FITSFixedWarning)
-                wcs = WCS(session_wcs_header, naxis=2)
+            wcs = celestial_wcs(session_wcs_header)
 
         if wcs is None:
             return _fallback_or_skip(catalog_access, target_id, path, result, follow_only)

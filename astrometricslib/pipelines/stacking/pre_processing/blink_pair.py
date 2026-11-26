@@ -53,6 +53,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.frame_identity import frame_subject_id
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +173,7 @@ def choose_typical_path(
             spreads.append(1.0)
             continue
         middle = statistics.median(column)
-        spread = 1.4826 * statistics.median(abs(value - middle) for value in column)
+        spread = robust_sigma(column)
         centers.append(middle)
         spreads.append(spread if spread > 0 else 1.0)
 

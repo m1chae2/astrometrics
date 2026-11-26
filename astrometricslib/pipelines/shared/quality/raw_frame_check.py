@@ -42,6 +42,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.saturation import resolve_saturation_threshold
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -545,7 +546,7 @@ def measure_sky_grid(image: np.ndarray, cells_per_side: int | None = None) -> np
             ].ravel()
             for _ in range(SKY_GRID_CLIP_PASSES):
                 centre = np.median(values)
-                spread = 1.4826 * np.median(np.abs(values - centre))
+                spread = robust_sigma(values)
                 kept = values[values <= centre + clip_sigmas * max(spread, 1e-6)]
                 if len(kept) == len(values):
                     break

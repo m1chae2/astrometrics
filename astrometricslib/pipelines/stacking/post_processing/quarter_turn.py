@@ -48,6 +48,7 @@ from astrometricslib._internal.drivers.fits_access import (
     update_first_header,
     write_image,
 )
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.session_identification import (
     header_is_plate_solved,
     put_wcs_in_header,
@@ -359,10 +360,10 @@ def registration_grid_header(header: fits.Header) -> fits.Header:
     degrees = read_quarter_turn(header) or 0
     if not degrees:
         return header
+    wcs = celestial_wcs(header)
+    if wcs is None:
+        return header
     try:
-        wcs = WCS(header, naxis=2)
-        if not wcs.has_celestial:
-            return header
         original = registration_grid_wcs(wcs, degrees, int(header["NAXIS1"]), int(header["NAXIS2"]))
     except ValueError, KeyError:
         return header
@@ -545,8 +546,8 @@ def apply_quarter_turn(stack_path: str) -> QuarterTurnResult | None:
         if data is None:
             return None
         height, width = np.asarray(data).shape[-2:]
-        wcs = WCS(header, naxis=2)
-        if not wcs.has_celestial:
+        wcs = celestial_wcs(header)
+        if wcs is None:
             return None
         top_down = str(header.get("ROWORDER", "")).upper() == "TOP-DOWN"
         before = up_angle_degrees(wcs, top_down=top_down)

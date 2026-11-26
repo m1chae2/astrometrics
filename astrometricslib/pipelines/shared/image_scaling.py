@@ -18,6 +18,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,6 @@ _AUTOSTRETCH_TARGET_BACKGROUND = TunedParameter(
 # is arbitrary.
 _PERCENTILE_SAMPLE_COUNT = 10000
 PREVIEW_SAMPLE_SEED = 20261010
-
-# MAD -> standard deviation for normally-distributed data (1 / Phi^-1(3/4)).
-# A fixed astronomical/statistical constant, not a tuned parameter.
-_MAD_TO_SIGMA = 1.4826
 
 # The three remaining numbers of Siril's autostretch, adopted from
 # `find_linked_midtones_balance` in `src/filters/mtf.c` (read 2026-11-22), not
@@ -256,7 +253,7 @@ def _clipped_median_and_sigma(values: np.ndarray) -> tuple[float, float] | None:
         if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
             return None
         middle = float(np.median(kept))
-        sigma = float(np.median(np.abs(kept - middle))) * _MAD_TO_SIGMA
+        sigma = robust_sigma(kept)
         if not sigma > 0.0:
             return None
         clipped = kept[np.abs(kept - middle) <= clip_sigmas * sigma]
@@ -266,6 +263,41 @@ def _clipped_median_and_sigma(values: np.ndarray) -> tuple[float, float] | None:
     if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
         return None
     return middle, sigma
+
+
+def _sky_sample(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Sample an image on a sparse grid, each pixel with a partner nearby.
+
+    Parameters
+    ----------
+    arr : `numpy.ndarray`
+        The image, 2-D.
+
+    Returns
+    -------
+    sample : `tuple` [`numpy.ndarray`, `numpy.ndarray`] or `None`
+        The sampled pixels and their partners, `_SKY_NEIGHBOR_SPACING_PIXELS`
+        columns to the right, both 1-D and `float64`. Pixels that are not
+        finite or are numerical dust (smaller than a tiny fraction of the
+        brightest pixel, as in empty registration borders) are left out, in
+        both arrays together. `None` when the image is not 2-D or too small.
+    """
+    if arr.ndim != 2 or arr.size == 0:
+        return None
+    peak = float(np.nanmax(arr))
+    if not np.isfinite(peak):
+        return None
+    spacing = int(resolve(_SKY_NEIGHBOR_SPACING_PIXELS).value)
+    step = max(1, int(np.sqrt(arr.size / _AUTOSTRETCH_SKY_SAMPLE_COUNT)))
+    rows = np.arange(step // 2, arr.shape[0], step)
+    columns = np.arange(step // 2, arr.shape[1] - spacing, step)
+    if rows.size == 0 or columns.size == 0:
+        return None
+    sample = arr[np.ix_(rows, columns)].astype(np.float64)
+    partner = arr[np.ix_(rows, columns + spacing)].astype(np.float64)
+    dust = peak * resolve(_AUTOSTRETCH_DUST_FRACTION_OF_PEAK).value
+    usable = np.isfinite(sample) & np.isfinite(partner) & (np.abs(sample) > dust) & (np.abs(partner) > dust)
+    return sample[usable], partner[usable]
 
 
 def measure_sky_background(arr: np.ndarray) -> tuple[float, float] | None:
@@ -293,26 +325,43 @@ def measure_sky_background(arr: np.ndarray) -> tuple[float, float] | None:
         brightest one are numerical dust (empty registration borders) and are
         left out.
     """
-    if arr.ndim != 2 or arr.size == 0:
+    sampled = _sky_sample(arr)
+    if sampled is None:
         return None
-    peak = float(np.nanmax(arr))
-    if not np.isfinite(peak):
-        return None
-    spacing = int(resolve(_SKY_NEIGHBOR_SPACING_PIXELS).value)
-    step = max(1, int(np.sqrt(arr.size / _AUTOSTRETCH_SKY_SAMPLE_COUNT)))
-    rows = np.arange(step // 2, arr.shape[0], step)
-    columns = np.arange(step // 2, arr.shape[1] - spacing, step)
-    if rows.size == 0 or columns.size == 0:
-        return None
-    sample = arr[np.ix_(rows, columns)].astype(np.float64)
-    partner = arr[np.ix_(rows, columns + spacing)].astype(np.float64)
-    dust = peak * resolve(_AUTOSTRETCH_DUST_FRACTION_OF_PEAK).value
-    usable = np.isfinite(sample) & np.isfinite(partner) & (np.abs(sample) > dust) & (np.abs(partner) > dust)
-    from_sample = _clipped_median_and_sigma(sample[usable])
-    from_differences = _clipped_median_and_sigma((partner - sample)[usable])
+    sample, partner = sampled
+    from_sample = _clipped_median_and_sigma(sample)
+    from_differences = _clipped_median_and_sigma(partner - sample)
     if from_sample is None or from_differences is None:
         return None
     return from_sample[0], from_differences[1] / float(np.sqrt(2.0))
+
+
+def measure_smoothed_sky_background(arr: np.ndarray) -> tuple[float, float] | None:
+    """Measure the sky's level and the spread of its pixel values.
+
+    The sibling of `measure_sky_background` for an image whose neighboring
+    pixels are alike, such as a median-filtered image. There, the difference
+    of two pixels a few columns apart cancels most of the noise, so the
+    noise from differences would read far too low. This function takes the
+    same grid sample and the same clipping, but its spread is that of the
+    sampled pixel values themselves.
+
+    Parameters
+    ----------
+    arr : `numpy.ndarray`
+        The image, 2-D.
+
+    Returns
+    -------
+    sky : `tuple` [`float`, `float`] or `None`
+        The sky level and the spread of the sky's pixel values (one standard
+        deviation). `None` when the image is not 2-D or the sky cannot be
+        measured.
+    """
+    sampled = _sky_sample(arr)
+    if sampled is None:
+        return None
+    return _clipped_median_and_sigma(sampled[0])
 
 
 def sky_level_for_peak(normalized_median: float, normalized_peak: float, peak_brightness: float) -> float:
@@ -506,7 +555,7 @@ def _channel_median_and_spread(channel: np.ndarray, full_scale: float) -> tuple[
     if values.size == 0:
         return None
     median = float(np.median(values))
-    spread = float(np.median(np.abs(values - median))) / full_scale * _MAD_TO_SIGMA
+    spread = float(np.median(np.abs(values - median))) / full_scale * MAD_TO_SIGMA
     if not spread > 0.0:
         spread = resolve(_AUTOSTRETCH_ZERO_SPREAD_GUARD).value
     return median / full_scale, spread

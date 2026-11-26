@@ -332,3 +332,23 @@ def test_a_single_frame_gets_no_solved_star_list(tmp_path: Path) -> None:
 
     assert not save_solved_stars(str(frame_path), [_star("HD 1", 1.0, 1.0, ["Albireo"])])
     assert read_solved_stars(str(frame_path)) == []
+
+
+def test_a_restacked_stack_drops_its_old_solved_star_list(tmp_path: Path) -> None:
+    """Verify a list written before the stack changed is not read.
+
+    A restack writes a new stack; until astrometry solves it again, the stars
+    named on the old stack must not stand for the new one.
+    """
+    import os
+
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+
+    stack_path = _write_stack(tmp_path / "Albireo_Stacked.fits")
+    assert save_solved_stars(stack_path, [_star("HD 183912", FIELD_CENTER[0], FIELD_CENTER[1], ["Albireo"])])
+    assert [star.id for star in read_solved_stars(stack_path)] == ["HD 183912"]
+
+    status = os.stat(stack_path)
+    os.utime(stack_path, ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000_000))
+
+    assert read_solved_stars(stack_path) == []

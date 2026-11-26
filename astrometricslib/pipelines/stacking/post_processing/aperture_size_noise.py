@@ -46,9 +46,9 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
     RING_INNER_PX,
     RING_OUTER_PX,
-    robust_sigma,
     signed_aperture_sum,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 

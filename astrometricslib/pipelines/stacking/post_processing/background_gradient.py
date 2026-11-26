@@ -51,11 +51,16 @@ from typing import Any
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+from astrometricslib.pipelines.shared.binned_sky_plane import (
+    block_medians,
+    even_block_edges,
+    least_squares_fit,
+)
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
@@ -211,37 +216,6 @@ def not_measured_outcome(reason: str) -> BackgroundGradientOutcome:
     return BackgroundGradientOutcome(gradient=None, reason=reason)
 
 
-def _bin_model(model: np.ndarray, bin_count: int = BACKGROUND_BIN_COUNT) -> np.ndarray:
-    """Replace the model by the median of each bin of a square grid.
-
-    The grid edges are spread evenly over the model, so no pixels are left
-    out when the size is not a multiple of the bin count.
-
-    Parameters
-    ----------
-    model : `numpy.ndarray`
-        The model, two-dimensional, as floating-point numbers.
-    bin_count : `int`, optional
-        Bins along each side.
-
-    Returns
-    -------
-    binned : `numpy.ndarray`
-        A ``bin_count`` by ``bin_count`` map. A bin with no finite pixel
-        holds NaN.
-    """
-    row_edges = np.linspace(0, model.shape[0], bin_count + 1).astype(int)
-    column_edges = np.linspace(0, model.shape[1], bin_count + 1).astype(int)
-    binned = np.full((bin_count, bin_count), np.nan)
-    for row in range(bin_count):
-        for column in range(bin_count):
-            cell = model[row_edges[row] : row_edges[row + 1], column_edges[column] : column_edges[column + 1]]
-            finite = cell[np.isfinite(cell)]
-            if finite.size:
-                binned[row, column] = float(np.median(finite))
-    return binned
-
-
 def _two_dimensional_model(model: np.ndarray) -> np.ndarray:
     """Reduce a model read from a file to one two-dimensional plane.
 
@@ -269,30 +243,6 @@ def _two_dimensional_model(model: np.ndarray) -> np.ndarray:
     return array
 
 
-def _fit(columns: list[np.ndarray], values: np.ndarray) -> tuple[np.ndarray, float]:
-    """Fit a sum of terms to the values by least squares.
-
-    Parameters
-    ----------
-    columns : `list` [`numpy.ndarray`]
-        The terms, each evaluated at every fitted bin.
-    values : `numpy.ndarray`
-        The binned model at the same bins.
-
-    Returns
-    -------
-    coefficients : `numpy.ndarray`
-        One number for each term.
-    rms : `float`
-        The root-mean-square of what the fit leaves behind, in the units of
-        the values.
-    """
-    design = np.stack(columns, axis=1)
-    coefficients, *_ = np.linalg.lstsq(design, values, rcond=None)
-    residual = values - design @ coefficients
-    return coefficients, float(np.sqrt(np.mean(residual**2)))
-
-
 def _sky_position_angle(
     header: fits.Header, row_slope: float, column_slope: float, shape: tuple[int, int]
 ) -> tuple[float | None, str]:
@@ -317,16 +267,16 @@ def _sky_position_angle(
     reason : `str`
         Why it is `None`; empty otherwise.
     """
+    wcs = celestial_wcs(header)
+    if wcs is None:
+        return None, "the stack's header has no sky coordinates (WCS)"
     try:
-        wcs = WCS(header, naxis=2)
-        if not wcs.has_celestial:
-            return None, "the stack's header has no sky coordinates (WCS)"
         center_column, center_row = (shape[1] - 1) / 2.0, (shape[0] - 1) / 2.0
         length = math.hypot(row_slope, column_slope)
         step_column = _SKY_DIRECTION_STEP_PIXELS * column_slope / length
         step_row = _SKY_DIRECTION_STEP_PIXELS * row_slope / length
-        start = wcs.celestial.pixel_to_world(center_column, center_row)
-        end = wcs.celestial.pixel_to_world(center_column + step_column, center_row + step_row)
+        start = wcs.pixel_to_world(center_column, center_row)
+        end = wcs.pixel_to_world(center_column + step_column, center_row + step_row)
         angle = float(SkyCoord(start).position_angle(SkyCoord(end)).deg) % 360.0
     except (ValueError, TypeError, ZeroDivisionError, fits.verify.VerifyError, KeyError) as error:
         return None, f"the stack's sky coordinates could not be used: {error}"
@@ -358,7 +308,11 @@ def measure_background_model(
         plane = _two_dimensional_model(model)
     except ValueError as error:
         return not_measured_outcome(f"the background model could not be read: {error}")
-    binned = _bin_model(plane)
+    binned = block_medians(
+        plane,
+        even_block_edges(plane.shape[0], BACKGROUND_BIN_COUNT),
+        even_block_edges(plane.shape[1], BACKGROUND_BIN_COUNT),
+    )
     finite = np.isfinite(binned)
     if finite.mean() < MINIMUM_FINITE_BIN_FRACTION:
         return not_measured_outcome(
@@ -376,8 +330,10 @@ def measure_background_model(
     y = (row_index + 0.5) / BACKGROUND_BIN_COUNT * 2.0 - 1.0
     radius_squared = x**2 + y**2
     one = np.ones_like(x)
-    plane_coefficients, plane_rms = _fit([one, x, y], values)
-    radial_coefficients, radial_rms = _fit([one, x, y, radius_squared, radius_squared**2], values)
+    plane_coefficients, plane_rms = least_squares_fit([one, x, y], values)
+    radial_coefficients, radial_rms = least_squares_fit(
+        [one, x, y, radius_squared, radius_squared**2], values
+    )
     tilt = 2.0 * math.hypot(plane_coefficients[1], plane_coefficients[2])
     # The slopes per pixel: the coordinate runs over half the side per unit.
     column_slope = plane_coefficients[1] / (plane.shape[1] / 2.0)

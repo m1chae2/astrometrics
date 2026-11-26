@@ -12,12 +12,12 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import _sky_position_angle
 from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     PARITY_UNKNOWN,
     image_parity_text,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import celestial_wcs
 
 
 def _colour_sip_header() -> fits.Header:

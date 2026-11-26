@@ -54,7 +54,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
-from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +222,9 @@ def sky_weight(blurred: np.ndarray, sample: np.ndarray, multiple: float) -> np.n
     peak = int(np.argmax(counts))
     level = 0.5 * (edges[peak] + edges[peak + 1])
     below = level - values[values <= level]
-    spread = max(1.4826 * float(np.median(below)) if below.size else 0.0, float(edges[1] - edges[0]))
+    # The median distance of the lower half from the peak, times MAD_TO_SIGMA,
+    # is one standard deviation of the sky; the bright side holds the object.
+    spread = max(MAD_TO_SIGMA * float(np.median(below)) if below.size else 0.0, float(edges[1] - edges[0]))
     reach = multiple * spread
     return np.clip((level + 2.0 * reach - blurred) / reach, 0.0, 1.0).astype(np.float32)
 

@@ -22,16 +22,13 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 # How many stars are loaded from the library at once.
 _LOAD_CHUNK_SIZE = 200
 
 # The names a frame's filter takes when it is the spectroscopy grating.
 _SPECTRAL_FILTER_NAMES = ("SPEC", "STAR ANALYZER 200", "SPECTROSCOPY")
-
-# The scale that turns the median absolute deviation into the standard
-# deviation of a normal distribution.
-MEDIAN_ABSOLUTE_DEVIATION_TO_SIGMA = 1.4826
 
 
 @dataclass(frozen=True)
@@ -209,23 +206,6 @@ def load_stored_star_spectra(astrometrics: Any) -> list[StoredStarSpectrum]:
     if not spectra:
         raise TuningSkippedError("the library holds no stored star spectra")
     return spectra
-
-
-def robust_sigma(values: Sequence[float] | np.ndarray) -> float:
-    """Estimate the spread of values that a few outliers cannot inflate.
-
-    Parameters
-    ----------
-    values : `Sequence` [`float`] or `numpy.ndarray`
-        The values.
-
-    Returns
-    -------
-    sigma : `float`
-        1.4826 times the median absolute deviation.
-    """
-    array = np.asarray(values, dtype=float)
-    return MEDIAN_ABSOLUTE_DEVIATION_TO_SIGMA * float(np.median(np.abs(array - np.median(array))))
 
 
 def upper_limit_from_spread(values: Sequence[float] | np.ndarray, sigma_multiple: float) -> float:

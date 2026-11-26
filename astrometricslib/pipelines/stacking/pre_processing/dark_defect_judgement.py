@@ -44,6 +44,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_DARK_LONGEST_STREAK,
     FRAME_DARK_OUTLIER_COUNT,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 __all__ = [
     "DARK_OUTLIER_COUNT_MAD_MULTIPLE",
@@ -141,8 +142,7 @@ def judge_dark_defects(
     count_rule_applies = len(measured) >= resolve(DARK_DEFECT_MINIMUM_SET_FRAMES).value
     if count_rule_applies:
         typical = statistics.median(counts)
-        # 1.4826 turns the median absolute deviation into a standard deviation.
-        spread = 1.4826 * statistics.median(abs(count - typical) for count in counts)
+        spread = robust_sigma(counts)
         count_limit = max(
             resolve(DARK_OUTLIER_COUNT_MINIMUM_FRACTION).value * frame_pixel_count,
             typical + resolve(DARK_OUTLIER_COUNT_MAD_MULTIPLE).value * spread,

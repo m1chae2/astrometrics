@@ -89,6 +89,7 @@ from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.frame_identity import frame_subject_id
 from astrometricslib.utilities.iso_text import canonical_iso_text
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -698,19 +699,6 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
     return batches
 
 
-def _robust_spread(values: Sequence[float]) -> float:
-    """Measure the spread of some numbers in a way a stray value cannot move.
-
-    Returns
-    -------
-    spread : `float`
-        The median absolute deviation about the median, times 1.4826, so it
-        equals the standard deviation for normally spread numbers.
-    """
-    middle = statistics.median(values)
-    return 1.4826 * statistics.median(abs(value - middle) for value in values)
-
-
 def measure_sky_unevenness(measurements: Sequence[dict[str, Any]]) -> list[float | None]:
     """Measure how much each frame's sky pattern differs from the session's.
 
@@ -929,7 +917,7 @@ def session_unevenness_limit(unevenness: Sequence[float | None]) -> float | None
         return None
     return max(
         resolve(UNEVEN_SKY_MINIMUM).value,
-        statistics.median(known) + resolve(UNEVEN_SKY_SIGMAS).value * _robust_spread(known),
+        statistics.median(known) + resolve(UNEVEN_SKY_SIGMAS).value * robust_sigma(known),
     )
 
 

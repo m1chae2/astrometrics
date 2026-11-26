@@ -25,6 +25,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import cKDTree
 
+from astrometricslib.utilities.robust_statistics import robust_sigma
+
 __all__ = [
     "NearestNeighbors",
     "NeighborField",
@@ -34,11 +36,6 @@ __all__ = [
     "nearest_neighbors",
     "neighbor_mask",
 ]
-
-# The factor that turns a median absolute deviation (MAD) into the standard
-# deviation of normal data: 1 / (sqrt(2) * erfinv(1/2)) = 1.4826. A bright
-# pixel cannot inflate a MAD the way it inflates a plain standard deviation.
-_MAD_TO_SIGMA = 1.4826
 
 # The standard deviation of a Gaussian over its full width at half maximum:
 # FWHM = 2 * sqrt(2 * ln 2) * sigma = 2.3548 * sigma.
@@ -81,10 +78,10 @@ def clipped_median_and_sigma(
         return None
     for _ in range(maximum_passes):
         median = float(np.median(pixels))
-        robust_sigma = _MAD_TO_SIGMA * float(np.median(np.abs(pixels - median)))
-        if robust_sigma <= 0.0:
+        spread = robust_sigma(pixels)
+        if spread <= 0.0:
             break
-        kept = pixels[np.abs(pixels - median) <= clip_sigma * robust_sigma]
+        kept = pixels[np.abs(pixels - median) <= clip_sigma * spread]
         if kept.size == pixels.size or kept.size < minimum_count:
             break
         pixels = kept

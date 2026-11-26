@@ -42,7 +42,6 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     reference_ring_width_px,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
     RING_OUTER_PX,
     SaturationCheck,
     pixel_scale_arcsec,
@@ -50,6 +49,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     signed_aperture_sum,
 )
 from astrometricslib.pipelines.stacking.processing.group_alignment import detect_star_centroids
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # The number of empty apertures. The spread of n samples has a relative error
 # of about 1.17 / sqrt(n) (see `MAD_SIGMA_ERROR_FACTOR`): about 12% for 100.

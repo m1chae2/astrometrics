@@ -38,7 +38,6 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity
 from astrometricslib._internal.drivers.fits_access import read_header
-from astrometricslib._internal.drivers.tuning_support import robust_sigma
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.tuning import Tuner, TuningInputs, TuningResult, TuningSkippedError
 from astrometricslib.models.tuned_parameter import (
@@ -56,6 +55,7 @@ from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 

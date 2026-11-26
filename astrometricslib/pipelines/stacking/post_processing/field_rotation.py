@@ -48,16 +48,14 @@ not measured, with the reason.
 import logging
 import math
 import os
-import warnings
 from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
-from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
@@ -148,13 +146,10 @@ def image_parity_text(stack_path: str) -> str:
         ``-1``.
     """
     try:
-        header = read_header(stack_path)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FITSFixedWarning)
-            wcs = WCS(fits.Header(header), naxis=2)
-        if not wcs.has_celestial:
+        wcs = celestial_wcs(read_header(stack_path))
+        if wcs is None:
             return PARITY_UNKNOWN
-        determinant = float(np.linalg.det(np.asarray(wcs.celestial.pixel_scale_matrix, dtype=float)))
+        determinant = float(np.linalg.det(np.asarray(wcs.pixel_scale_matrix, dtype=float)))
     except (*FITS_READ_ERRORS, *DATA_ERRORS):
         return PARITY_UNKNOWN
     if not math.isfinite(determinant) or determinant == 0.0:  # ruff: ignore[float-equality-comparison] -- exact zero of a matrix determinant, not a measurement

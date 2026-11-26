@@ -51,10 +51,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
-    robust_sigma,
-)
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 

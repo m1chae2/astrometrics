@@ -16,7 +16,6 @@ from astrometricslib.pipelines.spectroscopy import instrument_tuning
 from astrometricslib.pipelines.spectroscopy.spectrum_tuning_data import (
     reference_label,
     require_spectral_filter,
-    robust_sigma,
     symmetric_limit_from_spread,
     upper_limit_from_spread,
 )
@@ -186,7 +185,6 @@ def test_wing_radius_is_zero_without_a_wing_and_none_without_samples() -> None:
 def test_spread_limits() -> None:
     """The limits sit the stated number of robust deviations out."""
     values = np.array([-1.0, 0.0, 1.0, 2.0, 3.0])
-    assert robust_sigma(values) == pytest.approx(1.4826 * 1.0)
     assert upper_limit_from_spread(values, 2.0) == pytest.approx(1.0 + 2.0 * 1.4826)
     assert symmetric_limit_from_spread(-values, 2.0) == pytest.approx(1.0 + 2.0 * 1.4826)
 

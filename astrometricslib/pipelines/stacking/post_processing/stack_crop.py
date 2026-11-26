@@ -67,11 +67,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA
 from astrometricslib.pipelines.stacking.processing.image_registration import (
     PolynomialDistortion,
     RegistrationTransform,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 

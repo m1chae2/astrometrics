@@ -4,7 +4,8 @@ Description: `image_registration` fits a shift, a rotation, a scale and an
 optional quadratic lens-distortion correction to matched star positions, and
 moves images with it. These tests check the fit on synthetic star lists (exact
 recovery of a similarity, including a half turn; recovery of a quadratic
-distortion; refusal with too few or badly spread pairs), the image warp (stars
+distortion; a clip counted in the error of one axis; refusal with too few or
+badly spread pairs), the image warp (stars
 land where the transform says, channels and footprint are handled, the output
 may differ in size), and the way the exposure-group alignment uses it: a
 half-turned group seen through distorted optics, which a similarity leaves
@@ -35,6 +36,7 @@ from astrometricslib.pipelines.stacking.processing.group_file_merging import mer
 from astrometricslib.pipelines.stacking.processing.image_registration import (
     PolynomialDistortion,
     RegistrationTransform,
+    fit_similarity,
     fit_transform,
     warp,
 )
@@ -170,6 +172,27 @@ def test_the_polynomial_model_on_undistorted_stars_changes_nothing_that_matters(
     assert fit is not None
     assert fit.residual_pixels < 1e-6
     assert np.abs(fit.transform.distortion.row_coefficients).max() < 1e-6
+
+
+def test_the_clip_counts_in_the_error_of_one_axis() -> None:
+    """A pair 4.5 sigma off along one axis is dropped by a 3-sigma clip.
+
+    The misses are lengths in two dimensions, so their median is 1.1774 times
+    the error of one axis. Taking 1.4826 times the median as sigma (the rule
+    for one-dimensional values) made a 3-sigma clip about 5.2 sigma wide, and
+    a pair 4.5 sigma off was kept.
+    """
+    generator = np.random.default_rng(5)
+    moving = generator.uniform(0.0, 1000.0, size=(400, 2))
+    reference = moving + generator.normal(0.0, 0.2, size=moving.shape)
+    reference[0] = moving[0] + [0.9, 0.0]
+
+    fitted = fit_similarity(reference, moving, minimum_pairs=10, clip_sigmas=3.0, clip_passes=5)
+
+    assert fitted is not None
+    _a, _b, kept = fitted
+    assert not kept[0]
+    assert kept.mean() > 0.95
 
 
 def test_too_few_pairs_are_refused() -> None:

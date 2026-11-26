@@ -3,14 +3,16 @@
  * @description Checks the stack picker in Image Processing. A target with stacks from more than one
  * camera or lens gets a "Camera and lens" picker in the Data tab; a target with one stack does not.
  * Picking a stack shows that stack's file in the viewer, while the main stack stays the default and
- * stays the one the analysis uses.
+ * stays the one the analysis uses. Picking a stack also sets the File Browser's camera and optic
+ * filters to that stack's once; the person can change them afterwards, and that does not change
+ * the picked stack.
  */
 
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import type { StackChoice } from '../../common/types/backendTypes';
 
 const callBackendMock = vi.fn();
@@ -41,11 +43,27 @@ vi.mock('../../common/hooks/useTargetListLogic', () => ({
 }));
 vi.mock('../../common/radioList/TargetListFilterPanel', () => ({ TargetListFilterPanel: () => null }));
 vi.mock('../../common/fitsViewer/FitsViewerManager', () => ({ FitsViewerManager: () => <div /> }));
+/** The props the File Browser toolbar was last drawn with, so a test can change its filters. */
+interface ToolbarProps {
+    selectedCamera: string;
+    onCameraChange: (camera: string) => void;
+    selectedOptic?: string;
+    onOpticChange?: (optic: string) => void;
+}
+const toolbar: { props: ToolbarProps | null } = { props: null };
 vi.mock('../fileBrowser/FileBrowser', () => ({
     FileBrowser: (props: { selectedFile: string | null }) => (
         <span data-testid="selected">{props.selectedFile ?? 'none'}</span>
     ),
-    FileBrowserToolbar: () => <div />,
+    FileBrowserToolbar: (props: ToolbarProps) => {
+        toolbar.props = props;
+        return (
+            <div>
+                <span data-testid="camera-filter">{props.selectedCamera}</span>
+                <span data-testid="optic-filter">{props.selectedOptic ?? ''}</span>
+            </div>
+        );
+    },
 }));
 vi.mock('../../common/components/SwitchDisplayButton', () => ({ SwitchDisplayButton: () => <span /> }));
 vi.mock('../../common/components/AddTargetModal', () => ({ AddTargetModal: () => null }));
@@ -64,7 +82,7 @@ vi.mock('../../common/radioList/RadioListManager', () => ({ RadioListManager: ()
 
 import { ImageProcessingDisplay } from '../ImageProcessingDisplay';
 import { StackedImagePanel } from '../components/StackedImagePanel';
-import { stackChoiceLabel } from '../utils/stackChoices';
+import { matchCameraName, stackChoiceLabel } from '../utils/stackChoices';
 
 const MAIN = '/stacks/M 27/M_27_L_Stacked.fits';
 const NIKON_300 = '/stacks/M 27/nikon_300/M_27_RGB_Stacked.fits';
@@ -81,11 +99,32 @@ const TWO_STACKS: StackChoice[] = [
     },
 ];
 
+/**
+ * Makes some frames of one camera and focal length for the file list.
+ *
+ * @param camera The camera name as the frames spell it.
+ * @param focalLengthMm The focal length of the frames.
+ * @param count How many frames to make.
+ * @returns The frames.
+ */
+function framesOf(camera: string, focalLengthMm: number, count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+        path: `/frames/${camera}/${focalLengthMm}/light_${index}.fits`, name: `light_${index}.fits`,
+        camera, focalLengthMm,
+    }));
+}
+
+/** M 27's frames: the ZWO through two optics, and the Nikon (spelled its own way) through two lenses. */
+const FRAMES = [
+    ...framesOf('ZWO ASI533MM Pro', 405, 6), ...framesOf('ZWO ASI533MM Pro', 300, 2),
+    ...framesOf('Nikon D5300', 300, 3), ...framesOf('Nikon D5300', 135, 5),
+];
+
 /** Sets what the backend returns for the target's files. */
-function answerFiles(stacks: StackChoice[]) {
+function answerFiles(stacks: StackChoice[], files: unknown[] = []) {
     callBackendMock.mockImplementation(async (method: string) => {
         if (method === 'target:get_files') {
-            return { files: [], stackedImage: MAIN, stackedSpectralTarget: null, totalExposure: 70, stacks };
+            return { files, stackedImage: MAIN, stackedSpectralTarget: null, totalExposure: 70, stacks };
         }
         if (method === 'calibration:query') return { darks: [], biases: [], flats: [] };
         if (method === 'target:get_frames_grouped') return [];
@@ -169,5 +208,92 @@ describe('Image Processing stack choice', () => {
             .getByRole('button', { name: /\(main\)/ }));
         await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe(MAIN));
         expect(screen.getByTestId('stack-summary')).toBeTruthy();
+    });
+});
+
+/**
+ * Picks one stack in the Camera and lens picker.
+ *
+ * @param name The text of the stack's entry.
+ */
+async function pickStack(name: RegExp) {
+    await userEvent.click(screen.getByRole('button', { name: /Stack to show/ }));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Stack to show' })).getByRole('button', { name }));
+}
+
+describe('Image Processing stack choice sets the File Browser filters', () => {
+    beforeEach(() => {
+        callBackendMock.mockReset();
+        localStorage.clear();
+        toolbar.props = null;
+    });
+
+    it('leaves the filters at their defaults when the target opens', async () => {
+        answerFiles(TWO_STACKS, FRAMES);
+        renderDisplay();
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe(MAIN));
+        expect(screen.getByTestId('camera-filter').textContent).toBe('All');
+    });
+
+    it('sets the camera and optic filters to the picked stack, matching a differently spelled camera', async () => {
+        answerFiles(TWO_STACKS, FRAMES);
+        renderDisplay();
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe(MAIN));
+
+        await pickStack(/Nikon DSLR DSC D5300 · 300 mm/);
+        await waitFor(() => expect(screen.getByTestId('camera-filter').textContent).toBe('Nikon D5300'));
+        // 300 mm is not the Nikon's default optic (135 mm has more frames), so it was set by the pick.
+        expect(screen.getByTestId('optic-filter').textContent).toBe('300');
+
+        // Picking the main stack sets the filters to the main stack's camera and lens.
+        await pickStack(/\(main\)/);
+        await waitFor(() => expect(screen.getByTestId('camera-filter').textContent).toBe('ZWO ASI533MM Pro'));
+        expect(screen.getByTestId('optic-filter').textContent).toBe('405');
+    });
+
+    it('lets the person change a filter afterwards, and that does not change the picked stack', async () => {
+        answerFiles(TWO_STACKS, FRAMES);
+        renderDisplay();
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe(MAIN));
+        await pickStack(/Nikon DSLR DSC D5300 · 300 mm/);
+        await waitFor(() => expect(screen.getByTestId('optic-filter').textContent).toBe('300'));
+
+        act(() => toolbar.props?.onOpticChange?.('135'));
+        await waitFor(() => expect(screen.getByTestId('optic-filter').textContent).toBe('135'));
+        act(() => toolbar.props?.onCameraChange('ZWO ASI533MM Pro'));
+        await waitFor(() => expect(screen.getByTestId('camera-filter').textContent).toBe('ZWO ASI533MM Pro'));
+
+        // The filters stay where the person put them, and the Nikon stack stays picked and shown.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(screen.getByTestId('camera-filter').textContent).toBe('ZWO ASI533MM Pro');
+        expect(screen.getByTestId('selected').textContent).toBe(NIKON_300);
+        expect(screen.getByRole('button', { name: 'Stack to show: Nikon DSLR DSC D5300 · 300 mm' })).toBeTruthy();
+    });
+
+    it('leaves the camera filter alone when no File Browser camera matches the stack', async () => {
+        const unknownCamera: StackChoice = {
+            configurationKey: 'Canon EOS Ra@300mm', camera: 'Canon EOS Ra', focalLengthMm: 300,
+            framesStacked: 12, stackedImage: NIKON_300, isMain: false,
+        };
+        answerFiles([TWO_STACKS[0], unknownCamera], FRAMES);
+        renderDisplay();
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe(MAIN));
+        act(() => toolbar.props?.onCameraChange('Nikon D5300'));
+        await waitFor(() => expect(screen.getByTestId('camera-filter').textContent).toBe('Nikon D5300'));
+
+        await pickStack(/Canon EOS Ra · 300 mm/);
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe(NIKON_300));
+        expect(screen.getByTestId('camera-filter').textContent).toBe('Nikon D5300');
+    });
+});
+
+describe('matchCameraName', () => {
+    it('matches the same camera spelled differently, and gives no match when unsure', () => {
+        const names = ['ZWO ASI533MM Pro', 'Nikon D5300', 'ZWO ASI120MC-S'];
+        expect(matchCameraName('ZWO ASI 533MM Pro', names)).toBe('ZWO ASI533MM Pro');
+        expect(matchCameraName('Nikon DSLR DSC D5300', names)).toBe('Nikon D5300');
+        expect(matchCameraName('Canon EOS Ra', names)).toBeNull();
+        // "ZWO" fits two cameras, so it matches neither.
+        expect(matchCameraName('ZWO', names)).toBeNull();
     });
 });

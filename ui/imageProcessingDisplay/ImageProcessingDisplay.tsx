@@ -33,7 +33,7 @@ import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
 import type { DisplayMode } from '../common/fitsViewer/displayMode';
 import { useLibraryStars } from './hooks/useLibraryStars';
 import { useStackIdentification } from './hooks/useStackIdentification';
-import { isStackChoicePath } from './utils/stackChoices';
+import { isStackChoicePath, stackFilterMatch } from './utils/stackChoices';
 
 /**
  * Main component for the image processing view.
@@ -501,12 +501,19 @@ const ImageProcessingDisplayInner: React.FC = () => {
   }, [setSelectedFile]);
 
   // Show the stack of another camera or lens (or the main one again). The main stack does not change.
+  // Picking a stack also sets the File Browser's camera and optic filters to that stack's, once, at
+  // the moment of the pick. A filter with no matching choice is left alone. The person can change
+  // the filters again afterwards, and changing them never changes the picked stack.
   const handleChooseStack = React.useCallback((configurationKey: string) => {
     const choice = stackChoices.find((item) => item.configurationKey === configurationKey);
     if (!choice) return;
     setChosenStackKey(choice.isMain ? null : choice.configurationKey);
+    const filters = stackFilterMatch(choice, allFiles);
+    // A new camera puts the optic back to its default, so the optic is set after the camera.
+    if (filters.camera !== null && filters.camera !== fileBrowserCamera) setFileBrowserCamera(filters.camera);
+    if (filters.optic !== null) setSelectedOptic(filters.optic);
     pickFile(choice.stackedImage);
-  }, [stackChoices, setChosenStackKey, pickFile]);
+  }, [stackChoices, setChosenStackKey, allFiles, fileBrowserCamera, setFileBrowserCamera, setSelectedOptic, pickFile]);
 
   // --- Action Handlers ---
 

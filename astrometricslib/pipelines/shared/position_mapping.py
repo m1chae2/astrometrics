@@ -23,7 +23,8 @@ its left and top edges, so a stack pixel is the reference pixel minus the
 trim. A stack may then have been turned by a quarter turn so that north is
 near the top; the record's ``quarter_turn_degrees`` says how far, and the
 pixel is turned the same way to land on the saved file (see
-`quarter_turn.to_registration_grid`). A processed picture cropped from its
+`registration_record.to_registration_grid`). A processed picture cropped
+from its
 saved stack says in ``CROPX0`` and ``CROPY0`` how many columns and rows were
 cut from the saved stack's left and top.
 
@@ -195,7 +196,7 @@ def _registered_to_saved(stack: StackRecord, row: float, column: float) -> tuple
     degrees = stack.record.quarter_turn_degrees % 360
     if degrees == 0:
         return row, column
-    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import to_registration_grid
+    from astrometricslib.pipelines.shared.registration_record import to_registration_grid
 
     saved_rows, saved_columns = _saved_size(stack)
     registered_rows, registered_columns = (
@@ -223,7 +224,7 @@ def _saved_to_registered(stack: StackRecord, row: float, column: float) -> tuple
     degrees = stack.record.quarter_turn_degrees % 360
     if degrees == 0:
         return row, column
-    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import to_registration_grid
+    from astrometricslib.pipelines.shared.registration_record import to_registration_grid
 
     saved_rows, saved_columns = _saved_size(stack)
     return to_registration_grid(row, column, degrees, saved_rows, saved_columns)

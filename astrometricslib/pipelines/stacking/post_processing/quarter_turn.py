@@ -29,7 +29,7 @@ all work on the stack as Siril registered it. `read_stack_plane` therefore
 gives them the stack with the turn taken back, and
 `RegistrationRecord.quarter_turn_degrees` says how far the saved file was
 turned, so a pixel of the saved file can be moved back with
-`to_registration_grid`.
+`registration_record.to_registration_grid`.
 """
 
 import logging
@@ -63,7 +63,6 @@ __all__ = [
     "read_quarter_turn",
     "registration_grid_header",
     "registration_grid_wcs",
-    "to_registration_grid",
     "turn_image",
     "turn_wcs",
     "undo_quarter_turn",
@@ -159,37 +158,6 @@ def undo_quarter_turn(data: np.ndarray, degrees: int) -> np.ndarray:
         The image as it was before the turn.
     """
     return turn_image(data, -degrees % 360)
-
-
-def to_registration_grid(
-    row: float, column: float, degrees: int, turned_height: int, turned_width: int
-) -> tuple[float, float]:
-    """Move a pixel of a turned stack back to the grid before the turn.
-
-    Parameters
-    ----------
-    row, column : `float`
-        The pixel on the saved (turned) stack, counted from 0.
-    degrees : `int`
-        The turn that was applied to the saved stack.
-    turned_height, turned_width : `int`
-        The size of the saved (turned) stack.
-
-    Returns
-    -------
-    row, column : `float`
-        The same pixel on the stack as Siril registered it.
-    """
-    for _ in range((-degrees % 360) // 90):
-        # One counterclockwise turn sends (row, column) to
-        # (width - 1 - column, row).
-        row, column, turned_height, turned_width = (
-            turned_width - 1 - column,
-            row,
-            turned_width,
-            turned_height,
-        )
-    return row, column
 
 
 def _turn_sip_once(sip: Sip | None, new_crpix: np.ndarray) -> Sip | None:

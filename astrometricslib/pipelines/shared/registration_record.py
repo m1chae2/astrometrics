@@ -329,3 +329,34 @@ def record_quarter_turn(stack_path: str, degrees: int) -> None:
     record = read_registration_record(stack_path)
     if record is not None and record.quarter_turn_degrees != degrees:
         write_registration_record(stack_path, replace(record, quarter_turn_degrees=degrees))
+
+
+def to_registration_grid(
+    row: float, column: float, degrees: int, turned_height: int, turned_width: int
+) -> tuple[float, float]:
+    """Move a pixel of a turned stack back to the grid before the turn.
+
+    Parameters
+    ----------
+    row, column : `float`
+        The pixel on the saved (turned) stack, counted from 0.
+    degrees : `int`
+        The turn that was applied to the saved stack.
+    turned_height, turned_width : `int`
+        The size of the saved (turned) stack.
+
+    Returns
+    -------
+    row, column : `float`
+        The same pixel on the stack as Siril registered it.
+    """
+    for _ in range((-degrees % 360) // 90):
+        # One counterclockwise turn sends (row, column) to
+        # (width - 1 - column, row).
+        row, column, turned_height, turned_width = (
+            turned_width - 1 - column,
+            row,
+            turned_width,
+            turned_height,
+        )
+    return row, column

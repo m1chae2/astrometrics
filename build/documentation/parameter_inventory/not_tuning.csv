@@ -725,7 +725,7 @@ wayfindinglib/tasks/control_tasks/centering_exposure.py,ARCSEC_PER_RADIAN,unit o
 wayfindinglib/tasks/control_tasks/frame_end_detection.py,COUNTDOWN_JUMP_SECONDS,Plumbing: detection of a clock jump
 wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_FRAMES,Reply size cap
 wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_QUALITY_FRAMES,Cost cap on measuring frames
-wayfindinglib/tasks/control_tasks/frame_status.py,EXAMPLE_COUNT,Example list size
+wayfindinglib/tasks/control_tasks/frame_locations.py,EXAMPLE_COUNT,Example list size
 wayfindinglib/tasks/control_tasks/guide_exposure_ladder_tasks.py,FRAME_WAIT_MARGIN_SECONDS,Wait margin; plumbing
 wayfindinglib/tasks/control_tasks/guide_exposure_ladder_tasks.py,_POLL_SECONDS,Poll interval
 wayfindinglib/tasks/control_tasks/guiding_log_ingestion.py,_REFIT_SAMPLE_LIMIT,Read limit; plumbing

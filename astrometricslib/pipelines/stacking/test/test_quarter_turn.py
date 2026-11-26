@@ -22,6 +22,7 @@ from astrometricslib.pipelines.shared.registration_record import (
     RegistrationRecord,
     read_registration_record,
     record_quarter_turn,
+    to_registration_grid,
     write_registration_record,
 )
 from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
@@ -33,7 +34,6 @@ from astrometricslib.pipelines.stacking.post_processing.quarter_turn import (
     choose_quarter_turn,
     read_quarter_turn,
     registration_grid_header,
-    to_registration_grid,
     turn_image,
     turn_wcs,
     undo_quarter_turn,

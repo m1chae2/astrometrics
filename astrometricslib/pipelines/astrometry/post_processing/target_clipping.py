@@ -693,7 +693,7 @@ def _registered_stack_reference(
     pixel : `tuple` [`float`, `float`]
         The (row, column) on the registration reference's grid.
     """
-    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import to_registration_grid
+    from astrometricslib.pipelines.shared.registration_record import to_registration_grid
 
     row, registered_column = to_registration_grid(
         row_on_stack, column, record.quarter_turn_degrees, height, width

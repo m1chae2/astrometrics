@@ -3,7 +3,8 @@
 Description: Checks the sky grid worked out from a stack header: the center
 point lands on the reference sky position, the SIP distortion terms are
 applied, the first grid row is the picture's top row (the FITS file's first
-row), a header with no plate solution gives nothing, the picture is the
+row), a header with no plate solution, or with only the mount's pointing,
+gives nothing, the picture is the
 color picture when there is one, and a stack's header is read only once
 until its file changes.
 """
@@ -52,6 +53,7 @@ def _header(with_sip: bool) -> fits.Header:
     header["CD1_2"] = 0.0
     header["CD2_1"] = 0.0
     header["CD2_2"] = SCALE_DEG
+    header["PLTSOLVD"] = True
     if with_sip:
         header["A_ORDER"] = 2
         header["B_ORDER"] = 2
@@ -97,6 +99,22 @@ def test_a_header_with_no_plate_solution_gives_nothing() -> None:
     header = fits.Header()
     header["NAXIS1"] = WIDTH
     header["NAXIS2"] = HEIGHT
+    assert sky_grid(header) is None
+
+
+@pytest.mark.parametrize("flag", [None, False, "F"])
+def test_a_pointing_only_sky_map_gives_nothing(flag: object) -> None:
+    """A sky map not marked as plate solved, and with no SIP terms, is skipped.
+
+    Parameters
+    ----------
+    flag : `object`
+        The ``PLTSOLVD`` card to write, or `None` for no card.
+    """
+    header = _header(with_sip=False)
+    del header["PLTSOLVD"]
+    if flag is not None:
+        header["PLTSOLVD"] = flag
     assert sky_grid(header) is None
 
 

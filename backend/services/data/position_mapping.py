@@ -5,7 +5,9 @@ image, the panel asks where that star is on the new one. This module finds
 the answer in three ways, in order:
 
 1. Sky position. Both images have a plate solution (``PLTSOLVD`` true or the
-   SIP terms of a solved image). The pixel goes to the sky and back to a pixel.
+   SIP terms of a solved image, with both sky axes; see
+   `astrometricslib.drivers.header_is_plate_solved`). The pixel goes to the
+   sky and back to a pixel.
 2. Stack alignment. A stack has a record of how Siril moved each frame onto
    the stack's reference grid (``<stack name>_registration_frames.json``).
    That gives frame to stack, stack to frame and frame to frame, and it can be
@@ -34,7 +36,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.drivers import is_path_inside
+from astrometricslib.drivers import header_is_plate_solved, is_path_inside
 
 logger = logging.getLogger(__name__)
 
@@ -341,28 +343,6 @@ def _picture_offset(path: str) -> tuple[int, int]:
     return int(header.get("CROPX0", 0)), int(header.get("CROPY0", 0))
 
 
-def _is_plate_solved(header: fits.Header) -> bool:
-    """Say whether a header holds a real plate solution.
-
-    Parameters
-    ----------
-    header : `astropy.io.fits.Header`
-        The header.
-
-    Returns
-    -------
-    solved : `bool`
-        `True` when ``PLTSOLVD`` is true or the header has SIP terms, and the
-        sky axes are there. Pointing
-        keywords from the capture program alone do not count.
-    """
-    flag = header.get("PLTSOLVD", False)
-    flagged = flag is True or str(flag).strip().upper() in {"T", "TRUE", "1"}
-    has_sip = "A_ORDER" in header
-    has_axes = all(key in header for key in ("CTYPE1", "CRVAL1", "CRPIX1"))
-    return (flagged or has_sip) and has_axes
-
-
 class PositionMapper:
     """Maps a pixel of one image to another image.
 
@@ -476,7 +456,7 @@ class PositionMapper:
             plate solution.
         """
         from_header, to_header = _header_of(from_path), _header_of(to_path)
-        if not (_is_plate_solved(from_header) and _is_plate_solved(to_header)):
+        if not (header_is_plate_solved(from_header) and header_is_plate_solved(to_header)):
             return None
         try:
             world = WCS(from_header, naxis=2).all_pix2world([[x, y]], 1)
@@ -496,12 +476,12 @@ class PositionMapper:
         landing : `tuple` or `None`
             The solved file and the pixel on it, or `None` when none is found.
         """
-        if _is_plate_solved(_header_of(path)):
+        if header_is_plate_solved(_header_of(path)):
             return path, x, y
         height = self._frame_height(path)
         for record in self._records_holding(path):
             position = _position_of(record, path)
-            if position is None or not _is_plate_solved(_header_of(record.stack_path)):
+            if position is None or not header_is_plate_solved(_header_of(record.stack_path)):
                 continue
             try:
                 stack_x, stack_y = frame_to_stack(record, position, x, y, height)

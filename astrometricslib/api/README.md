@@ -12,7 +12,7 @@ The library has a small public surface. Everything else is private.
 | `astrometricslib.exceptions` | The errors a script catches, `ErrorInfo` with `to_error_info` and `error_from_info`, and `FITS_READ_ERRORS`. |
 | `astrometricslib.reports` | The quality reports and quality row shapes that checks return, `CaptureSetting` and `observing_night_id`. |
 | `astrometricslib.jobs` | `Jobs` (`astrometrics.jobs` is an instance of it), the job store and records, and the tools that run a function as a tracked background job. |
-| `astrometricslib.drivers` | The data store and file tools that other apps share (`Butler`, `connect_db`, `file_lock`, `is_path_inside`, `resolve_mounted_path`, `get_simbad_driver` and the like). |
+| `astrometricslib.drivers` | The data store and file tools that other apps share (`Butler`, `connect_db`, `file_lock`, `is_path_inside`, `resolve_mounted_path`, `get_simbad_driver`, `header_is_plate_solved` and the like). |
 | `astrometricslib.parameters` | The tuned-parameter declaration (`TunedParameter` and its enums), `collect_parameters`, `resolve_parameter` and the provider protocols. |
 | `astrometricslib._internal` | Everything else, in logical groups. |
 

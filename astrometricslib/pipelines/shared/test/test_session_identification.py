@@ -36,7 +36,15 @@ def _make_fake_image(wcs=None, path="/fake/session_reference.fits") -> MagicMock
     image.path = path
     image.data = np.zeros((100, 100), dtype=np.float32)
     # A plate-solved header, so a header map counts as a solution.
-    image.header = {"PLTSOLVD": True}
+    image.header = {
+        "PLTSOLVD": True,
+        "CTYPE1": "RA---TAN",
+        "CTYPE2": "DEC--TAN",
+        "CRVAL1": 10.0,
+        "CRVAL2": 41.0,
+        "CRPIX1": 50.0,
+        "CRPIX2": 50.0,
+    }
     return image
 
 
@@ -278,6 +286,11 @@ class TestReusedHeaderWcsVerification:
         """
 
         def _identify(stellar_objects, wcs, width, height):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+            # The real identifier gives every star a sky position: a
+            # catalog star's, or the projected one for a position-only star.
+            for index, star in enumerate(stellar_objects):
+                star.right_ascension = 10.0 + index * 0.01
+                star.declination = 41.0
             for star in stellar_objects[:matched_count]:
                 star.is_catalog_identified = True
             return stellar_objects
@@ -417,10 +430,8 @@ def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
     from astropy.io import fits
     from astropy.wcs import WCS
 
-    from astrometricslib.pipelines.shared.session_identification import (
-        header_is_plate_solved,
-        write_wcs_to_fits_header,
-    )
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
+    from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 
     path = tmp_path / "frame.fits"
     header = fits.Header()
@@ -438,3 +449,200 @@ def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
 
     assert header_is_plate_solved(fits.getheader(path))
     assert fits.getheader(path)["CRVAL1"] == pytest.approx(11.0)
+
+
+# Plate scales, in arcseconds per pixel, of the two setups the wrong-solution
+# check must work on: the ZWO ASI533MM Pro (3.76 micron pixels) on the 405 mm
+# refractor, and the Nikon D5300 (3.89 micron pixels) behind a 300 mm lens.
+# The catalog match radius follows the plate scale, so it is 10 arcsec on the
+# first and about 14 arcsec on the second.
+_ASI533_PLATE_SCALE = 206.265 * 3.76 / 405.0
+_D5300_300MM_PLATE_SCALE = 206.265 * 3.89 / 300.0
+
+
+def _stars_with_offsets(offsets_arcsec: list[float], unmatched: int) -> list:
+    """Build identified stars, matched ones at the given catalog distances.
+
+    Parameters
+    ----------
+    offsets_arcsec : `list` [`float`]
+        One catalog match distance per matched star.
+    unmatched : `int`
+        How many more stars have no catalog match.
+
+    Returns
+    -------
+    stars : `list` [`StellarObject`]
+        The matched stars first, then the unmatched ones.
+    """
+    from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+    from astrometricslib.models.stellar_source import StellarObject
+
+    stars = []
+    for index, offset in enumerate(offsets_arcsec):
+        star = StellarObject(
+            id=f"Gaia DR3 {index + 1}", right_ascension=10.0 + index * 0.01, declination=41.0
+        )
+        star.is_catalog_identified = True
+        star.catalog_match_quality = CatalogMatchQuality(matched_via="gaia", separation_arcsec=offset)
+        stars.append(star)
+    for index in range(unmatched):
+        stars.append(
+            StellarObject(id=f"FIELD_J{index}", right_ascension=11.0 + index * 0.01, declination=41.0)
+        )
+    return stars
+
+
+def _chance_match_offsets(count: int, radius_arcsec: float, seed: int) -> list[float]:
+    """Draw chance-match distances spread evenly over the match circle.
+
+    A wrong solution pairs a star with whatever catalog star lies within the
+    match radius. Such a star is equally likely to be anywhere in the circle,
+    so its distance is the radius times the square root of an even draw.
+
+    Parameters
+    ----------
+    count : `int`
+        How many matches.
+    radius_arcsec : `float`
+        The match radius.
+    seed : `int`
+        The random seed.
+
+    Returns
+    -------
+    offsets : `list` [`float`]
+        The match distances, in arcseconds.
+    """
+    generator = np.random.default_rng(seed)
+    return (radius_arcsec * np.sqrt(generator.uniform(0.0, 1.0, count))).tolist()
+
+
+@pytest.mark.parametrize("plate_scale", [_ASI533_PLATE_SCALE, _D5300_300MM_PLATE_SCALE])
+class TestPlateSolutionProblem:
+    """Verify the wrong-solution check catches chance matches, both scales."""
+
+    def test_a_correct_solution_passes(self, plate_scale: float) -> None:
+        """Matches within a couple of arcseconds of their catalog stars pass.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+        from astrometricslib.foundation.parameter_context import parameter_context, record_basis
+        from astrometricslib.models.tuned_parameter import RunBasis
+        from astrometricslib.pipelines.shared.session_identification import plate_solution_problem
+
+        offsets = (np.random.default_rng(1).rayleigh(1.0, 30)).tolist()
+        with parameter_context():
+            record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, plate_scale)
+            assert plate_solution_problem(_stars_with_offsets(offsets, unmatched=20)) is None
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_a_shifted_solution_with_chance_matches_fails(self, plate_scale: float, seed: int) -> None:
+        """Chance matches spread over the match circle fail the median test.
+
+        The share of matched stars (25 of 120, about 21%) passes the
+        match-share test, as chance matches can in a dense field, so only
+        the median distance can catch the wrong solution.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        seed : `int`
+            The random seed of the chance-match distances.
+        """
+        from astrometricslib.foundation.parameter_context import parameter_context, record_basis
+        from astrometricslib.foundation.parameters import resolve
+        from astrometricslib.models.tuned_parameter import RunBasis
+        from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
+        from astrometricslib.pipelines.shared.session_identification import plate_solution_problem
+
+        with parameter_context():
+            record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, plate_scale)
+            radius = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
+            offsets = _chance_match_offsets(25, radius, seed)
+            assert max(offsets) <= radius
+            problem = plate_solution_problem(_stars_with_offsets(offsets, unmatched=95))
+        assert problem is not None
+        assert "median" in problem
+
+    def test_the_limit_follows_the_match_radius(self, plate_scale: float) -> None:
+        """The limit is half the run's match radius, not a fixed distance.
+
+        Parameters
+        ----------
+        plate_scale : `float`
+            The run's plate scale, in arcseconds per pixel.
+        """
+        from astrometricslib.foundation.parameter_context import parameter_context, record_basis
+        from astrometricslib.foundation.parameters import resolve
+        from astrometricslib.models.tuned_parameter import RunBasis
+        from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
+        from astrometricslib.pipelines.shared.session_identification import plate_solution_problem
+
+        with parameter_context():
+            record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, plate_scale)
+            limit = 0.5 * float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
+            assert plate_solution_problem(_stars_with_offsets([0.95 * limit] * 30, unmatched=0)) is None
+            assert plate_solution_problem(_stars_with_offsets([1.05 * limit] * 30, unmatched=0)) is not None
+
+
+def test_a_reused_header_map_with_far_matches_is_solved_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reused map whose matches sit far from their catalog stars is replaced.
+
+    Half the stars match, which passes the match-share test, but every
+    match sits 8 arcsec off, past half the 10 arcsec match radius.
+    """
+    identifier = _make_star_identifier()
+    header_wcs = _make_celestial_wcs()
+    image = _make_fake_image(wcs=header_wcs)
+    sources = [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(40)]
+    identifier.detector.detect = MagicMock(return_value=sources)
+    identifier.detector.deduplicate = MagicMock(return_value=sources)
+    fresh_wcs = _make_celestial_wcs()
+    identifier.solver.solve = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=fresh_wcs))
+    monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", MagicMock())
+
+    def mark(offset_arcsec: float, count: int) -> Callable[..., Any]:
+        """Build an identify stand-in matching ``count`` stars at a distance.
+
+        Returns
+        -------
+        identify : callable
+            A stand-in for `identify_stars_with_wcs`.
+        """
+        from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+
+        def identify(stellar_objects: list, _wcs: object, _width: int, _height: int) -> list:
+            """Mark the first stars as matched and give every star a position.
+
+            Returns
+            -------
+            stars : `list`
+                The same stars.
+            """
+            for index, star in enumerate(stellar_objects):
+                star.right_ascension = 10.0 + index * 0.01
+                star.declination = 41.0
+            for star in stellar_objects[:count]:
+                star.is_catalog_identified = True
+                star.catalog_match_quality = CatalogMatchQuality(
+                    matched_via="gaia", separation_arcsec=offset_arcsec
+                )
+            return stellar_objects
+
+        return identify
+
+    marks = iter([mark(8.0, 20), mark(1.0, 30)])
+    monkeypatch.setattr(
+        identifier, "identify_stars_with_wcs", MagicMock(side_effect=lambda *a, **k: next(marks)(*a, **k))
+    )
+
+    result = identify_session_stars(image, identifier)
+
+    assert result.wcs is fresh_wcs
+    assert result.header_wcs_replaced_after_verification is True

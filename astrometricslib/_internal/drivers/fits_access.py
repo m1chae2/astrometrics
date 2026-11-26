@@ -6,6 +6,10 @@ the first block only contains text information (keywords), and the
 actual image is in the second block (index 1). This module provides
 tools to safely locate and read the correct block so that other code
 does not have to worry about this structural difference.
+
+It also owns the one test of whether a header's sky map came from a plate
+solve (`header_is_plate_solved`), which the pipelines, the backend and the
+Planetarium all use.
 """
 
 import logging
@@ -32,6 +36,23 @@ FITS_READ_ERRORS: tuple[type[Exception], ...] = (
     KeyError,
     fits.VerifyError,
 )
+
+
+# The header card that marks a sky map as written by a plate solve of this
+# library. Camera and capture programs also write position keywords (the
+# place the mount was told to point), which are only a pointing guess, so a
+# reader that needs a true solution looks for this card or for the distortion
+# terms that only a solver fits (see `header_is_plate_solved`).
+PLATE_SOLVED_KEYWORD = "PLTSOLVD"
+
+# The text values of a FITS card that mean "true". A logical card reads back
+# as a Python `bool`; a card some other program wrote as text ("T", "TRUE",
+# "1") reads back as a string. Any other text, "F" included, means false.
+_TRUE_TEXT = frozenset({"T", "TRUE", "1"})
+
+# The sky-axis cards every usable sky map has: the axis types, the reference
+# sky position and the reference pixel of both axes.
+_SKY_AXIS_KEYWORDS = ("CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2")
 
 
 @contextmanager
@@ -291,3 +312,55 @@ def collapse_to_2d(data: np.ndarray) -> np.ndarray:
     if data.shape[0] in (1, 3, 4):
         return np.mean(data, axis=0)
     return np.mean(data, axis=-1)
+
+
+def header_card_is_true(value: object) -> bool:
+    """Read a FITS logical card, written as a logical or as text.
+
+    Parameters
+    ----------
+    value : `object`
+        The card's value, as `astropy.io.fits.Header` returns it.
+
+    Returns
+    -------
+    is_true : `bool`
+        `True` for a logical true, a nonzero number, or the text ``T``,
+        ``TRUE`` or ``1`` (any letter case, spaces ignored). `False` for
+        anything else, including the text ``F``, ``FALSE`` and ``0``, which
+        plain `bool` would read as true.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().upper() in _TRUE_TEXT
+    return False
+
+
+def header_is_plate_solved(header: fits.Header) -> bool:
+    """Say whether a header's sky map came from a plate solve.
+
+    A header can hold sky-map keywords that are only the position the mount
+    was told to point at. Those are not a solution: a star placed with them
+    can sit tens of pixels from where it really is.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The first header of a FITS file.
+
+    Returns
+    -------
+    is_solved : `bool`
+        `True` when the header has both sky axes (``CTYPE``, ``CRVAL`` and
+        ``CRPIX`` of axes 1 and 2) and either carries `PLATE_SOLVED_KEYWORD`
+        as true (`header_card_is_true`) or holds SIP distortion terms
+        (``A_ORDER``), which a solver fits and a pointing guess does not
+        have. The SIP test recognizes files solved before the card was
+        written.
+    """
+    if not all(key in header for key in _SKY_AXIS_KEYWORDS):
+        return False
+    return header_card_is_true(header.get(PLATE_SOLVED_KEYWORD, False)) or "A_ORDER" in header

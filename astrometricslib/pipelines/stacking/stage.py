@@ -735,9 +735,8 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
     """
     from astropy.wcs import WCS
 
-    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
     from astrometricslib.pipelines.shared.session_identification import (
-        header_is_plate_solved,
         header_is_refit_to_gaia,
         write_wcs_to_fits_header,
     )
@@ -794,11 +793,8 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
     """
     from astropy.wcs import WCS
 
-    from astrometricslib._internal.drivers.fits_access import read_header
-    from astrometricslib.pipelines.shared.session_identification import (
-        header_is_plate_solved,
-        write_wcs_to_fits_header,
-    )
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
+    from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
     from astrometricslib.pipelines.stacking.post_processing.stack_crop import (
         CROP_HEIGHT_KEYWORD,
         CROP_WIDTH_KEYWORD,

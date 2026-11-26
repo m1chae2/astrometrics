@@ -98,7 +98,7 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 - **Detection and centroids (§4.2).** `processing/star_identifier.py`, `pre_processing/source_detection.py`, `pre_processing/fwhm.py`.
 - **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
 - **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets the depth and `processing/gaia_field_stars.py` fills and reads tiles. Missing tiles raise `astrometry.notice_gaia_tiles_missing`.
-- **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`). The refit is around the center (`proj_point="center"`); `save_refit_stack_plate_solution` adds the `WCSREFIT` card; detections file version 3.
+- **WCS header (§4.3).** `pipelines/shared/session_identification.write_wcs_to_fits_header`. The refit is around the center (`proj_point="center"`); `save_refit_stack_plate_solution` adds the `WCSREFIT` card; detections file version 3.
 - **Extended-source hint (§4.2).** `check_extended_source` falls back to the saved target record; type rule `target_object_category`. <!-- impl: astrometricslib.utilities.target_object_category.target_object_category -->
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
 - **Target clipping (§4.4).** `post_processing/target_clipping.py` (`target_clipping_measurements`). [AST-19](validation/astrometry.md#ast-19).
@@ -159,7 +159,7 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 - **Siril.** `siril_stacking_driver.py`, `siril_interface/`.
 - **Catalogs and services.** `_internal/drivers/outside_services` is the request gateway (AST-D26, AST-D27). `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`. `catalog_cache.answer_through_cache` stores each answer with its fetch time (`SIMBAD_ANSWER_LIFETIME_DAYS` 180, `VSX_ANSWER_LIFETIME_DAYS` 90; AST-D24); see `catalog_answer_store.py`, `cached_simbad_driver.py`. <!-- impl: astrometricslib._internal.drivers.catalog_cache.SIMBAD_ANSWER_LIFETIME_DAYS --> <!-- impl: astrometricslib._internal.drivers.catalog_cache.VSX_ANSWER_LIFETIME_DAYS -->
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `catalog_access.py`.
-- **Images.** `fits_access.py`, `image.py`.
+- **Images.** `fits_access.py`, `image.py`. <!-- impl: astrometricslib._internal.drivers.fits_access.header_is_plate_solved -->
 
 `catalog_access.py` uses the Butler (Section 4.8) [9], not SQL.
 
@@ -375,7 +375,7 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 | Gaia time limits; depth steps after a slow answer | 45 s, 60 s; 2 of 1 mag | Partly measured ([AST-08](validation/astrometry.md#ast-08)) | §4.2 (step 4) |
 | Gaia depth: throughput; star width; sky; signal-to-noise; margin; cap; default | 0.62; 5″; 18.7 mag/″²; 11.6; 1 mag; G 21; G 18 | Partly measured ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
 | Gaia tile level | 7, split at 50,000 rows | Partly measured ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
-| Catalog match radius | 10″ | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
+| Match radius; map-check median | 10″; 0.5× radius | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2, §4.4.2 |
 | Same-star tolerance; no Gaia number | 2″; 3″ | Measured ([AST-11](validation/astrometry.md#ast-11)) | §4.2 (step 4) |
 | Unresolved companions radius | 3″ | Partly measured ([AST-10](validation/astrometry.md#ast-10)) | §4.2 (step 4) |
 | Variable-star match radius | 3″ | Partly measured ([AST-12](validation/astrometry.md#ast-12)) | §5.2 (concept 4) |
@@ -386,7 +386,7 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 | Target clipping: disc radius; frame cap; read time; least peak | 30″; 200; 120 s; 5σ | Partly measured ([AST-19](validation/astrometry.md#ast-19)) | §4.4 |
 | Expected residual: centroid factor; pixel-phase rms at widths 1.5 to 5 px | √(2/π); 0.092 to 0.008 px | Partly measured ([AST-21](validation/astrometry.md#ast-21)) | §4.4 |
 | Target position tolerance: floor; extent factor | 15′; 1.0 of the radius | Partly measured ([AST-20](validation/astrometry.md#ast-20)) | §4.2 |
-| Margin around the solved frame for a catalog position | 15′ | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 |
+| Margin around the solved frame for a catalog position | 15′ | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
@@ -425,6 +425,9 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.GAIA_DEPTH_CAP -->
 <!-- impl: astrometricslib._internal.drivers.catalog_store.GAIA_TILE_LEVEL -->
 <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.SAME_STAR_POSITION_TOLERANCE_ARCSEC -->
+<!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS -->
+<!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_STARS_TO_VERIFY_REUSED_WCS -->
+<!-- impl: astrometricslib.pipelines.shared.session_identification.MAX_MEDIAN_CATALOG_OFFSET_FRACTION -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.UNRESOLVED_COMPANION_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.shared.variable_star_catalogs.MATCH_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.POINTING_ERROR_SEARCH_RADIUS_ARCSEC -->

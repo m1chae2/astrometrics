@@ -83,7 +83,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.gaia_star_colors import (
-    BRIGHTEST_G_MAGNITUDE,
+    GAIA_COLOUR_MAGNITUDE_RANGE,
     gaia_star_colors_in_footprint,
 )
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, image_corners_on_sky
@@ -1144,7 +1144,7 @@ def _bright_star_colors(wcs: WCS, shape: tuple[int, int]) -> tuple[Table | None,
         & np.isfinite(dec)
         & np.isfinite(blue)
         & np.isfinite(visual)
-        & (visual < BRIGHTEST_G_MAGNITUDE)
+        & (visual < resolve(GAIA_COLOUR_MAGNITUDE_RANGE).value[0])
     )
     stars = Table({
         "ra": ra[usable],

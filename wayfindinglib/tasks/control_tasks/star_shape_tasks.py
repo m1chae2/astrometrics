@@ -1,8 +1,9 @@
 """Purpose: Review the star shapes of a target against the equipment's history.
 
 Description: Reads the stored star-shape measurements of a target's frames
-(and its stack, when the stack has them), works out the equipment's own
-roundness limit (register entry WAY-42) and hands both to
+(and its stack, when the stack has them) and the frames the stacker set aside
+as trailed, works out the equipment's own roundness limit for frames
+(register entry WAY-42) and the library's stack baseline, and hands them to
 `analytics.star_shape_review.judge_star_shape`. Nothing here writes.
 """
 
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING
 from wayfindinglib.analytics.star_shape_review import (
     ROUNDNESS_LIMIT_NAME,
     judge_star_shape,
+    read_stack_roundness_low_limit,
     read_star_shape_rows,
 )
 from wayfindinglib.models.session.star_shape_review import StarShapeReview
@@ -46,14 +48,26 @@ def get_star_shape_review(
     Returns
     -------
     review : `StarShapeReview`
-        The verdicts and the per-frame series.
+        The verdicts, the set-aside frames, the typical elongation and the
+        per-frame series.
     """
     resolved = context.astrometrics.targets.resolve(target)
-    frames, stack = read_star_shape_rows(context.astrometrics, resolved, night, frame_paths)
+    frames, stack, set_aside = read_star_shape_rows(context.astrometrics, resolved, night, frame_paths)
     limit = None
-    if frames or stack is not None:
+    if frames:
         contexts, runs = night_analysis.recorded_sessions(context)
         envelope = night_analysis.performance_envelope(context, None, night, contexts, runs, {})
         limit = None if envelope is None else envelope.value(ROUNDNESS_LIMIT_NAME)
+    stack_limit = None
+    if stack is not None and stack.elongation is not None:
+        stack_limit = read_stack_roundness_low_limit(context.astrometrics, stack.path)
     scope = "frame_list" if frame_paths is not None else ("night" if night is not None else None)
-    return judge_star_shape(resolved.id, frames, stack, limit, scope)
+    return judge_star_shape(
+        resolved.id,
+        frames,
+        stack,
+        limit,
+        scope,
+        set_aside=set_aside,
+        stack_roundness_low_limit=stack_limit,
+    )

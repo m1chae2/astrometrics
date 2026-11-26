@@ -1,18 +1,17 @@
 /**
  * @file starShapeStats.ts
- * @description Small numbers drawn from the star-shape review's per-frame series: the median, and the
- * session's typical elongation (the dashed line of the stretch-by-frame chart and the "session typical"
- * in a flagged frame's hover text). Plain functions, so they can be tested without a screen.
+ * @description The session's typical elongation (the "session typical" in a flagged frame's hover text).
+ * The star-shape review works it out and sends it as `typicalElongation`, so the screen reads that number.
  */
 
-import type { FrameStarShape } from '../../common/types/backendTypes';
+import type { FrameStarShape, StarShapeReview } from '../../common/types/backendTypes';
 
 /**
  * Finds the middle value of a list of numbers.
  * @param values The numbers.
  * @return The median, or `null` for an empty list.
  */
-export function median(values: number[]): number | null {
+function median(values: number[]): number | null {
     if (values.length === 0) return null;
     const sorted = [...values].sort((a, b) => a - b);
     const middle = Math.floor(sorted.length / 2);
@@ -20,19 +19,25 @@ export function median(values: number[]): number | null {
 }
 
 /**
- * Finds a frame's measured elongation, if it has one.
- * @param frame One frame of the review's series.
- * @return The elongation, or `null`.
+ * Gives the session's typical elongation.
+ *
+ * Pass the star-shape review: its `typicalElongation` is the number. A caller that still passes the
+ * review's per-frame series gets the median of the series, the same number the review gives, until it
+ * passes the review itself.
+ * @param source The star-shape review, or its per-frame series.
+ * @return The typical elongation, or `null` when there is none.
  */
-function elongationOf(frame: FrameStarShape): number | null {
-    return typeof frame.elongation === 'number' && Number.isFinite(frame.elongation) ? frame.elongation : null;
-}
-
-/**
- * Finds the session's typical elongation: the median over the measured frames.
- * @param series The review's per-frame numbers.
- * @return The median, or `null` when no frame has one.
- */
-export function sessionTypicalElongation(series: FrameStarShape[] | undefined): number | null {
-    return median((series ?? []).map(elongationOf).filter((value): value is number => value !== null));
+export function sessionTypicalElongation(
+    source: Pick<StarShapeReview, 'typicalElongation'> | FrameStarShape[] | null | undefined,
+): number | null {
+    if (source === null || source === undefined) return null;
+    if (Array.isArray(source)) {
+        return median(
+            source
+                .map((frame) => frame.elongation)
+                .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
+        );
+    }
+    const value = source.typicalElongation;
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }

@@ -1329,6 +1329,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.notice_stack_turned",
     "stacking.star_elongation",
     "stacking.star_elongation_angle_deg",
+    "stacking.star_elongation_coherence",
     "stacking.star_width_center_px",
     "stacking.star_width_corner_xlow_ylow_px",
     "stacking.star_width_corner_xhigh_ylow_px",

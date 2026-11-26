@@ -203,6 +203,7 @@ shared.extent_tolerance_factor,AST-20,judgment,Partly measured
 shared.field_grid_cells_per_side,AST-18,measurement,Design estimate
 shared.field_region_cells_per_side,AST-18,measurement,Design estimate
 shared.focal_length_tolerance_fraction,STK-D71,measurement,Design estimate
+shared.gaia_colour_magnitude_range,STK-D86,measurement,Design estimate
 shared.low_star_fraction,STK-34,exclusion criteria,Partly measured
 shared.match_radius_arcsec,AST-12,exclusion criteria,Partly measured
 shared.maximum_stars_measured,STK-D38,exclusion criteria,Design estimate
@@ -467,9 +468,6 @@ stacking.aligned_edge_margin_px,STK-D84,measurement,Design estimate
 stacking.alignment_clip_sigmas,STK-D64,measurement,Design estimate
 stacking.alignment_high_pass_sigma_pixels,STK-D64,measurement,Design estimate
 stacking.alignment_upsample_factor,STK-D64,measurement,Design estimate
-stacking.annulus_inner_radius_pixels,STK-D17,measurement,Design estimate
-stacking.annulus_outer_radius_pixels,STK-D17,measurement,Design estimate
-stacking.aperture_radius_pixels,STK-D17,measurement,Design estimate
 stacking.aperture_radius_px,STK-36,measurement,Partly measured
 stacking.background_box_pixels,STK-D55,measurement,Design estimate
 stacking.background_smoothing_pixels,STK-D55,measurement,Design estimate
@@ -478,7 +476,6 @@ stacking.block_pixels,STK-D54,measurement,Design estimate
 stacking.bootstrap_count,STK-D32,measurement,Design estimate
 stacking.bright_object_brightness,STK-33,measurement,Partly measured
 stacking.bright_pixel_fraction_of_peak,STK-D59,judgment,Design estimate
-stacking.brightness_percentile_range,STK-27,measurement,Partly measured
 stacking.ceiling_share_limit,STK-52,judgment,Partly measured
 stacking.central_region_shape_pixels,STK-35,measurement,Partly measured
 stacking.checked_estimate_range_room_multiples,STK-40,judgment,Partly measured
@@ -533,7 +530,6 @@ stacking.default_star_fwhm_pixels,STK-D61,measurement,Design estimate
 stacking.default_star_strength,STK-31,measurement,Partly measured
 stacking.default_star_stretch,STK-31,measurement,Partly measured
 stacking.detected_star_count,STK-D23,measurement,Design estimate
-stacking.detection_sigma,STK-D17,measurement,Design estimate
 stacking.dimming_spread_pixels,STK-D55,measurement,Design estimate
 stacking.elongation_outlier_sigmas,STK-01,exclusion criteria,Partly measured
 stacking.elongation_rise_above_median,STK-01,exclusion criteria,Partly measured
@@ -554,7 +550,6 @@ stacking.faint_source_high_pass_sigma_px,STK-36,measurement,Partly measured
 stacking.faint_source_smoothing_sigmas_px,STK-36,measurement,Partly measured
 stacking.faint_source_threshold_sigmas,STK-36,measurement,Partly measured
 stacking.fallback_sky_level,STK-29,measurement,Partly measured
-stacking.finder_fwhm_pixels,STK-D17,measurement,Design estimate
 stacking.flat_clipped_share_limit,STK-D18,exclusion criteria,Design estimate
 stacking.frames_sampled_per_group,STK-D26,measurement,Design estimate
 stacking.gain_brightest_fraction,STK-D10,measurement,Design estimate
@@ -602,7 +597,6 @@ stacking.minimum_registered_fraction,STK-12,judgment,Partly measured
 stacking.minimum_ring_fill,STK-D23,measurement,Design estimate
 stacking.minimum_smoothing_sigma_pixels,STK-D06,measurement,Design estimate
 stacking.minimum_stack_data_fraction,STK-D69,exclusion criteria,Design estimate
-stacking.minimum_stars,STK-27,measurement,Partly measured
 stacking.minimum_subset_frames,STK-37,judgment,Design estimate
 stacking.minimum_trail_contrast_sigma,STK-D68,judgment,Design estimate
 stacking.minimum_usable_apertures,STK-D32,measurement,Design estimate

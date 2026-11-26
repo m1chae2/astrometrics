@@ -88,7 +88,9 @@ def test_a_stretched_stack_gets_the_frame_values_at_stack_level(stretched_stack:
     assert elongation.value == pytest.approx(expected.elongation)
     angle = rows[stacking_metrics.STACKING_STAR_ELONGATION_ANGLE_DEG]
     assert angle.value == pytest.approx(np.degrees(ANGLE_RAD), abs=5.0)
-    assert "coherence" in angle.reason
+    coherence = rows[stacking_metrics.STACKING_STAR_ELONGATION_COHERENCE]
+    assert coherence.value == pytest.approx(expected.angle_coherence)
+    assert coherence.value > 0.5
     center = rows[stacking_metrics.STACKING_STAR_WIDTH_CENTER_PX]
     assert center.status == MeasurementStatus.MEASURED
     assert set(rows) == set(stacking_metrics.STACK_STAR_SHAPE_METRIC_BY_FRAME_METRIC.values())

@@ -48,15 +48,11 @@ preview is made from.
 """
 
 import logging
-import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from photutils.detection import DAOStarFinder
-from photutils.utils import NoDetectionsWarning
 from scipy import fft, ndimage, signal
-from scipy.spatial import cKDTree
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.foundation.parameters import resolve
@@ -67,6 +63,11 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
+from astrometricslib.pipelines.shared.star_finding import (
+    find_sources_above_background,
+    source_positions,
+    unsaturated_boxes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ __all__ = [
     "STAR_WIDTH_MATCH_REGULARIZATION",
     "STAR_WIDTH_MATCH_STAR_SELECTION",
     "StarWidthMatch",
+    "find_measurable_stars",
     "match_star_widths",
     "match_star_widths_in_file",
     "measure_channel_widths",
@@ -242,6 +244,10 @@ _EDGE_MARGIN_PIXELS = 3
 # Converts a Gaussian's sigma to its full width at half maximum.
 _SIGMA_TO_FWHM = 2.0 * np.sqrt(2.0 * np.log(2.0))
 
+# The star finder keeps sources of any roundness from -1 to 1, its own
+# default. Plumbing, not tuned.
+_FINDER_ROUNDNESS_RANGE = (-1.0, 1.0)
+
 _CHANNEL_NAMES = ("red", "green", "blue")
 
 
@@ -338,8 +344,12 @@ class StarWidthMatch:
         return f"Star width matching: {channels} sharpened on {self.star_count} stars ({'; '.join(parts)})"
 
 
-def _find_measurable_stars(image: np.ndarray) -> np.ndarray:
+def find_measurable_stars(image: np.ndarray) -> np.ndarray:
     """Find bright, unsaturated, isolated stars on the green channel.
+
+    The stars come from the shared star finder (`star_finding`) with its
+    isolation and saturation filters, so every star-width measurement of a
+    color stack starts from the same stars.
 
     Parameters
     ----------
@@ -363,34 +373,25 @@ def _find_measurable_stars(image: np.ndarray) -> np.ndarray:
     sky, noise = measured_sky
     if not noise > 0.0:
         return np.empty((0, 2))
-    finder = DAOStarFinder(fwhm=finder_width, threshold=peak_sigmas * noise, exclude_border=True)
-    with warnings.catch_warnings():
-        # An image with no stars is an ordinary case, handled below.
-        warnings.simplefilter("ignore", NoDetectionsWarning)
-        found = finder(np.nan_to_num(green - np.float32(sky)))
-    if found is None or len(found) < 2:
+    sources = find_sources_above_background(
+        np.nan_to_num(green - np.float32(sky)),
+        noise=noise,
+        expected_fwhm_px=finder_width,
+        threshold_sigma=peak_sigmas,
+        roundness_range=_FINDER_ROUNDNESS_RANGE,
+        isolation_px=isolation,
+    )
+    if len(sources) < 2:
         return np.empty((0, 2))
-    found.sort("flux", reverse=True)
-    prefix = ("x_", "y_") if "x_centroid" in found.colnames else ("x", "y")
-    x = np.asarray(found[f"{prefix[0]}centroid"], dtype=float)
-    y = np.asarray(found[f"{prefix[1]}centroid"], dtype=float)
-    neighbors = cKDTree(np.column_stack([x, y])).query_ball_point(np.column_stack([x, y]), isolation)
-    isolated = np.array([len(group) == 1 for group in neighbors])
+    positions = source_positions(sources)
     margin = int(np.ceil(outer)) + _EDGE_MARGIN_PIXELS
     height, width = green.shape
+    x, y = positions[:, 0], positions[:, 1]
     inside = (x > margin) & (x < width - 1 - margin) & (y > margin) & (y < height - 1 - margin)
-    finite_maxima = [float(np.nanmax(channel)) for channel in image]
-    limit = saturation_share * min(finite_maxima)
-    half = int(np.ceil(outer))
-    kept = []
-    for star_x, star_y in zip(x[isolated & inside], y[isolated & inside], strict=True):
-        column, row = round(star_x), round(star_y)
-        stamp = image[:, row - half : row + half + 1, column - half : column + half + 1]
-        if np.all(np.isfinite(stamp)) and float(stamp.max()) < limit and float(stamp.min()) > 0.0:
-            kept.append((star_x, star_y))
-            if len(kept) >= _MAXIMUM_STARS:
-                break
-    return np.array(kept, dtype=float).reshape(-1, 2)
+    positions = positions[inside]
+    ceiling = saturation_share * min(float(np.nanmax(channel)) for channel in image)
+    usable = unsaturated_boxes(image, positions, int(np.ceil(outer)), ceiling, floor=0.0)
+    return positions[usable][:_MAXIMUM_STARS]
 
 
 def _stamps(image: np.ndarray, positions: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -402,14 +403,14 @@ def _stamps(image: np.ndarray, positions: np.ndarray) -> tuple[np.ndarray, np.nd
     Parameters
     ----------
     image : `numpy.ndarray`
-        A color image, shape (3, height, width).
+        An image, shape (channels, height, width).
     positions : `numpy.ndarray`
         Star positions, shape (n, 2).
 
     Returns
     -------
     stamps : `numpy.ndarray`
-        Shape (n, 3, side, side), 64-bit floats.
+        Shape (n, channels, side, side), 64-bit floats.
     distance : `numpy.ndarray`
         Each stamp pixel's distance from the middle, shape (side, side).
     """
@@ -419,12 +420,13 @@ def _stamps(image: np.ndarray, positions: np.ndarray) -> tuple[np.ndarray, np.nd
     offsets = np.arange(side) - half
     distance = np.hypot(offsets[None, :], offsets[:, None])
     ring = (distance > inner) & (distance <= outer)
-    stamps = np.empty((len(positions), 3, side, side))
+    channels = image.shape[0]
+    stamps = np.empty((len(positions), channels, side, side))
     for index, (star_x, star_y) in enumerate(positions):
         column, row = round(star_x), round(star_y)
         rows = slice(row - half - 1, row + half + 2)
         cut = image[:, rows, column - half - 1 : column + half + 2].astype(np.float64)
-        for channel in range(3):
+        for channel in range(channels):
             moved = ndimage.shift(cut[channel], (row - star_y, column - star_x), order=3, mode="nearest")
             stamps[index, channel] = moved[1:-1, 1:-1]
     stamps -= np.median(stamps[:, :, ring], axis=2)[:, :, None, None]
@@ -432,37 +434,50 @@ def _stamps(image: np.ndarray, positions: np.ndarray) -> tuple[np.ndarray, np.nd
 
 
 def measure_channel_widths(image: np.ndarray, positions: np.ndarray) -> tuple[float, ...]:
-    """Measure the star width of each channel of a color image.
+    """Measure the star width of each channel of an image.
 
-    Each star's width is the spread of its light around its center: the
-    root of the mean squared distance from the center inside the measuring
-    circle, weighted by the light, converted to the full width at half
-    maximum a Gaussian star of that spread would have. The channel's width is
-    the median over the stars.
+    This is the library's one second-moment star width for the color
+    preview. Each star's width is the spread of its light around its center:
+    the root of the mean squared distance from the center inside the
+    measuring circle, weighted by the light above the sky ring's median,
+    converted to the full width at half maximum a Gaussian star of that
+    spread would have (`_SIGMA_TO_FWHM`). The stamps are moved so the
+    star's center falls on the middle pixel. Pixels below the sky are kept
+    as they are (negative), so sky noise does not widen the star. A star
+    whose light inside the circle is not above zero gives no width. The
+    channel's width is the median over the stars.
 
     Parameters
     ----------
     image : `numpy.ndarray`
-        A linear color image, shape (3, height, width).
+        A linear image, shape (channels, height, width) or (height, width).
     positions : `numpy.ndarray`
-        The stars to measure, shape (n, 2), from `_find_measurable_stars`.
+        The stars to measure, shape (n, 2), such as from
+        `find_measurable_stars`.
 
     Returns
     -------
     widths : `tuple` [`float`, ...]
-        The red, green and blue widths in pixels, or empty when there are
-        no stars.
+        One width in pixels per channel (red, green and blue for a color
+        image), or empty when there are no stars. A channel in which no star
+        could be measured gives NaN.
     """
     if len(positions) == 0:
         return ()
+    cube = image if image.ndim == 3 else image[np.newaxis]
     radius = float(resolve(STAR_WIDTH_MATCH_RADII_PIXELS).value[0])
-    stamps, distance = _stamps(image, positions)
+    stamps, distance = _stamps(cube, positions)
     inside = distance <= radius
     light = stamps[:, :, inside]
     totals = light.sum(axis=2)
     spread = (light * distance[inside] ** 2).sum(axis=2) / np.where(totals > 0.0, totals, np.nan)
-    sigma = np.sqrt(np.clip(spread, 0.0, None) / 2.0)
-    return tuple(float(np.nanmedian(sigma[:, channel]) * _SIGMA_TO_FWHM) for channel in range(3))
+    sigma = np.sqrt(np.where(spread > 0.0, spread, np.nan) / 2.0)
+    widths = []
+    for channel in range(cube.shape[0]):
+        values = sigma[:, channel]
+        values = values[np.isfinite(values)]
+        widths.append(float(np.median(values) * _SIGMA_TO_FWHM) if values.size else float("nan"))
+    return tuple(widths)
 
 
 def _average_stars(image: np.ndarray, positions: np.ndarray) -> np.ndarray:
@@ -772,7 +787,7 @@ def match_star_widths(image: np.ndarray) -> tuple[np.ndarray | None, StarWidthMa
     if image.ndim != 3 or image.shape[0] != 3:
         return None, StarWidthMatch(applied=False, reason="the image is not a color image")
     image = np.asarray(image, dtype=np.float32)
-    positions = _find_measurable_stars(image)
+    positions = find_measurable_stars(image)
     minimum = int(resolve(STAR_WIDTH_MATCH_MINIMUM_STARS).value)
     if len(positions) < minimum:
         return None, StarWidthMatch(

@@ -4,10 +4,11 @@ Description: `review.get_star_shape_review` returns a `StarShapeReview`. It
 turns the star-shape measurements that `astrometricslib` stores (how
 stretched the stars are, which way, and how wide they are at the center and
 in the corners) into short plain verdicts: are the stars round, does the
-stretch point one way, which frames stand out, and how the corners compare
-with the center. Each verdict has one plain sentence for the screen and the
-numbers behind it. The review also carries the per-frame series, so the
-screen can draw a chart.
+stretch point one way, which frames the stacker set aside as trailed, and
+how the corners compare with the center. Each verdict has one plain sentence
+for the screen and the numbers behind it. The review also carries the
+per-frame series and their typical elongation, so the screen can draw a
+chart.
 
 `astrometricslib` measures; this review only reads what was stored and says
 what it suggests. Nothing here is stored.
@@ -64,7 +65,7 @@ class FrameStarShape(BaseModel):
         degrees.
     direction_coherence : `float` or `None`
         From 0 (the stars point every which way) to 1 (they all point the
-        same way), read from the angle measurement's reason text.
+        same way), from the stored coherence measurement.
     center_width_px : `float` or `None`
         Median star width at the center of the field, in pixels.
     corner_widths_px : `dict` [`str`, `float`]
@@ -72,7 +73,7 @@ class FrameStarShape(BaseModel):
     elongation_row_id : `int` or `None`
         The id of the stored elongation row, so a statement can cite it.
     standout : `bool`
-        Whether this frame's elongation stands out from the others.
+        Whether the stacker set this frame aside as trailed.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -89,26 +90,30 @@ class FrameStarShape(BaseModel):
 
 
 class StandoutFrame(BaseModel):
-    """A frame whose elongation is far from the usual one.
+    """A frame the stacker's quarantine set aside for stretched stars.
+
+    The review lists it as the quarantine decided; it does not judge the
+    frame again.
 
     Parameters
     ----------
     path : `str`
-        The frame's path.
+        The frame's path before it was set aside (its path now when that is
+        not known).
     timestamp : `float` or `None`
         When the frame was taken, in seconds since the Unix epoch.
-    elongation : `float`
-        The frame's elongation.
-    spreads_above_typical : `float`
-        How many robust spreads the frame lies above the typical value.
+    elongation : `float` or `None`
+        The frame's stored elongation, when there is one.
+    reason : `str`
+        The quarantine's sentence saying what it measured.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
     path: str
     timestamp: float | None = None
-    elongation: float
-    spreads_above_typical: float = Field(alias="spreadsAboveTypical")
+    elongation: float | None = None
+    reason: str = ""
 
 
 class ShapeVerdict(BaseModel):
@@ -142,16 +147,21 @@ class StarShapeReview(BaseModel):
         ``"frame_list"``.
     frame_count : `int`
         Frames with a stored elongation.
+    typical_elongation : `float` or `None`
+        The median elongation of those frames, the session's typical value.
+        `None` when no frame has one.
     roundness : `ShapeVerdict`
-        Round or elongated, against the equipment's own history.
+        Round or elongated: the frames against the equipment's own history,
+        a stack against the library's other stacks.
     direction : `ShapeVerdict`
         Whether the stretch points one way, and what that suggests.
     standout : `ShapeVerdict`
-        Whether some frames stand out, with ``standout_frames`` listing them.
+        Whether the stacker set frames aside as trailed, with
+        ``standout_frames`` listing them.
     corners : `ShapeVerdict`
         The corner and center widths. Always reported as not validated.
     standout_frames : `list` [`StandoutFrame`]
-        Frames that are candidates to set aside, most extreme first.
+        The frames set aside as trailed, oldest first.
     series : `list` [`FrameStarShape`]
         Every frame with a stored elongation, oldest first, for a chart.
     notes : `list` [`str`]
@@ -163,6 +173,7 @@ class StarShapeReview(BaseModel):
     target_id: str = Field(alias="targetId")
     scope: str
     frame_count: int = Field(alias="frameCount")
+    typical_elongation: float | None = Field(default=None, alias="typicalElongation")
     roundness: ShapeVerdict
     direction: ShapeVerdict
     standout: ShapeVerdict

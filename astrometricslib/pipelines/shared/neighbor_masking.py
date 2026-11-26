@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import cKDTree
 
-from astrometricslib.utilities.robust_statistics import robust_sigma
+from astrometricslib.utilities.robust_statistics import sigma_clipped_values
 
 __all__ = [
     "NearestNeighbors",
@@ -47,11 +47,10 @@ def clipped_median_and_sigma(
 ) -> tuple[float, float, int] | None:
     """Find the median and noise of some pixels after clipping outliers.
 
-    Each pass finds the median and the robust sigma (1.4826 times the median
-    absolute deviation) and drops every pixel farther than `clip_sigma`
-    sigmas from the median. The passes stop when nothing more is dropped,
-    when the spread is zero, or when dropping would leave fewer than
-    `minimum_count` pixels.
+    The clipping is the library's one loop, `sigma_clipped_values`: each
+    pass drops every pixel farther than `clip_sigma` robust sigmas from the
+    median, until nothing more is dropped. The noise is the standard
+    deviation of the kept pixels.
 
     Parameters
     ----------
@@ -72,19 +71,11 @@ def clipped_median_and_sigma(
         of pixels kept. `None` when fewer than `minimum_count` finite pixels
         exist.
     """
-    pixels = np.asarray(values, dtype=float).ravel()
-    pixels = pixels[np.isfinite(pixels)]
-    if pixels.size < minimum_count:
+    pixels = sigma_clipped_values(
+        values, minimum_count=minimum_count, maximum_passes=maximum_passes, clip_sigma=clip_sigma
+    )
+    if pixels is None:
         return None
-    for _ in range(maximum_passes):
-        median = float(np.median(pixels))
-        spread = robust_sigma(pixels)
-        if spread <= 0.0:
-            break
-        kept = pixels[np.abs(pixels - median) <= clip_sigma * spread]
-        if kept.size == pixels.size or kept.size < minimum_count:
-            break
-        pixels = kept
     noise = float(np.std(pixels, ddof=1)) if pixels.size > 1 else 0.0
     return float(np.median(pixels)), noise, int(pixels.size)
 

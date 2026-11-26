@@ -471,8 +471,10 @@ preview_colour_calibration_enabled = "true"
 # photometric colour calibration: Siril solves the field, matches the stars to
 # the Gaia catalogue over the network, and scales the channels. It takes about
 # 10 to 30 seconds per stack. If Siril or the catalogue lookup fails, the
-# preview falls back to "stars", which measures the stars in the stack itself,
-# needs no network, and takes a few seconds. Set "stars" to use only that.
+# preview falls back to "stars": the stars whose Gaia colours are like the
+# Sun's are made white. It needs a plate solution and the field's Gaia colours
+# (stored after the first lookup); without them the colours are left
+# uncalibrated. Set "stars" to use only that.
 preview_colour_calibration_method = "pcc"
 # "true" (the default): before a restack replaces a stack, move the old stack
 # and its pictures into a folder named "_previous" beside it, so the two can be

@@ -100,6 +100,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE,
     FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
     FRAME_STAR_WIDTH_EFFECTIVE_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
@@ -404,6 +405,7 @@ def _emit_star_profile_measurements(
         FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
         FRAME_STAR_ELONGATION,
         FRAME_STAR_ELONGATION_ANGLE_DEG,
+        FRAME_STAR_ELONGATION_COHERENCE,
         FRAME_STAR_WIDTH_EFFECTIVE_PX,
         FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
         *FRAME_STAR_WIDTH_REGION_PX.values(),
@@ -455,10 +457,14 @@ def _emit_star_profile_measurements(
         value=result.angle_deg,
         uncertainty=result.angle_uncertainty_deg,
         sample_count=result.star_count,
-        reason=(
-            f"{fit_note}; angles agree with a coherence of {result.angle_coherence:.2f} "
-            "(0 means no preferred direction, so the angle means little)"
-        ),
+        reason=f"{fit_note}; see {FRAME_STAR_ELONGATION_COHERENCE} for how well the stars agree",
+        channel=channel,
+    )
+    context.add(
+        FRAME_STAR_ELONGATION_COHERENCE,
+        value=result.angle_coherence,
+        sample_count=result.star_count,
+        reason=fit_note,
         channel=channel,
     )
     _emit_effective_width_measurements(context, result, channel, fit_note)
@@ -711,6 +717,7 @@ def measure_frame(
         FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
         FRAME_STAR_ELONGATION,
         FRAME_STAR_ELONGATION_ANGLE_DEG,
+        FRAME_STAR_ELONGATION_COHERENCE,
         FRAME_STAR_WIDTH_EFFECTIVE_PX,
         FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
         *FRAME_STAR_WIDTH_REGION_PX.values(),

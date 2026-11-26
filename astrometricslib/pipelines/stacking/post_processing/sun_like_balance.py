@@ -5,15 +5,18 @@ of a color stack so that its stars match the colors the Gaia catalog gives
 them. It is not always right. Siril itself logs "imprecise solution" when the
 fit scatters, and on two Nikon stacks it left the stars like the Sun with
 colors that depend strongly on how they are measured (see
-`SUN_LIKE_APERTURE_RADIUS_PIXELS`). The star-based fallback
-(`colour_calibration`) assumes the median star is neutral, which is the same
-kind of guess. A picture in which sun-like stars are not white has a color
-cast, however neutral its sky is.
-A picture in which sun-like stars
-are not white has a color cast, however neutral its sky is.
+`SUN_LIKE_APERTURE_RADIUS_PIXELS`). A picture in which sun-like stars are not
+white has a color cast, however neutral its sky is.
 
-This module checks and corrects the balance after either calibration, on the
-linear data, before the stretch:
+This module owns the library's white point: the colors of stars like the
+Sun. It checks and corrects the balance after Siril's calibration, and it is
+the calibration itself when Siril cannot run (`balance_sun_like_stars` with
+``as_calibration=True``). The monochrome-on-color picture takes its white
+point from here too (`star_color_measurement`). With no Gaia colors there is
+no white point: the colors are left uncalibrated and the result says so. No
+star is ever assumed to be white because it is the median star.
+
+The steps run on the linear data, before the stretch:
 
 1. *Stars.* The Gaia DR3 colors of the stars in the field come from
    `gaia_star_colors_in_footprint`. A star is used when its ``BP - RP``
@@ -40,11 +43,13 @@ linear data, before the stretch:
    tenth of a noise width between channels is a visible tint in the stretched
    sky, and a calibration leaves differences of that size. The ratios are
    measured again on the corrected image and both sets are recorded.
-4. *Guards.* A correction larger than `SUN_LIKE_MAXIMUM_CORRECTION` is not
-   applied: it means a wrong plate solution or a field where dust has
-   reddened the stars more than the camera has, and a large change made on
-   that evidence could do more harm than good. The result says so, so the
-   preview's record and notices can flag it.
+4. *Guards.* After a calibration, a correction larger than
+   `SUN_LIKE_MAXIMUM_CORRECTION` is not applied: it means a wrong plate
+   solution or a field where dust has reddened the stars more than the
+   camera has, and a large change made on that evidence could do more harm
+   than good. The result says so, so the
+   preview's record and notices can flag it. As the calibration itself the
+   guard does not apply: an uncalibrated camera is often off by more.
 
 The stack itself is never changed. This works on the scratch copy that the
 preview is made from.
@@ -82,13 +87,21 @@ from astrometricslib.utilities.robust_statistics import robust_sigma
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SUN_BP_RP",
     "SUN_LIKE_MAXIMUM_CORRECTION",
     "SunLikeBalance",
     "balance_sun_like_stars",
     "balance_sun_like_stars_in_file",
+    "find_sun_like_stars",
     "measure_sun_like_ratios",
     "select_sun_like_stars",
+    "sky_subtracted_aperture_fluxes",
 ]
+
+# The Gaia BP - RP color of the Sun (Casagrande and VandenBerg 2018 give
+# 0.82). The sun-like bands below are drawn around it. A published value, not
+# tuned.
+SUN_BP_RP = 0.82
 
 # The Gaia BP - RP colors that count as sun-like. The Sun's is about 0.82. The
 # narrow band is the first choice; the wide band is used only when the narrow
@@ -395,10 +408,48 @@ def select_sun_like_stars(
     return positions[chosen]
 
 
-def _star_fluxes(
+def find_sun_like_stars(
+    stars: Table, wcs: WCS, image_shape: tuple[int, int]
+) -> tuple[np.ndarray, tuple[float, float]]:
+    """Pick the sun-like stars in the narrow band, or in the wide one if short.
+
+    Parameters
+    ----------
+    stars : `astropy.table.Table`
+        The field's Gaia stars (see `select_sun_like_stars`).
+    wcs : `astropy.wcs.WCS`
+        The image's plate solution.
+    image_shape : `tuple` [`int`, `int`]
+        The image's height and width, in pixels.
+
+    Returns
+    -------
+    positions : `numpy.ndarray`
+        The chosen stars' x and y pixel positions, shape (n, 2).
+    colour_range : `tuple` [`float`, `float`]
+        The ``BP - RP`` band they came from: `SUN_LIKE_COLOUR_RANGE`, or
+        `SUN_LIKE_WIDE_COLOUR_RANGE` when the narrow band holds fewer than
+        `SUN_LIKE_MINIMUM_STARS`.
+    """
+    minimum_stars = int(resolve(SUN_LIKE_MINIMUM_STARS).value)
+    positions = np.empty((0, 2))
+    used_range = (0.0, 0.0)
+    for band in (SUN_LIKE_COLOUR_RANGE, SUN_LIKE_WIDE_COLOUR_RANGE):
+        low, high = (float(value) for value in resolve(band).value)
+        used_range = (low, high)
+        positions = select_sun_like_stars(stars, wcs, image_shape, used_range)
+        if len(positions) >= minimum_stars:
+            break
+    return positions, used_range
+
+
+def sky_subtracted_aperture_fluxes(
     channel: np.ndarray, positions: np.ndarray, radius: float, ring: tuple[float, float]
 ) -> np.ndarray:
     """Measure each star's light in one channel, with the local sky removed.
+
+    This is the library's aperture photometry for star colors: the light in a
+    circle minus the sigma-clipped median of a ring around it.
 
     Parameters
     ----------
@@ -448,7 +499,8 @@ def measure_sun_like_ratios(
     radius = float(resolve(SUN_LIKE_APERTURE_RADIUS_PIXELS).value)
     ring = tuple(float(value) for value in resolve(SUN_LIKE_ANNULUS_RADII_PIXELS).value)
     red, green, blue = (
-        _star_fluxes(image[index], positions, radius, (ring[0], ring[1])) for index in range(3)
+        sky_subtracted_aperture_fluxes(image[index], positions, radius, (ring[0], ring[1]))
+        for index in range(3)
     )
     usable = (red > 0) & (green > 0) & (blue > 0)
     count = int(usable.sum())
@@ -484,7 +536,7 @@ def _empty_sky_level(channel: np.ndarray) -> float:
 
 
 def balance_sun_like_stars(
-    image: np.ndarray, wcs: WCS, stars: Table | None
+    image: np.ndarray, wcs: WCS, stars: Table | None, *, as_calibration: bool = False
 ) -> tuple[np.ndarray | None, SunLikeBalance]:
     """Check the white balance of an image and correct it if it is off.
 
@@ -497,6 +549,9 @@ def balance_sun_like_stars(
     stars : `astropy.table.Table` or `None`
         The field's Gaia stars with their colors (see
         `gaia_star_colors_in_footprint`), or `None` when none are known.
+    as_calibration : `bool`, optional
+        `True` when this is the image's color calibration, not a check
+        after one: `SUN_LIKE_MAXIMUM_CORRECTION` then does not apply.
 
     Returns
     -------
@@ -509,13 +564,7 @@ def balance_sun_like_stars(
     if stars is None or len(stars) == 0:
         return None, _not_applied("the field has no Gaia star colors")
     minimum_stars = int(resolve(SUN_LIKE_MINIMUM_STARS).value)
-    positions = np.empty((0, 2))
-    used_range = tuple(resolve(SUN_LIKE_COLOUR_RANGE).value)
-    for band in (SUN_LIKE_COLOUR_RANGE, SUN_LIKE_WIDE_COLOUR_RANGE):
-        used_range = tuple(float(value) for value in resolve(band).value)
-        positions = select_sun_like_stars(stars, wcs, (image.shape[1], image.shape[2]), used_range)
-        if len(positions) >= minimum_stars:
-            break
+    positions, used_range = find_sun_like_stars(stars, wcs, (image.shape[1], image.shape[2]))
     if len(positions) < minimum_stars:
         return None, _not_applied(
             f"only {len(positions)} isolated sun-like stars were found; at least {minimum_stars} are needed",
@@ -548,7 +597,7 @@ def balance_sun_like_stars(
     }
     limit = float(resolve(SUN_LIKE_MAXIMUM_CORRECTION).value)
     largest = max(abs(red_gain - 1.0), abs(blue_gain - 1.0))
-    if largest > limit:
+    if largest > limit and not as_calibration:
         return None, _not_applied(
             f"the change it asks for (red x{red_gain:.3f}, blue x{blue_gain:.3f}) is more than "
             f"{100 * limit:.0f} percent, so it was not applied",
@@ -577,6 +626,8 @@ def balance_sun_like_stars_in_file(
     input_path: str,
     output_path: str,
     load_stars: Callable[[list[tuple[float, float]], float], Table | None] | None = None,
+    *,
+    as_calibration: bool = False,
 ) -> SunLikeBalance:
     """Check a color FITS image's white balance and save a corrected copy.
 
@@ -596,6 +647,9 @@ def balance_sun_like_stars_in_file(
         in degrees, and the margin in degrees) as the table of
         `gaia_star_colors_in_footprint`. By default the stored answers are
         read and the Gaia archive is asked for what is missing.
+    as_calibration : `bool`, optional
+        `True` when this is the image's color calibration (see
+        `balance_sun_like_stars`).
 
     Returns
     -------
@@ -619,7 +673,7 @@ def balance_sun_like_stars_in_file(
         return _not_applied(f"the Gaia star colors are not available ({error})")
     except (ValueError, ConnectionError) as error:
         return _not_applied(f"the field's stars could not be found ({error})")
-    corrected, result = balance_sun_like_stars(np.asarray(data), wcs, stars)
+    corrected, result = balance_sun_like_stars(np.asarray(data), wcs, stars, as_calibration=as_calibration)
     if corrected is not None:
         write_image(output_path, corrected, header)
     logger.info("%s.", result.step_sentence())

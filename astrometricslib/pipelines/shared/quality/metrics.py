@@ -41,6 +41,7 @@ FRAME_STAR_WIDTH_MOFFAT_PX = "frame.star_width_moffat_px"
 FRAME_STAR_WIDTH_MOFFAT_ARCSEC = "frame.star_width_moffat_arcsec"
 FRAME_STAR_ELONGATION = "frame.star_elongation"
 FRAME_STAR_ELONGATION_ANGLE_DEG = "frame.star_elongation_angle_deg"
+FRAME_STAR_ELONGATION_COHERENCE = "frame.star_elongation_coherence"
 FRAME_STAR_WIDTH_EFFECTIVE_PX = "frame.star_width_effective_px"
 FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC = "frame.star_width_effective_arcsec"
 FRAME_STAR_WIDTH_CENTER_PX = "frame.star_width_center_px"
@@ -506,16 +507,44 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
-            "Standard deviation of the direction over 1000 bootstrap resamples of the stars. The "
-            "measurement's reason gives the coherence (0 to 1: the length of the mean ellipticity "
-            "vector divided by the mean ellipticity of the stars); a low value means the stars do not "
-            "share a direction."
+            "Standard deviation of the direction over 1000 bootstrap resamples of the stars. How well "
+            "the stars agree on the direction is its own metric, `frame.star_elongation_coherence`."
         ),
         register_entry="AST-17",
         purpose=MetricPurpose.CONTEXT,
         purpose_reason=(
             "The direction of the stretch separates a right-ascension drift from a declination one, "
             "which explains an elongation value."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_STAR_ELONGATION_COHERENCE,
+        definition_version=1,
+        unit="",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning=(
+            "How well the stars agree on the direction of their stretch, from 0 (no shared direction, "
+            "so `frame.star_elongation_angle_deg` means little) to 1 (every star stretched the same way)."
+        ),
+        decisions=("guiding", "tracking"),
+        estimator=(
+            "The length of the average ellipticity vector of the stars divided by the average length of "
+            "the stars' ellipticity vectors. The vectors are the ones `frame.star_elongation_angle_deg` "
+            "averages."
+        ),
+        sample_definition=_MOFFAT_SAMPLE,
+        band=_PER_PLANE_BAND,
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported.",
+        register_entry="AST-17",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "It explains an elongation value: the star-shape review reads it to say whether stretched "
+            "stars share one direction, which points at tracking, guiding, wind or flexure rather than "
+            "seeing or focus."
         ),
     ),
     MetricSpec(

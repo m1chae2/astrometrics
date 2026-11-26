@@ -34,6 +34,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_METRICS,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE,
     FRAME_STAR_WIDTH_REGION_PX,
 )
 from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
@@ -44,6 +45,7 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
 STACKING_REJECTED_PIXEL_FRACTION = "stacking.rejected_pixel_fraction"
 STACKING_STAR_ELONGATION = "stacking.star_elongation"
 STACKING_STAR_ELONGATION_ANGLE_DEG = "stacking.star_elongation_angle_deg"
+STACKING_STAR_ELONGATION_COHERENCE = "stacking.star_elongation_coherence"
 STACKING_STAR_WIDTH_CENTER_PX = "stacking.star_width_center_px"
 FRAME_QUARANTINE_ROUNDNESS = "frame.quarantine_roundness"
 FRAME_QUARANTINE_SKY_MEDIAN = "frame.quarantine_sky_median_adu"
@@ -3245,6 +3247,7 @@ def _stack_star_shape_spec(frame_name: str, stack_name: str) -> MetricSpec:
 _STACK_STAR_SHAPE_METRICS: tuple[MetricSpec, ...] = (
     _stack_star_shape_spec(FRAME_STAR_ELONGATION, STACKING_STAR_ELONGATION),
     _stack_star_shape_spec(FRAME_STAR_ELONGATION_ANGLE_DEG, STACKING_STAR_ELONGATION_ANGLE_DEG),
+    _stack_star_shape_spec(FRAME_STAR_ELONGATION_COHERENCE, STACKING_STAR_ELONGATION_COHERENCE),
     *(
         _stack_star_shape_spec(frame_name, frame_name.replace("frame.", "stacking.", 1))
         for frame_name in FRAME_STAR_WIDTH_REGION_PX.values()
@@ -3255,6 +3258,7 @@ _STACK_STAR_SHAPE_METRICS: tuple[MetricSpec, ...] = (
 STACK_STAR_SHAPE_METRIC_BY_FRAME_METRIC: dict[str, str] = {
     FRAME_STAR_ELONGATION: STACKING_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG: STACKING_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE: STACKING_STAR_ELONGATION_COHERENCE,
     **{
         frame_name: frame_name.replace("frame.", "stacking.", 1)
         for frame_name in FRAME_STAR_WIDTH_REGION_PX.values()

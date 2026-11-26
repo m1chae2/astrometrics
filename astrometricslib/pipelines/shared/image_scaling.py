@@ -18,7 +18,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
-from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma, sigma_clipped_values
 
 logger = logging.getLogger(__name__)
 
@@ -227,13 +227,12 @@ def _solve_midtones_balance(normalized_median: float, target_background: float) 
     return float(numerator / denominator)
 
 
-def _clipped_median_and_sigma(values: np.ndarray) -> tuple[float, float] | None:
-    """Find the middle and spread of values by repeated sigma clipping.
+def _sky_level_and_spread(values: np.ndarray) -> tuple[float, float] | None:
+    """Find the middle and spread of sky samples after sigma clipping.
 
-    Each round takes the median as the middle and the median absolute
-    deviation (scaled to a standard deviation) as the spread, then drops the
-    values further than the clip limit from the middle. It stops when nothing
-    more is dropped.
+    The clipping is the library's one loop, `sigma_clipped_values`. The
+    middle is the median of the kept values and the spread is their robust
+    sigma (the scaled median absolute deviation).
 
     Parameters
     ----------
@@ -243,26 +242,21 @@ def _clipped_median_and_sigma(values: np.ndarray) -> tuple[float, float] | None:
     Returns
     -------
     middle_and_sigma : `tuple` [`float`, `float`] or `None`
-        The middle and the spread, or `None` when too few values are left or
+        The middle and the spread, or `None` when too few values are given or
         the spread is not above zero.
     """
-    kept = np.sort(values)
-    clip_sigmas = resolve(_SKY_CLIP_SIGMAS).value
-    middle = sigma = 0.0
-    for _ in range(_SKY_MAXIMUM_CLIP_ROUNDS):
-        if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
-            return None
-        middle = float(np.median(kept))
-        sigma = robust_sigma(kept)
-        if not sigma > 0.0:
-            return None
-        clipped = kept[np.abs(kept - middle) <= clip_sigmas * sigma]
-        if clipped.size == kept.size:
-            break
-        kept = clipped
-    if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
+    kept = sigma_clipped_values(
+        values,
+        minimum_count=_SKY_MINIMUM_SAMPLE_PIXELS,
+        maximum_passes=_SKY_MAXIMUM_CLIP_ROUNDS,
+        clip_sigma=resolve(_SKY_CLIP_SIGMAS).value,
+    )
+    if kept is None:
         return None
-    return middle, sigma
+    sigma = float(robust_sigma(kept))
+    if not sigma > 0.0:
+        return None
+    return float(np.median(kept)), sigma
 
 
 def _sky_sample(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
@@ -329,8 +323,8 @@ def measure_sky_background(arr: np.ndarray) -> tuple[float, float] | None:
     if sampled is None:
         return None
     sample, partner = sampled
-    from_sample = _clipped_median_and_sigma(sample)
-    from_differences = _clipped_median_and_sigma(partner - sample)
+    from_sample = _sky_level_and_spread(sample)
+    from_differences = _sky_level_and_spread(partner - sample)
     if from_sample is None or from_differences is None:
         return None
     return from_sample[0], from_differences[1] / float(np.sqrt(2.0))
@@ -361,7 +355,7 @@ def measure_smoothed_sky_background(arr: np.ndarray) -> tuple[float, float] | No
     sampled = _sky_sample(arr)
     if sampled is None:
         return None
-    return _clipped_median_and_sigma(sampled[0])
+    return _sky_level_and_spread(sampled[0])
 
 
 def sky_level_for_peak(normalized_median: float, normalized_peak: float, peak_brightness: float) -> float:

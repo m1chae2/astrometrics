@@ -34,7 +34,7 @@ const review = (): StarShapeReview => ({
         { path: '/lib/b.fits', timestamp: 2000, elongation: 1.2 },
         { path: '/lib/c.fits', timestamp: 3000, elongation: 1.9 },
     ],
-    standoutFrames: [{ path: '/lib/c.fits', elongation: 1.9, spreadsAboveTypical: 7 }],
+    standoutFrames: [{ path: '/lib/c.fits', elongation: 1.9, reason: 'stars stretched' }],
 });
 
 const frame = (name: string, state: string, kind: string | null, date: string): FrameStatus => ({

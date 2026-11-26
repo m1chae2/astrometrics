@@ -2,9 +2,10 @@
 
 Description: Each verdict of `judge_star_shape` is checked on made-up metric
 rows: round stars, elongated stars with a shared direction, elongated stars
-with random directions, a standout frame, corner widths reported as not
-validated, and no rows at all (a plain "not measured yet", not an error).
-The reader `read_star_shape_rows` is checked on a small stand-in library.
+with random directions, frames the quarantine set aside, corner widths
+reported as not validated, a stack judged against the stack baseline, and no
+rows at all (a plain "not measured yet", not an error). The reader
+`read_star_shape_rows` is checked on a small stand-in library.
 """
 
 from datetime import UTC, datetime
@@ -19,9 +20,11 @@ from wayfindinglib.analytics.star_shape_review import (
     PINNED_FRAME_SHAPE_METRICS,
     STACK_ELONGATION_METRIC,
     judge_star_shape,
+    read_stack_roundness_low_limit,
     read_star_shape_rows,
+    stack_roundness_low_limit,
 )
-from wayfindinglib.models.session.star_shape_review import FrameStarShape
+from wayfindinglib.models.session.star_shape_review import FrameStarShape, StandoutFrame
 
 ROUNDNESS_LIMIT = 0.9
 """A made-up history limit: roundness below 0.9 is elongated."""
@@ -93,31 +96,31 @@ def test_elongated_stars_in_random_directions_point_at_seeing_or_focus() -> None
     assert "seeing or focus" in review.direction.sentence
 
 
-def test_a_frame_far_from_the_typical_elongation_stands_out() -> None:
-    """One trailed frame is listed with its value; the others are not."""
+def test_the_frames_the_quarantine_set_aside_are_listed_as_they_are() -> None:
+    """The quarantine's trailed frames are listed and not judged again."""
     frames = _frames([*_typical(), 2.4])
+    set_aside = [StandoutFrame(path=frames[-1].path, elongation=2.4, reason="stars stretched 2.40")]
 
-    review = judge_star_shape("Target", frames, roundness_low_limit=ROUNDNESS_LIMIT)
+    review = judge_star_shape("Target", frames, roundness_low_limit=ROUNDNESS_LIMIT, set_aside=set_aside)
 
     assert review.standout.state == "found"
-    assert [item.elongation for item in review.standout_frames] == [2.4]
-    assert review.standout_frames[0].path == frames[-1].path
-    assert review.standout_frames[0].spreads_above_typical > 3.0
+    assert review.standout_frames == set_aside
     assert [frame.standout for frame in review.series].count(True) == 1
 
 
-def test_a_frame_below_the_typical_elongation_is_not_a_standout() -> None:
-    """Only stretch above the typical value is a candidate to set aside."""
-    review = judge_star_shape("Target", _frames([*_typical(), 1.0]), roundness_low_limit=ROUNDNESS_LIMIT)
+def test_a_frame_far_from_the_others_is_not_flagged_by_the_review_itself() -> None:
+    """With nothing set aside, an odd frame is not flagged here."""
+    review = judge_star_shape("Target", _frames([*_typical(), 2.4]), roundness_low_limit=ROUNDNESS_LIMIT)
 
     assert review.standout.state == "none_found"
+    assert review.standout_frames == []
 
 
-def test_too_few_frames_give_no_standouts() -> None:
-    """The spread of a handful of frames is not known, so none is flagged."""
-    review = judge_star_shape("Target", _frames([1.3, 1.31, 1.29, 2.4]), roundness_low_limit=ROUNDNESS_LIMIT)
+def test_the_review_gives_the_frames_typical_elongation() -> None:
+    """The typical elongation is the frames' median, for the screen to use."""
+    review = judge_star_shape("Target", _frames([1.1, 1.3, 1.2, 2.0]), roundness_low_limit=ROUNDNESS_LIMIT)
 
-    assert review.standout.state == "none_found"
+    assert review.typical_elongation == pytest.approx(1.25)
 
 
 def test_corner_widths_are_reported_but_not_validated() -> None:
@@ -151,9 +154,11 @@ def test_no_rows_give_a_not_measured_verdict_not_an_error() -> None:
 
     assert review.frame_count == 0
     assert review.series == []
-    for verdict in (review.roundness, review.direction, review.standout, review.corners):
+    assert review.typical_elongation is None
+    for verdict in (review.roundness, review.direction, review.corners):
         assert verdict.state == "not_measured"
         assert "not measured yet" in verdict.sentence
+    assert review.standout.state == "none_found"
 
 
 def test_without_a_history_limit_the_stars_are_not_called_round_or_elongated() -> None:
@@ -165,14 +170,39 @@ def test_without_a_history_limit_the_stars_are_not_called_round_or_elongated() -
     assert review.notes
 
 
-def test_a_stack_with_its_own_numbers_is_preferred_to_the_frames() -> None:
-    """The stack's elongation and direction replace the frames' median."""
-    stack = FrameStarShape(path="Target/stack", elongation=1.02, angle_degrees=100.0, direction_coherence=0.8)
+def test_a_stack_with_its_own_numbers_is_judged_against_the_stack_baseline() -> None:
+    """The stack's elongation is judged against other stacks, not frames."""
+    stack = FrameStarShape(path="Target/stack", elongation=1.08, angle_degrees=100.0, direction_coherence=0.8)
+
+    review = judge_star_shape(
+        "Target", _frames(_typical()), stack, roundness_low_limit=0.5, stack_roundness_low_limit=0.95
+    )
+
+    assert review.scope == "stack"
+    assert review.roundness.state == "elongated"
+    assert review.roundness.numbers["roundness_low_limit"] == pytest.approx(0.95)
+    assert "your stacks" in review.roundness.sentence
+    assert review.typical_elongation == pytest.approx(1.30, abs=0.01)
+
+
+def test_a_stack_without_a_stack_baseline_is_not_judged() -> None:
+    """Without enough other stacks, a stack is neither round nor elongated."""
+    stack = FrameStarShape(path="Target/stack", elongation=1.02)
 
     review = judge_star_shape("Target", _frames(_typical()), stack, ROUNDNESS_LIMIT)
 
-    assert review.scope == "stack"
-    assert review.roundness.state == "round"
+    assert review.roundness.state == "no_history"
+    assert any("stacks" in note for note in review.notes)
+
+
+def test_the_stack_baseline_follows_the_history_rule() -> None:
+    """The limit is the median roundness times exp(-3 x the log spread)."""
+    assert stack_roundness_low_limit([1.05, 1.1]) is None
+    elongations = [1.02, 1.04, 1.05, 1.06, 1.08]
+    limit = stack_roundness_low_limit(elongations)
+    assert limit is not None
+    assert limit < 1.0 / 1.05
+    assert limit > 0.8
 
 
 def test_a_stack_without_numbers_falls_back_to_the_frames() -> None:
@@ -231,11 +261,22 @@ def _row(
 class _Quality:
     """A stand-in for `astrometrics.quality` that answers from rows."""
 
-    def __init__(self, rows: list[Any]) -> None:
-        """Keep the rows."""
+    def __init__(self, rows: list[Any], set_aside: list[Any] | None = None) -> None:
+        """Keep the rows and the set-aside frames."""
         self.rows = rows
+        self.set_aside = set_aside or []
 
-    def query(self, metric: str, level: str, target_id: str, latest_only: bool = True) -> Any:
+    def set_aside_frames(self, target: Any) -> list[Any]:
+        """Answer with the set-aside frames.
+
+        Returns
+        -------
+        frames : `list`
+            The stand-in records.
+        """
+        return list(self.set_aside)
+
+    def query(self, metric: str, level: str, target_id: str | None = None, latest_only: bool = True) -> Any:
         """Answer with the rows of one metric, or refuse an unknown one.
 
         Returns
@@ -290,20 +331,34 @@ def _library() -> SimpleNamespace:
     rows = [
         _row("frame.star_elongation", "Target/a.fits", 1.4),
         _row("frame.star_elongation", "Target/b.fits", 1.2),
-        _row(
-            "frame.star_elongation_angle_deg",
-            "Target/a.fits",
-            40.0,
-            reason="12 stars; angles agree with a coherence of 0.83 (0 means no preferred direction)",
-            version=2,
+        _row("frame.star_elongation_angle_deg", "Target/a.fits", 40.0, version=2),
+        _row("frame.star_elongation_coherence", "Target/a.fits", 0.83),
+        _row("frame.star_elongation", "Target/c.fits", 2.1),
+    ]
+    set_aside = [
+        SimpleNamespace(
+            kind="trailed",
+            path="_excluded/c.fits",
+            original_path="c.fits",
+            subject_id="Target/c.fits",
+            date="2026-11-03 06:30:00",
+            reason="stars stretched 2.10",
+        ),
+        SimpleNamespace(
+            kind="clouded",
+            path="_excluded/d.fits",
+            original_path="d.fits",
+            subject_id="Target/d.fits",
+            date="2026-11-03 06:40:00",
+            reason="few stars",
         ),
     ]
-    return SimpleNamespace(quality=_Quality(rows))
+    return SimpleNamespace(quality=_Quality(rows, set_aside))
 
 
-def test_the_reader_gives_frames_oldest_first_with_the_coherence_from_the_reason() -> None:
-    """The coherence comes from the reason text; no stack rows is `None`."""
-    frames, stack = read_star_shape_rows(_library(), _Target())
+def test_the_reader_gives_frames_oldest_first_with_the_stored_coherence() -> None:
+    """The coherence comes from its own stored row; no stack rows is `None`."""
+    frames, stack, _ = read_star_shape_rows(_library(), _Target())
 
     assert [frame.path for frame in frames] == ["a.fits", "b.fits"]
     assert frames[0].direction_coherence == pytest.approx(0.83)
@@ -314,14 +369,41 @@ def test_the_reader_gives_frames_oldest_first_with_the_coherence_from_the_reason
 
 def test_the_reader_can_limit_to_a_night_or_a_list_of_frames() -> None:
     """A night or a frame list narrows the frames and leaves the stack out."""
-    night_frames, night_stack = read_star_shape_rows(
+    night_frames, night_stack, night_set_aside = read_star_shape_rows(
         _library(), _Target(), night=observing_night_id(_Target().frames[1].timestamp)
     )
-    listed_frames, _ = read_star_shape_rows(_library(), _Target(), frame_paths=["a.fits"])
+    listed_frames, _, listed_set_aside = read_star_shape_rows(_library(), _Target(), frame_paths=["a.fits"])
+    first_night = observing_night_id(_Target().frames[0].timestamp)
+    _, _, other_night_set_aside = read_star_shape_rows(_library(), _Target(), night=first_night)
 
     assert len(night_frames) == 1
     assert night_stack is None
+    assert [item.path for item in night_set_aside] == ["c.fits"]
     assert [frame.path for frame in listed_frames] == ["a.fits"]
+    assert listed_set_aside == []
+    assert other_night_set_aside == []
+
+
+def test_the_reader_lists_only_the_frames_set_aside_as_trailed() -> None:
+    """Clouded frames are left out; a trailed one keeps its elongation."""
+    _, _, set_aside = read_star_shape_rows(_library(), _Target())
+
+    assert [item.path for item in set_aside] == ["c.fits"]
+    assert set_aside[0].elongation == pytest.approx(2.1)
+    assert set_aside[0].reason == "stars stretched 2.10"
+    assert set_aside[0].timestamp == datetime(2026, 11, 3, 6, 30, tzinfo=UTC).timestamp()
+
+
+def test_the_stack_baseline_leaves_out_the_stack_being_judged() -> None:
+    """The library's other stacks set the baseline; too few give none."""
+    rows = [
+        _row(STACK_ELONGATION_METRIC, f"T{index}/stack.fits", 1.02 + 0.01 * index, level="stack")
+        for index in range(5)
+    ]
+    library = SimpleNamespace(quality=_Quality(rows))
+
+    assert read_stack_roundness_low_limit(library) is not None
+    assert read_stack_roundness_low_limit(library, exclude_subject="T0/stack.fits") is None
 
 
 def test_the_reader_ignores_rows_of_another_definition_version() -> None:
@@ -330,6 +412,6 @@ def test_the_reader_ignores_rows_of_another_definition_version() -> None:
     for row in library.quality.rows:
         row.definition_version = 99
 
-    frames, _ = read_star_shape_rows(library, _Target())
+    frames, _, _ = read_star_shape_rows(library, _Target())
 
     assert frames == []

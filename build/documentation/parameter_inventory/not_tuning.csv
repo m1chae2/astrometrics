@@ -242,8 +242,6 @@ astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety 
 astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/shared/binned_sky_plane.py,block_medians.minimum_valid_fraction,Default that keeps every block: callers pass their own share
 astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record format version: which header fields a frame record holds; not a measurement
-astrometricslib/pipelines/shared/gaia_star_colors.py,BRIGHTEST_G_MAGNITUDE,Bound of the stored catalog question; the stars that are measured are chosen by stacking.sun_like_magnitude_range.
-astrometricslib/pipelines/shared/gaia_star_colors.py,FAINTEST_G_MAGNITUDE,Bound of the stored catalog question; the stars that are measured are chosen by stacking.sun_like_magnitude_range.
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_LIFETIME_DAYS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_TILE_LEVEL,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ROW_LIMIT,"Sampling, numerics, plumbing or math constant."
@@ -456,11 +454,11 @@ astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_CLI
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_CLIP_SIGMAS,Same clipping as the frame registration; not tuned here.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_EDGE_PIXELS,Margin that keeps cut stars at a stack edge out of the alignment; plumbing.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_MINIMUM_PAIRS,Same fewest-pairs choice as the frame registration; not tuned here.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_HALF_BOX,Half size of the box a star width is measured in; plumbing of a half-maximum width.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_FINDER_FACTORS,Template widths the star finder tries before the star width is measured; plumbing of the width measurement.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_ISOLATION_PIXELS,Distance to the nearest other star for a star whose width is measured; plumbing.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_LIMITS,Sanity guard on the measured star width; not tuned.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_PEAKS,Cap on how many peaks the star width is measured on; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_SATURATED_SHARE,Share of the picture's top above which a peak is a burnt-out core; plumbing of a half-maximum width.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_SMOOTHING_PIXELS,Smoothing before the star-width peaks are found; plumbing of a half-maximum width.
+astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_STARS,Cap on how many stars the star width is measured on; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,align_with_stars.star_count,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."
@@ -496,20 +494,16 @@ astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_MI
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_MINIMUM_FOOTPRINT_LEVEL,Floor that keeps a very smooth stars-only picture from making every pixel a star; numerics.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_MINIMUM_SKY_PIXELS,Fewest ring pixels before neighbors are left in; sampling.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_PEAK_BOX_PIXELS,Size of the local-maximum search box; plumbing.
-astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_SUN_BP_RP,Published constant: the Gaia BP - RP color of the Sun.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_SUN_B_V,Published constant: the Johnson B - V color of the Sun.
-astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_CANDIDATES,Cap on stars examined for a median star width; sampling.
-astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_HALF_BOX,Cut-out size of a second-moment star width; plumbing.
-astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_ISOLATION,Isolation of the stars used for a star width; plumbing.
-astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_RADIUS,Radius inside which light counts in a second-moment star width; plumbing.
-astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_WIDTH_STARS,Cap on stars used for a median star width; sampling.
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_MINIMUM_ROOM,Divide-by-zero guard.
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_SPREAD_SMOOTHING_PER_PIXEL_OF_SPREAD,Fixed share of the spread half-width that hides the edge of the spread square.
 astrometricslib/pipelines/stacking/post_processing/star_width_match.py,_EDGE_MARGIN_PIXELS,Margin so a star's stamp fits inside the image; plumbing.
 astrometricslib/pipelines/stacking/post_processing/star_width_match.py,_FILTER_GRID_PIXELS,Side of the square on which the filter is worked out; plumbing.
 astrometricslib/pipelines/stacking/post_processing/star_width_match.py,_FILTER_HALF_WIDTH_PIXELS,Half width of the kept filter; the M 45 filter falls below 1e-4 of its peak within 15 px. Plumbing.
+astrometricslib/pipelines/stacking/post_processing/star_width_match.py,_FINDER_ROUNDNESS_RANGE,The star finder's own default roundness window; plumbing.
 astrometricslib/pipelines/stacking/post_processing/star_width_match.py,_MAXIMUM_STARS,Cap on the stars measured; affects only run time.
 astrometricslib/pipelines/stacking/post_processing/stretch_sky.py,_CLIP_CHECK_SAMPLE_COUNT,"Sample size of the clipped-share check, a speed limit and not a threshold. Design estimate STK-D78."
+astrometricslib/pipelines/stacking/post_processing/sun_like_balance.py,SUN_BP_RP,Published constant: the Gaia BP - RP color of the Sun.
 astrometricslib/pipelines/stacking/post_processing/sun_like_balance.py,_FIELD_MARGIN_DEGREES,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,EDGE_MARGIN_PX,Display margin so the zoomed view has pixels around the star
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_MINIMUM_FLUX_FRACTION,"Display choice of a reference star, picked by eye; does not act on data"

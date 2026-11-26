@@ -1,10 +1,10 @@
 """Records how round the stars of a stack are.
 
 A frame's star shape is measured when the frame is measured (the elongation,
-its direction and the star width at the center and in each corner of the
-field). The stack image gets the same numbers, so a person can see whether the
-stars of the finished stack are round and, from the direction and the corners,
-why they are not.
+its direction, how well the stars agree on that direction, and the star width
+at the center and in each corner of the field). The stack image gets the same
+numbers, so a person can see whether the stars of the finished stack are round
+and, from the direction and the corners, why they are not.
 
 Nothing here measures anything itself. `measure_image_star_profiles` in the
 shared frame measurement reads the stack and fits the stars, the same code the
@@ -29,6 +29,7 @@ from astrometricslib.pipelines.shared.quality.frame_measurement import measure_i
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE,
     FRAME_STAR_WIDTH_REGION_PX,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
@@ -142,10 +143,16 @@ def _plane_rows(
             uncertainty=result.angle_uncertainty_deg,
             sample_count=result.star_count,
             reason="the stars have no measurable direction",
-            provenance=(
-                f"{note}; angles agree with a coherence of {result.angle_coherence or 0.0:.2f} "
-                "(0 means no preferred direction, so the angle means little)"
-            ),
+            provenance=note,
+        ),
+        build_measurement(
+            _spec_for(FRAME_STAR_ELONGATION_COHERENCE),
+            result.angle_coherence,
+            context,
+            subject,
+            sample_count=result.star_count,
+            reason="the stars have no measurable direction",
+            provenance=note,
         ),
     ]
     minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value

@@ -89,7 +89,7 @@ from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.frame_identity import frame_subject_id
 from astrometricslib.utilities.iso_text import canonical_iso_text
-from astrometricslib.utilities.robust_statistics import robust_sigma
+from astrometricslib.utilities.robust_statistics import median_or_none, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -921,18 +921,6 @@ def session_unevenness_limit(unevenness: Sequence[float | None]) -> float | None
     )
 
 
-def _median_or_none(values: Sequence[float | None]) -> float | None:
-    """Return the median of the known values.
-
-    Returns
-    -------
-    median : `float` or `None`
-        `None` when no value is known.
-    """
-    known = [value for value in values if value is not None]
-    return float(statistics.median(known)) if known else None
-
-
 def judge_batch_with_notes(
     measurements: Sequence[dict[str, Any]],
 ) -> tuple[list[QuarantineDecision], list[str]]:
@@ -1006,7 +994,7 @@ def judge_batch_in_full(
         return [], [], notes
     cloud_sky_multiple = resolve(CLOUD_SKY_MULTIPLE).value
     typical_stars = statistics.median(m["star_count"] for m in measurements)
-    median_flux = _median_or_none([m.get("bright_star_flux_adu") for m in measurements])
+    median_flux = median_or_none([m.get("bright_star_flux_adu") for m in measurements])
     typical_sky = statistics.median(m["sky_median_adu"] for m in measurements)
 
     elongations = [m.get("star_elongation") for m in measurements]
@@ -1290,12 +1278,11 @@ def median_star_elongation(planes: Sequence[tuple[str | None, StarProfileResult,
     elongation : `float` or `None`
         The median over the planes, or `None` if no star could be measured.
     """
-    values = [
+    return median_or_none(
         result.elongation
         for _, result, _ in planes
         if result.elongation is not None and math.isfinite(result.elongation)
-    ]
-    return float(statistics.median(values)) if values else None
+    )
 
 
 def measure_star_elongation(path: str, camera: str | None) -> float | None:

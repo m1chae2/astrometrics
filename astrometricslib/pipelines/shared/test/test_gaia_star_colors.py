@@ -118,8 +118,9 @@ def test_the_question_asks_for_the_magnitude_range_and_the_source_id_range(
     assert "bp_rp" in asked[0]
     assert "source_id >=" in asked[0]
     assert "source_id <" in asked[0]
-    assert f"phot_g_mean_mag < {gaia_star_colors.FAINTEST_G_MAGNITUDE}" in asked[0]
-    assert f"phot_g_mean_mag >= {gaia_star_colors.BRIGHTEST_G_MAGNITUDE}" in asked[0]
+    brightest, faintest = gaia_star_colors.GAIA_COLOUR_MAGNITUDE_RANGE.default
+    assert f"phot_g_mean_mag < {faintest}" in asked[0]
+    assert f"phot_g_mean_mag >= {brightest}" in asked[0]
 
 
 def test_a_second_question_for_the_same_sky_uses_the_stored_answer(monkeypatch: pytest.MonkeyPatch) -> None:

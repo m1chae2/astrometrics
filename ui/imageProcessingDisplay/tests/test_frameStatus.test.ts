@@ -19,7 +19,7 @@ const review = (series: Array<{ path: string; elongation: number }>, standout: s
     targetId: 'M 1', scope: 'all', frameCount: series.length,
     roundness: verdict, direction: verdict, standout: verdict, corners: verdict,
     series, standoutFrames: standout.map((path) => ({
-        path, elongation: series.find((frame) => frame.path === path)!.elongation, spreadsAboveTypical: 5,
+        path, elongation: series.find((frame) => frame.path === path)!.elongation, reason: 'stars stretched',
     })),
 });
 

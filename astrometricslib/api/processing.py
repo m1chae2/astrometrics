@@ -125,17 +125,19 @@ class ProcessingPipelines:
     calibration : `CalibrationCatalog`
         Tracking, querying, and refreshing dark, bias, and flat
         calibration frames.
-    ANALYSIS_STAGES : `tuple` [`str`]
-        Every stage `process_target` can run, in the order run.
-    SELECTABLE_ANALYSIS_STAGES : `tuple` [`str`]
-        The stages the app and its AI tools offer by name: all but the
-        experimental asteroid search.
-    DEFAULT_ANALYSIS_STAGES : `tuple` [`str`]
-        The stages `process_target` runs for one target when none are named.
     """
 
+    # The three stage lists are described by these comments, not in the
+    # Attributes section above: the API reference documents class
+    # attributes from their comments, and listing them in both places
+    # describes each twice.
+
+    #: Every stage `process_target` can run, in the order run.
     ANALYSIS_STAGES = ANALYSIS_STAGES
+    #: The stages the app and its AI tools offer by name: all but the
+    #: experimental asteroid search.
     SELECTABLE_ANALYSIS_STAGES = SELECTABLE_ANALYSIS_STAGES
+    #: The stages `process_target` runs for one target when none are named.
     DEFAULT_ANALYSIS_STAGES = DEFAULT_ANALYSIS_STAGES
 
     def __init__(

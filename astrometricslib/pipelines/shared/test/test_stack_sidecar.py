@@ -130,5 +130,6 @@ def test_an_unstamped_record_is_read_only_when_asked_and_not_older(tmp_path: Pat
         "value": 5,
     }
     assert read_stamped_record(saved, stack, 2, "stamp", accept_unstamped_newer=True) is None
-    os.utime(stack, ns=(stack_time, stack_time + 1))
+    # One second newer: Windows keeps file times to 100 ns, so 1 ns is lost.
+    os.utime(stack, ns=(stack_time, stack_time + 1_000_000_000))
     assert read_stamped_record(saved, stack, 1, "stamp", accept_unstamped_newer=True) is None

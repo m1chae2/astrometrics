@@ -270,9 +270,13 @@ LOCAL_WRITE_METHODS = frozenset({
     "terminal:execute",
     "terminal:reset_workspace",
     "terminal:save_script",
+    # Interrupts the console's own running code; sends nothing to a device.
+    "terminal:stop",
     "ui:editor_set",
     "ui:inspect_variable",
     "ui:navigate",
+    # Stores Image Processing's current selection in the backend's memory.
+    "ui:set_selection",
 })
 """RPC methods that change the app's own data, files, settings or screens,
 or copy files from the telescope computer. None sends a command to a device.

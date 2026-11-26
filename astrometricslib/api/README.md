@@ -147,7 +147,7 @@ Live checks:
 
 `Visualization` draws images and charts.
 
-- `render_fits` draws a frame or stack as a PNG with a description (`kind="image"`) or as a data URL for the app's viewer (`kind="data_url"`).
+- `render_fits` draws a frame, a stack or an array (`pixels`) as a PNG with a description (`kind="image"`), as a data URL for the app's viewer (`kind="data_url"`), or as a Matplotlib figure for scripts and notebooks (`kind="figure"`). In the Command Console the figure opens in a figure window; in a notebook it shows in the page. The brightness is the same for every kind: `stretch=True` is the app's automatic stretch, `stretch=False` a straight line from the darkest to the brightest pixel, and `center` with `width` a fixed range. `overlays` (none by default; `"detections"`, `"stars"` or both) marks the stars the astrometry run's star finder detects (from the stack's `_detections.json` file when it is still valid) and names the stack's stars from its `_identification.json` file, on the PNG and on the figure. Like Image Processing's Astrometry overlay, it names only stars with photometry in the library; with `target` and `path`, only that target's stars. The description or the title says why an overlay drew nothing. The overlay code is in `visualization/image_display.py`. The MCP tool offers the PNG and data-URL kinds and the overlays, not the figure.
 - `plot(kind, ...)` draws one chart of a target or a star.
 
 ### `jobs.py`

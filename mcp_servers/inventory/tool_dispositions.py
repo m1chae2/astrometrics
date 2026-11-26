@@ -239,8 +239,9 @@ DECISIONS = {
     ),
     "visualization_render_fits": ToolDecision(
         "keep",
-        "Built 2026-10-03. Returns a real image of a frame, with a stretch and an optional zoom. "
-        "Saves nothing.",
+        "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the "
+        "optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts "
+        "and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing.",
     ),
     "visualization_get_last_captured_image": ToolDecision(
         "fix",

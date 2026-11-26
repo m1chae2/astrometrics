@@ -95,6 +95,7 @@ astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 me
 astrometricslib/api/visualization.py,Visualization.plot.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/visualization.py,Visualization.render_fits.index,Index of the frame or layer; 0 means the first
 astrometricslib/api/visualization.py,_DEFAULT_FIGURE_SIZES,Plumbing or protocol constant
+astrometricslib/api/visualization.py,DEFAULT_IMAGE_FIGURE_SIZE,Figure size of a render_fits figure; display only
 astrometricslib/foundation/_system_posix.py,PR_SET_PDEATHSIG,"The Linux prctl option number for the parent-death signal, fixed by the kernel API"
 astrometricslib/foundation/config.py,CONFIG_RECHECK_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/config.py,[Observatory.Constraints] max_altitude,"Physical limit of altitude, used as the setting's default"
@@ -562,6 +563,9 @@ astrometricslib/visualization/helpers.py,plot_spectroscopy_analysis.hspace,Plot 
 astrometricslib/visualization/helpers.py,plot_target_dashboard.limit,Row or item cap that callers pass; plumbing
 astrometricslib/visualization/helpers.py,plot_target_photometry.limit,Row or item cap that callers pass; plumbing
 astrometricslib/visualization/helpers.py,plot_target_spectroscopy.limit,Row or item cap that callers pass; plumbing
+astrometricslib/visualization/image_display.py,DETECTION_MARKER_SIZE,Size of an overlay circle on a figure; display only
+astrometricslib/visualization/image_display.py,MARKER_RADIUS_PIXELS,Size of an overlay circle on a PNG; display only
+astrometricslib/visualization/image_display.py,STAR_MARKER_SIZE,Size of an overlay circle on a figure; display only
 astrometricslib/visualization/layers/dispersion_overlay.py,DispersionOverlay.render.active_index,Index of the highlighted star; 0 means the first
 astrometricslib/visualization/layers/image_overlay.py,ImageOverlay.render.percentile,Display stretch percentile; not used in results
 astrometricslib/visualization/layers/star_overlay.py,StarOverlay.render.active_index,Index of the highlighted star; 0 means the first

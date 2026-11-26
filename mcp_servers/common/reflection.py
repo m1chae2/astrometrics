@@ -6,15 +6,40 @@ only passes the client's arguments to the method: the library methods accept
 what a client can send (a target id, an ISO time, a position dictionary) and
 convert it themselves. A method marked with `background_job` is called with
 ``register_job=True`` in a background thread, so a slow call answers with
-the id of the job it recorded instead of blocking the server.
+the id of the job it recorded instead of blocking the server. A server can
+also narrow what a client may send to one tool with `ClientLimits`: hide
+arguments a client cannot send (an array of pixels) and withhold choices of
+no use to it (a Matplotlib figure).
 """
 
 import asyncio
 import inspect
 import re
 import typing
-from collections.abc import Callable, Collection
-from typing import Any, Union
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Literal, Union
+
+from astrometricslib.exceptions import InvalidArgumentError
+
+
+@dataclass(frozen=True)
+class ClientLimits:
+    """What a client may not send to one reflected tool.
+
+    Attributes
+    ----------
+    hidden_parameters : `tuple` [`str`, ...]
+        Arguments left out of the tool's schema and refused if sent, such
+        as a NumPy array that JSON cannot carry.
+    withheld_choices : `Mapping` [`str`, `tuple` [`str`, ...]]
+        For an argument typed as a set of choices (a `Literal`), the
+        choices a client may not use. The schema lists only the others as
+        an ``enum``, and a call with a withheld one is refused.
+    """
+
+    hidden_parameters: tuple[str, ...] = ()
+    withheld_choices: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def parse_docstring_params(doc: str) -> dict[str, str]:
@@ -197,8 +222,73 @@ def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[s
     return arguments
 
 
+def _apply_client_limits(schema: dict[str, Any], method: Callable[..., Any], limits: ClientLimits) -> None:
+    """Narrow a tool's schema to what a client may send.
+
+    Parameters
+    ----------
+    schema : `dict` [`str`, `Any`]
+        The tool's schema, changed in place.
+    method : `Callable`
+        The library method, whose `Literal` type hints give the choices.
+    limits : `ClientLimits`
+        What the client may not send.
+    """
+    for hidden_name in limits.hidden_parameters:
+        schema["properties"].pop(hidden_name, None)
+        if hidden_name in schema["required"]:
+            schema["required"].remove(hidden_name)
+    try:
+        type_hints = typing.get_type_hints(method)
+    except NameError, TypeError, AttributeError:
+        type_hints = {}
+    for name, withheld in limits.withheld_choices.items():
+        hint = type_hints.get(name)
+        if name not in schema["properties"] or typing.get_origin(hint) is not Literal:
+            continue
+        offered = [choice for choice in typing.get_args(hint) if choice not in withheld]
+        schema["properties"][name]["enum"] = offered
+        schema["properties"][name]["description"] += (
+            " This tool offers only: " + ", ".join(repr(choice) for choice in offered) + "."
+        )
+
+
+def _check_client_limits(tool_name: str, arguments: Mapping[str, Any], limits: ClientLimits) -> None:
+    """Refuse a call that sends what the tool's limits keep from a client.
+
+    Parameters
+    ----------
+    tool_name : `str`
+        The tool being called, for the message.
+    arguments : `Mapping` [`str`, `Any`]
+        The client's arguments.
+    limits : `ClientLimits`
+        What the client may not send.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a hidden argument or a withheld choice was sent.
+    """
+    hidden = sorted(name for name in limits.hidden_parameters if name in arguments)
+    if hidden:
+        raise InvalidArgumentError(
+            f"{tool_name} does not take: {', '.join(hidden)}.", details={"tool": tool_name, "unused": hidden}
+        )
+    for name, withheld in limits.withheld_choices.items():
+        if arguments.get(name) in withheld:
+            raise InvalidArgumentError(
+                f"{tool_name} does not offer {name}={arguments[name]!r}.",
+                details={"tool": tool_name, name: arguments[name]},
+            )
+
+
 def register_reflected_tools(
-    registry: Any, api_object: Any, branch_mapping: dict[str, str], skip: Collection[str] = ()
+    registry: Any,
+    api_object: Any,
+    branch_mapping: dict[str, str],
+    skip: Collection[str] = (),
+    limits: Mapping[str, ClientLimits] | None = None,
 ) -> int:
     """Register the public methods of a library's API object as tools.
 
@@ -220,6 +310,8 @@ def register_reflected_tools(
     skip : `Collection` [`str`], optional
         Tool names to leave out, such as the tools another server serves
         (`mcp_servers.common.app_job_tools.APP_JOB_TOOLS`).
+    limits : `Mapping` [`str`, `ClientLimits`], optional
+        By tool name, the arguments and choices a client may not send.
 
     Returns
     -------
@@ -264,20 +356,29 @@ def register_reflected_tools(
                 schema["properties"].pop(hidden_name, None)
                 if hidden_name in schema["required"]:
                     schema["required"].remove(hidden_name)
+            tool_limits = (limits or {}).get(tool_name)
+            if tool_limits is not None:
+                _apply_client_limits(schema, method, tool_limits)
 
-            registry.register(tool_name, summary, schema)(_make_executor(method))
+            registry.register(tool_name, summary, schema)(_make_executor(method, tool_name, tool_limits))
             count += 1
 
     return count
 
 
-def _make_executor(target_callable: Callable[..., Any]) -> Callable[..., Any]:
+def _make_executor(
+    target_callable: Callable[..., Any], tool_name: str = "", limits: ClientLimits | None = None
+) -> Callable[..., Any]:
     """Wrap a library method as an asynchronous tool function.
 
     Parameters
     ----------
     target_callable : `Callable`
         The bound library method.
+    tool_name : `str`, optional
+        The tool's name, for the message of a refused call.
+    limits : `ClientLimits`, optional
+        What a client may not send. A call that sends it is refused.
 
     Returns
     -------
@@ -297,6 +398,8 @@ def _make_executor(target_callable: Callable[..., Any]) -> Callable[..., Any]:
             The method's result, or for a slow method still running, the
             job id to poll.
         """
+        if limits is not None:
+            _check_client_limits(tool_name, kwargs, limits)
         if grace_period is not None:
             # A method marked with `@background_job` runs slowly enough that
             # calling it directly would block this server's single

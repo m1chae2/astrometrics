@@ -1178,12 +1178,16 @@ class QualityRecords:
     def measure_detections(self, path: str) -> DetectionsMeasurement:
         """List the stars the astrometry run's star finder detects in an image.
 
-        Nothing is stored. The image is searched now, with the same function
-        the astrometry run uses (the star-width-scaled kernel, the merge of a
-        star reported twice, and the averaged copy of a color image), so a
-        marker drawn from the result is a star the run finds. A missing file
-        raises `NotFoundError`; an image with no pixels raises
-        `InvalidArgumentError`.
+        A saved list is reused while it still matches the file's size and
+        modified time: first the ``<stack>_detections.json`` the astrometry
+        run saves beside a stack, then a copy in the cache folder. Otherwise
+        the image is searched now, with the same function the astrometry run
+        uses (the star-width-scaled kernel, the merge of a star reported
+        twice, and the averaged copy of a color image), so a marker drawn from
+        the result is a star the run finds, and the result is saved to the
+        cache folder for next time. Nothing is written to the database or the
+        image. A missing file raises `NotFoundError`; an image with no pixels
+        raises `InvalidArgumentError`.
 
         Parameters
         ----------

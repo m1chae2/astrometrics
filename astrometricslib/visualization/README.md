@@ -7,6 +7,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 ## What each file is for
 
 - `helpers.py` — the high-level entry points other code calls. It has one function per plot type: astrometry star field, photometry light curve, spectroscopy spectrum, asteroid detection tracks and a combined target dashboard.
+- `image_display.py` — the overlays of `astrometrics.visualization.render_fits`. It finds the stars the astrometry run's star finder detects and the stack's named stars that have photometry, as Image Processing's Astrometry overlay does, and draws them on the PNG (`kind="image"`) or on the Matplotlib figure (`kind="figure"`) for scripts and notebooks. Both kinds use the same marks and colors.
 - `focus_plots.py` — plots showing how well the telescope stayed in focus over a session. They use each frame's focuser temperature and position. The focuser is the motor that moves the camera along the optical axis to bring stars into focus. Each frame record keeps the focuser's position and temperature at the time of the exposure.
 - `star_field_visualization.py` — the internal orchestrator for the interactive 2D star field view. It coordinates the overlay layers below.
 - `interaction_handler.py` — manages mouse events and interactive state for the star field view.

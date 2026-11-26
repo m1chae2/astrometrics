@@ -11,7 +11,7 @@ from pathlib import Path
 
 from astrometricslib import Astrometrics
 from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
-from mcp_servers.common.reflection import register_reflected_tools
+from mcp_servers.common.reflection import ClientLimits, register_reflected_tools
 from mcp_servers.common.tool_registry import ToolRegistry
 from mcp_servers.devtools import contract_validator
 
@@ -32,6 +32,15 @@ BRANCH_PREFIXES = {
 }
 """Sub-API of `Astrometrics` -> the prefix of its tools' names."""
 
+CLIENT_LIMITS = {
+    "visualization_render_fits": ClientLimits(
+        hidden_parameters=("pixels", "figsize"), withheld_choices={"kind": ("figure",)}
+    ),
+}
+"""What an AI client may not send to a tool. `render_fits` draws a
+Matplotlib figure for a script or a notebook, and an array of pixels cannot
+travel in JSON, so a client gets the PNG and the data URL kinds only."""
+
 
 def build_registry() -> ToolRegistry:
     """Build the registry with every tool this server can offer.
@@ -42,9 +51,12 @@ def build_registry() -> ToolRegistry:
         All tools, before a profile removes any. Path arguments are checked
         against the library folders. The tools in `APP_JOB_TOOLS` are left
         out: the astrometrics-backend server serves them, so the app runs
-        their work as its own job.
+        their work as its own job. `CLIENT_LIMITS` narrows what a client
+        may send to some tools.
     """
     registry = ToolRegistry(sandbox_paths=True)
-    register_reflected_tools(registry, Astrometrics(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS)
+    register_reflected_tools(
+        registry, Astrometrics(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS, limits=CLIENT_LIMITS
+    )
     contract_validator.register(registry)
     return registry

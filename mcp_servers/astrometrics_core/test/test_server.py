@@ -162,6 +162,23 @@ def test_a_rendered_frame_reaches_the_client_as_an_image(tmp_path: Path) -> None
     assert "brightness_range_shown" in json.loads(content[1].text)
 
 
+def test_render_fits_offers_the_overlays_but_not_the_figure_kind(registry: ToolRegistry) -> None:
+    """A client may ask for overlays, but not for a figure or its inputs."""
+    schema = registry.tools["visualization_render_fits"]["tool_def"].input_schema
+    assert schema["properties"]["kind"]["enum"] == ["image", "data_url"]
+    assert schema["properties"]["overlays"]["type"] == "array"
+    assert "pixels" not in schema["properties"]
+    assert "figsize" not in schema["properties"]
+
+
+def test_a_figure_request_is_refused_before_the_method_runs(registry: ToolRegistry) -> None:
+    """``kind="figure"`` and a hidden argument get an error reply."""
+    for arguments in ({"path": "/x.fits", "kind": "figure"}, {"figsize": [4, 4]}):
+        content = asyncio.run(registry.execute("visualization_render_fits", arguments))
+        assert content[0].type == "text"
+        assert "invalid_argument" in content[0].text
+
+
 def test_the_quality_root_replaces_the_diagnostics_tools(registry: ToolRegistry) -> None:
     """Quality tools are named ``quality_*``; none is ``diagnostics_*``."""
     names = set(registry.tools)

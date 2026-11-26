@@ -17,6 +17,7 @@ import { SelectableList, type SelectableItem } from '../common/components/Select
 import { Button } from '../common/components/Button';
 import { Toolbar, ToolbarGroup, ToolbarLabel } from '../common/components/Toolbar';
 import { DocViewer, type DocTopicItem } from './DocViewer';
+import { prefersReducedMotion } from '../common/utils/reducedMotion';
 import './documentationPane.css';
 
 /** One search match: a topic with a short piece of its text around the match. */
@@ -133,15 +134,6 @@ function paintFindHighlights(ranges: Range[], current: number): void {
   if (current >= 0 && current < ranges.length) {
     CSS.highlights.set(FIND_CURRENT_HIGHLIGHT, new Highlight(ranges[current]));
   }
-}
-
-/**
- * Says whether the person asked the computer to show less motion.
- *
- * @returns True when `prefers-reduced-motion` is set.
- */
-function prefersReducedMotion(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 /**

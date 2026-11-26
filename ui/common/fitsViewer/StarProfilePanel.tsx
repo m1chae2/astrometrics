@@ -8,12 +8,13 @@
  * view of the library's ring (the brightness by direction with the neighbor stars left out), the smooth curve of
  * its significant Fourier terms, and a small bar chart of the size of each term, with a one-line summary.
  */
+import { readThemeToken, readThemeTokenNumber } from '../utils/themeToken';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/Button';
 import { InfoButton } from '../components/InfoButton';
 import { Slider } from '../components/Slider';
 import { BasePlot } from '../components/plotting/BasePlot';
-import { buildLayout, getVar, getVarAsNum } from '../utils/plotTools';
+import { buildLayout } from '../utils/plotTools';
 import type { PlotlyTrace } from '../utils/plotTools';
 import type { ProfileFit, RingHarmonic, Spectrum, StarProfileMeasurement } from '../types/backendTypes';
 import { CloseStarButton, StarInspector } from './StarInspector';
@@ -178,9 +179,9 @@ function labelFwhm(fwhm: number, halfMaximum: number, halfRange: number, logScal
     xanchor: onLeft ? 'right' : 'left',
     yanchor: 'middle',
     xshift: onLeft ? -6 : 6,
-    bgcolor: getVar('--surface-menu', '#2e2e32'),
+    bgcolor: readThemeToken('--surface-menu', '#2e2e32'),
     borderwidth: 0,
-    font: { size: getVarAsNum('--small-font-size', 11), color: getVar('--plot-reference-line', '#aaaaaa') },
+    font: { size: readThemeTokenNumber('--small-font-size', 11), color: readThemeToken('--plot-reference-line', '#aaaaaa') },
   };
 }
 
@@ -204,7 +205,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
       y: lift(cut.values),
       type: 'scatter',
       mode: 'markers',
-      marker: { color: getVar('--text-dim', '#aaaaaa'), size: 5 },
+      marker: { color: readThemeToken('--text-dim', '#aaaaaa'), size: 5 },
       hovertemplate: 'x %{x:.2f} px, %{y:.3g}<extra></extra>',
       name: 'pixels along the cut',
     }];
@@ -219,7 +220,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
       const mirroredY = lift([...values].reverse().concat(values));
       list.push({
         x: mirroredX, y: mirroredY, type: 'scatter', mode: 'lines',
-        line: { color: getVar('--plot-accent', '#3584e4'), width: 2 }, name: 'fitted shape',
+        line: { color: readThemeToken('--plot-accent', '#3584e4'), width: 2 }, name: 'fitted shape',
         hovertemplate: 'fitted shape: %{y:.3g} at %{x:.2f} px<extra></extra>',
       });
       reach = Math.max(reach, ...radii);
@@ -229,7 +230,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
         width = chosen.fit.fwhm_px;
         list.push({
           x: [-width / 2, width / 2], y: [half, half], type: 'scatter', mode: 'lines',
-          line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1.5, dash: 'dash' }, name: 'FWHM',
+          line: { color: readThemeToken('--plot-reference-line', '#aaaaaa'), width: 1.5, dash: 'dash' }, name: 'FWHM',
           hoverinfo: 'skip',
         });
       }
@@ -284,7 +285,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
     const values = lift(measurement.ring_bin_values);
     const list: PlotlyTrace[] = [{
       x: measurement.ring_bin_angle_degrees, y: values, type: 'scatter', mode: 'lines+markers',
-      line: { color: getVar('--plot-accent', '#3584e4'), width: 1.5 }, marker: { color: getVar('--text-dim', '#aaaaaa'), size: 4 },
+      line: { color: readThemeToken('--plot-accent', '#3584e4'), width: 1.5 }, marker: { color: readThemeToken('--text-dim', '#aaaaaa'), size: 4 },
       hovertemplate: '%{x:.0f}°: %{y:.3g}<extra></extra>', name: 'around the star',
     }];
     const curve = harmonicCurve(measurement);
@@ -292,7 +293,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
     if (curve) {
       list.push({
         x: curve.angles, y: curveValues, type: 'scatter', mode: 'lines',
-        line: { color: getVar('--plot-orange', '#e5a50a'), width: 2 }, name: 'significant terms',
+        line: { color: readThemeToken('--plot-orange', '#e5a50a'), width: 2 }, name: 'significant terms',
         hovertemplate: 'fitted: %{y:.3g} at %{x:.0f}°<extra></extra>',
       });
     }
@@ -308,7 +309,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
     const partner = (angleDegrees + 180) % 360;
     const markerLine = (angle: number) => ({
       type: 'line', xref: 'x', yref: 'paper', x0: angle, x1: angle, y0: 0, y1: 1,
-      line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
+      line: { color: readThemeToken('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
     });
     const ticks = [0, 90, 180, 270, 360];
     return {
@@ -344,8 +345,8 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
  */
 function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.ReactElement | null {
   const traces = useMemo(() => {
-    const accent = getVar('--plot-accent', '#3584e4');
-    const dim = getVar('--text-dim', '#aaaaaa');
+    const accent = readThemeToken('--plot-accent', '#3584e4');
+    const dim = readThemeToken('--text-dim', '#aaaaaa');
     const trace: PlotlyTrace = {
       x: harmonics.map((term) => term.order),
       y: harmonics.map((term) => term.amplitude_debiased * 100),
@@ -353,7 +354,7 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
       marker: { color: harmonics.map((term) => (term.significant ? accent : dim)) },
       error_y: {
         type: 'data', array: harmonics.map((term) => term.amplitude_error * 100), visible: true,
-        color: getVar('--plot-reference-line', '#aaaaaa'), thickness: 1.5, width: 3,
+        color: readThemeToken('--plot-reference-line', '#aaaaaa'), thickness: 1.5, width: 3,
       },
       hovertemplate: 'order %{x}: %{y:.1f}%<extra></extra>',
       name: 'size of each term',

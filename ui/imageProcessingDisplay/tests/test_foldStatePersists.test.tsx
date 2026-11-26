@@ -77,7 +77,7 @@ describe('Image Processing fold state', () => {
 
         renderDisplay();
         expect(await screen.findByTitle('Expand Frame Analysis')).toBeTruthy();
-        expect(screen.getByTitle('Expand the File Browser')).toBeTruthy();
+        expect(screen.getByTitle(/^File Browser, \d+ frames$/)).toBeTruthy();
         // Image Controls was folded too; it stays folded once the column opens again.
         await userEvent.click(screen.getByTitle('Expand Frame Analysis'));
         expect(screen.getByTitle('Expand Image Controls')).toBeTruthy();

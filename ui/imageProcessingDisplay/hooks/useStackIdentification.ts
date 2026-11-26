@@ -3,9 +3,10 @@
  * @description The star names of the stack on screen, for the Astrometry button. It reads the saved
  * names; when there are none, `start` asks the backend to make them as a job of the analysis type (so
  * the Analyze Target button shows it as running, and its Cancel button stops it). While the job runs,
- * the state is read again every two seconds for its progress, and the names appear when it ends.
+ * the state is read again every two seconds for its progress. `useJobEndWatcher` follows the job,
+ * and the names are read once more when it ends.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchStackIdentification,
@@ -14,6 +15,7 @@ import {
   type StackIdentificationState,
 } from '../../common/services/astronomyService';
 import { reportError } from '../../common/utils/reportError';
+import { useJobEndWatcher } from './useJobEndWatcher';
 
 /** How often the state is read while a job is naming the stars, in milliseconds. */
 const RUNNING_POLL_MS = 2000;
@@ -71,40 +73,32 @@ export function useStackIdentification(
   enabled: boolean,
 ): StackIdentificationView {
   const queryClient = useQueryClient();
-  const [requested, setRequested] = useState(false);
+  // The job started by `start`, followed until it ends.
+  const [jobId, setJobId] = useState<string | null>(null);
   const queryKey = ['stackIdentification', targetId, stackPath];
   const query = useQuery({
     queryKey,
     queryFn: () => fetchStackIdentification(targetId as string, stackPath as string),
     enabled: Boolean(targetId && stackPath) && enabled,
-    refetchInterval: (current) => (current.state.data?.running || requested ? RUNNING_POLL_MS : false),
+    refetchInterval: (current) => (current.state.data?.running || jobId ? RUNNING_POLL_MS : false),
     staleTime: 10_000,
   });
   const state = query.data;
 
-  // The job is followed from its start until the state says it ended.
-  const sawRunningRef = useRef(false);
+  // When the job ends, read the names once more and stop following it.
+  useJobEndWatcher(jobId, () => {
+    setJobId(null);
+    void queryClient.invalidateQueries({ queryKey: ['stackIdentification', targetId, stackPath] });
+  });
   useEffect(() => {
-    if (!requested || !state) return;
-    if (state.running) {
-      sawRunningRef.current = true;
-      return;
-    }
-    if (sawRunningRef.current || state.identification || state.error) {
-      sawRunningRef.current = false;
-      setRequested(false);
-    }
-  }, [requested, state]);
-  useEffect(() => {
-    setRequested(false);
-    sawRunningRef.current = false;
+    setJobId(null);
   }, [targetId, stackPath]);
 
   const start = useCallback(async () => {
     if (!targetId || !stackPath) return;
     try {
-      await startStackIdentification(targetId, stackPath);
-      setRequested(true);
+      const reply = await startStackIdentification(targetId, stackPath);
+      setJobId(reply.jobId);
       await queryClient.invalidateQueries({ queryKey: ['stackIdentification', targetId, stackPath] });
     } catch (failure) {
       reportError(failure instanceof Error ? failure : new Error(String(failure)), 'backend');
@@ -119,7 +113,7 @@ export function useStackIdentification(
 
   return {
     stars: enabled && state?.identification ? state.identification.stars : [],
-    running: Boolean(state?.running) || requested,
+    running: Boolean(state?.running) || jobId !== null,
     statusText: enabled ? describeStackIdentification(state) : null,
     hasResult: Boolean(state?.identification),
     isLoaded: query.isSuccess,

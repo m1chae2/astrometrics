@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { usePersistentFlag } from '../../common/hooks/usePersistentFlag';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { CollapsibleColumn } from '../../common/components/CollapsibleColumn';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
@@ -192,64 +193,55 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onViewChange={onViewChange}
         />
       </SectionPanel>
-      {browserCollapsed ? null : (
-      <SectionPanel
-        title="File Browser"
-        className="image-processing-display__browser-section"
-        onTitleClick={() => setBrowserCollapsed(true)}
-        titleButtonLabel="Collapse the File Browser to a tab bar"
-        headerContent={
-          <div className="image-processing-display__browser-header">
-            <FileBrowserToolbar
-              className="file-browser__toolbar--header"
-              files={allFiles}
-              searchTerm={fileFilterText}
-              onSearchChange={setFileFilterText}
-              selectedCamera={fileBrowserCamera}
-              onCameraChange={setFileBrowserCamera}
-              selectedOptic={selectedOptic}
-              onOpticChange={setSelectedOptic}
-              checkedFiles={checkedFiles}
-              onDeleteFiles={handleRequestDeleteFiles}
-              onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}
-            />
-          </div>
-        }
+      <CollapsibleColumn
+        collapsed={browserCollapsed}
+        side="bottom"
+        onCollapsedChange={setBrowserCollapsed}
+        stripTitle="File Browser"
+        selectedLabel={`${filteredFiles.length} frames`}
+        showLabel="Expand the File Browser"
       >
-        <FileBrowser
-          files={filteredFiles}
-          searchTerm={fileFilterText}
-          onSearchChange={setFileFilterText}
-          rejectedFiles={analysisResults?.rejectedFiles || []}
-          onSelectFile={onFileClick}
-          selectedFile={selectedFile}
-          onDeleteFiles={handleRequestDeleteFiles}
-          checkedFiles={checkedFiles}
-          onToggleFile={toggleFile}
-          onToggleAll={toggleAllFiles}
-          selectedCamera={fileBrowserCamera}
-          frameStatuses={frameStatuses}
-          setAsideFiles={setAsideFiles}
-          onPutBackFrame={onPutBackFrame}
-        />
-      </SectionPanel>
-      )}
-      {browserCollapsed && (
-        <div className="image-processing-display__collapsed-row">
-          {browserCollapsed && (
-            <SectionPanel
-              title="File Browser"
-              collapsed="down"
-              collapsedNote={`${filteredFiles.length} frames`}
-              className="image-processing-display__collapsed-row-fill"
-              onTitleClick={() => setBrowserCollapsed(false)}
-              titleButtonLabel="Expand the File Browser"
-            >
-              {null}
-            </SectionPanel>
-          )}
-        </div>
-      )}
+        <SectionPanel
+          title="File Browser"
+          className="image-processing-display__browser-section"
+          onTitleClick={() => setBrowserCollapsed(true)}
+          titleButtonLabel="Collapse the File Browser to a tab bar"
+          headerContent={
+            <div className="image-processing-display__browser-header">
+              <FileBrowserToolbar
+                className="file-browser__toolbar--header"
+                files={allFiles}
+                searchTerm={fileFilterText}
+                onSearchChange={setFileFilterText}
+                selectedCamera={fileBrowserCamera}
+                onCameraChange={setFileBrowserCamera}
+                selectedOptic={selectedOptic}
+                onOpticChange={setSelectedOptic}
+                checkedFiles={checkedFiles}
+                onDeleteFiles={handleRequestDeleteFiles}
+                onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}
+              />
+            </div>
+          }
+        >
+          <FileBrowser
+            files={filteredFiles}
+            searchTerm={fileFilterText}
+            onSearchChange={setFileFilterText}
+            rejectedFiles={analysisResults?.rejectedFiles || []}
+            onSelectFile={onFileClick}
+            selectedFile={selectedFile}
+            onDeleteFiles={handleRequestDeleteFiles}
+            checkedFiles={checkedFiles}
+            onToggleFile={toggleFile}
+            onToggleAll={toggleAllFiles}
+            selectedCamera={fileBrowserCamera}
+            frameStatuses={frameStatuses}
+            setAsideFiles={setAsideFiles}
+            onPutBackFrame={onPutBackFrame}
+          />
+        </SectionPanel>
+      </CollapsibleColumn>
     </div>
   );
 };

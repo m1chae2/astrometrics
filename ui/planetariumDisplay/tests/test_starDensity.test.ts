@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeLimitingMagnitude, limitStarDensity, MAX_STARS_PER_MEGAPIXEL } from '../layers/StarOverlay';
+import {
+  CATALOG_STAR_DEFAULT_MAGNITUDE, computeLimitingMagnitude, limitStarDensity, MAX_STARS_PER_MEGAPIXEL,
+} from '../layers/StarOverlay';
 import type { DrawableStar } from '../layers/StarOverlay';
 
 /**
@@ -44,6 +46,27 @@ describe('star density rule', () => {
     const faintest = all[all.length - 1].source.id;
     const drawn = limitStarDensity(all, 1000, 1000, faintest);
     expect(drawn.some((star) => star.source.id === faintest)).toBe(true);
+  });
+
+  /**
+   * A catalog-layer star with no magnitude ranks at the same default magnitude the drawing rule
+   * gives it, so it is kept ahead of fainter stars; one of the user's own stars with none ranks last.
+   */
+  it('ranks a catalog star with no magnitude at the default magnitude', () => {
+    // Magnitudes 1 to 1 + count/100: the cap falls well past the default magnitude.
+    const count = MAX_STARS_PER_MEGAPIXEL + 100;
+    expect(1 + MAX_STARS_PER_MEGAPIXEL / 100).toBeGreaterThan(CATALOG_STAR_DEFAULT_MAGNITUDE);
+    const catalogStar: DrawableStar = {
+      source: { id: 'hip', ra: 1, dec: 1, name: '', type: 'star', catalogSource: 'hipparcos', hasSpectra: false, hasPhotometry: false },
+      x: 10, y: 10,
+    };
+    const ownStar: DrawableStar = {
+      source: { id: 'own', ra: 1, dec: 1, name: '', type: 'star', hasSpectra: false, hasPhotometry: false },
+      x: 10, y: 10,
+    };
+    const drawn = limitStarDensity([...stars(count), catalogStar, ownStar], 1000, 1000);
+    expect(drawn.some((star) => star.source.id === 'hip')).toBe(true);
+    expect(drawn.some((star) => star.source.id === 'own')).toBe(false);
   });
 
   /** Under the cap, nothing is dropped. */

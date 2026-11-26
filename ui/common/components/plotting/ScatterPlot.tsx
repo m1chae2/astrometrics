@@ -1,6 +1,7 @@
+import { readThemeToken } from '../../utils/themeToken';
 import React, { useEffect, useRef } from 'react';
 import { themedHoverLabel } from '../../utils/plotHoverLabel';
-import { loadPlotly, PlotlyStatic, PlotlyTrace, getVar } from '../../utils/plotTools';
+import { loadPlotly, PlotlyStatic, PlotlyTrace } from '../../utils/plotTools';
 import '../../styles/plotting.css';
 
 interface PointData {
@@ -60,7 +61,7 @@ export const ScatterPlot: React.FC<Props> = ({
             const layout: any = {
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
-                font: { color: getVar('--plot-font', '#fff'), size: 10 },
+                font: { color: readThemeToken('--plot-font', '#fff'), size: 10 },
                 margin: { l: 25, r: 25, b: 25, t: 10 },
                 showlegend: false,
                 hoverlabel: themedHoverLabel(),

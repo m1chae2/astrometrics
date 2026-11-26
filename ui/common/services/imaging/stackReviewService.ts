@@ -17,6 +17,7 @@ import type {
     SetAsideFrameRecord,
     StackPrediction,
     StackReviewStart,
+    StackSummary,
 } from '../../types/backendTypes';
 
 /** The event the image viewer listens for, so it reads a rewritten picture again. */
@@ -59,6 +60,22 @@ export async function startPreviewRemake(
         },
         { silent: true }
     );
+}
+
+/**
+ * Reads the saved summary of a target's imaging or spectral stack: how it was made, its path
+ * and the job that made it. A target with no saved summary is a normal case.
+ * @param targetId The target.
+ * @param kind The imaging or spectral stack.
+ * @return The summary, or `null` when the target has no such stack.
+ */
+export async function fetchStackSummary(targetId: string, kind: StackKind): Promise<StackSummary | null> {
+    try {
+        return await callBackend('processing:stack_summary', { target: targetId, kind }, { silent: true });
+    } catch (error) {
+        if (error instanceof BackendError && error.code === 'not_found') return null;
+        throw error;
+    }
 }
 
 /**

@@ -1,7 +1,8 @@
 /**
  * @file test_collapsibleColumn.test.tsx
  * @description Checks the folded strip of CollapsibleColumn: the title alone, the title with the
- * selected item, and the title with the selected item and a second detail (the picked star).
+ * selected item, and the title with the selected item and a second detail (the picked star), and
+ * the right-edge strip and the bottom bar.
  */
 
 import React from 'react';
@@ -89,6 +90,27 @@ describe('CollapsibleColumn strip', () => {
         expect(document.querySelector('.collapsible-column--collapsed-right')).not.toBeNull();
         expect(document.querySelector('.collapsible-column--collapsed')).toBeNull();
         await userEvent.click(screen.getByRole('button', { name: 'Console, Terminal' }));
+        expect(onCollapsedChange).toHaveBeenCalledWith(false);
+    });
+
+    /** A block under a viewer folds to a bar across the bottom, drawn as a panel folded down. */
+    it('folds a bottom block to a bar', async () => {
+        const onCollapsedChange = vi.fn();
+        render(
+            <CollapsibleColumn
+                collapsed
+                side="bottom"
+                onCollapsedChange={onCollapsedChange}
+                stripTitle="File Browser"
+                selectedLabel="12 frames"
+                showLabel="Expand the File Browser"
+            >
+                <div>open column</div>
+            </CollapsibleColumn>,
+        );
+        expect(document.querySelector('.collapsible-column--collapsed-bottom')).not.toBeNull();
+        expect(document.querySelector('.panel--collapsed-down')).not.toBeNull();
+        await userEvent.click(screen.getByRole('button', { name: 'File Browser, 12 frames' }));
         expect(onCollapsedChange).toHaveBeenCalledWith(false);
     });
 });

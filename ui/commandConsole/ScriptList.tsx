@@ -9,7 +9,8 @@
  */
 import React, { useMemo, useState } from 'react';
 import { RadioListFiltering } from '../common/radioList/RadioListFiltering';
-import { CollapsibleColumn, useCollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { CollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { SelectableList, type SelectableItem, type SelectableItemBadge } from '../common/components/SelectableList';
 import { Tabs } from '../common/components/Tabs';
@@ -200,7 +201,7 @@ export const ScriptList: React.FC<ScriptListProps> = ({
     else if (openItemId?.startsWith(RECIPE_ID_PREFIX)) setActiveTab('recipes');
   }
   // The whole column folds to a thin strip; the choice is remembered for this viewer.
-  const [collapsed, setCollapsed] = useCollapsibleColumn('astrometrics:commandConsole:scriptListCollapsed');
+  const [collapsed, setCollapsed] = usePersistentFlag('astrometrics:commandConsole:scriptListCollapsed', false);
   const userRows = useMemo(() => buildUserScriptRows(userScripts, filterText), [userScripts, filterText]);
   const recipeGroups = useMemo(() => buildRecipeGroups(recipes, filterText), [recipes, filterText]);
   const recipeRowCount = recipeGroups.reduce((total, group) => total + group.rows.length, 0);

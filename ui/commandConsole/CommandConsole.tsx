@@ -19,7 +19,7 @@ import { Tabs } from '../common/components/Tabs';
 import { Button } from '../common/components/Button';
 import { TextInput } from '../common/components/TextInput';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
-import { CollapsibleColumn, useCollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { CollapsibleColumn } from '../common/components/CollapsibleColumn';
 import { Toolbar, ToolbarGroup } from '../common/components/Toolbar';
 import { ScriptList, recipeListId, userScriptListId, type RecipeItem, type UserScriptItem } from './ScriptList';
 import { WorkspaceTable, type PreloadedObject, type WorkspaceVariable } from './WorkspaceTable';
@@ -147,7 +147,7 @@ export const CommandConsole: React.FC = () => {
   const [workspaceCollapsed, setWorkspaceCollapsed] = usePersistentFlag('astrometrics:commandConsole:workspaceCollapsed', false);
   // The Console panel (Terminal and Documentation) folds to a strip on the right edge, giving the
   // editor the width; remembered for this viewer.
-  const [consoleCollapsed, setConsoleCollapsed] = useCollapsibleColumn('astrometrics:commandConsole:consoleCollapsed');
+  const [consoleCollapsed, setConsoleCollapsed] = usePersistentFlag('astrometrics:commandConsole:consoleCollapsed', false);
 
   // Documentation
   const [docTopics, setDocTopics] = useState<DocTopicItem[]>([]);

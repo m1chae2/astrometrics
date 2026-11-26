@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { classFromBMinusV, starColorClass } from '../utils/starColor';
+import { classFromBMinusV, colorClassOfType, starColorClass } from '../utils/starColor';
 
 const mapProps: { current: Record<string, any> } = { current: {} };
 let skyMapMounts = 0;
@@ -174,6 +174,13 @@ describe('star color class', () => {
     // Carbon-type (C, R, N) and S-type stars take the carbon red; Wolf-Rayet stars their blue.
     expect(['C5:,4', 'C6,4e', 'R', 'N', 'S4,7e'].map((type) => starColorClass({ spectralType: type }))).toEqual(['C', 'C', 'C', 'C', 'C']);
     expect(starColorClass({ spectralType: 'WR' })).toBe('W');
+  });
+
+  /** A hot subdwarf ("sdB", "sdO") takes the color of its class letter, not the S-type carbon red. */
+  it('colors a subdwarf by the class letter after its prefix', () => {
+    expect(['sdB5', 'sdO6', 'sdOB', 'esdM1', 'usdK7'].map((type) => colorClassOfType(type))).toEqual(['B', 'O', 'O', 'M', 'K']);
+    expect(colorClassOfType('S4,7e')).toBe('C');
+    expect(starColorClass({ spectralType: 'sdB', bMinusV: 1.6 })).toBe('B');
   });
 
   /** B-V maps to the standard main-sequence classes. */

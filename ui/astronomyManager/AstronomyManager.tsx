@@ -19,7 +19,8 @@ import { chooseTargetForStar, readHandedOffStar as readHandoffPayload, HandedOff
 import './styles/astronomyManager.css';
 import { Tabs } from '../common/components/Tabs';
 import { Button } from '../common/components/Button';
-import { CollapsibleColumn, useCollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { CollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
 
 /** localStorage key under which Planetarium (and the image viewer) hand a star to this panel. */
 import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
@@ -253,7 +254,7 @@ export const AstronomyManager: React.FC = () => {
   };
 
   // The whole left column folds to a thin strip, like Image Processing's; the choice is remembered for this viewer.
-  const [browserCollapsed, setBrowserCollapsed] = useCollapsibleColumn('astrometrics:astronomyManager:targetListCollapsed');
+  const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:astronomyManager:targetListCollapsed', false);
   const browserStripTitle = navigationMode === 'target' ? 'Targets' : 'Spectral classes';
   const browserSelectedLabel = navigationMode === 'target'
     ? targetBrowser.items.find((item) => item.id === selectedTarget)?.label

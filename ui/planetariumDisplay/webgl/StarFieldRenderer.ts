@@ -29,7 +29,7 @@ import {
   type DrawableStar,
 } from '../layers/StarOverlay';
 import { viewportDipsBelowHorizon } from '../layers/overlayShared';
-import { refreshStarColors, starColorRgb } from '../utils/starColor';
+import { starColorRgb } from '../utils/starColor';
 import { compileShader, linkProgram, createBuffer, resizeCanvasToDisplaySize } from '../../common/webgl/glUtils';
 import { perfEnd, perfStart } from '../utils/perfMarks';
 
@@ -158,7 +158,6 @@ export class StarFieldRenderer {
     if (!projectionContext.showStars && !projectionContext.showCatalog) return;
 
     const projectStartedAt = perfStart();
-    refreshStarColors();
     this.rebuildStarInstanceData(projectionContext);
     if (this.starInstanceCount === 0) {
       perfEnd('planetarium:star_project_upload', projectStartedAt);

@@ -17,6 +17,9 @@ const fetchImageByPathMock = vi.fn();
 vi.mock('../../common/services/imaging/stackReviewService', () => ({
     STACK_PICTURE_REMADE_EVENT: 'stackPictureRemade',
     fetchJob: (...args: unknown[]) => fetchJobMock(...args),
+    // The summary reader goes through the backend mock, so each test sets its answer there.
+    fetchStackSummary: (target: string, kind: string) =>
+        callBackendMock('processing:stack_summary', { target, kind }, { silent: true }),
 }));
 vi.mock('../../common/services/backendApi', () => ({
     callBackend: (...args: unknown[]) => callBackendMock(...args),

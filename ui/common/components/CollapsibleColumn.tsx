@@ -3,12 +3,14 @@
  * @description A display's left column that folds to a thin strip and opens again. Image
  * Processing, the Image Viewer and the Astronomy Manager all use it, so the fold looks and works
  * the same on every screen. With `side="right"` it is a column on the right edge instead, such
- * as the Command Console's Console panel, and folds to a strip on that edge.
+ * as the Command Console's Console panel or Image Processing's Frame Analysis, and folds to a
+ * strip on that edge. With `side="bottom"` it is a block under the viewer, such as Image
+ * Processing's File Browser, and folds to a bar across the bottom. Screens remember the fold
+ * with `usePersistentFlag`.
  */
 
 import React from 'react';
 import { SectionPanel } from './SectionPanel';
-import { usePersistentFlag } from '../hooks/usePersistentFlag';
 import './collapsibleColumn.css';
 
 export interface CollapsibleColumnProps {
@@ -31,8 +33,9 @@ export interface CollapsibleColumnProps {
      * Which edge the column sits on. `left` (the default) narrows the display's left grid column
      * to the strip. `right` draws the strip at a fixed width on the right edge and leaves the
      * left column alone; a display with a right grid column narrows that column to the strip.
+     * `bottom` draws a bar across the full width, for a block under a viewer.
      */
-    side?: 'left' | 'right';
+    side?: 'left' | 'right' | 'bottom';
     /** A layout class for the strip's outer box. */
     className?: string;
     /** The open column. The screen puts the fold button (a panel title) in it. */
@@ -68,12 +71,13 @@ export const CollapsibleColumn: React.FC<CollapsibleColumnProps> = ({
     const selectedParts = [selectedLabel, selectedDetail].filter((part): part is string => !!part);
     const stripNote = selectedParts.length > 0 ? selectedParts.join(' · ') : undefined;
     const fullStripLabel = [stripTitle, ...selectedParts].join(', ');
+    const stripClass = side === 'left' ? 'collapsible-column--collapsed' : `collapsible-column--collapsed-${side}`;
     return (
-        <div className={`${side === 'right' ? 'collapsible-column--collapsed-right' : 'collapsible-column--collapsed'} panel-group ${className}`}>
+        <div className={`${stripClass} ${side === 'bottom' ? '' : 'panel-group'} ${className}`}>
             <SectionPanel
                 title={stripTitle}
                 collapsedNote={stripNote}
-                collapsed="right"
+                collapsed={side === 'bottom' ? 'down' : 'right'}
                 onTitleClick={() => onCollapsedChange(false)}
                 titleButtonLabel={stripNote ? fullStripLabel : showLabel}
                 collapsedAriaLabel={stripNote ? fullStripLabel : undefined}
@@ -83,14 +87,3 @@ export const CollapsibleColumn: React.FC<CollapsibleColumnProps> = ({
         </div>
     );
 };
-
-/**
- * Remembers whether a display's left column is folded, for this viewer, under `storageKey`
- * (for example `astrometrics:imageProcessing:targetListCollapsed`). It starts open.
- *
- * @param storageKey The local storage key for this display's column.
- * @returns The folded state and the function that changes it.
- */
-export function useCollapsibleColumn(storageKey: string): [boolean, (collapsed: boolean) => void] {
-    return usePersistentFlag(storageKey, false);
-}

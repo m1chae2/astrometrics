@@ -63,27 +63,6 @@
   justify-content: flex-end;
 }
 
-/* The folded File Browser tab bar under the viewer. */
-.image-processing-display__collapsed-row {
-  display: flex;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.image-processing-display__collapsed-row-fill {
-  flex: 1 1 auto;
-}
-
-/* Frame Analysis folded: the whole right column narrows to one rail, so the viewer widens. */
-.layout:has(.image-processing-display__right--collapsed) {
-  --layout-right-col-width: 36px;
-}
-
-.image-processing-display__right--collapsed {
-  display: flex;
-  height: 100%;
-}
-
 /* Right Panel structure */
 .image-processing-display__right {
   height: 100%;
@@ -671,40 +650,10 @@
   padding: 4px;
 }
 
-/* From FrameCountTable refactoring */
-.iso-counts-panel {
-  flex: 0 0 auto;
-  max-height: 300px;
-}
-
-.data-table-full {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--control-font-size);
-}
-
-.data-table-header-row {
-  border-bottom: 1px solid var(--grey-light);
-  text-align: left;
-}
-
-.data-table-cell-padding {
-  padding: 6px;
-}
-
+/* A right-aligned table cell, used by the Observatory Manager's calibration table. */
 .data-table-cell-right {
   padding: 6px;
   text-align: right;
-}
-
-.data-table-empty-row {
-  padding: 10px;
-  text-align: center;
-  color: var(--text-dimmest);
-}
-
-.data-table-row {
-  border-bottom: 1px solid var(--term-border);
 }
 
 /* From FileBrowser refactoring */

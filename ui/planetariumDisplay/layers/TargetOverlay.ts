@@ -11,12 +11,15 @@
 import type { PlanetariumTarget, StackSkyPicture } from '../../common/types/planetariumTypes';
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
 import { pixelsPerDegree } from '../utils/projectionMath';
-import { readThemeColor } from '../utils/themeColor';
+import { readThemeToken } from '../../common/utils/themeToken';
 import { chooseTargetMarker, TargetMarker } from './targetMarkers';
 import { isGridInView, projectGrid } from './StackPictureOverlay';
 
 /** Line width of a marker on a target that is not selected, in pixels. */
 const MARKER_LINE_PX = 1;
+
+/** The marker color used when a theme token has no value, as in tests, which load no stylesheet. */
+export const MISSING_MARKER_COLOR = '#ffffff';
 
 /** Line width of the selected target's marker, in pixels. */
 const SELECTED_MARKER_LINE_PX = 2;
@@ -134,8 +137,8 @@ export class TargetOverlay implements PlanetariumOverlay {
 
     const pictures = picturesByTarget(projectionContext);
     const scale = pixelsPerDegree(projectionContext.width, projectionContext.height, projectionContext.fov);
-    const faintColor = readThemeColor('--sky-target-marker');
-    const selectedColor = readThemeColor('--sky-target-marker-selected');
+    const faintColor = readThemeToken('--sky-target-marker', MISSING_MARKER_COLOR);
+    const selectedColor = readThemeToken('--sky-target-marker-selected', MISSING_MARKER_COLOR);
 
     context.save();
     context.setLineDash([]);

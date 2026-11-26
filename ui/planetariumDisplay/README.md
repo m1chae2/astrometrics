@@ -29,7 +29,7 @@ In *By target*, a target that is at or under the horizon (altitude 0° or less) 
 
 ## Spectral class view
 
-With the left column on *By spectral class*, the map's own stars are every star of the class lists and every star with a spectrum, whatever target is chosen, drawn in its class color (`planetarium:get_class_stars`, `hooks/useClassStarSources.ts`). The color comes from our own spectrum's type, then the catalog type, then the catalog B-V color (`utils/starColor.ts`); the colors are the `--star-color-*` tokens in `theme.css`, and a legend shows them. Picking a class keeps only that catalog class. *By target* is unchanged. The left column folds to a strip like the Astronomy Manager's; the strip names the target (or class) and the picked star.
+With the left column on *By spectral class*, the map's own stars are every star of the class lists and every star with a spectrum, whatever target is chosen, drawn in its class color (`planetarium:get_class_stars`, `hooks/useClassStarSources.ts`). The color comes from our own spectrum's type, then the catalog type, then the catalog B-V color (`utils/starColor.ts`). Carbon stars (C, R, N) and S-type stars take the carbon red; a hot subdwarf ("sdB", "sdO") takes the color of the class letter after its lower-case prefix; the colors are the `--star-color-*` tokens in `theme.css`, and a legend shows them. Picking a class keeps only that catalog class. *By target* is unchanged. The left column folds to a strip like the Astronomy Manager's; the strip names the target (or class) and the picked star.
 
 ## Toolbar and sessions
 
@@ -47,7 +47,7 @@ The toolbar's *Images* switch (remembered) lays each target's processed stack pi
 - A target with a catalog shape (major axis, minor axis and position angle) gets an ellipse of that shape. Its direction comes from projecting a point a short way along the position angle, so it stays right when the sky turns on screen. The library records only the major axis for now (`majorAxisArcmin`, SIMBAD's size, from `planetarium:get_targets`), so no target has a shape yet.
 - Any other target gets a small, faint ring of fixed size. When it is selected, four corner brackets frame the object's size: its catalog major axis, else its field of view. The brackets and the ellipse are never smaller than 16 px, so the selected target shows at any zoom.
 
-The selected target gets no name label, because its panel is open beside the map. The colors are the `--sky-target-marker` (faint) and `--sky-target-marker-selected` (bright) tokens in `theme.css`, read through `utils/themeColor.ts`. A click picks a target anywhere within the size its marker is drawn at (`utils/hitTesting.ts`); a star under the click wins.
+The selected target gets no name label, because its panel is open beside the map. The colors are the `--sky-target-marker` (faint) and `--sky-target-marker-selected` (bright) tokens in `theme.css`, read through `ui/common/utils/themeToken.ts`. A click picks a target anywhere within the size its marker is drawn at (`utils/hitTesting.ts`); a star under the click wins.
 
 ## Tracking view
 

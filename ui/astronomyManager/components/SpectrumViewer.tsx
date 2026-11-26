@@ -1,11 +1,11 @@
+import { readThemeToken } from '../../common/utils/themeToken';
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import {
     PlotlyTrace,
     findNearestIndex,
     getSelectionTraceName,
     computeTooltipPosition,
-    getVar,
-    buildLayout
+    buildLayout,
 } from '../../common/utils/plotTools';
 import { BasePlot } from '../../common/components/plotting/BasePlot';
 import '../styles/astronomyViewer.css';
@@ -140,8 +140,8 @@ export const SpectrumViewer: React.FC<Props> = ({
         if (!astronomyData) return [];
         const traces: PlotlyTrace[] = [];
 
-        const accent = getVar('--plot-accent', '#2196f3');
-        const selectionColor = getVar('--plot-selection', '#ff4444');
+        const accent = readThemeToken('--plot-accent', '#2196f3');
+        const selectionColor = readThemeToken('--plot-selection', '#ff4444');
 
         // Add the main extraction's trace.
         if (Array.isArray(astronomyData.wavelength) && astronomyData.wavelength.length > 0) {
@@ -177,7 +177,7 @@ export const SpectrumViewer: React.FC<Props> = ({
             yTitle: 'Intensity'
         });
 
-        const selectionColor = getVar('--plot-selection', '#ff4444');
+        const selectionColor = readThemeToken('--plot-selection', '#ff4444');
         const selectionShapes = selections.map(sel => ({
             type: 'line',
             x0: sel.x,
@@ -193,8 +193,8 @@ export const SpectrumViewer: React.FC<Props> = ({
             }
         }));
 
-        const detectedColor = getVar('--slate-blue-light', '#4b8ec8');
-        const inconclusiveColor = getVar('--plot-red', '#ff5252');
+        const detectedColor = readThemeToken('--slate-blue-light', '#4b8ec8');
+        const inconclusiveColor = readThemeToken('--plot-red', '#ff5252');
         const featureColor = (feature: SpectralFeatureResult) =>
             feature.verdict === 'inconclusive' ? inconclusiveColor : detectedColor;
         // A detected feature is drawn as a solid green line, a possible one as

@@ -241,13 +241,3 @@
         text-align: left;
     }
 }
-
-/* Information folded: the whole right column narrows to one strip, so the viewer widens. */
-.target-display-container:has(.target-details-manager--collapsed) {
-    --layout-right-col-width: 36px;
-}
-
-.target-details-manager--collapsed {
-    display: flex;
-    height: 100%;
-}

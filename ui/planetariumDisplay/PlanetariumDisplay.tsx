@@ -62,25 +62,16 @@ import {
   CAMERA_ALL, CATALOG_ALL, CATALOG_MESSIER, CATALOG_NGC_IC, CATALOG_NO_IMAGE, CATALOG_PLANETS, CATALOG_STARS,
   SORT_ALPHABETICAL, SORT_NEWEST, type SortChoice,
 } from '../common/hooks/targetListFiltering';
-import { CollapsibleColumn, useCollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { CollapsibleColumn } from '../common/components/CollapsibleColumn';
+import { usePersistentFlag } from '../common/hooks/usePersistentFlag';
+import { prefersReducedMotion } from '../common/utils/reducedMotion';
 import './styles/planetariumDisplay.css';
 
-// Browser storage key for the "Only targets above the horizon" choice. It is a
-// per-viewer convenience, so the list still works when storage is blocked.
-const ABOVE_HORIZON_ONLY_STORAGE_KEY = 'planetarium.targetList.aboveHorizonOnly';
-
-/**
- * Reads the saved "Only targets above the horizon" choice.
- *
- * @returns {boolean} True when the viewer last turned the filter on; false when it is off or storage cannot be read.
- */
-const readAboveHorizonOnly = (): boolean => {
-  try {
-    return window.localStorage.getItem(ABOVE_HORIZON_ONLY_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-};
+// Browser storage key for the "Only targets above the horizon" choice, and the key it was saved
+// under before keys took the `astrometrics:` form. It is a per-viewer convenience, so the list
+// still works when storage is blocked.
+const ABOVE_HORIZON_ONLY_STORAGE_KEY = 'astrometrics:planetarium:aboveHorizonOnly';
+const ABOVE_HORIZON_ONLY_LEGACY_KEY = 'planetarium.targetList.aboveHorizonOnly';
 
 // Page size of a target's star list; the same as useSpectrumList's, so a
 // prefetch fills the page the list will ask for.
@@ -329,9 +320,7 @@ export const PlanetariumDisplay: React.FC = () => {
    */
   const runAfterSlide = useCallback((work: () => void) => {
     const pane = levelTwoPaneRef.current;
-    const reduceMotion = typeof window.matchMedia === 'function'
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!pane || reduceMotion) {
+    if (!pane || prefersReducedMotion()) {
       window.requestAnimationFrame(() => work());
       return;
     }
@@ -383,7 +372,8 @@ export const PlanetariumDisplay: React.FC = () => {
   // Which targets are under the horizon at the planning time (null until the
   // site is known). Drives the muted "Below" badge and the horizon filter.
   const horizonCheck = useTargetsBelowHorizon(libraryTargets, location, !isLocationLoading, planningTime);
-  const [isAboveHorizonOnly, setIsAboveHorizonOnly] = useState<boolean>(readAboveHorizonOnly);
+  const [isAboveHorizonOnly, setIsAboveHorizonOnly] = usePersistentFlag(
+    ABOVE_HORIZON_ONLY_STORAGE_KEY, false, { legacyKey: ABOVE_HORIZON_ONLY_LEGACY_KEY });
 
   /**
    * Turns the "Only targets above the horizon" filter on or off and saves the choice for this viewer.
@@ -391,14 +381,8 @@ export const PlanetariumDisplay: React.FC = () => {
    * @param {React.ChangeEvent<HTMLInputElement>} event - The checkbox change.
    */
   const handleAboveHorizonOnlyChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const isChecked = event.target.checked;
-    setIsAboveHorizonOnly(isChecked);
-    try {
-      window.localStorage.setItem(ABOVE_HORIZON_ONLY_STORAGE_KEY, String(isChecked));
-    } catch {
-      // Storage is blocked; the choice lasts until the app closes.
-    }
-  }, []);
+    setIsAboveHorizonOnly(event.target.checked);
+  }, [setIsAboveHorizonOnly]);
 
   // The shared target filter (By catalog, By camera, A–Z or Newest), the same
   // one Image Processing shows in its Filter Targets panel. Its choices are
@@ -967,7 +951,7 @@ export const PlanetariumDisplay: React.FC = () => {
   }, [setModeDrilledIn]);
 
   // The whole left column folds to a thin strip, like the Astronomy Manager's; the choice is remembered for this viewer.
-  const [browserCollapsed, setBrowserCollapsed] = useCollapsibleColumn('astrometrics:planetarium:targetListCollapsed');
+  const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:planetarium:targetListCollapsed', false);
   const browserStripTitle = navigationMode === 'target' ? 'Targets' : 'Spectral classes';
   const browserSelectedLabel = navigationMode === 'target'
     ? targetBrowser.items.find((item) => item.id === scopedTarget)?.label

@@ -70,7 +70,6 @@ astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID forma
 astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
 astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
-astrometricslib/_internal/drivers/tuning_support.py,MAD_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
 astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.offset,Pagination start; 0 means from the first row
@@ -92,10 +91,10 @@ astrometricslib/api/targets.py,TargetCatalog.imaged_field_centers.max_frames_per
 astrometricslib/api/targets.py,TargetCatalog.query.include_frames,Count of frames to list; 0 means none
 astrometricslib/api/targets.py,TargetCatalog.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 means from the first row
+astrometricslib/api/visualization.py,DEFAULT_IMAGE_FIGURE_SIZE,Figure size of a render_fits figure; display only
 astrometricslib/api/visualization.py,Visualization.plot.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/visualization.py,Visualization.render_fits.index,Index of the frame or layer; 0 means the first
 astrometricslib/api/visualization.py,_DEFAULT_FIGURE_SIZES,Plumbing or protocol constant
-astrometricslib/api/visualization.py,DEFAULT_IMAGE_FIGURE_SIZE,Figure size of a render_fits figure; display only
 astrometricslib/foundation/_system_posix.py,PR_SET_PDEATHSIG,"The Linux prctl option number for the parent-death signal, fixed by the kernel API"
 astrometricslib/foundation/config.py,CONFIG_RECHECK_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/config.py,[Observatory.Constraints] max_altitude,"Physical limit of altitude, used as the setting's default"
@@ -214,7 +213,6 @@ astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,_CONSISTE
 astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/photometry/processing/family_wise_correction.py,MAXIMUM_REPEAT_SHUFFLES,Compute cap on shuffles
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_FRAMES_EACH_SIDE_OF_STEP,Method choice: frames whose median makes a jump; one bad frame cannot move it
-astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_MEDIAN_STANDARD_ERROR_FACTOR,unit or physical constant
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_MINIMUM_FRAMES_PER_GROUP,Method choice: fewest frames that give a group's scatter
 astrometricslib/pipelines/photometry/processing/instrumental_artifacts.py,_STEP_FIELD_MINIMUM_STARS,Method choice: fewest stars that give a field median and spread
@@ -240,9 +238,9 @@ astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MEDIAN_
 astrometricslib/pipelines/photometry/processing/variability_indices.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/photometry/processing/variability_indices.py,false_alarm_probability.scale,Unit scale; 1 means unchanged
 astrometricslib/pipelines/photometry/run_warnings.py,_MAXIMUM_KEPT_WARNINGS,Row or item cap on distinct warnings kept; later ones are counted; plumbing
-astrometricslib/pipelines/photometry/session_tie.py,_MAD_TO_SIGMA,Statistical constant 1.4826 (MAD to standard deviation)
 astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety limit on the clipping loop; it settles in two or three rounds
 astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/shared/binned_sky_plane.py,block_medians.minimum_valid_fraction,Default that keeps every block: callers pass their own share
 astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record format version: which header fields a frame record holds; not a measurement
 astrometricslib/pipelines/shared/gaia_star_colors.py,BRIGHTEST_G_MAGNITUDE,Bound of the stored catalog question; the stars that are measured are chosen by stacking.sun_like_magnitude_range.
 astrometricslib/pipelines/shared/gaia_star_colors.py,FAINTEST_G_MAGNITUDE,Bound of the stored catalog question; the stars that are measured are chosen by stacking.sun_like_magnitude_range.
@@ -256,7 +254,6 @@ astrometricslib/pipelines/shared/image_scaling.py,PREVIEW_SAMPLE_SEED,software p
 astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,Sampling size for sky median
 astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_16_BIT,Largest value of a 16-bit integer image (data format)
 astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_8_BIT,Largest value of an 8-bit integer image (data format)
-astrometricslib/pipelines/shared/image_scaling.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/shared/image_scaling.py,_PERCENTILE_SAMPLE_COUNT,"Sample size for display percentiles, seeded"
 astrometricslib/pipelines/shared/image_scaling.py,_SCALING_BLOCK_PIXELS,Memory block size
 astrometricslib/pipelines/shared/image_scaling.py,_SKY_MAXIMUM_CLIP_ROUNDS,Round cap of an iterative clip that settles in fewer rounds
@@ -264,7 +261,6 @@ astrometricslib/pipelines/shared/image_scaling.py,_SKY_MINIMUM_SAMPLE_PIXELS,Few
 astrometricslib/pipelines/shared/image_scaling.py,_WHITE_COUNT_STRIDE,Speed stride for counting
 astrometricslib/pipelines/shared/image_scaling.py,_autostretch_parameters.full_scale,Default full scale of a floating-point image (data format)
 astrometricslib/pipelines/shared/neighbor_masking.py,NeighborField.around.exclude_radius,Argument default of 0 meaning no star is excluded
-astrometricslib/pipelines/shared/neighbor_masking.py,_MAD_TO_SIGMA,Statistical constant: scales a median absolute deviation to a standard deviation
 astrometricslib/pipelines/shared/quality/background_measurement.py,BACKGROUND_LEVEL_METHOD,Version number of the background estimator (a label for stored values; not tuning)
 astrometricslib/pipelines/shared/quality/calibration_frame_measurement.py,NEIGHBOR_NOISE_COLUMN_STEP,Pixel step set by color sensor pattern
 astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_RESAMPLE_COUNT,Bootstrap resample count
@@ -381,7 +377,6 @@ astrometricslib/pipelines/spectroscopy/processing/second_order_risk.py,MAXIMUM_S
 astrometricslib/pipelines/spectroscopy/processing/spectral_feature_detector.py,_MINIMUM_NOISE_WIDTH,"1.0 is the unit of the depth uncertainty, not a choice"
 astrometricslib/pipelines/spectroscopy/processing/synthetic_colour.py,DWARF_B_MINUS_V,Published dwarf intrinsic colours
 astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database read batch size
-astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,MEDIAN_ABSOLUTE_DEVIATION_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
 astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,_LOAD_CHUNK_SIZE,Batch size for reading stored stars in a tuning run; affects only memory use
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_MAD_TO_SIGMA,unit or physical constant
@@ -426,9 +421,6 @@ astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MI
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MOVING_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_REFERENCE_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_SIMBAD_ROW_LIMIT,"Row cap of one stored SIMBAD tile, shared with the star identifier so both read the same answers; plumbing."
-astrometricslib/pipelines/stacking/post_processing/sky_levelling.py,_FOOTPRINT_NOISE_WIDTHS,Detection level (three noise widths) of the star footprints kept out of the sky sample; a little texture taken as stars only leaves it out of the sky.
-astrometricslib/pipelines/stacking/post_processing/sky_levelling.py,_MINIMUM_SKY_SHARE,Fewest sky pixels needed to measure the sky levels; a sanity guard.
-astrometricslib/pipelines/stacking/post_processing/sky_levelling.py,_SKY_HISTOGRAM_BINS,Histogram bins of the sky-level (mode) estimate; plumbing.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_WIDE_HALO_SAMPLING_PIXELS,Coarse-grid spacing of a wide blur; plumbing of a faster Gaussian.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,extended_color.halo_radius_px,Default that turns the halo fill off for callers without star footprints; not a tuning value.
 astrometricslib/pipelines/stacking/post_processing/depth_limits.py,INDEPENDENT_PIXEL_EXPONENT,"Sampling, numerics, plumbing or math constant."
@@ -455,8 +447,6 @@ astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_EXTENDED_T
 astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_KNEE_PIXELS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_LARGEST_CURVATURE,Bisection upper bound so the search ends; no effect on results
 astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_MINIMUM_VALUE,Divide-by-zero guard.
-astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_NOISE_CLIP_ROUNDS,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_NOISE_SAMPLE_STRIDE,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_SLOPE_SPAN,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/normalization_scale.py,EXPOSURE_MATCH_FRACTION,exposure equality check; the code says it is not tuned
 astrometricslib/pipelines/stacking/post_processing/odd_even_apertures.py,APERTURE_RECORD_VERSION,software plumbing
@@ -478,6 +468,9 @@ astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMU
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MINIMUM_HOMOGRAPHY_SCALE,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SECONDS_PER_HOUR,unit or physical constant
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SLOPE_SAMPLE_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/sky_levelling.py,_FOOTPRINT_NOISE_WIDTHS,Detection level (three noise widths) of the star footprints kept out of the sky sample; a little texture taken as stars only leaves it out of the sky.
+astrometricslib/pipelines/stacking/post_processing/sky_levelling.py,_MINIMUM_SKY_SHARE,Fewest sky pixels needed to measure the sky levels; a sanity guard.
+astrometricslib/pipelines/stacking/post_processing/sky_levelling.py,_SKY_HISTOGRAM_BINS,Histogram bins of the sky-level (mode) estimate; plumbing.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_QUARTER_SKY_BINS,Sample-size guard: sky bins needed in a quarter of the frame (of 1024) to check the sign of the falloff. Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RADIAL_FALLOFF,Noise floor of the radial fit (the bin medians scatter by 0.1% to 0.3%); a smaller falloff is left out. Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_RING_SKY_SHARE,Plain majority guard on the sky share of the two outer rings (the 13 stacks read 0.70 to 1.00). Not tuned. Partly measured STK-61.
@@ -485,13 +478,11 @@ astrometricslib/pipelines/stacking/post_processing/sky_plane.py,MINIMUM_SKY_BIN_
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,QUARTER_RISE_TOLERANCE,Allowance for bin noise when a quarter of the frame is checked for brightening toward its corner (the 13 stacks read -1.24% to +0.06%). Not tuned. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,SKY_CLIP_ROUNDS,Cap on the clip rounds; the kept bins stopped changing after 4 to 6 rounds. Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,SKY_CLIP_SPREADS,Statistical cut of the sky clip (2 spreads above the plane keeps about 98% of a clean Gaussian sky). Partly measured STK-61.
-astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_MEDIAN_TO_SIGMA,Statistical constant: 1 / 0.6745 turns the median distance of half a Gaussian into a standard deviation.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_OUTER_RING_RANGES,Definition of the two outer rings of the 64 by 64 grid in r squared (0.64 to 1 and 1 to 2); geometry of the frame.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,choose_background_method.graxpert.sky_bins,Count of sky bins; zero when no bins were measured.
 astrometricslib/pipelines/stacking/post_processing/stack_blank_tuning.py,PERCENT_PER_FRACTION,Unit conversion
 astrometricslib/pipelines/stacking/post_processing/stack_comparison.py,_sentence.scale,Unit scale; 1 means unchanged
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_SIGMA_ERROR_FACTOR,Statistical constant
-astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MEDIAN_ERROR_FACTOR,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_noise.py,_RECENT_STACK_SOLVES_KEPT,Cache size: how many recent plate solves are kept in memory; affects only run time
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
@@ -553,6 +544,7 @@ astrometricslib/utilities/parallel_batch.py,run_parallel_batch.max_tasks_per_chi
 astrometricslib/utilities/parallel_batch.py,run_parallel_batch.max_worker_memory_mb,Worker memory limit; resource plumbing
 astrometricslib/utilities/parallel_batch.py,run_parallel_batch.max_workers,Worker count cap; resource plumbing
 astrometricslib/utilities/parallel_batch.py,run_parallel_batch.niceness,Process priority; resource plumbing
+astrometricslib/utilities/robust_statistics.py,MAD_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
 astrometricslib/utilities/spectroscopy_models.py,ConfigLoader.load_spectroscopy_config.get_f.default,Fallback of a config reader helper; the caller passes the real default
 astrometricslib/utilities/stack_preview_path.py,PREVIEW_JPEG_QUALITY,Output file quality setting
 astrometricslib/visualization/helpers.py,plot_astrometry.limit,Row or item cap that callers pass; plumbing

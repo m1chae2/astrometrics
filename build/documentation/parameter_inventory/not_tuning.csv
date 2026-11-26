@@ -561,6 +561,7 @@ astrometricslib/visualization/image_display.py,STAR_MARKER_SIZE,Size of an overl
 astrometricslib/visualization/layers/dispersion_overlay.py,DispersionOverlay.render.active_index,Index of the highlighted star; 0 means the first
 astrometricslib/visualization/layers/image_overlay.py,ImageOverlay.render.percentile,Display stretch percentile; not used in results
 astrometricslib/visualization/layers/star_overlay.py,StarOverlay.render.active_index,Index of the highlighted star; 0 means the first
+astrometricslib/visualization/sky_placement.py,GRID_POINTS_PER_SIDE,Grid points for drawing a stack picture on a sky chart; display only
 wayfindinglib/analytics/capture_history.py,PINNED_FRAME_METRICS,Display pin counts; plumbing
 wayfindinglib/analytics/data_versions.py,REPORT_COARSE_STEP,Plumbing: report step
 wayfindinglib/analytics/envelope_assembly.py,_SAMPLE_READ_LIMIT,Read limit never cuts a night; plumbing

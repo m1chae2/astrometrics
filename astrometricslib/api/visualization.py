@@ -29,6 +29,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
 
 if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.visualization.sky_placement import SkyPicturePlacement
 
 __all__ = ["Visualization"]
 
@@ -379,6 +380,60 @@ class Visualization:
         from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_last_captured_image(self._config, stretch)
+
+    def stack_sky_picture_files(self, target: str | Target) -> tuple[str, str]:
+        """Name the files that place a target's stack picture on the sky.
+
+        A sky chart lays the picture over the sky. The picture is the color
+        picture when the target has one, else the stack's preview. Where it
+        lies comes from the stretched stack's plate solution. Pass the two
+        paths, once they exist, to `place_stack_picture_on_sky`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+
+        Returns
+        -------
+        processed, picture : `tuple` [`str`, `str`]
+            The stretched stack's path and the picture's path, each an empty
+            string when the target has none.
+        """
+        from astrometricslib.visualization.sky_placement import sky_picture_files
+
+        return sky_picture_files(resolve_target(self._targets, target).stacking)
+
+    def place_stack_picture_on_sky(
+        self, processed_path: str, picture_path: str
+    ) -> SkyPicturePlacement | None:
+        """Work out where a stack picture lies on the sky.
+
+        Only the stretched stack's header is read. A grid of points across
+        the picture (17 along each side, edges included) is mapped to the sky
+        with the full plate solution, distortion terms included. A pixel of
+        the picture is the same pixel of the stretched stack, first row at
+        the top.
+
+        Parameters
+        ----------
+        processed_path : `str`
+            The stretched stack, as `stack_sky_picture_files` names it.
+        picture_path : `str`
+            The picture, given back in the answer.
+
+        Returns
+        -------
+        placement : `SkyPicturePlacement` or `None`
+            ``picture_path``, ``width``, ``height``, ``grid_size`` and
+            ``grid`` (``[ra, dec]`` pairs in degrees, row by row from the
+            picture's top-left corner). `None` when the header cannot be read
+            or has no real plate solution (only the mount's pointing does not
+            count); that is a status, not an error.
+        """
+        from astrometricslib.visualization.sky_placement import place_picture_on_sky
+
+        return place_picture_on_sky(processed_path, picture_path)
 
     def plot(
         self,

@@ -349,7 +349,13 @@ SUB_API_MEMBERS = {
         "resolve_rows",
         "set_aside_frames",
     },
-    "visualization": {"get_last_captured_image", "plot", "render_fits"},
+    "visualization": {
+        "get_last_captured_image",
+        "place_stack_picture_on_sky",
+        "plot",
+        "render_fits",
+        "stack_sky_picture_files",
+    },
     "jobs": {"query"},
 }
 """Each sub-API of `Astrometrics`, by attribute path, and its members."""

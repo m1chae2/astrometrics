@@ -45,7 +45,7 @@ vi.mock('../hooks/useCanvasDrawer', async () => {
 });
 
 import { FitsRenderer } from '../FitsRenderer';
-import type { RestoreView } from '../FitsRenderer';
+import type { RestoreView } from '../hooks/useViewPlacement';
 
 const VIEW_WIDTH = 1000;
 const VIEW_HEIGHT = 800;

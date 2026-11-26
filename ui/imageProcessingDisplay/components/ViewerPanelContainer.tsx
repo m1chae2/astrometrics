@@ -15,7 +15,7 @@ import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
 import type { BlinkState } from '../hooks/useBlinkPair';
 import type { BlinkFocus } from '../utils/blinkView';
-import type { RestoreView } from '../../common/fitsViewer/FitsRenderer';
+import type { RestoreView } from '../../common/fitsViewer/hooks/useViewPlacement';
 import type { SavedViewport } from '../../common/utils/imageViewStore';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */

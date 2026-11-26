@@ -4,14 +4,7 @@
  * Flamsteed, HD and HIP, TYC, then brightness; a cap that grows with the zoom; and no overlap.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  STAR_LABEL_BUDGET,
-  StarScreenTransform,
-  chooseLabeledStarIds,
-  labelCapForScale,
-  starNameRank
-} from '../utils/starOverlayLayout';
-import { estimateBadgeWidth } from '../FitsRenderer';
+import { STAR_LABEL_BUDGET, StarScreenTransform, chooseLabeledStarIds, labelCapForScale, starNameRank, estimateBadgeWidth } from '../utils/starOverlayLayout';
 import type { AstrometryOverlayStar } from '../../services/astronomyService';
 
 /**

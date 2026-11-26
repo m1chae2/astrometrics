@@ -21,6 +21,11 @@ Center column: `TargetViewerManager` — displays the processed image. The
   image is shown the same way. The viewer parts live in `ui/common/fitsViewer/`
   because the Image Processing view uses them too. `FitsViewerManager` picks
   `FitsRenderer` for FITS data and `imageViewer/ImageViewer` for a plain picture.
+  `FitsRenderer` puts the viewer together from hooks in `fitsViewer/hooks/`:
+  `useViewPlacement` places the view on each picture (a focus star, a saved view),
+  `useStarOverlay` and `StarLabelLayer` draw the star overlay, `useStarMeasurement`
+  and `ProfileMarkerLayer` run click-to-measure, and `useDetectionsOverlay` runs
+  the Detections overlay.
 
 Pixel readout: the line with the pixel position, value and sky position floats over the
   bottom-left corner of the picture on a translucent dark background (`--surface-overlay`),

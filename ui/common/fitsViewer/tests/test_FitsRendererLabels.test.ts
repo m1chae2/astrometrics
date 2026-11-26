@@ -1,11 +1,11 @@
 /**
  * @file test_FitsRendererLabels.test.ts
- * @description Unit tests for FitsRenderer label formatting helper (formatStarDisplayName).
+ * @description Unit tests for the star overlay label helpers in utils/starOverlayLayout.ts (formatStarDisplayName and friends).
  * Verifies catalog compression for 2MASS, GPM, SDSS, Gaia, and unnamed field stars.
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeBadgePlacement, formatStarDisplayName, isStarSelected } from '../FitsRenderer';
+import { computeBadgePlacement, formatStarDisplayName, isStarSelected } from '../utils/starOverlayLayout';
 
 describe('formatStarDisplayName', () => {
   /**

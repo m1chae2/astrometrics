@@ -5,7 +5,7 @@ import type { FitsRendererHandle } from './FitsRenderer';
 
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { StretchParameters } from '../types/backendTypes';
-import type { FocusStar, RestoreView } from './FitsRenderer';
+import type { FocusStar, RestoreView } from './hooks/useViewPlacement';
 import type { SavedViewport } from '../utils/imageViewStore';
 
 export type { FitsRendererHandle, FocusStar };

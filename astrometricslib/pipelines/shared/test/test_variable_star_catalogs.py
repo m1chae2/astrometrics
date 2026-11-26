@@ -10,7 +10,6 @@ list (Algol, Vega, Sirius).
 
 import sys
 import types
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -127,20 +126,6 @@ def test_gaia_classes_fall_back_and_fail_like_vsx(monkeypatch: pytest.MonkeyPatc
     install_fake_vizier(monkeypatch, {HARVARD_VIZIER: ConnectionError("a"), CDS_VIZIER: ConnectionError("b")})
     with pytest.raises(CatalogUnavailableError, match="no stored results"):
         catalogs.look_up_gaia_classes(positions)
-
-
-@pytest.fixture(autouse=True)
-def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give each test its own stored catalog answers.
-
-    Parameters
-    ----------
-    tmp_path : `pathlib.Path`
-        The test's folder.
-    monkeypatch : `pytest.MonkeyPatch`
-        Sets the environment.
-    """
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
 
 def forget_stored_answers() -> None:

@@ -23,6 +23,7 @@ from astrometricslib.models.quality.detections import DetectionsMeasurement, Sta
 from astrometricslib.pipelines.astrometry.processing import stack_identification as module
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import FieldGaiaStars
 from astrometricslib.pipelines.shared.catalog_star_identity import SimbadStarNames
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 SIZE = 200
 
@@ -35,11 +36,7 @@ def _wcs() -> WCS:
     wcs : `astropy.wcs.WCS`
         The solution.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [100.0, 30.0]
-    wcs.wcs.crpix = [SIZE / 2.0, SIZE / 2.0]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(100.0, 30.0, (SIZE / 2.0, SIZE / 2.0), degrees_per_pixel=2.0 / 3600.0)
     return wcs
 
 

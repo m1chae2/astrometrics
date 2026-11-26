@@ -25,6 +25,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registr
     shift_wcs_to_frame,
     solution_shifted_onto_spectral_image,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 
 def _reference_star(star_id: str, x: float, y: float) -> StellarObject:
@@ -231,11 +232,7 @@ def test_estimate_registration_offset_needs_enough_pairs() -> None:
 
 def test_shift_wcs_to_frame_moves_a_sky_position_by_the_offset() -> None:
     """A sky position lands `offset` pixels away in the shifted solution."""
-    reference_wcs = WCS(naxis=2)
-    reference_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    reference_wcs.wcs.crpix = [1500.0, 1500.0]
-    reference_wcs.wcs.crval = [283.4, 33.0]
-    reference_wcs.wcs.cd = [[-5e-4, 0.0], [0.0, 5e-4]]
+    reference_wcs = tan_sky_map(283.4, 33.0, (1500.0, 1500.0), cd=[[-5e-4, 0.0], [0.0, 5e-4]])
 
     shifted_wcs = shift_wcs_to_frame(reference_wcs, (-6.0, 2.5))
 
@@ -254,11 +251,7 @@ def test_estimate_registration_offset_with_a_solution_ignores_stored_positions_a
     gave one star's name to eight trail points, so the median shift moved the
     solved stack's WCS about 125 px from where the nebula really was.
     """
-    reference_wcs = WCS(naxis=2)
-    reference_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    reference_wcs.wcs.crpix = [1500.0, 1500.0]
-    reference_wcs.wcs.crval = [300.0, 22.0]
-    reference_wcs.wcs.cd = [[-5e-4, 0.0], [0.0, 5e-4]]
+    reference_wcs = tan_sky_map(300.0, 22.0, (1500.0, 1500.0), cd=[[-5e-4, 0.0], [0.0, 5e-4]])
     rng = np.random.default_rng(5)
     reference_stars = []
     spectral_stars = []
@@ -320,11 +313,7 @@ def _solution_field(
         One unnamed detection per catalog star, at its spectroscopy-image
         position.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crpix = [1500.0, 1500.0]
-    wcs.wcs.crval = [310.0, 45.0]
-    wcs.wcs.cd = [[-5e-4, 0.0], [0.0, 5e-4]]
+    wcs = tan_sky_map(310.0, 45.0, (1500.0, 1500.0), cd=[[-5e-4, 0.0], [0.0, 5e-4]])
     rng = np.random.default_rng(11)
     reference_stars = []
     spectral_stars = []
@@ -493,11 +482,7 @@ def _field_on_two_grids(
     detections : `list` [`StellarObject`]
         One unnamed detection per row, plus one with no catalog star, last.
     """
-    true_wcs = WCS(naxis=2)
-    true_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    true_wcs.wcs.crpix = [1500.0, 1500.0]
-    true_wcs.wcs.crval = [300.0, 22.0]
-    true_wcs.wcs.cd = [[-5.3e-4, 0.0], [0.0, 5.3e-4]]
+    true_wcs = tan_sky_map(300.0, 22.0, (1500.0, 1500.0), cd=[[-5.3e-4, 0.0], [0.0, 5.3e-4]])
     rng = np.random.default_rng(144)
     reference_stars = []
     detections = []

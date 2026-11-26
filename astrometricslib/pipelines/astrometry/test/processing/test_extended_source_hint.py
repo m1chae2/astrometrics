@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 from astropy.io import fits
-from astropy.table import Table
 from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.driver_set import Drivers
@@ -23,44 +22,11 @@ from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
 from astrometricslib.pipelines.shared.analysis_context import KnownTarget
 from astrometricslib.pipelines.shared.target_center_hint import resolve_known_target
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
 
 M57_RA_DEG = 283.3962
 M57_DEC_DEG = 33.0292
 ARCSEC_PER_PIXEL = 1.9
-
-
-class DownSimbad(SimbadDriver):
-    """A SIMBAD client that cannot be reached."""
-
-    def query_region(self, *args: Any, **keywords: Any) -> Table:
-        """Fail as an unreachable service does.
-
-        Raises
-        ------
-        ExternalServiceError
-            Always.
-        """
-        raise ExternalServiceError("SIMBAD could not be reached.")
-
-    def query_object(self, *args: Any, **keywords: Any) -> Any:
-        """Fail as an unreachable service does.
-
-        Raises
-        ------
-        ExternalServiceError
-            Always.
-        """
-        raise ExternalServiceError("SIMBAD could not be reached.")
-
-    def query_tap(self, *args: Any, **keywords: Any) -> Table:
-        """Fail as an unreachable service does.
-
-        Raises
-        ------
-        ExternalServiceError
-            Always.
-        """
-        raise ExternalServiceError("SIMBAD could not be reached.")
 
 
 def _pipeline(simbad: SimbadDriver) -> AstrometryPipeline:
@@ -98,9 +64,20 @@ def _wcs_centered_on_m57() -> WCS:
 KNOWN_M57 = KnownTarget(object_type="PN", ra_deg=M57_RA_DEG, dec_deg=M57_DEC_DEG, major_axis_arcmin=1.4)
 
 
+def _down_simbad() -> FakeSimbad:
+    """Build a SIMBAD client that cannot be reached.
+
+    Returns
+    -------
+    simbad : `FakeSimbad`
+        A client whose every question raises `ExternalServiceError`.
+    """
+    return FakeSimbad(failure=ExternalServiceError("SIMBAD could not be reached."))
+
+
 def test_down_simbad_uses_the_librarys_own_record() -> None:
     """With SIMBAD down, the record gives the object's pixel."""
-    hint = _pipeline(DownSimbad())._build_extended_source_hint(
+    hint = _pipeline(_down_simbad())._build_extended_source_hint(
         "M 57", _wcs_centered_on_m57(), None, None, KNOWN_M57
     )
     assert hint is not None
@@ -115,7 +92,9 @@ def test_down_simbad_without_a_record_gives_no_hint_and_no_warning(
 ) -> None:
     """An unreachable SIMBAD and no record is a status, not a warning."""
     with caplog.at_level(logging.INFO):
-        hint = _pipeline(DownSimbad())._build_extended_source_hint("M 57", _wcs_centered_on_m57(), None, None)
+        hint = _pipeline(_down_simbad())._build_extended_source_hint(
+            "M 57", _wcs_centered_on_m57(), None, None
+        )
     assert hint is None
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
 
@@ -123,7 +102,7 @@ def test_down_simbad_without_a_record_gives_no_hint_and_no_warning(
 def test_a_star_record_is_not_extended() -> None:
     """A record whose type is a star makes no extended-source hint."""
     star = KnownTarget(object_type="*", ra_deg=M57_RA_DEG, dec_deg=M57_DEC_DEG)
-    hint = _pipeline(DownSimbad())._build_extended_source_hint(
+    hint = _pipeline(_down_simbad())._build_extended_source_hint(
         "Vega", _wcs_centered_on_m57(), None, None, star
     )
     assert hint is None
@@ -131,23 +110,11 @@ def test_a_star_record_is_not_extended() -> None:
 
 def test_no_plate_solution_is_not_a_failure(caplog: pytest.LogCaptureFixture) -> None:
     """A spectral stack has no solution yet: no SIMBAD query and no warning."""
-
-    class FailIfAsked(DownSimbad):
-        """A SIMBAD client that must not be asked."""
-
-        def query_object(self, *args: Any, **keywords: Any) -> Any:
-            """Fail the test when called.
-
-            Raises
-            ------
-            AssertionError
-                Always.
-            """
-            raise AssertionError("SIMBAD must not be asked without a plate solution.")
-
+    simbad = FakeSimbad()
     with caplog.at_level(logging.INFO):
-        hint = _pipeline(FailIfAsked())._build_extended_source_hint("M 57", None, None, None, KNOWN_M57)
+        hint = _pipeline(simbad)._build_extended_source_hint("M 57", None, None, None, KNOWN_M57)
     assert hint is None
+    assert simbad.call_count == 0
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
 
 

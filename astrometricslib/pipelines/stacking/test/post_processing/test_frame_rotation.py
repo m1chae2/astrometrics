@@ -13,7 +13,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from astropy.io import fits
-from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
@@ -40,6 +39,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     registration_reference_from_diagnostics,
 )
 from astrometricslib.pipelines.stacking.test.conformance_fixture import fixture_summary
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 POINTING_METRICS = (
     stacking_metrics.STACKING_REGISTRATION_STEP_MEDIAN_PX,
@@ -173,11 +173,7 @@ def test_a_measured_row_names_the_reference_frame_and_the_parity() -> None:
 
 def test_the_parity_is_the_sign_of_the_cd_determinant_of_the_stack_header(tmp_path: Path) -> None:
     """A north-up solution has parity -1, a mirrored one +1, none unknown."""
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crpix = [50.0, 50.0]
-    wcs.wcs.crval = [250.0, 36.0]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(250.0, 36.0, (50.0, 50.0), degrees_per_pixel=2.0 / 3600.0)
     normal = tmp_path / "normal.fits"
     fits.PrimaryHDU(data=np.zeros((10, 10), dtype=np.float32), header=wcs.to_header()).writeto(normal)
     wcs.wcs.cdelt = [2.0 / 3600.0, 2.0 / 3600.0]

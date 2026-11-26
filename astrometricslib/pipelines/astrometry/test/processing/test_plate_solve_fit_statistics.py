@@ -15,13 +15,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from astropy.io import fits
-from astropy.table import Table
-from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.driver_set import Drivers
-from astrometricslib._internal.drivers.interfaces import PlateSolveDriver, SimbadDriver, plate_solve_driver
+from astrometricslib._internal.drivers.interfaces import PlateSolveDriver, plate_solve_driver
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 FIELD_RA_DEG = 250.42
 FIELD_DEC_DEG = 36.46
@@ -35,11 +35,7 @@ def make_wcs_header() -> fits.Header:
     header : `astropy.io.fits.Header`
         The map, centred on the test field.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [FIELD_RA_DEG, FIELD_DEC_DEG]
-    wcs.wcs.crpix = [50.0, 50.0]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(FIELD_RA_DEG, FIELD_DEC_DEG, (50.0, 50.0), degrees_per_pixel=2.0 / 3600.0)
     return wcs.to_header()
 
 
@@ -74,56 +70,6 @@ class FakeSolver(PlateSolveDriver):
         return self.answer
 
 
-class EmptySimbad(SimbadDriver):
-    """A SIMBAD client that knows no stars."""
-
-    def query_region(self, *args: Any, **keywords: Any) -> Table:
-        """Answer with an empty table.
-
-        Parameters
-        ----------
-        *args
-            Ignored.
-        **keywords
-            Ignored.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            A table with no rows.
-        """
-        return Table()
-
-    def query_object(self, *args: Any, **keywords: Any) -> None:
-        """Know no object.
-
-        Parameters
-        ----------
-        *args
-            Ignored.
-        **keywords
-            Ignored.
-        """
-        return
-
-    def query_tap(self, *args: Any, **keywords: Any) -> Table:
-        """Answer with an empty table.
-
-        Parameters
-        ----------
-        *args
-            Ignored.
-        **keywords
-            Ignored.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            A table with no rows.
-        """
-        return Table()
-
-
 def run_identifier(monkeypatch: pytest.MonkeyPatch, answer: fits.Header | None) -> StarIdentifier:
     """Run `process_image` on ten fake detections with a fake solver.
 
@@ -145,7 +91,7 @@ def run_identifier(monkeypatch: pytest.MonkeyPatch, answer: fits.Header | None) 
     config.get_value.return_value = None
     config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
     identifier = StarIdentifier(
-        config=config, drivers=Drivers(plate_solve=FakeSolver(answer), simbad=EmptySimbad())
+        config=config, drivers=Drivers(plate_solve=FakeSolver(answer), simbad=FakeSimbad())
     )
     sources = [{"x_centroid": 10.0 + 8 * i, "y_centroid": 10.0 + 8 * i, "flux": 100.0 - i} for i in range(10)]
     identifier.detector = MagicMock()
@@ -239,7 +185,7 @@ def test_the_gaia_refit_gets_every_detection_not_only_the_identified_ones(
     config.get_value.return_value = None
     config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
     identifier = StarIdentifier(
-        config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=EmptySimbad())
+        config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=FakeSimbad())
     )
     sources = [{"x_centroid": 10.0 + 8 * i, "y_centroid": 10.0 + 8 * i, "flux": 100.0 - i} for i in range(10)]
     identifier.detector = MagicMock()

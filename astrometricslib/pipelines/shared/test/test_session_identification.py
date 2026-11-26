@@ -21,6 +21,7 @@ from astrometricslib.pipelines.shared.session_identification import (
     identify_session_stars,
     resolve_frame_wcs,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 
 def _make_star_identifier() -> StarIdentifier:
@@ -428,7 +429,6 @@ if __name__ == "__main__":
 def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
     """Writing a sky map adds the plate-solve card."""
     from astropy.io import fits
-    from astropy.wcs import WCS
 
     from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
     from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
@@ -440,11 +440,7 @@ def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
     fits.PrimaryHDU(data=np.zeros((10, 10), dtype=np.float32), header=header).writeto(path)
     assert not header_is_plate_solved(fits.getheader(path))
 
-    solved = WCS(naxis=2)
-    solved.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    solved.wcs.crval = [11.0, 21.0]
-    solved.wcs.crpix = [5.0, 5.0]
-    solved.wcs.cdelt = [-0.001, 0.001]
+    solved = tan_sky_map(11.0, 21.0, (5.0, 5.0), degrees_per_pixel=0.001)
     write_wcs_to_fits_header(str(path), solved)
 
     assert header_is_plate_solved(fits.getheader(path))

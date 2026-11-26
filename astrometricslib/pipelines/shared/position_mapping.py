@@ -39,7 +39,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
+from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.quality.position_mapping import PositionMapping
 from astrometricslib.pipelines.shared.registration_record import (
@@ -245,8 +245,7 @@ def _header_of(path: str) -> fits.Header:
     header : `astropy.io.fits.Header`
         A copy of the header.
     """
-    with fits.open(path, memmap=False) as hdul:
-        return hdul[0].header.copy()
+    return read_header(path, first_hdu_only=True)
 
 
 def _picture_offset(path: str) -> tuple[int, int]:

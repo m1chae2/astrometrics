@@ -54,7 +54,9 @@ _ESTIMATOR_BY_METRIC: dict[str, str] = {
     FRAME_STAR_WIDTH_MOFFAT_PX: StarWidthEstimator.FRAME_MOFFAT.value,
     FRAME_STAR_WIDTH_MOFFAT_ARCSEC: StarWidthEstimator.FRAME_MOFFAT.value,
     # The region widths are the same per-star Moffat widths, for the stars of
-    # one region of the field.
+    # one region of the field, so they take the frame Moffat ratio too. That
+    # ratio was measured on whole-frame medians (AST-17); off-axis star
+    # profiles can differ a little, so a corner's scale value is rougher.
     **dict.fromkeys(FRAME_STAR_WIDTH_REGION_PX.values(), StarWidthEstimator.FRAME_MOFFAT.value),
     FRAME_STAR_WIDTH_EFFECTIVE_PX: EFFECTIVE_WIDTH_ESTIMATOR,
     FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC: EFFECTIVE_WIDTH_ESTIMATOR,

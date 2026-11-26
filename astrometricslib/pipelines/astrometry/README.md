@@ -27,7 +27,7 @@ Terms are defined in the [glossary](../../../documentation/Glossary.md). This do
 
 ## Searching the cached Gaia catalog near Right Ascension 0
 
-The star identifier reads cached Gaia stars from a box around the field, and Right Ascension wraps from 360° back to 0°. When the box crosses that line, `_catalog_ra_ranges` in `processing/star_identifier.py` splits it into two RA ranges, one on each side, and the identifier runs one query per range. A field at RA = 0.01° therefore selects stars at 359.6° as well as at 0.4°. The shared helper `wrapped_ra_difference_deg` in `pipelines/shared/angles.py` handles the same wrap for code that compares two RA values.
+The star identifier reads cached Gaia stars by HEALPix sky tile (`processing/gaia_tile_queries.py`), not by a box of Right Ascension and Declination, so a field that crosses RA = 0° (where 360° wraps back to 0°) needs no special case. The shared helper `wrapped_ra_difference_deg` in `pipelines/shared/angles.py` handles the same wrap for code that compares two RA values.
 
 ## Two residual numbers: the plate-solve fit and the catalog match separation
 

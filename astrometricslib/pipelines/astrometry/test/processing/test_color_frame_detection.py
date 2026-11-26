@@ -3,7 +3,7 @@
 Description: A debayered (colour) stack's demosaicing interpolation leaves
 spatially correlated noise that a matched-filter point-source finder reads
 as thousands of star-like features -- see `star_identifier`'s
-`_COLOR_DETECTION_BIN_FACTOR` docstring for the synthetic measurements this
+`COLOR_DETECTION_BIN_FACTOR` docstring for the synthetic measurements this
 was built from. `StarIdentifier.detect_stars` handles this by detecting on
 a block-averaged copy for colour frames and rescaling the results back to
 full resolution, while monochrome frames instead get their detection
@@ -24,7 +24,7 @@ from astrometricslib.pipelines.astrometry.processing.star_detection import (
 )
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
-# Reproduces this module's `_COLOR_DETECTION_BIN_FACTOR` synthetic
+# Reproduces this module's `COLOR_DETECTION_BIN_FACTOR` synthetic
 # validation as a locked-in regression test: a bilinear-demosaiced RGGB
 # background with realistic per-channel gain and photon/read noise, no
 # real stars, using a fixed RNG seed so the array itself is
@@ -280,7 +280,7 @@ def test_binning_suppresses_demosaic_false_positives_on_a_real_detector() -> Non
     default detection path. Uses `StarIdentifier` end-to-end (a real
     `SourceDetector`, not a mock), so a change to detection internals
     that defeats this fix would be caught here, not just in the
-    hand-derivation in `_COLOR_DETECTION_BIN_FACTOR`'s comment.
+    hand-derivation in `COLOR_DETECTION_BIN_FACTOR`'s comment.
     """
     identifier = StarIdentifier(config=MagicMock(get_value=MagicMock(return_value=None)))
     background = _synthetic_demosaiced_background(height=400, width=400, seed=7)

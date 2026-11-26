@@ -46,7 +46,7 @@ from astrometricslib.pipelines.astrometry.pre_processing.source_detection import
     SourceDetector,
 )
 from astrometricslib.pipelines.astrometry.processing.star_detection import (
-    _COLOR_DETECTION_BIN_FACTOR,
+    COLOR_DETECTION_BIN_FACTOR,
     find_unique_stars,
 )
 from astrometricslib.pipelines.shared.quality.star_profile_fitting import STAR_FINDER_THRESHOLD_SIGMA
@@ -325,7 +325,7 @@ def _finder_settings() -> dict[str, Any]:
         "threshold_sigma": float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value),
         "kernel_fwhm_px": float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value),
         "roundness_range": [float(value) for value in resolve(SOURCE_DETECTOR_ROUNDNESS_RANGE).value],
-        "color_bin_factor": int(resolve(_COLOR_DETECTION_BIN_FACTOR).value),
+        "color_bin_factor": int(resolve(COLOR_DETECTION_BIN_FACTOR).value),
         "viewing_separation_kernel_widths": float(resolve(VIEWING_SEPARATION_KERNEL_WIDTHS).value),
     }
 

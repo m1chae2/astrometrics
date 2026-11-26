@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # before looking for stars. Tests prove this successfully breaks up
 # the noise clumps without missing any real stars, dropping false
 # detections significantly.
-_COLOR_DETECTION_BIN_FACTOR = TunedParameter(
+COLOR_DETECTION_BIN_FACTOR = TunedParameter(
     name="astrometry.color_detection_bin_factor",
     default=2,
     unit="px per bin side",
@@ -197,7 +197,7 @@ def find_unique_stars(
         The same list with each star reported twice merged into one.
     """
     if is_color_frame and data is not None:
-        bin_factor = resolve(_COLOR_DETECTION_BIN_FACTOR).value
+        bin_factor = resolve(COLOR_DETECTION_BIN_FACTOR).value
         binned = _block_average(data, bin_factor)
         sources = detector.detect(binned, with_radius=with_radius)
         unique_sources = detector.deduplicate(sources)

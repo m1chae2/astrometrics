@@ -1,8 +1,8 @@
 /**
  * @file frameStatus.ts
  * @description Words the File Browser's Status column shows for each frame. The backend decides the
- * status (the library's rule): Included, Flagged (in the stack, but its stars are stretched far more
- * than the others), Set aside (the stacker moved it to an `_excluded` folder) or Not stacked yet (taken
+ * status (the library's rule): Included, Flagged (in the stack, but its stars are stretched: at least the
+ * warning level, below the set-aside threshold), Set aside (the stacker moved it to an `_excluded` folder) or Not stacked yet (taken
  * after the last stack). This file only gives each status a short word, a tone for its chip, and the
  * reason shown when the pointer rests on it. These are plain functions, so they can be tested without
  * a screen.
@@ -57,7 +57,7 @@ export function setAsideCategory(kind: string | null | undefined): SetAsideCateg
 export function buildFrameStatusLookup(report: FrameStatusReport | null): Map<string, FrameStatusInfo> {
     const lookup = new Map<string, FrameStatusInfo>();
     for (const frame of report?.frames ?? []) {
-        lookup.set(frame.path, describeFrameStatus(frame, report?.typicalElongation ?? null, report?.stackedAt ?? null));
+        lookup.set(frame.path, describeFrameStatus(frame, report?.stackedAt ?? null));
     }
     return lookup;
 }
@@ -65,15 +65,10 @@ export function buildFrameStatusLookup(report: FrameStatusReport | null): Map<st
 /**
  * Describes one frame's status.
  * @param frame The backend's status for the frame.
- * @param typical The typical elongation the backend reports, or `null`.
  * @param stackedAt When the last stack was written, or `null` when the target has no stack.
  * @return The label, tone, hover text and filter text.
  */
-export function describeFrameStatus(
-    frame: FrameStatus,
-    typical: number | null,
-    stackedAt: number | null,
-): FrameStatusInfo {
+export function describeFrameStatus(frame: FrameStatus, stackedAt: number | null): FrameStatusInfo {
     const restorable = frame.restorable ?? false;
     const restoreNote = frame.restoreNote ?? '';
     if (frame.state === 'set_aside') {
@@ -100,13 +95,11 @@ export function describeFrameStatus(
         };
     }
     if (frame.state === 'flagged') {
-        const typicalText = typical === null ? 'not known' : typical.toFixed(2);
-        const elongationText = frame.elongation === null || frame.elongation === undefined ? 'not known' : frame.elongation.toFixed(2);
         return {
             kind: 'flagged',
             label: 'Flagged',
             tone: 'warning',
-            tooltip: `Stars stretched: elongation ${elongationText}, session typical ${typicalText}`,
+            tooltip: frame.reason ? frame.reason : 'Stacked, but its stars are stretched.',
             filterText: 'flagged',
             restorable: false,
             restoreNote: '',

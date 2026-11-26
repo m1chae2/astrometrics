@@ -2,17 +2,55 @@
 
 Description: `build_frame_statuses` says, for each frame of a target, whether
 it is included, flagged, not stacked yet or set aside, and lists the frames
-in `_excluded` folders (which the target's own frame list does not hold).
+in `_excluded` folders (which the target's own frame list does not hold). A
+stacked frame is flagged when its stored star elongation is at least the
+warning level and the quarantine kept it: the frame lies in the band between
+`STRETCHED_STAR_WARNING_ELONGATION` and its session's set-aside threshold
+(`set_aside_elongation_limit`), both read from their owner.
 The capture time a capture program writes into a file name is read by
 `capture_time_from_file_name`, the one place that rule lives.
 """
 
 import pytest
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.frame_scanning import capture_time_from_file_name
-from astrometricslib.pipelines.stacking.frame_status import build_frame_statuses
+from astrometricslib.pipelines.stacking.frame_status import build_frame_statuses, set_aside_limits_by_path
+from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+    COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN,
+    ELONGATION_RISE_ABOVE_MEDIAN,
+    MINIMUM_FRAMES_TO_JUDGE,
+    STRETCHED_STAR_WARNING_ELONGATION,
+    TRAILED_ELONGATION_LIMIT,
+    set_aside_elongation_limit,
+)
+
+
+def _mono(path: str) -> bool:
+    """Say every frame came from a monochrome camera (stands in for a header).
+
+    Returns
+    -------
+    is_colour : `bool`
+        Always `False`.
+    """
+    return False
+
+
+def _session(elongations: list[float], start: float = 100.0) -> list[FrameRecord]:
+    """Make one session of light frames a minute apart.
+
+    Returns
+    -------
+    frames : `list` [`FrameRecord`]
+        One frame per elongation, at ``/f<i>.fits``.
+    """
+    return [
+        FrameRecord(path=f"/f{index}.fits", timestamp=start + 60.0 * index, camera="ASI533MM", exposure="120")
+        for index in range(len(elongations))
+    ]
 
 
 def _set_aside(file_name: str, kind: str | None = "clouded") -> SetAsideFrameRecord:
@@ -65,24 +103,106 @@ def test_a_frame_with_no_time_counts_as_taken_before_the_stack() -> None:
     assert report.frames[0].state == "included"
 
 
-def test_a_flagged_frame_in_the_stack_keeps_its_elongation() -> None:
-    """A standout frame in the stack is flagged; a later one is not stacked."""
-    frames = [
-        FrameRecord(path="/a.fits", timestamp=100.0),
-        FrameRecord(path="/b.fits", timestamp=150.0),
-        FrameRecord(path="/c.fits", timestamp=300.0),
-    ]
+def test_a_stacked_frame_in_the_warning_band_is_flagged_with_its_numbers() -> None:
+    """A stacked frame between warning and set-aside threshold is flagged."""
+    warning = resolve(STRETCHED_STAR_WARNING_ELONGATION).value
+    values = [1.10] * 9 + [warning + 0.05]
+    frames = _session(values)
+    elongations = {frame.path: value for frame, value in zip(frames, values, strict=True)}
+    limit = set_aside_elongation_limit(values, colour_camera=False)
+    assert warning + 0.05 <= limit
 
-    report = build_frame_statuses(
-        frames, [], stacked_at=200.0, flagged={"/b.fits": 1.43, "/c.fits": 1.9}, typical_elongation=1.08
+    report = build_frame_statuses(frames, [], 10_000.0, elongations, colour_camera=_mono)
+
+    states = [status.state for status in report.frames]
+    assert states == ["included"] * 9 + ["flagged"]
+    flagged = report.frames[-1]
+    assert flagged.elongation == pytest.approx(warning + 0.05)
+    assert flagged.reason == (
+        f"Stacked, but its stars are stretched: elongation {warning + 0.05:.2f}, "
+        f"warning level {warning:.2f}, set-aside threshold {limit:.2f}."
     )
 
-    assert [(status.state, status.elongation) for status in report.frames] == [
-        ("included", None),
-        ("flagged", pytest.approx(1.43)),
-        ("not_stacked", None),
-    ]
-    assert report.typical_elongation == pytest.approx(1.08)
+
+def test_a_frame_below_the_warning_level_is_included() -> None:
+    """A stacked frame just under the warning level is not flagged."""
+    warning = resolve(STRETCHED_STAR_WARNING_ELONGATION).value
+    frames = _session([1.1] * 10)
+    elongations = {frame.path: 1.1 for frame in frames}
+    elongations[frames[0].path] = warning - 0.01
+
+    report = build_frame_statuses(frames, [], 10_000.0, elongations, colour_camera=_mono)
+
+    assert {status.state for status in report.frames} == {"included"}
+
+
+def test_a_frame_without_a_stored_elongation_or_after_the_stack_is_not_flagged() -> None:
+    """Only a stacked frame with a stored elongation can be flagged."""
+    frames = _session([1.1] * 10)
+    elongations = {frame.path: 1.25 for frame in frames[1:]}
+
+    report = build_frame_statuses(frames, [], frames[5].timestamp, elongations, colour_camera=_mono)
+
+    states = [status.state for status in report.frames]
+    assert states[0] == "included"
+    assert states[1:6] == ["flagged"] * 5
+    assert states[6:] == ["not_stacked"] * 4
+
+
+def test_a_stacked_frame_above_the_threshold_says_it_was_kept_anyway() -> None:
+    """A stacked frame above its threshold is flagged; the reason says so."""
+    values = [1.10] * 9 + [1.60]
+    frames = _session(values)
+    elongations = {frame.path: value for frame, value in zip(frames, values, strict=True)}
+
+    report = build_frame_statuses(frames, [], 10_000.0, elongations, colour_camera=_mono)
+
+    assert report.frames[-1].state == "flagged"
+    assert "above the set-aside threshold" in report.frames[-1].reason
+
+
+def test_a_session_too_small_to_judge_has_no_threshold() -> None:
+    """Below the minimum batch a frame is flagged with no threshold."""
+    count = resolve(MINIMUM_FRAMES_TO_JUDGE).value - 1
+    frames = _session([1.25] * count)
+    elongations = {frame.path: 1.25 for frame in frames}
+
+    limits = set_aside_limits_by_path(frames, elongations, colour_camera=_mono)
+    report = build_frame_statuses(frames, [], 10_000.0, elongations, colour_camera=_mono)
+
+    assert set(limits.values()) == {None}
+    assert all("too small for the quarantine" in status.reason for status in report.frames)
+
+
+def test_the_threshold_is_the_quarantines_own_for_mono_and_colour_sessions() -> None:
+    """The threshold is the owner's: the floor, or the median plus the rise."""
+    round_session = [1.10] * 10
+    stretched_session = [1.30] * 10
+    floor = resolve(TRAILED_ELONGATION_LIMIT).value
+    mono_rise = resolve(ELONGATION_RISE_ABOVE_MEDIAN).value
+    colour_rise = resolve(COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN).value
+
+    frames = _session(round_session)
+    limits = set_aside_limits_by_path(frames, {frame.path: 1.10 for frame in frames}, colour_camera=_mono)
+    assert list(limits.values()) == [pytest.approx(floor)] * 10
+
+    frames = _session(stretched_session)
+    elongations = {frame.path: 1.30 for frame in frames}
+    mono = set_aside_limits_by_path(frames, elongations, colour_camera=_mono)
+    colour = set_aside_limits_by_path(frames, elongations, colour_camera=lambda path: True)
+    assert list(mono.values()) == [pytest.approx(1.30 + mono_rise)] * 10
+    assert list(colour.values()) == [pytest.approx(1.30 + colour_rise)] * 10
+
+
+def test_spectroscopy_frames_and_calibration_frames_are_never_flagged() -> None:
+    """The quarantine judges light frames only, so only they can be flagged."""
+    frames = [*_session([1.25] * 9), FrameRecord(path="/dark.fits", role="DARK", timestamp=100.0)]
+    elongations = {frame.path: 1.25 for frame in frames}
+
+    report = build_frame_statuses(frames, [], 10_000.0, elongations, colour_camera=_mono)
+
+    assert report.frames[-1].state == "included"
+    assert report.frames[0].state == "flagged"
 
 
 def test_set_aside_frames_are_listed_with_their_reason_kind_and_date() -> None:

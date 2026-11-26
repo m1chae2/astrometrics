@@ -48,7 +48,7 @@ const report = (): FrameStatusReport => ({
     ],
 });
 const statusesOf = (frames: FrameStatus[]) => new Map(frames.map((item) => [
-    item.path, describeFrameStatus(item.path === '/lib/c.fits' ? { ...item, state: 'flagged', elongation: 1.9 } : item, 1.2, 5000),
+    item.path, describeFrameStatus(item.path === '/lib/c.fits' ? { ...item, state: 'flagged', elongation: 1.9 } : item, 5000),
 ]));
 
 describe('StarShapesSummary', () => {

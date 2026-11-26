@@ -145,6 +145,7 @@ EXPECTED_MODULE_NAMES = {
         "LOW_STAR_FRACTION",
         "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
         "NO_GOOD_MATCH_RMS",
+        "STRETCHED_STAR_WARNING_ELONGATION",
         "ParameterContext",
         "TYPICAL_GUIDE_CYCLE_SECONDS",
         "SetupEquipmentValues",

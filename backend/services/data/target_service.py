@@ -48,7 +48,7 @@ class TargetService:
     astrolib high-level interfaces.
     """
 
-    def __init__(self, config: Any, astrometrics: Any = None, review: Any = None) -> None:
+    def __init__(self, config: Any, astrometrics: Any = None) -> None:
         """Initialize TargetService.
 
         Wires it to the high-level interface library high-level interface.
@@ -60,12 +60,8 @@ class TargetService:
         astrometrics : `Any`, optional
             The Astrometrics facade. Injected for testability or loaded
             on-demand if omitted.
-        review : `Any`, optional
-            The wayfinder's review API. Its star-shape review names the
-            frames the Status column flags. Without it no frame is flagged.
         """
         self.config = config
-        self._review = review
         if astrometrics is None:
             from astrometricslib import Astrometrics
 
@@ -467,12 +463,12 @@ class TargetService:
         """Say what state each frame of a target is in, for the File Browser.
 
         The library decides each state (`quality.frame_statuses`):
-        ``included``, ``flagged`` (in the stack, but the star-shape review
-        finds its stars stretched far more than the others), ``not_stacked``
-        (taken after the latest stack file was written, or the target has no
-        stack) or ``set_aside`` (moved into an `_excluded` folder). This
-        method gives it the time of the newest stack file on disk and the
-        review's standout frames.
+        ``included``, ``flagged`` (in the stack, but its stars are stretched:
+        at least the warning level and kept by the quarantine, with a
+        ``reason`` giving the numbers), ``not_stacked`` (taken after the
+        latest stack file was written, or the target has no stack) or
+        ``set_aside`` (moved into an `_excluded` folder). This method gives
+        it the time of the newest stack file on disk.
 
         Parameters
         ----------
@@ -484,14 +480,13 @@ class TargetService:
         report : `dict`
             ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
             ``reason``, ``date``, ``exposure``, ``elongation``,
-            ``originalPath``, ``restorable`` and ``restoreNote``),
+            ``originalPath``, ``restorable`` and ``restoreNote``) and
             ``stackedAt``, the time of the latest stack file in seconds since
-            1970, or `None`, and ``typicalElongation``. A target that is not
-            found gives an empty list.
+            1970, or `None`. A target that is not found gives an empty list.
         """
         target = self.get_targets(target_id)
         if not target:
-            return {"frames": [], "stackedAt": None, "typicalElongation": None}
+            return {"frames": [], "stackedAt": None}
         stack_paths = {
             self._existing_stack_path(target.stacking.stacked_image),
             self._existing_stack_path(target.spectral_stacking.stacked_image),
@@ -501,39 +496,8 @@ class TargetService:
             for configuration in target.stacking.stacks_by_configuration.values()
         )
         stack_times = [os.path.getmtime(path) for path in stack_paths if path]
-        flagged, typical = self._standout_frames(target.id)
-        report = self.astrometrics.quality.frame_statuses(
-            target, max(stack_times) if stack_times else None, flagged, typical
-        )
+        report = self.astrometrics.quality.frame_statuses(target, max(stack_times) if stack_times else None)
         return report.model_dump(by_alias=True)
-
-    def _standout_frames(self, target_id: str) -> tuple[dict[str, float], float | None]:
-        """Read the frames the star-shape review flags, with their elongation.
-
-        Parameters
-        ----------
-        target_id : `str`
-            The target's id.
-
-        Returns
-        -------
-        flagged : `dict` [`str`, `float`]
-            The standout frames by path, with their elongation. Empty with no
-            review, or when the review cannot be made (a status: the frames
-            then show as included).
-        typical : `float` or `None`
-            The review's typical elongation, when it gives one.
-        """
-        if self._review is None:
-            return {}, None
-        try:
-            review = self._review.get_star_shape_review(target_id)
-        except (AstrometricsError, sqlite3.Error, OSError, ValueError) as error:
-            logger.info("No star-shape review for %s, so no frame is flagged: %s", target_id, error)
-            return {}, None
-        measured = [frame for frame in review.standout_frames if frame.elongation is not None]
-        flagged = {frame.path: float(frame.elongation) for frame in measured}
-        return flagged, review.typical_elongation
 
     def put_back_frames(self, target_id: str, paths: list[str]) -> dict:
         """Move set-aside frames back into a target.

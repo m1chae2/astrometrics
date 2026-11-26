@@ -21,8 +21,10 @@ from typing import Literal
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import NotFoundError
+from astrometricslib.foundation.run_bases import StarWidthEstimator, star_width_on_scale
 from astrometricslib.models.quality.quality_reports import RegistrationRow, StackQualityReport, StackSummary
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.quality.star_width_labels import SIRIL_REGISTRATION_WIDTH_ESTIMATOR
 
 __all__ = ["STACK_QUALITY_SECTIONS", "stack_path_of", "stack_quality_report", "summarize_stack"]
 
@@ -120,6 +122,11 @@ def stack_quality_report(
         report.fwhm_px = measure_stack_fwhm(stack_path)
         if report.fwhm_px is None:
             notes.append("The star width could not be measured: too few stars could be fitted.")
+        else:
+            report.fwhm_estimator = StarWidthEstimator.STACK_GAUSSIAN.value
+            report.fwhm_on_scale_px = float(
+                star_width_on_scale(report.fwhm_px, StarWidthEstimator.STACK_GAUSSIAN)
+            )
     if "rejected_fraction" in include:
         report.rejected_fraction = measure_rejected_fraction(stack_path)
         if report.rejected_fraction is None:
@@ -128,6 +135,7 @@ def stack_quality_report(
         seq_path = os.path.splitext(stack_path)[0] + "_Registration.seq"
         if os.path.isfile(seq_path):
             report.registration = [RegistrationRow(**row) for row in parse_seq_file(seq_path)]
+            report.registration_fwhm_estimator = SIRIL_REGISTRATION_WIDTH_ESTIMATOR
         else:
             notes.append("No _Registration.seq file was kept beside this stack.")
     if compare_to == "previous":

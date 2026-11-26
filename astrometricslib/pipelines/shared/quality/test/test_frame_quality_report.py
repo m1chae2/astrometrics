@@ -1,17 +1,21 @@
-"""Tests for the sky-level drift check in the input-quality report.
+"""Tests for the reports that `QualityRecords.measure_frames` returns.
 
 The raw background in ADU grows with the exposure length, so a ladder of
 longer exposures under a steady sky must not look like a drift. These tests
 build small fake frames and check which numbers are trended and what the
-alert says.
+alert says. They also check that each star width names its estimator.
 """
 
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+from astrometricslib.foundation.run_bases import StarWidthEstimator, star_width_on_scale
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality import frame_quality_report, frame_selection
+from astrometricslib.pipelines.shared.quality.star_width_labels import RAW_CHECK_WIDTH_ESTIMATOR
 
 BIAS_ADU = 400.0
 ADU_PER_SECOND_PER_RATE = 1.22
@@ -43,7 +47,7 @@ def _target(exposures: list[float]) -> Target:
     return Target(id="T 1", frames=frames)
 
 
-def _report(exposures: list[float], rates: list[float] | None) -> Any:
+def _report(exposures: list[float], rates: list[float] | None, width_px: float | None = None) -> Any:
     """Run the input-quality report on fake frames with a known sky.
 
     Parameters
@@ -53,6 +57,8 @@ def _report(exposures: list[float], rates: list[float] | None) -> Any:
     rates : `list` [`float`] or `None`
         The sky rate of each frame, or `None` for no stored rates. The fake
         background is the bias plus the rate times the exposure.
+    width_px : `float`, optional
+        The star width to give every frame, or `None` for none.
 
     Returns
     -------
@@ -76,6 +82,7 @@ def _report(exposures: list[float], rates: list[float] | None) -> Any:
             frame.measurements.background_level = BIAS_ADU + ADU_PER_SECOND_PER_RATE * rate * float(
                 frame.exposure
             )
+            frame.measurements.measured_fwhm_px = width_px
         return {"measured": len(working.frames), "skipped": 0, "failed": 0}
 
     by_path = (
@@ -122,3 +129,38 @@ def test_mixed_exposures_without_stored_rates_say_so() -> None:
     assert report.trends["alerts"] == []
     assert report.trends["metrics"].keys() == {"measured_fwhm_px"}
     assert "none has a stored" in report.trends["notes"][0]
+
+
+def test_the_input_quality_width_names_its_estimator_and_its_scale_value() -> None:
+    """A frame Gaussian width comes with its estimator and scale value."""
+    report = _report([30.0] * 3, None, width_px=2.0)
+
+    assert report.fwhm_estimator == StarWidthEstimator.FRAME_GAUSSIAN.value
+    expected = star_width_on_scale(2.0, StarWidthEstimator.FRAME_GAUSSIAN)
+    assert all(
+        row[frame_quality_report.FWHM_ON_SCALE_KEY] == pytest.approx(expected) for row in report.frames
+    )
+    assert report.summary[frame_quality_report.FWHM_ON_SCALE_KEY]["median"] == pytest.approx(expected)
+
+
+def test_frames_without_a_width_have_no_estimator() -> None:
+    """With no width on any frame, the estimator and scale value are None."""
+    report = _report([30.0] * 3, None)
+
+    assert report.fwhm_estimator is None
+    assert all(row[frame_quality_report.FWHM_ON_SCALE_KEY] is None for row in report.frames)
+
+
+def test_the_raw_check_names_its_width_estimator_and_why_it_is_off_the_scale() -> None:
+    """The raw check's second-moment width has no ratio; the report says so."""
+    checked = {"frames": [{"fwhm_px": 2.5, "star_count": 10, "sky_median_adu": 500.0}], "batch": {}}
+    with patch(
+        "astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames", return_value=checked
+    ):
+        report = frame_quality_report.raw_check_report(
+            _target([30.0]), frame_selection.FrameSelection(), 50, 10, 15.0
+        )
+
+    assert report.fwhm_estimator == RAW_CHECK_WIDTH_ESTIMATOR
+    assert report.fwhm_not_on_scale_reason is not None
+    assert "AST-17" in report.fwhm_not_on_scale_reason

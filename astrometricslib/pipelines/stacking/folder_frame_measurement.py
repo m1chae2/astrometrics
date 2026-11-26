@@ -28,6 +28,11 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 from astrometricslib.pipelines.shared.quality import frame_selection
 from astrometricslib.pipelines.shared.quality.frame_notices import FRAME_NOTICE_METRICS
+from astrometricslib.pipelines.shared.quality.star_width_labels import (
+    width_metric_estimator,
+    width_metric_not_on_scale_reason,
+    width_metric_on_scale_px,
+)
 from astrometricslib.pipelines.stacking.frame_measurement_run import (
     BiasLevelFinder,
     FrameMeasurementTask,
@@ -95,9 +100,36 @@ def _frame_result(
             result.not_measured[key] = row.reason
             continue
         result.values[key] = float(row.value)
+        on_scale = width_metric_on_scale_px(key, float(row.value))
+        if on_scale is not None:
+            result.widths_on_scale_px[key] = on_scale
         if row.uncertainty is not None:
             result.uncertainties[key] = float(row.uncertainty)
     return result, notices
+
+
+def _label_star_widths(report: FolderMeasurementReport) -> None:
+    """Add the estimator and the one-scale medians of each star width.
+
+    Parameters
+    ----------
+    report : `FolderMeasurementReport`
+        The report, with its frames and medians filled in. It is changed in
+        place.
+    """
+    on_scale: dict[str, list[float]] = {}
+    for result in report.frames:
+        for key, value in result.widths_on_scale_px.items():
+            on_scale.setdefault(key, []).append(value)
+    report.medians_on_scale_px = {key: statistics.median(values) for key, values in sorted(on_scale.items())}
+    for key in report.medians:
+        estimator = width_metric_estimator(key)
+        if estimator is None:
+            continue
+        report.star_width_estimators[key] = estimator
+        reason = width_metric_not_on_scale_reason(key)
+        if reason is not None:
+            report.star_widths_not_on_scale[key] = reason
 
 
 def measure_folder_frames(
@@ -186,6 +218,7 @@ def measure_folder_frames(
         for key, value in result.values.items():
             by_metric.setdefault(key, []).append(value)
     report.medians = {key: statistics.median(values) for key, values in sorted(by_metric.items())}
+    _label_star_widths(report)
     report.notices = sorted(notices)
     report.notes.extend(sorted(bias_reasons))
     return report

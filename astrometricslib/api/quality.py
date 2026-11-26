@@ -690,7 +690,13 @@ class QualityRecords:
         -------
         report : `InputQualityReport` or `RawFrameCheckReport` or ...
             The report for the chosen kind (or `SpectralFrameCheckReport`).
-            Frames are in file-name order, which is time order.
+            Frames are in file-name order, which is time order. Each star
+            width names its estimator (``fwhm_estimator``). An
+            ``"input_quality"`` row's ``measured_fwhm_px`` is a frame
+            Gaussian width, and its ``measured_fwhm_on_scale_px`` is the same
+            width on the library's one star-width scale. A ``"raw_check"``
+            width is the check's own second-moment estimate, which has no
+            ratio to that scale (``fwhm_not_on_scale_reason``).
 
         Notes
         -----
@@ -837,7 +843,12 @@ class QualityRecords:
             pixel, with the reason for any that could not be measured),
             ``medians`` over the frames, and ``notices`` (for example that a
             frame was drawn by a simulator, so its noise and sky values do
-            not describe a real sky).
+            not describe a real sky). Each star width names its estimator
+            (``star_width_estimators``); a pixel width whose estimator has a
+            ratio to the library's one star-width scale is also given on it
+            (each frame's ``widths_on_scale_px`` and the report's
+            ``medians_on_scale_px``), and ``star_widths_not_on_scale`` says
+            why the others are not.
 
         Raises
         ------
@@ -1424,7 +1435,13 @@ class QualityRecords:
         Returns
         -------
         report : `StackQualityReport`
-            The measurements asked for and the comparison.
+            The measurements asked for and the comparison. The star width
+            names its estimator (``fwhm_estimator``, ``"stack Gaussian"``)
+            and gives ``fwhm_on_scale_px``, the width on the library's one
+            star-width scale; each compared stack does the same. The
+            registration rows carry Siril's own width
+            (``registration_fwhm_estimator``), which has no ratio to that
+            scale.
 
         Raises
         ------

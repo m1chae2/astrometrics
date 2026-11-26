@@ -32,6 +32,13 @@ class FolderFrameMeasurement(BaseModel):
         named ``metric[plane]``.
     uncertainties : `dict` [`str`, `float`]
         One standard error for each value that has one, under the same key.
+    widths_on_scale_px : `dict` [`str`, `float`]
+        Each star width of ``values`` put on the library's one star-width
+        scale (the per-frame Gaussian of the brightest stars), in pixels,
+        under the same key, so widths from different estimators can be
+        compared. Only pixel widths whose estimator has a measured ratio to
+        the scale are here; ``star_widths_not_on_scale`` of the report says
+        why the others are not.
     not_measured : `dict` [`str`, `str`]
         The reason for each metric that could not be measured.
     """
@@ -43,6 +50,7 @@ class FolderFrameMeasurement(BaseModel):
     timestamp: float | None = None
     values: dict[str, float] = Field(default_factory=dict)
     uncertainties: dict[str, float] = Field(default_factory=dict)
+    widths_on_scale_px: dict[str, float] = Field(default_factory=dict, alias="widthsOnScalePx")
     not_measured: dict[str, str] = Field(default_factory=dict, alias="notMeasured")
 
 
@@ -66,6 +74,18 @@ class FolderMeasurementReport(BaseModel):
     medians : `dict` [`str`, `float`]
         The median over the frames of each metric's value. A metric measured
         on no frame has no entry.
+    medians_on_scale_px : `dict` [`str`, `float`]
+        The median over the frames of each ``widths_on_scale_px`` entry.
+    star_width_estimators : `dict` [`str`, `str`]
+        The estimator of each star width in ``medians``, by key: for example
+        ``"frame Moffat"`` for ``frame.star_width_moffat_px`` and ``"frame
+        Gaussian, brightest stars"`` (the scale itself) for
+        ``frame.star_width_gaussian_brightest_px``.
+    star_widths_not_on_scale : `dict` [`str`, `str`]
+        Why each star width in ``medians`` that has no value on the scale
+        has none: a width in arcseconds (use the pixel metric), or an
+        estimator with no measured ratio to the scale, such as the
+        effective width.
     notices : `list` [`str`]
         Warnings the measurement raised, such as that a frame was drawn by a
         camera simulator (its noise, sky and depth values do not describe a
@@ -82,5 +102,8 @@ class FolderMeasurementReport(BaseModel):
     bias_level_adu: float | None = Field(default=None, alias="biasLevelAdu")
     frames: list[FolderFrameMeasurement] = Field(default_factory=list)
     medians: dict[str, float] = Field(default_factory=dict)
+    medians_on_scale_px: dict[str, float] = Field(default_factory=dict, alias="mediansOnScalePx")
+    star_width_estimators: dict[str, str] = Field(default_factory=dict, alias="starWidthEstimators")
+    star_widths_not_on_scale: dict[str, str] = Field(default_factory=dict, alias="starWidthsNotOnScale")
     notices: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

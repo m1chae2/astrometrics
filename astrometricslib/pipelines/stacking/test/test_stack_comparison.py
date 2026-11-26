@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.run_bases import StarWidthEstimator, star_width_on_scale
 from astrometricslib.pipelines.stacking.post_processing import stack_comparison as sc
 
 SIZE = 512
@@ -242,3 +243,63 @@ def test_a_stack_with_no_record_says_the_reference_is_not_recoverable(
     _, notes = sc.measure_empty_aperture_noise(str(stack), "apertures.json")
 
     assert "not recoverable" in notes[0]
+
+
+def test_a_measured_stack_width_names_the_stack_gaussian_and_its_scale_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stack width carries the stack Gaussian estimator and scale value."""
+    monkeypatch.setattr(sc, "measure_fwhm_from_data", lambda *args, **kwargs: 3.0)
+
+    measured = sc.measure_stack_array(make_stack())
+
+    assert measured.fwhm_estimator == StarWidthEstimator.STACK_GAUSSIAN.value
+    assert measured.fwhm_on_scale_px == pytest.approx(
+        star_width_on_scale(3.0, StarWidthEstimator.STACK_GAUSSIAN)
+    )
+
+
+def test_an_unmeasured_stack_width_has_no_estimator() -> None:
+    """A stack with no stars has no width, estimator or scale value."""
+    measured = sc.measure_stack_array(make_stack())
+
+    assert measured.fwhm_px is None
+    assert measured.fwhm_estimator is None
+    assert measured.fwhm_on_scale_px is None
+
+
+def test_the_stack_report_names_each_width_estimator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stack report labels its width and the registration rows' width."""
+    from astropy.io import fits
+
+    from astrometricslib.pipelines.shared.quality.star_width_labels import SIRIL_REGISTRATION_WIDTH_ESTIMATOR
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_quality_report
+
+    stack = tmp_path / "stack.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+    row = {
+        "fwhm_px": 2.0,
+        "weighted_fwhm_px": 2.1,
+        "roundness": 0.9,
+        "quality": 1.0,
+        "background_level": 0.1,
+        "star_count": 50,
+        "homography": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        "dx": 0.0,
+        "dy": 0.0,
+        "rotation_deg": 0.0,
+        "scale": 1.0,
+    }
+    (tmp_path / "stack_Registration.seq").write_text("")
+    monkeypatch.setattr(sc, "measure_stack_fwhm", lambda path: 3.0)
+    monkeypatch.setattr(
+        "astrometricslib._internal.drivers.siril_output_parsing.parse_seq_file", lambda path: [row]
+    )
+
+    report = stack_quality_report(str(stack), None, ["fwhm", "registration"], None, False)
+
+    assert report.fwhm_estimator == StarWidthEstimator.STACK_GAUSSIAN.value
+    assert report.fwhm_on_scale_px == pytest.approx(
+        star_width_on_scale(3.0, StarWidthEstimator.STACK_GAUSSIAN)
+    )
+    assert report.registration_fwhm_estimator == SIRIL_REGISTRATION_WIDTH_ESTIMATOR

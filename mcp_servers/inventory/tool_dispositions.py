@@ -563,7 +563,8 @@ DECISIONS = {
         "keep",
         "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the "
         "warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at "
-        "'started' after the app stopped still shows as active.",
+        "'started' after the app stopped still shows as active. The AI gets at most 50 jobs and 200 log "
+        "lines, and not detail=full.",
     ),
     "quality_query": ToolDecision(
         "keep",

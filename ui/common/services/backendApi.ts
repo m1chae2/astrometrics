@@ -9,7 +9,6 @@ import {
     TargetFilesResponse,
     GroupedFrameStat,
     ProcessStatus,
-    ProcessingJob,
     AnalysisResult,
     Spectrum,
     FitsHeaderEntry,
@@ -366,13 +365,10 @@ export interface ActionRegistry {
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
     "processing:cancel": { payload: { target_id: string }; response: CancelProcessingResult };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
-    "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number; before?: string }; response: ProcessingJob[] };
-    "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
     "processing:delete_job": { payload: { job_id: string }; response: boolean };
     "quality:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
     "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
-    "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
     "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
     // The nebulae and galaxies SIMBAD lists inside the target's stack (`message` says why there are none).
     "processing:list_bright_objects": { payload: { target: string; refresh?: boolean }; response: import('../types/backendTypes').BrightObjectChoices };
@@ -394,8 +390,10 @@ export interface ActionRegistry {
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera_id?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
-    // The job history, read-only. detail 'warnings' lists the warnings one job detected (job_id required).
-    "jobs:query": { payload: { job_id?: string; target_id?: string; job_type?: string; status?: string; active_only?: boolean; detail?: 'summary' | 'log_tail' | 'result' | 'lineage' | 'warnings'; lines?: number; limit?: number; offset?: number }; response: import('../types/backendTypes').JobQueryResult };
+    // The job history, read-only, the app's one job read. detail 'full' adds each job's stored input and
+    // output numbers; 'warnings' lists the warnings one job detected (job_id required). `limit` is 1 to 500,
+    // `lines` 1 to 100000; `before` pages back by creation time; `max_line_chars: null` keeps log lines whole.
+    "jobs:query": { payload: { job_id?: string; target_id?: string; job_type?: string; status?: string; active_only?: boolean; detail?: 'summary' | 'full' | 'log_tail' | 'result' | 'lineage' | 'warnings'; lines?: number; limit?: number; offset?: number; before?: string; max_line_chars?: number | null }; response: import('../types/backendTypes').JobQueryResult };
     "quality:resolve_rows": { payload: { row_ids: number[] }; response: import('../types/backendTypes').QualityRowResolution };
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 

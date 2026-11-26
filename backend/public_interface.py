@@ -182,10 +182,7 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:siril_open",
     "processing:cancel",
     "processing:status",
-    "processing:list_jobs",
-    "processing:get_job",
     "processing:delete_job",
-    "processing:job_log_tail",
     # A target's current stack in one short answer (a read).
     "processing:stack_summary",
     # Makes a stack's preview picture again without restacking (a background

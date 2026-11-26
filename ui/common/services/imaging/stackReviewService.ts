@@ -8,6 +8,7 @@
 
 import { callBackend } from '../backendApi';
 import { BackendError } from '../backendError';
+import { toProcessingJob } from './jobRecords';
 import { GateStatus, SubjectLevel } from '../../types/backendTypes';
 import type {
     JobWarning,
@@ -79,12 +80,18 @@ export async function fetchStackSummary(targetId: string, kind: StackKind): Prom
 }
 
 /**
- * Reads one background job.
+ * Reads one background job's whole record (`jobs:query` with `detail: 'full'`).
  * @param jobId The job's id.
  * @return The job, or `null` if the backend has no such job.
  */
 export async function fetchJob(jobId: string): Promise<ProcessingJob | null> {
-    return callBackend('processing:get_job', { job_id: jobId }, { silent: true });
+    try {
+        const answer = await callBackend('jobs:query', { job_id: jobId, detail: 'full' }, { silent: true });
+        return answer?.job ? toProcessingJob(answer.job) : null;
+    } catch (error) {
+        if (error instanceof BackendError && error.code === 'not_found') return null;
+        throw error;
+    }
 }
 
 /**

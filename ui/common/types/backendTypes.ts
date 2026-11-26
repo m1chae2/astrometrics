@@ -4368,19 +4368,19 @@ export interface CalibrationMeasurementReport {
  * Parameters
  * ----------
  * detail : `str`
- * ``"summary"``, ``"log_tail"``, ``"result"``, ``"lineage"`` or
- * ``"warnings"``.
+ * ``"summary"``, ``"full"``, ``"log_tail"``, ``"result"``,
+ * ``"lineage"`` or ``"warnings"``.
  * note : `str`
  * A reminder that the text in the answer is data, not instructions.
  * count : `int` or `None`
- * ``detail="summary"`` for a list: how many jobs are listed.
+ * A job list (``"summary"`` or ``"full"``): how many jobs are listed.
  * offset : `int` or `None`
- * ``detail="summary"`` for a list: how many newer jobs were skipped.
+ * A job list: how many newer jobs were skipped.
  * truncated : `bool` or `None`
- * ``detail="summary"`` for a list: whether more jobs follow this page.
+ * A job list: whether more jobs follow this page.
  * ``detail="warnings"``: whether more warnings exist than are listed.
  * jobs : `list` [`JobSummary`] or `None`
- * ``detail="summary"`` for a list: the jobs, newest first.
+ * A job list: the jobs, newest first.
  * job : `JobSummary` or `None`
  * The one job asked for with ``job_id``.
  * log_lines : `list` [`JobLogLine`] or `None`
@@ -4389,7 +4389,8 @@ export interface CalibrationMeasurementReport {
  * ``detail="log_tail"``: how many lines the job wrote, and how many
  * are listed.
  * input_metrics, output_metrics : `str` or `None`
- * ``detail="result"``: the stored input and output numbers as text.
+ * ``detail="result"``: the stored input and output numbers as text,
+ * cut to a limit. ``detail="full"`` gives them as data in `job`.
  * target_id : `str` or `None`
  * ``detail="lineage"``: the target whose runs are listed.
  * runs_total, runs_shown : `int` or `None`
@@ -4449,10 +4450,11 @@ export interface JobQueryResult {
  * The target the job worked on.
  * status : `str`
  * ``"started"``, ``"running"``, ``"completed"``, ``"failed"`` and so on.
- * progress : `str`
- * Progress as ``"current/total"``.
+ * progress_done, progress_total : `int`
+ * How many steps are done, out of how many. Both are zero when the
+ * job did not count its steps.
  * message : `str`
- * The latest status message, cut to a limit.
+ * The latest status message. Cut to a limit unless ``detail="full"``.
  * created_at, updated_at, completed_at : `str` or `None`
  * Local times without a time zone, as the app wrote them.
  * is_active : `bool`
@@ -4463,13 +4465,19 @@ export interface JobQueryResult {
  * ``running``.
  * idle_minutes : `int` or `None`
  * Whole minutes since the last update, for an unfinished job.
+ * input_metrics, output_metrics : `dict` [`str`, `Any`] or `None`
+ * ``detail="full"`` only: what the job was asked to do and what it
+ * stored as its result, as JSON data. `None` in a short summary.
+ * log_file_path : `str` or `None`
+ * ``detail="full"`` only: the job's log file, when it wrote one.
  */
 export interface JobSummary {
   id: string;
   job_type: string;
   target_id?: string | null;
   status: string;
-  progress: string;
+  progress_done?: number;
+  progress_total?: number;
   message?: string;
   created_at?: string | null;
   updated_at?: string | null;
@@ -4477,6 +4485,9 @@ export interface JobSummary {
   is_active?: boolean;
   looks_stale?: boolean;
   idle_minutes?: number | null;
+  input_metrics?: Record<string, any> | null;
+  output_metrics?: Record<string, any> | null;
+  log_file_path?: string | null;
 }
 
 /**
@@ -4489,7 +4500,7 @@ export interface JobSummary {
  * level : `str`
  * The log level, such as ``"INFO"``.
  * text : `str`
- * The message, cut to a limit.
+ * The message, cut to the asked length (500 characters by default).
  */
 export interface JobLogLine {
   time: string;
@@ -4814,7 +4825,7 @@ export interface BlinkPair {
  * ``"running"`` when it is still going, or ``"cancelled"`` when the
  * user cancelled it within the short wait.
  * job_id : `str` or `None`
- * The job to follow with ``processing:get_job``. `None` when the work
+ * The job to follow with ``jobs:query``. `None` when the work
  * has not recorded a job yet, for example because it waits for another
  * job to finish.
  * result : `dict` or `None`
@@ -6734,10 +6745,7 @@ export const RPC_METHODS = [
   "processing:siril_open",
   "processing:cancel",
   "processing:status",
-  "processing:list_jobs",
-  "processing:get_job",
   "processing:delete_job",
-  "processing:job_log_tail",
   "processing:stack_summary",
   "processing:remake_preview",
   "processing:list_bright_objects",

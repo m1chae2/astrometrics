@@ -304,21 +304,6 @@ class ImageProcessingService(BaseBackgroundService):
             "message": "There is no active stacking job or picture remake for this target.",
         }
 
-    def fetch_job_log_tail(self, job_id: str, lines: int = 100) -> list:
-        """Fetch the tail of DB-recorded log entries for a job.
-
-        Returns
-        -------
-        entries : `list`
-            The last `lines` formatted log entry strings for the
-            job, oldest first.
-        """
-        if not self._job_service:
-            return []
-        entries = self._job_service.get_log_entries_for_job(job_id)
-        formatted = [f"{e['created_at']} - {e['level']} - {e['message']}" for e in entries]
-        return formatted[-lines:]
-
     def open_siril(self, target_id: str) -> bool:
         """Open the Siril GUI for the specified target's stacked image.
 

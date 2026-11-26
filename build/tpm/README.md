@@ -469,8 +469,8 @@ build/tpm/run_tpm.sh --real-snapshot --processing "M 31" --processing-dry-run   
 **What it runs.**
 
 1. `target:get_files` lists the target's frames. Frames of the chosen camera are kept (spectroscopy frames are left out) and sorted by path. The script stops with exit code 3 if there are none or a file is missing.
-2. `processing:stack` (the Process button) starts the stack job. The script polls `processing:get_job` every half second.
-3. The job log (`processing:job_log_tail`) holds a line `Stage N of 7: ...` at the start of each stage, with a time to the millisecond. A stage runs to the next stage's line; the last one to the end of the job. The stages are `choose_frames`, `screen_frames`, `prepare`, `stacking`, `summarize`, `quality` and `preview`. A skipped stage gives no TPM.
+2. `processing:stack` (the Process button) starts the stack job. The script polls `jobs:query` (`detail="full"`) every half second.
+3. The job log (`jobs:query` with `detail="log_tail"`, every line, uncut) holds a line `Stage N of 7: ...` at the start of each stage, with a time to the millisecond. A stage runs to the next stage's line; the last one to the end of the job. The stages are `choose_frames`, `screen_frames`, `prepare`, `stacking`, `summarize`, `quality` and `preview`. A skipped stage gives no TPM.
 4. The analysis steps then run one after another, each as a button of the display does: `photometry` (`analysis:analyze_image` on the new stack, the Analyze Target button), `frame_measurements` (`quality:record_frame_measurements`) and `stack_comparison` (`quality:measure_stack`). The last two do not return their job's number, so the script waits until every job that is new for the target has ended.
 5. For each window (stage or step) the CPU time, peak memory and disk bytes are cut out of the half-second samples, and the NVIDIA rows (every 2 seconds) inside the window are summarized. A window shorter than 2 seconds has no NVIDIA value.
 

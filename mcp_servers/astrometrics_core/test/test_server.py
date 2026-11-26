@@ -117,8 +117,18 @@ def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None
         "lines",
         "limit",
         "offset",
+        "before",
     }
     assert not schema.get("required")
+
+
+def test_jobs_query_keeps_ai_answers_small(registry: ToolRegistry) -> None:
+    """`jobs_query` caps jobs and log lines and withholds whole records."""
+    schema = registry.tools["jobs_query"]["tool_def"].input_schema
+    assert schema["properties"]["limit"]["maximum"] == 50
+    assert schema["properties"]["lines"]["maximum"] == 200
+    assert "full" not in schema["properties"]["detail"]["enum"]
+    assert "max_line_chars" not in schema["properties"]
 
 
 def test_manifest_covers_every_registered_tool(registry: ToolRegistry) -> None:
@@ -175,6 +185,13 @@ def test_a_figure_request_is_refused_before_the_method_runs(registry: ToolRegist
     for arguments in ({"path": "/x.fits", "kind": "figure"}, {"figsize": [4, 4]}):
         content = asyncio.run(registry.execute("visualization_render_fits", arguments))
         assert content[0].type == "text"
+        assert "invalid_argument" in content[0].text
+
+
+def test_a_large_or_full_jobs_request_is_refused_before_the_method_runs(registry: ToolRegistry) -> None:
+    """Too many lines, a whole record or an uncut log gets an error reply."""
+    for arguments in ({"lines": 201}, {"limit": 51}, {"detail": "full"}, {"max_line_chars": None}):
+        content = asyncio.run(registry.execute("jobs_query", arguments))
         assert "invalid_argument" in content[0].text
 
 

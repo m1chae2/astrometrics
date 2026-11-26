@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+INGESTION_LOG_LINES = 100
+"""How many of an ingestion job's last log lines its status answer holds."""
+
 
 class IngestionService(BaseBackgroundService):
     """Orchestrates frame ingestion from Local or Remote sources."""
@@ -211,8 +214,8 @@ class IngestionService(BaseBackgroundService):
         if not job:
             raise NotFoundError(f"There is no ingestion job {job_id}.", details={"job_id": job_id})
 
-        # We can fetch job log tail using image_processing_service
-        logs = self._image_processing_service.fetch_job_log_tail(job_id, 100)
+        entries = self._job_service.get_log_entries_for_job(job_id)[-INGESTION_LOG_LINES:]
+        logs = [f"{entry['created_at']} - {entry['level']} - {entry['message']}" for entry in entries]
         progress_pct = 0
         if getattr(job, "progress_total", 0) > 0:
             progress_pct = int(

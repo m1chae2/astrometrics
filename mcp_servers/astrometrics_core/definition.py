@@ -33,14 +33,28 @@ BRANCH_PREFIXES = {
 }
 """Sub-API of `Astrometrics` -> the prefix of its tools' names."""
 
+JOBS_QUERY_MAXIMUM_JOBS = 50
+"""Most jobs one ``jobs_query`` call lists for an AI client."""
+
+JOBS_QUERY_MAXIMUM_LOG_LINES = 200
+"""Most log lines one ``jobs_query`` call returns to an AI client."""
+
 CLIENT_LIMITS = {
     "visualization_render_fits": ClientLimits(
         hidden_parameters=("pixels", "figsize"), withheld_choices={"kind": ("figure",)}
     ),
+    "jobs_query": ClientLimits(
+        hidden_parameters=("max_line_chars",),
+        withheld_choices={"detail": ("full",)},
+        maximums={"limit": JOBS_QUERY_MAXIMUM_JOBS, "lines": JOBS_QUERY_MAXIMUM_LOG_LINES},
+    ),
 }
 """What an AI client may not send to a tool. `render_fits` draws a
 Matplotlib figure for a script or a notebook, and an array of pixels cannot
-travel in JSON, so a client gets the PNG and the data URL kinds only."""
+travel in JSON, so a client gets the PNG and the data URL kinds only.
+`jobs_query` keeps the short answers: at most 50 jobs, at most 200 log lines
+cut to 500 characters, and no whole job records. The app's screens ask the
+library for more."""
 
 
 def build_registry() -> ToolRegistry:

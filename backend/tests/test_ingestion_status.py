@@ -25,6 +25,20 @@ def test_an_unknown_job_raises_not_found() -> None:
         service.get_ingestion_status("missing-job")
 
 
+def test_the_status_holds_the_last_log_lines_and_the_progress() -> None:
+    """The answer has the last 100 log lines, oldest first, and progress."""
+    job_service = MagicMock()
+    job_service.get_job.return_value = SimpleNamespace(status="running", progress_current=1, progress_total=4)
+    job_service.get_log_entries_for_job.return_value = [
+        {"created_at": f"t{number}", "level": "INFO", "message": f"line {number}"} for number in range(150)
+    ]
+    answer = IngestionService(job_service=job_service).get_ingestion_status("job1")
+    assert answer["status"] == "running"
+    assert answer["progress"] == "25%"
+    assert len(answer["logs"]) == 100
+    assert answer["logs"][-1] == "t149 - INFO - line 149"
+
+
 def test_no_job_service_raises_configuration_error() -> None:
     """A service without a job table cannot look up jobs."""
     with pytest.raises(ConfigurationError, match="job service"):

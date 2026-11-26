@@ -165,19 +165,15 @@ class JobService:
         job_type: str | None = None,
         status: str | None = None,
         limit: int = 50,
-        before: str | None = None,
     ) -> list[ProcessingJob]:
         """Retrieve historical jobs for a target.
-
-        Pass ``before`` (an ISO time) to get only jobs created earlier than
-        that time, so a caller can page back through history.
 
         Returns
         -------
         jobs : `list`
             Historical jobs for the target, matching the given filters.
         """
-        return self.repository.get_jobs_by_target(target_id, job_type, status, limit, before)
+        return self.repository.get_jobs_by_target(target_id, job_type, status, limit)
 
     def get_recent_jobs(self, limit: int = 50, job_type: str | None = None) -> list[ProcessingJob]:
         """Retrieve most recent jobs globally.
@@ -200,29 +196,6 @@ class JobService:
         # Simple filter for now
         all_recent = self.get_recent_jobs(limit=100)
         return [j for j in all_recent if j.status in ["started", "running"]]
-
-    def list_jobs(
-        self,
-        target_id: str | None = None,
-        job_type: str | None = None,
-        limit: int = 50,
-        before: str | None = None,
-    ) -> list[ProcessingJob]:
-        """List jobs from history, optionally filtered.
-
-        ``before`` (an ISO time) keeps only jobs created earlier than that
-        time. It applies to a single target only.
-
-        Returns
-        -------
-        jobs : `list`
-            Jobs for the target if given, otherwise the most recent
-            jobs globally.
-        """
-        if target_id:
-            return self.get_jobs_for_target(target_id, job_type=job_type, limit=limit, before=before)
-        else:
-            return self.get_recent_jobs(limit=limit, job_type=job_type)
 
     def delete_job(self, job_id: str) -> bool:
         """Permanently delete a job record and its associated log file.

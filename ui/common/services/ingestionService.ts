@@ -34,9 +34,18 @@ export async function startReindex(): Promise<string> {
  * @return The IngestionJobStatus object.
  */
 export async function getIngestionJobStatus(jobId: string): Promise<IngestionJobStatus> {
-    const data = await callBackend("processing:get_job", { job_id: jobId });
-    if (data) {
-        return data as unknown as IngestionJobStatus;
+    const answer = await callBackend("jobs:query", { job_id: jobId, detail: 'full' });
+    const job = answer?.job;
+    if (!job) {
+        throw new Error('Failed to get job status');
     }
-    throw new Error('Failed to get job status');
+    return {
+        status: job.status as IngestionJobStatus['status'],
+        progress: `${job.progress_done}/${job.progress_total}`,
+        progressCurrent: job.progress_done,
+        progressTotal: job.progress_total,
+        message: job.message || undefined,
+        logs: [],
+        type: job.job_type === 'reindex' ? 'reindex' : 'ingestion',
+    };
 }

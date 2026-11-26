@@ -1,6 +1,6 @@
 # How-to guides
 
-*Version 1.0 · 2026-10-15 · Status: current*
+*Version 1.1 · 2026-11-26 · Status: current*
 
 How-to guides are recipes for one task each. They assume you know what you want to do and list the steps to do it.
 
@@ -18,6 +18,7 @@ How-to guides are recipes for one task each. They assume you know what you want 
 - [Change a tuned value](change_a_tuned_value.md): update the code, the register and the guides together.
 - [Add a register entry](add_a_register_entry.md): record the evidence for a tuned value.
 - [Add a quality gate](add_a_quality_gate.md): add a gate so the review guides and tests stay in step.
+- [Promote a console function into the library](library_quick_start.md#4-promote-a-console-function-into-the-library): move a function tried in the Command Console into `astrometricslib`.
 
 ```{toctree}
 :hidden:

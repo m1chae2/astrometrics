@@ -414,6 +414,49 @@ DECISIONS = {
         "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
         "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
     ),
+    "quality_measure_sky": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Measures the empty sky's level and noise "
+        "of a FITS file. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_find_stars": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Runs the shared star finder on a FITS file "
+        "with the width and threshold the caller gives. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_star_widths": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Measures the star width of each color "
+        "channel of a FITS file. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_measure_sky_gradient": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Measures the sky's tilt across a FITS file "
+        "as the preview does. Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_sky_corners": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Gives a plate-solved FITS file's corners on "
+        "the sky from its header. Reads the header only.",
+        tool_class="compute",
+    ),
+    "quality_solved_stars": ToolDecision(
+        "withhold",
+        "A Command Console building block, uncapped. The AI reads a target's named stars through star_query.",
+    ),
+    "quality_robust_sigma": ToolDecision(
+        "drop",
+        "A Command Console building block: a spread of numbers the caller already has. Of no use to an AI "
+        "client.",
+    ),
+    "quality_sigma_clip": ToolDecision(
+        "drop",
+        "A Command Console building block: clips numbers the caller already has. Of no use to an AI client.",
+    ),
     "quality_measure_detections": ToolDecision(
         "keep",
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "

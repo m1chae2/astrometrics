@@ -17,6 +17,10 @@
   their target.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
+* Building blocks: `measure_sky`, `find_stars`, `star_widths`,
+  `measure_sky_gradient`, `sky_corners`, `solved_stars`, `robust_sigma` and
+  `sigma_clip` give a script the library's own small measurements. They are
+  written in `_quality_building_blocks.py` and bound here as methods.
 
 The argument helpers it shares with `ProcessingPipelines` live in
 `pipelines/shared/api_arguments.py`.
@@ -31,6 +35,7 @@ from pydantic import ValidationError
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib.api import _quality_building_blocks as _blocks
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -1548,3 +1553,14 @@ class QualityRecords:
                 limit=limit,
                 save_target=lambda: save_quality_stamps(self._targets, resolved),
             )
+
+    # -- Building blocks for scripts (`_quality_building_blocks.py`) -------
+
+    measure_sky = _blocks.measure_sky
+    find_stars = _blocks.find_stars
+    star_widths = _blocks.star_widths
+    measure_sky_gradient = _blocks.measure_sky_gradient
+    sky_corners = _blocks.sky_corners
+    solved_stars = _blocks.solved_stars
+    robust_sigma = _blocks.robust_sigma
+    sigma_clip = _blocks.sigma_clip

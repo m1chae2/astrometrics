@@ -11,7 +11,7 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 - [Documentation conventions](.claude/skills/documentation-style/CONVENTIONS.md): where each kind of content lives and the rules the documents follow.
 - [Glossary](documentation/Glossary.md): definitions of the terms used everywhere.
 - [Installation](documentation/Installation.md): setting up the app and its environment.
-- [Library quick start](documentation/how_to/library_quick_start.md): a first call to the Python library.
+- [Library quick start](documentation/how_to/library_quick_start.md): a first call to the Python library, and how to promote a function tried in the Command Console into the library (Section 4).
 
 ## Image processing (astrometricslib)
 

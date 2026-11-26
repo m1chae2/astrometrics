@@ -65,20 +65,14 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
   }, [onClose]);
 
   /**
-   * Switches the app to the Astronomy Manager view with the current source
-   * pre-selected, in place -- matching how every other mode switch in this
-   * app (e.g. the sidebar) works, rather than opening a second window.
+   * Opens the current source in the Astronomy Manager through the display
+   * hand-off (`navigateToElement`). An open Astronomy Manager window takes it;
+   * otherwise this window switches to the Astronomy Manager in place.
    *
    * @returns {void}
    */
   const handleOpenInAstronomyManager = () => {
-    try {
-      window.localStorage.setItem('planetariumSelectedStar', source.id);
-    } catch {
-      // Ignore localStorage access failures (e.g. in private browsing)
-    }
-
-    navigateToElement({
+    void navigateToElement({
       targetDisplay: 'Astronomy Manager',
       targetElement: 'spectrumViewer',
       action: 'astronomySelectStar',
@@ -88,14 +82,6 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
         type: 'info',
         title: 'Planetarium',
       },
-    }).then((result) => {
-      if (!result.handledRemotely) {
-        try {
-          window.localStorage.setItem('appMode', 'Astronomy Manager');
-        } catch {
-          // Ignore
-        }
-      }
     });
     onClose();
   };

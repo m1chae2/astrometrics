@@ -53,9 +53,13 @@ describe('StarSummaryCard Back to image', () => {
       target: 'M 81', file: '/stack/M81.fits', displayMode: 'linear', astrometry: true, detections: false,
       view: { x: 0.4, y: 0.5, zoomOverFit: 3, turn: 0 }, returnPending: true, arrivedFromStar: 'Vega',
     });
+    const modeChanges: string[] = [];
+    const onModeChange = (event: Event) => modeChanges.push((event as CustomEvent).detail);
+    window.addEventListener('astrometrics:modeChange', onModeChange);
     render(<StarSummaryCard starId="Vega" astronomyData={{ id: 'Vega', name: 'Vega' }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Back to image' }));
-    expect(window.localStorage.getItem('appMode')).toBe('Image Processing');
+    window.removeEventListener('astrometrics:modeChange', onModeChange);
+    expect(modeChanges).toEqual(['Image Processing']);
     expect(peekHandoffs('Image Processing', 'returnToImage')).toHaveLength(1);
   });
 });

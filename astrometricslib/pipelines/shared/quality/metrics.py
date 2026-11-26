@@ -520,7 +520,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
         name=FRAME_STAR_ELONGATION_COHERENCE,
         definition_version=1,
-        unit="fraction",
+        unit="",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
         better=Direction.NONE,
@@ -540,10 +540,11 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         register_entry="AST-17",
-        purpose=MetricPurpose.DECISION,
+        purpose=MetricPurpose.CONTEXT,
         purpose_reason=(
-            "The star-shape review reads it to say whether stretched stars share one direction, which "
-            "points at tracking, guiding, wind or flexure rather than seeing or focus."
+            "It explains an elongation value: the star-shape review reads it to say whether stretched "
+            "stars share one direction, which points at tracking, guiding, wind or flexure rather than "
+            "seeing or focus."
         ),
     ),
     MetricSpec(

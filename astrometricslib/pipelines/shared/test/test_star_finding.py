@@ -51,7 +51,7 @@ def test_the_finder_gives_the_stars_brightest_first() -> None:
 
 
 def test_the_isolation_filter_drops_a_close_pair_and_keeps_a_lone_star() -> None:
-    """Stars 11 px apart are dropped at a 15 px isolation; a lone star stays."""
+    """Stars 11 px apart drop out at a 15 px isolation; a lone star stays."""
     picture = _picture([(30.0, 30.0, 300.0), (41.0, 30.0, 300.0), (90.0, 90.0, 300.0)])
     sources = find_sources_above_background(
         picture,

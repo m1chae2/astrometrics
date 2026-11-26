@@ -261,6 +261,7 @@ Every Python example assumes the library is installed and configured with your o
   - envelope limit `guide_lost_fraction_high_limit`. Relation: derived from this entry.
   - envelope limit `guide_excursion_fraction_high_limit`. Relation: derived from this entry.
   - envelope limit `capture_abort_fraction_high_limit`. Relation: derived from this entry.
+  - the star-shape review's stack baseline (`stack_roundness_low_limit` <!-- impl: wayfindinglib.analytics.star_shape_review.stack_roundness_low_limit --> in `wayfindinglib/analytics/star_shape_review.py`): the same rule on the roundness of the library's other stored stacks, at least 5 of them. Relation: derived from this entry.
 - **Status:** Partly measured. The method was checked on this observatory's recorded nights when it was built. Night star width and roundness now come from stored measurements (Moffat width, inverse of the star elongation), so their baselines have not been re-run.
 - **Data you need:** Five or more earlier nights of one equipment fingerprint with guide samples, runs and measured frames.
 - **Procedure:**
@@ -283,7 +284,7 @@ Every Python example assumes the library is installed and configured with your o
 - **What to look at:** Whether a limit with fewer than 5 nights has no value and says how many nights it has.
 - **Our result:** Measured value not recorded.
 - **Verdict:** Not judged.
-- **Limits:** A change of equipment starts an empty history by design.
+- **Limits:** A change of equipment starts an empty history by design. The stack baseline (added 2026-11-26) pools every stack of the library, not one equipment fingerprint, because a stack's stored rows name no capture setting; it has not been run on the library.
 - **To tune for your setup:** Raise the night count if your nights vary a great deal.
 - **Regenerate with:** No script; run the example above.
 - **Guarded by tests:** `wayfindinglib/analytics/test/test_performance_envelope.py`; `wayfindinglib/analytics/test/test_envelope_assembly.py`; `wayfindinglib/analytics/test/test_capture_history.py`.

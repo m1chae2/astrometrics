@@ -7,28 +7,36 @@ to 1) and how wide they are at
 the center and in the four corners of the field. This module reads those
 stored rows and says what they suggest:
 
-* **Roundness**: round or elongated, judged against the equipment's own
-  history limit `night_star_roundness_low_limit` (register entry WAY-42).
-  The limit is the same one the night review uses.
+* **Roundness**: round or elongated. The frames are judged against the
+  equipment's own history limit `night_star_roundness_low_limit` (register
+  entry WAY-42), the limit the night review uses. A stack's own numbers are
+  judged against a stack baseline: the low roundness limit of the library's
+  other stacks (`stack_roundness_low_limit`), because a stack averages
+  many frames and is rounder than a typical frame.
 * **Direction**: when the stars are elongated, a high coherence means the
   stars share one direction, which points at tracking, guiding, wind or
   flexure. A low coherence points at seeing or focus.
-* **Standout frames**: frames whose elongation is far above the typical one,
-  using the median plus a multiple of the robust spread. The multiple is the
-  history convention `BASELINE_SPREAD_MULTIPLIER`.
+* **Set-aside frames**: the frames the stacker's quarantine set aside as
+  trailed (`astrometrics.quality.set_aside_frames`). The review does not
+  judge the frames again; the quarantine owns that rule.
 * **Corners**: the corner widths compared with the center width. They are
   reported only. The corner measurements are exploratory (AST-18), so no tilt
   or curvature verdict is made.
 
+The review also gives the frames' typical elongation (their median), so the
+screen does not work it out again.
+
 The metric names are constants below, in one place. A stack may have its own
 star-shape rows; when it has none, the median of the frames is used.
-`judge_star_shape` is pure: it takes plain rows and a limit, so it is easy to
-test. `read_star_shape_rows` reads the stored rows.
+`judge_star_shape` is pure: it takes plain rows and limits, so it is easy to
+test. `read_star_shape_rows` and `read_stack_roundness_low_limit` read the
+stored rows.
 """
 
 import math
 import statistics
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib.exceptions import InvalidArgumentError
@@ -42,8 +50,8 @@ from astrometricslib.parameters import (
 from astrometricslib.reports import MeasurementStatus, observing_night_id
 from wayfindinglib.analytics.performance_envelope import (
     BASELINE_SPREAD_MULTIPLIER,
-    MAD_TO_SIGMA,
-    MINIMUM_FRAMES_PER_NIGHT,
+    MINIMUM_BASELINE_SESSIONS,
+    robust_median_and_spread,
 )
 from wayfindinglib.models.session.star_shape_review import (
     FrameStarShape,
@@ -54,7 +62,9 @@ from wayfindinglib.models.session.star_shape_review import (
 
 __all__ = [
     "judge_star_shape",
+    "read_stack_roundness_low_limit",
     "read_star_shape_rows",
+    "stack_roundness_low_limit",
 ]
 
 FRAME_ELONGATION_METRIC = "frame.star_elongation"
@@ -108,7 +118,10 @@ moves past a version, so a change of definition is reviewed here.
 """
 
 ROUNDNESS_LIMIT_NAME = "night_star_roundness_low_limit"
-"""The envelope limit that separates round from elongated (WAY-42)."""
+"""The envelope limit that separates round from elongated frames (WAY-42)."""
+
+TRAILED_KIND = "trailed"
+"""The kind the quarantine gives a frame it set aside for stretched stars."""
 
 SHARED_DIRECTION_COHERENCE = TunedParameter(
     name="wayfinding.shared_direction_coherence",
@@ -135,7 +148,7 @@ def read_star_shape_rows(
     target: Any,
     night: str | None = None,
     frame_paths: Sequence[str] | None = None,
-) -> tuple[list[FrameStarShape], FrameStarShape | None]:
+) -> tuple[list[FrameStarShape], FrameStarShape | None, list[StandoutFrame]]:
     """Read the stored star-shape rows of a target's light frames and stack.
 
     Parameters
@@ -157,6 +170,9 @@ def read_star_shape_rows(
         The target's library stack, when it has stored star-shape rows. It is
         left out when a night or a frame list narrows the question, because a
         stack covers all of the target's frames.
+    set_aside : `list` [`StandoutFrame`]
+        The frames the quarantine set aside as trailed, oldest first, with
+        their stored elongation when there is one.
     """
     wanted = None if frame_paths is None else set(frame_paths)
     subjects = {}
@@ -169,11 +185,15 @@ def read_star_shape_rows(
             continue
         subjects[target.frame_subject_id(frame)] = frame
     values: dict[str, dict[str, Any]] = {subject: {} for subject in subjects}
+    elongation_rows: dict[str, Any] = {}
     for metric, version in PINNED_FRAME_SHAPE_METRICS.items():
         for row in _query_rows(astrometrics, metric, "frame", target.id):
-            if row.definition_version != version or row.subject.subject_id not in values:
+            if row.definition_version != version:
                 continue
-            values[row.subject.subject_id][metric] = row
+            if metric == FRAME_ELONGATION_METRIC:
+                elongation_rows[row.subject.subject_id] = row
+            if row.subject.subject_id in values:
+                values[row.subject.subject_id][metric] = row
     frames = []
     for subject, frame in subjects.items():
         elongation_row = values[subject].get(FRAME_ELONGATION_METRIC)
@@ -184,7 +204,135 @@ def read_star_shape_rows(
     stack = None
     if night is None and wanted is None:
         stack = _read_stack(astrometrics, target.id)
-    return frames, stack
+    set_aside = _read_set_aside_trailed(astrometrics, target, elongation_rows, night, wanted)
+    return frames, stack, set_aside
+
+
+def _read_set_aside_trailed(
+    astrometrics: Any,
+    target: Any,
+    elongation_rows: dict[str, Any],
+    night: str | None,
+    wanted: set[str] | None,
+) -> list[StandoutFrame]:
+    """List the frames the quarantine set aside for stretched stars.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface.
+    target : `Any`
+        The resolved target.
+    elongation_rows : `dict` [`str`, `Any`]
+        The stored elongation rows of the target's frames, by subject id.
+    night : `str` or `None`
+        Only frames of this observing night.
+    wanted : `set` [`str`] or `None`
+        Only these frames (by their path before they were moved, or now).
+
+    Returns
+    -------
+    set_aside : `list` [`StandoutFrame`]
+        Oldest first; a frame with no capture time last.
+    """
+    found = []
+    for record in astrometrics.quality.set_aside_frames(target):
+        if record.kind != TRAILED_KIND:
+            continue
+        path = record.original_path or record.path
+        if wanted is not None and path not in wanted and record.path not in wanted:
+            continue
+        timestamp = _capture_timestamp(record.date)
+        if night is not None and (timestamp is None or observing_night_id(timestamp) != night):
+            continue
+        row = elongation_rows.get(record.subject_id) if record.subject_id else None
+        found.append(
+            StandoutFrame(
+                path=path,
+                timestamp=timestamp,
+                elongation=None if row is None else float(row.value),
+                reason=record.reason,
+            )
+        )
+    return sorted(found, key=lambda item: (item.timestamp is None, item.timestamp or 0.0))
+
+
+def _capture_timestamp(date: str) -> float | None:
+    """Turn a set-aside frame's capture time into seconds since 1970.
+
+    Parameters
+    ----------
+    date : `str`
+        ``"YYYY-MM-DD HH:MM:SS"`` in UTC, as the set-aside listing gives it,
+        or empty.
+
+    Returns
+    -------
+    timestamp : `float` or `None`
+        `None` when the text is empty or not a time.
+    """
+    try:
+        return datetime.strptime(date, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC).timestamp()
+    except ValueError:
+        return None
+
+
+def read_stack_roundness_low_limit(astrometrics: Any, exclude_subject: str | None = None) -> float | None:
+    """Work out the stack baseline from the library's stored stacks.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface.
+    exclude_subject : `str`, optional
+        The stack being judged, which must not set its own limit.
+
+    Returns
+    -------
+    limit : `float` or `None`
+        See `stack_roundness_low_limit`. `None` when too few stacks have a
+        stored elongation.
+    """
+    try:
+        result = astrometrics.quality.query(metric=STACK_ELONGATION_METRIC, level="stack", latest_only=True)
+    except InvalidArgumentError:
+        return None
+    elongations = [
+        float(row.value)
+        for row in result.rows
+        if row.subject.channel is None
+        and row.status != MeasurementStatus.NOT_MEASURED
+        and row.value is not None
+        and getattr(row.subject, "variant", None) is None
+        and row.subject.subject_id != exclude_subject
+    ]
+    return stack_roundness_low_limit(elongations)
+
+
+def stack_roundness_low_limit(elongations: Sequence[float]) -> float | None:
+    """Find the lowest roundness that is usual for the library's stacks.
+
+    The rule is the one the equipment history uses for its limits (WAY-42):
+    roundness (one over the elongation) varies by factors, so the median and
+    the robust spread are taken on its logarithm, and the limit is the
+    median times ``exp(-BASELINE_SPREAD_MULTIPLIER x spread)``.
+
+    Parameters
+    ----------
+    elongations : `Sequence` [`float`]
+        The stored elongations of other stacks.
+
+    Returns
+    -------
+    limit : `float` or `None`
+        The lowest usual roundness, or `None` when fewer than
+        `MINIMUM_BASELINE_SESSIONS` stacks have an elongation of 1 or more.
+    """
+    roundness = [1.0 / value for value in elongations if math.isfinite(value) and value >= 1.0]
+    if len(roundness) < int(resolve_parameter(MINIMUM_BASELINE_SESSIONS).value):
+        return None
+    log_median, log_spread = robust_median_and_spread([math.log(value) for value in roundness])
+    return math.exp(log_median - float(resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value) * log_spread)
 
 
 def _frame_names() -> tuple[str, str, str, str, dict[str, str]]:
@@ -298,6 +446,8 @@ def judge_star_shape(
     stack: FrameStarShape | None = None,
     roundness_low_limit: float | None = None,
     scope: str | None = None,
+    set_aside: Sequence[StandoutFrame] = (),
+    stack_roundness_low_limit: float | None = None,
 ) -> StarShapeReview:
     """Judge the star shapes of a target's frames and stack.
 
@@ -312,54 +462,70 @@ def judge_star_shape(
         the roundness, direction and corner verdicts; any number it lacks
         falls back to the median of the frames.
     roundness_low_limit : `float`, optional
-        The equipment history's lowest roundness (WAY-42). Roundness is one
-        over the elongation. Without it the stars are not called round or
-        elongated, because there is no history to say what is normal.
+        The equipment history's lowest roundness of a night's frames
+        (WAY-42). Roundness is one over the elongation. Without it the frames
+        are not called round or elongated, because there is no history to
+        say what is normal.
     scope : `str`, optional
         The scope to name in the result. ``"stack"`` or ``"frames"`` is
         chosen when omitted.
+    set_aside : `Sequence` [`StandoutFrame`], optional
+        The frames the quarantine set aside as trailed (see
+        `read_star_shape_rows`). They are reported as they are; nothing is
+        judged again.
+    stack_roundness_low_limit : `float`, optional
+        The stack baseline (`stack_roundness_low_limit`). A stack's own
+        numbers are judged against it, not against the frames' limit.
 
     Returns
     -------
     review : `StarShapeReview`
-        The verdicts, the standout frames and the per-frame series. With no
-        measured elongation the verdicts say "not measured yet"; that is not
-        an error.
+        The verdicts, the set-aside frames, the frames' typical elongation
+        and the per-frame series. With no measured elongation the verdicts
+        say "not measured yet"; that is not an error.
     """
     measured = [frame for frame in frames if frame.elongation is not None]
     notes: list[str] = []
     use_stack = stack is not None and stack.elongation is not None
     if not measured and not use_stack:
-        return _not_measured(target_id, scope or "frames")
-    standouts = _find_standouts(measured)
-    standout_paths = {item.path for item in standouts}
-    measured = [frame.model_copy(update={"standout": frame.path in standout_paths}) for frame in measured]
-    elongation = (
-        stack.elongation
-        if use_stack and stack is not None
-        else statistics.median(frame.elongation for frame in measured if frame.elongation is not None)
+        return _not_measured(target_id, scope or "frames", set_aside)
+    set_aside_paths = {item.path for item in set_aside}
+    measured = [frame.model_copy(update={"standout": frame.path in set_aside_paths}) for frame in measured]
+    typical = (
+        statistics.median(float(frame.elongation) for frame in measured if frame.elongation is not None)
+        if measured
+        else None
     )
+    elongation = stack.elongation if use_stack and stack is not None else typical
+    limit = stack_roundness_low_limit if use_stack else roundness_low_limit
     source = stack if use_stack else None
     if scope is None:
         scope = "stack" if use_stack else "frames"
-    if roundness_low_limit is None:
-        notes.append("The equipment has too few measured nights to say what roundness is normal.")
+    if limit is None:
+        notes.append(
+            "The library has too few stacks with measured stars to say what roundness is normal for a stack."
+            if use_stack
+            else "The equipment has too few measured nights to say what roundness is normal."
+        )
     return StarShapeReview(
         target_id=target_id,
         scope=scope,
         frame_count=len(measured),
-        roundness=_roundness_verdict(float(elongation), roundness_low_limit),
-        direction=_direction_verdict(float(elongation), roundness_low_limit, source, measured),
-        standout=_standout_verdict(standouts, len(measured)),
+        typical_elongation=typical,
+        roundness=_roundness_verdict(float(elongation), limit, use_stack),
+        direction=_direction_verdict(float(elongation), limit, source, measured),
+        standout=_standout_verdict(set_aside, len(measured)),
         corners=_corner_verdict(source, measured),
-        standout_frames=standouts,
+        standout_frames=list(set_aside),
         series=list(measured),
         notes=notes,
     )
 
 
-def _not_measured(target_id: str, scope: str) -> StarShapeReview:
+def _not_measured(target_id: str, scope: str, set_aside: Sequence[StandoutFrame]) -> StarShapeReview:
     """Build the review for a target with no stored star shapes.
+
+    The frames the quarantine set aside are still listed.
 
     Returns
     -------
@@ -373,14 +539,18 @@ def _not_measured(target_id: str, scope: str) -> StarShapeReview:
         frame_count=0,
         roundness=ShapeVerdict(state="not_measured", sentence=sentence),
         direction=ShapeVerdict(state="not_measured", sentence=sentence),
-        standout=ShapeVerdict(state="not_measured", sentence=sentence),
+        standout=_standout_verdict(set_aside, 0),
         corners=ShapeVerdict(state="not_measured", sentence=sentence),
+        standout_frames=list(set_aside),
         notes=["Measure the frames' star shapes to get a review."],
     )
 
 
-def _roundness_verdict(elongation: float, roundness_low_limit: float | None) -> ShapeVerdict:
+def _roundness_verdict(elongation: float, roundness_low_limit: float | None, is_stack: bool) -> ShapeVerdict:
     """Say whether the stars are round, against the history limit.
+
+    A stack is compared with the library's other stacks, the frames with the
+    equipment's nights.
 
     Returns
     -------
@@ -399,24 +569,25 @@ def _roundness_verdict(elongation: float, roundness_low_limit: float | None) -> 
             sentence="The stored star stretch is below 1, so it cannot be used.",
             numbers=numbers,
         )
+    usual = "your stacks" if is_stack else "your equipment"
     if roundness_low_limit is None:
         return ShapeVerdict(
             state="no_history",
             sentence=(
                 f"Stars are stretched by {elongation:.2f} (1 is round), but there is not enough history "
-                "yet to say if that is normal for your equipment."
+                f"yet to say if that is normal for {usual}."
             ),
             numbers=numbers,
         )
     if roundness >= roundness_low_limit:
         return ShapeVerdict(
             state="round",
-            sentence=f"Stars are round enough (stretch {elongation:.2f}), as usual for your equipment.",
+            sentence=f"Stars are round enough (stretch {elongation:.2f}), as usual for {usual}.",
             numbers=numbers,
         )
     return ShapeVerdict(
         state="elongated",
-        sentence=f"Stars are stretched more than usual for your equipment (stretch {elongation:.2f}).",
+        sentence=f"Stars are stretched more than usual for {usual} (stretch {elongation:.2f}).",
         numbers=numbers,
     )
 
@@ -504,42 +675,8 @@ def _direction(
     return angle, (statistics.median(coherences) if coherences else None)
 
 
-def _find_standouts(frames: Sequence[FrameStarShape]) -> list[StandoutFrame]:
-    """Find frames far above the typical elongation.
-
-    A frame stands out when its elongation is above the median by more than
-    `BASELINE_SPREAD_MULTIPLIER` robust spreads (1.4826 times the median
-    absolute deviation). Fewer than `MINIMUM_FRAMES_PER_NIGHT` frames are
-    too few to know the spread, and a spread of zero gives no standouts.
-
-    Returns
-    -------
-    standouts : `list` [`StandoutFrame`]
-        Most extreme first.
-    """
-    if len(frames) < resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
-        return []
-    values = [float(frame.elongation) for frame in frames if frame.elongation is not None]
-    median = statistics.median(values)
-    spread = MAD_TO_SIGMA * statistics.median(abs(value - median) for value in values)
-    if spread <= 0.0:
-        return []
-    multiple = float(resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value)
-    found = [
-        StandoutFrame(
-            path=frame.path,
-            timestamp=frame.timestamp,
-            elongation=float(frame.elongation),
-            spreads_above_typical=(float(frame.elongation) - median) / spread,
-        )
-        for frame in frames
-        if frame.elongation is not None and (float(frame.elongation) - median) / spread > multiple
-    ]
-    return sorted(found, key=lambda item: item.spreads_above_typical, reverse=True)
-
-
-def _standout_verdict(standouts: Sequence[StandoutFrame], measured_count: int) -> ShapeVerdict:
-    """Say whether some frames stand out.
+def _standout_verdict(set_aside: Sequence[StandoutFrame], measured_count: int) -> ShapeVerdict:
+    """Say whether the quarantine set frames aside for stretched stars.
 
     Returns
     -------
@@ -548,20 +685,20 @@ def _standout_verdict(standouts: Sequence[StandoutFrame], measured_count: int) -
     """
     numbers: dict[str, float | None] = {
         "frames_checked": float(measured_count),
-        "standouts": float(len(standouts)),
+        "standouts": float(len(set_aside)),
     }
-    if not standouts:
+    if not set_aside:
         return ShapeVerdict(
             state="none_found",
-            sentence="No frame has stars stretched far more than the others.",
+            sentence="No frame was set aside for stretched stars.",
             numbers=numbers,
         )
-    plural = "frame has" if len(standouts) == 1 else "frames have"
+    plural = "frame was" if len(set_aside) == 1 else "frames were"
     return ShapeVerdict(
         state="found",
         sentence=(
-            f"{len(standouts)} {plural} stars stretched far more than the others. "
-            "You may want to set them aside."
+            f"{len(set_aside)} {plural} set aside for stretched stars when the target was stacked. "
+            "You can put a frame back if you disagree."
         ),
         numbers=numbers,
     )

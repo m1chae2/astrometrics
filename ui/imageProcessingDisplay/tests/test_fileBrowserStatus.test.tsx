@@ -29,7 +29,7 @@ const review = {
     roundness: { state: 'round', sentence: '' }, direction: { state: 'round', sentence: '' },
     standout: { state: 'found', sentence: '' }, corners: { state: 'not_measured', sentence: '' },
     series: [{ path: '/lib/a.fits', elongation: 1.0 }, { path: '/lib/b.fits', elongation: 1.5 }],
-    standoutFrames: [{ path: '/lib/b.fits', elongation: 1.5, spreadsAboveTypical: 6 }],
+    standoutFrames: [{ path: '/lib/b.fits', elongation: 1.5, reason: 'stars stretched' }],
 };
 
 function renderBrowser(overrides: Partial<React.ComponentProps<typeof FileBrowser>> = {}) {

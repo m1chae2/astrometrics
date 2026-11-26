@@ -346,7 +346,7 @@ class ObservationReview(ControlChild):
         night_history.refuse_unused_arguments(
             kind, night_history.TYPED_KIND_ARGUMENTS[kind], session_id, ekos_file_id, include
         )
-        limit = night_history.clamp_limit(limit)
+        limit = night_history.checked_limit(limit)
         match kind:
             case "nights":
                 return night_history.build_night_list(self._context, limit)

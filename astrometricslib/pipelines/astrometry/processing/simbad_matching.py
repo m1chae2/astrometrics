@@ -428,6 +428,7 @@ class SimbadMatching(GaiaFieldMatching):
             The updated list of named stars.
         """
         self._nearest_catalog_by_star = {}
+        self.field_catalog_density_per_square_degree = None
         if not stellar_objects:
             return stellar_objects
 

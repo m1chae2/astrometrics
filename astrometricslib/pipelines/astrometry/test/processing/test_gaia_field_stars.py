@@ -20,6 +20,8 @@ from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.pipelines.astrometry.processing import gaia_field_matching, plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
+    FieldGaiaStars,
+    field_catalog_density,
     load_field_gaia_stars,
     tiles_under_image,
 )
@@ -262,3 +264,35 @@ def test_an_empty_refit_cache_is_a_warning_only_after_a_real_fetch(
     assert kept is wcs
     assert identifier.wcs_refit_note.startswith("not refit: no Gaia stars cached")
     assert identifier.astrometry_flags == [plate_solution_steps.FLAG_WCS_REFINEMENT_SKIPPED]
+
+
+def test_the_catalog_density_counts_the_stars_on_the_image_per_square_degree() -> None:
+    """Stars on the image over its sky area; stars off it do not count."""
+    from astropy import units as u
+    from astropy.coordinates import SkyCoord
+
+    sky_map = tan_sky_map(100.0, 20.0, (50.5, 50.5), degrees_per_pixel=0.01)
+    on_image = sky_map.pixel_to_world(np.linspace(5, 95, 30), np.linspace(10, 90, 30))
+    off_image = SkyCoord(ra=[110.0, 90.0] * u.deg, dec=[20.0, 20.0] * u.deg)
+    coords = SkyCoord(
+        ra=np.concatenate([on_image.ra.deg, off_image.ra.deg]) * u.deg,
+        dec=np.concatenate([on_image.dec.deg, off_image.dec.deg]) * u.deg,
+    )
+    field = FieldGaiaStars(table=None, coords=coords, depth=18.0, tiles=[1], complete_tiles=[1])
+
+    # 30 stars over 100 x 100 pixels of 0.01 degree: one square degree.
+    assert field_catalog_density(field, sky_map, 100, 100) == pytest.approx(30.0, rel=1e-3)
+
+
+def test_the_catalog_density_is_unknown_when_a_tile_is_missing_or_no_map() -> None:
+    """A missing tile would undercount, so the density is not given."""
+    sky_map = tan_sky_map(100.0, 20.0, (50.5, 50.5), degrees_per_pixel=0.01)
+    coords = sky_map.pixel_to_world([10.0], [10.0])
+    missing = FieldGaiaStars(table=None, coords=coords, depth=18.0, tiles=[1, 2], missing_tiles=[2])
+    empty = FieldGaiaStars(table=None, coords=None, depth=18.0, tiles=[1])
+
+    assert field_catalog_density(missing, sky_map, 100, 100) is None
+    assert field_catalog_density(empty, sky_map, 100, 100) is None
+    assert (
+        field_catalog_density(FieldGaiaStars(table=None, coords=coords, depth=18.0), None, 100, 100) is None
+    )

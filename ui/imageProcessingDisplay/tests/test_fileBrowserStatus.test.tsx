@@ -17,10 +17,9 @@ const item = (name: string, date = '2026-11-01 21:00:00'): FileItem => ({
 
 const report: FrameStatusReport = {
     stackedAt: 100,
-    typicalElongation: 1.25,
     frames: [
         { path: '/lib/a.fits', name: 'a.fits', state: 'included' },
-        { path: '/lib/b.fits', name: 'b.fits', state: 'flagged', elongation: 1.5 },
+        { path: '/lib/b.fits', name: 'b.fits', state: 'flagged', elongation: 1.25, reason: 'Stacked, but its stars are stretched: elongation 1.25, warning level 1.20, set-aside threshold 1.32.' },
         { path: '/lib/c.fits', name: 'c.fits', state: 'not_stacked' },
         { path: '/lib/_excluded/d.fits', name: 'd.fits', state: 'set_aside', kind: 'clouded', reason: '203 stars against a typical 3348', restorable: true },
     ],
@@ -54,7 +53,7 @@ describe('File Browser Status column', () => {
         renderBrowser();
         expect(screen.getAllByText('Included')).toHaveLength(1);
         expect(screen.getByText('Flagged').closest('[title]')?.getAttribute('title'))
-            .toBe('Stars stretched: elongation 1.50, session typical 1.25');
+            .toBe('Stacked, but its stars are stretched: elongation 1.25, warning level 1.20, set-aside threshold 1.32.');
         expect(screen.getByText('Not stacked yet').closest('[title]')?.getAttribute('title')).toMatch(/after the last stack/);
         expect(screen.getByText('Set aside: cloud').closest('[title]')?.getAttribute('title'))
             .toBe('203 stars against a typical 3348');

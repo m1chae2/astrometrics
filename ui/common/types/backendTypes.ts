@@ -1092,7 +1092,9 @@ export interface FrameCopyPulse {
  * ``clouded``, ``trailed`` or ``off_field``. `None` when none is
  * recorded.
  * reason : `str`
- * The stacker's own words for a set-aside frame; empty otherwise.
+ * The stacker's own words for a set-aside frame, or why a flagged
+ * frame is flagged (its elongation, the warning level and the set-aside
+ * threshold); empty otherwise.
  * date : `str`
  * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS`` (set-aside
  * frames only).
@@ -1138,14 +1140,10 @@ export interface FrameStatus {
  * stacked_at : `float` or `None`
  * When the latest stack file was written, in seconds since the Unix
  * epoch. `None` when the target has no stack.
- * typical_elongation : `float` or `None`
- * The typical elongation of the target's frames, which a flagged
- * frame's elongation stands far above. `None` when not known.
  */
 export interface FrameStatusReport {
   frames?: FrameStatus[];
   stackedAt?: number | null;
-  typicalElongation?: number | null;
 }
 
 /**

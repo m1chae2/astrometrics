@@ -1,7 +1,7 @@
 /**
  * @file test_frameStatus.test.ts
  * @description Tests of the File Browser's Status wording: the set-aside kinds, the hover text of a
- * flagged frame (with the backend's typical elongation), "not stacked yet", and the `status:` search filter.
+ * flagged frame (the library's reason word for word), "not stacked yet", and the `status:` search filter.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -28,7 +28,7 @@ describe('describeFrameStatus', () => {
     it('gives a set-aside frame the stacker reason word for word', () => {
         const info = describeFrameStatus(
             { path: '/e/a.fits', name: 'a.fits', state: 'set_aside', kind: 'clouded', reason: '203 stars against a typical 3348', restorable: true },
-            null, 10,
+            10,
         );
         expect(info.label).toBe('Set aside: cloud');
         expect(info.tooltip).toBe('203 stars against a typical 3348');
@@ -37,41 +37,47 @@ describe('describeFrameStatus', () => {
     });
 
     it('says when no reason is on record', () => {
-        const info = describeFrameStatus({ path: '/e/a.fits', name: 'a.fits', state: 'set_aside' }, null, 10);
+        const info = describeFrameStatus({ path: '/e/a.fits', name: 'a.fits', state: 'set_aside' }, 10);
         expect(info.tooltip).toBe(NO_REASON_ON_RECORD);
         expect(info.label).toBe('Set aside: other');
     });
 
-    it('words a flagged frame with its elongation and the typical one', () => {
-        const info = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'flagged', elongation: 1.4321 }, 1.08, 10);
+    it('shows the library reason for a flagged frame word for word', () => {
+        const reason = 'Stacked, but its stars are stretched: elongation 1.25, warning level 1.20, set-aside threshold 1.32.';
+        const info = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'flagged', elongation: 1.25, reason }, 10);
         expect(info.label).toBe('Flagged');
-        expect(info.tooltip).toBe('Stars stretched: elongation 1.43, session typical 1.08');
+        expect(info.tone).toBe('warning');
+        expect(info.tooltip).toBe(reason);
+    });
+
+    it('gives a flagged frame with no reason a plain sentence', () => {
+        const info = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'flagged', elongation: 1.25 }, 10);
+        expect(info.tooltip).toBe('Stacked, but its stars are stretched.');
     });
 
     it('says not stacked yet, with the reason', () => {
-        const withStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null, 10);
+        const withStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, 10);
         expect(withStack.label).toBe('Not stacked yet');
         expect(withStack.tooltip).toMatch(/after the last stack/);
-        const noStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null, null);
+        const noStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null);
         expect(noStack.tooltip).toMatch(/no stack yet/);
     });
 });
 
 describe('buildFrameStatusLookup', () => {
-    it('words each state the backend gives, with its typical elongation', () => {
+    it('words each state the backend gives, with the flagged reason', () => {
         const report: FrameStatusReport = {
             frames: [
                 { path: '/a.fits', name: 'a.fits', state: 'included' },
-                { path: '/b.fits', name: 'b.fits', state: 'flagged', elongation: 1.5 },
+                { path: '/b.fits', name: 'b.fits', state: 'flagged', elongation: 1.25, reason: 'Stacked, but its stars are stretched: elongation 1.25, warning level 1.20, set-aside threshold 1.32.' },
                 { path: '/c.fits', name: 'c.fits', state: 'not_stacked' },
             ],
             stackedAt: 5,
-            typicalElongation: 1.1,
         };
         const lookup = buildFrameStatusLookup(report);
         expect(lookup.get('/a.fits')?.kind).toBe('included');
         expect(lookup.get('/b.fits')?.kind).toBe('flagged');
-        expect(lookup.get('/b.fits')?.tooltip).toBe('Stars stretched: elongation 1.50, session typical 1.10');
+        expect(lookup.get('/b.fits')?.tooltip).toBe('Stacked, but its stars are stretched: elongation 1.25, warning level 1.20, set-aside threshold 1.32.');
         expect(lookup.get('/c.fits')?.kind).toBe('not-stacked');
     });
 

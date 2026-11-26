@@ -27,7 +27,7 @@ The argument helpers it shares with `ProcessingPipelines` live in
 """
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -1007,21 +1007,19 @@ class QualityRecords:
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
 
-    def frame_statuses(
-        self,
-        target: str | Target,
-        stacked_at: float | None,
-        flagged: Mapping[str, float] | None = None,
-        typical_elongation: float | None = None,
-    ) -> FrameStatusReport:
+    def frame_statuses(self, target: str | Target, stacked_at: float | None) -> FrameStatusReport:
         """Say what state each frame of a target is in, for a status column.
 
         Each frame of the target is ``not_stacked`` when it was taken after
         ``stacked_at`` (or there is no stack), ``flagged`` when it is in the
-        stack and named in ``flagged``, and ``included`` otherwise. The
-        frames in the target's `_excluded` folders follow as ``set_aside``,
-        with the stacker's kind and reason (see `set_aside_frames`), because
-        the target's own frame list no longer holds them. Nothing is written.
+        stack and its stored star elongation is at least the warning level
+        (``stacking.stretched_star_warning_elongation``, 1.2) but the
+        quarantine kept it, and ``included`` otherwise. A flagged frame's
+        reason gives its elongation, the warning level and its session's
+        set-aside threshold. The frames in the target's `_excluded` folders
+        follow as ``set_aside``, with the stacker's kind and reason (see
+        `set_aside_frames`), because the target's own frame list no longer
+        holds them. Nothing is written.
 
         Parameters
         ----------
@@ -1030,27 +1028,29 @@ class QualityRecords:
         stacked_at : `float` or `None`
             When the latest stack file was written, in seconds since the Unix
             epoch, or `None` when the target has no stack.
-        flagged : `Mapping` [`str`, `float`], optional
-            The frames whose stars stand out as stretched (such as a star-shape
-            review's standout frames), by path, with their elongation.
-        typical_elongation : `float`, optional
-            The typical elongation they stand out from, given back in the
-            report.
 
         Returns
         -------
         report : `FrameStatusReport`
             ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
             ``reason``, ``date``, ``exposure``, ``elongation``,
-            ``original_path``, ``restorable`` and ``restore_note``),
-            ``stacked_at`` and ``typical_elongation``.
+            ``original_path``, ``restorable`` and ``restore_note``) and
+            ``stacked_at``.
         """
         from astrometricslib.pipelines.stacking.frame_status import build_frame_statuses
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            stored_star_elongations,
+        )
+        from astrometricslib.utilities.frame_identity import frame_subject_id
 
         resolved = resolve_target(self._targets, target)
-        return build_frame_statuses(
-            resolved.frames, self.set_aside_frames(resolved), stacked_at, flagged, typical_elongation
-        )
+        stored = stored_star_elongations(resolved.id)
+        elongations = {
+            frame.path: stored[subject_id]
+            for frame in resolved.frames
+            if (subject_id := frame_subject_id(frame.path, resolved.id)) in stored
+        }
+        return build_frame_statuses(resolved.frames, self.set_aside_frames(resolved), stacked_at, elongations)
 
     def put_back_set_aside_frames(self, target: str | Target, paths: list[str]) -> list[str]:
         """Move chosen set-aside frames back into their target.

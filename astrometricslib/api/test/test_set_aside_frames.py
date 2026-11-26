@@ -292,17 +292,22 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
 def test_frame_statuses_list_the_targets_frames_with_the_flags(
     quality: QualityRecords, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The status call reads the target's frames and its set-aside frames."""
+    """The status call reads stored elongations and flags a stretched frame."""
     target = Target(
         id="M 1",
         frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
     )
     monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
+        lambda target_id: {"M 1/a.fits": 1.6, "M 1/b.fits": 1.7},
+    )
 
-    report = quality.frame_statuses(target, 200.0, {"/a.fits": 1.6}, 1.1)
+    report = quality.frame_statuses(target, 200.0)
 
     assert [(status.name, status.state) for status in report.frames] == [
         ("a.fits", "flagged"),
         ("b.fits", "not_stacked"),
     ]
-    assert report.typical_elongation == pytest.approx(1.1)
+    assert report.frames[0].elongation == pytest.approx(1.6)
+    assert "too small for the quarantine" in report.frames[0].reason

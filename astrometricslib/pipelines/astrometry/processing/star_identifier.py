@@ -156,6 +156,11 @@ class StarIdentifier(PlateSolutionSteps):
         # that entry is close enough to count as a match. The plate solution
         # check reads it through `nearest_catalog_separations_arcsec`.
         self._nearest_catalog_by_star: dict[int, float] = {}
+        # The Gaia stars per square degree over the last image, counted in
+        # `identify_stars_with_wcs` when Gaia was searched with every tile
+        # under the image complete (see `field_catalog_density`). The plate
+        # solution check sets its chance share from it. `None` otherwise.
+        self.field_catalog_density_per_square_degree: float | None = None
         # The plate solver's own fit residual (RMS, arcseconds) and matched
         # star count for the last solve. `None` when the solver gave none.
         self.plate_solve_fit_residual_rms_arcsec: float | None = None

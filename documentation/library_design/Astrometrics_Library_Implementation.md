@@ -375,7 +375,7 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 | Gaia time limits; depth steps after a slow answer | 45 s, 60 s; 2 of 1 mag | Partly measured ([AST-08](validation/astrometry.md#ast-08)) | §4.2 (step 4) |
 | Gaia depth: throughput; star width; sky; signal-to-noise; margin; cap; default | 0.62; 5″; 18.7 mag/″²; 11.6; 1 mag; G 21; G 18 | Partly measured ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
 | Gaia tile level | 7, split at 50,000 rows | Partly measured ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
-| Match radius; map-check circle/share | 10″; 2×/0.4 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2, §4.4.2 |
+| Match radius; map-check circle/share | 10″; 2×/chance+3σ≥0.35 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2, §4.4.2 |
 | Same-star tolerance; no Gaia number | 2″; 3″ | Measured ([AST-11](validation/astrometry.md#ast-11)) | §4.2 (step 4) |
 | Unresolved companions radius | 3″ | Partly measured ([AST-10](validation/astrometry.md#ast-10)) | §4.2 (step 4) |
 | Variable-star match radius | 3″ | Partly measured ([AST-12](validation/astrometry.md#ast-12)) | §5.2 (concept 4) |
@@ -428,6 +428,7 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS -->
 <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_STARS_TO_VERIFY_REUSED_WCS -->
 <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_MATCH_CONCENTRATION -->
+<!-- impl: astrometricslib.pipelines.shared.session_identification.MATCH_CONCENTRATION_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.shared.session_identification.SOLUTION_CHECK_RADIUS_FACTOR -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.simbad_matching.UNRESOLVED_COMPANION_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.shared.variable_star_catalogs.MATCH_RADIUS_ARCSEC -->

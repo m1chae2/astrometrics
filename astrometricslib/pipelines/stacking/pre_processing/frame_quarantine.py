@@ -109,6 +109,7 @@ __all__ = [
     "quarantine_preview_report",
     "read_quarantine_manifest",
     "restore_quarantined_frames",
+    "set_aside_elongation_limit",
     "split_into_batches",
 ]
 
@@ -278,6 +279,28 @@ sessions are stored, the colour value stays at 0.22. The contact sheets of
 2026-11-20 support it: NGC 6888 frame 113 (+0.20) has round stars, while
 M 106 frame 021 (+0.21) is trailed, so no lower value separates them
 (STK-02).
+"""
+
+STRETCHED_STAR_WARNING_ELONGATION = TunedParameter(
+    name="stacking.stretched_star_warning_elongation",
+    default=1.2,
+    unit="ratio",
+    description="Star elongation from which a frame's stars count as stretched, a warning only.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D07",
+)
+"""From this star elongation a frame's stars count as stretched.
+
+It is a warning level and sets nothing aside. Noise alone pushes the value
+of a round star a little above 1, most for faint stars. 1.2 is the point
+where a star is plainly oval to the eye (design estimate, WAY-D07). Two
+rules read it: the wayfinder's trailed-stars rule, and the frame-status rule
+(`frame_status.build_frame_statuses`), which flags a stacked frame whose
+stars are at least this stretched. It sits below the set-aside threshold
+(`set_aside_elongation_limit`, at least `TRAILED_ELONGATION_LIMIT`), so the
+two bound a warning band.
 """
 
 UNEVEN_SKY_SIGMAS = TunedParameter(
@@ -921,6 +944,35 @@ def session_unevenness_limit(unevenness: Sequence[float | None]) -> float | None
     )
 
 
+def set_aside_elongation_limit(elongations: Sequence[float], colour_camera: bool) -> float | None:
+    """Find the star elongation above which a frame of a batch is set aside.
+
+    Parameters
+    ----------
+    elongations : `Sequence` [`float`]
+        The known star elongations of the batch's frames.
+    colour_camera : `bool`
+        Whether the batch was taken with a colour camera, which gets the
+        wider `COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN`.
+
+    Returns
+    -------
+    limit : `float` or `None`
+        The larger of `TRAILED_ELONGATION_LIMIT` and the batch median plus
+        the rise (`ELONGATION_RISE_ABOVE_MEDIAN`, or the colour camera's).
+        A frame above it is trailed. `None` when no elongation is known.
+    """
+    if not elongations:
+        return None
+    rise_parameter = (
+        COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN if colour_camera else ELONGATION_RISE_ABOVE_MEDIAN
+    )
+    return max(
+        resolve(TRAILED_ELONGATION_LIMIT).value,
+        statistics.median(elongations) + resolve(rise_parameter).value,
+    )
+
+
 def judge_batch_with_notes(
     measurements: Sequence[dict[str, Any]],
 ) -> tuple[list[QuarantineDecision], list[str]]:
@@ -999,16 +1051,9 @@ def judge_batch_in_full(
 
     elongations = [m.get("star_elongation") for m in measurements]
     known_elongations = [value for value in elongations if value is not None]
-    elongation_limit = None
-    if known_elongations:
-        rise = (
-            resolve(COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN).value
-            if any(m.get("colour_camera") for m in measurements)
-            else resolve(ELONGATION_RISE_ABOVE_MEDIAN).value
-        )
-        elongation_limit = max(
-            resolve(TRAILED_ELONGATION_LIMIT).value, statistics.median(known_elongations) + rise
-        )
+    elongation_limit = set_aside_elongation_limit(
+        known_elongations, any(m.get("colour_camera") for m in measurements)
+    )
     if len(known_elongations) < len(measurements):
         missing = len(measurements) - len(known_elongations)
         notes.append(

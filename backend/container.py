@@ -198,9 +198,7 @@ class Container:
             open_port_forwards=not testing,
         )
 
-        self.target_service = TargetService(
-            self.config_service, astrometrics=self.astrometrics, review=self.wayfinder.review
-        )
+        self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)
         self.stellar_object_service = StellarService(
             self.config_service, astrometrics=self.astrometrics, wayfinder=self.wayfinder
         )

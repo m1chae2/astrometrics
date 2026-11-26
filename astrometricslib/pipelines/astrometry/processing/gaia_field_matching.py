@@ -40,6 +40,7 @@ from astrometricslib.pipelines.astrometry.processing.gaia_depth import (
 )
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     FieldGaiaStars,
+    field_catalog_density,
     load_field_gaia_stars,
     tiles_under_image,
 )
@@ -243,6 +244,7 @@ class GaiaFieldMatching:
     _detected_on_binned_copy: bool
     gaia_depth_prediction: GaiaDepthPrediction | None
     field_gaia_stars: FieldGaiaStars | None
+    field_catalog_density_per_square_degree: float | None
 
     def _add_flag(self, flag: str) -> None:
         """Record a limiting condition once for the current image.
@@ -438,6 +440,10 @@ class GaiaFieldMatching:
             logger.exception("Could not list the Gaia tiles under the image; Gaia naming is skipped.")
             return unmatched_after_simbad
         gaia_table, gaia_coords = field.table, field.coords
+        try:
+            self.field_catalog_density_per_square_degree = field_catalog_density(field, wcs, width, height)
+        except DATA_ERRORS:
+            logger.debug("Could not count the Gaia stars over the image; the density stays unknown.")
         if gaia_table is not None and gaia_coords is not None:
             gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 

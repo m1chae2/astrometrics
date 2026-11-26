@@ -35,6 +35,7 @@ measure them on your own data.
 from pydantic import BaseModel, ConfigDict
 
 from astrometricslib.parameters import (
+    STRETCHED_STAR_WARNING_ELONGATION,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -137,22 +138,10 @@ MINIMUM_SKY_TO_READ_NOISE_RATIO = TunedParameter(
 )
 
 # The most stretched the stars may be (long axis divided by short axis; 1 is
-# round) before the rule warns. Noise alone pushes the value of a round star
-# a little above 1, most for faint stars. 1.2 is the point where a star is
-# plainly oval to the eye. Design estimate, register entry WAY-D07.
-TRAILED_STAR_ELONGATION_LIMIT = TunedParameter(
-    name="wayfinding.trailed_star_elongation_limit",
-    default=1.2,
-    unit="ratio",
-    description=(
-        "The most stretched the stars may be (long axis divided by short axis; 1 is round) before the "
-        "rule warns."
-    ),
-    role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="WAY-D07",
-)
+# round) before the rule warns is `STRETCHED_STAR_WARNING_ELONGATION` (1.2),
+# imported above, not declared here. astrometricslib owns it, because its
+# frame-status rule flags a stacked frame at the same level. Design estimate,
+# register entry WAY-D07.
 
 # The share of the stack's noise variance that the master flat may add before
 # the rule warns. 0.03 is the figure of STK-05: a flat that adds under 3% to
@@ -432,7 +421,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         requires=[MetricRequirement(name=ELONGATION_METRIC, definition_version=1)],
         limits=[
             _design_limit(
-                resolve_parameter(TRAILED_STAR_ELONGATION_LIMIT).value,
+                resolve_parameter(STRETCHED_STAR_WARNING_ELONGATION).value,
                 "",
                 "A star whose long axis is 20% longer than its short axis is plainly oval to the eye.",
                 "WAY-D07",

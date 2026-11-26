@@ -11,7 +11,8 @@ equipment, a tuning run, the configuration or the default. A run sets a
 `ParameterContext` (`setup_parameter_context`, `frames_parameter_context`)
 naming the setup whose equipment and tuned values it reads. The two spectrum
 match limits are public so that wayfindinglib judges spectra with the same
-limits the pipeline uses. A `Tuner`
+limits the pipeline uses, and the stretched-star warning level so that its
+trailed-stars rule warns where the frame status flags. A `Tuner`
 derives one family of tuned values, and `run_tuning` stores them with their
 provenance in the config. A script and
 `wayfindinglib` import these names from here. Each is imported from the module
@@ -67,12 +68,16 @@ from astrometricslib.models.tuned_parameter import (
     WhenMissing,
 )
 from astrometricslib.pipelines.shared.quality.raw_frame_check import LOW_STAR_FRACTION
+from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+    STRETCHED_STAR_WARNING_ELONGATION,
+)
 
 __all__ = [
     "AMBIGUOUS_RMS_GAP",
     "LOW_STAR_FRACTION",
     "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
     "NO_GOOD_MATCH_RMS",
+    "STRETCHED_STAR_WARNING_ELONGATION",
     "TYPICAL_GUIDE_CYCLE_SECONDS",
     "ChangeNotice",
     "ConfigTunedValues",

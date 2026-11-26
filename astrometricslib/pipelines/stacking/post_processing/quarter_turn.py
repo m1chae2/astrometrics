@@ -43,15 +43,13 @@ from astropy.wcs import WCS, Sip
 
 from astrometricslib._internal.drivers.fits_access import (
     FITS_READ_ERRORS,
+    header_is_plate_solved,
     read_data,
     read_header,
     update_first_header,
     write_image,
 )
-from astrometricslib.pipelines.shared.session_identification import (
-    header_is_plate_solved,
-    put_wcs_in_header,
-)
+from astrometricslib.pipelines.shared.session_identification import put_wcs_in_header
 from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
 
 logger = logging.getLogger(__name__)

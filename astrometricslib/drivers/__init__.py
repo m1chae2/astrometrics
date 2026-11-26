@@ -24,13 +24,17 @@ SIMBAD driver every caller shares: it answers from the library's stored
 answers first and asks SIMBAD only when it must, and `get_gaia_archive`, the
 ESA Gaia archive connection (``launch_job`` and ``launch_job_async``). Both
 send every request through the outside-service gateway, which applies one rate
-limit and one pause rule to each service host.
+limit and one pause rule to each service host. `header_is_plate_solved` says
+whether a FITS header's sky map came from a plate solve, not from the place
+the mount was told to point; the library, the backend and the Planetarium all
+use this one test.
 The private driver code (Siril, catalog
 access, camera profiles) lives in `astrometricslib._internal.drivers`.
 Each name here is imported from the module where its code lives today.
 """
 
 from astrometricslib._internal.drivers.cached_simbad_driver import get_simbad_driver
+from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
 from astrometricslib._internal.drivers.outside_services import get_gaia_archive
 from astrometricslib._internal.drivers.sky_tiles import (
     build_pixel_query,
@@ -102,6 +106,7 @@ __all__ = [
     "get_target_camera_names",
     "get_target_data_version",
     "get_target_document_signs",
+    "header_is_plate_solved",
     "healpix_pixels_of_points",
     "is_loopback_host",
     "is_path_inside",

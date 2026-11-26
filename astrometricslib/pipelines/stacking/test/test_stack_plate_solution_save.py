@@ -17,7 +17,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.pipelines.shared.session_identification import header_is_plate_solved
+from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
 from astrometricslib.pipelines.stacking import stage
 from astrometricslib.pipelines.stacking.post_processing import stack_noise
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (

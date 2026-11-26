@@ -5,11 +5,15 @@ Every test here writes a FITS file with the image split across HDU0
 caused silent data loss before -- see the module docstring on
 `fits_access.py`. Each test proves the function under test reads HDU1's
 header/data correctly rather than HDU0's near-empty one.
+
+The last tests cover `header_is_plate_solved`, the one test of whether a
+header's sky map came from a plate solve.
 """
 
 from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from astrometricslib._internal.drivers import fits_access
@@ -268,3 +272,88 @@ def test_update_first_header_leaves_the_file_alone_when_nothing_changed(tmp_path
     assert fits_access.update_first_header(str(path), _decline) is False
     assert Path(path).stat().st_size == size_before
     assert "TESTKEY" not in fits_access.read_header(str(path))
+
+
+def _sky_axes_header() -> fits.Header:
+    """Build a header with both sky axes and nothing that marks a solve.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header`
+        The ``CTYPE``, ``CRVAL`` and ``CRPIX`` cards of axes 1 and 2, as the
+        capture program writes them from the mount's pointing.
+    """
+    header = fits.Header()
+    header["CTYPE1"] = "RA---TAN"
+    header["CTYPE2"] = "DEC--TAN"
+    header["CRVAL1"] = 10.0
+    header["CRVAL2"] = 41.0
+    header["CRPIX1"] = 100.0
+    header["CRPIX2"] = 100.0
+    return header
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        (True, True),
+        (False, False),
+        ("T", True),
+        ("true", True),
+        (" 1 ", True),
+        ("F", False),
+        ("FALSE", False),
+        ("0", False),
+        ("", False),
+        (1, True),
+        (0, False),
+    ],
+)
+def test_the_plate_solved_card_is_read_as_a_fits_logical(flag: object, expected: bool) -> None:
+    """A text "F" is false, unlike plain `bool`; "T", "TRUE" and "1" are true.
+
+    Parameters
+    ----------
+    flag : `object`
+        The ``PLTSOLVD`` value.
+    expected : `bool`
+        Whether the header counts as plate solved.
+    """
+    header = _sky_axes_header()
+    header[fits_access.PLATE_SOLVED_KEYWORD] = flag
+    assert fits_access.header_is_plate_solved(header) is expected
+
+
+def test_a_pointing_only_header_is_not_plate_solved() -> None:
+    """Sky axes alone, with no card and no SIP terms, are only a pointing."""
+    assert not fits_access.header_is_plate_solved(_sky_axes_header())
+
+
+def test_sip_terms_mark_a_header_solved_before_the_card_existed() -> None:
+    """A header with SIP terms and no card was written by a solver."""
+    header = _sky_axes_header()
+    header["A_ORDER"] = 2
+    assert fits_access.header_is_plate_solved(header)
+
+
+@pytest.mark.parametrize("missing", ["CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2"])
+def test_a_solved_card_without_both_sky_axes_is_not_a_solution(missing: str) -> None:
+    """A true card is not enough when a sky axis card is missing.
+
+    Parameters
+    ----------
+    missing : `str`
+        The sky-axis card to leave out.
+    """
+    header = _sky_axes_header()
+    header[fits_access.PLATE_SOLVED_KEYWORD] = True
+    header["A_ORDER"] = 2
+    del header[missing]
+    assert not fits_access.header_is_plate_solved(header)
+
+
+def test_the_public_name_is_the_same_function() -> None:
+    """Other apps reach the one test through `astrometricslib.drivers`."""
+    from astrometricslib import drivers
+
+    assert drivers.header_is_plate_solved is fits_access.header_is_plate_solved

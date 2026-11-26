@@ -190,6 +190,7 @@ EXPECTED_MODULE_NAMES = {
         "get_target_camera_names",
         "get_target_data_version",
         "get_target_document_signs",
+        "header_is_plate_solved",
         "healpix_pixels_of_points",
         "is_loopback_host",
         "is_path_inside",

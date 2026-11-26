@@ -172,11 +172,9 @@ def _run_variability_analysis_for_session(
     seed_stars = None
     identify_result = None
     if use_astrometry_seed and star_identifier is not None and target is not None:
+        from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
         from astrometricslib._internal.drivers.image import AstrometricsImage
-        from astrometricslib.pipelines.shared.session_identification import (
-            header_is_plate_solved,
-            identify_session_stars,
-        )
+        from astrometricslib.pipelines.shared.session_identification import identify_session_stars
         from astrometricslib.pipelines.shared.target_center_hint import resolve_solved_stack_wcs
 
         center_ra, center_dec = resolve_target_center_hint(target)

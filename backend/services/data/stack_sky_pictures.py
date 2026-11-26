@@ -7,6 +7,11 @@ works that out from the stretched stack's header (``<stack>_processed.fits``):
 its plate solution, including the SIP distortion terms, maps a pixel to a
 right ascension and declination. Only the header is read; no pixels are.
 
+Only a real plate solution counts (`header_is_plate_solved`). A header that
+holds just the place the mount was told to point can sit about 80 pixels off,
+so a stack with only that map is left off the sky. That is a status, not an
+error: it is logged at the information level and nothing is shown.
+
 The picture is the color picture when the target has one
 (``stacking.color_preview_image``), else the stack's ``_preview.jpg``. Both
 are written on the same pixel grid as the stretched stack, with the file's
@@ -30,6 +35,8 @@ from typing import Any
 import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
+
+from astrometricslib.drivers import header_is_plate_solved
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +111,11 @@ def sky_grid(header: fits.Header, points_per_side: int = GRID_POINTS_PER_SIDE) -
     -------
     grid : `list` [`list` [`float`]] or `None`
         ``points_per_side`` squared ``[ra, dec]`` pairs in degrees, or `None`
-        when the header has no usable plate solution.
+        when the header has no usable plate solution. A sky map that did not
+        come from a plate solve (`header_is_plate_solved`) is not used.
     """
+    if not header_is_plate_solved(header):
+        return None
     ctype1 = str(header.get("CTYPE1", ""))
     ctype2 = str(header.get("CTYPE2", ""))
     if not (ctype1.startswith("RA") and ctype2.startswith("DEC")):
@@ -212,6 +222,7 @@ class StackSkyPictures:
             return None
         grid = sky_grid(header)
         if grid is None:
+            logger.info("Stack %s has no plate solution; it is left off the sky.", processed)
             return None
         return {
             "picturePath": picture,

@@ -293,7 +293,7 @@ Table 5 lists the steps.
 | 4 | Catalog cross-match | Fill the Gaia tiles, refit to Gaia, name the stars. |
 | 5 | Solution check | Judge the residual against the star width. |
 
-Before naming, every Gaia sky tile under the image is filled to a depth predicted from equipment and exposure. Stars are matched only in complete tiles, since a tile missing faint stars could give a detection a neighbor's name; missing tiles are counted. Every request to an outside catalog passes through one gateway that limits each host's rate and pauses a host that answers too busy or keeps timing out. A tile of sky is asked once; the answer is kept with its fetch time, and a fresh one is used with no network call. A paused catalog is answered from stored results, with a warning of their age, and only a field never stored stays unverified.
+Before naming, every Gaia sky tile under the image is filled to a depth predicted from equipment and exposure. Stars are matched only in complete tiles, since a tile missing faint stars could give a detection a neighbor's name; missing tiles are counted. Each tile is asked once and kept with its fetch time; a fresh one needs no network call. A paused catalog is answered from stored results, with a warning of their age, and only a field never stored stays unverified.
 
 ### 4.4 Quality metrics and solution validation
 
@@ -303,7 +303,7 @@ At least four stars are needed, since one quad needs four. Below a higher count 
 
 #### 4.4.2 After solving: checking the result
 
-The solver must find a WCS, and enough stars must match a catalog entry, or the residual averages too few stars. The residual of Section 4.2, step 6, must stay below a fixed fraction of the star width. A larger residual means a wrong match, a bad distortion model, or a wrong field. A network check fails when remote catalog lookups were paused or too many failed, which tells a sparse field from a network problem. <!-- impl: astrometricslib.models.quality.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates -->
+The solver must find a WCS with enough catalog-matched stars to average the residual over. The residual (Section 4.2, step 6) must stay below a fixed fraction of the star width; a larger one means a wrong match, a bad distortion model, or a wrong field. A network check fails when lookups were paused or too many failed, telling a sparse field from a network problem. A map the solver did not just make is checked by its stars: under a wrong map, matches are chance pairings spread evenly within the match radius (median $1/\sqrt{2}$ of it), so the median match distance is limited to a fraction of that radius. <!-- impl: astrometricslib.models.quality.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.shared.session_identification.plate_solution_problem -->
 
 :::{warning}
 **A pass is not a measure of position accuracy.** The residual limit catches a failed solve and does not rank good ones.

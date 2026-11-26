@@ -531,7 +531,7 @@ def _read_solution(stack_path: str, drivers: Any) -> tuple[WCS, bool, Any]:
     InvalidArgumentError
         When the stack cannot be solved.
     """
-    from astrometricslib.pipelines.shared.session_identification import header_is_plate_solved
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
     from astrometricslib.pipelines.stacking.stage import ensure_stack_plate_solution
 
     header = read_header(stack_path)

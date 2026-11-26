@@ -23,7 +23,12 @@ from typing import Any, Protocol
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, update_first_header
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    PLATE_SOLVED_KEYWORD,
+    header_is_plate_solved,
+    update_first_header,
+)
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
@@ -37,6 +42,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +120,15 @@ class SessionStarIdentifier(Protocol):
 # Setting the limit to 0.10 (10%) easily separates the good from the bad,
 # ensuring a correct solution isn't accidentally thrown away just
 # because the star field is sparse.
+# The share does not separate them in a dense field. A wrong solution still
+# pairs a star with whatever catalog star happens to fall within the match
+# radius. The chance is 1 - exp(-pi R^2 n) for a catalog of n stars per unit
+# area: about 17% for a 10 arcsecond radius in a Milky Way field with
+# 7,700 catalog stars per square degree, and about 30% at the 14 arcsecond
+# radius of a Nikon D5300 behind a 300 mm lens. There the median distance
+# test of `plate_solution_problem` (MAX_MEDIAN_CATALOG_OFFSET_FRACTION) is
+# what catches a wrong solution. Both a reused header map and a photometry
+# session's solution go through both tests (AST-D19).
 MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = TunedParameter(
     name="shared.min_catalog_match_fraction_for_reused_wcs",
     default=0.10,
@@ -143,17 +158,24 @@ MIN_STARS_TO_VERIFY_REUSED_WCS = TunedParameter(
 
 # Largest median distance, over a run's catalog-matched stars, between a
 # star's position and its catalog position before the run's plate solution
-# is judged wrong. On the real catalog (backup of 2026-11-24), the median of
-# the stored match distances is below 2.5 arcseconds for every target with
-# at least 20 matched stars except the Moon field (3.8), M 67 (6.2) and Algol
-# (6.5); the 99th percentile of all 9,965 match distances is 9.75. The M 31
-# photometry run of 2026-11-04 used a header map 56 arcseconds off. 10
-# arcseconds sits above every good run and well below that one.
-MAX_MEDIAN_CATALOG_OFFSET_ARCSEC = TunedParameter(
-    name="shared.max_median_catalog_offset_arcsec",
-    default=10.0,
-    unit="arcsec",
-    description="Largest median offset of matched stars from the catalog for a plate solution to stand.",
+# is judged wrong, as a share of the catalog match radius
+# (`CATALOG_MATCH_RADIUS_ARCSEC`, resolved for the run's plate scale).
+# A limit in arcseconds cannot work: a star is matched only within that
+# radius, so no median can exceed it. Under a wrong solution the matches that
+# remain are chance pairings, spread evenly over the match circle, so their
+# distances have a median of the radius divided by the square root of 2
+# (about 0.71 of it); with 20 matches the spread of that median is about 0.08
+# of the radius, and half the radius sits about 2.6 such spreads below it. A
+# right solution matches most stars within a few arcseconds: on the real
+# catalog (backup of 2026-11-24) the median of the stored match distances is
+# below 2.5 arcseconds for every target with at least 20 matched stars
+# except the Moon field (3.8), M 67 (6.2) and Algol (6.5). Design estimate
+# until shifted real solutions are checked (AST-D19).
+MAX_MEDIAN_CATALOG_OFFSET_FRACTION = TunedParameter(
+    name="shared.max_median_catalog_offset_fraction",
+    default=0.5,
+    unit="fraction of match radius",
+    description="Largest median offset of matched stars from the catalog, as a share of the match radius.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.RELATIVE,
@@ -166,9 +188,16 @@ def plate_solution_problem(stellar_objects: list[StellarObject]) -> str | None:
 
     A wrong solution puts every star somewhere it is not. Few stars then
     find their catalog star (`MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`),
-    and those that do sit far from it (`MAX_MEDIAN_CATALOG_OFFSET_ARCSEC`).
-    Saving such a run would make new position-only stars at false
+    and the ones that do are chance pairings, spread evenly over the match
+    circle. Their median distance is then about 0.71 of the match radius,
+    above the limit of `MAX_MEDIAN_CATALOG_OFFSET_FRACTION` times that
+    radius. Saving such a run would make new position-only stars at false
     positions and give light curves to the wrong stars.
+
+    The match radius is `CATALOG_MATCH_RADIUS_ARCSEC` as the current run
+    resolves it (it follows the plate scale), the same radius the star
+    identifier matched with. Call this inside the run that identified the
+    stars.
 
     Parameters
     ----------
@@ -197,23 +226,16 @@ def plate_solution_problem(stellar_objects: list[StellarObject]) -> str | None:
     if not separations:
         return None
     median_offset = statistics.median(separations)
-    if median_offset > resolve(MAX_MEDIAN_CATALOG_OFFSET_ARCSEC).value:
-        return f"the matched stars sit a median {median_offset:.1f} arcsec from their catalog positions"
+    match_radius = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
+    fraction = float(resolve(MAX_MEDIAN_CATALOG_OFFSET_FRACTION).value)
+    limit = fraction * match_radius
+    if median_offset > limit:
+        return (
+            f"the matched stars sit a median {median_offset:.1f} arcsec from their catalog positions "
+            f"(limit {limit:.1f} arcsec, {fraction:g} of the {match_radius:.1f} arcsec match radius)"
+        )
     return None
 
-
-# The keywords that describe where an image points on the sky, for the first
-# two axes. `write_wcs_to_fits_header` deletes these before it writes a new
-# solution. Without that step, a card from an older solve can survive and
-# contradict the new one. For example, an old `CD1_1` matrix outranks a new
-# `PC1_1` matrix when astropy reads the header, and an old `A_4_0` term
-# stays next to a new second-order SIP fit.
-# The header card that marks a sky map as written by a plate solve of this
-# library. Camera and capture programs also write position keywords (the
-# place the mount was told to point), which are only a pointing guess, so a
-# reader that needs a true solution looks for this card or for the distortion
-# terms that only a solver fits (see `header_is_plate_solved`).
-PLATE_SOLVED_KEYWORD = "PLTSOLVD"
 
 # The header card that says the sky map was refit to Gaia stars after the
 # solver made it (see `wcs_refinement`). A file with no card, or a false one,
@@ -221,35 +243,18 @@ PLATE_SOLVED_KEYWORD = "PLTSOLVD"
 # and save (`stage.save_refit_stack_plate_solution`).
 REFIT_TO_GAIA_KEYWORD = "WCSREFIT"
 
+# The keywords that describe where an image points on the sky, for the first
+# two axes. `write_wcs_to_fits_header` deletes these before it writes a new
+# solution. Without that step, a card from an older solve can survive and
+# contradict the new one. For example, an old `CD1_1` matrix outranks a new
+# `PC1_1` matrix when astropy reads the header, and an old `A_4_0` term
+# stays next to a new second-order SIP fit.
 _STALE_WCS_KEYWORD_PATTERN = re.compile(
     r"^(WCSAXES|CTYPE[12]|CRVAL[12]|CRPIX[12]|CDELT[12]|CUNIT[12]|CROTA[12]"
     r"|PC[12]_[12]|CD[12]_[12]|PV[12]_\d+|PS[12]_\d+"
     r"|LONPOLE|LATPOLE|RADESYS|RADECSYS|EQUINOX"
     r"|(A|B|AP|BP)_ORDER|(A|B|AP|BP)_\d+_\d+|(A|B)_DMAX)$"
 )
-
-
-def header_is_plate_solved(header: fits.Header) -> bool:
-    """Say whether a header's sky map came from a plate solve.
-
-    A header can hold sky-map keywords that are only the position the mount
-    was told to point at. Those are not a solution: a star placed with them
-    can sit tens of pixels from where it really is.
-
-    Parameters
-    ----------
-    header : `astropy.io.fits.Header`
-        The first header of a FITS file.
-
-    Returns
-    -------
-    is_solved : `bool`
-        True when the header carries `PLATE_SOLVED_KEYWORD` as true, or SIP
-        distortion terms (``A_ORDER``), which a solver fits and a pointing
-        guess does not have. The second test recognizes files solved before
-        the card was written.
-    """
-    return bool(header.get(PLATE_SOLVED_KEYWORD, False)) or "A_ORDER" in header
 
 
 def header_is_refit_to_gaia(header: fits.Header) -> bool:
@@ -562,25 +567,6 @@ def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
     return sum(1 for star in stellar_objects if star.is_catalog_identified)
 
 
-def _reused_wcs_looks_untrustworthy(stellar_objects: list[StellarObject]) -> bool:
-    """Check if the saved map in the image file is actually garbage.
-
-    Sometimes an image has a saved map, but it's completely wrong.
-    This can be determined because when trying to look up the stars
-    using that map, none of them match the real database.
-
-    Returns
-    -------
-    untrustworthy : `bool`
-        True if the saved map is so bad it needs to be thrown out and
-        recalculated.
-    """
-    if len(stellar_objects) < resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value:
-        return False
-    matched_fraction = _catalog_matched_count(stellar_objects) / len(stellar_objects)
-    return matched_fraction < resolve(MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS).value
-
-
 @dataclass
 class SessionIdentificationResult:
     """Result of identifying a session's stars from its reference frame."""
@@ -592,9 +578,9 @@ class SessionIdentificationResult:
     plate_solve_succeeded: bool = False
     simbad_matched_count: int = 0
     sources_detected: int = 0
-    # True when a reused header WCS matched too few catalog stars to be
-    # trusted and was replaced by a fresh plate solve; see
-    # MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS.
+    # True when a reused header WCS failed `plate_solution_problem` (too few
+    # catalog matches, or matches too far from their catalog stars) and was
+    # replaced by a fresh plate solve.
     header_wcs_replaced_after_verification: bool = False
     # How well the plate solve that produced `wcs` fit its reference stars.
     # `fit_residual_rms_arcsec` is the root mean square (RMS) distance, in
@@ -819,16 +805,15 @@ def _reverify_wcs_solution(
         when it replaced the header WCS, otherwise `fit_statistics`
         unchanged.
     """
-    if not (reused_existing_header_wcs and _reused_wcs_looks_untrustworthy(stellar_objects)):
+    problem = plate_solution_problem(stellar_objects) if reused_existing_header_wcs else None
+    if problem is None:
         return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
 
     matched_before = _catalog_matched_count(stellar_objects)
     logger.warning(
-        "Reused header WCS for %s identified only %s/%s stars against a catalog; discarding it and "
-        "plate-solving this frame fresh.",
+        "Reused header WCS for %s looks wrong (%s); discarding it and plate-solving this frame fresh.",
         reference_image.path,
-        matched_before,
-        len(stellar_objects),
+        problem,
     )
     # write_back=False: the header is only corrected below, once the
     # fresh solve has actually proven better. Overwriting first would

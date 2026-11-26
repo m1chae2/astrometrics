@@ -117,7 +117,15 @@ def _make_image(wcs: object = None, path: str = "/fake/reference.fits") -> Magic
     image.path = path
     image.data = np.zeros((100, 100), dtype=np.float32)
     # A plate-solved header, so a header map counts as a solution.
-    image.header = {"PLTSOLVD": True}
+    image.header = {
+        "PLTSOLVD": True,
+        "CTYPE1": "RA---TAN",
+        "CTYPE2": "DEC--TAN",
+        "CRVAL1": 10.0,
+        "CRVAL2": 41.0,
+        "CRPIX1": 50.0,
+        "CRPIX2": 50.0,
+    }
     return image
 
 
@@ -151,7 +159,7 @@ def _identify_marking(matched_count: int) -> Callable[..., Any]:
     def _identify(
         stellar_objects: list[StellarObject], wcs: object, width: int, height: int
     ) -> list[StellarObject]:
-        """Mark the first stars as identified and hand the list back.
+        """Give every star a position, mark the first as identified, hand back.
 
         Parameters
         ----------
@@ -167,6 +175,10 @@ def _identify_marking(matched_count: int) -> Callable[..., Any]:
         stellar_objects : `list` [`StellarObject`]
             The same list.
         """
+        # The real identifier gives every star a sky position.
+        for index, star in enumerate(stellar_objects):
+            star.right_ascension = 10.0 + index * 0.01
+            star.declination = 41.0
         for star in stellar_objects[:matched_count]:
             star.is_catalog_identified = True
         return stellar_objects

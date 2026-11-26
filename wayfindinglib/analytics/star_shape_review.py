@@ -1,8 +1,9 @@
 """Purpose: Turn stored star-shape measurements into plain verdicts.
 
 Description: `astrometricslib` measures how stretched the stars of each frame
-are (`frame.star_elongation`), which way (`frame.star_elongation_angle_deg`,
-with a 0 to 1 coherence in the row's reason text) and how wide they are at
+are (`frame.star_elongation`), which way (`frame.star_elongation_angle_deg`),
+how well the stars agree on that way (`frame.star_elongation_coherence`, 0
+to 1) and how wide they are at
 the center and in the four corners of the field. This module reads those
 stored rows and says what they suggest:
 
@@ -26,7 +27,6 @@ test. `read_star_shape_rows` reads the stored rows.
 """
 
 import math
-import re
 import statistics
 from collections.abc import Sequence
 from typing import Any
@@ -61,10 +61,10 @@ FRAME_ELONGATION_METRIC = "frame.star_elongation"
 """Long axis over short axis of a frame's stars, with its pinned version."""
 
 FRAME_ANGLE_METRIC = "frame.star_elongation_angle_deg"
-"""Direction of the long axis of a frame's stars.
+"""Direction of the long axis of a frame's stars."""
 
-The row's reason text holds the coherence.
-"""
+FRAME_COHERENCE_METRIC = "frame.star_elongation_coherence"
+"""How well a frame's stars agree on the direction, 0 to 1."""
 
 FRAME_CENTER_WIDTH_METRIC = "frame.star_width_center_px"
 """Median star width at the center of a frame, in pixels (AST-18)."""
@@ -83,6 +83,9 @@ STACK_ELONGATION_METRIC = "stacking.star_elongation"
 STACK_ANGLE_METRIC = "stacking.star_elongation_angle_deg"
 """The stack's direction of the long axis. Optional."""
 
+STACK_COHERENCE_METRIC = "stacking.star_elongation_coherence"
+"""How well the stack's stars agree on the direction. Optional."""
+
 STACK_CENTER_WIDTH_METRIC = "stacking.star_width_center_px"
 """The stack's center width, in pixels. Optional."""
 
@@ -94,6 +97,7 @@ STACK_CORNER_WIDTH_METRICS = {
 PINNED_FRAME_SHAPE_METRICS = {
     FRAME_ELONGATION_METRIC: 1,
     FRAME_ANGLE_METRIC: 2,
+    FRAME_COHERENCE_METRIC: 1,
     FRAME_CENTER_WIDTH_METRIC: 1,
     **dict.fromkeys(FRAME_CORNER_WIDTH_METRICS.values(), 1),
 }
@@ -124,9 +128,6 @@ square root of N: about 0.16 for 30 stars. Half is three times that, so noise
 alone rarely reaches it, while a real shared stretch gives values near 1.
 Design estimate, register row WAY-D148. It is not yet measured on real frames.
 """
-
-_COHERENCE_PATTERN = re.compile(r"coherence of ([0-9]*\.?[0-9]+)")
-"""Finds the coherence in the reason text of an angle measurement."""
 
 
 def read_star_shape_rows(
@@ -186,15 +187,22 @@ def read_star_shape_rows(
     return frames, stack
 
 
-def _frame_names() -> tuple[str, str, str, dict[str, str]]:
+def _frame_names() -> tuple[str, str, str, str, dict[str, str]]:
     """Name the frame metrics in the order `_shape_from_rows` reads them.
 
     Returns
     -------
     names : `tuple`
-        The elongation, angle and center-width metrics, and the corner metrics.
+        The elongation, angle, coherence and center-width metrics, and the
+        corner metrics.
     """
-    return FRAME_ELONGATION_METRIC, FRAME_ANGLE_METRIC, FRAME_CENTER_WIDTH_METRIC, FRAME_CORNER_WIDTH_METRICS
+    return (
+        FRAME_ELONGATION_METRIC,
+        FRAME_ANGLE_METRIC,
+        FRAME_COHERENCE_METRIC,
+        FRAME_CENTER_WIDTH_METRIC,
+        FRAME_CORNER_WIDTH_METRICS,
+    )
 
 
 def _query_rows(astrometrics: Any, metric: str, level: str, target_id: str) -> list[Any]:
@@ -234,13 +242,19 @@ def _read_stack(astrometrics: Any, target_id: str) -> FrameStarShape | None:
     newest = max(elongation_rows, key=lambda row: row.measured_at)
     subject = newest.subject.subject_id
     values: dict[str, Any] = {STACK_ELONGATION_METRIC: newest}
-    for metric in (STACK_ANGLE_METRIC, STACK_CENTER_WIDTH_METRIC, *STACK_CORNER_WIDTH_METRICS.values()):
+    for metric in (
+        STACK_ANGLE_METRIC,
+        STACK_COHERENCE_METRIC,
+        STACK_CENTER_WIDTH_METRIC,
+        *STACK_CORNER_WIDTH_METRICS.values(),
+    ):
         for row in _query_rows(astrometrics, metric, "stack", target_id):
             if row.subject.subject_id == subject:
                 values[metric] = row
     names = (
         STACK_ELONGATION_METRIC,
         STACK_ANGLE_METRIC,
+        STACK_COHERENCE_METRIC,
         STACK_CENTER_WIDTH_METRIC,
         STACK_CORNER_WIDTH_METRICS,
     )
@@ -248,7 +262,7 @@ def _read_stack(astrometrics: Any, target_id: str) -> FrameStarShape | None:
 
 
 def _shape_from_rows(
-    path: str, timestamp: float | None, rows: dict[str, Any], names: tuple[str, str, str, dict[str, str]]
+    path: str, timestamp: float | None, rows: dict[str, Any], names: tuple[str, str, str, str, dict[str, str]]
 ) -> FrameStarShape:
     """Gather one subject's stored rows into a `FrameStarShape`.
 
@@ -257,22 +271,19 @@ def _shape_from_rows(
     shape : `FrameStarShape`
         The subject's numbers; a number with no stored row is `None`.
     """
-    elongation_name, angle_name, center_name, corner_names = names
-    elongation_row, angle_row, center_row = (
+    elongation_name, angle_name, coherence_name, center_name, corner_names = names
+    elongation_row, angle_row, coherence_row, center_row = (
         rows.get(elongation_name),
         rows.get(angle_name),
+        rows.get(coherence_name),
         rows.get(center_name),
     )
-    coherence = None
-    if angle_row is not None:
-        match = _COHERENCE_PATTERN.search(angle_row.reason or "")
-        coherence = float(match.group(1)) if match else None
     return FrameStarShape(
         path=path,
         timestamp=timestamp,
         elongation=None if elongation_row is None else float(elongation_row.value),
         angle_degrees=None if angle_row is None else float(angle_row.value),
-        direction_coherence=coherence,
+        direction_coherence=None if coherence_row is None else float(coherence_row.value),
         center_width_px=None if center_row is None else float(center_row.value),
         corner_widths_px={
             region: float(rows[metric].value) for region, metric in corner_names.items() if metric in rows

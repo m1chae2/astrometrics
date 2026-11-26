@@ -47,6 +47,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_ELONGATION_COHERENCE,
     FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
     FRAME_STAR_WIDTH_EFFECTIVE_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
@@ -424,7 +425,8 @@ def test_round_stars_read_round(round_frame_result: dict[str, list[QualityMeasur
     """Round stars give an elongation near 1 and a weak angle."""
     elongation = round_frame_result[FRAME_STAR_ELONGATION][0]
     assert 1.0 <= elongation.value < 1.06
-    assert "coherence" in round_frame_result[FRAME_STAR_ELONGATION_ANGLE_DEG][0].reason
+    coherence = round_frame_result[FRAME_STAR_ELONGATION_COHERENCE][0]
+    assert coherence.value is not None and 0.0 <= coherence.value <= 1.0
 
 
 def test_stretched_stars_give_their_elongation_and_angle() -> None:

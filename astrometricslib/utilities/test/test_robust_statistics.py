@@ -3,7 +3,8 @@
 The robust spread gets numbers with a known answer: a formula check, a stray
 value, values with gaps (not-a-number), and an empty list. The per-axis
 spread of two-dimensional misses gets a large simulated sample whose answer
-is known.
+is known. The clipping loop and the gap-skipping median get small lists
+with known answers.
 """
 
 import numpy as np
@@ -12,8 +13,10 @@ import pytest
 from astrometricslib.utilities.robust_statistics import (
     MAD_TO_SIGMA,
     MEDIAN_DISTANCE_TO_AXIS_SIGMA,
+    median_or_none,
     per_axis_sigma_from_distances,
     robust_sigma,
+    sigma_clipped_values,
 )
 
 
@@ -79,3 +82,37 @@ def test_per_axis_sigma_recovers_the_error_of_one_axis() -> None:
 def test_per_axis_sigma_of_nothing_is_not_a_number() -> None:
     """No distances give no spread."""
     assert np.isnan(per_axis_sigma_from_distances([]))
+
+
+def test_median_or_none_skips_gaps() -> None:
+    """Missing values are left out, and no known value gives None."""
+    assert median_or_none([3.0, None, 1.0, 2.0]) == pytest.approx(2.0)
+    assert median_or_none(value for value in (None, None)) is None
+    assert median_or_none([]) is None
+
+
+def test_sigma_clipped_values_drops_outliers_and_gaps() -> None:
+    """Bright outliers and not-a-number values are gone after clipping."""
+    rng = np.random.default_rng(3)
+    values = np.concatenate([rng.normal(100.0, 2.0, 400), np.full(20, 5000.0), [np.nan]])
+    kept = sigma_clipped_values(values, minimum_count=10, maximum_passes=5, clip_sigma=3.0)
+
+    assert kept is not None
+    assert kept.max() < 200.0
+    assert np.all(np.isfinite(kept))
+
+
+def test_sigma_clipped_values_keeps_the_minimum_count() -> None:
+    """Too few values give None; no pass may keep fewer than the minimum."""
+    assert sigma_clipped_values([1.0, 2.0], minimum_count=3, maximum_passes=5, clip_sigma=3.0) is None
+    values = [0.0, 0.1, -0.1, 0.05, 50.0]
+    kept = sigma_clipped_values(values, minimum_count=5, maximum_passes=5, clip_sigma=3.0)
+    assert kept is not None
+    assert kept.size == 5
+
+
+def test_sigma_clipped_values_stops_on_zero_spread() -> None:
+    """Values with no spread are returned as they are."""
+    kept = sigma_clipped_values([4.0] * 10 + [9.0], minimum_count=3, maximum_passes=5, clip_sigma=3.0)
+    assert kept is not None
+    assert kept.size == 11

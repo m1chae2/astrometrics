@@ -25,8 +25,6 @@ warning the run logged (`logged_warnings_notice_measurement`).
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-import numpy as np
-
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gate_result import (
@@ -133,6 +131,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     build_measurement,
     gate_measurement,
 )
+from astrometricslib.utilities.robust_statistics import median_or_none
 
 # The percentage of rejected frames needed to trigger a quality warning flag.
 # Normal processing naturally rejects a small number of frames (around 7.2%
@@ -1220,22 +1219,6 @@ def steady_number_needs_run_data(gate: GateResult) -> bool:
     )
 
 
-def _median_or_none(values: Sequence[float]) -> float | None:
-    """Find the median of some values, or `None` when there are none.
-
-    Parameters
-    ----------
-    values : `Sequence` [`float`]
-        The values.
-
-    Returns
-    -------
-    median : `float` or `None`
-        The median, or `None` for an empty sequence.
-    """
-    return float(np.median(values)) if values else None
-
-
 def _worst_centroid_values(
     summaries: Sequence[CentroidShiftSummary],
 ) -> tuple[float | None, float | None]:
@@ -1377,16 +1360,12 @@ def photometry_run_measurements(
         ),
         (
             PHOTOMETRY_SCINTILLATION_COEFFICIENT,
-            _median_or_none([
-                record.coefficient
-                for record in inputs.session_scintillation
-                if record.coefficient is not None
-            ]),
+            median_or_none(record.coefficient for record in inputs.session_scintillation),
             "No session had a scintillation term added.",
         ),
         (
             PHOTOMETRY_SCINTILLATION_TERM_MEDIAN_MAG,
-            _median_or_none([
+            median_or_none([
                 record.used_mmag / 1000.0
                 for record in inputs.session_scintillation
                 if record.used_mmag is not None

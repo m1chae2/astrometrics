@@ -290,19 +290,14 @@ def _library() -> SimpleNamespace:
     rows = [
         _row("frame.star_elongation", "Target/a.fits", 1.4),
         _row("frame.star_elongation", "Target/b.fits", 1.2),
-        _row(
-            "frame.star_elongation_angle_deg",
-            "Target/a.fits",
-            40.0,
-            reason="12 stars; angles agree with a coherence of 0.83 (0 means no preferred direction)",
-            version=2,
-        ),
+        _row("frame.star_elongation_angle_deg", "Target/a.fits", 40.0, version=2),
+        _row("frame.star_elongation_coherence", "Target/a.fits", 0.83),
     ]
     return SimpleNamespace(quality=_Quality(rows))
 
 
-def test_the_reader_gives_frames_oldest_first_with_the_coherence_from_the_reason() -> None:
-    """The coherence comes from the reason text; no stack rows is `None`."""
+def test_the_reader_gives_frames_oldest_first_with_the_stored_coherence() -> None:
+    """The coherence comes from its own stored row; no stack rows is `None`."""
     frames, stack = read_star_shape_rows(_library(), _Target())
 
     assert [frame.path for frame in frames] == ["a.fits", "b.fits"]

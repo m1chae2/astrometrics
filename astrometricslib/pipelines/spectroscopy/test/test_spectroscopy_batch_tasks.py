@@ -27,6 +27,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch
 from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import PROCESSING_QUALITY_GATE_NAME
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 from astrometricslib.utilities import parallel_batch
 
 
@@ -79,13 +80,24 @@ def isolated_config(tmp_path: Path) -> Iterator[AppConfiguration]:
     config_loader._instance = original_instance
 
 
-def _make_wcs_header(ra_center=279.0, dec_center=38.0, scale_deg_per_px=0.0001):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
-    w = WCS(naxis=2)
-    w.wcs.crpix = [128, 128]
-    w.wcs.cdelt = [-scale_deg_per_px, scale_deg_per_px]
-    w.wcs.crval = [ra_center, dec_center]
-    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    return w.to_header()
+def _make_wcs_header(
+    ra_center: float = 279.0, dec_center: float = 38.0, scale_deg_per_px: float = 0.0001
+) -> fits.Header:
+    """Give the header cards of a plain sky map centered on the frame.
+
+    Parameters
+    ----------
+    ra_center, dec_center : `float`
+        The sky position of the frame's middle, in degrees.
+    scale_deg_per_px : `float`
+        The pixel size on the sky, in degrees.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header`
+        The sky-map cards.
+    """
+    return tan_sky_map(ra_center, dec_center, (128, 128), degrees_per_pixel=scale_deg_per_px).to_header()
 
 
 def _write_frame_fits(path, date_obs, with_own_wcs=False) -> None:  # ruff: ignore[missing-type-function-argument]

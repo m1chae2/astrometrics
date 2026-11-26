@@ -83,6 +83,7 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
     is_listed_as_variable,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 # The fewest comparison stars a session may end with. Below this, the
 # ensemble's own noise and its chance of containing a variable star are too
@@ -260,10 +261,6 @@ MINIMUM_FRACTIONAL_NOISE = 1.0e-6
 # is the fairer reference. If they are too large, a star that fits its errors
 # is still kept.
 _CONSISTENT_CHI_SQUARE = 1.0
-
-# 1.4826 times the median absolute deviation equals the standard deviation of
-# normally distributed values.
-_MAD_TO_SIGMA = 1.4826
 
 # The fewest frames for which a consistency test is meaningful.
 _MINIMUM_FRAMES_FOR_VETTING = TunedParameter(
@@ -577,9 +574,7 @@ def _point_to_point_noise(relative: np.ndarray) -> np.ndarray:
     relative = np.where(np.isfinite(relative), relative, 1.0)
     others_mean = (relative.sum(axis=0) - relative) / (stars - 1)
     differences = np.diff(relative - others_mean, axis=1)
-    centre = np.median(differences, axis=1, keepdims=True)
-    mad = np.median(np.abs(differences - centre), axis=1)
-    return np.maximum(_MAD_TO_SIGMA * mad / math.sqrt(2.0), MINIMUM_FRACTIONAL_NOISE)
+    return np.maximum(robust_sigma(differences, axis=1) / math.sqrt(2.0), MINIMUM_FRACTIONAL_NOISE)
 
 
 def _weights_and_ratios(

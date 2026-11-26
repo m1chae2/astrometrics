@@ -46,6 +46,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.neighbor_masking import mask_radius_from_profile
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 __all__ = [
     "STAR_RING_BIN_DEGREES",
@@ -446,7 +447,7 @@ def _ring_background(
     for _ in range(_SKY_CLIP_ITERATIONS):
         coefficients = np.linalg.lstsq(design[keep], target[keep], rcond=None)[0]
         residual = target - design @ coefficients
-        scatter = 1.4826 * float(np.median(np.abs(residual[keep] - np.median(residual[keep]))))
+        scatter = robust_sigma(residual[keep])
         keep = np.abs(residual) <= _SKY_CLIP_SIGMA * scatter
     background = coefficients[0] + coefficients[1] * delta_x + coefficients[2] * delta_y
     return float(coefficients[0]), background

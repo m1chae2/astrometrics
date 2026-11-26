@@ -1305,7 +1305,7 @@ def detect_stars_without_shape_cut(
     )
 
 
-def _grid_candidates(
+def grid_candidates(
     sources: list[dict], shape: tuple[int, int], plane: np.ndarray, top_level_adu: float | None
 ) -> tuple[list[list[tuple[float, float]]], CandidateRefusals]:
     """Pick the candidate stars of each grid cell.
@@ -1378,7 +1378,7 @@ def _grid_candidates(
     return list(cell_lists.values()), refusals
 
 
-def _sum_bayer_cells(plane: np.ndarray) -> np.ndarray:
+def sum_bayer_cells(plane: np.ndarray) -> np.ndarray:
     """Add up each 2 x 2 cell of a raw color mosaic into one super-pixel.
 
     A one-shot-color sensor puts a red, two green and a blue filter over every
@@ -1457,7 +1457,7 @@ def measure_star_profiles(
     expected_fwhm_px = resolve(STAR_FINDER_EXPECTED_FWHM_PX).value / factor
     field_shape_px = (plane.shape[0] - plane.shape[0] % factor, plane.shape[1] - plane.shape[1] % factor)
     if bayer_mosaic:
-        plane = _sum_bayer_cells(plane)
+        plane = sum_bayer_cells(plane)
         sources = None
         # A super-pixel holds the sum of factor ** 2 pixels, so its top level
         # is that many times the pixel's.
@@ -1470,7 +1470,7 @@ def measure_star_profiles(
         return StarProfileResult(reason="no stars were detected in the frame")
     if top_level_adu is None:
         top_level_adu = plateau_saturation_level_adu(plane)
-    cells, refusals = _grid_candidates(sources, plane.shape, plane, top_level_adu)
+    cells, refusals = grid_candidates(sources, plane.shape, plane, top_level_adu)
     half = resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value
     minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value
     grid = _subpixel_grid(2 * half + 1)

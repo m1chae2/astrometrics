@@ -31,6 +31,7 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import CLIP_SIGMAS, MAXIMUM_PASSES
 from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -720,7 +721,7 @@ def _fit_sky_map_from_named_detections(
         mapped_x, mapped_y = sky_map.all_world2pix(pairs[:, 2], pairs[:, 3], 0)
         errors = np.hypot(mapped_x - pairs[:, 0], mapped_y - pairs[:, 1])
         median = np.median(errors[keep])
-        spread = 1.4826 * np.median(np.abs(errors[keep] - median))
+        spread = MAD_TO_SIGMA * np.median(np.abs(errors[keep] - median))
         new_keep = errors <= max(median + clip_sigmas * spread, sky_map_clip_floor_px)
         if np.array_equal(new_keep, keep):
             break

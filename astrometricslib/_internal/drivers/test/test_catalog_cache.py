@@ -5,7 +5,6 @@ reads or writes the real library's stored answers.
 """
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,7 +17,6 @@ from astrometricslib._internal.drivers.catalog_cache import (
     answer_through_cache,
     catalog_use_scope,
 )
-from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
@@ -26,95 +24,31 @@ from astrometricslib.pipelines.photometry.post_processing.known_variability_labe
 )
 from astrometricslib.pipelines.shared import variable_star_catalogs as variable_catalogs
 from astrometricslib.pipelines.shared.stored_variability import fill_known_variability
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
 
 
-@pytest.fixture(autouse=True)
-def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the cache folder at a temporary folder.
+def counting_simbad() -> FakeSimbad:
+    """Build a SIMBAD stand-in with fixed answers that counts live calls.
 
-    Parameters
-    ----------
-    tmp_path : `pathlib.Path`
-        The test's folder.
-    monkeypatch : `pytest.MonkeyPatch`
-        Sets the environment.
+    Set its ``failure`` to take it down; its ``call_count`` counts the
+    questions that reached it.
+
+    Returns
+    -------
+    simbad : `FakeSimbad`
+        One fixed star for a region, one fixed row for any name, one row for
+        a table question.
     """
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-
-
-class CountingSimbad(SimbadDriver):
-    """A SIMBAD stand-in that counts live calls and can be switched off."""
-
-    def __init__(self) -> None:
-        """Start up, with no calls made."""
-        self.calls = 0
-        self.down = False
-
-    def query_region(
-        self,
-        coordinates: Any,
-        radius: str,
-        *,
-        votable_fields: tuple[str, ...] = (),
-        row_limit: int | None = None,
-    ) -> Table:
-        """Answer one fixed star, or fail when down.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            One row.
-
-        Raises
-        ------
-        ExternalServiceError
-            When switched off.
-        """
-        self.calls += 1
-        if self.down:
-            raise ExternalServiceError("down")
-        return Table({
+    return FakeSimbad(
+        region=lambda coordinates, radius: Table({
             "main_id": ["* bet Per"],
             "ra": [51.08],
             "dec": [49.86],
             "otypes": ["EB*|V*"],
-        })
-
-    def query_object(self, object_name: str, *, votable_fields: tuple[str, ...] = ()) -> Table:
-        """Resolve any name to one fixed row, or fail when down.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            One row.
-
-        Raises
-        ------
-        ExternalServiceError
-            When switched off.
-        """
-        self.calls += 1
-        if self.down:
-            raise ExternalServiceError("down")
-        return Table({"main_id": [object_name], "ra": [10.0], "dec": [20.0]})
-
-    def query_tap(self, adql_query: str) -> Table:
-        """Answer with one row, or fail when down.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            One row.
-
-        Raises
-        ------
-        ExternalServiceError
-            When switched off.
-        """
-        self.calls += 1
-        if self.down:
-            raise ExternalServiceError("down")
-        return Table({"oid": [1]})
+        }),
+        objects=lambda name: Table({"main_id": [name], "ra": [10.0], "dec": [20.0]}),
+        tap=lambda query: Table({"oid": [1]}),
+    )
 
 
 def test_fresh_answer_is_used_without_a_live_call() -> None:
@@ -184,27 +118,27 @@ def test_outage_with_nothing_stored_is_unavailable() -> None:
 
 def test_cached_simbad_region_second_call_uses_no_network() -> None:
     """A region is asked once per tile; asking again reads the store."""
-    inner = CountingSimbad()
+    inner = counting_simbad()
     driver = CachedSimbadDriver(inner)
     from astropy.coordinates import SkyCoord
 
     center = SkyCoord(51.08, 49.86, unit="deg")
     first = driver.query_region(center, "0.05d", votable_fields=("otypes",))
     assert driver.query_object("Algol")["ra"][0] == pytest.approx(10.0)
-    calls = inner.calls
+    calls = inner.call_count
     assert calls >= 1
-    inner.down = True
+    inner.failure = ExternalServiceError("down")
     second = driver.query_region(center, "0.05d", votable_fields=("otypes",))
-    assert inner.calls == calls
+    assert inner.call_count == calls
     assert first is not None and second is not None
     assert driver.query_object("algol")["ra"][0] == pytest.approx(10.0)
-    assert inner.calls == calls
+    assert inner.call_count == calls
 
 
 def test_cached_simbad_region_outage_without_store_raises() -> None:
     """A field never stored and SIMBAD down raises the plain status error."""
-    inner = CountingSimbad()
-    inner.down = True
+    inner = counting_simbad()
+    inner.failure = ExternalServiceError("down")
     from astropy.coordinates import SkyCoord
 
     with pytest.raises(CatalogUnavailableError):
@@ -245,8 +179,8 @@ def test_comparison_stars_listed_by_vsx_are_excluded_when_simbad_is_down(
         return Table(names=columns, dtype=[object] * len(columns))
 
     monkeypatch.setattr(variable_catalogs, "_ask_vizier_circle", ask)
-    simbad = CountingSimbad()
-    simbad.down = True
+    simbad = counting_simbad()
+    simbad.failure = ExternalServiceError("down")
     stars = [StellarObject(id="V1", ra=30.0, declination=40.0)]
     fill_known_variability(stars, CachedSimbadDriver(simbad))
     assert is_listed_as_variable(stars[0])

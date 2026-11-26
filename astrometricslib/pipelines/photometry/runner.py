@@ -68,7 +68,7 @@ from astrometricslib.pipelines.pipeline_base import (
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.session_identification import plate_solution_problem
 from astrometricslib.pipelines.shared.star_recording import (
-    _drop_unresolved_stars,
+    drop_unresolved_stars,
     merge_photometry_stellar_object,
     record_pipeline_stars,
 )
@@ -689,7 +689,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         )
         if every_solution_wrong:
             # No session has a plate solution to trust, so no star is saved.
-            all_stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+            all_stellar_objects, star_id_breakdown = drop_unresolved_stars(
                 all_stellar_objects, target_id=target.id, pipeline_name="photometry"
             )
         else:

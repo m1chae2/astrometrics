@@ -246,13 +246,13 @@ def test_cache_hit_is_reported_to_the_job_log(tmp_path: Path) -> None:
 
 def test_dark_cache_key_holds_the_combine_method_but_the_bias_key_does_not(tmp_path: Path) -> None:
     """A mean-combined master dark is never reused: darks use the median."""
-    from astrometricslib._internal.drivers.siril_interface.staging import DARK_MASTER_RECIPE, _master_recipe
+    from astrometricslib._internal.drivers.siril_interface.staging import DARK_MASTER_RECIPE, master_recipe
 
     darks = _stage_frames(str(tmp_path / "run"), "darks", str(tmp_path / "library_darks"), 3)
 
     old_key = _calibration_source_fingerprint(darks)
-    new_key = _calibration_source_fingerprint(darks, _master_recipe("dark"))
+    new_key = _calibration_source_fingerprint(darks, master_recipe("dark"))
 
-    assert DARK_MASTER_RECIPE in _master_recipe("dark")
+    assert DARK_MASTER_RECIPE in master_recipe("dark")
     assert new_key != old_key
-    assert _master_recipe("bias") == ""
+    assert master_recipe("bias") == ""

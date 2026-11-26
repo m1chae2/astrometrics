@@ -142,6 +142,7 @@ from astrometricslib.pipelines.spectroscopy.processing.star_reddening import (
 )
 from astrometricslib.utilities import SpectroscopyConfig
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -2800,7 +2801,7 @@ class SpectroscopyPipeline:
         # follows the trail is biased by which pixels happen to be brightest
         # (+0.2 to +0.4 degrees on the Albireo and Vega stacks).
         background_level = float(np.median(pixel_block))
-        noise_sigma = float(np.median(np.abs(pixel_block - background_level))) * 1.4826
+        noise_sigma = float(np.median(np.abs(pixel_block - background_level))) * MAD_TO_SIGMA
         if noise_sigma <= 0.0:
             noise_sigma = float(np.std(pixel_block))
         if noise_sigma <= 0.0:

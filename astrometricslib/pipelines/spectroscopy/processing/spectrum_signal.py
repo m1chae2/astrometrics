@@ -20,6 +20,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 # A spectrum whose typical resolution element is less than this many times
 # the scatter between neighbouring elements has no measurable continuum. The
@@ -150,11 +151,7 @@ def estimate_spectrum_signal_to_noise(
         return None
 
     second_difference = elements[1:-1] - 0.5 * (elements[:-2] + elements[2:])
-    scatter = (
-        1.4826
-        * float(np.median(np.abs(second_difference - np.median(second_difference))))
-        / _SECOND_DIFFERENCE_NOISE_FACTOR
-    )
+    scatter = robust_sigma(second_difference) / _SECOND_DIFFERENCE_NOISE_FACTOR
     signal = float(np.median(elements))
     if signal <= 0:
         return 0.0

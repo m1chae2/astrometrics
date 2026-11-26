@@ -24,10 +24,10 @@ from astrometricslib.pipelines.astrometry.processing.star_identifier import Star
 from astrometricslib.pipelines.astrometry.test.processing.test_plate_solve_fit_statistics import (
     FIELD_DEC_DEG,
     FIELD_RA_DEG,
-    EmptySimbad,
     FakeSolver,
     make_wcs_header,
 )
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
 
 
 def _fail_if_called(*arguments: Any, **keywords: Any) -> None:
@@ -89,7 +89,7 @@ def _identifier(answer: fits.Header | None) -> StarIdentifier:
     config.get_value.return_value = None
     config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
     identifier = StarIdentifier(
-        config=config, drivers=Drivers(plate_solve=FakeSolver(answer), simbad=EmptySimbad())
+        config=config, drivers=Drivers(plate_solve=FakeSolver(answer), simbad=FakeSimbad())
     )
     sources = [{"x_centroid": 10.0 + 8 * i, "y_centroid": 10.0 + 8 * i, "flux": 100.0 - i} for i in range(10)]
     identifier.detector = MagicMock()
@@ -140,7 +140,7 @@ def test_the_pipeline_solve_wcs_skips_refit_and_naming(
     config.get_value.return_value = None
     config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
     pipeline = AstrometryPipeline(
-        app_config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=EmptySimbad())
+        app_config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=FakeSimbad())
     )
     identifier = _identifier(make_wcs_header())
     pipeline.star_identifier.detector = identifier.detector

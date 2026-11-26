@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from astropy.io import fits
-from astropy.wcs import WCS
 from scipy import ndimage
 
 from astrometricslib.pipelines.stacking.post_processing import masked_stretch
@@ -27,6 +26,7 @@ from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
     plan_masked_stretch_for_file,
 )
 from astrometricslib.pipelines.stacking.post_processing.star_tone import soft_highlights, tone_stars
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 SIZE = 320
 SKY = 0.006
@@ -450,11 +450,7 @@ def solved_header(ra_deg: float = 10.0, dec_deg: float = 20.0) -> fits.Header:
     header : `astropy.io.fits.Header`
         A tangent-plane solution of 1.9 arcseconds per pixel.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [ra_deg, dec_deg]
-    wcs.wcs.crpix = [161.0, 161.0]
-    wcs.wcs.cdelt = [-1.9 / 3600.0, 1.9 / 3600.0]
+    wcs = tan_sky_map(ra_deg, dec_deg, (161.0, 161.0), degrees_per_pixel=1.9 / 3600.0)
     return wcs.to_header()
 
 

@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from astropy.io import fits
-from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.api.stars import StellarCatalog
@@ -27,6 +26,7 @@ from astrometricslib.models.stellar_source import (
 )
 from astrometricslib.models.target import StackConfigurationResult, Target, TargetStackingResult
 from astrometricslib.pipelines.shared.star_catalog_queries import is_unresolved_detection
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 DETECTION_ID = "M13:2026-05-01:100:30:Star_7"
 
@@ -206,11 +206,7 @@ def _write_reference_image(path: Path, plate_solved: bool = True) -> None:
         Whether the header carries the plate-solve card. `False` makes a
         header with a pointing guess only.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [250.42, 36.45]
-    wcs.wcs.crpix = [100.0, 50.0]
-    wcs.wcs.cdelt = [-0.00005, 0.00005]
+    wcs = tan_sky_map(250.42, 36.45, (100.0, 50.0), degrees_per_pixel=0.00005)
     header = wcs.to_header()
     if plate_solved:
         header["PLTSOLVD"] = (True, "sky map written by a plate solve")

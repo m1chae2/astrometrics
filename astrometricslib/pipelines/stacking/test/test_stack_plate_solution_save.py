@@ -23,6 +23,7 @@ from astrometricslib.pipelines.stacking.post_processing import stack_noise
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     PLATE_SOLVE_UNREFINED_WCS_SOURCE,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 _NO_SOLUTION = "plate-solving the stack itself was tried and found no solution"
 
@@ -95,11 +96,7 @@ def _solved_wcs() -> WCS:
     wcs : `astropy.wcs.WCS`
         A tangent-plane map near M 31 at about 1.9 arcsec per pixel.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [10.68, 41.27]
-    wcs.wcs.crpix = [32.0, 32.0]
-    wcs.wcs.cd = [[-0.00053, 0.0], [0.0, 0.00053]]
+    wcs = tan_sky_map(10.68, 41.27, (32.0, 32.0), cd=[[-0.00053, 0.0], [0.0, 0.00053]])
     return wcs
 
 

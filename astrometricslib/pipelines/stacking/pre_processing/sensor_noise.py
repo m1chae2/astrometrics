@@ -78,6 +78,7 @@ from astrometricslib.utilities.camera_setting_text import (
     canonical_gain_setting,
     canonical_offset_setting,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +183,6 @@ MAXIMUM_PAIR_GAP_SECONDS = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="STK-35",
 )
-
-# Turns a median absolute deviation into a standard deviation for Gaussian
-# noise (the same constant `flat_calibration.py` uses).
-MAD_TO_STANDARD_DEVIATION = 1.4826
 
 # The factor between the standard deviation of a difference of two frames
 # with equal noise and the noise of one frame.
@@ -581,8 +578,7 @@ def measure_sensor_noise(
     for first, second in bias_pairs:
         difference = first.pixels[slices] - second.pixels[slices]
         pair_read_noises_adu.append(float(np.std(difference) / _PAIR_DIFFERENCE_FACTOR))
-        mad = float(np.median(np.abs(difference - np.median(difference))))
-        pair_robust_read_noises_adu.append(MAD_TO_STANDARD_DEVIATION * mad / _PAIR_DIFFERENCE_FACTOR)
+        pair_robust_read_noises_adu.append(robust_sigma(difference) / _PAIR_DIFFERENCE_FACTOR)
     read_noise_adu = float(np.median(pair_read_noises_adu))
     read_variance_adu2 = read_noise_adu**2
 

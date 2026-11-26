@@ -74,6 +74,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     _move_guess_onto_reference_stars,
     measure_stack_noise,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 SIZE = 900
 PIXEL_SCALE_ARCSEC = 2.0
@@ -589,11 +590,7 @@ def test_a_rotation_is_followed_when_the_solution_uses_a_cd_matrix() -> None:
     """A solution with a CD matrix is turned through that matrix."""
     scattered = _scattered_stars(seed=3)
     scale = PIXEL_SCALE_ARCSEC / 3600.0
-    guess = WCS(naxis=2)
-    guess.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    guess.wcs.crval = [150.0, 2.0]
-    guess.wcs.crpix = [SIZE / 2, SIZE / 2]
-    guess.wcs.cd = [[-scale, 0.0], [0.0, scale]]
+    guess = tan_sky_map(150.0, 2.0, (SIZE / 2, SIZE / 2), cd=[[-scale, 0.0], [0.0, scale]])
     sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
     rotated = _rotated_stars(scattered, -0.2)
     plane = _sky_image(2.0, seed=2, star_positions=rotated)

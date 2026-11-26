@@ -200,6 +200,23 @@ def isolated_outside_services(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
 
 
 @pytest.fixture(autouse=True)
+def headless_matplotlib() -> None:
+    """Draw each test's plots with the headless Agg backend.
+
+    The backend's script console switches Matplotlib, for the whole process,
+    to the browser backend (WebAgg) when it builds its workspace. The backend
+    tests build that workspace once for the session, so a library test run
+    after them in the same process would get browser figures with a toolbar,
+    whose default click handler fails on a made-up mouse event. Setting Agg
+    once at import is not enough; this puts it back before each test.
+    """
+    import matplotlib.pyplot as plt
+
+    if matplotlib.get_backend().lower() != "agg":
+        plt.switch_backend("Agg")
+
+
+@pytest.fixture(autouse=True)
 def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stop tests from plate-solving a stack that has no coordinate solution.
 

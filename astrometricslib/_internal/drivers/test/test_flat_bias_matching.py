@@ -29,7 +29,7 @@ from astrometricslib._internal.drivers.siril_interface.script_builders import (
     StagedFrameCounts,
     build_master_calibration_commands,
 )
-from astrometricslib._internal.drivers.siril_interface.staging import FLAT_MASTER_RECIPE, _master_recipe
+from astrometricslib._internal.drivers.siril_interface.staging import FLAT_MASTER_RECIPE, master_recipe
 
 CAMERA = "ZWO ASI 533MM Pro"
 LIGHT_OFFSET = 0
@@ -250,28 +250,28 @@ def test_the_flat_cache_key_follows_the_bias(tmp_path: Path) -> None:
     mismatched = stage(mismatched_directory, mismatched_library)
     matching = stage(matching_directory, matching_library)
 
-    mismatched_recipe = _master_recipe("flat", os.path.join(mismatched.workdir, "target"))
-    matching_recipe = _master_recipe("flat", os.path.join(matching.workdir, "target"))
+    mismatched_recipe = master_recipe("flat", os.path.join(mismatched.workdir, "target"))
+    matching_recipe = master_recipe("flat", os.path.join(matching.workdir, "target"))
 
     assert mismatched_recipe.startswith(f"{FLAT_MASTER_RECIPE}|bias=")
     assert matching_recipe.startswith(f"{FLAT_MASTER_RECIPE}|bias=")
     assert mismatched_recipe != matching_recipe
     # The same staging gives the same key again.
-    assert _master_recipe("flat", os.path.join(mismatched.workdir, "target")) == mismatched_recipe
+    assert master_recipe("flat", os.path.join(mismatched.workdir, "target")) == mismatched_recipe
 
 
 def test_the_recipe_is_version_six_and_other_kinds_have_none() -> None:
     """Raising the recipe retires every older flat master."""
     assert FLAT_MASTER_RECIPE == "flat-recipe-7"
-    assert _master_recipe("flat_bias") == ""
-    assert _master_recipe("flat") == FLAT_MASTER_RECIPE
+    assert master_recipe("flat_bias") == ""
+    assert master_recipe("flat") == FLAT_MASTER_RECIPE
 
 
 def test_a_flat_with_no_bias_at_all_has_a_key_that_says_so(tmp_path: Path) -> None:
     """With no bias staged, the key holds the word none, not an empty gap."""
     target = tmp_path / "target"
     (target / "biases").mkdir(parents=True)
-    assert _master_recipe("flat", str(target)) == f"{FLAT_MASTER_RECIPE}|bias=none"
+    assert master_recipe("flat", str(target)) == f"{FLAT_MASTER_RECIPE}|bias=none"
 
 
 def test_the_flat_is_calibrated_with_the_named_bias_master() -> None:

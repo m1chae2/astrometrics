@@ -76,7 +76,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 
 import numpy as np
 from astropy.stats import mad_std
@@ -94,6 +93,7 @@ from astrometricslib.pipelines.shared.quality.frame_statistics import (
     BOOTSTRAP_RESAMPLE_COUNT,
     BOOTSTRAP_SEED,
 )
+from astrometricslib.utilities.table_cells import optional_float
 
 logger = logging.getLogger(__name__)
 
@@ -355,28 +355,6 @@ class ZeroPointScatter:
     reason: str
 
 
-def _optional_float(value: Any) -> float | None:
-    """Turn a stored number into a finite float, or `None`.
-
-    Parameters
-    ----------
-    value : `Any`
-        A value that may be a number, a NumPy scalar or `None`.
-
-    Returns
-    -------
-    number : `float` or `None`
-        The value as a float when it is finite, else `None`.
-    """
-    if value is None:
-        return None
-    try:
-        number = float(value)
-    except TypeError, ValueError:
-        return None
-    return number if math.isfinite(number) else None
-
-
 def catalog_band_of(star: StellarObject) -> CatalogBand | None:
     """Say which catalog band a star's magnitude comes from.
 
@@ -412,8 +390,8 @@ def _star_position_px(star: StellarObject) -> tuple[float, float] | None:
         ``(x, y)`` in pixels, or `None` when the star has no position.
     """
     data = star.star_data if isinstance(star.star_data, dict) else {}
-    x_px = _optional_float(data.get("xcentroid", data.get("x_centroid")))
-    y_px = _optional_float(data.get("ycentroid", data.get("y_centroid")))
+    x_px = optional_float(data.get("xcentroid", data.get("x_centroid")))
+    y_px = optional_float(data.get("ycentroid", data.get("y_centroid")))
     if x_px is None or y_px is None:
         return None
     return x_px, y_px
@@ -450,7 +428,7 @@ def central_candidates_by_band(
     members: dict[CatalogBand, list[int]] = {band: [] for band in CatalogBand}
     with_magnitude = with_band = unambiguous = 0
     for index, star in enumerate(stars):
-        magnitude = _optional_float(star.magnitude)
+        magnitude = optional_float(star.magnitude)
         if magnitude is None or magnitude <= BRIGHTEST_CATALOG_MAGNITUDE or star.photometry is None:
             continue
         with_magnitude += 1
@@ -815,14 +793,14 @@ def session_zero_points(
                 chosen_indices = [indices[row] for row in rows]
                 estimates = differential_frame_estimates(
                     np.array(
-                        [_optional_float(stars[index].magnitude) for index in chosen_indices], dtype=float
+                        [optional_float(stars[index].magnitude) for index in chosen_indices], dtype=float
                     ),
                     flux[rows],
                     usable[rows],
                     np.array(
                         [
                             value
-                            if (value := _optional_float(stars[index].b_minus_v)) is not None
+                            if (value := optional_float(stars[index].b_minus_v)) is not None
                             else math.nan
                             for index in chosen_indices
                         ],

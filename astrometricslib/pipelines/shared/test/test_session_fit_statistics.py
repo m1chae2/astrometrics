@@ -18,7 +18,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from astropy.io import fits
-from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveHeader
 from astrometricslib.models.stellar_source import StellarObject
@@ -28,6 +27,7 @@ from astrometricslib.pipelines.shared.session_identification import (
     identify_session_stars,
     resolve_frame_wcs,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 FIELD_RA_DEG = 250.42
 FIELD_DEC_DEG = 36.46
@@ -43,11 +43,7 @@ def _make_wcs_header() -> fits.Header:
     header : `astropy.io.fits.Header`
         The map, centred on the test field.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [FIELD_RA_DEG, FIELD_DEC_DEG]
-    wcs.wcs.crpix = [50.0, 50.0]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(FIELD_RA_DEG, FIELD_DEC_DEG, (50.0, 50.0), degrees_per_pixel=2.0 / 3600.0)
     return wcs.to_header()
 
 

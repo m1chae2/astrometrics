@@ -54,6 +54,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
     MINIMUM_RESOLUTION_ELEMENT_PIXELS,
     ResolutionProfile,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # The bands of the profile. They start at 4200 A, where the instrument
 # response is first usable, step by 400 A and stop at 8000 A, the longest
@@ -323,7 +324,7 @@ def measure_line_spread(
         centres.append(0.5 * (float(low) + high))
         fwhm_pixels.append(median_fwhm)
         fwhm_angstrom.append(median_fwhm * float(np.median(dispersion[in_band])))
-        scatter.append(1.4826 * float(np.median(np.abs(band_fwhm - median_fwhm))))
+        scatter.append(MAD_TO_SIGMA * float(np.median(np.abs(band_fwhm - median_fwhm))))
         counts.append(int(in_band.sum()))
     if len(centres) < 2:
         return None

@@ -50,6 +50,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # The fewest matched stars with which a second-order SIP fit is attempted. The
 # fit has two linear and ten distortion terms for each axis plus the reference
@@ -250,7 +251,7 @@ def _clip(separations_arcsec: np.ndarray, clip_sigmas: float) -> np.ndarray:
         standard deviations of the median.
     """
     median = np.median(separations_arcsec)
-    spread = 1.4826 * np.median(np.abs(separations_arcsec - median))
+    spread = MAD_TO_SIGMA * np.median(np.abs(separations_arcsec - median))
     if spread <= 0:
         return np.ones(separations_arcsec.size, dtype=bool)
     return np.abs(separations_arcsec - median) <= clip_sigmas * spread

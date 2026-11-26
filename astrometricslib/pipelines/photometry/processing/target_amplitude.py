@@ -37,6 +37,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 __all__ = [
     "MAXIMUM_TARGET_DISTANCE_ARCSEC",
@@ -206,7 +207,7 @@ def folded_amplitude(time_days: np.ndarray, flux: np.ndarray, period_days: float
         if values.size < minimum_points_per_bin:
             continue
         median = float(np.median(values))
-        spread = 1.4826 * float(np.median(np.abs(values - median)))
+        spread = MAD_TO_SIGMA * float(np.median(np.abs(values - median)))
         medians.append(median)
         # The standard error of a median is 1.2533 times that of a mean.
         errors.append(1.2533 * spread / math.sqrt(values.size))

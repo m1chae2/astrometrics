@@ -587,7 +587,7 @@ def _bright_block_map(
     crop = (slice(0, rows * block), slice(0, columns * block))
     average = residual[crop].reshape(rows, block, columns, block).mean(axis=(1, 3))
     peak = smooth[crop].reshape(rows, block, columns, block).max(axis=(1, 3))
-    block_noise = 1.4826 * np.median(np.abs(average - np.median(average)))
+    block_noise = robust_sigma(average)
     if not block_noise > 0:
         return None
     margin = 2 * resolve(TRAIL_STAR_MARGIN_BLOCKS).value + 1
@@ -814,7 +814,7 @@ def detect_stars(
     residual = image - background
     smooth = ndimage.gaussian_filter(residual, 1.5)
     sample = smooth[::NOISE_SAMPLE_STEP, ::NOISE_SAMPLE_STEP]
-    noise = 1.4826 * np.median(np.abs(sample - np.median(sample)))
+    noise = robust_sigma(sample)
 
     labels, blob_count = ndimage.label(smooth > resolve(DETECTION_SIGMA).value * noise)
     extents = [

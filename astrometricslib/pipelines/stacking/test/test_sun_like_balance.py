@@ -23,6 +23,7 @@ from astrometricslib.pipelines.stacking.post_processing.sun_like_balance import 
     balance_sun_like_stars_in_file,
     select_sun_like_stars,
 )
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 SIZE = 600
 GRID_SPACING = 50
@@ -41,11 +42,7 @@ def make_wcs() -> WCS:
     wcs : `astropy.wcs.WCS`
         A tangent-plane solution, 2 arcseconds per pixel, near declination 30.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [300.0, 30.0]
-    wcs.wcs.crpix = [SIZE / 2.0, SIZE / 2.0]
-    wcs.wcs.cdelt = [-2.0 / 3600.0, 2.0 / 3600.0]
+    wcs = tan_sky_map(300.0, 30.0, (SIZE / 2.0, SIZE / 2.0), degrees_per_pixel=2.0 / 3600.0)
     return wcs
 
 

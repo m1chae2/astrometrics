@@ -9,14 +9,13 @@ in our databases.
 import logging
 import math
 import os
-import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 from astropy.io import fits
-from astropy.wcs import WCS, FITSFixedWarning
+from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.spatial import cKDTree
 
@@ -52,6 +51,8 @@ from astrometricslib.pipelines.asteroid_detection.frame_wcs_composer import (
     estimate_frame_wcs_from_mount_pointing,
 )
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -152,11 +153,6 @@ def _position_error_match_radius_arcsec() -> float:
         still count, in arcseconds on the sky.
     """
     return _POSITION_ERROR_MATCH_RADIUS_VOTE_BINS * resolve(_POINTING_CORRECTION_VOTE_BIN_ARCSEC).value
-
-
-# Scale factor that turns a median absolute deviation into the standard
-# deviation of a normal distribution.
-_MAD_TO_SIGMA = 1.4826
 
 
 @dataclass(frozen=True)
@@ -363,10 +359,7 @@ def _estimate_bulk_pointing_correction_deg(
     position_error_arcsec = None
     if int(np.count_nonzero(matched)) >= minimum_votes:
         residuals = reference_tree.data[nearest_indices[matched]] - shifted_query_points[matched]
-        per_axis_sigma_arcsec = [
-            _MAD_TO_SIGMA * float(np.median(np.abs(axis_residuals - np.median(axis_residuals))))
-            for axis_residuals in residuals.T
-        ]
+        per_axis_sigma_arcsec = [robust_sigma(axis_residuals) for axis_residuals in residuals.T]
         position_error_arcsec = PositionError(
             ra_arcsec=per_axis_sigma_arcsec[0],
             dec_arcsec=per_axis_sigma_arcsec[1],
@@ -649,17 +642,19 @@ class AsteroidDetectionPipeline:
         Raises
         ------
         ConflictError
-            If `stacked_image_path` is empty.
+            If `stacked_image_path` is empty, or the stack has no sky map.
         """
         if not stacked_image_path:
             raise ConflictError(
                 f"Target '{target_id}' has no stacked_image; run analyze_target(type='astrometry') first."
             )
 
-        stack_header = read_header(stacked_image_path, first_hdu_only=True)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FITSFixedWarning)
-            stack_wcs = WCS(stack_header, naxis=2)
+        stack_wcs = celestial_wcs(read_header(stacked_image_path, first_hdu_only=True))
+        if stack_wcs is None:
+            raise ConflictError(
+                f"Target '{target_id}' has a stacked image with no sky map; "
+                "run analyze_target(type='astrometry') first."
+            )
         # The stack's plate solution gives the run's plate scale. Record it
         # once, so the values that scale with it follow this run.
         record_basis(

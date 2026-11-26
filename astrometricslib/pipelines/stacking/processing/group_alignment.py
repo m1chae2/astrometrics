@@ -62,6 +62,7 @@ from astrometricslib.pipelines.stacking.processing.star_pattern_candidates impor
     candidate_similarity_transforms,
     pattern_star_counts,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -933,7 +934,7 @@ def _filtered(plane: np.ndarray) -> np.ndarray:
     """
     alignment_clip_sigmas = resolve(ALIGNMENT_CLIP_SIGMAS).value
     filtered = plane - gaussian_filter(plane, resolve(ALIGNMENT_HIGH_PASS_SIGMA_PIXELS).value)
-    sigma = 1.4826 * float(np.median(np.abs(filtered - np.median(filtered))))
+    sigma = robust_sigma(filtered)
     if sigma > 0:
         np.clip(
             filtered,
@@ -1173,7 +1174,7 @@ def detect_star_centroids(
     image = np.nan_to_num(np.asarray(plane, dtype=np.float64))
     flat = image - gaussian_filter(image, 20)
     smooth = gaussian_filter(flat, 1.5)
-    sigma = 1.4826 * float(np.median(np.abs(smooth - np.median(smooth))))
+    sigma = robust_sigma(smooth)
     if sigma <= 0:
         return np.empty((0, 2))
     top = float(np.percentile(image, 99.99))

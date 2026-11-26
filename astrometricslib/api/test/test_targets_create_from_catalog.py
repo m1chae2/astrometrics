@@ -7,86 +7,57 @@ refused with `NotFoundError`. Uses a fake SIMBAD driver and a mock
 storage, so nothing touches the network or real data.
 """
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from astropy.table import Table
 
 from astrometricslib._internal.drivers.driver_set import Drivers
-from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.foundation.errors import NotFoundError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared import target_records
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
 
 
-class _FakeSimbad(SimbadDriver):
-    """A SIMBAD client that knows a fixed set of names.
+def _simbad_knowing(positions: dict[str, tuple[float, float]]) -> FakeSimbad:
+    """Build a SIMBAD stand-in that knows a fixed set of names.
 
-    Attributes
+    Parameters
     ----------
     positions : `dict` [`str`, `tuple` [`float`, `float`]]
         Right ascension and declination in degrees for each known name.
-    object_calls : `list` [`str`]
-        The names asked for.
+
+    Returns
+    -------
+    simbad : `FakeSimbad`
+        The stand-in. A known name gets a one-row table with ``ra`` and
+        ``dec``; any other name gets `None`.
     """
 
-    def __init__(self, positions: dict[str, tuple[float, float]]) -> None:
-        """Store the known names.
-
-        Parameters
-        ----------
-        positions : `dict` [`str`, `tuple` [`float`, `float`]]
-            Right ascension and declination in degrees for each known name.
-        """
-        self.positions = positions
-        self.object_calls: list[str] = []
-
-    def query_object(self, name: str, *, votable_fields: tuple[str, ...] = ()) -> Table | None:
-        """Answer with one row for a known name, else `None`.
+    def answer(name: str) -> Table | None:
+        """Give the row for a known name.
 
         Parameters
         ----------
         name : `str`
             The name asked for.
-        votable_fields : `tuple` [`str`], optional
-            Ignored.
 
         Returns
         -------
         table : `astropy.table.Table` or `None`
-            A one-row table with ``ra`` and ``dec``, or `None`.
+            A one-row table, or `None` for an unknown name.
         """
-        self.object_calls.append(name)
-        if name not in self.positions:
+        if name not in positions:
             return None
-        ra_deg, dec_deg = self.positions[name]
+        ra_deg, dec_deg = positions[name]
         return Table({"ra": [ra_deg], "dec": [dec_deg]})
 
-    def query_region(self, *args: Any, **kwargs: Any) -> Table:
-        """Not used by these tests.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            An empty table.
-        """
-        return Table()
-
-    def query_tap(self, *args: Any, **kwargs: Any) -> Table:
-        """Not used by these tests.
-
-        Returns
-        -------
-        table : `astropy.table.Table`
-            An empty table.
-        """
-        return Table()
+    return FakeSimbad(objects=answer)
 
 
 def _catalog(
-    monkeypatch: pytest.MonkeyPatch, simbad: _FakeSimbad, targets: list[Target] | None = None
+    monkeypatch: pytest.MonkeyPatch, simbad: FakeSimbad, targets: list[Target] | None = None
 ) -> TargetCatalog:
     """Build a catalog over a mock storage with the fake SIMBAD driver.
 
@@ -94,7 +65,7 @@ def _catalog(
     ----------
     monkeypatch : `pytest.MonkeyPatch`
         Used to skip the frame scan and the save.
-    simbad : `_FakeSimbad`
+    simbad : `FakeSimbad`
         The SIMBAD stand-in.
     targets : `list` [`Target`], optional
         Targets the library already holds.
@@ -113,7 +84,7 @@ def _catalog(
 
 def test_a_catalog_name_creates_a_target_with_its_position(monkeypatch: pytest.MonkeyPatch) -> None:
     """The new target holds the position SIMBAD gave."""
-    simbad = _FakeSimbad({"M 57": (283.396, 33.029)})
+    simbad = _simbad_knowing({"M 57": (283.396, 33.029)})
     catalog = _catalog(monkeypatch, simbad)
 
     target = catalog.create("M_57", from_catalog=True)
@@ -127,7 +98,7 @@ def test_a_catalog_name_creates_a_target_with_its_position(monkeypatch: pytest.M
 def test_an_existing_target_is_reused_without_a_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     """A target already in the library is returned and SIMBAD is not asked."""
     existing = Target(id="M 57")
-    simbad = _FakeSimbad({})
+    simbad = _simbad_knowing({})
     catalog = _catalog(monkeypatch, simbad, [existing])
 
     assert catalog.create("M 57", from_catalog=True) is existing
@@ -137,7 +108,7 @@ def test_an_existing_target_is_reused_without_a_lookup(monkeypatch: pytest.Monke
 
 def test_an_unknown_name_is_refused_and_nothing_is_created(monkeypatch: pytest.MonkeyPatch) -> None:
     """A name SIMBAD does not know raises NotFoundError."""
-    catalog = _catalog(monkeypatch, _FakeSimbad({}))
+    catalog = _catalog(monkeypatch, _simbad_knowing({}))
 
     with pytest.raises(NotFoundError):
         catalog.create("NGC 9999", from_catalog=True)
@@ -147,7 +118,7 @@ def test_an_unknown_name_is_refused_and_nothing_is_created(monkeypatch: pytest.M
 @pytest.mark.parametrize("name", ["", "   ", "Jupiter"])
 def test_an_empty_name_or_a_moving_body_is_refused(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     """An empty name or a planet has no catalog position and is refused."""
-    simbad = _FakeSimbad({"Jupiter": (10.0, 10.0)})
+    simbad = _simbad_knowing({"Jupiter": (10.0, 10.0)})
     catalog = _catalog(monkeypatch, simbad)
 
     with pytest.raises(NotFoundError):
@@ -157,7 +128,7 @@ def test_an_empty_name_or_a_moving_body_is_refused(monkeypatch: pytest.MonkeyPat
 
 def test_without_from_catalog_a_bare_target_is_made(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default keeps its old meaning: no lookup, no position."""
-    simbad = _FakeSimbad({"M 57": (283.396, 33.029)})
+    simbad = _simbad_knowing({"M 57": (283.396, 33.029)})
     catalog = _catalog(monkeypatch, simbad)
 
     target = catalog.create("M 57")

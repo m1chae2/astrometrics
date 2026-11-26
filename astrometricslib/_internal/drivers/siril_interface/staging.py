@@ -135,7 +135,7 @@ _CALIBRATION_MASTER_KINDS = (
 # saved as 32-bit floating point (the script sets ``set32bits``), not as the
 # 16-bit integers of Siril's default preference. Version 6 subtracts a bias
 # taken at the flats' own gain and offset, and the key also holds that bias's
-# fingerprint (see `_master_recipe`). Earlier versions subtracted the lights'
+# fingerprint (see `master_recipe`). Earlier versions subtracted the lights'
 # bias, which left a pedestal in the flat when the offsets differed, and
 # shared one cached master between runs that used different biases. Version
 # 7 leaves clipped flat frames out of the master (see `assess_staged_flats`),
@@ -150,7 +150,7 @@ FLAT_MASTER_RECIPE = "flat-recipe-7"
 DARK_MASTER_RECIPE = "dark-recipe-2"
 
 
-def _master_recipe(kind: str, target_folder: str | None = None) -> str:
+def master_recipe(kind: str, target_folder: str | None = None) -> str:
     """Name how a master of this kind is built, for its cache key.
 
     A master flat depends on the bias subtracted from it, so its recipe holds
@@ -366,7 +366,7 @@ class SirilStaging(SirilSession):
 
         for kind, frames_subdirectory, master_filename in _CALIBRATION_MASTER_KINDS:
             fingerprint = _calibration_source_fingerprint(
-                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind, target_folder)
+                os.path.join(target_folder, frames_subdirectory), master_recipe(kind, target_folder)
             )
             if fingerprint is None:
                 continue
@@ -501,7 +501,7 @@ class SirilStaging(SirilSession):
             if not os.path.exists(built_master_path):
                 continue
             fingerprint = _calibration_source_fingerprint(
-                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind, target_folder)
+                os.path.join(target_folder, frames_subdirectory), master_recipe(kind, target_folder)
             )
             if fingerprint is None:
                 continue

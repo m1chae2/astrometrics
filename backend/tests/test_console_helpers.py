@@ -16,7 +16,8 @@ import pytest
 from backend.services.infrastructure import api_doc_generator
 from backend.services.infrastructure.app_selection_service import AppSelection, AppSelectionService
 from backend.services.infrastructure.console_helpers import ConsoleSelection, make_show_request
-from backend.services.infrastructure.scripting_service import STOPPED_MESSAGE, ScriptingService
+from backend.services.infrastructure.scripting_runs import STOPPED_MESSAGE
+from backend.services.infrastructure.scripting_service import ScriptingService
 
 #: How long a test waits for a run to start or end, in seconds.
 WAIT_SECONDS = 5.0

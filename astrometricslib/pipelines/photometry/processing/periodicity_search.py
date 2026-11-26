@@ -74,7 +74,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from astropy.timeseries import BoxLeastSquares, LombScargle
-from scipy.stats import median_abs_deviation
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_abandonment import raise_if_abandoned
@@ -85,6 +84,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 VERDICT_DETECTED = "detected"
 VERDICT_POSSIBLE = "possible"
@@ -1262,7 +1262,7 @@ def _robust_point_scatter(flux: np.ndarray) -> float:
         The estimated noise of one measurement, never zero.
     """
     differences = np.diff(flux)
-    spread = 1.4826 * float(median_abs_deviation(differences, scale=1.0))
+    spread = robust_sigma(differences)
     # A difference of two independent measurements has sqrt(2) times the
     # noise of one, so divide it out.
     return max(spread / math.sqrt(2.0), 1e-6)

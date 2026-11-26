@@ -370,7 +370,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # and 2). An entry goes when its code is fixed. Do not add to it.
 ".claude/hooks/guard_destructive.py" = ["print"]
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
-"backend/services/infrastructure/scripting_service.py" = ["print"]
+"backend/services/infrastructure/scripting_workspace.py" = ["print"]
 "backend/services/infrastructure/socket_manager.py" = ["blind-except"]
 "documentation/notebooks/astrometrics/user_guide/01_working_with_targets.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/02_inspecting_fits_metadata.ipynb" = ["print"]

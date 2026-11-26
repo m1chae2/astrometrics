@@ -538,7 +538,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The stars the run identified, after the unresolved ones are dropped.",
         "The `catalog_matches` self-check compares this count with its limit.",
         better=Direction.HIGHER,
-        computed_by="pipelines.shared.star_recording._drop_unresolved_stars",
+        computed_by="pipelines.shared.star_recording.drop_unresolved_stars",
     ),
     _count_metric(
         ASTROMETRY_POSITION_ONLY_STAR_COUNT,
@@ -546,7 +546,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "Count of the stars given an id built from their sky position only.",
         "The stars the run identified, after the unresolved ones are dropped.",
         "These stars are real detections that no catalog could name.",
-        computed_by="pipelines.shared.star_recording._drop_unresolved_stars",
+        computed_by="pipelines.shared.star_recording.drop_unresolved_stars",
     ),
     _count_metric(
         ASTROMETRY_UNRESOLVED_STAR_COUNT,
@@ -555,7 +555,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "All the stars the run detected.",
         "A high count means many detections could not be placed on the sky.",
         better=Direction.LOWER,
-        computed_by="pipelines.shared.star_recording._drop_unresolved_stars",
+        computed_by="pipelines.shared.star_recording.drop_unresolved_stars",
     ),
     _count_metric(
         ASTROMETRY_PLATE_SOLVE_ATTEMPTS,

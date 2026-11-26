@@ -9,16 +9,13 @@ stack and reused until the stack file changes.
 """
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
 from astropy.io import fits
 from astropy.table import Table
-from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.cached_simbad_driver import CachedSimbadDriver
-from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.target import PreviewBrightObject, Target
 from astrometricslib.pipelines.stacking.post_processing import bright_object_choices
@@ -26,6 +23,8 @@ from astrometricslib.pipelines.stacking.post_processing.bright_object_choices im
     common_name_rank,
     list_bright_object_choices,
 )
+from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 SIZE = 200
 SCALE_ARCSEC = 10.0
@@ -33,73 +32,32 @@ CENTER_RA = 350.0
 CENTER_DEC = 61.0
 
 
-class FakeSimbad(SimbadDriver):
-    """A SIMBAD stand-in with a fixed answer that counts the questions."""
+def fake_simbad(
+    table: Table | None = None,
+    failure: Exception | None = None,
+    identifiers: Table | None = None,
+) -> FakeSimbad:
+    """Build a SIMBAD stand-in that answers the list's table questions.
 
-    def __init__(
-        self,
-        table: Table | None = None,
-        failure: Exception | None = None,
-        identifiers: Table | None = None,
-    ) -> None:
-        """Keep the answer to give.
+    Parameters
+    ----------
+    table : `astropy.table.Table` or `None`, optional
+        The rows a question about objects in the field returns.
+    failure : `Exception`, optional
+        An error every question raises instead.
+    identifiers : `astropy.table.Table` or `None`, optional
+        The rows a question about identifiers returns.
 
-        Parameters
-        ----------
-        table : `astropy.table.Table` or `None`, optional
-            The rows ``query_tap`` returns.
-        failure : `Exception`, optional
-            An error ``query_tap`` raises instead.
-        identifiers : `astropy.table.Table` or `None`, optional
-            The rows ``query_tap`` returns for a question about identifiers.
-        """
-        self.identifiers = identifiers
-        self.table = table
-        self.failure = failure
-        self.queries: list[str] = []
-
-    def query_region(
-        self,
-        coordinates: Any,
-        radius: str,
-        *,
-        votable_fields: tuple[str, ...] = (),
-        row_limit: int | None = None,
-    ) -> Any:
-        """Not used by the list.
-
-        Returns
-        -------
-        result_table : `None`
-            Always `None`.
-        """
-        return None
-
-    def query_object(self, object_name: str, *, votable_fields: tuple[str, ...] = ()) -> Any:
-        """Not used by the list.
-
-        Returns
-        -------
-        result_table : `None`
-            Always `None`.
-        """
-        return None
-
-    def query_tap(self, adql_query: str) -> Any:
-        """Record the question and give the fixed answer.
-
-        Returns
-        -------
-        result_table : `astropy.table.Table` or `None`
-            The table given at construction.
-
-        """
-        self.queries.append(adql_query)
-        if "FROM ident" in adql_query:
-            return self.identifiers
-        if self.failure is not None:
-            raise self.failure
-        return self.table
+    Returns
+    -------
+    simbad : `FakeSimbad`
+        The stand-in; its ``tap_calls`` list the questions asked.
+    """
+    return FakeSimbad(
+        region=None,
+        tap=lambda query: identifiers if "FROM ident" in query else table,
+        failure=failure,
+    )
 
 
 def rows(*entries: tuple[str, float, float, str, float | None]) -> Table:
@@ -154,11 +112,9 @@ def write_stack(path: Path, solved: bool = True) -> str:
     """
     header = fits.Header()
     if solved:
-        wcs = WCS(naxis=2)
-        wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-        wcs.wcs.crval = [CENTER_RA, CENTER_DEC]
-        wcs.wcs.crpix = [SIZE / 2 + 0.5, SIZE / 2 + 0.5]
-        wcs.wcs.cdelt = [-SCALE_ARCSEC / 3600.0, SCALE_ARCSEC / 3600.0]
+        wcs = tan_sky_map(
+            CENTER_RA, CENTER_DEC, (SIZE / 2 + 0.5, SIZE / 2 + 0.5), degrees_per_pixel=SCALE_ARCSEC / 3600.0
+        )
         header = wcs.to_header()
     fits.PrimaryHDU(np.zeros((SIZE, SIZE), dtype=np.float32), header=header).writeto(path)
     return str(path)
@@ -169,7 +125,7 @@ def test_the_list_keeps_nebulae_and_galaxies_inside_the_frame_nearest_the_center
 ) -> None:
     """Wrong kinds and off-picture objects go; the rest sort by distance."""
     offset = 0.2
-    simbad = FakeSimbad(
+    simbad = fake_simbad(
         rows(
             ("Far nebula", CENTER_RA, CENTER_DEC + offset, "HII", 10.0),
             ("Near nebula", CENTER_RA, CENTER_DEC + 0.02, "HII", 9.0),
@@ -186,22 +142,22 @@ def test_the_list_keeps_nebulae_and_galaxies_inside_the_frame_nearest_the_center
     assert by_name["Near nebula"].category == "nebula"
     assert by_name["NGC 1"].category == "galaxy"
     assert by_name["NGC 1"].major_axis_arcmin is None
-    assert "CIRCLE('ICRS'" in simbad.queries[0]
+    assert "CIRCLE('ICRS'" in simbad.tap_calls[0]
 
 
 def test_a_stack_without_a_plate_solution_says_to_run_astrometry_first(tmp_path: Path) -> None:
     """No solution means no list, and SIMBAD is not asked."""
-    simbad = FakeSimbad(rows())
+    simbad = fake_simbad(rows())
     result = list_bright_object_choices("M 52", write_stack(tmp_path / "stack.fits", solved=False), simbad)
 
     assert result.objects == []
     assert result.message == "Run Astrometry first to list objects in the frame"
-    assert simbad.queries == []
+    assert simbad.tap_calls == []
 
 
 def test_a_target_with_no_stack_gives_a_message(tmp_path: Path) -> None:
     """A missing stack file is a message, not an error."""
-    result = list_bright_object_choices("M 52", str(tmp_path / "missing.fits"), FakeSimbad())
+    result = list_bright_object_choices("M 52", str(tmp_path / "missing.fits"), fake_simbad())
 
     assert result.objects == []
     assert result.message == bright_object_choices.MESSAGE_NO_STACK
@@ -209,7 +165,7 @@ def test_a_target_with_no_stack_gives_a_message(tmp_path: Path) -> None:
 
 def test_simbad_out_of_reach_is_a_message_not_an_error(tmp_path: Path) -> None:
     """An unreachable service gives no objects and a plain message."""
-    simbad = FakeSimbad(failure=ExternalServiceError("down"))
+    simbad = fake_simbad(failure=ExternalServiceError("down"))
     result = list_bright_object_choices("M 52", write_stack(tmp_path / "stack.fits"), simbad)
 
     assert result.objects == []
@@ -220,30 +176,30 @@ def test_the_list_is_stored_and_reused(tmp_path: Path, monkeypatch: pytest.Monke
     """A second call reads SIMBAD's stored answer; no question goes out."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     stack = write_stack(tmp_path / "stack.fits")
-    fake = FakeSimbad(rows(("Near nebula", CENTER_RA, CENTER_DEC, "HII", 9.0)))
+    fake = fake_simbad(rows(("Near nebula", CENTER_RA, CENTER_DEC, "HII", 9.0)))
     simbad = CachedSimbadDriver(fake)
 
     first = list_bright_object_choices("M 52", stack, simbad)
-    asked = len(fake.queries)
+    asked = len(fake.tap_calls)
     second = list_bright_object_choices("M 52", stack, simbad)
 
     assert first.from_cache is False
     assert second.from_cache is True
     assert [entry.simbad_id for entry in second.objects] == ["Near nebula"]
-    assert len(fake.queries) == asked
+    assert len(fake.tap_calls) == asked
 
 
 def test_refresh_style_call_skips_the_stored_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With ``use_cache`` off, SIMBAD is asked though an answer is stored."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     stack = write_stack(tmp_path / "stack.fits")
-    fake = FakeSimbad(rows(("Near nebula", CENTER_RA, CENTER_DEC, "HII", 9.0)))
+    fake = fake_simbad(rows(("Near nebula", CENTER_RA, CENTER_DEC, "HII", 9.0)))
     simbad = CachedSimbadDriver(fake)
     list_bright_object_choices("M 52", stack, simbad)
-    asked = len(fake.queries)
+    asked = len(fake.tap_calls)
     list_bright_object_choices("M 52", stack, simbad, use_cache=False)
 
-    assert len(fake.queries) > asked
+    assert len(fake.tap_calls) > asked
 
 
 def test_the_target_record_defaults_to_automatic_and_loads_without_the_field() -> None:
@@ -259,7 +215,7 @@ def test_hii_regions_inside_a_galaxy_are_dropped_and_the_galaxy_takes_its_common
     tmp_path: Path,
 ) -> None:
     """Sub-components go, a separate neighbor stays, names are common."""
-    simbad = FakeSimbad(
+    simbad = fake_simbad(
         rows_with_ids(
             (1, "NGC  7331", CENTER_RA, CENTER_DEC, "LIN", 10.5),
             (2, "[P98] 175", CENTER_RA + 0.01, CENTER_DEC + 0.01, "HII", None),
@@ -290,7 +246,7 @@ def test_the_best_common_name_wins_over_the_main_name() -> None:
 
 def test_the_bubble_gets_its_ngc_name(tmp_path: Path) -> None:
     """The main name is replaced by the best common identifier."""
-    simbad = FakeSimbad(
+    simbad = fake_simbad(
         rows_with_ids((9, "NAME Bubble Nebula", CENTER_RA, CENTER_DEC, "HII", 15.0)),
         identifiers=Table({"oidref": [9, 9, 9], "id": ["Sh 2-162", "NGC  7635", "LBN 548"]}),
     )
@@ -301,7 +257,7 @@ def test_the_bubble_gets_its_ngc_name(tmp_path: Path) -> None:
 
 def test_a_failed_identifier_question_keeps_the_main_names(tmp_path: Path) -> None:
     """Without identifiers the sized objects still list by their main names."""
-    simbad = FakeSimbad(rows_with_ids((9, "Some cloud", CENTER_RA, CENTER_DEC, "HII", 15.0)))
+    simbad = fake_simbad(rows_with_ids((9, "Some cloud", CENTER_RA, CENTER_DEC, "HII", 15.0)))
     result = list_bright_object_choices("M 52", write_stack(tmp_path / "s.fits"), simbad)
 
     assert [entry.simbad_id for entry in result.objects] == ["Some cloud"]

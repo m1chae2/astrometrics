@@ -4,8 +4,6 @@ The Gaia archive is replaced by a stand-in, so no test touches the network.
 Stored answers go to a folder the test owns.
 """
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from astropy.table import Table
@@ -15,21 +13,6 @@ from astrometricslib._internal.drivers.catalog_cache import CatalogUnavailableEr
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.pipelines.shared import gaia_star_colors
 from astrometricslib.pipelines.shared.gaia_star_colors import COLOUR_COLUMNS, gaia_star_colors_in_footprint
-
-
-@pytest.fixture(autouse=True)
-def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give each test its own stored catalog answers.
-
-    Parameters
-    ----------
-    tmp_path : `pathlib.Path`
-        The test's own folder.
-    monkeypatch : `pytest.MonkeyPatch`
-        Used to move the cache folder.
-    """
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-
 
 # A footprint of about 0.1 degree on a side, inside one tile.
 FOOTPRINT = [(10.0, 20.0), (10.1, 20.0), (10.1, 20.1), (10.0, 20.1)]

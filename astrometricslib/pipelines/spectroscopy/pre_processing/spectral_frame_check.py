@@ -43,6 +43,7 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_ADU,
     resolve_saturation_threshold,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 # It stands for about two star widths (6 on the reference setup, 2 × the star
 # width), so it follows the star width the run measures.
@@ -134,10 +135,6 @@ ZERO_ORDER_SATURATION_RADIUS_PX = TunedParameter(
     reference_value=12,
 )
 """A saturated patch this close to the zero order is the zero order itself."""
-
-_MAD_TO_SIGMA = 1.4826
-"""A robust standard deviation is 1.4826 times the median absolute deviation
-for Gaussian noise."""
 
 
 def _fwhm_across(profile: np.ndarray, centre: int) -> float | None:
@@ -238,7 +235,7 @@ def analyze_spectral_frame(
     direction = 1.0 if positive else -1.0
 
     sky = float(np.median(image))
-    sigma = _MAD_TO_SIGMA * float(np.median(np.abs(image - sky)))
+    sigma = MAD_TO_SIGMA * float(np.median(np.abs(image - sky)))
 
     saturated = image >= saturation_threshold_adu
     labels, count = ndimage.label(saturated)

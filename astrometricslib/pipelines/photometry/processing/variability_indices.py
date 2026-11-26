@@ -48,7 +48,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.stats import chi2, median_abs_deviation
+from scipy.stats import chi2
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
@@ -58,6 +58,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 # Converts a fractional flux change to magnitudes: 2.5 / ln(10) = 1.0857.
 MAGNITUDES_PER_FRACTION = 2.5 / math.log(10.0)
@@ -132,10 +133,6 @@ CALIBRATION_SIGMAS = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="PHO-06",
 )
-
-# Converts a median absolute deviation to a standard deviation for a
-# normal distribution.
-_MAD_TO_SIGMA = 1.4826
 
 # A candidate must also have a false discovery q-value (see
 # `benjamini_hochberg`) below this level: about 1 in 100 of the stars the
@@ -365,12 +362,8 @@ def calibrate_thresholds(
         sigmas = resolve(CALIBRATION_SIGMAS).value
     log_chi = np.log10(np.maximum(np.asarray(chi_squares, dtype=float), 1e-6))
     j_values = np.asarray(stetson_js, dtype=float)
-    chi_threshold = 10.0 ** (
-        float(np.median(log_chi)) + sigmas * _MAD_TO_SIGMA * float(median_abs_deviation(log_chi, scale=1.0))
-    )
-    j_threshold = float(np.median(j_values)) + sigmas * _MAD_TO_SIGMA * float(
-        median_abs_deviation(j_values, scale=1.0)
-    )
+    chi_threshold = 10.0 ** (float(np.median(log_chi)) + sigmas * robust_sigma(log_chi))
+    j_threshold = float(np.median(j_values)) + sigmas * robust_sigma(j_values)
     return VariabilityThresholds(chi_threshold, j_threshold, excess_scatter_threshold)
 
 

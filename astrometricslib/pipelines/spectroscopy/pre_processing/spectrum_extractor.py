@@ -122,6 +122,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance im
     median_variance_factor,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -625,7 +626,7 @@ def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
         return values.copy()
     baseline = median_filter(values, size=resolve(CONTAMINANT_BASELINE_WIDTH_PX).value, mode="nearest")
     residual = values - baseline
-    noise_width = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    noise_width = robust_sigma(residual)
     is_spike = residual > resolve(CONTAMINANT_THRESHOLD_SIGMA).value * noise_width
     if not is_spike.any():
         return values.copy()

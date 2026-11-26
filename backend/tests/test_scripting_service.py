@@ -10,12 +10,9 @@ from pathlib import Path
 import pytest
 
 from astrometricslib.exceptions import InvalidArgumentError
-from backend.services.infrastructure.scripting_service import (
-    RECENT_RUN_LIMIT,
-    RECENT_RUN_TEXT_LIMIT,
-    ScriptingService,
-    inspect_api,
-)
+from backend.services.infrastructure.scripting_runs import RECENT_RUN_LIMIT, RECENT_RUN_TEXT_LIMIT
+from backend.services.infrastructure.scripting_service import ScriptingService
+from backend.services.infrastructure.scripting_workspace import inspect_api
 
 
 def test_scripting_service_workspace_manifest() -> None:

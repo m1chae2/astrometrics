@@ -24,6 +24,7 @@ from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     tiles_under_image,
 )
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 LEVEL = 7
 
@@ -43,11 +44,7 @@ def _wcs(ra: float = 339.28, dec: float = 34.57, size: int = 3000) -> WCS:
     wcs : `astropy.wcs.WCS`
         A tangent-plane map with 1.92 arcsec pixels.
     """
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [ra, dec]
-    wcs.wcs.crpix = [size / 2.0, size / 2.0]
-    wcs.wcs.cdelt = [-1.92 / 3600.0, 1.92 / 3600.0]
+    wcs = tan_sky_map(ra, dec, (size / 2.0, size / 2.0), degrees_per_pixel=1.92 / 3600.0)
     return wcs
 
 

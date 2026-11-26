@@ -116,6 +116,17 @@ These helpers test the comparison of a calibrated spectrum with the star's Gaia 
 - **Variables.** `variable_fraction` (default 5%) of the stars get a sinusoid (two thirds) or an eclipsing dip (one third). Amplitudes are log-uniform (uniform in their logarithm, so each factor of ten is equally likely) over `amplitude_range_mag` (default 0.01 to 0.3 mag) and do not depend on brightness. A sinusoid's amplitude is its semi-amplitude. An eclipse's amplitude is its depth. Periods are log-uniform from 4 frames to the length of the run.
 - **Seed.** One `numpy.random.default_rng(seed)` drives every draw, so the same arguments give the same field.
 
+## Test stand-ins: `sky_map.py` and `fake_simbad.py`
+
+Two helpers give tests the pieces most of them build. They are not re-exported by the package; import them from the module.
+
+| Name | What it gives |
+| --- | --- |
+| `tan_sky_map(center_ra_deg, center_dec_deg, reference_pixel, degrees_per_pixel=None, cd=None)` | A sky map (World Coordinate System, WCS: the map from pixel to right ascension and declination) with a gnomonic (TAN) projection and no distortion terms. `reference_pixel` counts from 1, as `CRPIX` does. With `degrees_per_pixel` the map has north up and east to the left; `cd` gives a full 2 by 2 matrix instead. `wcs.to_header()` gives the header cards. |
+| `FakeSimbad(region=..., objects=..., tap=..., failure=None)` | A `SimbadDriver` (the library's client for SIMBAD, the online database of named sky objects). Each answer is a fixed value or a function of the question; by default a region or table question gets an empty table and a name gets `None`. It records each question in `region_calls`, `object_calls` and `tap_calls`, and `call_count` counts them. Setting `failure` makes every question raise that error, as when the service cannot be reached. |
+
+A test that checks distortion terms, a mirrored image or a turned field builds its own map, because those settings are what it tests. A test that fakes astroquery's own `Simbad` class, one layer lower, keeps its own stand-in.
+
 ## Extending the generators
 
 - Add new frame types as a new module here and export the names in `__init__.py`.
@@ -125,7 +136,7 @@ These helpers test the comparison of a calibrated spectrum with the star's Gaia 
 
 ## Tests
 
-The variability field is tested through the photometry pipeline's own tests (`pipelines/photometry/test/test_variability_injection.py`). `test_synthetic_generators.py` checks flux conservation, sub-pixel centroid shifts, the drift rule, line depth and column, the extractor's tilt sign, and seed repeatability. `test_wavelength_dependent_trace.py` checks the `trace_sigma_by_wavelength` option of the spectral generator: leaving it out changes nothing, a constant table gives the same image as the plain width, and the trail width measured at a column follows the table. Run both with:
+The variability field is tested through the photometry pipeline's own tests (`pipelines/photometry/test/test_variability_injection.py`). `test_synthetic_generators.py` checks flux conservation, sub-pixel centroid shifts, the drift rule, line depth and column, the extractor's tilt sign, and seed repeatability. `test_wavelength_dependent_trace.py` checks the `trace_sigma_by_wavelength` option of the spectral generator: leaving it out changes nothing, a constant table gives the same image as the plain width, and the trail width measured at a column follows the table. `test_stand_ins.py` checks that `tan_sky_map` puts its reference pixel at the given sky position and that `FakeSimbad` gives its answers, records each question and raises a set failure. Run them all with:
 
 ```bash
 .venv/bin/pytest astrometricslib/test/synthetic -q

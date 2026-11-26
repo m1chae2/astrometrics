@@ -73,6 +73,7 @@ from astrometricslib.pipelines.shared.quality.star_ring import (
     STAR_RING_NEIGHBOR_SEARCH_MARGIN_PX,
     STAR_RING_TARGET_MATCH_RADIUS_PX,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +248,7 @@ def locate_star_centroid(
     # count. The noise width is the median absolute deviation (MAD, a spread
     # that ignores the star) scaled to match a standard deviation. On a
     # noise-free window the MAD is zero and nothing changes.
-    noise_width = 1.4826 * np.median(np.abs(cutout - background_level))
+    noise_width = MAD_TO_SIGMA * np.median(np.abs(cutout - background_level))
     weights = np.clip(cutout - background_level - 3.0 * noise_width, 0.0, None)
     if weights.sum() <= 0:
         return None
@@ -553,7 +554,7 @@ def fit_frame_alignment(
         residual = np.hypot(
             displacement[:, 0] - rows_x @ parameters, displacement[:, 1] - rows_y @ parameters
         )
-        scatter = 1.4826 * float(np.median(residual[keep]))
+        scatter = MAD_TO_SIGMA * float(np.median(residual[keep]))
         if scatter <= 0:
             break
         updated = residual <= alignment_clip_sigmas * max(scatter, 1e-3)
@@ -786,7 +787,7 @@ def estimate_pixel_noise(data: np.ndarray) -> float:
         return 0.0
     rows = data[::4, :]
     differences = rows[:, 3:] - rows[:, :-3]
-    return float(1.4826 * np.median(np.abs(differences - np.median(differences))) / math.sqrt(2.0))
+    return robust_sigma(differences) / math.sqrt(2.0)
 
 
 def select_alignment_anchors(

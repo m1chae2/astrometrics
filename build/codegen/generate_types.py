@@ -48,6 +48,7 @@ from astrometricslib.models.quality.blink_pair import BlinkPair
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
+from astrometricslib.models.quality.frame_status import FrameStatus, FrameStatusReport
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -156,7 +157,6 @@ from astrometricslib.models.wavelength_scale import (
     WavelengthZeroPointRecord,
 )
 from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
-from backend.services.data.frame_status import FrameStatus, FrameStatusReport
 from backend.services.infrastructure.system_status_service import (
     FrameCopyPulse,
     IndiStatus,

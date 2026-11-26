@@ -37,7 +37,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
 
     // The star-shape review of this target, and each frame's status (with the frames set aside).
     const starShapeReview = useStarShapeReview(selectedTarget, reloadKey, shouldFetch);
-    const frameReview = useFrameStatuses(selectedTarget, reloadKey, starShapeReview, shouldFetch);
+    const frameReview = useFrameStatuses(selectedTarget, reloadKey, shouldFetch);
 
     const [allFiles, setAllFiles] = useState<FileItem[]>([]);
     const [exposureCounts, setExposureCounts] = useState<Record<string, number>>({});

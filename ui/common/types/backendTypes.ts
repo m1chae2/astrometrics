@@ -1086,7 +1086,7 @@ export interface FrameCopyPulse {
  * name : `str`
  * The file name.
  * state : `str`
- * ``included``, ``not_stacked`` or ``set_aside``.
+ * One of `FRAME_STATES`.
  * kind : `str` or `None`
  * The kind the stacker recorded for a set-aside frame, such as
  * ``clouded``, ``trailed`` or ``off_field``. `None` when none is
@@ -1094,14 +1094,17 @@ export interface FrameCopyPulse {
  * reason : `str`
  * The stacker's own words for a set-aside frame; empty otherwise.
  * date : `str`
- * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
- * file name has no date (set-aside frames only).
+ * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS`` (set-aside
+ * frames only).
  * camera : `str`
  * The camera name from the frame's header (set-aside frames only).
  * filter : `str`
  * The filter name from the frame's header (set-aside frames only).
  * exposure : `str`
  * The exposure in seconds, for a set-aside frame; empty otherwise.
+ * elongation : `float` or `None`
+ * For a flagged frame, the elongation of its stars (long axis over
+ * short axis); `None` otherwise.
  * original_path : `str` or `None`
  * Where a set-aside frame was before it was moved.
  * restorable : `bool`
@@ -1119,6 +1122,7 @@ export interface FrameStatus {
   camera?: string;
   filter?: string;
   exposure?: string;
+  elongation?: number | null;
   originalPath?: string | null;
   restorable?: boolean;
   restoreNote?: string;
@@ -1134,10 +1138,14 @@ export interface FrameStatus {
  * stacked_at : `float` or `None`
  * When the latest stack file was written, in seconds since the Unix
  * epoch. `None` when the target has no stack.
+ * typical_elongation : `float` or `None`
+ * The typical elongation of the target's frames, which a flagged
+ * frame's elongation stands far above. `None` when not known.
  */
 export interface FrameStatusReport {
   frames?: FrameStatus[];
   stackedAt?: number | null;
+  typicalElongation?: number | null;
 }
 
 /**

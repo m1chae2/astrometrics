@@ -287,3 +287,22 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
     actions = {row.subject.subject_id.split("/")[-1]: row.action_taken for row in rows}
     assert actions["moved.fits"] == set_aside_action_text("clouded", REASON)
     assert actions["kept.fits"] is None
+
+
+def test_frame_statuses_list_the_targets_frames_with_the_flags(
+    quality: QualityRecords, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The status call reads the target's frames and its set-aside frames."""
+    target = Target(
+        id="M 1",
+        frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
+    )
+    monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+
+    report = quality.frame_statuses(target, 200.0, {"/a.fits": 1.6}, 1.1)
+
+    assert [(status.name, status.state) for status in report.frames] == [
+        ("a.fits", "flagged"),
+        ("b.fits", "not_stacked"),
+    ]
+    assert report.typical_elongation == pytest.approx(1.1)

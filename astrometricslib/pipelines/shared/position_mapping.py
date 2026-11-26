@@ -20,8 +20,12 @@ array (``y = height - 1 - row``), as `astrometricslib` uses it (checked on the
 M 57 night of 2026-10-03). The transform saved for a frame moves the frame onto
 the reference, the stack was then trimmed ``crop_offset`` columns and rows from
 its left and top edges, so a stack pixel is the reference pixel minus the
-trim. A processed picture cropped from its stack says in ``CROPX0`` and
-``CROPY0`` how many columns and rows were cut from the stack's left and top.
+trim. A stack may then have been turned by a quarter turn so that north is
+near the top; the record's ``quarter_turn_degrees`` says how far, and the
+pixel is turned the same way to land on the saved file (see
+`quarter_turn.to_registration_grid`). A processed picture cropped from its
+saved stack says in ``CROPX0`` and ``CROPY0`` how many columns and rows were
+cut from the saved stack's left and top.
 
 `ProcessingError` (from `astrometricslib.exceptions`) marks a pixel that
 cannot be followed, such as a frame Siril left out of its stack. `map_position`
@@ -156,6 +160,75 @@ def _matrix(stack: StackRecord, position: int) -> np.ndarray:
     return np.asarray(stack.record.homographies[position], dtype=float).reshape(3, 3)
 
 
+def _saved_size(stack: StackRecord) -> tuple[int, int]:
+    """Read the saved stack file's number of rows and columns.
+
+    Parameters
+    ----------
+    stack : `StackRecord`
+        The stack's record.
+
+    Returns
+    -------
+    size : `tuple` [`int`, `int`]
+        Rows and columns of the stack as saved (after any quarter turn).
+    """
+    header = _header_of(stack.stack_path)
+    return int(header.get("NAXIS2", 0)), int(header.get("NAXIS1", 0))
+
+
+def _registered_to_saved(stack: StackRecord, row: float, column: float) -> tuple[float, float]:
+    """Move a pixel of the trimmed stack as registered onto the saved stack.
+
+    Parameters
+    ----------
+    stack : `StackRecord`
+        The stack's record.
+    row, column : `float`
+        The pixel on the trimmed stack before the quarter turn, from 0.
+
+    Returns
+    -------
+    row, column : `float`
+        The same pixel on the saved stack file, from 0.
+    """
+    degrees = stack.record.quarter_turn_degrees % 360
+    if degrees == 0:
+        return row, column
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import to_registration_grid
+
+    saved_rows, saved_columns = _saved_size(stack)
+    registered_rows, registered_columns = (
+        (saved_columns, saved_rows) if degrees % 180 else (saved_rows, saved_columns)
+    )
+    # Taking back the opposite turn on the registered grid makes the turn.
+    return to_registration_grid(row, column, -degrees % 360, registered_rows, registered_columns)
+
+
+def _saved_to_registered(stack: StackRecord, row: float, column: float) -> tuple[float, float]:
+    """Move a pixel of the saved stack back onto the trimmed registered stack.
+
+    Parameters
+    ----------
+    stack : `StackRecord`
+        The stack's record.
+    row, column : `float`
+        The pixel on the saved stack file, from 0.
+
+    Returns
+    -------
+    row, column : `float`
+        The same pixel on the trimmed stack before the quarter turn, from 0.
+    """
+    degrees = stack.record.quarter_turn_degrees % 360
+    if degrees == 0:
+        return row, column
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import to_registration_grid
+
+    saved_rows, saved_columns = _saved_size(stack)
+    return to_registration_grid(row, column, degrees, saved_rows, saved_columns)
+
+
 def frame_to_stack(
     stack: StackRecord, position: int, x: float, y: float, frame_height: int
 ) -> tuple[float, float]:
@@ -175,7 +248,7 @@ def frame_to_stack(
     Returns
     -------
     x, y : `float`
-        The pixel on the stack, 1-based.
+        The pixel on the saved stack file, 1-based.
 
     Raises
     ------
@@ -189,7 +262,8 @@ def frame_to_stack(
     reference_column = moved[0] / moved[2]
     reference_row = frame_height - 1 - moved[1] / moved[2]
     crop = stack.record.crop_offset
-    return float(reference_column - crop[0]) + 1.0, float(reference_row - crop[1]) + 1.0
+    row, column = _registered_to_saved(stack, reference_row - crop[1], reference_column - crop[0])
+    return float(column) + 1.0, float(row) + 1.0
 
 
 def stack_to_frame(
@@ -204,7 +278,7 @@ def stack_to_frame(
     position : `int`
         The frame's index in the record.
     x, y : `float`
-        The pixel on the stack, 1-based.
+        The pixel on the saved stack file, 1-based.
     frame_height : `int`
         The frame's number of rows.
 
@@ -224,8 +298,9 @@ def stack_to_frame(
     except np.linalg.LinAlgError as error:
         raise ProcessingError("The frame's transform cannot be turned around.") from error
     crop = stack.record.crop_offset
-    reference_column = (x - 1.0) + crop[0]
-    reference_row = (y - 1.0) + crop[1]
+    row, column = _saved_to_registered(stack, y - 1.0, x - 1.0)
+    reference_column = column + crop[0]
+    reference_row = row + crop[1]
     moved = inverse @ np.array([reference_column, frame_height - 1 - reference_row, 1.0])
     if math.isclose(moved[2], 0.0, abs_tol=1e-12):
         raise ProcessingError("The frame's transform cannot place that pixel.")

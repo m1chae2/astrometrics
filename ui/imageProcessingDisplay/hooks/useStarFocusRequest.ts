@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AstrometryOverlayStar } from '../../common/services/astronomyService';
 import type { RestoreView } from '../../common/fitsViewer/FitsRenderer';
-import { catalogKeysOfStar } from '../../common/fitsViewer/utils/starNames';
 
 /**
  * Screen pixels per stack pixel when the view zooms in on a star: the star fills a few screen pixels per
@@ -54,14 +53,14 @@ export interface StarFocusInputs {
 }
 
 /**
- * Finds the stack's star that has a given library record, by its catalog keys.
+ * Finds the stack's star that has a given library record, by the record id the star carries.
  *
  * @param stars The stack's named stars.
  * @param recordId The library record id.
  * @returns The star, or null.
  */
 export function findStarForRecord(stars: readonly AstrometryOverlayStar[], recordId: string): AstrometryOverlayStar | null {
-  return stars.find((star) => star.libraryId === recordId || catalogKeysOfStar(star).includes(recordId)) ?? null;
+  return stars.find((star) => star.libraryId === recordId) ?? null;
 }
 
 /**

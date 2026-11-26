@@ -10,8 +10,9 @@ saved next to a stack:
   ``<stack>_detections.json`` file when it is still valid.
 * ``"stars"``: the named stars of the stack, read from its
   ``<stack>_identification.json`` file. As in Image Processing's Astrometry
-  overlay, only stars that have a record in the library with photometry (a
-  light curve) are drawn and named.
+  overlay, only stars whose library id (``library_id``, set by the
+  identification) is a record with photometry (a light curve) are drawn and
+  named.
 
 This module finds the marks once (`collect_overlay_marks`) and draws them
 either on a Matplotlib figure (`draw_image_figure`) or on a PNG
@@ -24,7 +25,6 @@ window. Nothing is saved.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from io import BytesIO
@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 __all__ = [
     "IMAGE_OVERLAYS",
     "OverlayMark",
-    "catalog_keys_of_star",
     "check_overlays",
     "collect_overlay_marks",
     "draw_image_figure",
@@ -52,15 +51,6 @@ __all__ = [
 
 IMAGE_OVERLAYS = ("detections", "stars")
 """The overlays that can be drawn on a FITS file."""
-
-UNNAMED_STAR = "Unnamed star"
-"""The name a stack's star gets when no catalog star is close to it."""
-
-GAIA_NAME_PREFIX = "Gaia DR3 "
-"""How a library star found only in Gaia is named: this text and its number."""
-
-_STACK_STAR_ID = re.compile(r"^(detection|gaia)-\d+$")
-"""The ids a stack's star list gives its stars, which are not library ids."""
 
 OVERLAY_COLORS = {"detections": "cyan", "stars": "yellow"}
 """The color of each overlay's circles and names."""
@@ -102,37 +92,6 @@ class OverlayMark:
     label: str | None = None
 
 
-def catalog_keys_of_star(star: Any) -> list[str]:
-    """List the library ids a stack's named star may have.
-
-    This follows the app's rule (``catalogKeysOfStar`` in the viewer): the
-    Gaia name ``Gaia DR3 <number>`` when the star has a Gaia number, then
-    its name unless it is ``Unnamed star``, then its own id unless it is a
-    stack-only id such as ``detection-12``.
-
-    Parameters
-    ----------
-    star : `IdentifiedStar`
-        One star of a stack's saved identification.
-
-    Returns
-    -------
-    keys : `list` [`str`]
-        The possible library ids, most specific first, with no repeats.
-    """
-    keys: list[str] = []
-    gaia_source_id = getattr(star, "gaia_source_id", None)
-    if gaia_source_id:
-        keys.append(f"{GAIA_NAME_PREFIX}{gaia_source_id}")
-    name = (getattr(star, "name", "") or "").strip()
-    if name and name != UNNAMED_STAR and name not in keys:
-        keys.append(name)
-    own_id = (getattr(star, "id", "") or "").strip()
-    if own_id and not _STACK_STAR_ID.match(own_id) and own_id not in keys:
-        keys.append(own_id)
-    return keys
-
-
 def check_overlays(overlays: Sequence[str] | str | None) -> tuple[str, ...]:
     """Check the overlay names a caller gave.
 
@@ -171,7 +130,7 @@ def _photometry_star_ids(stars: StellarCatalog, keys: list[str], target_id: str 
     stars : `StellarCatalog`
         The library's star catalog.
     keys : `list` [`str`]
-        The possible library ids of the stack's stars.
+        The library ids of the stack's stars.
     target_id : `str` or `None`
         The target the stack belongs to. With one, only that target's stars
         count, as in Image Processing. With none, any library star counts.
@@ -281,14 +240,13 @@ def _named_star_marks(
     identification = read_stack_identification(path)
     if identification is None:
         return "no star names (identify the stack first)"
-    keys_by_star = [(star, catalog_keys_of_star(star)) for star in identification.stars]
-    all_keys = list(dict.fromkeys(key for _star, keys in keys_by_star for key in keys))
-    with_photometry = _photometry_star_ids(stars, all_keys, target_id)
+    library_ids = list(dict.fromkeys(star.library_id for star in identification.stars if star.library_id))
+    with_photometry = _photometry_star_ids(stars, library_ids, target_id)
     if not with_photometry:
         return "no stars with photometry yet (run Analyze Target)"
     shown = 0
-    for star, keys in keys_by_star:
-        if any(key in with_photometry for key in keys):
+    for star in identification.stars:
+        if star.library_id in with_photometry:
             marks.append(OverlayMark("stars", star.x, star.y, star.name))
             shown += 1
     return f"{shown:,} {'star' if shown == 1 else 'stars'} with photometry"

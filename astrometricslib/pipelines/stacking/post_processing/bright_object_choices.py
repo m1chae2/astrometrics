@@ -59,8 +59,9 @@ from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDri
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.processing_results import BrightObjectChoice, BrightObjectChoices
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
-from astrometricslib.pipelines.shared.simbad_object_types import quote_adql
+from astrometricslib.pipelines.shared.simbad_object_types import quote_adql, without_name_prefix
 from astrometricslib.pipelines.stacking.post_processing.stack_image import pixel_scale_arcsec
+from astrometricslib.utilities.table_cells import optional_float
 from astrometricslib.utilities.target_object_category import (
     GALAXY_CODES,
     NEBULA_CODES,
@@ -138,7 +139,7 @@ MINIMUM_LISTED_ARCMIN = 1.0
 MAXIMUM_LISTED_OBJECTS = 5
 
 
-def _number(value: object) -> float | None:
+def _positive(value: object) -> float | None:
     """Read one table cell as a positive number.
 
     Parameters
@@ -149,15 +150,11 @@ def _number(value: object) -> float | None:
     Returns
     -------
     number : `float` or `None`
-        The value, or `None` when it is masked, not a number or not positive.
+        The value, or `None` when it is masked, not a number or not positive
+        (see `table_cells.optional_float`).
     """
-    if getattr(value, "mask", False):
-        return None
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except TypeError, ValueError:
-        return None
-    return number if math.isfinite(number) and number > 0.0 else None
+    number = optional_float(value)
+    return number if number is not None and number > 0.0 else None
 
 
 def _text(value: object) -> str:
@@ -197,14 +194,9 @@ def _magnitude(row: object, column_names: list[str]) -> float | None:
     """
     for name in ("mag_v", "mag_b", "mag_g"):
         if name in column_names:
-            value = row[name]  # type: ignore[index]
-            if not getattr(value, "mask", False):
-                try:
-                    magnitude = float(value)
-                except TypeError, ValueError:
-                    continue
-                if math.isfinite(magnitude):
-                    return magnitude
+            magnitude = optional_float(row[name])  # type: ignore[index]
+            if magnitude is not None:
+                return magnitude
     return None
 
 
@@ -257,7 +249,7 @@ def common_name_rank(identifier: str) -> int | None:
         0 for a Messier name, then NGC, IC, Sh2, LBN, vdB, Abell, UGC and PGC;
         `None` when the identifier is none of these.
     """
-    tidy = re.sub(r"\s+", " ", identifier.replace("NAME ", "")).strip()
+    tidy = without_name_prefix(identifier)
     for rank, pattern in enumerate(_COMMON_NAME_PATTERNS):
         if pattern.match(tidy):
             return rank
@@ -299,7 +291,7 @@ def _best_common_names(simbad: SimbadDriver, candidates: list[_Candidate]) -> di
         if number is None or rank is None:
             continue
         if number not in best or rank < best[number][0]:
-            best[number] = (rank, re.sub(r"\s+", " ", identifier.replace("NAME ", "")).strip())
+            best[number] = (rank, without_name_prefix(identifier))
     return {number: name for number, (_, name) in best.items()}
 
 
@@ -546,7 +538,7 @@ def _choices_from_table(
     """
     candidates: list[_Candidate] = []
     for row in table if table is not None else []:
-        ra_deg, dec_deg = _number(row["ra"]), _number(row["dec"])
+        ra_deg, dec_deg = optional_float(row["ra"]), optional_float(row["dec"])
         code, name = _text(row["otype"]), _text(row["main_id"])
         category = target_object_category(code)
         if ra_deg is None or dec_deg is None or not name or category not in ("nebula", "galaxy"):
@@ -565,7 +557,7 @@ def _choices_from_table(
                     category=category,
                     ra_deg=ra_deg,
                     dec_deg=dec_deg,
-                    major_axis_arcmin=_number(row["major_axis"]),
+                    major_axis_arcmin=_positive(row["major_axis"]),
                 ),
             )
         )

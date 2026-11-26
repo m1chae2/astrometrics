@@ -21,6 +21,7 @@ identifier and the save step both use that radius.
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -35,6 +36,8 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.simbad_object_types import SIMBAD_NAME_PREFIX, without_name_prefix
+from astrometricslib.utilities.gaia_record_ids import GAIA_DR3_PREFIX, gaia_record_id
 
 # Two catalog rows closer than this on the sky are the same star. On the
 # real catalog, pairs of non-position-only rows within 1 arcsecond number
@@ -112,7 +115,7 @@ POSITION_ONLY_SAME_STAR_RADIUS_ARCSEC = TunedParameter(
 # Names that beat every other catalog, best first. A name matching the
 # first pattern is preferred to one matching the second, and both to any
 # other name.
-_PREFERRED_NAME_PATTERNS = (r"^(HD|BD|CD|CPD)[\s+\-\d]", r"^Gaia DR3 ")
+_PREFERRED_NAME_PATTERNS = (r"^(HD|BD|CD|CPD)[\s+\-\d]", rf"^{re.escape(GAIA_DR3_PREFIX)}")
 
 
 def catalog_family(star_id: str) -> str:
@@ -229,7 +232,7 @@ def display_name_rank(name: str) -> int:
     text = name.strip()
     if text.startswith("FIELD_J"):
         return 5
-    if text.startswith("Gaia DR3 "):
+    if text.startswith(GAIA_DR3_PREFIX):
         return 4
     if _SURVEY_NAME_PATTERN.match(text):
         return 3
@@ -238,6 +241,51 @@ def display_name_rank(name: str) -> int:
     if text.startswith(("* ", "V* ")) or not re.search(r"\d", text):
         return 0
     return 2
+
+
+# Inside the two most familiar groups of `display_name_rank`, the order people
+# know names in. Group 0: a proper name (``Vega``, or SIMBAD's ``NAME Vega``),
+# then a Bayer name (a Greek letter and the constellation, ``* alf Lyr``),
+# then a Flamsteed number (``* 3 Lyr``), then any other starred name such as
+# a variable-star name (``V* RR Lyr``). Group 1: the Henry Draper (HD)
+# number, then the Hipparcos (HIP) number, then the other bright-star
+# catalogs. A name that matches none of its group's patterns comes last in
+# the group.
+_ORDER_WITHIN_RANK: dict[int, tuple[re.Pattern[str], ...]] = {
+    0: (
+        re.compile(r"^(?!\*\s|V\*\s)"),
+        re.compile(r"^\*\s+[a-z]{2,3}\d{0,2}\s+[A-Z][a-z]{2}\b"),
+        re.compile(r"^\*\s+\d+\s+[A-Z][a-z]{2}\b"),
+    ),
+    1: (re.compile(r"^HD[\s\d]"), re.compile(r"^HIP[\s\d]")),
+}
+
+
+def familiarity_key(name: str) -> tuple[int, int]:
+    """Give the sort key that orders a star's names by familiarity.
+
+    This is the library's one ranking of star names: `display_name_rank`
+    gives the group, and inside the two most familiar groups the order
+    people know names in breaks ties (see `_ORDER_WITHIN_RANK`).
+
+    Parameters
+    ----------
+    name : `str`
+        A name of the star, as SIMBAD or the library writes it.
+
+    Returns
+    -------
+    key : `tuple` [`int`, `int`]
+        The `display_name_rank` group, then the place inside the group;
+        lower is more familiar.
+    """
+    text = name.strip()
+    rank = display_name_rank(text)
+    patterns = _ORDER_WITHIN_RANK.get(rank, ())
+    for position, pattern in enumerate(patterns):
+        if pattern.match(text):
+            return rank, position
+    return rank, len(patterns)
 
 
 def order_names_by_familiarity(names: Iterable[str]) -> list[str]:
@@ -252,7 +300,7 @@ def order_names_by_familiarity(names: Iterable[str]) -> list[str]:
     Returns
     -------
     ordered : `list` [`str`]
-        The names, sorted by `display_name_rank`; names of equal rank keep
+        The names, sorted by `familiarity_key`; names with equal keys keep
         their order.
     """
     unique: list[str] = []
@@ -260,13 +308,106 @@ def order_names_by_familiarity(names: Iterable[str]) -> list[str]:
         text = str(name or "").strip()
         if text and text not in unique:
             unique.append(text)
-    return sorted(unique, key=display_name_rank)
+    return sorted(unique, key=familiarity_key)
+
+
+def most_familiar_name(identifiers: Iterable[str]) -> str | None:
+    """Pick the name a person knows a star by best.
+
+    Parameters
+    ----------
+    identifiers : `Iterable` [`str`]
+        The star's names or SIMBAD identifiers, in any order.
+
+    Returns
+    -------
+    name : `str` or `None`
+        The most familiar one (see `familiarity_key`), with single spaces
+        and without SIMBAD's ``NAME`` mark, or `None` for an empty list.
+        Among names with equal keys the first in alphabetical order wins, so
+        the answer does not depend on the order the names were listed in.
+    """
+    cleaned = [" ".join(str(item).split()) for item in identifiers if item and str(item).strip()]
+    if not cleaned:
+        return None
+    return without_name_prefix(min(cleaned, key=lambda text: (familiarity_key(text), text)))
+
+
+# The SIMBAD names kept as a star's aliases: proper, Bayer, Flamsteed and
+# variable-star names, and the bright-star catalogs (groups 0 and 1 of
+# `display_name_rank`). At most this many are kept, so the record stays
+# small. Not tuning: a choice of what to show, not a measurement.
+_ALIAS_NAME_RANK_LIMIT = 1
+_MAXIMUM_ALIASES = 6
+
+
+@dataclass(frozen=True)
+class SimbadStarNames:
+    """The id, name and aliases the library gives a star SIMBAD lists.
+
+    Attributes
+    ----------
+    record_id : `str`
+        The id the library saves the star under: ``Gaia DR3 <number>`` when
+        SIMBAD lists a Gaia DR3 number, else SIMBAD's main identifier.
+    name : `str`
+        The most familiar name (see `most_familiar_name`).
+    gaia_source_id : `int` or `None`
+        The Gaia DR3 source number SIMBAD lists, if any.
+    aliases : `list` [`str`]
+        The other familiar names, most familiar first, without the id and
+        the name, at most `_MAXIMUM_ALIASES`.
+    """
+
+    record_id: str
+    name: str
+    gaia_source_id: int | None
+    aliases: list[str]
+
+
+def name_simbad_star(main_id: str, identifiers: Iterable[str]) -> SimbadStarNames:
+    """Name a star from SIMBAD's main identifier and list of identifiers.
+
+    Both star identification paths (an astrometry run and a stack's own
+    star names) name a SIMBAD star here, so the image and the library show
+    the same name. A star Gaia DR3 lists is saved under its Gaia number,
+    which every star in a field has and which never changes; a star Gaia
+    does not list (the brightest ones) keeps its SIMBAD main identifier.
+
+    Parameters
+    ----------
+    main_id : `str`
+        SIMBAD's main identifier, or ``""`` when unknown.
+    identifiers : `Iterable` [`str`]
+        Every identifier SIMBAD lists for the star.
+
+    Returns
+    -------
+    names : `SimbadStarNames`
+        The id, name, Gaia number and aliases.
+    """
+    listed = [" ".join(str(item).split()) for item in identifiers if item and str(item).strip()]
+    main = " ".join(str(main_id or "").split())
+    gaia_source_id = gaia_dr3_source_id_from_names(listed)
+    name = most_familiar_name([*listed, main]) or main or "Unknown"
+    record_id = gaia_record_id(gaia_source_id) if gaia_source_id is not None else (main or name)
+    # Only the names a reader may know the star by are kept as aliases, not
+    # every survey number SIMBAD lists.
+    familiar = [
+        item
+        for item in listed
+        if not item.startswith(SIMBAD_NAME_PREFIX) and display_name_rank(item) <= _ALIAS_NAME_RANK_LIMIT
+    ]
+    aliases = [
+        item for item in order_names_by_familiarity([main, *familiar]) if item not in (record_id, name)
+    ][:_MAXIMUM_ALIASES]
+    return SimbadStarNames(record_id=record_id, name=name, gaia_source_id=gaia_source_id, aliases=aliases)
 
 
 # A Gaia DR3 name with a source number, such as "Gaia DR3 1328045433153485824".
 # A made-up name for a Gaia star with no number ("Gaia DR3 J1234.5+12.3")
 # does not match, because it is not digits only.
-_GAIA_DR3_NAME_PATTERN = re.compile(r"^\s*Gaia DR3\s+(\d+)\s*$")
+_GAIA_DR3_NAME_PATTERN = re.compile(rf"^\s*{re.escape(GAIA_DR3_PREFIX.strip())}\s+(\d+)\s*$")
 
 
 def gaia_dr3_source_id_from_names(names: Iterable[str]) -> int | None:

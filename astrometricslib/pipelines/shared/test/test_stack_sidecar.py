@@ -110,3 +110,25 @@ def test_a_missing_stack_is_not_saved(tmp_path: Path) -> None:
     missing = str(tmp_path / "missing.fits")
     assert not write_stamped_record(sidecar_path(missing, "_test.json"), missing, 1, "stack_stamp", {})
     assert os.listdir(tmp_path) == []
+
+
+def test_an_unstamped_record_is_read_only_when_asked_and_not_older(tmp_path: Path) -> None:
+    """A record with no stamp is stale unless the caller accepts one.
+
+    It is accepted only when its file is not older than the stack.
+    """
+    stack = _stack(tmp_path)
+    saved = sidecar_path(stack, "_test.json")
+    with open(saved, "w", encoding="utf-8") as handle:
+        json.dump({"version": 1, "value": 5}, handle)
+    stack_time = os.stat(stack).st_mtime_ns
+    os.utime(saved, ns=(stack_time, stack_time))
+
+    assert read_stamped_record(saved, stack, 1, "stamp") is None
+    assert read_stamped_record(saved, stack, 1, "stamp", accept_unstamped_newer=True) == {
+        "version": 1,
+        "value": 5,
+    }
+    assert read_stamped_record(saved, stack, 2, "stamp", accept_unstamped_newer=True) is None
+    os.utime(stack, ns=(stack_time, stack_time + 1))
+    assert read_stamped_record(saved, stack, 1, "stamp", accept_unstamped_newer=True) is None

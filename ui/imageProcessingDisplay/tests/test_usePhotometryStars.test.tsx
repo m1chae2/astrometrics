@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tests for `usePhotometryStars`: on a stack the Astrometry overlay keeps only the named
- * stars with photometry, found with one request, and says how many it shows. A target with no
- * photometry shows no stars and a note.
+ * stars whose library id has photometry, found with one request, and says how many it shows. A target
+ * with no photometry shows no stars and a note.
  */
 import React from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
@@ -15,8 +15,8 @@ vi.mock('../../common/services/backendApi', () => ({
 }));
 
 const stars = [
-    { id: 'detection-0', name: 'HD 214181', x: 1, y: 1, gaiaSourceId: '11', matchKind: 'matched' as const },
-    { id: 'detection-1', name: 'TYC 1-2-3', x: 2, y: 2, gaiaSourceId: '22', matchKind: 'matched' as const },
+    { id: 'detection-0', name: 'HD 214181', x: 1, y: 1, gaiaSourceId: '11', libraryId: 'Gaia DR3 11', matchKind: 'matched' as const },
+    { id: 'detection-1', name: 'TYC 1-2-3', x: 2, y: 2, gaiaSourceId: '22', libraryId: 'Gaia DR3 22', matchKind: 'matched' as const },
     { id: 'detection-2', name: 'Unnamed star', x: 3, y: 3, matchKind: 'unmatched' as const },
 ];
 
@@ -41,11 +41,11 @@ describe('usePhotometryStars', () => {
         });
     });
 
-    it('matches a star by its catalog name too', async () => {
+    it('matches a star by its library id only, never by guessing from its name', async () => {
         callBackendMock.mockResolvedValue([{ id: 'HD 214181' }]);
         const { result } = renderHook(() => usePhotometryStars(stars, 'NGC 7331', true), { wrapper });
-        await waitFor(() => expect(result.current.stars).toHaveLength(1));
-        expect(result.current.stars[0].libraryId).toBe('HD 214181');
+        await waitFor(() => expect(result.current.countText).toBe('Showing 0 stars with photometry'));
+        expect(result.current.stars).toEqual([]);
     });
 
     it('shows no stars and a note when the target has no photometry', async () => {

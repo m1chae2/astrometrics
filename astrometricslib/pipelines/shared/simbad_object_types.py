@@ -1,8 +1,11 @@
-"""Reads the object types out of a row of a SIMBAD result.
+"""Reads the object types and names out of a row of a SIMBAD result.
 
 Used by the astrometry pipeline when it matches a detected star to SIMBAD,
 and by the script that fills in the types of stars saved before they were
-recorded, so both read a result the same way.
+recorded, so both read a result the same way. It is also the one owner of
+SIMBAD's ``NAME`` prefix, which SIMBAD puts in front of a common name
+(``NAME Vega``): `without_name_prefix` removes it for display and
+`normalize_name` for comparing names.
 """
 
 import re
@@ -134,6 +137,77 @@ CONSECUTIVE_FAILURE_LIMIT = 3
 TARGETS_PER_REQUEST = 20
 
 
+# SIMBAD's mark in front of a common name, as in "NAME Vega".
+SIMBAD_NAME_PREFIX = "NAME "
+
+
+def without_name_prefix(identifier: str) -> str:
+    """Write a SIMBAD identifier without its leading ``NAME`` mark.
+
+    Parameters
+    ----------
+    identifier : `str`
+        One SIMBAD identifier, such as ``"NAME Vega"`` or ``"HD  172167"``.
+
+    Returns
+    -------
+    name : `str`
+        The identifier with runs of spaces turned into one space and a
+        leading ``NAME `` removed (``"Vega"``, ``"HD 172167"``). Only a
+        leading mark is removed, so a name that holds the word elsewhere is
+        kept whole.
+    """
+    return " ".join(str(identifier).split()).removeprefix(SIMBAD_NAME_PREFIX)
+
+
+def simbad_row_identifiers(row: Any) -> tuple[str, list[str]]:
+    """Read a SIMBAD row's main identifier and its list of identifiers.
+
+    Parameters
+    ----------
+    row : `astropy.table.Row`
+        One row of a SIMBAD answer. The main identifier is read from
+        ``main_id`` (or ``MAIN_ID``, ``ID``, ``id``) and the list from
+        ``ids`` (or ``IDS``), whose entries SIMBAD separates with ``|``.
+
+    Returns
+    -------
+    main_id : `str`
+        The main identifier, or ``""`` when the row has none.
+    identifiers : `list` [`str`]
+        Every identifier, without empty entries. A row with no list gives
+        its main identifier alone.
+    """
+
+    def text_of(value: Any) -> str:
+        """Read one cell as text, decoding bytes.
+
+        Parameters
+        ----------
+        value : `Any`
+            The cell.
+
+        Returns
+        -------
+        text : `str`
+            The text, stripped; empty for a masked cell.
+        """
+        if value is None or (hasattr(value, "mask") and bool(value.mask)):
+            return ""
+        return (value.decode("utf-8") if isinstance(value, bytes) else str(value)).strip()
+
+    names = row.colnames
+    main_column = next((name for name in ("main_id", "MAIN_ID", "ID", "id") if name in names), None)
+    ids_column = next((name for name in ("ids", "IDS") if name in names), None)
+    main_id = text_of(row[main_column]) if main_column else ""
+    identifiers = (
+        [part.strip() for part in text_of(row[ids_column]).split("|") if part.strip()] if ids_column else []
+    )
+    if not identifiers and main_id:
+        identifiers = [main_id]
+    return main_id, identifiers
+
+
 def normalize_name(name: str) -> str:
     """Write a name so spelling differences do not matter.
 
@@ -149,7 +223,7 @@ def normalize_name(name: str) -> str:
         and SIMBAD's leading "NAME " (which marks a common name) removed.
     """
     key = re.sub(r"\s+", " ", name.replace("_", " ").replace("\u00a0", " ")).strip().upper()
-    return key.removeprefix("NAME ")
+    return key.removeprefix(SIMBAD_NAME_PREFIX)
 
 
 def names_to_try(target: Target) -> list[str]:

@@ -352,3 +352,34 @@ def test_a_restacked_stack_drops_its_old_solved_star_list(tmp_path: Path) -> Non
     os.utime(stack_path, ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000_000))
 
     assert read_solved_stars(stack_path) == []
+
+
+def test_a_list_saved_before_stamps_is_read_while_the_stack_is_not_newer(tmp_path: Path) -> None:
+    """Verify a list with no stamp is read unless the stack changed after it.
+
+    Lists written before the stack's stamp was added have none. Such a list
+    is kept while its file is not older than the stack, and dropped once the
+    stack is newer (a restack that astrometry has not solved yet).
+    """
+    import json
+    import os
+
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+    from astrometricslib.pipelines.shared.stack_sidecar import sidecar_path
+
+    stack_path = _write_stack(tmp_path / "Albireo_Stacked.fits")
+    assert save_solved_stars(stack_path, [_star("HD 183912", FIELD_CENTER[0], FIELD_CENTER[1], ["Albireo"])])
+    saved_path = sidecar_path(stack_path, "_solved_stars.json")
+    with open(saved_path, encoding="utf-8") as handle:
+        record = json.load(handle)
+    del record["stack_stamp"]
+    with open(saved_path, "w", encoding="utf-8") as handle:
+        json.dump(record, handle)
+    stack_time = os.stat(stack_path).st_mtime_ns
+    os.utime(saved_path, ns=(stack_time, stack_time + 1_000_000_000))
+
+    assert [star.id for star in read_solved_stars(stack_path)] == ["HD 183912"]
+
+    os.utime(stack_path, ns=(stack_time, stack_time + 2_000_000_000))
+
+    assert read_solved_stars(stack_path) == []

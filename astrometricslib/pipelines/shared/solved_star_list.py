@@ -13,8 +13,10 @@ of astrometry on the stack writes the file again. A restack makes the
 astrometry result out of date, and the stage order then runs astrometry again
 before spectroscopy (see `tasks.STAGE_PREREQUISITES`). The file carries the
 stack's stamp (`stack_sidecar`), so a file older than the stack is never
-read. Only a stack gets a file: a single frame belongs to the raw folders,
-where nothing is written.
+read. A file written before the stamp was added has none; it is still read
+when it was last changed no earlier than the stack, so the overlays keep
+their stars until astrometry runs again. Only a stack gets a file: a single
+frame belongs to the raw folders, where nothing is written.
 """
 
 import logging
@@ -39,7 +41,7 @@ SOLVED_STARS_SIDECAR_SUFFIX = "_solved_stars.json"
 
 # Raise this when the file's layout changes, so an old file is not read as a
 # new one. A file of version 1 written before the stack's stamp was added has
-# no stamp, so it is read as out of date and astrometry writes it again.
+# no stamp; it is read when it is not older than the stack.
 SOLVED_STARS_FILE_VERSION = 1
 
 # The key that holds the stack's stamp (size and modification time).
@@ -100,7 +102,10 @@ def read_solved_stars(stack_path: str) -> list[StellarObject]:
     stars : `list` [`StellarObject`]
         The named stars, or an empty list when the stack has no readable
         file of the current version, or the stack changed since the file
-        was written (a restack that astrometry has not solved yet).
+        was written (a restack that astrometry has not solved yet). A file
+        with a stamp must match the stack's stamp. A file from before stamps
+        were added has none; it is read when its modification time is not
+        older than the stack's.
     """
     if not stack_path:
         return []
@@ -109,6 +114,7 @@ def read_solved_stars(stack_path: str) -> list[StellarObject]:
         stack_path,
         SOLVED_STARS_FILE_VERSION,
         _STAMP_KEY,
+        accept_unstamped_newer=True,
     )
     if record is None:
         return []

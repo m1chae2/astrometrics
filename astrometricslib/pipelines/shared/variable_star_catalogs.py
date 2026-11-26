@@ -99,10 +99,10 @@ FIELD_ROW_LIMIT = 100_000
 # imaged field fits in one request.
 FIELD_RADIUS_DEGREES = 1.5
 
-# How far a catalog entry may lie from the star, in arcseconds.
-# Stands for the sky distance for the cross-match with the variable-star
-# catalog. It follows the plate scale: the value is a factor times the plate
-# scale the run measured (3.0 on the reference setup).
+# How far a catalog entry may lie from the star, in arcseconds, for the
+# cross-match with the variable-star catalogs and with the stored SIMBAD
+# answers (`stored_variability`). It follows the plate scale: 3.0 arcseconds
+# on the reference setup, scaled by the plate scale the run measured.
 MATCH_RADIUS_ARCSEC = TunedParameter(
     name="shared.match_radius_arcsec",
     default=factor_for(3.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),

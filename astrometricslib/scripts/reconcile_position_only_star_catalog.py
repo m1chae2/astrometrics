@@ -103,6 +103,7 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
     merge_cluster,
     settle_names,
 )
+from astrometricslib.utilities.gaia_record_ids import gaia_record_id
 
 logger = logging.getLogger(__name__)
 
@@ -480,7 +481,7 @@ def build_gaia_groups(
 
     groups: dict[int, MergeGroup] = {}
     for source_id, members in candidates.items():
-        final_id = f"Gaia DR3 {source_id}"
+        final_id = gaia_record_id(source_id)
         accepted: list[str] = []
         families: set[str] = set()
         for _, _, row in sorted(members, key=lambda member: (member[0], member[1], member[2].id)):

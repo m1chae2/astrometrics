@@ -16,6 +16,9 @@ never sees half a file. A temporary file left by a failed write is removed.
 A failure to write is logged as a warning and otherwise ignored: the file is
 only a shortcut, and the caller measures again next time.
 
+A caller may also accept a file written before stamps were added (it has
+none) while the file is not older than the stack; the solved star list does.
+
 The layout of each file is the caller's: this module adds only the
 ``"version"`` key and the stamp key (each caller keeps the key name its files
 already use).
@@ -72,9 +75,11 @@ def file_stamp(path: str) -> list[int] | None:
 
 
 def read_stamped_record(
-    saved_path: str, stack_path: str, version: int, stamp_key: str
+    saved_path: str, stack_path: str, version: int, stamp_key: str, *, accept_unstamped_newer: bool = False
 ) -> dict[str, Any] | None:
     """Read a saved record, if it is for the stack as the stack is now.
+
+    A record with a stamp is read only when the stamp matches the stack.
 
     Parameters
     ----------
@@ -86,6 +91,11 @@ def read_stamped_record(
         The layout version the caller reads.
     stamp_key : `str`
         The key that holds the stack's stamp in the record.
+    accept_unstamped_newer : `bool`, optional
+        Also read a record of the right version that has no stamp (written
+        before stamps were added) when the saved file was last changed no
+        earlier than the stack: the stack has not changed since it was
+        written. False by default, so such a record counts as out of date.
 
     Returns
     -------
@@ -102,9 +112,12 @@ def read_stamped_record(
     except (OSError, ValueError) as error:
         logger.debug("Could not read the saved file %s: %s", saved_path, error)
         return None
-    if not isinstance(record, dict) or record.get("version") != version or record.get(stamp_key) != stamp:
+    if not isinstance(record, dict) or record.get("version") != version:
         return None
-    return record
+    if stamp_key not in record and accept_unstamped_newer:
+        saved_stamp = file_stamp(saved_path)
+        return record if saved_stamp is not None and saved_stamp[1] >= stamp[1] else None
+    return record if record.get(stamp_key) == stamp else None
 
 
 def write_stamped_record(

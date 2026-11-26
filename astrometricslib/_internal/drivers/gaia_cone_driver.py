@@ -38,6 +38,7 @@ from astrometricslib._internal.drivers import outside_services
 from astrometricslib._internal.drivers.sky_tiles import build_pixel_query, pixel_source_id_range
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
+from astrometricslib.utilities.gaia_record_ids import gaia_record_id
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ def query_gaia_cone_vizier(
             _as_float_column(found["RA_ICRS"]),
             _as_float_column(found["DE_ICRS"]),
             _as_float_column(found["Gmag"]),
-            [f"Gaia DR3 {source_id}" for source_id in source_ids],
+            [gaia_record_id(source_id) for source_id in source_ids],
             _as_float_column(found["pmRA"]),
             _as_float_column(found["pmDE"]),
         ],

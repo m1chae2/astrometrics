@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { callBackend, loadStaticMounts, resolveImageSrc } from '../../common/services/backendApi';
-import { usePersistentFlag } from '../../common/hooks/usePersistentFlag';
+import { usePersistentFlag, usePersistentNumber } from '../../common/hooks/usePersistentFlag';
 import { useIsDisplayActive } from '../../common/context/DisplayActiveContext';
 import type { StackSkyPicture } from '../../common/types/planetariumTypes';
 
@@ -25,6 +25,9 @@ const PICTURE_LIST_RETRY_INTERVAL_MS = 60000;
 
 /** Default opacity of the pictures, from 0 to 1. */
 export const DEFAULT_PICTURE_OPACITY = 0.8;
+
+/** Lowest opacity the slider can set, so the pictures never vanish completely. */
+const MINIMUM_PICTURE_OPACITY = 0.05;
 
 const OPACITY_STORAGE_KEY = 'astrometrics:planetarium:imagesOpacity';
 
@@ -48,21 +51,6 @@ export interface StackPictureLayer {
   getDrawable: (picture: StackSkyPicture, full: boolean) => PictureDrawable | null;
   /** Goes up by one each time a picture finishes loading, so the sky map draws again. */
   loadedVersion: number;
-}
-
-/**
- * Reads the remembered opacity.
- *
- * @returns {number} The opacity, or the default when none is saved.
- */
-function readOpacity(): number {
-  try {
-    const saved = Number(localStorage.getItem(OPACITY_STORAGE_KEY));
-    if (Number.isFinite(saved) && saved > 0 && saved <= 1) return saved;
-  } catch {
-    // Storage is unavailable; use the default.
-  }
-  return DEFAULT_PICTURE_OPACITY;
 }
 
 /**
@@ -109,16 +97,8 @@ function overviewCopy(image: HTMLImageElement): PictureDrawable {
  */
 export const useStackPictures = (): StackPictureLayer => {
   const [showImages, setShowImages] = usePersistentFlag('astrometrics:planetarium:showImages', false);
-  const [opacity, setOpacityState] = useState<number>(readOpacity);
-  const setOpacity = useCallback((value: number) => {
-    const clamped = Math.max(0.05, Math.min(1, value));
-    setOpacityState(clamped);
-    try {
-      localStorage.setItem(OPACITY_STORAGE_KEY, String(clamped));
-    } catch {
-      // Storage is unavailable; the opacity still works for this session.
-    }
-  }, []);
+  const [opacity, setOpacity] = usePersistentNumber(
+    OPACITY_STORAGE_KEY, DEFAULT_PICTURE_OPACITY, { min: MINIMUM_PICTURE_OPACITY, max: 1 });
 
   const isDisplayActive = useIsDisplayActive();
   const query = useQuery({

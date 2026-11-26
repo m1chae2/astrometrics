@@ -15,9 +15,10 @@
  * returns to the full range. When zoomed in, dragging the empty plot pans along x, kept inside the
  * full range; a drag never picks a frame, a plain click does.
  */
+import { readThemeToken, readThemeTokenNumber } from '../../common/utils/themeToken';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BasePlot } from '../../common/components/plotting/BasePlot';
-import { buildLayout, getVar, getVarAsNum } from '../../common/utils/plotTools';
+import { buildLayout } from '../../common/utils/plotTools';
 import type { PlotlyTrace } from '../../common/utils/plotTools';
 import type { FrameStarShape, FrameStatus } from '../../common/types/backendTypes';
 import { setAsideCategory, type FrameStatusInfo } from '../utils/frameStatus';
@@ -341,14 +342,14 @@ export function buildStarShapeChart(
         }),
     });
     const colorOf = (lane: Lane): string => {
-        if (lane === 'Flagged') return getVar('--plot-orange', '#e95420');
-        if (lane === 'Included') return getVar('--plot-green', '#26a269');
-        return getVar('--plot-red', '#e01b24');
+        if (lane === 'Flagged') return readThemeToken('--plot-orange', '#e95420');
+        if (lane === 'Included') return readThemeToken('--plot-green', '#26a269');
+        return readThemeToken('--plot-red', '#e01b24');
     };
     const traces: PlotlyTrace[] = lanes.map((lane) => ({
         ...pointsOf(all.filter((frame) => frame.lane === lane)), type: 'bar', orientation: 'h', width: 0.7, textposition: 'none', name: lane,
         hoverinfo: 'none', showlegend: false, // A thin outline in the panel color separates frames that touch.
-        marker: { color: colorOf(lane), line: { width: 1, color: getVar('--background-secondary', '#28282c') } },
+        marker: { color: colorOf(lane), line: { width: 1, color: readThemeToken('--background-secondary', '#28282c') } },
     }));
     // The picked frame's outline is a layout shape, drawn from the frame's own start, end and row on every render,
     // so hovering, zooming, panning or a change of the traces cannot lose it.
@@ -464,7 +465,7 @@ export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedP
     }, [hasChart]);
 
     const layout = useMemo(() => {
-        const fontSize = getVarAsNum('--compact-font-size', 13) - 1;
+        const fontSize = readThemeTokenNumber('--compact-font-size', 13) - 1;
         const base = buildLayout({
             xTitle: '', yTitle: '',
             margin: { l: 8, r: 8, t: 8, b: 28 },
@@ -493,12 +494,12 @@ export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedP
             shapes: [
                 ...chart.nightBreaks.map((place) => ({
                     type: 'line', xref: 'x', yref: 'paper', x0: place, x1: place, y0: 0, y1: 1,
-                    line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
+                    line: { color: readThemeToken('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
                 })),
                 ...(chart.selection ? [{
                     type: 'rect', xref: 'x', yref: 'y', layer: 'above',
                     x0: chart.selection.x0, x1: chart.selection.x1, y0: chart.selection.y - 0.45, y1: chart.selection.y + 0.45,
-                    fillcolor: 'rgba(0,0,0,0)', line: { width: 2, color: getVar('--plot-selection', '#e01b24') },
+                    fillcolor: 'rgba(0,0,0,0)', line: { width: 2, color: readThemeToken('--plot-selection', '#e01b24') },
                 }] : []),
             ],
         };

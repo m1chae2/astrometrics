@@ -7,7 +7,8 @@
  * projection. A panel is skipped when any of its corners is out of view.
  */
 
-import { getVar } from '../../common/utils/plotTools';
+
+import { readThemeToken } from '../../common/utils/themeToken';
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
 
 /** One corner of a framing panel on the sky, in degrees. */
@@ -46,13 +47,13 @@ export class FramingOverlay implements PlanetariumOverlay {
 
     context.save();
     // The colors and the label font are theme tokens (see theme.css); a canvas ignores an empty value.
-    const outlineColor = getVar('--framing-outline', 'currentColor');
-    const fillColor = getVar('--framing-fill', 'transparent');
-    const labelColor = getVar('--framing-label', 'currentColor');
+    const outlineColor = readThemeToken('--framing-outline', 'currentColor');
+    const fillColor = readThemeToken('--framing-fill', 'transparent');
+    const labelColor = readThemeToken('--framing-label', 'currentColor');
     context.strokeStyle = outlineColor;
     context.fillStyle = fillColor;
     context.lineWidth = 2;
-    context.font = getVar('--framing-label-font', '');
+    context.font = readThemeToken('--framing-label-font', '');
     context.textAlign = 'center';
 
     for (const panel of panels) {

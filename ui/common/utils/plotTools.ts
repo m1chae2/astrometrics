@@ -1,6 +1,7 @@
 // Lightweight Plot utilities used by multiple viewers
 // Exported to keep Plotly-related plumbing in one place.
 import { themedHoverLabel } from './plotHoverLabel';
+import { readThemeToken, readThemeTokenNumber } from './themeToken';
 
 export type PlotlyTrace = {
   x: number[];
@@ -140,23 +141,6 @@ export function loadPlotly(): Promise<PlotlyStatic> {
   return plotlyLoadPromise;
 }
 
-export const getVar = (name: string, fallback: string) => {
-  try {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
-    const v = (raw || '').trim();
-    return v || fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-export const getVarAsNum = (name: string, fallback: number) => {
-  const val = getVar(name, '');
-  if (!val) return fallback;
-  const parsed = parseInt(val, 10);
-  return isNaN(parsed) ? fallback : parsed;
-};
-
 // Shared layout builder matching "Guiding Trends" / "Control Panel" dark style
 export const buildLayout = (overrides?: {
   xTitle?: string;
@@ -166,7 +150,7 @@ export const buildLayout = (overrides?: {
   margin?: any;
   autosize?: boolean;
 }): PlotlyLayout => {
-  const commonFontSize = getVarAsNum('--label-font-size', 12);
+  const commonFontSize = readThemeTokenNumber('--label-font-size', 12);
   const titleFontSize = commonFontSize;
   const tickFontSize = commonFontSize - 1;
 
@@ -174,10 +158,10 @@ export const buildLayout = (overrides?: {
     autosize: overrides?.autosize ?? true,
     paper_bgcolor: 'rgba(0,0,0,0)', // Transparent to blend with panel
     plot_bgcolor: 'rgba(0,0,0,0)',
-    font: { color: getVar('--plot-font', '#eaeaea'), size: commonFontSize },
+    font: { color: readThemeToken('--plot-font', '#eaeaea'), size: commonFontSize },
     xaxis: {
       title: { text: overrides?.xTitle ?? 'Val', font: { size: titleFontSize, ...overrides?.xTitleFont } },
-      color: getVar('--plot-font', '#eaeaea'),
+      color: readThemeToken('--plot-font', '#eaeaea'),
       gridcolor: 'rgba(255, 255, 255, 0.06)',
       zerolinecolor: 'rgba(255, 255, 255, 0.1)',
       tickfont: { size: tickFontSize },
@@ -185,7 +169,7 @@ export const buildLayout = (overrides?: {
     },
     yaxis: {
       title: { text: overrides?.yTitle ?? 'Val', font: { size: titleFontSize, ...overrides?.yTitleFont } },
-      color: getVar('--plot-font', '#eaeaea'),
+      color: readThemeToken('--plot-font', '#eaeaea'),
       gridcolor: 'rgba(255, 255, 255, 0.06)',
       zerolinecolor: 'rgba(255, 255, 255, 0.1)',
       tickfont: { size: tickFontSize },

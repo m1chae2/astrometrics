@@ -9,6 +9,7 @@
  */
 
 import { spectralClassLetter } from '../../common/utils/starDisplayFormat';
+import { readThemeToken } from '../../common/utils/themeToken';
 
 /** The color class for a star with no known type: drawn neutral gray. */
 export const NO_COLOR_CLASS = 'none';
@@ -66,20 +67,31 @@ export function classFromBMinusV(bMinusV: number): string {
 }
 
 /**
- * The color class of a spectral type text, such as "G2V", "C5:,4", "R" or "WR".
+ * The prefix of a subdwarf type, such as "sd" in "sdB5" or "esd" in "esdM1". It is written in
+ * lower case, so it is never read as a class letter: an "sd" star is hot or cool by the letter
+ * after it, not an S-type star.
+ */
+const SUBDWARF_PREFIX = /^[eu]?sd/;
+
+/**
+ * The color class of a spectral type text, such as "G2V", "C5:,4", "R", "WR" or "sdB5".
  *
  * Uses the same class letters as the class lists (R and N are carbon stars,
  * so C). S-type stars are cool giants close to the carbon stars, so they get
- * the carbon red too, although the class lists do not group them.
+ * the carbon red too, although the class lists do not group them. Only a
+ * capital S means an S-type star. A subdwarf ("sdB", "sdO") takes the color of
+ * the class letter after its prefix.
  *
  * @param {string | null | undefined} spectralType The spectral type text.
  * @returns {string} The color class, or an empty string when the type says nothing.
  */
 export function colorClassOfType(spectralType: string | null | undefined): string {
-  const letter = spectralClassLetter(spectralType);
+  const trimmed = (spectralType ?? '').trim();
+  const withoutPrefix = trimmed.replace(SUBDWARF_PREFIX, '');
+  if (withoutPrefix !== trimmed) return spectralClassLetter(withoutPrefix);
+  const letter = spectralClassLetter(trimmed);
   if (letter) return letter;
-  const first = (spectralType ?? '').trim().charAt(0).toUpperCase();
-  return first === 'S' ? 'C' : '';
+  return trimmed.charAt(0) === 'S' ? 'C' : '';
 }
 
 /** What decides a star's color. */
@@ -127,19 +139,6 @@ export const WHITE_RGB: RgbColor = [255, 255, 255];
 const resolvedColors = new Map<string, RgbColor>();
 
 /**
- * Forgets the colors read from the theme, so the next star reads its token again.
- *
- * The star renderers call this once at the start of each drawn frame, so a changed
- * `--star-color-*` token shows on the next redraw without a reload, while a frame of
- * thousands of stars still reads each token only once.
- *
- * @returns {void}
- */
-export function refreshStarColors(): void {
-  resolvedColors.clear();
-}
-
-/**
  * Reads a `#rrggbb` or `#rgb` color.
  *
  * @param {string} text The color text.
@@ -153,8 +152,8 @@ function parseHexColor(text: string): RgbColor | null {
 }
 
 /**
- * The drawing color of a color class, read from its theme token once per drawn frame
- * (see `refreshStarColors`).
+ * The drawing color of a color class, read from its theme token with `readThemeToken` and kept,
+ * so a frame of thousands of stars reads and parses each token only once.
  *
  * Falls back to white when the token is missing (as in tests, which load no
  * stylesheet), so a star is never invisible.
@@ -166,12 +165,7 @@ export function starColorRgb(colorClass: string | undefined): RgbColor {
   if (!colorClass) return WHITE_RGB;
   const cached = resolvedColors.get(colorClass);
   if (cached) return cached;
-  let color: RgbColor | null;
-  try {
-    color = parseHexColor(getComputedStyle(document.documentElement).getPropertyValue(starColorToken(colorClass)));
-  } catch {
-    color = null;
-  }
+  const color = parseHexColor(readThemeToken(starColorToken(colorClass), ''));
   if (!color) return WHITE_RGB;
   resolvedColors.set(colorClass, color);
   return color;

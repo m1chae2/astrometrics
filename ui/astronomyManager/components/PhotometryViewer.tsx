@@ -3,9 +3,10 @@
  * and phase-folded orbital light curve rendering in AstronomyManager.
  */
 
+import { readThemeToken } from '../../common/utils/themeToken';
 import React, { useState, useMemo } from 'react';
 import { BasePlot } from '../../common/components/plotting/BasePlot';
-import { PlotlyTrace, getVar, buildLayout } from '../../common/utils/plotTools';
+import { PlotlyTrace, buildLayout } from '../../common/utils/plotTools';
 import '../styles/astronomyViewer.css';
 
 import { Spectrum } from '../../common/types/backendTypes';
@@ -88,7 +89,7 @@ export const PhotometryViewer: React.FC<Props> = ({
                     y: y,
                     mode: 'markers',
                     type: 'scatter',
-                    marker: { color: getVar('--plot-accent', '#2196f3'), size: 6 },
+                    marker: { color: readThemeToken('--plot-accent', '#2196f3'), size: 6 },
                     name: `${yLabel} (Phase-Folded P=${formatPeriod(bestPeriodDays)})`,
                 },
             ];
@@ -100,7 +101,7 @@ export const PhotometryViewer: React.FC<Props> = ({
                 y: y,
                 mode: 'markers',
                 type: 'scatter',
-                marker: { color: getVar('--plot-accent', '#2196f3'), size: 6 },
+                marker: { color: readThemeToken('--plot-accent', '#2196f3'), size: 6 },
                 name: yLabel,
             },
         ];

@@ -49,3 +49,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* side="bottom": a block under a viewer folded to a bar across the full width. The bar keeps
+   its own height and the bar's panel takes the whole row. */
+.collapsible-column--collapsed-bottom {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.collapsible-column--collapsed-bottom > .panel {
+  flex: 1 1 auto;
+}

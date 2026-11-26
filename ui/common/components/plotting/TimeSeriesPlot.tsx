@@ -1,5 +1,6 @@
+import { readThemeToken } from '../../utils/themeToken';
 import React, { useMemo } from 'react';
-import { PlotlyTrace, getVar } from '../../utils/plotTools';
+import { PlotlyTrace } from '../../utils/plotTools';
 import { BasePlot } from './BasePlot';
 import '../../styles/plotting.css';
 
@@ -110,7 +111,7 @@ export const TimeSeriesPlot = React.memo(({
     const layout = useMemo(() => ({
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { color: getVar('--plot-font', '#fff'), size: 10 },
+        font: { color: readThemeToken('--plot-font', '#fff'), size: 10 },
         margin: { l: 30, r: hasSecondaryYAxis ? 35 : 10, b: 25, t: 10 },
         showlegend: showLegend,
         autosize: true,
@@ -136,7 +137,7 @@ export const TimeSeriesPlot = React.memo(({
                 x1: 1,
                 y0: line.y,
                 y1: line.y,
-                line: { color: line.color ?? getVar('--plot-reference-line', 'currentColor'), width: 1, dash: 'dash' }
+                line: { color: line.color ?? readThemeToken('--plot-reference-line', 'currentColor'), width: 1, dash: 'dash' }
             }))
         ],
         annotations: [

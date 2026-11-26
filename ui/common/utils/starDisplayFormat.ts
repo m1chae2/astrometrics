@@ -313,9 +313,11 @@ const SPECTRAL_CLASS_ALIASES: Record<string, string> = { R: 'C', N: 'C' };
 
 /**
  * Reduces a catalog spectral type string to its primary class letter, the
- * same way the backend's `_spectral_class_letter` does, so the Planetarium
+ * same way the backend's `spectral_class_letter` does, so the Planetarium
  * can filter its rendered star field to match a chosen spectral-class
- * browser selection without a round trip.
+ * browser selection without a round trip. This is a copy of that rule:
+ * `spectral_class_letter` in `astrometricslib/pipelines/shared/star_analysis.py`
+ * owns it, so change both together.
  *
  * @param spectralType The star's catalog spectral type, e.g. "G2V".
  * @returns The class letter (e.g. "G", "R2" -> "C"), or an empty string when the type is empty, "Unknown", or not one of the classes the browser shows.

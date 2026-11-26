@@ -2,16 +2,13 @@
  * @file useReviewJob.ts
  * @description Runs one slow stack check (a preview remake or a stack comparison) and follows
  * it to the end. The backend answers a start with the finished result, or with the job to
- * follow. This hook polls that job until it completes or fails, and hands the result back.
+ * follow. This hook follows that job with `useJobEndWatcher` until it ends, and hands the result back.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOnValueChange } from './useOnValueChange';
-import { fetchJob } from '../../common/services/imaging/stackReviewService';
+import { JOB_END_POLL_INTERVAL_MS, useJobEndWatcher, type JobLookup } from './useJobEndWatcher';
 import { fetchJobs } from '../../common/services/imaging/processingService';
 import type { ProcessingJob, StackReviewStart } from '../../common/types/backendTypes';
-
-/** How long to wait between two looks at a running job, in milliseconds. */
-export const JOB_POLL_INTERVAL_MS = 2000;
 
 /** Where a check stands. */
 export type ReviewJobPhase = 'idle' | 'starting' | 'running' | 'done' | 'failed' | 'cancelled';
@@ -56,53 +53,29 @@ export function useReviewJob<T>(options: ReviewJobOptions<T>) {
         setWatch(null);
     });
 
-    // Poll a running job until it ends.
-    useEffect(() => {
-        if (!watch) return undefined;
-        let stopped = false;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-
-        const look = async () => {
-            let job: ProcessingJob | null | undefined;
-            try {
-                if (watch.jobId) {
-                    job = await fetchJob(watch.jobId);
-                } else {
-                    // The job has no id yet (it may be waiting for another job).
-                    // The newest job of this type that began after the click is ours.
-                    const jobs = await fetchJobs(optionsRef.current.targetId, optionsRef.current.jobType);
-                    job = jobs.find((candidate) => {
-                        const created = candidate.createdAt ? Date.parse(candidate.createdAt) : NaN;
-                        return !Number.isNaN(created) && created >= watch.startedAt - JOB_POLL_INTERVAL_MS;
-                    });
-                }
-            } catch {
-                job = undefined;
-            }
-            if (stopped) return;
-            if (job && job.status === 'completed') {
-                setState({ phase: 'done', result: optionsRef.current.readResult(job), message: null });
-                setWatch(null);
-                return;
-            }
-            if (job && job.status === 'cancelled') {
-                setState({ phase: 'cancelled', result: null, message: null });
-                setWatch(null);
-                return;
-            }
-            if (job && job.status === 'failed') {
-                setState({ phase: 'failed', result: null, message: job.message ?? 'The job failed.' });
-                setWatch(null);
-                return;
-            }
-            timer = setTimeout(look, JOB_POLL_INTERVAL_MS);
-        };
-        timer = setTimeout(look, JOB_POLL_INTERVAL_MS);
-        return () => {
-            stopped = true;
-            if (timer) clearTimeout(timer);
+    // Follow a running job until it ends: by its id, or, when it has no id yet (it may be
+    // waiting for another job), as the newest job of this type that began after the click.
+    const lookup = useMemo<JobLookup | null>(() => {
+        if (!watch) return null;
+        if (watch.jobId) return watch.jobId;
+        return async () => {
+            const jobs = await fetchJobs(optionsRef.current.targetId, optionsRef.current.jobType);
+            return jobs.find((candidate) => {
+                const created = candidate.createdAt ? Date.parse(candidate.createdAt) : NaN;
+                return !Number.isNaN(created) && created >= watch.startedAt - JOB_END_POLL_INTERVAL_MS;
+            });
         };
     }, [watch]);
+    useJobEndWatcher(lookup, (job) => {
+        setWatch(null);
+        if (job.status === 'completed') {
+            setState({ phase: 'done', result: optionsRef.current.readResult(job), message: null });
+        } else if (job.status === 'cancelled') {
+            setState({ phase: 'cancelled', result: null, message: null });
+        } else {
+            setState({ phase: 'failed', result: null, message: job.message ?? 'The job failed.' });
+        }
+    });
 
     const run = useCallback(async (starter: () => Promise<StackReviewStart>) => {
         setState({ phase: 'starting', result: null, message: null });

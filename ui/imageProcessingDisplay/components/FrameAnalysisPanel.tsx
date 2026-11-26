@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { TabView } from '../../common/components/TabView';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { CollapsibleColumn } from '../../common/components/CollapsibleColumn';
 import { Tabs } from '../../common/components/Tabs';
 
 import { useTargetContext } from '../../common/context/TargetContext';
@@ -180,21 +181,19 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   };
   const analysisSelection = chooseAnalysisSelection(selectionInput);
 
-  // Frame Analysis folded: a thin rail on the right edge.
-  const analysisRail = (
-    <SectionPanel
-      title="Frame Analysis"
-      collapsed="right"
-      onTitleClick={() => setAnalysisCollapsed(false)}
-      titleButtonLabel="Expand Frame Analysis"
-    >
-      {null}
-    </SectionPanel>
-  );
-
-  // Frame Analysis folded: the whole right column, Image Controls too, is just the rail.
+  // Frame Analysis folded: the whole right column, Image Controls too, is just a strip on the right edge.
   if (analysisCollapsed) {
-    return <div className="image-processing-display__right image-processing-display__right--collapsed">{analysisRail}</div>;
+    return (
+      <CollapsibleColumn
+        collapsed
+        side="right"
+        onCollapsedChange={setAnalysisCollapsed}
+        stripTitle="Frame Analysis"
+        showLabel="Expand Frame Analysis"
+      >
+        {null}
+      </CollapsibleColumn>
+    );
   }
 
   return (

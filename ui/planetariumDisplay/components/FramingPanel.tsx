@@ -20,6 +20,7 @@ import { NumberInput } from '../../common/components/NumberInput';
 import { InfoButton } from '../../common/components/InfoButton';
 
 import { Skeleton } from '../../common/components/Skeleton';
+import { prefersReducedMotion } from '../../common/utils/reducedMotion';
 /**
  * How long the panel takes to extend down or fold back up, in milliseconds. Matches
  * `--motion-duration-panel` in theme.css, which times the transition itself. A close also
@@ -35,16 +36,6 @@ export const FRAMING_REVEAL_MS = 240;
  * - "closing": folding back up; it leaves the screen when the fold ends.
  */
 export type RevealPhase = 'closed' | 'opening' | 'open' | 'closing';
-
-/**
- * Whether the viewer asked the system for less motion.
- *
- * @returns True when `prefers-reduced-motion: reduce` matches.
- */
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 /**
  * Runs the panel's open and close movement.

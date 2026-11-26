@@ -4,14 +4,15 @@
  * same stack path as before, so a viewer that shows that stack must be told to read it again. This
  * file sends that news once per finished job, whichever part of the screen noticed the end first.
  */
-import { callBackend } from '../../common/services/backendApi';
-import { fetchJob, STACK_PICTURE_REMADE_EVENT } from '../../common/services/imaging/stackReviewService';
+import {
+    fetchJob,
+    fetchStackSummary,
+    STACK_PICTURE_REMADE_EVENT,
+} from '../../common/services/imaging/stackReviewService';
 import type { StackKind } from '../../common/services/imaging/stackReviewService';
-import type { ProcessingJob, StackSummary } from '../../common/types/backendTypes';
+import type { ProcessingJob } from '../../common/types/backendTypes';
 import { emit as emitEvent } from '../../common/utils/eventBus';
-
-/** The job states that mean a job is over. */
-const ENDED_STATUSES = new Set(['completed', 'failed', 'cancelled', 'canceled']);
+import { isJobEnded } from './jobStatus';
 
 /** The stack kinds a stacking job can make. */
 const STACK_KINDS: StackKind[] = ['imaging', 'spectral'];
@@ -33,8 +34,7 @@ export function resetAnnouncedStackJobs(): void {
  */
 async function readStackPath(targetId: string, kind: StackKind): Promise<string | null> {
     try {
-        const summary: StackSummary | null = await callBackend(
-            'processing:stack_summary', { target: targetId, kind }, { silent: true });
+        const summary = await fetchStackSummary(targetId, kind);
         return summary?.stack_path ?? null;
     } catch {
         return null;
@@ -63,7 +63,7 @@ export async function announceFinishedStack(
     } catch {
         job = null;
     }
-    if (!job || !ENDED_STATUSES.has(job.status)) {
+    if (!job || !isJobEnded(job.status)) {
         // Not over yet (or not readable): the next look may announce it.
         announcedJobIds.delete(jobId);
         return;

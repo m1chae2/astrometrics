@@ -13,14 +13,13 @@
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { callBackend } from '../../common/services/backendApi';
-import { BackendError } from '../../common/services/backendError';
 import type { StackSummary } from '../../common/types/backendTypes';
 import { StackComparisonControl } from './StackComparisonControl';
 import { SetAsideFramesList } from './SetAsideFramesList';
 import { formatExposureSeconds } from '../utils/stackFormatting';
 import {
     fetchStackJobWarnings,
+    fetchStackSummary,
     fetchStoredStackWarnings,
     type StackWarning,
 } from '../../common/services/imaging/stackReviewService';
@@ -89,15 +88,7 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
     const [showSetAside, setShowSetAside] = React.useState(false);
     const { data: summary, isLoading, isError } = useQuery<StackSummary | null>({
         queryKey: ['stackSummary', { target_id: targetId, kind }, refreshKey ?? ''],
-        queryFn: async () => {
-            try {
-                return await callBackend(
-                    'processing:stack_summary', { target: targetId as string, kind }, { silent: true });
-            } catch (error) {
-                if (error instanceof BackendError && error.code === 'not_found') return null;
-                throw error;
-            }
-        },
+        queryFn: () => fetchStackSummary(targetId as string, kind),
         enabled: Boolean(targetId),
         // A finished stack changes `refreshKey`, so 30 s is safe.
         staleTime: 30_000,

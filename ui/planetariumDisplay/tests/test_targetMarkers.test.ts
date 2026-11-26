@@ -15,9 +15,9 @@ import {
   TARGET_MARKER_MIN_PX,
   type TargetMarkerInput,
 } from '../layers/targetMarkers';
-import { TargetOverlay, shownPictureFor, picturesByTarget } from '../layers/TargetOverlay';
+import { MISSING_MARKER_COLOR, TargetOverlay, shownPictureFor, picturesByTarget } from '../layers/TargetOverlay';
 import { targetExtentDegrees } from '../layers/overlayShared';
-import { clearThemeColors, MISSING_TOKEN_COLOR, readThemeColor } from '../utils/themeColor';
+import { clearThemeTokens, readThemeToken } from '../../common/utils/themeToken';
 import { findNearestSource } from '../utils/hitTesting';
 import type { PlanetariumTarget, StackSkyPicture } from '../../common/types/planetariumTypes';
 import type { ProjectionContext } from '../layers/overlayTypes';
@@ -217,13 +217,13 @@ describe('marker colors', () => {
   afterEach(() => {
     document.documentElement.style.removeProperty('--sky-target-marker');
     document.documentElement.style.removeProperty('--sky-target-marker-selected');
-    clearThemeColors();
+    clearThemeTokens();
   });
 
   /** The overlay strokes the faint token for an unselected target and the bright one for the selected. */
   it('reads the marker colors from the theme tokens', () => {
-    clearThemeColors();
-    expect(readThemeColor('--sky-target-marker')).toBe(MISSING_TOKEN_COLOR);
+    clearThemeTokens();
+    expect(readThemeToken('--sky-target-marker', MISSING_MARKER_COLOR)).toBe(MISSING_MARKER_COLOR);
     document.documentElement.style.setProperty('--sky-target-marker', 'rgb(1, 2, 3)');
     document.documentElement.style.setProperty('--sky-target-marker-selected', 'rgb(4, 5, 6)');
 

@@ -4,7 +4,7 @@
  */
 
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
-import { refreshStarColors, starColorRgb } from '../utils/starColor';
+import { starColorRgb } from '../utils/starColor';
 
 /**
  * Radius of the selection reticle circle drawn around a selected star, in pixels.
@@ -140,9 +140,12 @@ export function limitStarDensity(stars: DrawableStar[], width: number, height: n
   const isKept = (star: DrawableStar) => !!star.source.alwaysShow || (!!selectedId && star.source.id === selectedId);
   const kept = stars.filter(isKept);
   const ranked = stars.filter((star) => !isKept(star));
-  // Brightest first; a star with no catalog magnitude counts as faint.
+  // Brightest first. A catalog-layer star with no magnitude ranks as CATALOG_STAR_DEFAULT_MAGNITUDE,
+  // the same value the drawing rule uses; one of the user's own stars with none counts as faint.
   const rankOf = (star: DrawableStar) => catalogMagnitudeOf(star.source)
-    ?? (star.source.catalogSource && typeof star.source.magnitude === 'number' ? star.source.magnitude : 99);
+    ?? (star.source.catalogSource
+      ? (typeof star.source.magnitude === 'number' ? star.source.magnitude : CATALOG_STAR_DEFAULT_MAGNITUDE)
+      : UNCATALOGED_STAR_RANK);
   ranked.sort((first, second) => rankOf(first) - rankOf(second));
   return [...ranked.slice(0, Math.max(0, cap - kept.length)), ...kept];
 }
@@ -195,6 +198,16 @@ export const DEEP_STAR_MAX_MAGNITUDE = 16;
  * narrow enough for a target's field to be worth looking at.
  */
 export const UNCATALOGED_STAR_MAX_FOV_DEG = 10.0;
+
+/**
+ * The magnitude a star of a catalog layer (the bright or deep catalog) is taken to have when its
+ * record has none. The drawing rule and the density limit both use it, so such a star is shown
+ * and ranked as a moderately bright star.
+ */
+export const CATALOG_STAR_DEFAULT_MAGNITUDE = 5.0;
+
+/** The rank of one of the user's own stars with no catalog magnitude: fainter than any real star. */
+const UNCATALOGED_STAR_RANK = 99;
 
 /**
  * FOV, in degrees, at which the user's own stars with no catalog magnitude
@@ -275,7 +288,7 @@ export function isDisplayableStar(
   if (source.alwaysShow) return true;
 
   if (source.catalogSource === 'hipparcos' || source.catalogSource === 'deep_stars') {
-    const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
+    const magnitude = typeof source.magnitude === 'number' ? source.magnitude : CATALOG_STAR_DEFAULT_MAGNITUDE;
     if (magnitude > limitingMagnitude) return false;
     return showStars;
   }
@@ -408,7 +421,6 @@ export class StarOverlay implements PlanetariumOverlay {
 
     // Filter sources to displayable stars, routing by catalogSource for online drivers
     // and hiding stars fainter than the current FOV's limiting magnitude
-    refreshStarColors();
     const limitingMagnitude = computeLimitingMagnitude(projectionContext.fov);
     const stars = projectionContext.sources.filter(source =>
       isDisplayableStar(

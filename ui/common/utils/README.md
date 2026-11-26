@@ -11,6 +11,8 @@ This folder contains small cross-cutting utilities used by the UI.
 - **ToastProvider.tsx**: Global React provider for the toast system.
 - **ConfirmDialog.tsx**: Reusable confirmation modal.
 - **plotTools.ts**: Shared physics and plotting utilities.
+- **themeToken.ts**: The one reader of theme tokens (colors and sizes in `ui/common/styles/theme.css`) for code that cannot use CSS variables, such as Plotly charts and the Planetarium's canvas layers. It reads each token once and keeps the value, because the theme does not change while the app runs.
+- **reducedMotion.ts**: Says whether the person turned on the system's "reduce motion" setting. Smooth scrolls and sliding panels check it and jump straight to the end when it is on.
 - **dataUrl.ts**: Decodes a `data:` URL (a picture sent as text) into a Blob. The app's security policy blocks `fetch` on `data:` URLs, so use this instead.
 - **starDisplayFormat.ts**: Turns a star's raw data into short text, such as list labels, coordinates and light-curve axis titles. The Astronomy Manager, the planetarium and the FITS viewer's star labels all use it.
 - **displayHandoffStore.ts**: The one place where a "show this in that display" request waits until the display can act on it. See "Hidden displays and hand-offs" below.

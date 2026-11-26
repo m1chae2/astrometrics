@@ -216,7 +216,6 @@ def link_frames_to_guiding(
     NotFoundError
         If no target has the id `target_id`.
     """
-    limit = max(1, min(int(limit), MAXIMUM_FRAMES))
     target = context.astrometrics.targets.get(target_id, refresh=True)
     if target is None:
         raise NotFoundError(

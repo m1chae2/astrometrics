@@ -31,7 +31,6 @@ from datetime import UTC, date, datetime
 from functools import partial
 from typing import Any, Literal
 
-from astropy.time import Time
 from pydantic import ValidationError
 
 from astrometricslib import (
@@ -44,7 +43,13 @@ from astrometricslib import (
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from astrometricslib.parameters import resolve_parameter
-from wayfindinglib._internal.arguments import check_choice, check_include, reject_unused_arguments
+from wayfindinglib._internal.arguments import (
+    TimeInput,
+    check_choice,
+    check_include,
+    check_limit,
+    reject_unused_arguments,
+)
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     TargetFrameReader,
@@ -554,7 +559,8 @@ class ObservationPlanning:
         limit : `int`, optional
             Most stars to list, from 1 to 300, brightest first. Targets are
             never cut. Defaults to 100. `None` lists every star in the order
-            found, which can be very long.
+            found, which can be very long. A value outside the range raises
+            `InvalidArgumentError`.
 
         Returns
         -------
@@ -573,6 +579,7 @@ class ObservationPlanning:
         """
         from wayfindinglib.tasks.planning_tasks import sky_sources
 
+        check_limit(limit, 1, MAXIMUM_SOURCES)
         sections = check_include(source, ("targets", "stars", "simbad", "catalogs"))
         if ("catalogs" in sections) != bool(catalog_drivers):
             raise InvalidArgumentError(
@@ -619,7 +626,6 @@ class ObservationPlanning:
         stars = [item for item in found if item.type == "star"]
         total_stars = len(stars)
         if limit is not None:
-            limit = max(1, min(int(limit), MAXIMUM_SOURCES))
             stars.sort(key=lambda item: (item.magnitude is None, item.magnitude or 0.0))
         truncated = catalogs_cut_short or (limit is not None and total_stars > limit)
         return SourceQueryResult(
@@ -658,8 +664,8 @@ class ObservationPlanning:
     def get_visibility(
         self,
         objects: list[str | Target | StellarObject | dict[str, Any]] | None = None,
-        time: str | datetime | Time | None = None,
-        end_time: str | datetime | Time | None = None,
+        time: TimeInput = None,
+        end_time: TimeInput = None,
         step_minutes: float | None = None,
         include: list[str] | None = None,
         minimum_altitude_deg: float = 0.0,

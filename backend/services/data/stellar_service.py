@@ -118,7 +118,7 @@ class StellarService:
         # RPC worker thread, and shares identical concurrent ones.
         self._heavy_reads = HeavyReadLimiter()
         self._socket_manager = None
-        self._stack_sky_pictures = StackSkyPictures(resolve_mounted_path)
+        self._stack_sky_pictures = StackSkyPictures(self.astrometrics, resolve_mounted_path)
 
     def set_socket_manager(self, socket_manager: Any) -> None:
         """Give this service a socket manager to notify the UI through.

@@ -153,7 +153,11 @@ def test_file_list_names_the_preferred_stack_configuration() -> None:
 
     result = _service_with(target).get_file_list("M 31")
 
-    assert result["stackConfiguration"] == {"camera": "ZWO ASI 533MM Pro", "focalLengthMm": 405}
+    assert result["stackConfiguration"] == {
+        "camera": "ZWO ASI 533MM Pro",
+        "focalLengthMm": 405,
+        "label": "asi",
+    }
 
 
 def test_file_list_lists_each_stack_on_disk_with_the_main_one_first(tmp_path: Path) -> None:

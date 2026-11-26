@@ -148,6 +148,11 @@ describe('calibration scope (M 31-like target with two cameras)', () => {
         expect(screen.getByTestId('calibration-all-groups').querySelectorAll('tbody tr')).toHaveLength(2);
     });
 
+    it('names the stack configuration with the label the backend sends', () => {
+        const scope = chooseCalibrationScope('All', '', { camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405, label: 'ZWO ASI 533MM Pro@405mm' });
+        expect(scope?.label).toBe('ZWO ASI 533MM Pro@405mm');
+    });
+
     it('follows the File Browser when it is filtered to a camera', () => {
         const scope = chooseCalibrationScope('Nikon D5300', '300', { camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405 });
         expect(filterGroupsByScope(groups, scope).map((g) => g.camera)).toEqual(['Nikon D5300', 'Nikon D5300']);

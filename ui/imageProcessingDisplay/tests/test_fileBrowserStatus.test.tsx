@@ -17,21 +17,14 @@ const item = (name: string, date = '2026-11-01 21:00:00'): FileItem => ({
 
 const report: FrameStatusReport = {
     stackedAt: 100,
+    typicalElongation: 1.25,
     frames: [
         { path: '/lib/a.fits', name: 'a.fits', state: 'included' },
-        { path: '/lib/b.fits', name: 'b.fits', state: 'included' },
+        { path: '/lib/b.fits', name: 'b.fits', state: 'flagged', elongation: 1.5 },
         { path: '/lib/c.fits', name: 'c.fits', state: 'not_stacked' },
         { path: '/lib/_excluded/d.fits', name: 'd.fits', state: 'set_aside', kind: 'clouded', reason: '203 stars against a typical 3348', restorable: true },
     ],
 };
-const review = {
-    targetId: 'M 1', scope: 'all', frameCount: 3,
-    roundness: { state: 'round', sentence: '' }, direction: { state: 'round', sentence: '' },
-    standout: { state: 'found', sentence: '' }, corners: { state: 'not_measured', sentence: '' },
-    series: [{ path: '/lib/a.fits', elongation: 1.0 }, { path: '/lib/b.fits', elongation: 1.5 }],
-    standoutFrames: [{ path: '/lib/b.fits', elongation: 1.5, reason: 'stars stretched' }],
-};
-
 function renderBrowser(overrides: Partial<React.ComponentProps<typeof FileBrowser>> = {}) {
     const onPutBackFrame = vi.fn();
     const onSelectFile = vi.fn();
@@ -47,7 +40,7 @@ function renderBrowser(overrides: Partial<React.ComponentProps<typeof FileBrowse
             onToggleFile={() => {}}
             onToggleAll={() => {}}
             selectedCamera="All"
-            frameStatuses={buildFrameStatusLookup(report, review)}
+            frameStatuses={buildFrameStatusLookup(report)}
             setAsideFiles={[{ ...item('d.fits'), path: '/lib/_excluded/d.fits', camera: '' }]}
             onPutBackFrame={onPutBackFrame}
             {...overrides}
@@ -118,7 +111,7 @@ describe('Put back', () => {
         const limited: FrameStatusReport = {
             frames: [{ path: '/lib/_excluded/d.fits', name: 'd.fits', state: 'set_aside', kind: 'trailed', restorable: false, restoreNote: 'No record of where it came from.' }],
         };
-        renderBrowser({ frameStatuses: buildFrameStatusLookup(limited, null) });
+        renderBrowser({ frameStatuses: buildFrameStatusLookup(limited) });
         expect(screen.queryByRole('button', { name: 'Put back' })).toBeNull();
         expect(screen.getByText('Set aside: trailed').closest('[title]')?.getAttribute('title')).toMatch(/No record of where it came from/);
     });

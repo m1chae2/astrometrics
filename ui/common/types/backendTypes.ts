@@ -168,10 +168,14 @@ export interface TelescopeStatus {
 
 /**
  * The camera and optic of a target's current stack.
+ *
+ * ``label`` is the stack's configuration key, such as
+ * ``ZWO ASI 533MM Pro@405mm``.
  */
 export interface StackConfigurationRef {
   camera?: string;
   focalLengthMm?: number | null;
+  label?: string;
 }
 
 /**
@@ -1082,7 +1086,7 @@ export interface FrameCopyPulse {
  * name : `str`
  * The file name.
  * state : `str`
- * ``included``, ``not_stacked`` or ``set_aside``.
+ * One of `FRAME_STATES`.
  * kind : `str` or `None`
  * The kind the stacker recorded for a set-aside frame, such as
  * ``clouded``, ``trailed`` or ``off_field``. `None` when none is
@@ -1090,14 +1094,17 @@ export interface FrameCopyPulse {
  * reason : `str`
  * The stacker's own words for a set-aside frame; empty otherwise.
  * date : `str`
- * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
- * file name has no date (set-aside frames only).
+ * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS`` (set-aside
+ * frames only).
  * camera : `str`
  * The camera name from the frame's header (set-aside frames only).
  * filter : `str`
  * The filter name from the frame's header (set-aside frames only).
  * exposure : `str`
  * The exposure in seconds, for a set-aside frame; empty otherwise.
+ * elongation : `float` or `None`
+ * For a flagged frame, the elongation of its stars (long axis over
+ * short axis); `None` otherwise.
  * original_path : `str` or `None`
  * Where a set-aside frame was before it was moved.
  * restorable : `bool`
@@ -1115,6 +1122,7 @@ export interface FrameStatus {
   camera?: string;
   filter?: string;
   exposure?: string;
+  elongation?: number | null;
   originalPath?: string | null;
   restorable?: boolean;
   restoreNote?: string;
@@ -1130,10 +1138,14 @@ export interface FrameStatus {
  * stacked_at : `float` or `None`
  * When the latest stack file was written, in seconds since the Unix
  * epoch. `None` when the target has no stack.
+ * typical_elongation : `float` or `None`
+ * The typical elongation of the target's frames, which a flagged
+ * frame's elongation stands far above. `None` when not known.
  */
 export interface FrameStatusReport {
   frames?: FrameStatus[];
   stackedAt?: number | null;
+  typicalElongation?: number | null;
 }
 
 /**
@@ -4606,13 +4618,15 @@ export interface BrightObjectChoice {
  *
  * ``objects`` is empty when the list could not be made, and ``message``
  * then says why in plain words. A list read from the saved copy beside the
- * stack has ``from_cache`` set.
+ * stack has ``from_cache`` set. ``current`` is the choice saved on the
+ * target.
  */
 export interface BrightObjectChoices {
   target_id: string;
   objects?: BrightObjectChoice[];
   message?: string | null;
   from_cache?: boolean;
+  current?: PreviewBrightObject | null;
 }
 
 /**
@@ -4769,11 +4783,15 @@ export interface BlinkPair {
  * result : `dict` or `None`
  * The library's result as plain data, when the status is
  * ``"completed"``.
+ * configuration : `str` or `None`
+ * The key of the stack chosen by camera and optic (such as
+ * ``ZWO ASI 533MM Pro@405mm``), when one was chosen that way.
  */
 export interface StackReviewStart {
   status: any;
   job_id?: string | null;
   result?: Record<string, any> | null;
+  configuration?: string | null;
 }
 
 /**

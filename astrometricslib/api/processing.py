@@ -57,14 +57,22 @@ from astrometricslib.models.quality.subset_stacks import (
     OddEvenDifferenceNoiseResult,
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
-from astrometricslib.models.target import FrameRecord, PreviewBrightObject, Target
+from astrometricslib.models.target import FrameRecord, PreviewBrightObject, StackConfigurationResult, Target
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.analysis_configuration import configuration_stack_path
+from astrometricslib.pipelines.analysis_stage_names import (
+    ANALYSIS_STAGES,
+    DEFAULT_ANALYSIS_STAGES,
+    SELECTABLE_ANALYSIS_STAGES,
+)
+from astrometricslib.pipelines.shared.analysis_configuration import (
+    choose_stack_configuration,
+    configuration_stack_path,
+)
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
     StackKind,
@@ -1171,7 +1179,18 @@ class ProcessingPipelines:
     calibration : `CalibrationCatalog`
         Tracking, querying, and refreshing dark, bias, and flat
         calibration frames.
+    ANALYSIS_STAGES : `tuple` [`str`]
+        Every stage `process_target` can run, in the order run.
+    SELECTABLE_ANALYSIS_STAGES : `tuple` [`str`]
+        The stages the app and its AI tools offer by name: all but the
+        experimental asteroid search.
+    DEFAULT_ANALYSIS_STAGES : `tuple` [`str`]
+        The stages `process_target` runs for one target when none are named.
     """
+
+    ANALYSIS_STAGES = ANALYSIS_STAGES
+    SELECTABLE_ANALYSIS_STAGES = SELECTABLE_ANALYSIS_STAGES
+    DEFAULT_ANALYSIS_STAGES = DEFAULT_ANALYSIS_STAGES
 
     def __init__(
         self,
@@ -1951,19 +1970,21 @@ class ProcessingPipelines:
         Returns
         -------
         choices : `BrightObjectChoices`
-            The objects, or no objects and the reason.
+            The objects, or no objects and the reason, with ``current``, the
+            choice saved on the target.
         """
         from astrometricslib.pipelines.stacking.post_processing.bright_object_choices import (
             list_bright_object_choices,
         )
 
         resolved = self._resolve(target)
-        return list_bright_object_choices(
+        choices = list_bright_object_choices(
             resolved.id,
             resolved.stacking.stacked_image,
             self._drivers.simbad_or_default(),
             use_cache=not refresh,
         )
+        return choices.model_copy(update={"current": resolved.preview_bright_object})
 
     def set_preview_bright_object(
         self,
@@ -1973,6 +1994,7 @@ class ProcessingPipelines:
         ra_deg: float | None = None,
         dec_deg: float | None = None,
         major_axis_arcmin: float | None = None,
+        name: str | None = None,
     ) -> PreviewBrightObject:
         """Choose which object the preview's masked stretch protects.
 
@@ -1998,6 +2020,11 @@ class ProcessingPipelines:
             With ``"object"``, its declination in degrees.
         major_axis_arcmin : `float`, optional
             With ``"object"``, its major axis in arcminutes, if known.
+        name : `str`, optional
+            With ``"object"``, instead of the name and position: any spelling
+            of the name of an object ``list_preview_bright_objects`` lists
+            (``"ngc7635"`` names ``NGC 7635``). Its SIMBAD name, position and
+            size are taken from that list.
 
         Returns
         -------
@@ -2007,10 +2034,16 @@ class ProcessingPipelines:
         Raises
         ------
         InvalidArgumentError
-            If ``mode`` is unknown, or ``"object"`` lacks a name or a
-            position inside the sky.
+            If ``mode`` is unknown, ``"object"`` lacks a name or a position
+            inside the sky, or ``name`` is not in the stack's list (the
+            message lists the objects that are).
         """
         check_choice("mode", mode, ("auto", "off", "object"))
+        if mode == "object" and name and ra_deg is None and dec_deg is None:
+            listed = self._listed_bright_object(target, name)
+            simbad_id = listed.simbad_id
+            ra_deg, dec_deg = listed.ra_deg, listed.dec_deg
+            major_axis_arcmin = listed.major_axis_arcmin
         if mode == "object":
             if not simbad_id or ra_deg is None or dec_deg is None:
                 raise InvalidArgumentError("Mode 'object' needs simbad_id, ra_deg and dec_deg.")
@@ -2031,6 +2064,76 @@ class ProcessingPipelines:
         resolved.preview_bright_object = choice
         self._targets.add(resolved)
         return choice
+
+    def _listed_bright_object(self, target: str | Target, name: str) -> Any:
+        """Find an object of the stack's bright-object list by its name.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target whose stack's list to read.
+        name : `str`
+            The object's name, in any spelling (case, spaces, SIMBAD's
+            ``NAME`` prefix and underscores do not matter).
+
+        Returns
+        -------
+        choice : `BrightObjectChoice`
+            The listed object.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the list has no object of that name. The message lists the
+            objects, or says why there are none.
+        """
+        from astrometricslib.pipelines.shared.simbad_object_types import normalize_name
+
+        listing = self.list_preview_bright_objects(target)
+        wanted = "".join(normalize_name(name).split())
+        for item in listing.objects:
+            if "".join(normalize_name(item.simbad_id).split()) == wanted:
+                return item
+        names = ", ".join(item.simbad_id for item in listing.objects) or "none"
+        raise InvalidArgumentError(
+            f"{name!r} is not an object in the frame of {listing.target_id!r}. Objects in the frame: {names}."
+            + (f" {listing.message}" if listing.message else ""),
+            details={"target": listing.target_id, "name": name},
+        )
+
+    def find_stack_configuration(
+        self,
+        target: str | Target,
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
+    ) -> StackConfigurationResult:
+        """Find the target's one imaging stack of a camera and optic.
+
+        A target stacked with several cameras or optics keeps one stack for
+        each (``stacking.stacks_by_configuration``). This picks the one a
+        camera and focal length name, the way `process_target` does: the
+        camera by its full name, an alias or part of its name, the focal
+        length after rounding to whole millimeters.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        camera_id : `str`, optional
+            The camera. Left out, any camera.
+        focal_length_mm : `float`, optional
+            The optic's focal length in millimeters. Left out, any optic.
+
+        Returns
+        -------
+        record : `StackConfigurationResult`
+            The stack's record: ``configuration_key``, ``camera``,
+            ``focal_length_mm`` and ``stacked_image``. When neither is
+            given, or no stack or more than one matches,
+            `InvalidArgumentError` is raised, and its message lists the
+            target's configurations.
+        """
+        return choose_stack_configuration(self._resolve(target), camera_id, focal_length_mm, self._config)
 
     # -- Analysis stages ----------------------------------------------------
 
@@ -2228,9 +2331,9 @@ class ProcessingPipelines:
                 "on_item_complete": on_item_complete is not None,
             },
         )
-        chosen_stages = tuple(stages) if stages is not None else tasks.DEFAULT_ANALYSIS_STAGES
+        chosen_stages = tuple(stages) if stages is not None else DEFAULT_ANALYSIS_STAGES
         for stage in chosen_stages:
-            check_choice("stages", stage, tasks.ANALYSIS_STAGES)
+            check_choice("stages", stage, ANALYSIS_STAGES)
         stage_options = {
             "astrometry": astrometry,
             "photometry": photometry,

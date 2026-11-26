@@ -141,6 +141,7 @@ export const chooseCalibrationScope = (
 ): CalibrationScope | null => {
     let camera = '';
     let focalLengthMm: number | null = null;
+    let label = '';
     if (browserCamera && browserCamera !== 'All') {
         camera = browserCamera;
         const optic = Number(browserOptic);
@@ -148,9 +149,11 @@ export const chooseCalibrationScope = (
     } else if (stackConfiguration?.camera) {
         camera = stackConfiguration.camera;
         focalLengthMm = stackConfiguration.focalLengthMm ?? null;
+        // The backend names the stack's camera and optic with the library's configuration key.
+        label = stackConfiguration.label ?? '';
     }
     if (!camera) return null;
-    return { camera, focalLengthMm, label: focalLengthMm === null ? camera : `${camera}@${focalLengthMm}mm` };
+    return { camera, focalLengthMm, label: label || (focalLengthMm === null ? camera : `${camera}@${focalLengthMm}mm`) };
 };
 
 /**

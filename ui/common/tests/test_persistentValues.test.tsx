@@ -1,11 +1,12 @@
 /**
  * @file test_persistentValues.test.tsx
  * @description Tests the saved states in `usePersistentFlag.ts`: a number kept inside its range,
- * a choice moved once from an older key, and a default when nothing usable is saved.
+ * a choice moved once from an older key, a default when nothing usable is saved, and a text that
+ * can be set to nothing.
  */
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { usePersistentFlag, usePersistentNumber } from '../hooks/usePersistentFlag';
+import { usePersistentFlag, usePersistentNumber, usePersistentText } from '../hooks/usePersistentFlag';
 
 describe('usePersistentNumber', () => {
     beforeEach(() => localStorage.clear());
@@ -52,5 +53,23 @@ describe('usePersistentFlag with an older key', () => {
         localStorage.setItem('astrometrics:test:flag', 'false');
         const { result } = renderHook(() => usePersistentFlag('astrometrics:test:flag', true, { legacyKey: 'old.key' }));
         expect(result.current[0]).toBe(false);
+    });
+});
+
+describe('usePersistentText', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it('moves the text from an older key, saves a new one and forgets it when set to nothing', () => {
+        localStorage.setItem('old:star', 'Vega');
+        const { result } = renderHook(() => usePersistentText('new:star', null, { legacyKey: 'old:star' }));
+        expect(result.current[0]).toBe('Vega');
+        expect(localStorage.getItem('old:star')).toBeNull();
+        act(() => result.current[1]('Deneb'));
+        expect(localStorage.getItem('new:star')).toBe('Deneb');
+        act(() => result.current[1](null));
+        expect(result.current[0]).toBeNull();
+        expect(localStorage.getItem('new:star')).toBeNull();
     });
 });

@@ -1,15 +1,15 @@
 /**
  * @file frameStatus.ts
- * @description Works out the File Browser's Status column and the star-shape chart's numbers from what
- * the backend reports. A frame is Included, Flagged (in the stack, but its stars are stretched far more
+ * @description Words the File Browser's Status column shows for each frame. The backend decides the
+ * status (the library's rule): Included, Flagged (in the stack, but its stars are stretched far more
  * than the others), Set aside (the stacker moved it to an `_excluded` folder) or Not stacked yet (taken
- * after the last stack). Each status has a short word, a tone for its chip, and the reason shown when
- * the pointer rests on it. These are plain functions, so they can be tested without a screen.
+ * after the last stack). This file only gives each status a short word, a tone for its chip, and the
+ * reason shown when the pointer rests on it. These are plain functions, so they can be tested without
+ * a screen.
  */
 
-import type { FrameStatus, FrameStatusReport, StarShapeReview } from '../../common/types/backendTypes';
+import type { FrameStatus, FrameStatusReport } from '../../common/types/backendTypes';
 import type { StatusChipStatus } from '../../common/components/StatusChip';
-import { sessionTypicalElongation } from './starShapeStats';
 
 /** The four things the Status column can say. */
 export type FrameStatusKind = 'included' | 'flagged' | 'set-aside' | 'not-stacked';
@@ -50,20 +50,14 @@ export function setAsideCategory(kind: string | null | undefined): SetAsideCateg
 }
 
 /**
- * Builds the status of every frame the backend lists, with the review's flags added.
+ * Words the status of every frame the backend lists.
  * @param report The backend's per-frame statuses, or `null` when not read yet.
- * @param review The star-shape review, or `null` when not read yet.
  * @return The statuses by frame path.
  */
-export function buildFrameStatusLookup(
-    report: FrameStatusReport | null,
-    review: StarShapeReview | null,
-): Map<string, FrameStatusInfo> {
+export function buildFrameStatusLookup(report: FrameStatusReport | null): Map<string, FrameStatusInfo> {
     const lookup = new Map<string, FrameStatusInfo>();
-    const typical = sessionTypicalElongation(review?.series);
-    const standouts = new Map((review?.standoutFrames ?? []).map((frame) => [frame.path, frame]));
     for (const frame of report?.frames ?? []) {
-        lookup.set(frame.path, describeFrameStatus(frame, standouts.get(frame.path)?.elongation ?? null, typical, report?.stackedAt ?? null));
+        lookup.set(frame.path, describeFrameStatus(frame, report?.typicalElongation ?? null, report?.stackedAt ?? null));
     }
     return lookup;
 }
@@ -71,14 +65,12 @@ export function buildFrameStatusLookup(
 /**
  * Describes one frame's status.
  * @param frame The backend's status for the frame.
- * @param standoutElongation The frame's elongation when the review flags it, else `null`.
- * @param typical The session's typical elongation, or `null`.
+ * @param typical The typical elongation the backend reports, or `null`.
  * @param stackedAt When the last stack was written, or `null` when the target has no stack.
  * @return The label, tone, hover text and filter text.
  */
 export function describeFrameStatus(
     frame: FrameStatus,
-    standoutElongation: number | null,
     typical: number | null,
     stackedAt: number | null,
 ): FrameStatusInfo {
@@ -107,13 +99,14 @@ export function describeFrameStatus(
             restoreNote: '',
         };
     }
-    if (standoutElongation !== null) {
+    if (frame.state === 'flagged') {
         const typicalText = typical === null ? 'not known' : typical.toFixed(2);
+        const elongationText = frame.elongation === null || frame.elongation === undefined ? 'not known' : frame.elongation.toFixed(2);
         return {
             kind: 'flagged',
             label: 'Flagged',
             tone: 'warning',
-            tooltip: `Stars stretched: elongation ${standoutElongation.toFixed(2)}, session typical ${typicalText}`,
+            tooltip: `Stars stretched: elongation ${elongationText}, session typical ${typicalText}`,
             filterText: 'flagged',
             restorable: false,
             restoreNote: '',

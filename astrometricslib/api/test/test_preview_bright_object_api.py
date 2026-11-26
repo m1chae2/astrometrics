@@ -16,6 +16,7 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.processing_results import BrightObjectChoice, BrightObjectChoices
 from astrometricslib.models.target import Target
 
 
@@ -102,3 +103,66 @@ def test_a_target_with_no_wcs_in_its_stack_is_told_to_run_astrometry(tmp_path: P
     assert result.objects == []
     assert result.message == "Run Astrometry first to list objects in the frame"
     simbad.query_tap.assert_not_called()
+
+
+def test_the_list_carries_the_saved_choice(tmp_path: Path) -> None:
+    """The list call says which choice the target has saved."""
+    stack = tmp_path / "stack.fits"
+    fits.PrimaryHDU(np.zeros((20, 20), dtype=np.float32)).writeto(stack)
+    pipelines, _ = make_pipelines(MagicMock())
+    target = Target(id="M 52")
+    target.stacking.stacked_image = str(stack)
+    pipelines.set_preview_bright_object(target, "off")
+
+    result = pipelines.list_preview_bright_objects(target)
+
+    assert result.current is not None
+    assert result.current.mode == "off"
+
+
+def listing_with_nebula() -> BrightObjectChoices:
+    """Build a stack's list holding one nebula.
+
+    Returns
+    -------
+    listing : `BrightObjectChoices`
+        The list, as ``list_preview_bright_objects`` gives it.
+    """
+    nebula = BrightObjectChoice(
+        simbad_id="NGC 7635",
+        object_type="HII",
+        category="nebula",
+        ra_deg=350.2,
+        dec_deg=61.2,
+        major_axis_arcmin=15.0,
+    )
+    return BrightObjectChoices(target_id="M 52", objects=[nebula])
+
+
+@pytest.mark.parametrize("name", ["ngc7635", "NGC  7635", "NAME NGC_7635"])
+def test_an_object_name_in_any_spelling_saves_the_listed_object(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """A name is found in the stack's list; its position and size are saved."""
+    pipelines, _ = make_pipelines()
+    monkeypatch.setattr(pipelines, "list_preview_bright_objects", lambda target: listing_with_nebula())
+    target = Target(id="M 52")
+
+    saved = pipelines.set_preview_bright_object(target, "object", name=name)
+
+    assert (saved.simbad_id, saved.ra_deg, saved.dec_deg, saved.major_axis_arcmin) == (
+        "NGC 7635",
+        350.2,
+        61.2,
+        15.0,
+    )
+
+
+def test_a_name_not_in_the_list_is_refused_with_the_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown name raises, names the listed objects, and saves nothing."""
+    pipelines, targets = make_pipelines()
+    monkeypatch.setattr(pipelines, "list_preview_bright_objects", lambda target: listing_with_nebula())
+
+    with pytest.raises(InvalidArgumentError, match="NGC 7635"):
+        pipelines.set_preview_bright_object(Target(id="M 52"), "object", name="M 31")
+    targets.add.assert_not_called()

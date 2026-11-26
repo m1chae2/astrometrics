@@ -1589,12 +1589,17 @@ class GroupedFrameStat(BaseModel):
 
 
 class StackConfigurationRef(BaseModel):
-    """The camera and optic of a target's current stack."""
+    """The camera and optic of a target's current stack.
+
+    ``label`` is the stack's configuration key, such as
+    ``ZWO ASI 533MM Pro@405mm``.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
     camera: str = Field(default="", alias="camera")
     focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
+    label: str = Field(default="", alias="label")
 
 
 class StackChoice(BaseModel):

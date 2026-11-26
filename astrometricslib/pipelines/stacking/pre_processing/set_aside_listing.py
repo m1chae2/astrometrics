@@ -110,15 +110,20 @@ def _header_identity(path: str) -> tuple[str, str, str]:
     -------
     identity : `tuple` [`str`, `str`, `str`]
         The camera name, the filter name and the capture time as
-        ``YYYY-MM-DD HH:MM:SS``. Each is an empty string when it is not known.
+        ``YYYY-MM-DD HH:MM:SS`` (from the header, else from the file name).
+        Each is an empty string when it is not known.
     """
     from astrometricslib.foundation.enums import FilterType
-    from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
+    from astrometricslib.pipelines.shared.frame_scanning import (
+        capture_time_from_file_name,
+        create_frame_record_from_fits,
+    )
 
     record = create_frame_record_from_fits(path)
     camera = "" if record.camera == "Unknown" else record.camera
     filter_name = "None" if record.filter == FilterType.NONE else record.filter.name
-    return camera, filter_name, record.date or ""
+    # A file with no capture time in its header may have one in its name.
+    return camera, filter_name, record.date or capture_time_from_file_name(os.path.basename(path))
 
 
 def build_set_aside_records(

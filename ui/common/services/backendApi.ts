@@ -48,6 +48,14 @@ import {
 
 /** Summary of one persisted observation session, from execution:list_sessions. */
 /** Answer to a request to stop a stacking job. */
+/** The answer of `target:get_frame_header`: the header and the turn that shows the frame like the stack. */
+export interface FrameHeaderAnswer {
+    /** The FITS header cards. */
+    entries: FitsHeaderEntry[];
+    /** The quarter turn (0, 90, 180 or 270 degrees, clockwise) the viewer shows the frame with. */
+    displayTurn: number;
+}
+
 export interface CancelProcessingResult {
     /** `cancelled`, `other_process` (the job runs in another program) or `none`. */
     status: string;
@@ -193,7 +201,7 @@ export interface ActionRegistry {
     "target:add_data": { payload: { target_id: string; image_file: string }; response: boolean };
     "target:send_to_phone": { payload: { target_id: string }; response: { path: string; method: string; device?: string } };
     "target:refresh": { payload: { target_id: string; prune_missing?: boolean }; response: void };
-    "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FitsHeaderEntry[] };
+    "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FrameHeaderAnswer };
 
     // Astronomy & Stellar Library
     "astronomy:get_status": { payload: { target_id: string }; response: ObjectVisibility };
@@ -386,9 +394,9 @@ export interface ActionRegistry {
     // The nebulae and galaxies SIMBAD lists inside the target's stack (`message` says why there are none).
     "processing:list_bright_objects": { payload: { target: string; refresh?: boolean }; response: import('../types/backendTypes').BrightObjectChoices };
     // Saves which object the preview's masked stretch protects (used the next time the target is stacked or post-processed).
-    "processing:set_bright_object": { payload: { target: string; mode: 'auto' | 'off' | 'object'; simbad_id?: string; ra_deg?: number; dec_deg?: number; major_axis_arcmin?: number }; response: import('../types/backendTypes').PreviewBrightObject };
+    "processing:set_bright_object": { payload: { target: string; mode: 'auto' | 'off' | 'object'; simbad_id?: string; ra_deg?: number; dec_deg?: number; major_axis_arcmin?: number; name?: string }; response: import('../types/backendTypes').PreviewBrightObject };
     // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
-    "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
+    "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean; stack_path?: string; camera_id?: string; focal_length_mm?: number }; response: import('../types/backendTypes').StackReviewStart };
     // What a stack would do with its frames (a background job that stacks nothing): the answer is the
     // prediction, or the job to follow. `image_files` are the frames the Stack Frames click would send.
     "processing:check_stack": { payload: { target_id: string; image_files?: string[]; kind?: 'imaging' | 'spectral'; filter_name?: string; camera_id?: string; focal_length_mm?: number }; response: import('../types/backendTypes').StackReviewStart };
@@ -409,7 +417,7 @@ export interface ActionRegistry {
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
-    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string; stages?: ('astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation')[] }; response: AnalysisResult };
+    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string; stages?: ('astrometry' | 'photometry' | 'spectroscopy' | 'spectral_variation')[]; camera_id?: string; focal_length_mm?: number }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
     // Names the detected stars of a stack (a job of the analysis type), and reads the saved names.

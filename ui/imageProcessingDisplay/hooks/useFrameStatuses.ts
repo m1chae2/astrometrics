@@ -1,14 +1,14 @@
 /**
  * @file useFrameStatuses.ts
- * @description Reads each frame's status for the selected target (included, not stacked yet, set aside),
- * including the frames set aside, and joins it with the star-shape review's flags. It reads again when
+ * @description Reads each frame's status for the selected target (included, flagged, not stacked yet,
+ * set aside), including the frames set aside, as the backend decides it. It reads again when
  * the target or the reload key changes, and keeps nothing from the previous target. A read that fails
  * leaves the value `null`, which the screen shows as "Included", never as an error.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchFrameStatuses } from '../../common/services/imaging/frameReviewService';
-import type { FrameStatusReport, StarShapeReview } from '../../common/types/backendTypes';
+import type { FrameStatusReport } from '../../common/types/backendTypes';
 import { buildFrameStatusLookup, type FrameStatusInfo } from '../utils/frameStatus';
 
 /** What {@link useFrameStatuses} gives back. */
@@ -25,14 +25,12 @@ export interface FrameStatuses {
  * Reads the frame statuses of one target.
  * @param targetId The selected target ("" for none).
  * @param reloadKey Changes when the screen should read again.
- * @param review The star-shape review, whose flagged frames become "Flagged".
  * @param shouldFetch False while the target is not local, so nothing is asked of the backend.
  * @return The report, the status of each frame, and a function that reads again.
  */
 export function useFrameStatuses(
     targetId: string,
     reloadKey: number,
-    review: StarShapeReview | null,
     shouldFetch: boolean = true,
 ): FrameStatuses {
     const [report, setReport] = useState<FrameStatusReport | null>(null);
@@ -56,6 +54,6 @@ export function useFrameStatuses(
         setReport(null);
     }
 
-    const statuses = useMemo(() => buildFrameStatusLookup(report, review), [report, review]);
+    const statuses = useMemo(() => buildFrameStatusLookup(report), [report]);
     return { report, statuses, reload };
 }

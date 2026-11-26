@@ -26,8 +26,8 @@ from typing import Any
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError
+from astrometricslib.models.target import FrameRecord, StackConfigurationResult, Target
 from astrometricslib.utilities.frame_identity import frame_is_spectral
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,47 @@ def stack_configuration(stack_path: str | None, target: Target | None = None) ->
     return None
 
 
+def _matching_stack_configurations(
+    target: Target,
+    camera: str | None,
+    focal_length_mm: float | None,
+    config: AppConfiguration | None,
+) -> list[StackConfigurationResult]:
+    """List the target's recorded imaging stacks of one camera and optic.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    camera : `str` or `None`
+        The camera: its full name, an alias, or part of its name. `None`
+        matches any camera.
+    focal_length_mm : `float` or `None`
+        The optic's focal length in millimeters, compared after rounding.
+        `None` matches any optic.
+    config : `AppConfiguration` or `None`
+        The config whose camera profiles give the aliases.
+
+    Returns
+    -------
+    records : `list` [`StackConfigurationResult`]
+        The records with a stack file that match, in recorded order.
+    """
+    return [
+        recorded
+        for recorded in target.stacking.stacks_by_configuration.values()
+        if recorded.stacked_image
+        and _camera_is(recorded.camera, camera, config)
+        and (
+            focal_length_mm is None
+            or (
+                recorded.focal_length_mm is not None
+                and round(float(recorded.focal_length_mm)) == round(float(focal_length_mm))
+            )
+        )
+    ]
+
+
 def configuration_stack_path(
     target: Target,
     camera: str | None,
@@ -144,20 +185,73 @@ def configuration_stack_path(
     """
     if not camera and focal_length_mm is None:
         return None
-    matches = [
-        recorded.stacked_image
+    matches = _matching_stack_configurations(target, camera, focal_length_mm, config)
+    return matches[0].stacked_image if len(matches) == 1 else None
+
+
+def choose_stack_configuration(
+    target: Target,
+    camera: str | None,
+    focal_length_mm: float | None,
+    config: AppConfiguration | None = None,
+) -> StackConfigurationResult:
+    """Find the one recorded imaging stack of a camera and optic, or say why.
+
+    This is `configuration_stack_path` for a caller that must tell the
+    person what went wrong: no match, or more than one, is an error whose
+    message lists the target's configurations by their keys (such as
+    ``ZWO ASI 533MM Pro@405mm``).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    camera : `str` or `None`
+        The camera: its full name, an alias, or part of its name.
+    focal_length_mm : `float` or `None`
+        The optic's focal length in millimeters, compared after rounding.
+    config : `AppConfiguration`, optional
+        The config whose camera profiles give the aliases.
+
+    Returns
+    -------
+    record : `StackConfigurationResult`
+        The matching record.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If neither a camera nor an optic is given, or no record or more than
+        one matches. ``details["configurations"]`` lists every key.
+    """
+    keys = sorted(
+        recorded.configuration_key
         for recorded in target.stacking.stacks_by_configuration.values()
         if recorded.stacked_image
-        and _camera_is(recorded.camera, camera, config)
-        and (
-            focal_length_mm is None
-            or (
-                recorded.focal_length_mm is not None
-                and round(float(recorded.focal_length_mm)) == round(float(focal_length_mm))
-            )
+    )
+    details = {"target": target.id, "configurations": keys}
+    if not camera and focal_length_mm is None:
+        raise InvalidArgumentError(
+            "Give a camera, a focal length or both to choose a stack.", details=details
         )
-    ]
-    return matches[0] if len(matches) == 1 else None
+    matches = _matching_stack_configurations(target, camera, focal_length_mm, config)
+    if len(matches) == 1:
+        return matches[0]
+    asked = f"camera {camera!r}" if camera else "any camera"
+    if focal_length_mm is not None:
+        asked += f" at {focal_length_mm:g} mm"
+    if matches:
+        raise InvalidArgumentError(
+            f"Target {target.id!r} has more than one stack for {asked}: "
+            f"{', '.join(sorted(record.configuration_key for record in matches))}. "
+            "Give both the camera and the focal length.",
+            details=details,
+        )
+    raise InvalidArgumentError(
+        f"Target {target.id!r} has no stack for {asked}. Its configurations are: "
+        f"{', '.join(keys) or 'none recorded (stack the target first)'}.",
+        details=details,
+    )
 
 
 def _camera_is(recorded_camera: str, wanted: str | None, config: AppConfiguration | None) -> bool:

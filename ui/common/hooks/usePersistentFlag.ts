@@ -2,7 +2,8 @@
  * @file usePersistentFlag.ts
  * @description States that are kept in the browser's `localStorage`, so they are still the same
  * after the window refreshes: a true/false flag (`usePersistentFlag`, used for folded panels and
- * on/off choices) and a number (`usePersistentNumber`, used for a slider such as an opacity).
+ * on/off choices), a number (`usePersistentNumber`, used for a slider such as an opacity) and a
+ * short text or nothing (`usePersistentText`, used for a selection such as the picked star).
  * Keys follow the `astrometrics:<display>:<name>` pattern. Storage is a per-viewer convenience:
  * if it is missing, empty or throws, the value simply starts at its default.
  */
@@ -141,5 +142,34 @@ export function usePersistentNumber(
     setValue(kept);
     writeSaved(key, String(kept));
   }, [key, min, max]);
+  return [value, update];
+}
+
+/**
+ * A text state, or nothing, that is saved to `localStorage` each time it changes. Setting it to
+ * `null` removes the saved text.
+ * @param {string} key - The `localStorage` key.
+ * @param {string | null} defaultValue - The starting value when nothing is saved.
+ * @param {PersistentValueOptions} [options] - An older key to move the saved value from.
+ * @returns {[string | null, (value: string | null) => void]} The value and a setter that also saves it.
+ */
+export function usePersistentText(
+  key: string,
+  defaultValue: string | null,
+  options: PersistentValueOptions = {},
+): [string | null, (value: string | null) => void] {
+  const [value, setValue] = useState<string | null>(() => readSaved(key, options.legacyKey) ?? defaultValue);
+  const update = useCallback((next: string | null) => {
+    setValue(next);
+    if (next !== null) {
+      writeSaved(key, next);
+      return;
+    }
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Storage is unavailable; the value still works for this session.
+    }
+  }, [key]);
   return [value, update];
 }

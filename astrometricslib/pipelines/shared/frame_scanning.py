@@ -221,6 +221,30 @@ def _record_camera_name(header_camera_name: str, config: Any) -> str:
     return "Unknown"
 
 
+_FILE_NAME_CAPTURE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})")
+"""The date and time a capture program writes into a frame's file name."""
+
+
+def capture_time_from_file_name(file_name: str) -> str:
+    """Read the capture time a capture program wrote into a frame's file name.
+
+    Parameters
+    ----------
+    file_name : `str`
+        The frame's file name, such as ``M_31_Light_2026-09-24T21-14-05.fits``.
+
+    Returns
+    -------
+    date : `str`
+        ``YYYY-MM-DD HH:MM:SS``, or an empty string when the name has none.
+    """
+    match = _FILE_NAME_CAPTURE_TIME.search(file_name)
+    if match is None:
+        return ""
+    day, hour, minute, second = match.groups()
+    return f"{day} {hour}:{minute}:{second}"
+
+
 def create_frame_record_from_fits(path: str, camera: str | None = None, config: Any = None) -> FrameRecord:
     """Read an image file and create a record for it.
 
@@ -272,13 +296,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
             record.date = datetime.fromtimestamp(image.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         else:
             # Fallback to filename date extraction if timestamp is missing
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})", filename)
-            if date_match:
-                raw = date_match.group(1)
-                parts = raw.split("T")
-                d_part = parts[0]
-                t_part = parts[1].replace("-", ":")
-                record.date = f"{d_part} {t_part}"
+            record.date = capture_time_from_file_name(filename) or record.date
 
         if not camera:
             record.camera = _record_camera_name(

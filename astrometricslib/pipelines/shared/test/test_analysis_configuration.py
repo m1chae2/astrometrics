@@ -18,6 +18,7 @@ from astropy.io import fits
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.config import _TomlSectionedConfig
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.observatory_setups import load_observatory_setups
 from astrometricslib.foundation.parameter_context import equipment_parameter_context
 from astrometricslib.foundation.parameters import resolve
@@ -31,6 +32,7 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.shared.analysis_configuration import (
     AnalysisConfiguration,
     analysis_frames_and_configuration,
+    choose_stack_configuration,
     configuration_stack_path,
     context_filter_name,
     left_out_summary,
@@ -393,6 +395,21 @@ def test_a_camera_and_optic_find_the_stack_of_that_configuration(tmp_path: Path)
     assert configuration_stack_path(target, None, 405.0) == target.stacking.stacked_image
     assert configuration_stack_path(target, NIKON, 405.0) is None
     assert configuration_stack_path(target, None, None) is None
+
+
+def test_choosing_a_configuration_names_the_stack_or_lists_the_choices(tmp_path: Path) -> None:
+    """One match gives its record; none or several raise with every key."""
+    target = make_target(tmp_path)
+    nikon_stack = add_configuration_stacks(target, tmp_path)
+
+    assert choose_stack_configuration(target, "d5300", None).stacked_image == nikon_stack
+    assert choose_stack_configuration(target, None, 404.6).configuration_key == "asi@405"
+    with pytest.raises(InvalidArgumentError, match=r"no stack for camera 'Canon'.*asi@405, nikon@300"):
+        choose_stack_configuration(target, "Canon", None)
+    with pytest.raises(InvalidArgumentError, match="more than one stack"):
+        choose_stack_configuration(target, "o", None)
+    with pytest.raises(InvalidArgumentError, match="Give a camera"):
+        choose_stack_configuration(target, None, None)
 
 
 def test_photometry_of_another_configuration_keeps_that_configurations_frames(tmp_path: Path) -> None:

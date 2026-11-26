@@ -72,6 +72,13 @@
       "interim_block": "",
       "note": "Internal concurrency lock exposed by reflection."
     },
+    "processing_find_stack_configuration": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why none or several match and lists the target's configurations. Reads the target record only."
+    },
     "processing_get_stack_identification": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -183,6 +190,13 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "Deletes the stored quality measurements of the given frames from the quality database. The AI is read-only, so it reads the stored numbers with quality_query instead."
+    },
+    "quality_frame_statuses": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-26 for the File Browser's Status column. The caller must give the newest stack file's time and the star-shape review's flagged frames, which the backend fills in for the app. quality_set_aside_frames and review_get_star_shape_review serve an AI client."
     },
     "quality_get_aperture_record": {
       "tool_class": "observe",
@@ -359,6 +373,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "target_display_turn": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-26 for the image viewer: the quarter turn that shows a raw frame the same way round as its stack, for display only. Of no use to an AI client."
+    },
     "target_get": {
       "tool_class": "observe",
       "category": "targets",
@@ -471,6 +492,13 @@
       "interim_block": "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use visualization_render_fits with a path, which returns a real image.",
       "note": "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it into visualization_render_fits with a latest option."
     },
+    "visualization_place_stack_picture_on_sky": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-26 for the Planetarium's Images layer: a grid of sky positions for drawing a picture on a sky chart. Of no use to an AI client."
+    },
     "visualization_plot": {
       "tool_class": "compute",
       "category": "image-processing",
@@ -484,6 +512,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing."
+    },
+    "visualization_stack_sky_picture_files": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-26 for the Planetarium's Images layer: names the picture and stretched stack that place a target's picture on the sky. Of no use to an AI client."
     }
   }
 }

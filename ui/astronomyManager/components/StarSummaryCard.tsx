@@ -95,17 +95,13 @@ function navigateToTarget(
     if (!targetId) return;
     try {
         window.localStorage.setItem('selectedTarget', targetId);
-        if (selectedStarId) {
-            window.localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectedStarId);
-        }
-        window.localStorage.setItem('astrometrics:enableAstrometryOverlay', 'true');
     } catch {
         // Ignore localStorage access failures (e.g. in private browsing)
     }
     setSelectedTarget?.(targetId);
     setPendingTarget?.(targetId);
 
-    navigateToElement({
+    void navigateToElement({
         targetDisplay: 'Image Processing',
         targetElement: 'fitsViewer',
         action: 'targetSelected',
@@ -115,14 +111,6 @@ function navigateToTarget(
             type: 'info',
             title: 'Targets',
         },
-    }).then((result) => {
-        if (!result.handledRemotely) {
-            try {
-                window.localStorage.setItem('appMode', 'Image Processing');
-            } catch {
-                // Ignore
-            }
-        }
     });
 }
 

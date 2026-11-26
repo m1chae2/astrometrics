@@ -270,6 +270,7 @@ SUB_API_MEMBERS = {
         "sessions",
         "create",
         "delete",
+        "display_turn",
         "delete_images",
         "get",
         "get_frame",
@@ -297,8 +298,12 @@ SUB_API_MEMBERS = {
         "update",
     },
     "processing": {
+        "ANALYSIS_STAGES",
+        "DEFAULT_ANALYSIS_STAGES",
+        "SELECTABLE_ANALYSIS_STAGES",
         "acquire_job_slot",
         "calibration",
+        "find_stack_configuration",
         "get_stack_identification",
         "identify_stack",
         "list_preview_bright_objects",
@@ -328,6 +333,7 @@ SUB_API_MEMBERS = {
     "quality": {
         "calibration_identities",
         "choose_blink_pair",
+        "frame_statuses",
         "get_aperture_record",
         "capture_settings",
         "forget",
@@ -345,7 +351,13 @@ SUB_API_MEMBERS = {
         "resolve_rows",
         "set_aside_frames",
     },
-    "visualization": {"get_last_captured_image", "plot", "render_fits"},
+    "visualization": {
+        "get_last_captured_image",
+        "place_stack_picture_on_sky",
+        "plot",
+        "render_fits",
+        "stack_sky_picture_files",
+    },
     "jobs": {"query"},
 }
 """Each sub-API of `Astrometrics`, by attribute path, and its members."""

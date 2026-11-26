@@ -1,7 +1,7 @@
 /**
  * @file test_frameStatus.test.ts
  * @description Tests of the File Browser's Status wording: the set-aside kinds, the hover text of a
- * flagged frame, "not stacked yet", the session's typical elongation, and the `status:` search filter.
+ * flagged frame (with the backend's typical elongation), "not stacked yet", and the `status:` search filter.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -12,16 +12,7 @@ import {
     NO_REASON_ON_RECORD,
 } from '../utils/frameStatus';
 import { matchesQuery } from '../../common/utils/searchLogic';
-import type { FileItem, FrameStatusReport, StarShapeReview } from '../../common/types/backendTypes';
-
-const verdict = { state: 'round', sentence: 'x' };
-const review = (series: Array<{ path: string; elongation: number }>, standout: string[]): StarShapeReview => ({
-    targetId: 'M 1', scope: 'all', frameCount: series.length,
-    roundness: verdict, direction: verdict, standout: verdict, corners: verdict,
-    series, standoutFrames: standout.map((path) => ({
-        path, elongation: series.find((frame) => frame.path === path)!.elongation, reason: 'stars stretched',
-    })),
-});
+import type { FileItem, FrameStatusReport } from '../../common/types/backendTypes';
 
 describe('setAsideCategory', () => {
     it('names trailed, cloud, off field and other', () => {
@@ -37,7 +28,7 @@ describe('describeFrameStatus', () => {
     it('gives a set-aside frame the stacker reason word for word', () => {
         const info = describeFrameStatus(
             { path: '/e/a.fits', name: 'a.fits', state: 'set_aside', kind: 'clouded', reason: '203 stars against a typical 3348', restorable: true },
-            null, null, 10,
+            null, 10,
         );
         expect(info.label).toBe('Set aside: cloud');
         expect(info.tooltip).toBe('203 stars against a typical 3348');
@@ -46,46 +37,46 @@ describe('describeFrameStatus', () => {
     });
 
     it('says when no reason is on record', () => {
-        const info = describeFrameStatus({ path: '/e/a.fits', name: 'a.fits', state: 'set_aside' }, null, null, 10);
+        const info = describeFrameStatus({ path: '/e/a.fits', name: 'a.fits', state: 'set_aside' }, null, 10);
         expect(info.tooltip).toBe(NO_REASON_ON_RECORD);
         expect(info.label).toBe('Set aside: other');
     });
 
-    it('flags an included frame the review marks, naming its elongation and the typical one', () => {
-        const info = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'included' }, 1.4321, 1.08, 10);
+    it('words a flagged frame with its elongation and the typical one', () => {
+        const info = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'flagged', elongation: 1.4321 }, 1.08, 10);
         expect(info.label).toBe('Flagged');
         expect(info.tooltip).toBe('Stars stretched: elongation 1.43, session typical 1.08');
     });
 
     it('says not stacked yet, with the reason', () => {
-        const withStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null, null, 10);
+        const withStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null, 10);
         expect(withStack.label).toBe('Not stacked yet');
         expect(withStack.tooltip).toMatch(/after the last stack/);
-        const noStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null, null, null);
+        const noStack = describeFrameStatus({ path: '/a.fits', name: 'a.fits', state: 'not_stacked' }, null, null);
         expect(noStack.tooltip).toMatch(/no stack yet/);
     });
 });
 
 describe('buildFrameStatusLookup', () => {
-    it('adds the review flags to the included frames only', () => {
+    it('words each state the backend gives, with its typical elongation', () => {
         const report: FrameStatusReport = {
             frames: [
                 { path: '/a.fits', name: 'a.fits', state: 'included' },
-                { path: '/b.fits', name: 'b.fits', state: 'included' },
+                { path: '/b.fits', name: 'b.fits', state: 'flagged', elongation: 1.5 },
                 { path: '/c.fits', name: 'c.fits', state: 'not_stacked' },
             ],
             stackedAt: 5,
+            typicalElongation: 1.1,
         };
-        const lookup = buildFrameStatusLookup(report, review([
-            { path: '/a.fits', elongation: 1.0 }, { path: '/b.fits', elongation: 1.5 }, { path: '/c.fits', elongation: 1.6 },
-        ], ['/b.fits', '/c.fits']));
+        const lookup = buildFrameStatusLookup(report);
         expect(lookup.get('/a.fits')?.kind).toBe('included');
         expect(lookup.get('/b.fits')?.kind).toBe('flagged');
+        expect(lookup.get('/b.fits')?.tooltip).toBe('Stars stretched: elongation 1.50, session typical 1.10');
         expect(lookup.get('/c.fits')?.kind).toBe('not-stacked');
     });
 
     it('is empty before the report is read', () => {
-        expect(buildFrameStatusLookup(null, null).size).toBe(0);
+        expect(buildFrameStatusLookup(null).size).toBe(0);
     });
 });
 

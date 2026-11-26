@@ -12,7 +12,6 @@ import { Button } from '../../common/components/Button';
 import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
 import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
-import type { StackOrientation } from '../../common/fitsViewer/displayTurn';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
 import type { BlinkState } from '../hooks/useBlinkPair';
 import type { BlinkFocus } from '../utils/blinkView';
@@ -43,8 +42,8 @@ interface ViewerPanelContainerProps {
   overlayReason?: string | null;
   onStarClick?: (star: AstrometryOverlayStar) => void;
   selectedStarId?: string | null;
-  /** The target's stack orientation; raw frames are shown turned to match it. */
-  stackOrientation?: StackOrientation | null;
+  /** True when the target has a stack; raw frames are then shown turned to match it. */
+  matchStackTurn?: boolean;
   /** The Blink comparison of the picked frame with a typical frame of its session. */
   blink?: BlinkState;
   /** The file the viewer is showing, when it is not the picked file (the typical frame while blinking). */
@@ -92,7 +91,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, displayMode, onDisplayModeChange,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
-  selectedStarId, stackOrientation, blink, shownFile, focusStar,
+  selectedStarId, matchStackTurn, blink, shownFile, focusStar,
   detectionsEnabled, onDetectionsChange, restoreView, onViewChange,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
@@ -185,7 +184,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onStarClick={onStarClick}
           selectedStarId={selectedStarId}
           showDetections={detectionsEnabled}
-          stackOrientation={stackOrientation}
+          matchStackTurn={matchStackTurn}
           resolveMeasurePath={resolveMeasurePath}
           acceptPrefetch={Boolean(blink?.ready)}
           focusStar={focusStar}

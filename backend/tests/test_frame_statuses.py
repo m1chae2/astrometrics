@@ -1,9 +1,9 @@
 """Tests of the File Browser's frame statuses and the Put back call.
 
-`TargetService.get_frame_statuses` says, for each frame of a target, whether
-it is included, not stacked yet or set aside, and lists the frames in
-`_excluded` folders (which the target's own frame list does not hold).
-`put_back_frames` moves chosen set-aside frames back through the library.
+`TargetService.get_frame_statuses` gives the library's frame-status rule
+(`quality.frame_statuses`, tested in the library) the time of the newest
+stack file and the star-shape review's standout frames. `put_back_frames`
+moves chosen set-aside frames back through the library.
 """
 
 import os
@@ -13,129 +13,71 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import FrameRecord, Target
+from astrometricslib import Target
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
-from backend.services.data.frame_status import build_frame_statuses
 from backend.services.data.target_service import TargetService
 
 
-def _set_aside(file_name: str, kind: str | None = "clouded") -> SimpleNamespace:
-    """Make a stand-in for the library's set-aside record.
-
-    Returns
-    -------
-    record : `SimpleNamespace`
-        The fields `build_frame_statuses` reads.
-    """
-    return SimpleNamespace(
-        path=f"/frames/lights/M 1/_excluded/{file_name}",
-        file=file_name,
-        kind=kind,
-        reason="203 stars against a typical 3348",
-        exposure_seconds=120.0,
-        original_path=f"/frames/lights/M 1/{file_name}",
-        restorable=True,
-        camera="ASI533MM",
-        filter="Luminance",
-        date="",
-        restore_note="",
-    )
-
-
-def test_frames_before_the_stack_are_included_and_later_ones_are_not_stacked() -> None:
-    """A frame taken after the latest stack file is "not stacked yet"."""
-    frames = [FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)]
-
-    report = build_frame_statuses(frames, [], stacked_at=200.0)
-
-    assert [(status.name, status.state) for status in report.frames] == [
-        ("a.fits", "included"),
-        ("b.fits", "not_stacked"),
-    ]
-    assert report.stacked_at == pytest.approx(200.0)
-
-
-def test_with_no_stack_every_frame_is_not_stacked_yet() -> None:
-    """A target that has no stack has nothing included."""
-    report = build_frame_statuses([FrameRecord(path="/a.fits", timestamp=1.0)], [], stacked_at=None)
-
-    assert report.frames[0].state == "not_stacked"
-
-
-def test_a_frame_with_no_time_counts_as_taken_before_the_stack() -> None:
-    """Without a recorded time the frame is not called new."""
-    report = build_frame_statuses([FrameRecord(path="/a.fits")], [], stacked_at=200.0)
-
-    assert report.frames[0].state == "included"
-
-
-def test_set_aside_frames_are_listed_with_their_reason_kind_and_date() -> None:
-    """A frame in `_excluded` keeps the stacker's words and its name's date."""
-    record = _set_aside("M1_2026-10-03T08-15-30_120s.fits")
-
-    report = build_frame_statuses([], [record], stacked_at=None)
-
-    [status] = report.frames
-    assert status.state == "set_aside"
-    assert status.kind == "clouded"
-    assert status.reason == "203 stars against a typical 3348"
-    assert status.date == "2026-10-03 08:15:30"
-    assert (status.camera, status.filter) == ("ASI533MM", "Luminance")
-    assert status.exposure == "120"
-    assert status.restorable is True
-
-
-def _service(tmp_path: Path, target: Target, set_aside: list[SimpleNamespace]) -> TargetService:
-    """Build a service whose library holds one target and its set-aside frames.
+def _service(tmp_path: Path, target: Target | None, review: object = None) -> TargetService:
+    """Build a service whose library holds one target.
 
     Returns
     -------
     service : `TargetService`
-        A service with a mocked library.
+        A service with a mocked library and the given review API.
     """
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
     service.astrometrics.targets.get.return_value = target
-    service.astrometrics.quality.set_aside_frames.return_value = set_aside
+    service.astrometrics.quality.frame_statuses.return_value.model_dump.return_value = {"frames": []}
     service.config = SimpleNamespace(get_stacks_path=lambda: tmp_path / "stacks")
+    service._review = review
     return service
 
 
-def test_service_reads_the_stack_time_and_lists_set_aside_frames(tmp_path: Path) -> None:
-    """Frames taken after the stack file's time are "not stacked yet"."""
+def test_the_library_rule_receives_the_numbers(tmp_path: Path) -> None:
+    """The stack time, the review's flags and typical value reach the rule."""
     stack = tmp_path / "M_1_Stacked.fits"
     stack.write_bytes(b"x")
     os.utime(stack, (1000.0, 1000.0))
-    target = Target(
-        id="M 1",
-        frames=[FrameRecord(path="/a.fits", timestamp=500.0), FrameRecord(path="/b.fits", timestamp=2000.0)],
-    )
+    target = Target(id="M 1")
     target.stacking.stacked_image = str(stack)
+    review = MagicMock()
+    review.get_star_shape_review.return_value = SimpleNamespace(
+        standout_frames=[SimpleNamespace(path="/a.fits", elongation=1.5)], typical_elongation=1.1
+    )
+    service = _service(tmp_path, target, review)
 
-    report = _service(tmp_path, target, [_set_aside("c.fits", "trailed")]).get_frame_statuses("M 1")
+    service.get_frame_statuses("M 1")
 
-    assert report["stackedAt"] == pytest.approx(1000.0)
-    assert [(row["name"], row["state"]) for row in report["frames"]] == [
-        ("a.fits", "included"),
-        ("b.fits", "not_stacked"),
-        ("c.fits", "set_aside"),
-    ]
-    assert report["frames"][2]["kind"] == "trailed"
-    assert report["frames"][2]["originalPath"] == "/frames/lights/M 1/c.fits"
+    arguments = service.astrometrics.quality.frame_statuses.call_args.args
+    assert arguments[1] == pytest.approx(1000.0)
+    assert arguments[2:] == ({"/a.fits": 1.5}, 1.1)
+
+
+def test_no_review_flags_nothing(tmp_path: Path) -> None:
+    """Without a review, or when it cannot be made, no frame is flagged."""
+    failing = MagicMock()
+    failing.get_star_shape_review.side_effect = OSError("no history")
+    for review in (None, failing):
+        service = _service(tmp_path, Target(id="M 1"), review)
+
+        service.get_frame_statuses("M 1")
+
+        assert service.astrometrics.quality.frame_statuses.call_args.args[1:] == (None, {}, None)
 
 
 def test_service_answers_an_unknown_target_with_an_empty_list(tmp_path: Path) -> None:
     """A target that is not there is an empty answer, not an error."""
-    service = _service(tmp_path, None, [])
-    service.astrometrics.targets.get.return_value = None
+    service = _service(tmp_path, None)
 
-    assert service.get_frame_statuses("Nope") == {"frames": [], "stackedAt": None}
+    assert service.get_frame_statuses("Nope") == {"frames": [], "stackedAt": None, "typicalElongation": None}
 
 
 def test_put_back_goes_through_the_library_and_reports_what_moved(tmp_path: Path) -> None:
     """The service passes the paths to the library's put-back call."""
-    service = _service(tmp_path, Target(id="M 1"), [])
+    service = _service(tmp_path, Target(id="M 1"))
     service.astrometrics.quality.put_back_set_aside_frames.return_value = ["/frames/lights/M 1/c.fits"]
 
     result = service.put_back_frames("M 1", ["/frames/lights/M 1/_excluded/c.fits"])

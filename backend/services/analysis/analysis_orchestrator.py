@@ -9,8 +9,13 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AppConfiguration, Astrometrics, FilterType
-from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, InvalidArgumentError
+from astrometricslib import AppConfiguration, Astrometrics, FilterType, ProcessingPipelines
+from astrometricslib.exceptions import (
+    FITS_READ_ERRORS,
+    AstrometricsError,
+    InvalidArgumentError,
+    NotFoundError,
+)
 from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
@@ -33,11 +38,16 @@ STACK_IDENTIFICATION_LOG_PREFIX = "stack_astrometry_"
 MASTER_STACK_STAR_LIMIT = 10
 
 # The stages a client may ask for with the `stages` argument of
-# `analyze_image`. They run in this order. Photometry and spectroscopy need
-# astrometry, which the library adds on its own when it is missing or old.
-# Spectral variation needs spectroscopy, which the library also adds when
-# its result is missing or older than the spectral stack.
-SELECTABLE_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "spectral_variation")
+# `analyze_image` are the library's
+# `ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES`. They run in that order.
+# Photometry and spectroscopy need astrometry, which the library adds on its
+# own when it is missing or old. Spectral variation needs spectroscopy, which
+# the library also adds when its result is missing or older than the spectral
+# stack.
+
+SPECTRAL_STAGES = ("spectroscopy", "spectral_variation")
+"""The stages that work on spectra. Their stack is kept only for a target's
+main camera and optic."""
 
 
 def _json_default(value: Any) -> Any:
@@ -77,6 +87,38 @@ def _without_none(values: dict[str, Any]) -> dict[str, Any]:
         The entries that have a value.
     """
     return {name: value for name, value in values.items() if value is not None}
+
+
+def _existing_file(path: str | None) -> bool:
+    """Say whether a recorded path names a file on disk.
+
+    Parameters
+    ----------
+    path : `str` or `None`
+        The recorded path.
+
+    Returns
+    -------
+    exists : `bool`
+        `True` when the path is set and the file exists.
+    """
+    return bool(path) and os.path.exists(path)
+
+
+def _same_file(first: str | None, second: str | None) -> bool:
+    """Say whether two recorded paths name the same file.
+
+    Parameters
+    ----------
+    first, second : `str` or `None`
+        The paths.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when both are set and resolve to the same path.
+    """
+    return bool(first) and bool(second) and os.path.realpath(first) == os.path.realpath(second)
 
 
 def _is_identification_job(job: Any) -> bool:
@@ -239,7 +281,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
     def analyze_image(
         self,
         target_id: str,
-        image_files: Any,
+        image_files: Any = None,
         filter_name: str | None = None,
         type: str = "photometry",
         stages: list[str] | None = None,
@@ -252,67 +294,101 @@ class AnalysisOrchestrator(BaseBackgroundService):
         ----------
         target_id : `str`
             The target to analyze.
-        image_files : `Any`
+        image_files : `Any`, optional
             The image files the app sends: a list of paths or frame
             records, or a nested dictionary of them. With ``stages`` they
             stand in for a stack the target does not have.
         filter_name : `str`, optional
             The filter of the frames to analyze.
         type : `str`, optional
-            The kind of analysis when ``stages`` is not given.
+            The kind of analysis when the sent files choose the stages.
         stages : `list` [`str`], optional
-            The stages to run, from ``"astrometry"``, ``"photometry"``,
-            ``"spectroscopy"`` and ``"spectral_variation"``. When left out, the
-            stages come from the kind of the image files, as before.
+            The stages to run, from the library's
+            ``SELECTABLE_ANALYSIS_STAGES``. When left out, the backend
+            chooses (see `_default_stages`): photometry and spectroscopy for
+            a target with both stacks, or the stage of its one stack when no
+            files are sent; otherwise the kind of the sent files decides.
             Either way the library first runs astrometry when it is needed
-            and its result is missing or older than the stack. When given,
-            the stack is used for each stage that has one, and a sent file
-            only for a stage whose stack the target lacks.
+            and its result is missing or older than the stack.
         camera_id : `str`, optional
-            With ``stages``: the camera of the stack to analyze, when the
-            target has a stack for each camera and optic. Left out, the
-            target's main stack is analyzed.
+            The camera of the stack to analyze (its full name, an alias or
+            part of its name), when the target has a stack for each camera
+            and optic. Left out, the target's main stack is analyzed.
         focal_length_mm : `float`, optional
-            With ``stages``: the optic of the stack to analyze, in
-            millimeters.
+            The optic of the stack to analyze, in millimeters.
 
         Returns
         -------
         result : `dict`
-            Dict with `"status"` (`"started"` or
-            `"already_running"`), `"jobId"`, and `"logFile"`.
+            ``status`` (``"started"`` or ``"already_running"``), ``jobId``,
+            ``logFile``, ``stages`` (the stages chosen, or `None` when the
+            sent files choose) and, when a camera or optic was given,
+            ``configuration`` (the chosen stack's key, such as
+            ``ZWO ASI 533MM Pro@405mm``).
 
         Raises
         ------
         InvalidArgumentError
-            Before any job starts, if the ``stages`` list is empty or names a
-            stage that cannot be chosen, or a camera or optic is given
-            without ``stages``.
+            Before any job starts: if the ``stages`` list is empty or names a
+            stage that cannot be chosen; if the camera and optic name no
+            stack of the target, or more than one; or if a spectral stage is
+            asked for a stack that is not the main one. Also, before any job
+            starts, `NotFoundError` comes from `_default_stages` or
+            `_check_stage_sources` when no files are sent and a stage has
+            nothing to work on (no stack, or no raw spectrum frames).
         """
         chosen_stages = self._checked_stages(stages)
-        if chosen_stages is None and (camera_id or focal_length_mm is not None):
-            raise InvalidArgumentError(
-                "A camera or optic can be chosen only together with the stages to run.",
-                details={"camera_id": camera_id, "focal_length_mm": focal_length_mm},
+        target = self._target_service.get_targets(target_id) if self._target_service else None
+        configuration_record = None
+        configuration: dict[str, Any] = {}
+        if camera_id or focal_length_mm is not None:
+            configuration_record = self.astrometrics.processing.find_stack_configuration(
+                target_id, camera_id, focal_length_mm
             )
-        configuration = _without_none({"camera_id": camera_id, "focal_length_mm": focal_length_mm})
+            configuration = _without_none({
+                "camera_id": configuration_record.camera or None,
+                "focal_length_mm": configuration_record.focal_length_mm,
+            })
+        other_stack = configuration_record is not None and not _same_file(
+            configuration_record.stacked_image, target.stacking.stacked_image if target else None
+        )
+        if other_stack and chosen_stages:
+            spectral_requested = [stage for stage in chosen_stages if stage in SPECTRAL_STAGES]
+            if spectral_requested:
+                raise InvalidArgumentError(
+                    f"Spectral stacks are kept only for the main configuration of {target_id!r}, not for "
+                    f"{configuration_record.configuration_key}. Choose astrometry or photometry.",
+                    details={"target_id": target_id, "stages": spectral_requested},
+                )
+        if chosen_stages is None:
+            chosen_stages = self._default_stages(target, bool(image_files), other_stack)
+        if chosen_stages is not None and not image_files:
+            self._check_stage_sources(target_id, target, chosen_stages, other_stack)
         # Isolated log file per job
         safe_target = target_id.replace(" ", "_").replace("/", "_")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()
         log_file = str(log_dir / f"analysis_{safe_target}_{timestamp}.log")
+        extra: dict[str, Any] = {"stages": chosen_stages}
+        if configuration_record is not None:
+            extra["configuration"] = configuration_record.configuration_key
 
         with self._analyze_submit_lock:
             if self._job_service:
                 for job in self.get_live_jobs_for_target(target_id, "analysis"):
                     if job.log_file_path and f"analysis_{safe_target}" in job.log_file_path:
-                        return {"status": "already_running", "jobId": job.id, "logFile": job.log_file_path}
+                        return {
+                            "status": "already_running",
+                            "jobId": job.id,
+                            "logFile": job.log_file_path,
+                            **extra,
+                        }
 
             job_id = self._submit_job(
                 target_id,
                 "analysis",
                 self._start_analysis_task,
-                image_files,
+                image_files or [],
                 filter_name,
                 type,
                 chosen_stages,
@@ -320,7 +396,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 log_file_path=log_file,
             )
 
-        return {"status": "started", "jobId": job_id, "logFile": log_file}
+        return {"status": "started", "jobId": job_id, "logFile": log_file, **extra}
 
     @staticmethod
     def _checked_stages(stages: list[str] | None) -> list[str] | None:
@@ -329,7 +405,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         Parameters
         ----------
         stages : `list` [`str`] or `None`
-            The stages, or `None` for the choice by file type.
+            The stages, or `None` for the backend's choice.
 
         Returns
         -------
@@ -343,14 +419,106 @@ class AnalysisOrchestrator(BaseBackgroundService):
         """
         if stages is None:
             return None
-        unknown = sorted({str(stage) for stage in stages} - set(SELECTABLE_ANALYSIS_STAGES))
+        selectable = ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES
+        unknown = sorted({str(stage) for stage in stages} - set(selectable))
         if unknown or not stages:
             raise InvalidArgumentError(
                 f"Unknown or missing analysis stage(s): {', '.join(unknown) or 'none given'}. "
-                f"Choose from: {', '.join(SELECTABLE_ANALYSIS_STAGES)}.",
+                f"Choose from: {', '.join(selectable)}.",
                 details={"stages": stages},
             )
-        return [stage for stage in SELECTABLE_ANALYSIS_STAGES if stage in stages]
+        return [stage for stage in selectable if stage in stages]
+
+    @staticmethod
+    def _default_stages(target: Any, files_sent: bool, other_stack: bool) -> list[str] | None:
+        """Choose the stages when the client names none.
+
+        This is the Analyze Target button's choice, kept in one place for
+        the app and its AI tools. A target with both an imaging and a
+        spectral stack gets photometry and spectroscopy. When the client
+        sends no files, the target's one stack decides: photometry for an
+        imaging stack, spectroscopy for a spectral stack. Otherwise the kind
+        of the sent files decides, as before (`None`).
+
+        Parameters
+        ----------
+        target : `Target` or `None`
+            The target, or `None` when it is not in the library.
+        files_sent : `bool`
+            Whether the client sent image files.
+        other_stack : `bool`
+            Whether the client chose the stack of another camera and optic
+            than the main stack. Only imaging stages apply to it.
+
+        Returns
+        -------
+        stages : `list` [`str`] or `None`
+            The stages, or `None` when the sent files choose.
+
+        Raises
+        ------
+        NotFoundError
+            When no files are sent and the target has no stack.
+        """
+        if other_stack:
+            return ["photometry"]
+        imaging = _existing_file(target.stacking.stacked_image) if target else False
+        spectral = _existing_file(target.spectral_stacking.stacked_image) if target else False
+        if imaging and spectral:
+            return ["photometry", "spectroscopy"]
+        if files_sent:
+            return None
+        if imaging:
+            return ["photometry"]
+        if spectral:
+            return ["spectroscopy"]
+        target_id = target.id if target else None
+        raise NotFoundError(
+            f"Target {target_id!r} has no stack to analyze. Stack it first.",
+            details={"target_id": target_id},
+        )
+
+    @staticmethod
+    def _check_stage_sources(target_id: str, target: Any, stages: list[str], other_stack: bool) -> None:
+        """Refuse a stage that has nothing to work on, before a job starts.
+
+        Only used when the client sent no files, so each stage must use the
+        target's own data: astrometry and photometry an imaging stack (or
+        the chosen camera and optic's stack), spectroscopy the spectral
+        stack, and spectral variation the raw spectrum frames.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target asked for.
+        target : `Target` or `None`
+            The target, or `None` when it is not in the library.
+        stages : `list` [`str`]
+            The checked stages.
+        other_stack : `bool`
+            Whether another camera and optic's stack was chosen (it exists).
+
+        Raises
+        ------
+        NotFoundError
+            If a stage has nothing to work on.
+        """
+        for stage in stages:
+            if stage in ("astrometry", "photometry"):
+                ready = other_stack or bool(target and _existing_file(target.stacking.stacked_image))
+                kind = "imaging"
+            elif stage == "spectroscopy":
+                ready = bool(target and _existing_file(target.spectral_stacking.stacked_image))
+                kind = "spectral"
+            else:
+                ready = bool(target and any(frame.filter == FilterType.SPEC for frame in target.frames))
+                kind = "spectral"
+            if not ready:
+                raise NotFoundError(
+                    f"Target {target_id!r} has nothing for the {stage} stage to work on. Stack the {kind} "
+                    "frames first.",
+                    details={"target_id": target_id, "stage": stage},
+                )
 
     def get_analysis_results(self, target_id: str, filter_name: str | None = None) -> dict[str, Any] | None:
         """Get the results of the analysis job if complete.

@@ -5,9 +5,10 @@
  * upside down from each other, and this puts them back in line on screen.
  *
  * The turn is for display only. The file is never changed, and every reading (the pixel
- * position, the value, a star measurement) still names the file's own pixels. This module holds
- * the steps that decide the turn and the steps that move a point between the file and the turned
- * picture, so the drawing code, the pixel readout and the overlays all use the same rules.
+ * position, the value, a star measurement) still names the file's own pixels. The backend (the
+ * library) decides the turn from the frame's and the stack's headers; this module holds only the
+ * steps that move a point between the file and the turned picture, so the drawing code, the pixel
+ * readout and the overlays all use the same rules.
  *
  * Words used here:
  * - The "base picture" is the file drawn with its first row at the top or at the bottom, as the
@@ -16,19 +17,8 @@
  *   For 90 and 270 degrees its width and height are swapped.
  * - A position in either picture is counted in pixels from the picture's top-left corner.
  */
-import { isPlateSolved } from './wcs';
-import type { FitsHeaderCards } from './wcs';
-
 /** A turn of the picture on screen, clockwise, in degrees. */
 export type QuarterTurn = 0 | 90 | 180 | 270;
-
-/** What the viewer needs to know about the target's stack to turn a frame the same way round. */
-export interface StackOrientation {
-  /** Where the stack's top points, in degrees from north toward east (see `PlateGeometry.upAngleDegrees`). */
-  upAngleDegrees: number;
-  /** The side of the pier the stack header names (`PIERSIDE`), or null when it has none. */
-  pierSide: string | null;
-}
 
 /** A point, in pixels from the top-left corner of a picture. */
 export interface PicturePoint {
@@ -44,94 +34,14 @@ export interface FileCellPosition {
   fileRow: number;
 }
 
-const DEGREES_PER_QUARTER = 90;
-const DEGREES_PER_CIRCLE = 360;
-
 /**
- * Rounds an angle to the nearest quarter turn.
+ * Reads a turn the backend sent as a quarter turn.
  *
- * @param degrees Any angle in degrees.
- * @returns 0, 90, 180 or 270.
+ * @param degrees The turn in degrees.
+ * @returns The turn, or 0 when it is not one of 0, 90, 180 and 270.
  */
-export function nearestQuarterTurn(degrees: number): QuarterTurn {
-  const quarters = Math.round(degrees / DEGREES_PER_QUARTER);
-  return ((((quarters % 4) + 4) % 4) * DEGREES_PER_QUARTER) as QuarterTurn;
-}
-
-/**
- * Reads a header card as a number.
- *
- * @param header The header cards.
- * @param key The card name.
- * @returns The number, or null when the card is missing or is not a number.
- */
-function numberOrNull(header: FitsHeaderCards, key: string): number | null {
-  const value = header[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-/**
- * Works out where north points on screen for a raw frame, from its capture rotation.
- *
- * `CROTA2` is the angle from the file's up direction (the +y axis) to north, going clockwise on
- * a picture drawn with row 1 at the bottom. A picture stored top-down is drawn upside down from
- * that, so its angle is measured from the other end of the axis.
- *
- * @param header The frame's header cards.
- * @returns Degrees clockwise from the top of the screen to north (0 up to 360), or null when the header has no `CROTA2`.
- */
-export function frameNorthAngleDegrees(header: FitsHeaderCards): number | null {
-  const rotation = numberOrNull(header, 'CROTA2');
-  if (rotation === null) return null;
-  const isTopDown = String(header['ROWORDER'] ?? '').toUpperCase() === 'TOP-DOWN';
-  const angle = isTopDown ? 180 - rotation : rotation;
-  return ((angle % DEGREES_PER_CIRCLE) + DEGREES_PER_CIRCLE) % DEGREES_PER_CIRCLE;
-}
-
-/**
- * Names the side of the pier a header gives, as `EAST`, `WEST` or null.
- *
- * @param header The header cards.
- * @returns The side in upper case, or null when the card is missing or says something else.
- */
-function pierSideOf(header: FitsHeaderCards): string | null {
-  const side = String(header['PIERSIDE'] ?? '').trim().toUpperCase();
-  return side === 'EAST' || side === 'WEST' ? side : null;
-}
-
-/**
- * Reads the pier side from a header, for the stack's orientation.
- *
- * @param header The stack's header cards.
- * @returns `EAST`, `WEST` or null.
- */
-export function stackPierSide(header: FitsHeaderCards): string | null {
-  return pierSideOf(header);
-}
-
-/**
- * Decides how far to turn a raw frame on screen so it matches the stack.
- *
- * The turn is the stack's rotation minus the frame's, rounded to the nearest quarter turn. When the
- * frame has no `CROTA2`, the pier side decides: a frame from the other side of the pier than the
- * stack is turned half a turn. No stack, a frame that has a plate solution of its own (it is a
- * stack, or was solved) and a frame already turned to north (`QTURN`) are shown as they are.
- *
- * @param header The frame's header cards, or undefined when it has none.
- * @param stack The stack's orientation, or null when the target has no stack with a plate solution.
- * @returns The turn, clockwise in degrees.
- */
-export function turnToMatchStack(
-  header: FitsHeaderCards | undefined | null,
-  stack: StackOrientation | null | undefined,
-): QuarterTurn {
-  if (!header || !stack) return 0;
-  if (header['QTURN'] !== undefined || isPlateSolved(header)) return 0;
-  const frameNorth = frameNorthAngleDegrees(header);
-  if (frameNorth !== null) return nearestQuarterTurn(stack.upAngleDegrees - frameNorth);
-  const framePier = pierSideOf(header);
-  if (framePier !== null && stack.pierSide !== null && framePier !== stack.pierSide) return 180;
-  return 0;
+export function asQuarterTurn(degrees: unknown): QuarterTurn {
+  return degrees === 90 || degrees === 180 || degrees === 270 ? degrees : 0;
 }
 
 /**

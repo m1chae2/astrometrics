@@ -105,11 +105,15 @@ class StackReviewStart(BaseModel):
     result : `dict` or `None`
         The library's result as plain data, when the status is
         ``"completed"``.
+    configuration : `str` or `None`
+        The key of the stack chosen by camera and optic (such as
+        ``ZWO ASI 533MM Pro@405mm``), when one was chosen that way.
     """
 
     status: Literal["completed", "running", "cancelled"]
     job_id: str | None = None
     result: dict[str, Any] | None = None
+    configuration: str | None = None
 
 
 def _plain(result: Any) -> Any:
@@ -179,6 +183,8 @@ class StackReviewService:
         star_strength: float | None = None,
         star_stretch: float | None = None,
         stack_path: str | None = None,
+        camera_id: str | None = None,
+        focal_length_mm: float | None = None,
     ) -> StackReviewStart:
         """Make a target's preview picture again, as a background job.
 
@@ -210,13 +216,36 @@ class StackReviewService:
             The stack to make the picture of: the main stack or the stack of
             one camera and optic. Left out, the main stack. Another camera's
             stack never changes the picture the target shows.
+        camera_id : `str`, optional
+            Instead of ``stack_path``: the camera of the stack (its full name,
+            an alias or part of its name). The library finds the stack.
+        focal_length_mm : `float`, optional
+            Instead of ``stack_path``: the optic of the stack, in millimeters.
 
         Returns
         -------
         reply : `StackReviewStart`
             The result, when finished, is a `PreviewRemakeResult` as a dict.
+            ``configuration`` names the stack chosen by camera and optic.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a camera or optic is given with ``stack_path`` or for a
+            spectral stack, or names no stack of the target, or more than one.
         """
         processing = self._astrometrics.processing
+        configuration_key = None
+        if camera_id or focal_length_mm is not None:
+            if stack_path or kind == "spectral":
+                raise InvalidArgumentError(
+                    "A camera and optic choose an imaging stack; give them without stack_path, and not for "
+                    "a spectral stack (spectral stacks are kept only for the main configuration).",
+                    details={"target_id": target_id, "kind": kind},
+                )
+            record = processing.find_stack_configuration(target_id, camera_id, focal_length_mm)
+            stack_path = record.stacked_image
+            configuration_key = record.configuration_key
 
         def remake() -> Any:
             """Run the remake so that a cancel can reach it.
@@ -258,7 +287,8 @@ class StackReviewService:
                     for job_id in recorded_job_ids:
                         _preview_abandonments.pop(job_id, None)
 
-        return self._start(remake)
+        reply = self._start(remake)
+        return reply.model_copy(update={"configuration": configuration_key}) if configuration_key else reply
 
     def start_stack_comparison(self, target_id: str, kind: str = "imaging") -> StackReviewStart:
         """Compare a target's stack with the previous one, as a job.

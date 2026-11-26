@@ -24,7 +24,7 @@ const baseInput: AnalysisSelectionInput = {
 };
 
 describe('chooseAnalysisSelection', () => {
-    it('runs photometry and spectroscopy on both stacks, whichever filter is in view', () => {
+    it('sends both stacks and no stages, whichever filter is in view, so the backend chooses', () => {
         for (const filterType of ['SPEC', 'L']) {
             const selection = chooseAnalysisSelection({
                 ...baseInput,
@@ -34,7 +34,6 @@ describe('chooseAnalysisSelection', () => {
             expect(selection).toEqual({
                 paths: ['/lights/Vega/Vega_L_Stacked.fits', '/lights/Vega/Vega_SPEC_Stacked.fits'],
                 filterType: filterType === 'L' ? 'L' : undefined,
-                stages: ['photometry', 'spectroscopy'],
             });
         }
     });

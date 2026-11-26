@@ -65,6 +65,7 @@ from astrometricslib.foundation.storage.process_locks import acquire_resource_sl
 from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.models.tuned_parameter import RunBasis
+from astrometricslib.pipelines.analysis_stage_names import ANALYSIS_STAGES
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
@@ -551,12 +552,6 @@ def _run_analysis_pipeline_match(
 
 
 # -- Running chosen analysis stages for one target ----------------------
-
-ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "spectral_variation", "asteroids")
-"""The analysis stages `run_target_stages` can run, in the order run."""
-
-DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
-"""The stages that run for one target when the caller names none."""
 
 STAGE_OPTIONS = {
     "astrometry": frozenset({"path"}),

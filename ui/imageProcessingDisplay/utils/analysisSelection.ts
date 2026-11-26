@@ -189,24 +189,22 @@ export const ANALYZE_TARGET_TOOLTIP =
     'Analyze Target: measures the stars of the imaging stack and, when there is one, the spectra of the spectral stack';
 
 /**
- * Chooses the files for the main "Analyze Target" click.
+ * Chooses the files for the main "Analyze Target" click. It names no stages: the backend chooses them.
  *
- * When the target has both an imaging stack and a spectral stack, the click runs photometry on the
- * imaging stack and spectroscopy on the spectral stack in one job, whatever filter is in view.
- * With only one of the two stacks, that stack is analyzed by its own stage (stars or spectra),
- * following the filter in view. With neither, the selected file is used. With no file either,
- * nothing is returned and the action is off. The backend reports a stage it had to skip in the job
- * message.
+ * When the target has both an imaging stack and a spectral stack, both are sent, and the backend runs
+ * photometry on the imaging stack and spectroscopy on the spectral stack in one job, whatever filter
+ * is in view. With only one of the two stacks, that stack is sent, following the filter in view.
+ * With neither, the selected file is used. With no file either, nothing is returned and the action
+ * is off. The backend reports a stage it had to skip in the job message.
  *
  * @param input The current selection state.
- * @returns The files, filter type and stages to analyze, or null when there is nothing to analyze.
+ * @returns The files and filter type to analyze, or null when there is nothing to analyze.
  */
 export function chooseAnalysisSelection(input: AnalysisSelectionInput): AnalysisSelection | null {
     if (input.stackedImage && input.stackedSpectralTarget) {
         return {
             paths: [input.stackedImage, input.stackedSpectralTarget],
             filterType: isSpectralFilter(input.filterType) ? undefined : input.filterType || undefined,
-            stages: ['photometry', 'spectroscopy'],
         };
     }
     if (isSpectralFilter(input.filterType)) {

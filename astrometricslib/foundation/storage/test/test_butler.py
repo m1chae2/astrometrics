@@ -111,6 +111,28 @@ def test_merge_and_persist_preserves_untouched_rows(tmp_path: Path) -> None:
     assert ids == {"a", "b"}
 
 
+def test_a_merge_result_of_none_saves_nothing_for_that_record(tmp_path: Path) -> None:
+    """A merge rule that gives None leaves the saved row as it was."""
+    butler = _make_butler(tmp_path)
+    butler.put_all("widget", [_Widget(id="a", label="Alpha")])
+
+    def skip_a(existing: _Widget | None, updated: _Widget) -> _Widget | None:
+        """Save nothing for "a" and the new record for any other id.
+
+        Returns
+        -------
+        merged : `_Widget` or `None`
+            `None` for "a", otherwise the new record.
+        """
+        return None if updated.id == "a" else updated
+
+    butler.merge_and_record("widget", [_Widget(id="a", label="changed"), _Widget(id="b")], skip_a)
+
+    loaded = {widget.id: widget for widget in butler.get_all("widget")}
+    assert loaded["a"].label == "Alpha"
+    assert set(loaded) == {"a", "b"}
+
+
 def test_delete_by_ids_scopes_to_targeted_rows(tmp_path: Path) -> None:
     """delete_by_ids removes only the requested ids."""
     butler = _make_butler(tmp_path)

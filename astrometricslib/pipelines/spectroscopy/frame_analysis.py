@@ -4,7 +4,7 @@ Most spectroscopy processing works through a whole observing session at
 once, but some callers just want to point at a single FITS file and get
 its spectrum. This runs the astrometry step (to find the frame's stars
 and orientation) followed by the spectroscopy step, then saves whatever
-stars it found.
+stars it found a spectrum for.
 """
 
 from typing import Any
@@ -83,6 +83,9 @@ def analyze_frame_spectroscopy(
         existing.spectroscopy = updated.spectroscopy
         return existing
 
-    CatalogAccess(config).merge_and_record("stellar_catalog", stellar_objects, _merge_frame_star)
+    # Only a star with a spectrum is saved (see `holds_measurements`).
+    CatalogAccess(config).merge_and_record(
+        "stellar_catalog", [obj for obj in stellar_objects if obj.has_spectra], _merge_frame_star
+    )
 
     return context, stellar_objects

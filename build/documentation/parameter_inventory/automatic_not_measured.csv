@@ -205,6 +205,7 @@ shared.field_region_cells_per_side,AST-18,measurement,Design estimate
 shared.focal_length_tolerance_fraction,STK-D71,measurement,Design estimate
 shared.low_star_fraction,STK-34,exclusion criteria,Partly measured
 shared.match_radius_arcsec,AST-12,exclusion criteria,Partly measured
+shared.max_median_catalog_offset_arcsec,AST-D19,judgment,Design estimate
 shared.maximum_stars_measured,STK-D38,exclusion criteria,Design estimate
 shared.min_catalog_match_fraction_for_reused_wcs,AST-D19,judgment,Design estimate
 shared.min_stars_to_verify_reused_wcs,AST-D19,judgment,Design estimate

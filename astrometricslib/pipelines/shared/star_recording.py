@@ -12,7 +12,13 @@ once a star is found, saving it works the same way for all three:
    carry data from more than one target and more than one pipeline
    (`merge_astrometry_stellar_object` and its two siblings).
 
-`record_pipeline_stars` does all three in order. Astrometry is the one
+`record_pipeline_stars` does all three in order. Only a star that holds a
+measurement (a light curve or a spectrum) is saved: photometry saves the
+stars it measured, spectroscopy the stars with a spectrum, and astrometry
+only updates the names and position of stars already saved (see
+`catalog_access.holds_measurements`, which the save step also checks).
+
+Astrometry is the one
 exception: it needs the drop step's counts *before* it can finish
 building its quality summary, and that summary-building work sits between
 the drop and the save, so it calls the drop step itself, earlier, and
@@ -26,16 +32,19 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
-from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX, holds_measurements
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     POSITION_ONLY_SAME_STAR_RADIUS_ARCSEC,
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+    SAME_STAR_TOLERANCE_WITHOUT_GAIA_NUMBER_ARCSEC,
     catalog_family,
     display_name_rank,
+    gaia_dr3_source_id_from_names,
     identity_rank,
+    merge_cluster,
     merge_duplicate_into_survivor,
     order_names_by_familiarity,
 )
@@ -346,9 +355,14 @@ def _reconcile_identified_star_ids(
     curve between two rows.
 
     This checks each new star's position against the catalog before
-    saving. When exactly one saved row sits within
-    `SAME_STAR_POSITION_TOLERANCE_ARCSEC` and that row's name comes from a
-    different catalog, the two are one star and are saved as one row:
+    saving. When exactly one saved row sits within the same-star distance
+    and that row's name comes from a different catalog, the two are one
+    star and are saved as one row. The distance is
+    `SAME_STAR_POSITION_TOLERANCE_ARCSEC` when both carry a Gaia DR3
+    number, and `SAME_STAR_TOLERANCE_WITHOUT_GAIA_NUMBER_ARCSEC` when one
+    does not (a name-keyed row holds a SIMBAD position, which can sit a few
+    arcseconds from Gaia's). Two different Gaia numbers are never one star,
+    and the same number is one star within either distance.
 
     * If the saved row's id is at least as good an identity (a Gaia DR3
       number, then HD/BD/CD/CPD, then anything else; see `identity_rank`),
@@ -359,6 +373,11 @@ def _reconcile_identified_star_ids(
 
     Either way the row keeps the more familiar of the two names as its
     display name (see `display_name_rank`) and the other as an alias.
+
+    When the star's own row is already saved and one row of another catalog
+    sits within that distance, an earlier run saved the star twice. The two
+    rows are merged into the one with the better id (see `merge_cluster`),
+    so a later run repairs the pair.
 
     Two names from the same catalog are different stars however close
     they are (a close double star has two Gaia ids), and a star with
@@ -396,8 +415,12 @@ def _reconcile_identified_star_ids(
         ra=[star.right_ascension for star in named_stars] * u.deg,
         dec=[star.declination for star in named_stars] * u.deg,
     )
+    gaia_tolerance_arcsec = resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value
+    widest_tolerance_arcsec = max(
+        gaia_tolerance_arcsec, resolve(SAME_STAR_TOLERANCE_WITHOUT_GAIA_NUMBER_ARCSEC).value
+    )
     center_right_ascension, center_declination, search_radius_degrees = _search_circle(
-        star_coordinates, resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value
+        star_coordinates, widest_tolerance_arcsec
     )
 
     try:
@@ -419,19 +442,40 @@ def _reconcile_identified_star_ids(
         ra=[row.right_ascension for row in nearby_rows] * u.deg,
         dec=[row.declination for row in nearby_rows] * u.deg,
     )
-    star_indices, row_indices, _, _ = search_around_sky(
-        star_coordinates, row_coordinates, resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value * u.arcsec
+    star_indices, row_indices, separations, _ = search_around_sky(
+        star_coordinates, row_coordinates, widest_tolerance_arcsec * u.arcsec
     )
+    row_gaia_numbers = _saved_gaia_numbers(catalog_access, [nearby_rows[int(index)] for index in row_indices])
     rows_near_star: dict[int, list] = {}
-    for star_index, row_index in zip(star_indices, row_indices, strict=True):
-        rows_near_star.setdefault(int(star_index), []).append(nearby_rows[int(row_index)])
+    for star_index, row_index, separation in zip(star_indices, row_indices, separations.arcsec, strict=True):
+        stellar_object = named_stars[int(star_index)]
+        row = nearby_rows[int(row_index)]
+        if row.id == stellar_object.id or _could_be_one_star(
+            _gaia_number(stellar_object),
+            row_gaia_numbers.get(row.id),
+            float(separation),
+            gaia_tolerance_arcsec,
+        ):
+            rows_near_star.setdefault(int(star_index), []).append(row)
 
     claimed_row_ids: set[str] = set()
-    reused_count = renamed_count = 0
+    reused_count = renamed_count = repaired_count = 0
     for star_index, stellar_object in enumerate(named_stars):
         rows_here = rows_near_star.get(star_index, [])
-        if not rows_here or any(row.id == stellar_object.id for row in rows_here):
-            # Nothing saved nearby, or the star's own row is already there.
+        if not rows_here:
+            continue
+        if any(row.id == stellar_object.id for row in rows_here):
+            # The star's own row is saved already. Another catalog's row at
+            # the same spot is the same star saved twice: merge the pair.
+            other_rows = [
+                row
+                for row in rows_here
+                if row.id != stellar_object.id and catalog_family(row.id) != catalog_family(stellar_object.id)
+            ]
+            if len(other_rows) == 1 and other_rows[0].id not in claimed_row_ids:
+                if _merge_saved_pair(catalog_access, stellar_object, other_rows[0].id, target_id=target_id):
+                    claimed_row_ids.add(other_rows[0].id)
+                    repaired_count += 1
             continue
         if len(rows_here) > 1:
             logger.debug(
@@ -439,7 +483,7 @@ def _reconcile_identified_star_ids(
                 target_id,
                 stellar_object.id,
                 len(rows_here),
-                resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value,
+                widest_tolerance_arcsec,
             )
             continue
         saved_row = rows_here[0]
@@ -475,17 +519,145 @@ def _reconcile_identified_star_ids(
         stellar_object.aliases = [name for name in names if name not in (kept_id, names[0])]
         claimed_row_ids.add(saved_row.id)
 
-    if reused_count or renamed_count:
+    if reused_count or renamed_count or repaired_count:
         logger.info(
             "[%s] Matched %s star(s) to a saved row under another catalog's name within %g arcsec "
-            "(%s reused the saved name, %s renamed the saved row), instead of saving a second row.",
+            "(%s reused the saved name, %s renamed the saved row), instead of saving a second row; "
+            "merged %s pair(s) of rows an earlier run saved for one star.",
             target_id,
             reused_count + renamed_count,
-            resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value,
+            widest_tolerance_arcsec,
             reused_count,
             renamed_count,
+            repaired_count,
         )
     return stellar_objects
+
+
+def _gaia_number(record: Any) -> int | None:
+    """Find the Gaia DR3 number a star or saved row carries, if any.
+
+    Parameters
+    ----------
+    record : `StellarObject` or `StarSummary`
+        The star or row. A row summary has only its id and name.
+
+    Returns
+    -------
+    number : `int` or `None`
+        The Gaia DR3 source number, or `None` when none is known.
+    """
+    stored = getattr(record, "gaia_dr3_source_id", None)
+    if stored:
+        return int(stored)
+    return gaia_dr3_source_id_from_names(str(text or "") for text in (record.id, record.name))
+
+
+def _saved_gaia_numbers(catalog_access: Any, rows: list) -> dict[str, int | None]:
+    """Find the Gaia DR3 number of each saved row near a run's stars.
+
+    A row keyed by a Gaia number carries it in its id. A row keyed by a
+    name may hold it in its record (from SIMBAD's list of names), so those
+    few rows are read in full.
+
+    Parameters
+    ----------
+    catalog_access : `Any`
+        Provides `get_by_ids`.
+    rows : `list` [`StarSummary`]
+        The nearby rows.
+
+    Returns
+    -------
+    numbers : `dict` [`str`, `int` or `None`]
+        Each row's Gaia number, or `None` when none is known.
+    """
+    numbers = {row.id: _gaia_number(row) for row in rows}
+    unknown = sorted(row_id for row_id, number in numbers.items() if number is None)
+    if unknown:
+        try:
+            for record in catalog_access.get_by_ids("stellar_catalog", unknown):
+                numbers[record.id] = _gaia_number(record)
+        except AstrometricsError, sqlite3.Error, AttributeError:
+            # Without the full rows the numbers stay unknown, which only
+            # widens the distance to the no-number one.
+            pass
+    return numbers
+
+
+def _could_be_one_star(
+    star_number: int | None, row_number: int | None, separation_arcsec: float, gaia_tolerance: float
+) -> bool:
+    """Tell whether a new star and a saved row this far apart may be one star.
+
+    Parameters
+    ----------
+    star_number, row_number : `int` or `None`
+        The Gaia DR3 numbers of the new star and the saved row, if known.
+    separation_arcsec : `float`
+        Their distance on the sky, in arcseconds.
+    gaia_tolerance : `float`
+        The same-star distance when both carry the same Gaia DR3 number
+        (the wider of it and the no-number distance is used).
+
+    Returns
+    -------
+    could_be_one : `bool`
+        When both carry a Gaia number, `True` only for the same number.
+        Otherwise `True` within
+        `SAME_STAR_TOLERANCE_WITHOUT_GAIA_NUMBER_ARCSEC`.
+    """
+    no_number_tolerance = resolve(SAME_STAR_TOLERANCE_WITHOUT_GAIA_NUMBER_ARCSEC).value
+    if star_number is not None and row_number is not None:
+        return star_number == row_number and separation_arcsec <= max(gaia_tolerance, no_number_tolerance)
+    return separation_arcsec <= no_number_tolerance
+
+
+def _merge_saved_pair(catalog_access: Any, stellar_object: Any, other_id: str, *, target_id: str) -> bool:
+    """Merge two saved rows of one star into the row with the better id.
+
+    The star's own row and ``other_id`` hold one star under two catalogs'
+    names. The row with the better id (see `identity_rank`) survives with
+    both rows' data (`merge_cluster`); the other is deleted. The new star
+    takes the surviving id and names.
+
+    Parameters
+    ----------
+    catalog_access : `Any`
+        Provides `get_by_ids`, `merge_and_record` and `delete_by_ids`.
+    stellar_object : `StellarObject`
+        The new star, whose own row is saved; changed in place.
+    other_id : `str`
+        The id of the other saved row.
+    target_id : `str`
+        The target, for the log line only.
+
+    Returns
+    -------
+    merged : `bool`
+        `True` when the rows were merged.
+    """
+    own_id = stellar_object.id
+    survivor_id = own_id if identity_rank(own_id) <= identity_rank(other_id) else other_id
+    try:
+        rows = {row.id: row for row in catalog_access.get_by_ids("stellar_catalog", [own_id, other_id])}
+        if len(rows) != 2:
+            return False
+        result = merge_cluster(rows, survivor_id)
+        if isinstance(result, str):
+            logger.info("[%s] Left %s and %s apart: %s.", target_id, own_id, other_id, result)
+            return False
+        survivor, removed_ids = result
+        catalog_access.merge_and_record("stellar_catalog", [survivor], lambda _existing, updated: updated)
+        catalog_access.delete_by_ids("stellar_catalog", removed_ids)
+    except (AstrometricsError, sqlite3.Error, ValueError) as storage_error:
+        logger.warning("[%s] Could not merge rows %s and %s: %s", target_id, own_id, other_id, storage_error)
+        return False
+    stellar_object.id = survivor.id
+    _combine_names(survivor, stellar_object)
+    stellar_object.name = survivor.name
+    stellar_object.aliases = list(survivor.aliases)
+    return True
 
 
 def _search_circle(star_coordinates: Any, margin_arcsec: float) -> tuple[float, float, float]:
@@ -699,6 +871,7 @@ def record_pipeline_stars(
     merge_function: Callable[..., Any],
     pipeline_name: str | None = None,
     already_dropped: bool = False,
+    measured_only: bool = False,
 ) -> tuple[list, StarIdentificationBreakdown | None]:
     """Tag, reconcile, and save a pipeline's stars into the shared catalog.
 
@@ -737,11 +910,17 @@ def record_pipeline_stars(
     already_dropped : `bool`, optional
         Set by astrometry, which has already called
         `_drop_unresolved_stars` itself. Defaults to `False`.
+    measured_only : `bool`, optional
+        Save only the stars that hold a measurement of this run (see
+        `holds_measurements`), so a star this run did not measure leaves its
+        saved row unchanged. Set by photometry and spectroscopy. Defaults to
+        `False`, where every star goes to the merge rule; a merged record
+        with no measurement is still not saved.
 
     Returns
     -------
     stellar_objects : `list`
-        The saved stars, tagged and reconciled.
+        Every star of the run, tagged and reconciled, saved or not.
     breakdown : `StarIdentificationBreakdown` or `None`
         The drop step's counts, or `None` when `already_dropped` was
         `True`.
@@ -765,7 +944,12 @@ def record_pipeline_stars(
     absorbed_ids = _absorb_position_only_rows(
         stellar_objects, catalog_access=catalog_access, target_id=target_id
     )
-    catalog_access.merge_and_record("stellar_catalog", stellar_objects, merge_function)
+    stars_to_save = (
+        [stellar_object for stellar_object in stellar_objects if holds_measurements(stellar_object)]
+        if measured_only
+        else stellar_objects
+    )
+    catalog_access.merge_and_record("stellar_catalog", stars_to_save, merge_function)
     if absorbed_ids:
         try:
             catalog_access.delete_by_ids("stellar_catalog", absorbed_ids)
@@ -777,20 +961,33 @@ def record_pipeline_stars(
     return stellar_objects, breakdown
 
 
-def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
+def merge_astrometry_stellar_object(
+    existing_stellar_object: Any | None, updated_stellar_object: Any
+) -> Any | None:
     """Merge rule for astrometry updates to a star.
 
     Keeps any old target names but adds new ones. It also updates
     things we just solved (like identity or position) without throwing
     away data from other targets that might be attached to this star.
+    Astrometry measures no light curve or spectrum, so it never adds a
+    star: a star with no saved record is saved only when it took a
+    measurement from a position-only row it replaced.
+
+    Parameters
+    ----------
+    existing_stellar_object : `StellarObject` or `None`
+        The saved record, or `None` when the star has none.
+    updated_stellar_object : `StellarObject`
+        The star as this run identified it.
 
     Returns
     -------
-    merged_object : StellarObject
-        The combined star record.
+    merged_object : `StellarObject` or `None`
+        The combined star record, or `None` (save nothing) for a star with
+        no saved record and no measurement.
     """
     if existing_stellar_object is None:
-        return updated_stellar_object
+        return updated_stellar_object if holds_measurements(updated_stellar_object) else None
     for target_id in updated_stellar_object.target_ids:
         if target_id not in existing_stellar_object.target_ids:
             existing_stellar_object.target_ids.append(target_id)

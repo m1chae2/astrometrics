@@ -579,9 +579,10 @@ STAGE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     # Astrometry needs only a stack to solve.
     "astrometry": (),
     # Photometry names its stars with the plate solution of the imaging stack:
-    # with `use_astrometry_seed` it borrows the stack's solution for a
-    # session's first frame when that frame has none
-    # (`photometry/batch.py`, about lines 163-181). Without it, photometry
+    # with `use_astrometry_seed` it borrows the solution of the solved stack
+    # of the same camera and focal length for a session's first frame when
+    # that frame has none (`photometry/batch.py`,
+    # `_run_variability_analysis_for_session`). Without it, photometry
     # plate-solves each session itself, which costs more time and can fail
     # on a sparse frame. The code can still run without astrometry. The
     # rule is that photometry must not run on a guess: a project ruling of
@@ -592,8 +593,9 @@ STAGE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     # taken with the same camera and telescope
     # (`shared/target_center_hint.py`, about lines 104-132; otherwise it
     # uses the mount's position, up to about 24 arcminutes off), and it names
-    # the zero-order stars from the star records astrometry saved
-    # (`spectroscopy/runner.py`, about lines 302 and 535). The spectral
+    # the zero-order stars from the star list astrometry keeps next to the
+    # stack (`shared/solved_star_list.py`, read by `spectroscopy/runner.py`,
+    # `_registration_reference_candidates`). The spectral
     # stack is never plate-solved. Same ruling as photometry.
     "spectroscopy": ("astrometry",),
     # The spectral variation stage follows each star's spectrum across the

@@ -648,8 +648,15 @@ def process_spectroscopy_frames_by_session(
 
     for session in sessions:
         reference_image = AstrometricsImage(session.frame_paths[0])
+        # A dispersed frame rarely plate-solves, so its header map (often the
+        # mount's pointing) is kept as before; it is still checked against
+        # the catalog.
         identify_result = identify_session_stars(
-            reference_image, star_identifier, center_ra=center_ra, center_dec=center_dec
+            reference_image,
+            star_identifier,
+            center_ra=center_ra,
+            center_dec=center_dec,
+            trust_image_wcs=True,
         )
         session_results.append((session, identify_result))
 

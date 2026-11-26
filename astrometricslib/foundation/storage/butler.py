@@ -1002,7 +1002,9 @@ class Butler(AbstractButler):
             The new or updated records to merge in.
         merge_function : callable
             Combines an existing record (or `None` if new) with the
-            updated record, returning the merged record to save.
+            updated record, returning the merged record to save, or
+            `None` to save nothing for that record (a saved row is then
+            left as it is).
         """
         if not objects:
             return
@@ -1013,9 +1015,15 @@ class Butler(AbstractButler):
             existing_rows = self.get_by_ids(dataset_type, ids)
             existing_by_id = {getattr(record, spec.id_field): record for record in existing_rows}
             merged_records = [
-                merge_function(existing_by_id.get(getattr(record, spec.id_field)), record)
-                for record in objects
+                merged
+                for merged in (
+                    merge_function(existing_by_id.get(getattr(record, spec.id_field)), record)
+                    for record in objects
+                )
+                if merged is not None
             ]
+            if not merged_records:
+                return
 
             conn = connect_db(self._db_path())
             try:

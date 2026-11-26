@@ -15,6 +15,7 @@ import configparser
 import logging
 import os
 import re
+import statistics
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -138,6 +139,67 @@ MIN_STARS_TO_VERIFY_REUSED_WCS = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="AST-D19",
 )
+
+
+# Largest median distance, over a run's catalog-matched stars, between a
+# star's position and its catalog position before the run's plate solution
+# is judged wrong. On the real catalog (backup of 2026-11-24), the median of
+# the stored match distances is below 2.5 arcseconds for every target with
+# at least 20 matched stars except the Moon field (3.8), M 67 (6.2) and Algol
+# (6.5); the 99th percentile of all 9,965 match distances is 9.75. The M 31
+# photometry run of 2026-11-04 used a header map 56 arcseconds off. 10
+# arcseconds sits above every good run and well below that one.
+MAX_MEDIAN_CATALOG_OFFSET_ARCSEC = TunedParameter(
+    name="shared.max_median_catalog_offset_arcsec",
+    default=10.0,
+    unit="arcsec",
+    description="Largest median offset of matched stars from the catalog for a plate solution to stand.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D19",
+)
+
+
+def plate_solution_problem(stellar_objects: list[StellarObject]) -> str | None:
+    """Say why a run's plate solution looks wrong, judged by its stars.
+
+    A wrong solution puts every star somewhere it is not. Few stars then
+    find their catalog star (`MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`),
+    and those that do sit far from it (`MAX_MEDIAN_CATALOG_OFFSET_ARCSEC`).
+    Saving such a run would make new position-only stars at false
+    positions and give light curves to the wrong stars.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The run's identified stars, with their match distances
+        (``catalog_match_quality.separation_arcsec``).
+
+    Returns
+    -------
+    problem : `str` or `None`
+        A sentence saying what is wrong, or `None` when the solution looks
+        right or there are fewer than `MIN_STARS_TO_VERIFY_REUSED_WCS`
+        stars to judge by.
+    """
+    stars = [star for star in stellar_objects if star.right_ascension is not None]
+    if len(stars) < resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value:
+        return None
+    matched_fraction = _catalog_matched_count(stars) / len(stars)
+    if matched_fraction < resolve(MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS).value:
+        return f"only {matched_fraction:.0%} of {len(stars)} stars matched a catalog star"
+    separations = [
+        float(star.catalog_match_quality.separation_arcsec)
+        for star in stars
+        if star.catalog_match_quality is not None and star.catalog_match_quality.separation_arcsec is not None
+    ]
+    if not separations:
+        return None
+    median_offset = statistics.median(separations)
+    if median_offset > resolve(MAX_MEDIAN_CATALOG_OFFSET_ARCSEC).value:
+        return f"the matched stars sit a median {median_offset:.1f} arcsec from their catalog positions"
+    return None
 
 
 # The keywords that describe where an image points on the sky, for the first
@@ -306,6 +368,7 @@ def resolve_frame_wcs(
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
     solve_timeout: int = 300,
+    trust_image_wcs: bool = False,
 ) -> tuple[WCS | None, bool, bool]:
     """Figure out the sky map (WCS) for an image.
 
@@ -331,6 +394,11 @@ def resolve_frame_wcs(
         If True, ignore any saved map and force it to calculate a new one.
     solve_timeout : `int`, optional
         The maximum time in seconds to let the solver run.
+    trust_image_wcs : `bool`, optional
+        Use the image's sky map even when its header does not mark it as
+        plate solved (`header_is_plate_solved`). Set when the caller put a
+        solved stack's map on the image itself. Otherwise a header map that
+        is only the mount's pointing (as INDI writes) is not used.
 
     Returns
     -------
@@ -351,6 +419,7 @@ def resolve_frame_wcs(
         write_back=write_back,
         ignore_existing_wcs=ignore_existing_wcs,
         solve_timeout=solve_timeout,
+        trust_image_wcs=trust_image_wcs,
     )
     return wcs, reused_existing_header_wcs, solve_attempted
 
@@ -365,6 +434,7 @@ def _resolve_frame_wcs_with_fit(
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
     solve_timeout: int = 300,
+    trust_image_wcs: bool = False,
 ) -> tuple[WCS | None, bool, bool, tuple[float | None, int | None]]:
     """Find an image's sky map (WCS) and keep the solver's fit numbers.
 
@@ -390,6 +460,11 @@ def _resolve_frame_wcs_with_fit(
         If True, ignore any saved map and force it to calculate a new one.
     solve_timeout : `int`, optional
         The maximum time in seconds to let the solver run.
+    trust_image_wcs : `bool`, optional
+        Use the image's sky map even when its header does not mark it as
+        plate solved (`header_is_plate_solved`). Set when the caller put a
+        solved stack's map on the image itself. Otherwise a header map that
+        is only the mount's pointing (as INDI writes) is not used.
 
     Returns
     -------
@@ -405,10 +480,19 @@ def _resolve_frame_wcs_with_fit(
         or the solver did not report them.
     """
     no_fit_statistics: tuple[float | None, int | None] = (None, None)
-    if not ignore_existing_wcs and image.wcs is not None and image.wcs.is_celestial:
+    if (
+        not ignore_existing_wcs
+        and image.wcs is not None
+        and image.wcs.is_celestial
+        and (trust_image_wcs or _image_header_is_plate_solved(image))
+    ):
         # NOTE: is_celestial is a *structural* check (does this WCS have
         # RA/Dec axes), not an accuracy one -- a header solution that is
         # off by tens of arcsec passes it just as readily as a good one.
+        # A header map that is only the mount's pointing is refused above:
+        # on the M 31 frames of 2026-11-04 (ZWO ASI 533MM Pro, 405 mm) the
+        # one INDI writes sits dRA +34", dDec +44" from the solved frame,
+        # which put 303 stars outside the catalog match radius.
         # `identify_session_stars` verifies the result against catalog
         # matches and re-solves when this turns out to be untrustworthy.
         return image.wcs, True, False, no_fit_statistics
@@ -445,6 +529,26 @@ def _resolve_frame_wcs_with_fit(
         write_wcs_to_fits_header(image.path, wcs)
 
     return wcs, False, True, read_fit_statistics(header)
+
+
+def _image_header_is_plate_solved(image: Any) -> bool:
+    """Say whether an image's header map came from a plate solve.
+
+    Parameters
+    ----------
+    image : `AstrometricsImage`
+        The image.
+
+    Returns
+    -------
+    is_solved : `bool`
+        `True` when the header passes `header_is_plate_solved`. An image
+        without a header gives `False`.
+    """
+    header = getattr(image, "header", None)
+    if header is None:
+        return False
+    return header_is_plate_solved(header)
 
 
 def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
@@ -509,6 +613,7 @@ def identify_session_stars(
     center_dec: float | None = None,
     max_detections: int | None = None,
     write_back: bool = True,
+    trust_image_wcs: bool = False,
 ) -> SessionIdentificationResult:
     """Find and name all the stars in the first image of a sequence.
 
@@ -528,6 +633,10 @@ def identify_session_stars(
         This puts a cap on how many of the brightest stars are identified.
     write_back : `bool`, optional
         Whether to save the calculated map data back into the image file.
+    trust_image_wcs : `bool`, optional
+        Use a sky map the caller put on the image even though its header
+        is not marked as plate solved (see `resolve_frame_wcs`). It is
+        still checked against the catalog.
 
     Returns
     -------
@@ -552,6 +661,7 @@ def identify_session_stars(
         center_dec=center_dec,
         sources=unique_sources,
         write_back=write_back,
+        trust_image_wcs=trust_image_wcs,
     )
 
     height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)

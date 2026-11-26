@@ -35,7 +35,8 @@ def _make_fake_image(wcs=None, path="/fake/session_reference.fits") -> MagicMock
     image.wcs = wcs
     image.path = path
     image.data = np.zeros((100, 100), dtype=np.float32)
-    image.header = {}
+    # A plate-solved header, so a header map counts as a solution.
+    image.header = {"PLTSOLVD": True}
     return image
 
 
@@ -60,6 +61,32 @@ class TestResolveFrameWcs:
         assert wcs is header_wcs
         assert reused is True
         assert solve_attempted is False
+        identifier.solver.solve.assert_not_called()
+
+    def test_a_pointing_map_that_is_not_plate_solved_is_not_reused(self) -> None:
+        """Verify a map INDI wrote from the pointing is solved fresh."""
+        identifier = _make_star_identifier()
+        identifier.solver.solve = MagicMock(return_value=None)
+        image = _make_fake_image(wcs=_make_celestial_wcs())
+        image.header = {"CTYPE1": "RA---TAN", "CRVAL1": 10.7}
+
+        _wcs, reused, solve_attempted = resolve_frame_wcs(image, identifier)
+
+        assert reused is False
+        assert solve_attempted is True
+
+    def test_a_map_the_caller_trusts_is_reused_without_the_plate_solved_card(self) -> None:
+        """Verify a borrowed stack map is reused without PLTSOLVD."""
+        identifier = _make_star_identifier()
+        identifier.solver.solve = MagicMock()
+        borrowed = _make_celestial_wcs()
+        image = _make_fake_image(wcs=borrowed)
+        image.header = {}
+
+        wcs, reused, _solve_attempted = resolve_frame_wcs(image, identifier, trust_image_wcs=True)
+
+        assert wcs is borrowed
+        assert reused is True
         identifier.solver.solve.assert_not_called()
 
     def test_non_celestial_header_wcs_is_not_reused(self) -> None:

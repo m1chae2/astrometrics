@@ -184,7 +184,7 @@ def _run_two_sessions(
     monkeypatch.setattr(variability_analyzer, "identify_long_term_variable_candidates", fake_long_term)
     monkeypatch.setattr(runner, "record_pipeline_stars", lambda stars, **_options: (stars, None))
     monkeypatch.setattr(runner, "search_periods_and_save", lambda *_arguments: 0)
-    monkeypatch.setattr(runner, "label_known_variability", lambda *_arguments: None)
+    monkeypatch.setattr(runner, "label_known_variability", lambda *_arguments, **_keywords: None)
 
     request = PipelineRequest(
         target=SimpleNamespace(id="M 27", frames=[]),

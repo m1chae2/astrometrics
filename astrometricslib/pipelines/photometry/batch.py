@@ -174,20 +174,34 @@ def _run_variability_analysis_for_session(
     if use_astrometry_seed and star_identifier is not None and target is not None:
         from astrometricslib._internal.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.session_identification import (
+            header_is_plate_solved,
             identify_session_stars,
         )
+        from astrometricslib.pipelines.shared.target_center_hint import resolve_solved_stack_wcs
 
         center_ra, center_dec = resolve_target_center_hint(target)
 
         reference_image = AstrometricsImage(session.frame_paths[0])
-        if reference_image.wcs is None and target and target.stacking.stacked_image:
-            stacked_img = AstrometricsImage(target.stacking.stacked_image)
-            swcs = stacked_img.wcs
-            if swcs is not None and (swcs.is_celestial or swcs.has_celestial):
-                reference_image.wcs = swcs
+        borrowed_stack_wcs = False
+        header = getattr(reference_image, "header", None)
+        if header is None or not header_is_plate_solved(header):
+            # The frame has no plate solution of its own (a map INDI writes
+            # from the mount's pointing is not one). Borrow the solution of
+            # the target's solved stack taken with the same camera and
+            # focal length, never the main stack of another setup (a Nikon
+            # session must not take the ZWO stack's map). It is checked
+            # against the catalog like any reused map.
+            stack_wcs = resolve_solved_stack_wcs(target, session.frame_paths[0])
+            if stack_wcs is not None and stack_wcs.has_celestial:
+                reference_image.wcs = stack_wcs
+                borrowed_stack_wcs = True
 
         identify_result = identify_session_stars(
-            reference_image, star_identifier, center_ra=center_ra, center_dec=center_dec
+            reference_image,
+            star_identifier,
+            center_ra=center_ra,
+            center_dec=center_dec,
+            trust_image_wcs=borrowed_stack_wcs,
         )
         seed_stars = identify_result.stellar_objects
 

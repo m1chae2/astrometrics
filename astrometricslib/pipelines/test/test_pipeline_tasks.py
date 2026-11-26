@@ -448,7 +448,13 @@ def test_target_analyze_frame_spectroscopy(tmp_path: Path, mocker: MockerFixture
         )
         mocker.patch(
             "astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process",
-            return_value=[StellarObject(id="Vega_Star")],
+            # Only a star with a spectrum is saved.
+            return_value=[
+                StellarObject(
+                    id="Vega_Star",
+                    spectroscopy=SpectroscopyResult(wavelengths_angstrom=[4000.0], intensities=[1.0]),
+                )
+            ],
         )
 
         target = Target(id="Vega")
@@ -526,7 +532,13 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         )
         mocker.patch(
             "astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process",
-            return_value=[StellarObject(id="Vega_Star")],
+            # Only a star with a spectrum is saved.
+            return_value=[
+                StellarObject(
+                    id="Vega_Star",
+                    spectroscopy=SpectroscopyResult(wavelengths_angstrom=[4000.0], intensities=[1.0]),
+                )
+            ],
         )
 
         target = Target(id="Vega")

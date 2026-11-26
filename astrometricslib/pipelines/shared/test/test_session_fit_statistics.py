@@ -116,7 +116,8 @@ def _make_image(wcs: object = None, path: str = "/fake/reference.fits") -> Magic
     image.wcs = wcs
     image.path = path
     image.data = np.zeros((100, 100), dtype=np.float32)
-    image.header = {}
+    # A plate-solved header, so a header map counts as a solution.
+    image.header = {"PLTSOLVD": True}
     return image
 
 

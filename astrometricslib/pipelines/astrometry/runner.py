@@ -41,6 +41,7 @@ from astrometricslib.pipelines.pipeline_base import (
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
+from astrometricslib.pipelines.shared.solved_star_list import save_solved_stars
 from astrometricslib.pipelines.shared.star_recording import (
     _drop_unresolved_stars,
     merge_astrometry_stellar_object,
@@ -425,10 +426,14 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             merge_function=merge_astrometry_stellar_object,
             already_dropped=True,
         )
+        # Astrometry measures no light curve or spectrum, so the catalog
+        # keeps only the names it adds to stars already saved. Spectroscopy
+        # names its stars from this list instead (see `solved_star_list`).
+        save_solved_stars(path, context.stellar_objects)
 
-        # The stars solved and saved from the stacked image are the ones
-        # this target "has"; photometry later finds more, but only from
-        # per-frame detection, so they do not describe the stack.
+        # The stars solved from the stacked image are the ones this target
+        # "has"; photometry later finds more, but only from per-frame
+        # detection, so they do not describe the stack.
         target.number_of_stars = len(context.stellar_objects)
 
         return Result(

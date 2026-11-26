@@ -289,12 +289,13 @@ class StellarCatalog:
         target_id: str | None = None,
         tolerance_arcsec: float | None = None,
     ) -> StellarObject:
-        """Find the star at a spot on the sky, or record a new one there.
+        """Find the star at a spot on the sky, or make a new one there.
 
         Looks for an existing star with the given name, then for one within
-        ``tolerance_arcsec`` of the position, and only records a new star if
-        neither exists. Whichever star is used gets any of the spectral type,
-        magnitude and target that it does not have yet.
+        ``tolerance_arcsec`` of the position. A saved star that is found gets
+        any of the spectral type, magnitude and target that it does not have
+        yet. When neither exists, a new star is returned but not saved, since
+        the catalog keeps only stars with a light curve or a spectrum.
 
         Parameters
         ----------
@@ -319,7 +320,8 @@ class StellarCatalog:
         Returns
         -------
         star : `StellarObject`
-            The star that was found or created.
+            The star that was found, or a new one at that spot. A new star
+            holds no light curve or spectrum, so it is not saved.
         """
         from astrometricslib.foundation.parameters import resolve
         from astrometricslib.pipelines.shared.catalog_star_identity import SAME_STAR_POSITION_TOLERANCE_ARCSEC
@@ -430,6 +432,9 @@ class StellarCatalog:
     def create(self, star_id: str, ra: str | None = None, dec: str | None = None) -> StellarObject:
         """Record a new star in the catalog, or return the one with that id.
 
+        The catalog keeps only stars with a light curve or a spectrum, so a
+        new star made here, which holds neither, is returned but not saved.
+
         Parameters
         ----------
         star_id : `str`
@@ -442,7 +447,7 @@ class StellarCatalog:
         Returns
         -------
         star : `StellarObject`
-            The existing or newly created star.
+            The existing star, or the new, unsaved one.
 
         Raises
         ------

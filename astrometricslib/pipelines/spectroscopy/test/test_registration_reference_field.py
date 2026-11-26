@@ -278,3 +278,57 @@ def test_position_only_rows_are_never_read_in_full() -> None:
         candidates = _registration_reference_candidates(SimpleNamespace(id="Albireo"), catalog, field_center)
         assert [star.id for star in candidates] == ["Gaia DR3 1"]
         assert position_only.id not in catalog.read_ids
+
+
+def _write_stack(path: Path) -> str:
+    """Write a small stack that says it holds five frames.
+
+    Returns
+    -------
+    stack_path : `str`
+        The stack's path.
+    """
+    import numpy as np
+    from astropy.io import fits
+
+    header = fits.Header()
+    header["STACKCNT"] = 5
+    fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32), header=header).writeto(path)
+    return str(path)
+
+
+def test_the_stars_astrometry_named_on_the_stack_are_references(tmp_path: Path) -> None:
+    """Verify the stack's solved star list joins the saved stars of the target.
+
+    Astrometry no longer saves star records, so the named stars of the
+    target's imaging stack come from the list kept next to the stack.
+    """
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+
+    stack_path = _write_stack(tmp_path / "Albireo_Stacked.fits")
+    named = _star("HD 183912", FIELD_CENTER[0], FIELD_CENTER[1] + 0.01, ["Albireo"])
+    far = _star("HD 1", FIELD_CENTER[0] + 5.0, FIELD_CENTER[1], ["Albireo"])
+    assert save_solved_stars(stack_path, [named, far])
+    assert [star.id for star in read_solved_stars(stack_path)] == ["HD 183912", "HD 1"]
+    saved = _star("Gaia DR3 7", FIELD_CENTER[0], FIELD_CENTER[1] - 0.01, ["Albireo"])
+    target = SimpleNamespace(
+        id="Albireo", stacking=SimpleNamespace(stacked_image=stack_path, stacks_by_configuration={})
+    )
+
+    candidates = _registration_reference_candidates(target, _Catalog([saved]), FIELD_CENTER)
+
+    assert sorted(star.id for star in candidates) == ["Gaia DR3 7", "HD 183912"]
+
+
+def test_a_single_frame_gets_no_solved_star_list(tmp_path: Path) -> None:
+    """Verify nothing is written next to an image that is not a stack."""
+    import numpy as np
+    from astropy.io import fits
+
+    from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars, save_solved_stars
+
+    frame_path = tmp_path / "frame.fits"
+    fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32)).writeto(frame_path)
+
+    assert not save_solved_stars(str(frame_path), [_star("HD 1", 1.0, 1.0, ["Albireo"])])
+    assert read_solved_stars(str(frame_path)) == []

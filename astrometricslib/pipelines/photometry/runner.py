@@ -66,7 +66,9 @@ from astrometricslib.pipelines.pipeline_base import (
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+from astrometricslib.pipelines.shared.session_identification import plate_solution_problem
 from astrometricslib.pipelines.shared.star_recording import (
+    _drop_unresolved_stars,
     merge_photometry_stellar_object,
     record_pipeline_stars,
 )
@@ -495,6 +497,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "1", get_configuration().get_photometry_workers()
             ).inner_worker_count
 
+        # Sessions whose plate solution looks wrong (see
+        # `plate_solution_problem`), with the reason. Their stars are not
+        # saved.
+        sessions_with_wrong_plate_solution: dict[str, str] = {}
+
         for session in photometry_sessions:
             id_prefix = f"{session.id}:" if id_prefix_enabled else ""
             # The scintillation term needs this session's aperture, taken
@@ -513,6 +520,21 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 aperture_diameter_mm=session_aperture_mm,
                 aperture_reason=session_aperture_reason or None,
             )
+            if identify_result is not None and identify_result.wcs is not None:
+                solution_problem = plate_solution_problem(identify_result.stellar_objects)
+                if solution_problem is not None:
+                    # A wrong map would save new position-only stars at false
+                    # places and give light curves to the wrong stars.
+                    sessions_with_wrong_plate_solution[session.id] = solution_problem
+                    logger.warning(
+                        "[%s] The plate solution of session %s (reference frame %s) looks wrong: %s. "
+                        "Its stars are not saved.",
+                        target.id,
+                        session.id,
+                        session.frame_paths[0],
+                        solution_problem,
+                        extra=SESSION_NOTICE_LOG_EXTRA,
+                    )
             if identify_result is not None:
                 session_wcs_map[session.id] = identify_result.wcs
                 astrometry_identified_star_count += identify_result.simbad_matched_count
@@ -586,7 +608,13 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # curves, adding the between-session amplitude fields) cannot
         # retroactively change an already-built VariableCandidate.
         candidates_formatted = _format_variable_candidates(all_candidates)
-        label_known_variability(candidates_formatted, catalog_access)
+        label_known_variability(
+            candidates_formatted,
+            catalog_access,
+            run_stars=[
+                star for analyzer, _ in per_session_results for star in (analyzer.stellar_objects or ())
+            ],
+        )
 
         sessions_missing_wcs: list[str] = []
         session_tie_records: list[Any] = []
@@ -615,6 +643,15 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 for session, session_result in zip(photometry_sessions, per_session_results, strict=True)
                 if not (exclude_unnormalized and session.id in unnormalized_ids)
             ]
+            # Leave out a session with a wrong plate solution, unless every
+            # session has one; nothing is saved then (see below).
+            well_solved_pairs = [
+                (session, session_result)
+                for session, session_result in merged_pairs
+                if session.id not in sessions_with_wrong_plate_solution
+            ]
+            if well_solved_pairs:
+                merged_pairs = well_solved_pairs
             if exclude_unnormalized:
                 logger.warning(
                     "[%s] Left %s session(s) without comparison stars out of the merged light curves: %s.",
@@ -643,25 +680,36 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_stellar_objects = per_session_results[0][0].stellar_objects
 
         long_term_candidates_formatted = _format_variable_candidates(long_term_candidates)
-        label_known_variability(long_term_candidates_formatted, catalog_access)
+        label_known_variability(long_term_candidates_formatted, catalog_access, run_stars=all_stellar_objects)
 
-        all_stellar_objects, star_id_breakdown = record_pipeline_stars(
-            all_stellar_objects,
-            catalog_access=catalog_access,
-            target_id=target.id,
-            merge_function=merge_photometry_stellar_object,
-            pipeline_name="photometry",
+        every_solution_wrong = bool(photometry_sessions) and all(
+            session.id in sessions_with_wrong_plate_solution for session in photometry_sessions
         )
+        if every_solution_wrong:
+            # No session has a plate solution to trust, so no star is saved.
+            all_stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+                all_stellar_objects, target_id=target.id, pipeline_name="photometry"
+            )
+        else:
+            all_stellar_objects, star_id_breakdown = record_pipeline_stars(
+                all_stellar_objects,
+                catalog_access=catalog_access,
+                target_id=target.id,
+                merge_function=merge_photometry_stellar_object,
+                pipeline_name="photometry",
+                measured_only=True,
+            )
 
-        # The light curves are saved now. Search the target's own star and
-        # its brightest stars for repeating patterns, in a step of its own so
-        # that a failure here can never cost a photometry result.
-        try:
-            search_periods_and_save(all_stellar_objects, target, catalog_access)
-        except RunAbandonedError:
-            raise
-        except (AstrometricsError, sqlite3.Error, *DATA_ERRORS) as search_error:
-            logger.warning("[%s] Period search step failed: %s", target.id, search_error)
+            # The light curves are saved now. Search the target's own star
+            # and its brightest stars for repeating patterns, in a step of
+            # its own so that a failure here can never cost a photometry
+            # result.
+            try:
+                search_periods_and_save(all_stellar_objects, target, catalog_access)
+            except RunAbandonedError:
+                raise
+            except (AstrometricsError, sqlite3.Error, *DATA_ERRORS) as search_error:
+                logger.warning("[%s] Period search step failed: %s", target.id, search_error)
 
         frames_processed = (
             sum(len(session.frame_paths) for session in photometry_sessions)

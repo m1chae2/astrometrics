@@ -341,7 +341,8 @@ def test_a_gaia_row_keeps_its_own_number_over_a_copied_one(catalog: tuple) -> No
     """Check a row named by a Gaia number is never moved by a copied number."""
     config, database_path, gaia = catalog
     access = CatalogAccess(config)
-    star = _star("Gaia DR3 555", 20.0)
+    # Only a measured star is saved, so this one carries a light curve.
+    star = _star("Gaia DR3 555", 20.0, photometry=_curve(["2026-01-05"], 7.0))
     star.gaia_dr3_source_id = gaia["B"]
     access.merge_and_record("stellar_catalog", [star], lambda _existing, updated: updated)
 

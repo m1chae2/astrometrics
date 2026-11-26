@@ -13,6 +13,8 @@ from pytest_mock import MockerFixture
 
 from astrometricslib import Astrometrics, StellarObject, Target
 from astrometricslib._internal.drivers import AbstractCatalogAccess, CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import holds_measurements
+from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult
 
 
 class MockCatalogAccess(AbstractCatalogAccess):
@@ -179,7 +181,9 @@ def test_dataset_version_increments_on_put_merge_and_delete(tmp_path: Path) -> N
     catalog_access.put([StellarObject(id="Star1")], "stellar_catalog", {})
     assert catalog_access.get_dataset_version("stellar_catalog") == starting_version + 1
 
-    catalog_access.merge_and_record("stellar_catalog", [StellarObject(id="Star2")], lambda _old, new: new)
+    # Only a measured star is saved, so Star2 carries a light curve.
+    measured = StellarObject(id="Star2", photometry=PhotometryResult(fluxes=[1.0]))
+    catalog_access.merge_and_record("stellar_catalog", [measured], lambda _old, new: new)
     assert other_program.get_dataset_version("stellar_catalog") == starting_version + 2
 
     catalog_access.delete_by_ids("stellar_catalog", ["Star1"])
@@ -597,3 +601,58 @@ def test_dataset_version_is_none_when_the_counters_cannot_be_read(
     assert catalog_access.get_dataset_version("stellar_catalog") is None
     # A dataset with no counter at all differs from an unreadable file.
     assert catalog_access.get_dataset_version("no_such_dataset") == 0
+
+
+def _light_curve() -> PhotometryResult:
+    """Build a one-point light curve.
+
+    Returns
+    -------
+    photometry : `PhotometryResult`
+        A light curve with one flux.
+    """
+    return PhotometryResult(timestamps=["2026-01-01T00:00:00"], fluxes=[1.0])
+
+
+def _spectrum() -> SpectroscopyResult:
+    """Build a short measured spectrum.
+
+    Returns
+    -------
+    spectroscopy : `SpectroscopyResult`
+        A spectrum with two points.
+    """
+    return SpectroscopyResult(wavelengths_angstrom=[4000.0, 4100.0], intensities=[1.0, 1.0])
+
+
+def test_only_a_star_with_a_light_curve_or_a_spectrum_is_saved(tmp_path: Path) -> None:
+    """Verify the save step drops a star that was only detected and named."""
+    catalog_access = _build_catalog_access_with_stars(tmp_path, [])
+    named_only = StellarObject(id="Gaia DR3 1", name="Gaia DR3 1")
+    measured = StellarObject(id="Gaia DR3 2", photometry=_light_curve())
+    with_spectrum = StellarObject(id="Gaia DR3 3", spectroscopy=_spectrum())
+    empty_curve = StellarObject(id="Gaia DR3 4", photometry=PhotometryResult(mean_flux=None))
+
+    catalog_access.merge_and_record(
+        "stellar_catalog", [named_only, measured, with_spectrum, empty_curve], lambda _old, new: new
+    )
+
+    assert sorted(catalog_access.list_star_ids()) == ["Gaia DR3 2", "Gaia DR3 3"]
+    assert not holds_measurements(named_only)
+    assert not holds_measurements(None)
+
+
+def test_a_merge_that_leaves_no_measurement_keeps_the_saved_row(tmp_path: Path) -> None:
+    """Verify a merge that would empty a saved star does not write it."""
+    catalog_access = _build_catalog_access_with_stars(tmp_path, [])
+    catalog_access.merge_and_record(
+        "stellar_catalog", [StellarObject(id="Vega", photometry=_light_curve())], lambda _old, new: new
+    )
+
+    catalog_access.merge_and_record(
+        "stellar_catalog", [StellarObject(id="Vega", name="alf Lyr")], lambda _old, new: new
+    )
+
+    (row,) = catalog_access.get_by_ids("stellar_catalog", ["Vega"])
+    assert row.has_photometry
+    assert row.name != "alf Lyr"

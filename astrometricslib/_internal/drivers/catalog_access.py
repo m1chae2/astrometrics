@@ -36,6 +36,7 @@ __all__ = [
     "StarGroupCount",
     "StarPosition",
     "StarSummary",
+    "holds_measurements",
     "stellar_object_from_row",
     "stellar_row_values",
     "stellar_storage_payload",
@@ -750,8 +751,7 @@ def stellar_storage_payload(stellar_object: Any) -> dict[str, Any]:
     the rest) are left out, because they are worked out again on reading.
     The id, name, position, brightness and targets are left out when the
     row's own columns give them back exactly (`stellar_object_from_row`
-    puts them back). A star with no measurements then keeps only its
-    detection record (``starData``) and its catalog facts.
+    puts them back).
 
     This is the stored form only. `StellarObject.serialize` still gives
     the full form, with the worked-out values, for the app.
@@ -804,6 +804,70 @@ def stellar_row_values(stellar_object: Any) -> dict[str, Any]:
         "data_json": safe_json_dumps(stellar_storage_payload(stellar_object)),
         **_stellar_extra_columns(stellar_object),
     }
+
+
+def holds_measurements(stellar_object: Any) -> bool:
+    """Tell whether a star record holds a measurement worth saving.
+
+    The star catalog keeps a star only when this library measured it: a
+    light curve (``has_photometry``) or a spectrum (``has_spectra``). A star
+    that was only detected and named holds neither, and is not saved; its
+    name for the image overlay lives in the stack's own identification file.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject` or `None`
+        The record to test.
+
+    Returns
+    -------
+    holds : `bool`
+        `True` when the record has a light curve or a spectrum.
+    """
+    if stellar_object is None:
+        return False
+    return bool(
+        getattr(stellar_object, "has_photometry", False) or getattr(stellar_object, "has_spectra", False)
+    )
+
+
+def _keep_measured_stars(
+    merge_function: Callable[[Any | None, Any], Any],
+) -> Callable[[Any | None, Any], Any]:
+    """Wrap a star merge rule so a record with no measurement is not saved.
+
+    Parameters
+    ----------
+    merge_function : `Callable`
+        The caller's rule for combining a saved record with a new one.
+
+    Returns
+    -------
+    guarded : `Callable`
+        The same rule, giving `None` (save nothing) when the merged record
+        has neither a light curve nor a spectrum. A saved row is then left
+        as it is.
+    """
+
+    def guarded(existing: Any | None, updated: Any) -> Any | None:
+        """Merge, then drop a record with no measurement.
+
+        Parameters
+        ----------
+        existing : `StellarObject` or `None`
+            The saved record, or `None` for a new star.
+        updated : `StellarObject`
+            The new record.
+
+        Returns
+        -------
+        merged : `StellarObject` or `None`
+            The merged record, or `None` when it holds no measurement.
+        """
+        merged = merge_function(existing, updated)
+        return merged if holds_measurements(merged) else None
+
+    return guarded
 
 
 def stellar_object_from_row(payload: dict[str, Any], columns: dict[str, Any]) -> Any:
@@ -1086,16 +1150,24 @@ class CatalogAccess(AbstractCatalogAccess):
             The new data to add or update.
         merge_function : `Callable`
             A function that knows how to combine the old data with the new
-            data.
+            data. It may give `None` to save nothing for a record.
 
         Raises
         ------
         InvalidArgumentError
             If the dataset type isn't supported for merging.
+
+        Notes
+        -----
+        A star whose merged record has neither a light curve nor a spectrum
+        is not saved (see `holds_measurements`), so no pipeline can add a
+        star that was only detected and named.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
             raise InvalidArgumentError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
+        if dataset_type == "stellar_catalog":
+            merge_function = _keep_measured_stars(merge_function)
         self._generic.merge_and_record(dataset_type, objects, merge_function)
 
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:

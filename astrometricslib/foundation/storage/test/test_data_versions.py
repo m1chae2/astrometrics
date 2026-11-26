@@ -40,7 +40,7 @@ from astrometricslib.models.quality.measurement import (
     QualitySubject,
     SubjectLevel,
 )
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.models.target import Target
 
 
@@ -139,7 +139,9 @@ def test_star_catalog_writers_count_in_the_stars_kind(config: AppConfiguration) 
     """A star write bumps the stars counter and not the targets counter."""
     access = CatalogAccess(config=config)
     access.put([StellarObject(id="Vega")], "stellar_catalog", {})
-    access.merge_and_record("stellar_catalog", [StellarObject(id="Altair")], lambda _old, new: new)
+    # Only a measured star is saved, so Altair carries a light curve.
+    measured = StellarObject(id="Altair", photometry=PhotometryResult(fluxes=[1.0]))
+    access.merge_and_record("stellar_catalog", [measured], lambda _old, new: new)
     access.delete_by_ids("stellar_catalog", ["Vega"])
 
     assert _counters(config)[STARS_KIND] == 3

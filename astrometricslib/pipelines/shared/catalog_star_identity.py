@@ -53,6 +53,26 @@ SAME_STAR_POSITION_TOLERANCE_ARCSEC = TunedParameter(
     register_entry="AST-11",
 )
 
+# Two rows from different catalogs, one of them without a Gaia DR3 number,
+# are the same star this close. A name-keyed row (for example "* bet01
+# Cyg") holds a SIMBAD position, which for a bright star can differ from
+# the Gaia DR3 position by a few arcseconds. On the real catalog (backup of
+# 2026-11-24), pairs of one Gaia-keyed and one name-keyed row number 645
+# within 2 arcseconds, 709 within 2.5, 750 within 3 and 772 within 3.5;
+# past 3.5 arcseconds the count grows only by the 10 to 15 pairs per half
+# arcsecond that real neighbors give. Albireo's pair sits 2.9 arcseconds
+# apart. AST-11.
+SAME_STAR_TOLERANCE_WITHOUT_GAIA_NUMBER_ARCSEC = TunedParameter(
+    name="shared.same_star_tolerance_without_gaia_number_arcsec",
+    default=3.0,
+    unit="arcsec",
+    description="Largest distance at which two records are one star when one has no Gaia number.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="AST-11",
+)
+
 # The maximum allowed distance between a detected star and a catalog entry
 # for the two to count as the same physical star. This 10-arcsecond limit is
 # used when matching detected stars to the SIMBAD and Gaia catalogs, and when

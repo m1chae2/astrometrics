@@ -34,6 +34,7 @@ from astrometricslib.pipelines.pipeline_base import (
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars
 from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_known_target,
     resolve_solved_stack_center_hint,
@@ -295,18 +296,86 @@ def _named_star_ids(star_ids: list[str]) -> list[str]:
     return [star_id for star_id in star_ids if not str(star_id).startswith(_ANONYMOUS_ID_PREFIXES)]
 
 
+def _solved_stack_stars(target: Target) -> list:
+    """Read the stars astrometry named on the target's imaging stacks.
+
+    Astrometry keeps them in a file next to each stack it solved (see
+    `solved_star_list`), since the star catalog saves only measured stars.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose stacks are read.
+
+    Returns
+    -------
+    stars : `list` [`StellarObject`]
+        The named stars of every stack that has the file, each id once.
+    """
+    stacking = getattr(target, "stacking", None)
+    if stacking is None:
+        return []
+    stack_paths = [stacking.stacked_image] + [
+        configuration.stacked_image for configuration in stacking.stacks_by_configuration.values()
+    ]
+    stars: dict[str, Any] = {}
+    for stack_path in dict.fromkeys(path for path in stack_paths if isinstance(path, str) and path):
+        for star in read_solved_stars(stack_path):
+            stars.setdefault(star.id, star)
+    return list(stars.values())
+
+
 def _registration_reference_candidates(
     target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
 ) -> list:
     """Collect the stars a spectral field can register its identity against.
 
+    The stars astrometry named on this target's imaging stacks come first
+    (see `_solved_stack_stars`), joined by this target's own saved catalog
+    stars. Without a named stack star in the field, the saved catalog stars
+    alone are used (see `_saved_reference_candidates`).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target running spectroscopy.
+    catalog_access : `Any`
+        Provides the queries on `stellar_catalog`.
+    field_center : `tuple` [`float`, `float`], optional
+        Where the spectral frame points, `(ra, dec)` in decimal degrees.
+        Only stars within `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` of it
+        are kept.
+
+    Returns
+    -------
+    candidates : `list` [`StellarObject`]
+        The reference stars, each id once.
+    """
+    solved = [
+        star
+        for star in _solved_stack_stars(target)
+        if _can_be_a_reference_star(star) and _within_field(star, field_center)
+    ]
+    saved = _saved_reference_candidates(target, catalog_access, field_center)
+    if not solved:
+        return saved
+    candidates = {star.id: star for star in solved}
+    for star in saved:
+        if target.id in star.target_ids:
+            candidates.setdefault(star.id, star)
+    return list(candidates.values())
+
+
+def _saved_reference_candidates(
+    target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
+) -> list:
+    """Collect the saved catalog stars a spectral field can register against.
+
     `identify_spectral_stars_via_registration` needs a reference set of
     stars with known identities and pixel positions to match a
     spectroscopy image's blind detections against. Prefer this target's
-    own catalog-identified stars -- a target with both standard and SPEC
-    frames ("mixed frames") gets its own astrometry pass run first, so
-    by the time spectroscopy runs, the catalog usually already has stars
-    tagged with this exact target's id.
+    own catalog-identified stars: the measured stars (photometry or
+    spectra) saved with this exact target's id.
 
     A SPEC-only target (no standard frames of its own) never produces
     catalog-identified stars for its own id, and there is no field
@@ -326,7 +395,7 @@ def _registration_reference_candidates(
     ----------
     target : `Target`
         The target running spectroscopy; scopes the preferred candidate
-        set to stars this target's own astrometry pass already found.
+        set to the measured stars saved for this target.
     catalog_access : `Any`
         Provides the queries on `stellar_catalog`: `list_stars_in_region`,
         `list_star_summaries`, `list_star_ids` and `get_by_ids`.

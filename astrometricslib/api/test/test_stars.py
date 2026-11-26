@@ -121,13 +121,17 @@ def _make_real_catalog(tmp_path: Path, stars: list[StellarObject]) -> StellarCat
 
 
 def _positioned_star(star_id: str, ra: float, dec: float, **fields: Any) -> StellarObject:
-    """Build a star at a known position.
+    """Build a measured star at a known position.
+
+    The catalog keeps only measured stars, so the star carries a one-point
+    light curve unless ``photometry`` is given.
 
     Returns
     -------
     star : `StellarObject`
         The star, named after its id, at (`ra`, `dec`) degrees.
     """
+    fields.setdefault("photometry", PhotometryResult(timestamps=["2026-01-01T00:00:00"], fluxes=[1.0]))
     star = StellarObject(id=star_id, name=fields.pop("name", star_id))
     star.right_ascension = ra
     star.declination = dec
@@ -271,7 +275,11 @@ class TestFindOrCreateByPosition:
     """Unit test suite for StellarCatalog.find_or_create_by_position."""
 
     def test_creates_a_named_star_with_its_details(self, tmp_path: Path) -> None:
-        """Verify a brand-new star is created with its details."""
+        """Verify a brand-new star has its details but is not saved.
+
+        It holds no light curve or spectrum, and the catalog keeps only
+        measured stars.
+        """
         catalog = _make_real_catalog(tmp_path, [_positioned_star("Other", 10.0, 10.0)])
 
         created = catalog.find_or_create_by_position(
@@ -282,7 +290,7 @@ class TestFindOrCreateByPosition:
         assert created.spectral_type == "A0V"
         assert created.magnitude == pytest.approx(5.5)
         assert created.target_ids == ["M 1"]
-        assert _ids(catalog) == ["HD 1", "Other"]
+        assert _ids(catalog) == ["Other"]
 
     def test_reuses_the_star_at_the_same_position_instead_of_duplicating_it(self, tmp_path: Path) -> None:
         """Verify a star 1 arcsecond away is reused and gains the target."""
@@ -299,8 +307,7 @@ class TestFindOrCreateByPosition:
 
         The default is the registered 2 arcsecond same-star distance (it was
         5 arcseconds here, which did not match the rest of the library). An
-        explicit 5 arcseconds still reuses the nearest star, here the one the
-        first call recorded at that very spot.
+        explicit 5 arcseconds reuses the saved star 4 arcseconds away.
         """
         catalog = _make_real_catalog(tmp_path, [_positioned_star("HD 1", 50.0, 20.0, name="HD 1")])
 
@@ -308,7 +315,7 @@ class TestFindOrCreateByPosition:
         reused = catalog.find_or_create_by_position(50.0, 20.0 + 4.0 / 3600.0, tolerance_arcsec=5.0)
 
         assert separate.id != "HD 1"
-        assert reused.id == separate.id
+        assert reused.id == "HD 1"
 
     def test_finds_a_star_by_its_exact_name_wherever_it_sits(self, tmp_path: Path) -> None:
         """Verify an existing id is reused wherever the position is."""
@@ -328,6 +335,8 @@ class TestFindOrCreateByPosition:
 
         assert found.id == "* bet Lyr"
         assert _ids(catalog) == ["* bet Lyr"]
+        # The renamed record keeps its light curve.
+        assert found.photometry.fluxes == [1.0]
 
     def test_an_unnamed_new_star_gets_a_numbered_id(self, tmp_path: Path) -> None:
         """Verify a nameless star with no neighbour gets a Star_ id."""

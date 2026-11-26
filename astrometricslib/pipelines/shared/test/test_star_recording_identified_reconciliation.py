@@ -6,6 +6,8 @@ star's spectra and light curve. `record_pipeline_stars` now matches a new
 star to a saved row by position first. These tests run it end to end on a
 throwaway catalog (never the real one) and check the cases where matching
 must NOT happen: two names from one catalog, a crowded spot, a far star.
+The catalog keeps only measured stars, so each test star carries a short
+light curve unless a test says otherwise.
 """
 
 import math
@@ -36,6 +38,8 @@ from astrometricslib.pipelines.shared.star_recording import (
 _RIGHT_ASCENSION = 250.0
 _DECLINATION = 36.0
 _ONE_ARCSECOND = 1.0 / 3600.0
+# A measured spectrum, for a saved star that must hold no light curve.
+_SPECTRUM = SpectroscopyResult(wavelengths_angstrom=[4000.0, 4100.0], intensities=[1.0, 1.0])
 
 
 @pytest.fixture
@@ -67,8 +71,10 @@ def _star(
     Returns
     -------
     star : `StellarObject`
-        A catalog-identified star.
+        A catalog-identified star, with a one-point light curve unless
+        ``photometry`` is given.
     """
+    fields.setdefault("photometry", PhotometryResult(timestamps=["2026-01-01T00:00:00"], fluxes=[1.0]))
     return StellarObject(
         id=star_id,
         name=star_id,
@@ -320,7 +326,7 @@ def test_a_named_star_takes_over_a_position_only_row_within_three_arcsec(
     field_row = _position_only_star(2.5, photometry=curve)
     _save(catalog_access, field_row)
 
-    (recorded,) = _record(catalog_access, _star("Gaia DR3 7"))
+    (recorded,) = _record(catalog_access, _star("Gaia DR3 7", photometry=None))
 
     assert recorded.id == "Gaia DR3 7"
     assert _saved_ids(catalog_access) == ["Gaia DR3 7"]
@@ -332,9 +338,13 @@ def test_a_named_star_takes_over_a_position_only_row_within_three_arcsec(
 def test_a_position_only_row_merges_into_an_already_saved_named_row(catalog_access: CatalogAccess) -> None:
     """Verify the FIELD_J data fills the saved named row and the row goes."""
     curve = PhotometryResult(timestamps=["2026-01-01T00:00:00"], fluxes=[5.0], mean_flux=5.0)
-    _save(catalog_access, _star("Gaia DR3 7"), _position_only_star(1.0, photometry=curve))
+    _save(
+        catalog_access,
+        _star("Gaia DR3 7", photometry=None, spectroscopy=_SPECTRUM),
+        _position_only_star(1.0, photometry=curve),
+    )
 
-    _record(catalog_access, _star("Gaia DR3 7", arcseconds_east=0.2))
+    _record(catalog_access, _star("Gaia DR3 7", arcseconds_east=0.2, photometry=None))
 
     assert _saved_ids(catalog_access) == ["Gaia DR3 7"]
     (row,) = catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 7"])
@@ -359,3 +369,54 @@ def test_one_position_only_row_goes_to_its_nearest_named_star_only(catalog_acces
     _record(catalog_access, _star("Gaia DR3 7"), _star("Gaia DR3 8", arcseconds_east=2.5))
 
     assert _saved_ids(catalog_access) == ["Gaia DR3 7", "Gaia DR3 8"]
+
+
+def test_a_name_keyed_row_without_a_gaia_number_matches_within_three_arcsec(
+    catalog_access: CatalogAccess,
+) -> None:
+    """Verify Albireo's two rows 2.9 arcsec apart become one row."""
+    _save(catalog_access, _star("* bet01 Cyg"))
+
+    (recorded,) = _record(catalog_access, _star("Gaia DR3 2026116260337482112", arcseconds_east=2.9))
+
+    assert recorded.id == "Gaia DR3 2026116260337482112"
+    assert _saved_ids(catalog_access) == ["Gaia DR3 2026116260337482112"]
+
+
+def test_a_name_keyed_row_three_and_a_half_arcsec_away_is_another_star(catalog_access: CatalogAccess) -> None:
+    """Verify the wider distance stops at 3 arcsec."""
+    _save(catalog_access, _star("* bet01 Cyg"))
+
+    (recorded,) = _record(catalog_access, _star("Gaia DR3 5", arcseconds_east=3.5))
+
+    assert recorded.id == "Gaia DR3 5"
+    assert _saved_ids(catalog_access) == ["* bet01 Cyg", "Gaia DR3 5"]
+
+
+def test_two_different_gaia_numbers_are_never_one_star(catalog_access: CatalogAccess) -> None:
+    """Verify a named row whose Gaia number differs keeps its own row."""
+    _save(catalog_access, _star("HD 1", gaia_dr3_source_id=7))
+
+    (recorded,) = _record(catalog_access, _star("Gaia DR3 8", arcseconds_east=0.5, gaia_dr3_source_id=8))
+
+    assert recorded.id == "Gaia DR3 8"
+    assert _saved_ids(catalog_access) == ["Gaia DR3 8", "HD 1"]
+
+
+def test_a_later_run_merges_a_pair_saved_for_one_star(catalog_access: CatalogAccess) -> None:
+    """Verify a named row and a Gaia row of one star merge into one."""
+    curve = PhotometryResult(timestamps=["2026-01-02T00:00:00"], fluxes=[7.0])
+    _save(
+        catalog_access,
+        _star("* bet01 Cyg", photometry=curve),
+        _star("Gaia DR3 5", arcseconds_east=2.9, photometry=None, spectroscopy=_SPECTRUM),
+    )
+
+    (recorded,) = _record(catalog_access, _star("Gaia DR3 5", arcseconds_east=2.9, photometry=None))
+
+    assert recorded.id == "Gaia DR3 5"
+    assert _saved_ids(catalog_access) == ["Gaia DR3 5"]
+    (row,) = catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 5"])
+    assert row.photometry.fluxes == [7.0]
+    assert row.has_spectra
+    assert "* bet01 Cyg" in [row.name, *row.aliases]

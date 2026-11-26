@@ -46,7 +46,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from astropy.wcs import WCS
-from scipy.ndimage import gaussian_filter, maximum_filter, median_filter
+from scipy.ndimage import median_filter
 from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.parameters import resolve
@@ -57,7 +57,15 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
-from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
+from astrometricslib.pipelines.shared.star_finding import (
+    find_sources_above_background,
+    source_positions,
+    unsaturated_boxes,
+)
+from astrometricslib.pipelines.stacking.post_processing.star_width_match import (
+    STAR_WIDTH_MATCH_RADII_PIXELS,
+    measure_channel_widths,
+)
 from astrometricslib.pipelines.stacking.processing.image_registration import (
     RegistrationTransform,
     fit_transform,
@@ -133,13 +141,14 @@ _BACKGROUND_FILTER_BINS = 9
 # edge has fewer frames and its stars can be cut. Not tuned.
 _EDGE_PIXELS = 30
 
-# The star-width measurement: the smoothing before the peaks are found, the
-# half size of the box around a peak, the most peaks measured, and the share
-# of the picture's top value above which a peak counts as a burnt-out core
-# and is not measured. Plumbing of a half-maximum width, not tuned.
-_WIDTH_SMOOTHING_PIXELS = 1.0
-_WIDTH_HALF_BOX = 10
-_WIDTH_PEAKS = 300
+# The star-width measurement: the multiples of the expected width the
+# finder's template tries, the distance to the nearest other star, the most
+# stars measured, and the share of the picture's top value at which a star
+# counts as a burnt-out core and is not measured. Plumbing of the width
+# measurement, not tuned.
+_WIDTH_FINDER_FACTORS = (1.0, 2.0)
+_WIDTH_ISOLATION_PIXELS = 20.0
+_WIDTH_STARS = 300
 _WIDTH_SATURATED_SHARE = 0.95
 
 # The measured star width is held between these multiples of the expected
@@ -246,25 +255,29 @@ def _remove_background(plane: np.ndarray) -> tuple[np.ndarray, float]:
     return flat, measured_sky[1] if measured_sky is not None else float("nan")
 
 
-def measure_star_width(flat: np.ndarray, level: float, expected_fwhm_px: float) -> float:
+def measure_star_width(
+    flat: np.ndarray, noise: float, threshold_sigma: float, expected_fwhm_px: float
+) -> float:
     """Measure the typical star width on a picture with its background removed.
 
-    The width is taken on the brightest peaks that are not burnt out. For
-    each one, the pixels above half the peak's height inside a 21 by 21
-    pixel box are counted, and the width is the diameter of a circle of that
-    area (the full width at half maximum of a round star). The median over
-    the peaks is the picture's star width. A stretched picture squeezes a
-    star's core, so this is the width the star finder sees, not the
-    optical width.
+    The stars come from the shared star finder with its isolation and
+    saturation filters (`star_finding`), tried with the expected width and
+    with twice it, since a template half the stars' width rejects them; the
+    try that finds more stars is used. Their width is the color preview's
+    one second-moment width (`star_width_match.measure_channel_widths`). A
+    stretched picture squeezes a star's core and lifts its wings, so this is
+    the width of the picture as it is, not the optical width.
 
     Parameters
     ----------
     flat : `numpy.ndarray`
         The 2-D picture with its sky background taken away.
-    level : `float`
-        The least height of a peak, in the picture's units.
+    noise : `float`
+        The sky noise of `flat`.
+    threshold_sigma : `float`
+        How far above the noise a star must stand, in noise widths.
     expected_fwhm_px : `float`
-        The expected star width, in pixels. It is returned when no peak can
+        The expected star width, in pixels. It is returned when no star can
         be measured, and the measured width is held between half and three
         times it.
 
@@ -273,34 +286,27 @@ def measure_star_width(flat: np.ndarray, level: float, expected_fwhm_px: float) 
     width : `float`
         The star width to use for the finder's template, in pixels.
     """
-    half = _WIDTH_HALF_BOX
-    smoothed = gaussian_filter(flat, _WIDTH_SMOOTHING_PIXELS)
-    is_peak = (smoothed == maximum_filter(smoothed, size=2 * half + 1)) & (smoothed > level)
-    is_peak[: half + 1, :] = False
-    is_peak[-half - 1 :, :] = False
-    is_peak[:, : half + 1] = False
-    is_peak[:, -half - 1 :] = False
-    rows, columns = np.nonzero(is_peak)
-    heights = flat[rows, columns]
-    top = float(np.max(flat))
-    unsaturated = heights < _WIDTH_SATURATED_SHARE * top
-    rows, columns, heights = rows[unsaturated], columns[unsaturated], heights[unsaturated]
-    order = np.argsort(heights)[::-1][:_WIDTH_PEAKS]
-    yy, xx = np.mgrid[-half : half + 1, -half : half + 1]
-    inside_circle = yy**2 + xx**2 <= half**2
-    widths = []
-    for row, column in zip(rows[order], columns[order], strict=True):
-        cut = flat[row - half : row + half + 1, column - half : column + half + 1]
-        sky = float(np.median(cut[~inside_circle]))
-        height = float(cut[half, half]) - sky
-        if height <= 0.0:
-            continue
-        area = int(np.count_nonzero((cut - sky > 0.5 * height) & inside_circle))
-        widths.append(2.0 * np.sqrt(area / np.pi))
-    if not widths:
+    best = np.empty((0, 2))
+    for factor in _WIDTH_FINDER_FACTORS:
+        sources = find_sources_above_background(
+            flat,
+            noise=noise,
+            expected_fwhm_px=factor * expected_fwhm_px,
+            threshold_sigma=threshold_sigma,
+            roundness_range=None,
+            isolation_px=_WIDTH_ISOLATION_PIXELS,
+        )
+        positions = source_positions(sources)
+        if len(positions) > len(best):
+            best = positions
+    # The width's stamps reach one pixel past the sky ring.
+    half_box = int(np.ceil(resolve(STAR_WIDTH_MATCH_RADII_PIXELS).value[2])) + 1
+    usable = unsaturated_boxes(flat, best, half_box, _WIDTH_SATURATED_SHARE * float(np.max(flat)))
+    widths = measure_channel_widths(flat, best[usable][:_WIDTH_STARS])
+    if not widths or not np.isfinite(widths[0]):
         return float(expected_fwhm_px)
     low, high = (factor * expected_fwhm_px for factor in _WIDTH_LIMITS)
-    return float(np.clip(np.median(widths), low, high))
+    return float(np.clip(widths[0], low, high))
 
 
 def _find_stars(plane: np.ndarray, count: int, expected_fwhm_px: float) -> tuple[np.ndarray, float]:
@@ -327,7 +333,7 @@ def _find_stars(plane: np.ndarray, count: int, expected_fwhm_px: float) -> tuple
     if not np.isfinite(noise) or noise <= 0.0:
         return np.empty((0, 3)), float(expected_fwhm_px)
     threshold = float(resolve(ALIGNMENT_DETECTION_SIGMAS).value)
-    width = measure_star_width(flat, threshold * noise, expected_fwhm_px)
+    width = measure_star_width(flat, noise, threshold, expected_fwhm_px)
     sources = find_sources_above_background(
         flat,
         noise=noise,

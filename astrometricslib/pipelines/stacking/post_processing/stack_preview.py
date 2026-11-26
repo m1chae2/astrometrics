@@ -12,21 +12,25 @@ anything. Up to eight steps turn it into a picture.
    it, so uneven sky glow or vignetting does not wash out the faint parts.
    The record beside the picture says which ran, with the measured gradient
    and the limit.
-2. Colour calibration (see `colour_calibration`) balances the colours of a
-   colour stack from its own stars, on the linear data. Just before it, the
-   star widths of the colour channels are matched (see `star_width_match`):
+2. Colour calibration balances the colours of a colour stack, on the linear
+   data: Siril's photometric colour calibration, or, when that is not asked
+   for or fails, the Gaia stars like the Sun (see `sun_like_balance`). With
+   no Gaia colours the colours are left uncalibrated, and the record says
+   so. Just before it, the star widths of the colour channels are matched
+   (see `star_width_match`):
    a channel whose stars are clearly wider than green's, such as red behind
    the 300 mm camera lens, is sharpened to green's width, so the stars get no
    colored ring and the calibration measures stars of one shape. It is
    skipped, with the reason in the record, when the widths already agree;
    the setting ``preview_star_width_match_enabled`` turns it off. The setting
    ``preview_colour_calibration_enabled`` turns it off. A white-balance check
-   follows it (see `sun_like_balance`): stars that look like the Sun, found
-   from their Gaia colours, should come out white, and the red and blue
-   channels are scaled about the sky level if they do not. It is skipped, with
-   the reason in the record, when the stack has no plate solution, the Gaia
-   colours cannot be had, too few stars qualify, or the change it asks for is
-   too large. If Siril says its calibration is imprecise, a notice is stored.
+   follows Siril's calibration (see `sun_like_balance`): stars that look
+   like the Sun, found from their Gaia colours, should come out white, and
+   the red and blue channels are scaled about the sky level if they do not.
+   It is skipped, with the reason in the record, when the stack has no
+   plate solution, the Gaia colours cannot be had, too few stars qualify, or
+   the change it asks for is too large. If Siril says its calibration is
+   imprecise, a notice is stored.
 3. Siril's Remove Green Noise (``rmgreen``) lowers the green in a colour
    stack, such as one from the Nikon DSLR. A colour sensor has twice as many
    green pixels as red or blue, and the sky's glow is often green, so these
@@ -166,7 +170,6 @@ from astrometricslib.pipelines.stacking.post_processing.cluster_nebula import (
     CategoryVerdict,
     refine_object_category,
 )
-from astrometricslib.pipelines.stacking.post_processing.colour_calibration import calibrate_colours_in_file
 from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
     MaskedStretchPlan,
     TargetAnchor,
@@ -1373,10 +1376,10 @@ def _check_white_balance(
 ) -> str:
     """Check the white balance of a calibrated stack against sun-like stars.
 
-    The check runs after the colour calibration (Siril PCC or the stars of
-    the stack), on the linear data (see `sun_like_balance`). It never fails
-    the preview: when it cannot run or a guard stops it, the calibrated image
-    is kept, the reason goes into the record and a notice is stored.
+    The check runs after Siril's colour calibration, on the linear data (see
+    `sun_like_balance`). It never fails the preview: when it cannot run or a
+    guard stops it, the calibrated image is kept, the reason goes into the
+    record and a notice is stored.
 
     Parameters
     ----------
@@ -1426,6 +1429,66 @@ def _check_white_balance(
     logger.warning("White balance check not applied: %s.", balance.reason)
     if skipped_steps is not None:
         skipped_steps.append(SkippedPreviewStep("White balance check", balance.reason))
+    return name
+
+
+def _calibrate_from_sun_like_stars(
+    scratch: str,
+    name: str,
+    settings_used: dict[str, Any] | None,
+    skipped_steps: list[SkippedPreviewStep] | None,
+) -> str:
+    """Calibrate the colours from the Gaia stars like the Sun.
+
+    This runs when Siril's calibration was not asked for or failed. The white
+    point is the library's one (see `sun_like_balance`), with no limit on the
+    size of the change. With no Gaia colours there is no white point: the
+    colours are left uncalibrated. That is a status in the record and a
+    notice, not an error.
+
+    Parameters
+    ----------
+    scratch : `str`
+        The scratch folder.
+    name : `str`
+        The image's file name in the scratch folder.
+    settings_used : `dict`, optional
+        The record of the choices the run used; ``colour_calibration_status``
+        is added.
+    skipped_steps : `list` [`SkippedPreviewStep`], optional
+        A calibration that changed nothing is added to it.
+
+    Returns
+    -------
+    file_name : `str`
+        The calibrated image's file name, or `name` when the colours are left
+        uncalibrated.
+    """
+    raise_if_abandoned()
+    calibrated_name = "colour.fits"
+    try:
+        balance = balance_sun_like_stars_in_file(
+            os.path.join(scratch, name), os.path.join(scratch, calibrated_name), as_calibration=True
+        )
+    except (OSError, ValueError) as error:
+        balance = SunLikeBalance(applied=False, reason=f"the calibration could not run ({error})")
+    applied = balance.applied and os.path.isfile(os.path.join(scratch, calibrated_name))
+    if settings_used is not None:
+        settings_used["colour_calibration_status"] = {
+            "status": "calibrated" if applied else "uncalibrated",
+            **balance.record(),
+        }
+    if applied:
+        logger.info("Colour calibration: %s.", balance.step_sentence())
+        return calibrated_name
+    logger.info("Colours left uncalibrated: %s.", balance.reason)
+    if skipped_steps is not None:
+        skipped_steps.append(
+            SkippedPreviewStep(
+                "Colour calibration from the stars like the Sun",
+                f"the colours are left uncalibrated because {balance.reason}",
+            )
+        )
     return name
 
 
@@ -1705,28 +1768,22 @@ def _picture_script(
                     skipped_steps.append(SkippedPreviewStep("Siril PCC", warning, still_used=True))
                 if settings_used is not None:
                     settings_used["colour_calibration_warning"] = warning
+        checked = calibrated_name != name
         if calibrated_name == name:
             # PCC was not asked for, or failed (no network, no catalog, no
-            # solution): measure the stars in the stack itself.
-            calibrated_name = _next_source(
-                "Colour calibration from the stars",
-                name,
-                "colour.fits",
-                scratch,
-                calibrate_colours_in_file,
-                skipped_steps=skipped_steps,
-            )
-            method = "from the stars"
+            # solution): the Gaia stars like the Sun set the white point.
+            calibrated_name = _calibrate_from_sun_like_stars(scratch, name, settings_used, skipped_steps)
+            method = "from the stars like the Sun"
         steps.append(
             f"Colour calibration ({method}) done"
             if calibrated_name != name
-            else "Colour calibration skipped after a failure"
+            else "Colour calibration not applied: the colours are left uncalibrated"
         )
         # A balanced picture needs a stretch shared by all channels: stretched
         # one by one, the channels would be set back to equal sky and scale.
         linked = calibrated_name != name
         name = calibrated_name
-        if linked:
+        if checked:
             name = _check_white_balance(scratch, name, steps, settings_used, skipped_steps)
     else:
         linked = False

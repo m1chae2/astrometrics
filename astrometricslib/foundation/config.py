@@ -1253,8 +1253,10 @@ class AppConfiguration:
 
         ``"pcc"`` runs Siril's photometric colour calibration, which solves
         the field, matches the stars to the Gaia catalogue over the network
-        and falls back to the star-based method if that fails. ``"stars"``
-        uses only the star-based method, which needs no network.
+        and falls back to the stars like the Sun if that fails. ``"stars"``
+        uses only the stars like the Sun: the stars whose Gaia colours match
+        the Sun's are made white (without Gaia colours the colours are left
+        uncalibrated).
 
         Returns
         -------

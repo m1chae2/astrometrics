@@ -392,8 +392,10 @@ def test_star_color_is_painted_only_inside_the_narrow_monochrome_star() -> None:
     """A red star is red inside its monochrome footprint, gray outside it."""
     luminance, starless, linear, red_stars = make_star_field(seed=4)
     covered = np.ones(luminance.shape, dtype=bool)
-    footprints, colors = measure_star_colors(luminance, starless, linear, covered, None, None)
+    wcs, gaia = grid_gaia_colors(luminance.shape)
+    footprints, colors = measure_star_colors(luminance, starless, linear, covered, wcs, gaia)
 
+    assert colors.record["white_balance"]["method"] == "gaia_sun_like_stars"
     assert colors.counts["measured"] >= 30
     measured = SOURCE_NAMES.index("measured")
     row, column = red_stars[1]
@@ -413,6 +415,47 @@ def test_star_color_is_painted_only_inside_the_narrow_monochrome_star() -> None:
     # A white star stays white.
     white_row, white_column = 60, 150
     assert np.ptp(picture[white_row, white_column]) < 0.05
+
+
+def grid_gaia_colors(shape: tuple[int, int]) -> tuple[WCS, Table]:
+    """Give a plate solution and Gaia colors for the 6 by 6 star grid.
+
+    A third of the stars (every third one) are red (``BP - RP`` 1.6); the
+    rest are like the Sun (0.82). All have G = 12.
+
+    Parameters
+    ----------
+    shape : `tuple` [`int`, `int`]
+        Rows and columns of the picture.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS`
+        The plate solution.
+    gaia : `astropy.table.Table`
+        The Gaia stars, with ``ra``, ``dec``, ``g`` and ``bp_rp``.
+    """
+    wcs = make_wcs(shape, 2.0, 0.0)
+    positions = [(60 + 90 * i, 60 + 90 * j) for i in range(6) for j in range(6)]
+    rows = np.array([row for row, _ in positions], dtype=float)
+    columns = np.array([column for _, column in positions], dtype=float)
+    ra, dec = wcs.pixel_to_world_values(columns, rows)
+    colors = np.array([1.6 if index % 3 == 0 else 0.82 for index in range(len(positions))])
+    return wcs, Table({"ra": ra, "dec": dec, "g": np.full(len(positions), 12.0), "bp_rp": colors})
+
+
+def test_without_gaia_colors_the_stars_are_left_gray_and_uncalibrated() -> None:
+    """No white point gives gray stars; no median star is taken as white."""
+    luminance, starless, linear, _ = make_star_field(seed=4)
+    covered = np.ones(luminance.shape, dtype=bool)
+    _, colors = measure_star_colors(luminance, starless, linear, covered, None, None, " (no network)")
+
+    assert colors.record["white_balance"]["method"] == "uncalibrated"
+    assert "red_gain" not in colors.record["white_balance"]
+    assert colors.counts["measured"] == 0
+    assert colors.counts["neutral"] >= 30
+    assert not np.any(colors.chroma_a) and not np.any(colors.chroma_b)
+    assert any("uncalibrated" in note for note in colors.notes)
 
 
 def make_red_wide_field() -> tuple[np.ndarray, np.ndarray, np.ndarray, WCS, Table, list[tuple[int, int]]]:
@@ -464,7 +507,7 @@ def make_red_wide_field() -> tuple[np.ndarray, np.ndarray, np.ndarray, WCS, Tabl
     luminance += 0.002 * generator.standard_normal((size, size))
     linear += 0.0005 * generator.standard_normal((3, size, size))
     ra, dec = wcs.pixel_to_world_values(np.array(columns, dtype=float), np.array(rows, dtype=float))
-    gaia = Table({"ra": ra, "dec": dec, "bp_rp": np.array(colors)})
+    gaia = Table({"ra": ra, "dec": dec, "g": np.full(len(colors), 12.0), "bp_rp": np.array(colors)})
     starless = np.full((size, size), 0.1, dtype=np.float32)
     return (
         np.clip(luminance, 0.0, 1.0).astype(np.float32),

@@ -11,11 +11,13 @@ nothing when the widths already agree.
 from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from astrometricslib.pipelines.stacking.post_processing.star_width_match import (
     match_star_widths,
     match_star_widths_in_file,
+    measure_channel_widths,
 )
 
 SIZE = 600
@@ -162,3 +164,25 @@ def test_file_is_written_only_when_a_channel_is_sharpened(tmp_path: Path) -> Non
     assert not result.applied and not (tmp_path / "even_out.fits").exists()
     missing = match_star_widths_in_file(str(tmp_path / "missing.fits"), str(tmp_path / "out.fits"))
     assert not missing.applied and "could not be read" in missing.reason
+
+
+def test_the_width_of_a_known_gaussian_star_is_read_without_bias() -> None:
+    """Round Gaussian stars of known width on a noisy sky read that width.
+
+    The sky noise is large next to the stars' wings, so clipping the pixels
+    below the sky to zero would read the stars too wide. A star drawn on
+    pixels has a second moment larger by one twelfth of a pixel squared (the
+    pixel's own spread), which the expected width includes.
+    """
+    size, sigma = 330, 1.5
+    yy, xx = np.mgrid[0:size, 0:size]
+    generator = np.random.default_rng(5)
+    plane = generator.normal(100.0, 2.0, (size, size))
+    positions = np.array([[25.0 + 35.0 * i, 25.0 + 35.0 * j] for i in range(9) for j in range(9)])
+    for x, y in positions:
+        plane += 300.0 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sigma**2))
+
+    (width,) = measure_channel_widths(plane, positions)
+
+    expected = 2.0 * np.sqrt(2.0 * np.log(2.0)) * np.sqrt(sigma**2 + 1.0 / 12.0)
+    assert width == pytest.approx(expected, rel=0.03)

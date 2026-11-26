@@ -19,8 +19,8 @@ a circle of 1.0 degree at the same place answered in 1.7 seconds. An
 unreachable archive is a status: the caller gets `CatalogUnavailableError` and
 carries on without the colors.
 
-The question asks for stars from `BRIGHTEST_G_MAGNITUDE` to
-`FAINTEST_G_MAGNITUDE`, with or without a color. Stars without a color are
+The question asks for stars in `GAIA_COLOUR_MAGNITUDE_RANGE`, with or
+without a color. Stars without a color are
 kept because the white-balance check uses them to find stars that have a
 close neighbor.
 """
@@ -39,11 +39,19 @@ from astrometricslib._internal.drivers.sky_tiles import (
     tiles_for_footprint,
 )
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "COLOUR_COLUMNS",
+    "GAIA_COLOUR_MAGNITUDE_RANGE",
     "gaia_star_colors_in_footprint",
 ]
 
@@ -66,14 +74,25 @@ _ANSWER_LIFETIME_DAYS = 3650
 # under the row limit below, and a typical DSLR field needs 10 to 20 tiles.
 _ANSWER_TILE_LEVEL = 6
 
-# The brightest and faintest G magnitudes asked for. Stars brighter than
-# 10.5 may saturate the camera, so a color measured on them is not used, and
-# there are few of them. Stars fainter than 15 are too faint to disturb a
-# measurement of a G = 11 star 24 pixels away. These two numbers only bound
-# the question; the check picks the stars it measures from this table (see
-# `sun_like_balance`).
-BRIGHTEST_G_MAGNITUDE = 10.5
-FAINTEST_G_MAGNITUDE = 15.0
+# The brightest and faintest G magnitudes asked for. The bright end is the
+# bright end of the sun-like stars that are measured
+# (`stacking.sun_like_magnitude_range`): brighter stars may saturate the
+# camera, so a color measured on them is not used, and there are few of them.
+# The faint end is deeper than the measured stars on purpose: a star down to
+# G = 15 can still disturb the sky ring of a G = 11 star, so the white-balance
+# check needs these stars to judge isolation. Fainter stars are too faint to
+# matter 24 pixels away. A design estimate (STK-D86); a stored answer is
+# filed under the range, so a change asks the archive again.
+GAIA_COLOUR_MAGNITUDE_RANGE = TunedParameter(
+    name="shared.gaia_colour_magnitude_range",
+    default=(10.5, 15.0),
+    unit="G (mag)",
+    description="Brightest and faintest Gaia G magnitude of the stars whose colors are asked for.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D86",
+)
 
 # The most rows one tile's circle may return. An answer that reaches it is
 # refused, because the archive cuts the answer at the limit and rows could
@@ -109,15 +128,16 @@ def _ask_archive_tile(tile: int) -> Table:
     catalog.
     """
     low, high = pixel_source_id_range(_ANSWER_TILE_LEVEL, tile)
+    brightest, faintest = resolve(GAIA_COLOUR_MAGNITUDE_RANGE).value
     # build_pixel_query writes the ADQL for the archive (not SQL for a local
     # database) from whole numbers and a magnitude limit. This adds the color
     # column, the row limit and the bright end of the magnitude range.
-    query = build_pixel_query(low, high, FAINTEST_G_MAGNITUDE).replace(
+    query = build_pixel_query(low, high, faintest).replace(
         "SELECT source_id, ra, dec, phot_g_mean_mag",
         f"SELECT TOP {_ROW_LIMIT} source_id, ra, dec, phot_g_mean_mag, bp_rp",
         1,
     )
-    query += f" AND phot_g_mean_mag >= {BRIGHTEST_G_MAGNITUDE}"
+    query += f" AND phot_g_mean_mag >= {brightest}"
     found = outside_services.gaia_archive_query(query)
     if len(found) >= _ROW_LIMIT:
         raise ExternalServiceError(f"The Gaia archive gave {len(found)} stars, the most it is asked for.")
@@ -178,10 +198,11 @@ def gaia_star_colors_in_footprint(
     archive is a status for the caller to report, not a failure.
     """
     pieces: list[Table] = []
+    brightest, faintest = resolve(GAIA_COLOUR_MAGNITUDE_RANGE).value
     for tile in tiles_for_footprint(corners_ra_dec, margin_degrees, _ANSWER_TILE_LEVEL):
         piece = answer_through_cache(
             _CATALOG_NAME,
-            f"esa|{BRIGHTEST_G_MAGNITUDE}-{FAINTEST_G_MAGNITUDE}|L{_ANSWER_TILE_LEVEL}|{tile}",
+            f"esa|{brightest}-{faintest}|L{_ANSWER_TILE_LEVEL}|{tile}",
             _ANSWER_LIFETIME_DAYS,
             lambda tile=tile: _ask_archive_tile(tile),
             allow_live=allow_live,

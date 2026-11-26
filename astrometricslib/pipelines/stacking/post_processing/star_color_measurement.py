@@ -29,11 +29,11 @@ painted only where the monochrome star is.
    it is in the color table, else the ``B - V`` of a catalog of bright stars
    (SIMBAD), turned into ``BP - RP``. With no catalog color it is white.
 4. *White balance.* The linear color stack is not color calibrated, so the
-   red and blue ratios are scaled until stars with the Sun's Gaia color
-   (``BP - RP`` 0.75 to 0.90) come out white. When the Gaia colors cannot be
-   had, the median measured star is taken as white instead, the same
-   assumption as the star-based color calibration of the color stack's own
-   preview.
+   red and blue ratios are scaled until stars with the Sun's Gaia color come
+   out white. The white point is the library's one (`sun_like_balance`),
+   measured with its own aperture photometry. When the Gaia colors cannot be
+   had, there is no white point: the colors are uncalibrated, so every star
+   is left gray, and the record says so.
 5. *The color of each star.* A star whose color index is known to better
    than 0.10 magnitude, and that has no bright neighbor, is colored by its
    measurement. Otherwise a Gaia ``BP - RP`` from the cache gives its color
@@ -64,9 +64,15 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.stacking.post_processing.star_width_match import (
+    find_measurable_stars,
+    measure_channel_widths,
+)
 from astrometricslib.pipelines.stacking.post_processing.sun_like_balance import (
-    SUN_LIKE_COLOUR_RANGE,
+    SUN_BP_RP,
     SUN_LIKE_MINIMUM_STARS,
+    find_sun_like_stars,
+    measure_sun_like_ratios,
 )
 from astrometricslib.utilities.robust_statistics import robust_sigma
 
@@ -210,13 +216,15 @@ STAR_SATURATION_SHARES = TunedParameter(
 
 # A saturated star's wing color is not trusted when the color stack's red
 # star width is more than this share wider than its green star width. The
-# widths are the second-moment widths of `_star_widths`. Measured on the
-# color records of 2026-11-25: the Nikon D5300 at 405 mm gave red over green
-# 0.94 (M 27) and 1.14 (M 31); at 300 mm 0.97 to 0.99 (M 13, M 81), 1.14
-# (M 101), 1.22 (M 45) and 1.25 (M 42). On M 45 the bright Pleiades, hot
-# blue-white stars, came out red and magenta. 0.15 keeps both 405 mm pairs on
-# the wing color and moves the two worst 300 mm pairs to catalog colors; M 31
-# (1.14) is close to the limit (STK-62).
+# widths are the second-moment widths of `_star_widths`, the same numbers the
+# star width matching judges (`star_width_match.measure_channel_widths`).
+# Measured on the color records of 2026-11-25 (with the earlier estimator):
+# the Nikon D5300 at 405 mm gave red over green 0.94 (M 27) and 1.14 (M 31);
+# at 300 mm 0.97 to 0.99 (M 13, M 81), 1.14 (M 101), 1.22 (M 45) and 1.25
+# (M 42). On M 45 the bright Pleiades, hot blue-white stars, came out red
+# and magenta. 0.15 keeps both 405 mm pairs on the wing color and moves the
+# two worst 300 mm pairs to catalog colors; M 31 (1.14) is close to the limit
+# (STK-62).
 STAR_RED_WIDE_TOLERANCE = TunedParameter(
     name="stacking.color_preview_red_wide_tolerance",
     default=0.15,
@@ -290,13 +298,9 @@ STAR_GAIA_MATCH_PIXELS = TunedParameter(
     register_entry="STK-62",
 )
 
-# The Gaia BP - RP color of the Sun (Casagrande and VandenBerg 2018 give
-# 0.82). A sun-like star is drawn white. A published value, not tuned.
-_SUN_BP_RP = 0.82
-
 # The Johnson B - V color of the Sun (Ramirez et al. 2012 give 0.653). With
-# `_SUN_BP_RP` it sets the slope of `bp_rp_from_b_v`. A published value, not
-# tuned.
+# `SUN_BP_RP` (from `sun_like_balance`) it sets the slope of
+# `bp_rp_from_b_v`. A published value, not tuned.
 _SUN_B_V = 0.653
 
 # The width of the smoothing of the stars-only picture before its peaks are
@@ -311,15 +315,6 @@ _MINIMUM_FOOTPRINT_LEVEL = 0.01
 
 # The smallest footprint that counts as a star, in pixels. Not tuned.
 _MINIMUM_FOOTPRINT_AREA = 4
-
-# The star-width measurement: the half size of the cut-out, the radius inside
-# which the light is used, the isolation distance and the most stars used.
-# Plumbing of a second-moment width, not tuned.
-_WIDTH_HALF_BOX = 12
-_WIDTH_RADIUS = 10.0
-_WIDTH_ISOLATION = 20.0
-_WIDTH_STARS = 150
-_WIDTH_CANDIDATES = 1500
 
 # The percentile of the covered pixels that is a channel's top. Not tuned.
 _CHANNEL_TOP_PERCENTILE = 99.9995
@@ -510,24 +505,23 @@ def bp_rp_from_b_v(b_minus_v: np.ndarray) -> np.ndarray:
     bp_rp : `numpy.ndarray`
         Gaia ``BP - RP`` colors, in magnitudes.
     """
-    return np.asarray(b_minus_v, dtype=np.float64) * (_SUN_BP_RP / _SUN_B_V)
+    return np.asarray(b_minus_v, dtype=np.float64) * (SUN_BP_RP / _SUN_B_V)
 
 
-def _star_widths(linear: np.ndarray, covered: np.ndarray, footprints: StarFootprints) -> np.ndarray | None:
+def _star_widths(linear: np.ndarray) -> np.ndarray | None:
     """Measure the star width in each color on the linear color stack.
 
-    The width is the full width at half maximum of a Gaussian with the same
-    second moments, on the brightest isolated unsaturated stars.
+    The widths are the color preview's one star width
+    (`star_width_match.measure_channel_widths`) on the stars that the star
+    width matching measures (`star_width_match.find_measurable_stars`), so
+    `STAR_RED_WIDE_TOLERANCE` judges the same number as the width matching.
 
     Parameters
     ----------
     linear : `numpy.ndarray`
         The linear color stack on the monochrome grid, shape
-        (3, rows, columns).
-    covered : `numpy.ndarray`
-        Where the moved stack holds real data.
-    footprints : `StarFootprints`
-        The monochrome stars.
+        (3, rows, columns). Where the moved stack holds no data its pixels
+        are zero, and no star is measured there.
 
     Returns
     -------
@@ -535,42 +529,53 @@ def _star_widths(linear: np.ndarray, covered: np.ndarray, footprints: StarFootpr
         The median red, green and blue width in pixels, or `None` when no
         star could be measured.
     """
-    rows, columns = covered.shape
-    kept = np.nonzero(footprints.keep)[0]
-    if len(kept) == 0:
+    widths = np.asarray(measure_channel_widths(linear, find_measurable_stars(linear)), dtype=np.float64)
+    if widths.size != 3 or not np.all(np.isfinite(widths)):
         return None
-    tree = cKDTree(footprints.centroids[kept])
-    channel_top = np.array([np.percentile(linear[c][covered], _CHANNEL_TOP_PERCENTILE) for c in range(3)])
-    half = _WIDTH_HALF_BOX
-    yy, xx = np.mgrid[-half : half + 1, -half : half + 1]
-    radius_squared = (yy**2 + xx**2).astype(np.float32)
-    widths = []
-    for star in kept[np.argsort(footprints.flux[kept])[::-1]][:_WIDTH_CANDIDATES]:
-        row, column = np.round(footprints.centroids[star]).astype(int)
-        if not (half * 2 < row < rows - half * 2 and half * 2 < column < columns - half * 2):
-            continue
-        if (
-            not covered[row, column]
-            or len(tree.query_ball_point(footprints.centroids[star], _WIDTH_ISOLATION)) > 1
-        ):
-            continue
-        cut = linear[:, row - half : row + half + 1, column - half : column + half + 1]
-        if np.any(cut.max(axis=(1, 2)) > 0.5 * channel_top):
-            continue
-        sky = np.median(cut[:, radius_squared > _WIDTH_RADIUS**2], axis=1)
-        net = np.clip(cut - sky[:, None, None], 0.0, None) * (radius_squared <= _WIDTH_RADIUS**2)
-        sums = net.sum(axis=(1, 2))
-        if np.any(sums <= 0.0):
-            continue
-        center_row = (net[1] * yy).sum() / sums[1]
-        center_column = (net[1] * xx).sum() / sums[1]
-        distance_squared = (yy - center_row) ** 2 + (xx - center_column) ** 2
-        widths.append([2.355 * np.sqrt((net[c] * distance_squared).sum() / sums[c] / 2.0) for c in range(3)])
-        if len(widths) >= _WIDTH_STARS:
-            break
-    if not widths:
-        return None
-    return np.median(np.array(widths), axis=0)
+    return widths
+
+
+def _white_point(linear: np.ndarray, wcs: WCS | None, gaia_stars: Any) -> dict[str, Any]:
+    """Find the gains that make the stars like the Sun white.
+
+    The white point is the library's one (`sun_like_balance`): the Gaia stars
+    like the Sun, measured with its aperture photometry.
+
+    Parameters
+    ----------
+    linear : `numpy.ndarray`
+        The linear color stack on the monochrome grid, shape
+        (3, rows, columns).
+    wcs : `astropy.wcs.WCS` or `None`
+        The monochrome picture's plate solution.
+    gaia_stars : `astropy.table.Table` or `None`
+        The field's Gaia stars (see `gaia_star_colors_in_footprint`).
+
+    Returns
+    -------
+    balance : `dict` [`str`, `Any`]
+        ``method``, ``stars``, ``red_gain`` and ``blue_gain`` when there is a
+        white point. Otherwise ``method`` is ``"uncalibrated"`` and
+        ``reason`` says why; no gain is given.
+    """
+    minimum_stars = int(resolve(SUN_LIKE_MINIMUM_STARS).value)
+    if wcs is None or gaia_stars is None or len(gaia_stars) == 0:
+        return {"method": "uncalibrated", "stars": 0, "reason": "no Gaia star colors"}
+    positions, _ = find_sun_like_stars(gaia_stars, wcs, (linear.shape[1], linear.shape[2]))
+    measured = measure_sun_like_ratios(linear, positions) if len(positions) else None
+    found = 0 if measured is None else measured[4]
+    if measured is None or found < minimum_stars:
+        return {
+            "method": "uncalibrated",
+            "stars": found,
+            "reason": f"only {found} sun-like Gaia stars were measured; at least {minimum_stars} are needed",
+        }
+    return {
+        "method": "gaia_sun_like_stars",
+        "stars": found,
+        "red_gain": round(1.0 / measured[0], 4),
+        "blue_gain": round(1.0 / measured[1], 4),
+    }
 
 
 def _photometry(
@@ -983,7 +988,7 @@ def measure_star_colors(
         colors.notes.append("No stars were found on the monochrome picture, so no star color was measured.")
         return footprints, colors
 
-    widths = _star_widths(linear, covered, footprints)
+    widths = _star_widths(linear)
     low, high = (float(value) for value in resolve(STAR_APERTURE_RADIUS_RANGE_PIXELS).value)
     if widths is None:
         aperture = float(np.clip(8.0, low, high))
@@ -1036,26 +1041,21 @@ def measure_star_colors(
     )
     colors.record["gaia_matched"] = int(np.isfinite(bp_rp).sum())
 
-    # White balance: sun-like stars should come out white.
-    sun_low, sun_high = (float(value) for value in resolve(SUN_LIKE_COLOUR_RANGE).value)
-    sun_like = clean & (bp_rp >= sun_low) & (bp_rp <= sun_high)
-    if sun_like.sum() >= minimum_stars:
-        red_gain, blue_gain = 1.0 / np.median(raw_red[sun_like]), 1.0 / np.median(raw_blue[sun_like])
-        balance = {"method": "gaia_sun_like_stars", "stars": int(sun_like.sum())}
-    elif clean.sum() >= minimum_stars:
-        red_gain, blue_gain = 1.0 / np.median(raw_red[clean]), 1.0 / np.median(raw_blue[clean])
-        balance = {"method": "median_star", "stars": int(clean.sum())}
+    # White balance: the library's white point, the Gaia stars like the Sun
+    # (see `sun_like_balance`). With no white point the colors are left
+    # uncalibrated: every star stays gray, and the record says so.
+    balance = _white_point(linear, wcs, gaia_stars)
+    if "red_gain" not in balance:
+        colors.record["white_balance"] = balance
         colors.notes.append(
-            f"Too few sun-like Gaia stars ({int(sun_like.sum())}){gaia_note}; the median star was "
-            "taken as white, as the color stack's own star-based calibration does."
+            f"The color stack has no white point ({balance['reason']}{gaia_note}); its colors are "
+            "uncalibrated, so every star is left gray."
         )
-    else:
-        colors.notes.append(f"Only {int(clean.sum())} stars were measured cleanly; every star is left gray.")
         for star in measured:
             sources[star["label"]] = _NEUTRAL
             counts["neutral"] += 1
         return footprints, colors
-    balance.update({"red_gain": round(float(red_gain), 4), "blue_gain": round(float(blue_gain), 4)})
+    red_gain, blue_gain = balance["red_gain"], balance["blue_gain"]
     colors.record["white_balance"] = balance
 
     # Saturated stars: color from the wing, corrected by the wing-to-total
@@ -1107,8 +1107,8 @@ def measure_star_colors(
             "robust_scatter_mag": round(scatter, 4),
         }
         relation = (
-            np.polyfit(bp_rp[check] - _SUN_BP_RP, np.log10(red_ratio[check]), 1),
-            np.polyfit(bp_rp[check] - _SUN_BP_RP, np.log10(blue_ratio[check]), 1),
+            np.polyfit(bp_rp[check] - SUN_BP_RP, np.log10(red_ratio[check]), 1),
+            np.polyfit(bp_rp[check] - SUN_BP_RP, np.log10(blue_ratio[check]), 1),
         )
     elif gaia_stars is not None:
         colors.notes.append(
@@ -1128,7 +1128,7 @@ def measure_star_colors(
         a_per_l, b_per_l : `float`
             The Lab color per unit of lightness.
         """
-        offset = bp_rp_value - _SUN_BP_RP
+        offset = bp_rp_value - SUN_BP_RP
         a_value, b_value = chroma_per_lightness(
             10 ** np.polyval(relation[0], offset), 10 ** np.polyval(relation[1], offset)
         )

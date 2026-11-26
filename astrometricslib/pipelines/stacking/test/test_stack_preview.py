@@ -1271,6 +1271,7 @@ def test_a_calibrated_colour_stack_is_stretched_with_one_shared_stretch(
     """Verify calibrated colours get one stretch for all channels."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -1386,13 +1387,14 @@ def test_pcc_does_not_solve_a_field_that_is_already_solved(
     assert "pcc -catalog=gaia" in programs.siril_calls[0][1]
 
 
-def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
+def test_a_failed_pcc_falls_back_to_the_stars_like_the_sun(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Verify no network or no catalog still gives a calibrated picture."""
     _use_online_catalog(monkeypatch, reachable=True)
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs(pcc_result=False)
     programs.install(monkeypatch)
 
@@ -1403,7 +1405,7 @@ def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
     assert 'load "colour.fits"' in final_commands
     assert any(command.startswith("mtf ") for command in final_commands)
     summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
-    assert "Colour calibration (from the stars) done" in summary
+    assert "Colour calibration (from the stars like the Sun) done" in summary
 
 
 def test_the_pcc_script_reads_a_local_catalog_when_given_one() -> None:
@@ -1524,6 +1526,7 @@ def test_pcc_is_not_started_when_the_server_does_not_answer(
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     _use_online_catalog(monkeypatch, reachable=False)
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -1533,7 +1536,30 @@ def test_pcc_is_not_started_when_the_server_does_not_answer(
     assert not any(any(c.startswith("pcc ") for c in commands) for _, commands in programs.siril_calls)
     messages = [r.getMessage() for r in caplog.records]
     assert any("Siril PCC could not run (no local Gaia catalog" in m for m in messages)
-    assert any("Colour calibration (from the stars) done" in m for m in messages)
+    assert any("Colour calibration (from the stars like the Sun) done" in m for m in messages)
+
+
+def test_without_gaia_colours_the_colours_are_left_uncalibrated(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a field with no white point is reported as uncalibrated."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="stars")
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
+
+    assert "Colour calibration not applied: the colours are left uncalibrated" in steps
+    status = read_preview_settings(str(stack))["settings_used"]["colour_calibration_status"]
+    assert status["status"] == "uncalibrated"
+    assert status["reason"] == "the image has no plate solution"
+    assert [step.step_name for step in skipped if step.step_name.startswith("Colour calibration")] == [
+        "Colour calibration from the stars like the Sun"
+    ]
+    assert 'load "stack.fits"' in programs.siril_calls[-2][1]
 
 
 def test_the_stars_method_never_starts_pcc(
@@ -1556,6 +1582,7 @@ def test_starnet_splits_the_image_then_stretches_the_pieces_apart(
     """Verify StarNet splits the image and the picture is the blend."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="stars")
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -2063,6 +2090,7 @@ def test_a_calibrated_colour_stack_is_not_given_green_removal(
     """Verify `rmgreen` is left out once colour calibration has run."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
@@ -2082,6 +2110,7 @@ def test_a_calibrated_colour_stack_is_stretched_from_its_measured_sky(
     """Verify a calibrated colour stack gets a measured sky and a record."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
@@ -2101,7 +2130,13 @@ def test_a_failed_colour_calibration_keeps_the_green_removal(
     """Verify `rmgreen` still runs when no calibration worked."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
-    monkeypatch.setattr(stack_preview, "calibrate_colours_in_file", lambda input_path, output_path: False)
+    monkeypatch.setattr(
+        stack_preview,
+        "balance_sun_like_stars_in_file",
+        lambda *args, **kwargs: stack_preview.SunLikeBalance(
+            applied=False, reason="the field has no Gaia star colors"
+        ),
+    )
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -2120,7 +2155,13 @@ def test_the_green_removal_switch_wins_over_the_calibration_rule(
     """Verify the setting stays the master switch when calibration failed."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, remove_green=False)
-    monkeypatch.setattr(stack_preview, "calibrate_colours_in_file", lambda input_path, output_path: False)
+    monkeypatch.setattr(
+        stack_preview,
+        "balance_sun_like_stars_in_file",
+        lambda *args, **kwargs: stack_preview.SunLikeBalance(
+            applied=False, reason="the field has no Gaia star colors"
+        ),
+    )
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -2178,10 +2219,14 @@ def _fake_white_balance(applied: bool, calls: list[str]) -> object:
     -------
     check : `Callable`
         The stand-in, with the signature of `balance_sun_like_stars_in_file`.
+        Used as the calibration (``as_calibration=True``) it always corrects,
+        as with Gaia colors at hand.
     """
 
-    def check(input_path: str, output_path: str) -> stack_preview.SunLikeBalance:
-        """Act like the check.
+    def check(
+        input_path: str, output_path: str, *_: object, as_calibration: bool = False
+    ) -> stack_preview.SunLikeBalance:
+        """Act like the check, or like the calibration from sun-like stars.
 
         Returns
         -------
@@ -2189,7 +2234,7 @@ def _fake_white_balance(applied: bool, calls: list[str]) -> object:
             An applied result with gains, or one that says nothing changed.
         """
         calls.append(input_path)
-        if not applied:
+        if not applied and not as_calibration:
             return stack_preview.SunLikeBalance(applied=False, reason="only 3 isolated sun-like stars")
         shutil.copyfile(input_path, output_path)
         return stack_preview.SunLikeBalance(
@@ -2210,9 +2255,10 @@ def _fake_white_balance(applied: bool, calls: list[str]) -> object:
 def test_the_white_balance_check_feeds_the_stretch_when_it_corrects(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the corrected image is stretched, and the check is recorded."""
+    """Verify the check after Siril's calibration feeds the stretch."""
     _write_colour_stack_with_stars(stack)
-    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    _use_online_catalog(monkeypatch, reachable=True)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     calls: list[str] = []
     monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
     programs = _Programs()
@@ -2238,7 +2284,8 @@ def test_a_check_that_changes_nothing_keeps_the_calibrated_image_and_says_why(
 ) -> None:
     """Verify a skipped check keeps the calibrated image and adds a notice."""
     _write_colour_stack_with_stars(stack)
-    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    _use_online_catalog(monkeypatch, reachable=True)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(False, []))
     programs = _Programs()
     programs.install(monkeypatch)

@@ -197,6 +197,18 @@ def test_a_correction_above_the_limit_is_not_applied_and_is_flagged() -> None:
     assert result.red_to_green_after is None
 
 
+def test_as_the_calibration_a_large_correction_is_applied() -> None:
+    """As the calibration itself, a large change is applied."""
+    image, stars = make_sky([SUN_LIKE_COLOUR] * 30, [(1.5, 1.0, 1.0)] * 30)
+
+    corrected, result = balance_sun_like_stars(image, make_wcs(), stars, as_calibration=True)
+
+    assert corrected is not None
+    assert result.applied
+    assert result.red_gain == pytest.approx(1 / 1.5, rel=0.01)
+    assert result.red_to_green_after == pytest.approx(1.0, abs=0.01)
+
+
 def test_a_star_with_a_close_neighbor_is_left_out() -> None:
     """A sun-like star with another catalog star 10 pixels away is not used."""
     _, stars = sun_like_sky(count=30)

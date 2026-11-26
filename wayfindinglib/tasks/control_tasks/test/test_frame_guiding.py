@@ -201,3 +201,12 @@ def test_a_time_that_is_not_iso_8601_is_refused() -> None:
 
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
         _link([_frame(1, 1000.0)], [], FrameRange(since="yesterday"))
+
+
+def test_a_datetime_bound_picks_the_frames_after_it() -> None:
+    """`since` may be a `datetime`, as for the library's frame selection."""
+    from datetime import UTC, datetime
+
+    frames = [_frame(1, 1000.0), _frame(2, 1060.0)]
+    report = _link(frames, [], FrameRange(since=datetime.fromtimestamp(1030.0, UTC)))
+    assert [row["file"] for row in report["frames"]] == ["T_1_002.fits"]

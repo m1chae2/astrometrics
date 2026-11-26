@@ -115,24 +115,6 @@ class ImageProcessingService(BaseBackgroundService):
         LOG_DIR = str(self._config_service.get_logs_path())
         self._notification_service = notification_service
 
-    def get_calibration_stats(self) -> dict[str, Any]:
-        """Count the calibration frames in the library.
-
-        Returns
-        -------
-        stats : `dict` [`str`, `Any`]
-            ``"darks"``, ``"biases"`` and ``"flats"``, each a list of
-            per-group counts.
-        """
-        answer = self._calibration.query(detail="counts")
-        return {
-            key: [
-                {name: value for name, value in row.items() if name != "row_key"}
-                for row in (getattr(answer, key) or [])
-            ]
-            for key in ("darks", "biases", "flats")
-        }
-
     def start_calibration_measurement(
         self, kind: str | None = None, camera_id: str | None = None, force: bool = False
     ) -> dict[str, Any]:
@@ -408,7 +390,7 @@ class ImageProcessingService(BaseBackgroundService):
         if frames:
             self._processing_api.predict_stack(target_id, frames=frames, checks=False)
 
-    def process_target(
+    def stack_target(
         self,
         target_id: str,
         image_files: list | None = None,

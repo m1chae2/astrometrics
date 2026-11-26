@@ -298,7 +298,7 @@ DECISIONS = {
     "app_controls": ToolDecision(
         "keep", "Built 2026-10-03. Navigate only; pause, resume and notify are not offered."
     ),
-    "observatory_remote_frame_status": ToolDecision(
+    "observatory_remote_frame_locations": ToolDecision(
         "keep",
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",

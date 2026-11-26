@@ -2,7 +2,8 @@
 
 Description: Copies of the science library's checks of a choice, an
 ``include`` list, arguments a kind does not use, and a time, so this library
-does not reach into the science library's private package. Each refuses a bad
+does not reach into the science library's private package. `TimeInput` names
+the kinds of time a public call takes. Each refuses a bad
 value with `InvalidArgumentError`. Only `wayfindinglib` itself, and the tests
 of either library, may import this module.
 """
@@ -11,9 +12,15 @@ from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from astropy.time import Time
+
 from astrometricslib.exceptions import InvalidArgumentError
 
-__all__ = ["check_choice", "check_include", "reject_unused_arguments", "to_epoch_seconds"]
+__all__ = ["TimeInput", "check_choice", "check_include", "reject_unused_arguments", "to_epoch_seconds"]
+
+TimeInput = str | datetime | Time | None
+"""A time a public call takes: an ISO 8601 string, a `datetime` or an astropy
+`Time` (no time zone means UTC), or `None` for no bound."""
 
 
 def check_choice(name: str, value: Any, choices: Collection[str]) -> None:
@@ -102,7 +109,7 @@ def reject_unused_arguments(
         )
 
 
-def to_epoch_seconds(value: str | datetime | Any | None, name: str = "time") -> float | None:
+def to_epoch_seconds(value: TimeInput | Any, name: str = "time") -> float | None:
     """Turn a time into seconds since 1970-01-01 UTC.
 
     Parameters

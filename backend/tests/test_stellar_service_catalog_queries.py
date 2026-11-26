@@ -86,16 +86,6 @@ def _make_service(stars: _Stars, planning_sources: list | None = None) -> Stella
     return StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=wayfinder)
 
 
-def test_stars_of_one_target_are_read_from_that_target_only() -> None:
-    """Asking for a target's stars reads just that target's stars."""
-    stars = _Stars({"M 13": [StellarObject(id="A"), StellarObject(id="B")]})
-
-    found = _make_service(stars).get_stellar_objects("M 13")
-
-    assert [star.id for star in found] == ["A", "B"]
-    assert stars.calls == [("query", "M 13", True)]
-
-
 def test_saving_does_not_read_or_rewrite_the_catalog() -> None:
     """save_objects() has nothing to write, and touches nothing.
 

@@ -125,13 +125,3 @@ class ImagingService:
             error: stopping nothing does nothing.
         """
         return self._observatory.imaging.stop_capture()
-
-    def get_active_capture_jobs(self) -> list[Any]:
-        """Return the capture jobs that are still running.
-
-        Returns
-        -------
-        jobs : `list`
-            The active `Job` records whose `job_type` is ``"capture"``.
-        """
-        return [job for job in self.job_service.get_active_jobs() if job.job_type == "capture"]

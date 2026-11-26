@@ -116,8 +116,11 @@ async def test_the_notifications_resource_reads_the_rpc_method(monkeypatch: pyte
 
 @pytest.mark.anyio
 async def test_active_jobs_come_from_the_rpc_method(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The active_jobs section asks ``processing:active_jobs``."""
-    payloads = fake_backend(monkeypatch, success([{"id": 7, "status": "running"}]))
+    """The active_jobs section asks ``jobs:query`` for the unfinished jobs."""
+    payloads = fake_backend(
+        monkeypatch, success({"detail": "summary", "jobs": [{"id": "7", "status": "running"}]})
+    )
     answer = await definition.tool_app_status(["active_jobs"])
-    assert answer["active_jobs"] == [{"id": 7, "status": "running"}]
-    assert [payload["method"] for payload in payloads] == ["processing:active_jobs"]
+    assert answer["active_jobs"] == [{"id": "7", "status": "running"}]
+    assert [payload["method"] for payload in payloads] == ["jobs:query"]
+    assert payloads[0]["params"] == {"active_only": True, "limit": 50}

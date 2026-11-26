@@ -1,7 +1,6 @@
 """Tests for mount pointing model decomposition and guiding FFT spectrum."""
 
 import math
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -124,60 +123,3 @@ def test_analyze_guiding_telemetry_detects_worm_period_and_backlash() -> None:
     assert len(analysis.peaks) > 0
     assert analysis.peaks[0].probable_source == "Worm Fundamental Period"
     assert analysis.dec_backlash_estimate_ms is not None
-
-
-def test_alignment_service_compute_pointing_model() -> None:
-    """Verify AlignmentService.compute_pointing_model queries logger.
-
-    Delegates to `review.query(kind="pointing_model")` rather
-    than fitting directly, so the logger mock is injected on the control's
-    shared context, not on `AlignmentService` itself.
-    """
-    from backend.services.observatory.alignment_service import AlignmentService
-    from wayfindinglib import ObservatoryControl
-    from wayfindinglib.api.review import ObservationReview
-
-    records_mock = MagicMock()
-    records_mock.get_session_alignment_attempts.return_value = [
-        {"ra": 180.0, "dec": 45.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
-        {"ra": 190.0, "dec": 50.0, "delta_ra_arcsec": 6.0, "delta_dec_arcsec": -2.0},
-    ]
-
-    observatory = ObservatoryControl(config=MagicMock())
-    observatory._context.records = records_mock
-    observatory._context.observer_location = lambda: {"latitude": 39.7}
-
-    service = AlignmentService(observatory_api=observatory, review=ObservationReview(observatory))
-    res = service.compute_pointing_model(session_id="2026-09-25")
-    assert res["sampleCount"] == 2
-    assert res["confidence"] == "insufficient_data"
-    records_mock.get_session_alignment_attempts.assert_called_once_with("2026-09-25")
-
-
-def test_guiding_service_analyze_guiding_spectrum() -> None:
-    """Verify GuidingService.analyze_guiding_spectrum delegates to logger.
-
-    Delegates to `control.guiding.refit_spectrum` rather than analyzing
-    directly, so the logger mock is injected on the control's shared
-    context, not on `GuidingService` itself.
-    """
-    from backend.services.observatory.guiding_service import GuidingService
-    from wayfindinglib import ObservatoryControl
-
-    records_mock = MagicMock()
-    records_mock.get_guiding_samples.return_value = []
-
-    observatory = ObservatoryControl(config=MagicMock())
-    observatory._context.records = records_mock
-    observatory._context.butler = MagicMock()  # refit_spectrum saves; avoid real disk I/O
-
-    service = GuidingService(observatory_api=observatory)
-    res = service.analyze_guiding_spectrum(session_id="2026-09-25")
-    assert res["sampleCount"] == 0
-    # Only samples measured from a real guide star are refit; estimates
-    # reconstructed from mount pulses are never read.
-    records_mock.get_guiding_samples.assert_called_once_with(
-        session_id="2026-09-25",
-        limit=2000,
-        sources=["phd2_guide_log", "phd2_live", "ekos_guide_log", "ekos_analyze_log"],
-    )

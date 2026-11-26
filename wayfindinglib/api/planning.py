@@ -477,7 +477,8 @@ class ObservationPlanning:
         -------
         position : `CoordinateLookup`
             The ``id``, ``name`` and ``kind`` (``"target"`` or ``"star"``),
-            and the position in degrees (``ra_deg``, ``dec_deg``). A target
+            and the position in ICRS (J2000) degrees (``ra_deg``,
+            ``dec_deg``). A target
             also has its position as saved text; a star has its magnitude
             and spectral type.
         """
@@ -524,9 +525,9 @@ class ObservationPlanning:
         Parameters
         ----------
         ra_deg : `float`
-            Right ascension of the center, in degrees.
+            Right ascension of the center, in ICRS (J2000) degrees.
         dec_deg : `float`
-            Declination of the center, in degrees.
+            Declination of the center, in ICRS (J2000) degrees.
         radius_deg : `float`
             Search radius, in degrees.
         source : `list` [`str`], optional
@@ -688,7 +689,8 @@ class ObservationPlanning:
         objects : `list`, optional
             Names or ids (the library first, then SIMBAD), `Target` or
             `StellarObject` objects, or dictionaries ``{"id", "ra_deg",
-            "dec_deg"}`` for points with known coordinates. When omitted,
+            "dec_deg"}`` (ICRS (J2000) degrees) for points with known
+            coordinates. When omitted,
             every library target, highest first.
         time : `str`, `datetime` or `astropy.time.Time`, optional
             The moment, or the start of the span. ``"now"`` or omitted
@@ -863,9 +865,10 @@ class ObservationPlanning:
         Parameters
         ----------
         ra_deg : `float`
-            Right ascension of the grid center, in degrees.
+            Right ascension of the grid center, in ICRS (J2000) degrees.
         dec_deg : `float`
-            Declination of the grid center, in degrees, from -90 to 90.
+            Declination of the grid center, in ICRS (J2000) degrees, from
+            -90 to 90.
         rows : `int`
             Number of panel rows.
         cols : `int`
@@ -1491,7 +1494,8 @@ class ObservationPlanning:
         session_id : `str`
             The session to change.
         framing : `dict`
-            The field center (``center_ra_deg``, ``center_dec_deg``), the
+            The field center (``center_ra_deg``, ``center_dec_deg``, ICRS
+            (J2000) degrees), the
             camera rotation and any mosaic panels.
         expected_revision : `int`, optional
             The plan revision the caller last read. Leave out to write

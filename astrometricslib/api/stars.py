@@ -216,10 +216,11 @@ class StellarCatalog:
             it matched, the absorption features and emission lines, and
             whether the brightness repeats), with no raw arrays.
             ``"objects"``: the full star records. ``"overlay"``: the stars of
-            ``target_id`` placed in pixels on the target's stacked image
-            (needs ``target_id``; takes no filter, ``order`` or
-            ``offset``). ``"class_counts"``: how many stars each spectral
-            class has. ``"target_counts"``: each target's star count and
+            ``target_id`` placed in 1-based pixels (as in FITS and DS9) on
+            the target's stacked image (needs ``target_id``; takes no
+            filter, ``order`` or ``offset``). ``"class_counts"``: how many
+            stars each spectral class has. ``"target_counts"``: each
+            target's star count and
             whether its stars have spectra or photometry. ``"stats"``:
             counts and coverage for the whole library, single-frame
             detections included. The last three take no selector and no

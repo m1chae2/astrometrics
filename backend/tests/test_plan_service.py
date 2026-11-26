@@ -1,13 +1,12 @@
 """Purpose: Test the night plan RPC methods and the ``plan:changed`` event.
 
-Description: The plan service wraps the planning library's `get_plan`,
-the queue calls and `tick_checklist_item`. The tests use a stand-in planning
-library and a stand-in socket manager to check that:
+Description: The plan service wraps the planning library's queue calls and
+`tick_checklist_item`. The tests use a stand-in planning library and a
+stand-in socket manager to check that:
 
-* the three methods are declared, served and in the generated event list,
+* the tick method and the event are declared and served,
 * each successful write announces ``plan:changed`` once with the session id,
   the new revision and the kinds of change,
-* a read announces nothing,
 * a stale revision announces nothing and reaches the caller as the
   ``conflict`` error with the current revision in its details.
 """
@@ -102,17 +101,6 @@ class _Planning:
             session=self._session(),
         )
 
-    def get_plan(self, session_id: str | None = None, **filters: Any) -> ObservationSession:
-        """Read the session.
-
-        Returns
-        -------
-        session : `ObservationSession`
-            The stored session.
-        """
-        self.calls.append(("get_plan", {"session_id": session_id}))
-        return self._session()
-
     def remove_from_queue(self, session_id: str, entry_ids: list[str], **arguments: Any) -> PlanChange:
         """Write a queue change.
 
@@ -160,33 +148,16 @@ def plan_setup(monkeypatch: pytest.MonkeyPatch) -> tuple[_Planning, _Sockets]:
 
 
 def test_the_methods_and_the_event_are_declared_and_served() -> None:
-    """Three methods and the event are declared; each method has a handler."""
-    for method, handler in (
-        ("plan:get", "get_plan"),
-        ("plan:edit", "edit_plan"),
-        ("plan:tick_checklist_item", "tick_checklist_item"),
-    ):
-        assert method in RPC_METHODS
-        assert rpc_registry._handlers[method] == ("plan_service", handler)
+    """The tick method and the event are declared; the tick has a handler."""
+    assert "plan:tick_checklist_item" in RPC_METHODS
+    assert rpc_registry._handlers["plan:tick_checklist_item"] == ("plan_service", "tick_checklist_item")
     assert "plan:changed" in [event.name for event in UI_EVENTS]
 
 
-@pytest.mark.anyio
-async def test_a_read_announces_nothing(plan_setup: tuple[_Planning, _Sockets]) -> None:
-    """Reading the plan sends no event."""
-    _, sockets = plan_setup
-    result = await rpc_registry.execute("plan:get", {"session_id": "night-1"})
-    assert result.revision == 3
-    assert sockets.events == []
-
-
-@pytest.mark.anyio
-async def test_an_edit_announces_once_with_the_new_revision(plan_setup: tuple[_Planning, _Sockets]) -> None:
+def test_an_edit_announces_once_with_the_new_revision(plan_setup: tuple[_Planning, _Sockets]) -> None:
     """One edit gives one event with the session, revision and change kinds."""
     planning, sockets = plan_setup
-    result = await rpc_registry.execute(
-        "plan:edit", {"session_id": "night-1", "remove": ["entry-1"], "expected_revision": 3}
-    )
+    result = container.plan_service.edit_plan("night-1", remove=["entry-1"], expected_revision=3)
     assert result.revision == 4
     assert sockets.events == [
         ("plan:changed", {"sessionId": "night-1", "revision": 4, "changed": ["queue_added"]})
@@ -212,7 +183,6 @@ async def test_a_tick_announces_once(plan_setup: tuple[_Planning, _Sockets]) -> 
 @pytest.mark.parametrize(
     ("method", "params"),
     [
-        ("plan:edit", {"session_id": "night-1", "remove": ["entry-1"], "expected_revision": 1}),
         ("plan:tick_checklist_item", {"session_id": "night-1", "item_id": "item-1", "expected_revision": 1}),
     ],
 )

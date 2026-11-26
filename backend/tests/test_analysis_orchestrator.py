@@ -1,6 +1,6 @@
 """Purpose: Unit tests for AnalysisOrchestrator's analysis routing.
 
-Description: Verifies how analyze_image routes frames by type and how the
+Description: Verifies how run_analysis routes frames by type and how the
 chosen stages reach the library's process_target. Raw spectral frames now go
 through the spectroscopy stage; the per-frame work (the spectral variation
 stage) lives in the library, and its tests are in
@@ -204,7 +204,7 @@ class TestResultSurvivesRestart:
 
 
 class TestChosenStages:
-    """Verify the `stages` argument of `analyze_image` and its worker."""
+    """Verify the `stages` argument of `run_analysis` and its worker."""
 
     def _make_setup(self, target: Target, outcome: SimpleNamespace) -> tuple[AnalysisOrchestrator, MagicMock]:
         """Build an orchestrator whose library call is recorded.
@@ -248,9 +248,9 @@ class TestChosenStages:
         orchestrator._submit_job = MagicMock()
 
         with pytest.raises(InvalidArgumentError, match="asteroids"):
-            orchestrator.analyze_image("M 57", [], stages=["photometry", "asteroids"])
+            orchestrator.run_analysis("M 57", [], stages=["photometry", "asteroids"])
         with pytest.raises(InvalidArgumentError):
-            orchestrator.analyze_image("M 57", [], stages=[])
+            orchestrator.run_analysis("M 57", [], stages=[])
 
         orchestrator._submit_job.assert_not_called()
 
@@ -310,8 +310,8 @@ class TestChosenStages:
         """Verify `stages` reaches the job; sent files alone choose by kind."""
         orchestrator = self._submitting_orchestrator(None)
 
-        reply = orchestrator.analyze_image("M 57", ["/lib/a.fits"], stages=["spectroscopy", "photometry"])
-        orchestrator.analyze_image("M 57", ["/lib/a.fits"])
+        reply = orchestrator.run_analysis("M 57", ["/lib/a.fits"], stages=["spectroscopy", "photometry"])
+        orchestrator.run_analysis("M 57", ["/lib/a.fits"])
 
         assert orchestrator._submit_job.call_args_list[0].args[-2] == ["photometry", "spectroscopy"]
         assert reply["stages"] == ["photometry", "spectroscopy"]
@@ -333,7 +333,7 @@ class TestChosenStages:
         """Verify the button's choice: both stacks, else the one stack sent."""
         orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, imaging, spectral))
 
-        reply = orchestrator.analyze_image("M 57", files)
+        reply = orchestrator.run_analysis("M 57", files)
 
         assert orchestrator._submit_job.call_args.args[-2] == expected
         assert reply["stages"] == expected
@@ -343,7 +343,7 @@ class TestChosenStages:
         orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, False, False))
 
         with pytest.raises(NotFoundError, match="no stack to analyze"):
-            orchestrator.analyze_image("M 57", [])
+            orchestrator.run_analysis("M 57", [])
 
         orchestrator._submit_job.assert_not_called()
 
@@ -352,9 +352,9 @@ class TestChosenStages:
         orchestrator = self._submitting_orchestrator(self._target_with_stacks(tmp_path, True, False))
 
         with pytest.raises(NotFoundError, match="spectroscopy"):
-            orchestrator.analyze_image("M 57", [], stages=["spectroscopy"])
+            orchestrator.run_analysis("M 57", [], stages=["spectroscopy"])
         with pytest.raises(NotFoundError, match="spectral_variation"):
-            orchestrator.analyze_image("M 57", [], stages=["spectral_variation"])
+            orchestrator.run_analysis("M 57", [], stages=["spectral_variation"])
 
         orchestrator._submit_job.assert_not_called()
 
@@ -368,8 +368,8 @@ class TestChosenStages:
             stacked_image=str(tmp_path / "M_57_Nikon_300.fits"),
         )
 
-        reply = orchestrator.analyze_image("M 57", [], camera_id="D5300", focal_length_mm=300.0)
-        orchestrator.analyze_image("M 57", [], stages=["photometry"])
+        reply = orchestrator.run_analysis("M 57", [], camera_id="D5300", focal_length_mm=300.0)
+        orchestrator.run_analysis("M 57", [], stages=["photometry"])
 
         orchestrator.astrometrics.processing.find_stack_configuration.assert_called_once_with(
             "M 57", "D5300", 300.0
@@ -394,7 +394,7 @@ class TestChosenStages:
         )
 
         with pytest.raises(InvalidArgumentError, match="only for the main configuration"):
-            orchestrator.analyze_image("M 57", [], stages=["spectroscopy"], camera_id="Nikon")
+            orchestrator.run_analysis("M 57", [], stages=["spectroscopy"], camera_id="Nikon")
 
         orchestrator._submit_job.assert_not_called()
 

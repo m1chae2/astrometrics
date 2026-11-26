@@ -222,7 +222,7 @@ export type AstrometryOverlayStar = OverlayStar & {
 
 /** The saved star names of a stack. */
 export interface StackIdentificationResult {
-    /** Every detection, then the catalog stars with no detection, in 0-based pixels of the viewer copy. */
+    /** Every detection, then the catalog stars with no detection, in 1-based pixels of the viewer copy. */
     stars: AstrometryOverlayStar[];
     /** How many detections have a catalog name. */
     matchedCount: number;

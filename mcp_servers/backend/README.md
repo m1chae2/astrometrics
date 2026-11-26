@@ -20,7 +20,7 @@ When the server starts, it removes every tool that the manifest does not allow f
 
 The profile offers these backend tools:
 
-- `app_status` reports health, connections, system resources, the telescope, guiding, INDI devices and properties, and running jobs. The running jobs come from the `processing:active_jobs` RPC method. A section that fails holds an error record, and the other sections still answer.
+- `app_status` reports health, connections, system resources, the telescope, guiding, INDI devices and properties, and running jobs. The running jobs come from the `jobs:query` RPC method (`active_only`), and a job whose process most likely died is marked `looks_stale`. A section that fails holds an error record, and the other sections still answer.
 - `app_controls` switches the view.
 - `docs_get` reads a documentation topic.
 - `terminal_add_script` lets an AI add a new Python script to the Command Console's My scripts list.

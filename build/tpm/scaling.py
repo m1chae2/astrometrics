@@ -32,7 +32,7 @@ TPM_COLUMNS = (
     "display_switch_median",
     "display_switch_p95",
     "rpc_p95[processing:stack_summary]",
-    "rpc_p95[target:get_targets]",
+    "rpc_p95[target:get]",
     "rpc_p95[history:night_quality]",
     "backend_peak_rss",
     "js_heap_after_last_lap",

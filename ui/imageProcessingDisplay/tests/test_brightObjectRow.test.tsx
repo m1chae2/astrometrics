@@ -27,7 +27,7 @@ const bubble = {
  */
 function answerBackend(options: { saved?: Record<string, unknown>; list?: Record<string, unknown> } = {}) {
     callBackendMock.mockImplementation(async (action: string, params: Record<string, unknown>) => {
-        if (action === 'target:get_targets') {
+        if (action === 'target:get') {
             return [{ id: 'M 52', name: 'M 52', previewBrightObject: options.saved ?? { mode: 'auto' } }];
         }
         if (action === 'processing:list_bright_objects') {
@@ -120,7 +120,7 @@ describe('BrightObjectRow', () => {
     ])('explains a %s failure of the list call in plain words, with no console error', async (code, expected) => {
         const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
         callBackendMock.mockImplementation(async (action: string) => {
-            if (action === 'target:get_targets') return [{ id: 'M 52', name: 'M 52', previewBrightObject: { mode: 'auto' } }];
+            if (action === 'target:get') return [{ id: 'M 52', name: 'M 52', previewBrightObject: { mode: 'auto' } }];
             if (action === 'processing:list_bright_objects') throw new BackendError({ code, message: 'Method not found: raw text' });
             return null;
         });

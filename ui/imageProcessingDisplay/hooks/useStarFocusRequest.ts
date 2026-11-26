@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AstrometryOverlayStar } from '../../common/services/astronomyService';
 import type { RestoreView } from '../../common/fitsViewer/hooks/useViewPlacement';
+import { overlayPicturePoint } from '../../common/fitsViewer/utils/starOverlayLayout';
 
 /**
  * Screen pixels per stack pixel when the view zooms in on a star: the star fills a few screen pixels per
@@ -74,9 +75,10 @@ export function starFocusView(star: AstrometryOverlayStar, key: string): Restore
   const width = star.referenceWidth ?? 0;
   const height = star.referenceHeight ?? 0;
   if (width <= 0 || height <= 0) return null;
+  const point = overlayPicturePoint(star);
   return {
     key,
-    view: { x: star.x / width, y: star.y / height, zoomOverFit: 1, turn: 0 },
+    view: { x: point.x / width, y: point.y / height, zoomOverFit: 1, turn: 0 },
     scale: STAR_FOCUS_SCALE,
     pictureWidth: width,
     // The star profile panel opens for the star, the same as a click on it.

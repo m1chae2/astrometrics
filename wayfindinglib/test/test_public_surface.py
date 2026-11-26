@@ -176,7 +176,7 @@ CHILDREN = {
         "run_loop",
         "stop_loop",
     },
-    "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
+    "remote": {"list", "check_connection", "frame_locations", "sync_frames", "sync_logs"},
     "safety": {
         "status",
         "apply_promotion_decision",

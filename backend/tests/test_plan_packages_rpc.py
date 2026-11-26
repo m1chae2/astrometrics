@@ -1,14 +1,14 @@
 """Purpose: Test the package RPC methods and the ``packages:changed`` event.
 
-Description: The plan service wraps the planning library's `get_plan` (with
-its package list), `create_package`, `create_session` and the package
-verbs (`update_package`, `reopen_package`, `dismiss_package` and the
+Description: The plan service wraps the planning library's `query_plans`
+(the package list), `get_plan` (tonight's session), `create_package` and the
+package verbs (`update_package`, `reopen_package`, `dismiss_package` and the
 others) that `edit_package` chooses between. The library is a
 `create_autospec` of the real `ObservationPlanning`, so a call with a wrong
 argument name fails. The tests check that:
 
 * the new methods and the event are declared and served,
-* `plan:get` passes the package filters through,
+* `plan:list_packages` passes the package filters through,
 * `plan:current_session` reads tonight's session by the library's night name
   and never creates one,
 * each package write announces ``packages:changed`` once with the package id
@@ -129,26 +129,6 @@ def test_package_for_target_asks_the_library_to_pick_one(setup: tuple[Any, _Sock
     assert sockets.events == []
 
 
-def test_plan_get_keeps_the_old_call_working(setup: tuple[Any, _Sockets, PlanService]) -> None:
-    """A call with only a session id still reads that session."""
-    planning, _, service = setup
-    planning.get_plan.return_value = _session()
-
-    service.get_plan("night-1")
-
-    planning.get_plan.assert_called_once_with("night-1")
-
-
-def test_plan_get_without_a_session_lists_every_session(setup: tuple[Any, _Sockets, PlanService]) -> None:
-    """A call with no session id lists the sessions."""
-    planning, _, service = setup
-    planning.query_plans.return_value = []
-
-    assert service.get_plan() == []
-
-    planning.query_plans.assert_called_once_with()
-
-
 def test_current_session_reads_tonights_night_and_creates_nothing(
     setup: tuple[Any, _Sockets, PlanService], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -207,19 +187,6 @@ def test_creating_a_package_passes_exposure_dicts_to_the_library(
     service.create_package("M 81", exposure_requests=[row])
 
     assert planning.create_package.call_args.kwargs["exposure_requests"] == [row]
-
-
-def test_creating_a_session_still_asks_for_the_empty_session(
-    setup: tuple[Any, _Sockets, PlanService],
-) -> None:
-    """The default kind is the night's session; no package event is sent."""
-    planning, sockets, service = setup
-    planning.create_session.return_value = _session()
-
-    service.create_plan(night_id="2026-10-24")
-
-    planning.create_session.assert_called_once_with(observing_night_id="2026-10-24")
-    assert sockets.events == []
 
 
 @pytest.mark.parametrize(

@@ -12,7 +12,6 @@ the files are missing).
 """
 
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,11 +20,10 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib import QualityRecords
-from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.data.image_service import ImageService
-from backend.services.data.position_mapping import PositionMapper
 
 REAL_LIBRARY = Path.home() / "Astrometrics" / "Library"
 REAL_STACK = REAL_LIBRARY / "stacks" / "lights" / "M 31" / "M_31_L_Stacked_ZWO_ASI_533MM_Pro_405mm.fits"
@@ -112,6 +110,14 @@ def test_outside_path_is_refused(tmp_path: Path) -> None:
         _service(library).map_position(str(library / "a.fits"), 1.0, 1.0, "/etc/hostname")
     with pytest.raises(InvalidArgumentError):
         _service(library).map_position("/etc/hostname", 1.0, 1.0, str(library / "a.fits"))
+
+
+def test_a_missing_image_is_not_found(tmp_path: Path) -> None:
+    """A library path with no file gives the library's not-found error."""
+    library = tmp_path / "library"
+    _write_image(library / "a.fits")
+    with pytest.raises(NotFoundError):
+        _service(library).map_position(str(library / "a.fits"), 1.0, 1.0, str(library / "gone.fits"))
 
 
 def test_two_solved_images_are_linked_by_the_sky(tmp_path: Path) -> None:
@@ -232,8 +238,7 @@ def test_real_asi_frame_and_stack_agree_on_the_bright_stars() -> None:
     config = SimpleNamespace(
         get_library_path=lambda: str(REAL_LIBRARY), get_stacks_path=lambda: str(REAL_LIBRARY / "stacks")
     )
-    quality = QualityRecords(config, storage=None)  # type: ignore[arg-type]
-    mapper = PositionMapper(lambda: [os.path.realpath(REAL_LIBRARY)], quality.map_position)
+    mapper = QualityRecords(config, storage=None)  # type: ignore[arg-type]
 
     def bright_stars(path: Path, count: int) -> np.ndarray:
         """Find the brightest smoothed peaks, as 1-based (x, y) pairs.

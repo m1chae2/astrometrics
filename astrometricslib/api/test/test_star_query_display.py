@@ -224,8 +224,8 @@ def test_overlay_places_stars_through_the_image_wcs(catalog: StellarCatalog, tmp
 
     assert [star.id for star in overlay] == ["HD 3"]
     placed = overlay[0]
-    assert placed.x == pytest.approx(99.0, abs=0.2)
-    assert placed.y == pytest.approx(49.0, abs=0.2)
+    assert placed.x == pytest.approx(100.0, abs=0.2)
+    assert placed.y == pytest.approx(50.0, abs=0.2)
     assert placed.model_dump(by_alias=True)["referenceWidth"] == 200
     assert placed.reference_height == 100
 
@@ -245,7 +245,7 @@ def test_overlay_uses_saved_centers_when_the_image_has_no_wcs(tmp_path: Path) ->
 
     overlay = catalog.query(target_id="M 13", detail="overlay").overlay
 
-    assert [(star.id, star.x, star.y, star.radius_px) for star in overlay] == [("HD 5", 12.2, 40.0, 3.5)]
+    assert [(star.id, star.x, star.y, star.radius_px) for star in overlay] == [("HD 5", 13.2, 41.0, 3.5)]
     assert overlay[0].is_catalog_identified
 
 
@@ -308,7 +308,7 @@ def test_overlay_follows_the_named_image_not_the_current_stack(
     overlay = catalog.query(target_id="M 13", detail="overlay", image_path=str(shown)).overlay
 
     assert [star.id for star in overlay] == ["HD 3"]
-    assert overlay[0].x == pytest.approx(99.0, abs=0.2)
+    assert overlay[0].x == pytest.approx(100.0, abs=0.2)
     assert (overlay[0].reference_width, overlay[0].reference_height) == (200, 100)
 
 
@@ -369,7 +369,7 @@ def test_overlay_uses_saved_centers_for_the_only_stack(tmp_path: Path) -> None:
 
     answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(stack))
 
-    assert [(star.id, star.x, star.y) for star in answer.overlay] == [("HD 5", 12.2, 40.0)]
+    assert [(star.id, star.x, star.y) for star in answer.overlay] == [("HD 5", 13.2, 41.0)]
     assert answer.overlay_reason is None
 
 

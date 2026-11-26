@@ -282,9 +282,9 @@ class ConsoleSelection:
 
         It has ``id``, ``name``, ``library_id``, ``ra`` and ``dec``
         (degrees; usually `None` on a raw frame) and ``x`` and ``y`` (the
-        0-based column and row of the star's center on the shown picture,
-        as NumPy counts; the Star Profile panel counts from 1). Any may be
-        `None`. Only a star picked with the Astrometry overlay counts.
+        1-based column and row of the star's center on the shown picture,
+        as FITS, DS9 and the Star Profile panel count). Any may be `None`.
+        Only a star picked with the Astrometry overlay counts.
         """
         return self._read().star
 

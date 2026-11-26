@@ -75,7 +75,8 @@ class OverlayStar(BaseModel):
 
     id: str
     name: str
-    # Pixel column and row of the star's center, counted from 0.
+    # Pixel column and row of the star's center, 1-based as in FITS and DS9
+    # (the center of the first pixel is 1, 1).
     x: float
     y: float
     spectral_type: str = Field(default="", alias="spectralType")

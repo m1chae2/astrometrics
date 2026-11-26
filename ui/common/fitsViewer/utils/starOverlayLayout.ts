@@ -49,9 +49,22 @@ export interface StarScreenTransform {
 }
 
 /**
+ * Gives an overlay star's place on the picture, counted from 0 at its top-left corner.
+ *
+ * The backend sends overlay stars in 1-based pixels, as FITS and DS9 count them (the center of the
+ * first pixel is 1, 1). Drawing counts from 0, so this is the one place that takes the 1 off.
+ *
+ * @param star The star's 1-based column and row.
+ * @returns The same place, counted from 0.
+ */
+export function overlayPicturePoint(star: { x: number; y: number }): { x: number; y: number } {
+  return { x: star.x - 1, y: star.y - 1 };
+}
+
+/**
  * Converts a star's image position to a screen position.
  *
- * @param star The overlay star.
+ * @param star The overlay star, in 1-based pixels.
  * @param transform The current image-to-screen mapping.
  * @returns The screen x and y.
  */
@@ -59,9 +72,10 @@ export function starScreenPosition(
   star: AstrometryOverlayStar,
   transform: StarScreenTransform
 ): { x: number; y: number } {
+  const point = overlayPicturePoint(star);
   return {
-    x: transform.panX + star.x * transform.scaleX,
-    y: transform.panY + star.y * transform.scaleY
+    x: transform.panX + point.x * transform.scaleX,
+    y: transform.panY + point.y * transform.scaleY
   };
 }
 

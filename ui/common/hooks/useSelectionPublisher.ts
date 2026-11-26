@@ -25,9 +25,9 @@ export interface PublishedStar {
   ra: number | null;
   /** Declination, in degrees. */
   dec: number | null;
-  /** Column of the star's center on the shown picture, in pixels counted from 0. */
+  /** Column of the star's center on the shown picture, in 1-based pixels (as FITS and DS9 count). */
   x: number | null;
-  /** Row of the star's center on the shown picture, in pixels counted from 0. */
+  /** Row of the star's center on the shown picture, in 1-based pixels. */
   y: number | null;
 }
 
@@ -67,7 +67,7 @@ function textOrNull(value: unknown): string | null {
  * Turns a star of the Astrometry overlay into the star the backend takes.
  *
  * The pixel position is copied as the overlay gives it: the column and row of the star's center on the shown
- * picture, counted from 0 (the first pixel is 0, as in NumPy and Astropy).
+ * picture, 1-based (the center of the first pixel is 1, as in FITS and DS9).
  *
  * @param star The overlay star, or null when no star is selected.
  * @returns The star to send, or null.

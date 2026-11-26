@@ -106,13 +106,14 @@ class FakeLibrary:
                     {"path": str(path), "date": "", "camera": names.get(str(path), "")} for path in self.files
                 ]
             }
-        if method == "images:get_fits_header":
-            with fits.open(params["path"], memmap=False) as hdus:
-                return [
+        if method == "target:get_frame_header":
+            with fits.open(params["frame_path"], memmap=False) as hdus:
+                entries = [
                     {"key": key, "value": str(hdus[0].header[key]), "comment": ""}
                     for key in hdus[0].header
                     if key
                 ]
+            return {"entries": entries, "displayTurn": 0}
         if method == "images:delete":
             if self.fail_delete:
                 return {"deleted": [], "failed": [{"path": params["paths"][0], "reason": "busy"}]}

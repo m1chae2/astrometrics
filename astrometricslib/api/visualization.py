@@ -26,10 +26,14 @@ from astrometricslib.pipelines.shared.api_arguments import (
     reject_unused_arguments,
     resolve_target,
 )
+from astrometricslib.visualization.sky_placement import (
+    SkyPicturePlacement,
+    place_picture_on_sky,
+    sky_picture_files,
+)
 
 if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
-    from astrometricslib.visualization.sky_placement import SkyPicturePlacement
 
 __all__ = ["Visualization"]
 
@@ -400,8 +404,6 @@ class Visualization:
             The stretched stack's path and the picture's path, each an empty
             string when the target has none.
         """
-        from astrometricslib.visualization.sky_placement import sky_picture_files
-
         return sky_picture_files(resolve_target(self._targets, target).stacking)
 
     def place_stack_picture_on_sky(
@@ -431,8 +433,6 @@ class Visualization:
             or has no real plate solution (only the mount's pointing does not
             count); that is a status, not an error.
         """
-        from astrometricslib.visualization.sky_placement import place_picture_on_sky
-
         return place_picture_on_sky(processed_path, picture_path)
 
     def plot(

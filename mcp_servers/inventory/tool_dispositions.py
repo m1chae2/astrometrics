@@ -168,6 +168,12 @@ DECISIONS = {
         "the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, "
         "which the astrometrics-backend server serves; this library tool stays withheld.",
     ),
+    "processing_find_stack_configuration": ToolDecision(
+        "keep",
+        "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why "
+        "none or several match and lists the target's configurations. Reads the target record only.",
+        tool_class="observe",
+    ),
     "processing_set_preview_bright_object": ToolDecision(
         "withhold",
         "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. "
@@ -242,6 +248,16 @@ DECISIONS = {
         "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the "
         "optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts "
         "and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing.",
+    ),
+    "visualization_stack_sky_picture_files": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the Planetarium's Images layer: names the picture and stretched stack that "
+        "place a target's picture on the sky. Of no use to an AI client.",
+    ),
+    "visualization_place_stack_picture_on_sky": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the Planetarium's Images layer: a grid of sky positions for drawing a "
+        "picture on a sky chart. Of no use to an AI client.",
     ),
     "visualization_get_last_captured_image": ToolDecision(
         "fix",
@@ -520,6 +536,12 @@ DECISIONS = {
         "a plain reason when a picture cannot be found, and lists the ids no row has. Reads only.",
         tool_class="observe",
     ),
+    "quality_frame_statuses": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the File Browser's Status column. The caller must give the newest stack "
+        "file's time and the star-shape review's flagged frames, which the backend fills in for the app. "
+        "quality_set_aside_frames and review_get_star_shape_review serve an AI client.",
+    ),
     "quality_set_aside_frames": ToolDecision(
         "keep",
         "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and "
@@ -659,6 +681,11 @@ DECISIONS = {
         "configuration file. The AI is read-only.",
     ),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
+    "target_display_turn": ToolDecision(
+        "drop",
+        "Built 2026-11-26 for the image viewer: the quarter turn that shows a raw frame the same way round "
+        "as its stack, for display only. Of no use to an AI client.",
+    ),
     "target_read_frame_header": ToolDecision(
         "drop",
         "Reads a header from any path with typed values. target_get_header already serves an AI client.",

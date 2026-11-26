@@ -15,7 +15,6 @@ import configparser
 import logging
 import os
 import re
-import statistics
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -56,6 +55,19 @@ class SessionStarIdentifier(Protocol):
     """
 
     solver: PlateSolveDriver
+
+    @property
+    def nearest_catalog_separations_arcsec(self) -> list[float]:
+        """Give each star's distance to its nearest catalog entry.
+
+        Returns
+        -------
+        separations : `list` [`float`]
+            One distance, in arcseconds, for each star that had a sky
+            position in the last `identify_stars_with_wcs` call, including
+            stars too far from any entry to match.
+        """
+        ...
 
     def detect_stars(self, data: Any, is_color_frame: bool = False) -> tuple[list[dict], list[dict]]:
         """Find the stars in an image and drop duplicates.
@@ -125,9 +137,9 @@ class SessionStarIdentifier(Protocol):
 # radius. The chance is 1 - exp(-pi R^2 n) for a catalog of n stars per unit
 # area: about 17% for a 10 arcsecond radius in a Milky Way field with
 # 7,700 catalog stars per square degree, and about 30% at the 14 arcsecond
-# radius of a Nikon D5300 behind a 300 mm lens. There the median distance
-# test of `plate_solution_problem` (MAX_MEDIAN_CATALOG_OFFSET_FRACTION) is
-# what catches a wrong solution. Both a reused header map and a photometry
+# radius of a Nikon D5300 behind a 300 mm lens. There the concentration
+# test of `plate_solution_problem` (MIN_MATCH_CONCENTRATION) is what catches
+# a wrong solution. Both a reused header map and a photometry
 # session's solution go through both tests (AST-D19).
 MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = TunedParameter(
     name="shared.min_catalog_match_fraction_for_reused_wcs",
@@ -156,26 +168,43 @@ MIN_STARS_TO_VERIFY_REUSED_WCS = TunedParameter(
 )
 
 
-# Largest median distance, over a run's catalog-matched stars, between a
-# star's position and its catalog position before the run's plate solution
-# is judged wrong, as a share of the catalog match radius
-# (`CATALOG_MATCH_RADIUS_ARCSEC`, resolved for the run's plate scale).
-# A limit in arcseconds cannot work: a star is matched only within that
-# radius, so no median can exceed it. Under a wrong solution the matches that
-# remain are chance pairings, spread evenly over the match circle, so their
-# distances have a median of the radius divided by the square root of 2
-# (about 0.71 of it); with 20 matches the spread of that median is about 0.08
-# of the radius, and half the radius sits about 2.6 such spreads below it. A
-# right solution matches most stars within a few arcseconds: on the real
-# catalog (backup of 2026-11-24) the median of the stored match distances is
-# below 2.5 arcseconds for every target with at least 20 matched stars
-# except the Moon field (3.8), M 67 (6.2) and Algol (6.5). Design estimate
+# The circle the concentration test looks in, as a multiple of the catalog
+# match radius R (`CATALOG_MATCH_RADIUS_ARCSEC`, resolved for the run's plate
+# scale). The test counts the stars whose nearest catalog entry lies within
+# this wider circle W, whether or not that entry is close enough to match,
+# and asks what share of them have it inside R. Design estimate (AST-D19).
+SOLUTION_CHECK_RADIUS_FACTOR = TunedParameter(
+    name="shared.solution_check_radius_factor",
+    default=2.0,
+    unit="multiple of match radius",
+    description="Radius of the plate solution check's search circle, as a multiple of the match radius.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D19",
+)
+
+# Smallest share, among the stars whose nearest catalog entry lies within the
+# search circle W, of those whose entry also lies within the match radius R.
+# Under a wrong solution each nearest entry is a chance neighbor, about
+# equally likely anywhere in the circle, so the share is near (R/W)^2, 0.25
+# for W = 2R. It rises in a dense field, where a star often has several
+# entries within W: about 0.32 at 10 arcsec and 0.40 at 14 arcsec with 7,700
+# catalog stars per square degree. A right solution puts true neighbors
+# inside R. Faint detections with no true catalog star add chance neighbors
+# to both counts, which lowers the share but does not move it to the
+# wrong-solution value. On the real catalog (backup of 2026-11-24), right
+# solutions had median match distances of 6.5 arcsec (Algol, ZWO ASI533MM,
+# above the old limit of half the 10 arcsec radius) and 6.2 arcsec (M 67,
+# Nikon D5300), so a median test cannot separate them. Design estimate
 # until shifted real solutions are checked (AST-D19).
-MAX_MEDIAN_CATALOG_OFFSET_FRACTION = TunedParameter(
-    name="shared.max_median_catalog_offset_fraction",
-    default=0.5,
-    unit="fraction of match radius",
-    description="Largest median offset of matched stars from the catalog, as a share of the match radius.",
+MIN_MATCH_CONCENTRATION = TunedParameter(
+    name="shared.min_match_concentration",
+    default=0.4,
+    unit="fraction",
+    description=(
+        "Smallest share of catalog neighbors in the search circle that lie within the match radius."
+    ),
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.RELATIVE,
@@ -183,16 +212,20 @@ MAX_MEDIAN_CATALOG_OFFSET_FRACTION = TunedParameter(
 )
 
 
-def plate_solution_problem(stellar_objects: list[StellarObject]) -> str | None:
+def plate_solution_problem(
+    stellar_objects: list[StellarObject], nearest_catalog_separations_arcsec: list[float]
+) -> str | None:
     """Say why a run's plate solution looks wrong, judged by its stars.
 
     A wrong solution puts every star somewhere it is not. Few stars then
     find their catalog star (`MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`),
-    and the ones that do are chance pairings, spread evenly over the match
-    circle. Their median distance is then about 0.71 of the match radius,
-    above the limit of `MAX_MEDIAN_CATALOG_OFFSET_FRACTION` times that
-    radius. Saving such a run would make new position-only stars at false
-    positions and give light curves to the wrong stars.
+    and each star's nearest catalog entry is a chance neighbor, spread
+    evenly over the sky around it. Among the stars with a neighbor inside
+    the search circle (`SOLUTION_CHECK_RADIUS_FACTOR` times the match
+    radius), the share whose neighbor is also inside the match radius is
+    then near the ratio of the two areas, below `MIN_MATCH_CONCENTRATION`.
+    Saving such a run would make new position-only stars at false positions
+    and give light curves to the wrong stars.
 
     The match radius is `CATALOG_MATCH_RADIUS_ARCSEC` as the current run
     resolves it (it follows the plate scale), the same radius the star
@@ -202,37 +235,43 @@ def plate_solution_problem(stellar_objects: list[StellarObject]) -> str | None:
     Parameters
     ----------
     stellar_objects : `list` [`StellarObject`]
-        The run's identified stars, with their match distances
-        (``catalog_match_quality.separation_arcsec``).
+        The run's identified stars.
+    nearest_catalog_separations_arcsec : `list` [`float`]
+        For each star with a sky position, the distance in arcseconds to
+        its nearest catalog entry, matched or not (the star identifier's
+        `nearest_catalog_separations_arcsec` from the same run).
 
     Returns
     -------
     problem : `str` or `None`
         A sentence saying what is wrong, or `None` when the solution looks
         right or there are fewer than `MIN_STARS_TO_VERIFY_REUSED_WCS`
-        stars to judge by.
+        stars to judge by. The concentration test alone is skipped when
+        fewer than that many stars have a neighbor in the search circle.
     """
     stars = [star for star in stellar_objects if star.right_ascension is not None]
-    if len(stars) < resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value:
+    minimum_stars = resolve(MIN_STARS_TO_VERIFY_REUSED_WCS).value
+    if len(stars) < minimum_stars:
         return None
     matched_fraction = _catalog_matched_count(stars) / len(stars)
     if matched_fraction < resolve(MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS).value:
         return f"only {matched_fraction:.0%} of {len(stars)} stars matched a catalog star"
-    separations = [
-        float(star.catalog_match_quality.separation_arcsec)
-        for star in stars
-        if star.catalog_match_quality is not None and star.catalog_match_quality.separation_arcsec is not None
-    ]
-    if not separations:
-        return None
-    median_offset = statistics.median(separations)
     match_radius = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value)
-    fraction = float(resolve(MAX_MEDIAN_CATALOG_OFFSET_FRACTION).value)
-    limit = fraction * match_radius
-    if median_offset > limit:
+    search_radius = float(resolve(SOLUTION_CHECK_RADIUS_FACTOR).value) * match_radius
+    in_search_circle = [
+        distance for distance in nearest_catalog_separations_arcsec if distance <= search_radius
+    ]
+    if len(in_search_circle) < minimum_stars:
+        return None
+    concentration = sum(1 for distance in in_search_circle if distance <= match_radius) / len(
+        in_search_circle
+    )
+    limit = float(resolve(MIN_MATCH_CONCENTRATION).value)
+    if concentration < limit:
         return (
-            f"the matched stars sit a median {median_offset:.1f} arcsec from their catalog positions "
-            f"(limit {limit:.1f} arcsec, {fraction:g} of the {match_radius:.1f} arcsec match radius)"
+            f"only {concentration:.0%} of the {len(in_search_circle)} stars with a catalog entry within "
+            f"{search_radius:.1f} arcsec have it within the {match_radius:.1f} arcsec match radius "
+            f"(limit {limit:.0%})"
         )
     return None
 
@@ -579,9 +618,14 @@ class SessionIdentificationResult:
     simbad_matched_count: int = 0
     sources_detected: int = 0
     # True when a reused header WCS failed `plate_solution_problem` (too few
-    # catalog matches, or matches too far from their catalog stars) and was
-    # replaced by a fresh plate solve.
+    # catalog matches, or nearest catalog entries not concentrated inside
+    # the match radius) and was replaced by a fresh plate solve.
     header_wcs_replaced_after_verification: bool = False
+    # For each star in `stellar_objects` with a sky position, the distance in
+    # arcseconds to its nearest catalog entry, matched or not. It belongs to
+    # the identification that made `stellar_objects`, and is what
+    # `plate_solution_problem` needs beside the stars.
+    nearest_catalog_separations_arcsec: list[float] = field(default_factory=list)
     # How well the plate solve that produced `wcs` fit its reference stars.
     # `fit_residual_rms_arcsec` is the root mean square (RMS) distance, in
     # arcseconds, between the matched stars' fitted positions and the
@@ -652,12 +696,15 @@ def identify_session_stars(
 
     height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)
 
+    nearest_separations: list[float] = []
     if wcs is not None and stellar_objects:
         star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
+        nearest_separations = list(star_identifier.nearest_catalog_separations_arcsec)
 
     (
         wcs,
         stellar_objects,
+        nearest_separations,
         reused_existing_header_wcs,
         solve_attempted,
         header_wcs_replaced,
@@ -670,6 +717,7 @@ def identify_session_stars(
         center_dec,
         wcs,
         stellar_objects,
+        nearest_separations,
         reused_existing_header_wcs,
         solve_attempted,
         width,
@@ -689,6 +737,7 @@ def identify_session_stars(
         simbad_matched_count=simbad_matched_count,
         sources_detected=sources_detected,
         header_wcs_replaced_after_verification=header_wcs_replaced,
+        nearest_catalog_separations_arcsec=nearest_separations,
         fit_residual_rms_arcsec=fit_statistics[0],
         matched_star_count=fit_statistics[1],
     )
@@ -751,13 +800,14 @@ def _reverify_wcs_solution(
     center_dec: float | None,
     wcs: WCS | None,
     stellar_objects: list[StellarObject],
+    nearest_separations: list[float],
     reused_existing_header_wcs: bool,
     solve_attempted: bool,
     width: int,
     height: int,
     write_back: bool,
     fit_statistics: tuple[float | None, int | None],
-) -> tuple[WCS | None, list[StellarObject], bool, bool, bool, tuple[float | None, int | None]]:
+) -> tuple[WCS | None, list[StellarObject], list[float], bool, bool, bool, tuple[float | None, int | None]]:
     """Re-solve a reused header WCS that turns out to be untrustworthy.
 
     Parameters
@@ -774,6 +824,8 @@ def _reverify_wcs_solution(
         The WCS from the first pass.
     stellar_objects : `list` [`StellarObject`]
         The stars identified against `wcs`.
+    nearest_separations : `list` [`float`]
+        The nearest catalog distances of that identification.
     reused_existing_header_wcs : `bool`
         Whether `wcs` came from the image header.
     solve_attempted : `bool`
@@ -792,6 +844,9 @@ def _reverify_wcs_solution(
         better, otherwise unchanged.
     stellar_objects : `list` [`StellarObject`]
         The stars identified against `wcs`.
+    nearest_separations : `list` [`float`]
+        The nearest catalog distances of the identification against the
+        returned `wcs`.
     reused_existing_header_wcs : `bool`
         Whether the returned WCS is still the reused header one.
     solve_attempted : `bool`
@@ -805,9 +860,19 @@ def _reverify_wcs_solution(
         when it replaced the header WCS, otherwise `fit_statistics`
         unchanged.
     """
-    problem = plate_solution_problem(stellar_objects) if reused_existing_header_wcs else None
+    problem = (
+        plate_solution_problem(stellar_objects, nearest_separations) if reused_existing_header_wcs else None
+    )
     if problem is None:
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
+        return (
+            wcs,
+            stellar_objects,
+            nearest_separations,
+            reused_existing_header_wcs,
+            solve_attempted,
+            False,
+            fit_statistics,
+        )
 
     matched_before = _catalog_matched_count(stellar_objects)
     logger.warning(
@@ -830,15 +895,27 @@ def _reverify_wcs_solution(
         ignore_existing_wcs=True,
     )
     solve_attempted = solve_attempted or fresh_solve_attempted
+    # What is returned when the header WCS stays: the first pass's stars and
+    # distances, not the fresh pass's, which the identifier now holds.
+    kept = (
+        wcs,
+        stellar_objects,
+        nearest_separations,
+        reused_existing_header_wcs,
+        solve_attempted,
+        False,
+        fit_statistics,
+    )
 
     if fresh_wcs is None:
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
+        return kept
 
     # Identify onto *fresh* objects: the first pass already mutated
     # the originals (ids, names, coordinates), so reusing them would
     # compare a re-identified list against itself.
     fresh_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
     star_identifier.identify_stars_with_wcs(fresh_objects, fresh_wcs, width, height)
+    fresh_separations = list(star_identifier.nearest_catalog_separations_arcsec)
     matched_after = _catalog_matched_count(fresh_objects)
 
     if matched_after <= matched_before:
@@ -848,7 +925,7 @@ def _reverify_wcs_solution(
             matched_before,
             matched_after,
         )
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
+        return kept
 
     logger.info(
         "Fresh plate solve for %s improved catalog matches %s -> %s; using it instead of the header WCS.",
@@ -858,4 +935,4 @@ def _reverify_wcs_solution(
     )
     if write_back:
         write_wcs_to_fits_header(reference_image.path, fresh_wcs)
-    return fresh_wcs, fresh_objects, False, solve_attempted, True, fresh_fit_statistics
+    return fresh_wcs, fresh_objects, fresh_separations, False, solve_attempted, True, fresh_fit_statistics

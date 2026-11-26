@@ -1018,6 +1018,12 @@ class StarIdentifier:
         # database says it should be (measured in arcseconds). We use this
         # to figure out how accurate our image alignment is.
         self.catalog_match_separations_arcsec: list[float] = []
+        # For each star with a sky position in the last
+        # `identify_stars_with_wcs` call, keyed by `id(star)`: the distance,
+        # in arcseconds, to its nearest SIMBAD or Gaia entry, whether or not
+        # that entry is close enough to count as a match. The plate solution
+        # check reads it through `nearest_catalog_separations_arcsec`.
+        self._nearest_catalog_by_star: dict[int, float] = {}
         # The plate solver's own fit residual (RMS, arcseconds) and matched
         # star count for the last solve. `None` when the solver gave none.
         self.plate_solve_fit_residual_rms_arcsec: float | None = None
@@ -1377,6 +1383,7 @@ class StarIdentifier:
         self.sources_detected = len(unique_sources)
         self.detected_unique_sources = list(unique_sources)
         self.catalog_match_separations_arcsec = []
+        self._nearest_catalog_by_star = {}
         self.plate_solve_fit_residual_rms_arcsec = None
         self.plate_solve_matched_star_count = None
         self.astrometry_flags = []
@@ -1804,6 +1811,7 @@ class StarIdentifier:
         stellar_objects : `list` [`StellarObject`]
             The updated list of named stars.
         """
+        self._nearest_catalog_by_star = {}
         if not stellar_objects:
             return stellar_objects
 
@@ -1836,6 +1844,42 @@ class StarIdentifier:
         self._assign_field_ids(still_unmatched, sky_positions)
 
         return stellar_objects
+
+    @property
+    def nearest_catalog_separations_arcsec(self) -> list[float]:
+        """Give each star's distance to its nearest catalog entry.
+
+        One value for each star that had a sky position in the last
+        `identify_stars_with_wcs` call: the distance to the nearest SIMBAD
+        or Gaia entry, the smaller of the two when both were searched. A
+        star matched in SIMBAD gives its SIMBAD distance. Distances beyond
+        `CATALOG_MATCH_RADIUS_ARCSEC` are kept, so the plate solution check
+        can compare how many neighbors fall inside the match radius with
+        how many fall in a wider circle.
+
+        Returns
+        -------
+        separations : `list` [`float`]
+            The distances, in arcseconds.
+        """
+        return list(self._nearest_catalog_by_star.values())
+
+    def _record_nearest_catalog_distance(
+        self, stellar_object: StellarObject, separation_arcsec: float
+    ) -> None:
+        """Keep the smaller of a star's recorded and new catalog distances.
+
+        Parameters
+        ----------
+        stellar_object : `StellarObject`
+            The star.
+        separation_arcsec : `float`
+            The distance to the nearest entry of one catalog, in arcseconds.
+        """
+        key = id(stellar_object)
+        recorded = self._nearest_catalog_by_star.get(key)
+        if recorded is None or separation_arcsec < recorded:
+            self._nearest_catalog_by_star[key] = separation_arcsec
 
     def _project_stars_to_sky(
         self,
@@ -1948,6 +1992,7 @@ class StarIdentifier:
 
             if simbad_coords is not None and result_table is not None:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
+                self._record_nearest_catalog_distance(stellar_object, float(np.ravel(d2d.arcsec)[0]))
                 if d2d < match_radius_arcsec * u.arcsec:
                     is_ambiguous = _is_unresolved_match(star_coord, simbad_coords)
                     idx = brightest_unresolved_entry_index(
@@ -2039,6 +2084,7 @@ class StarIdentifier:
 
                 star_coord = SkyCoord(ra * u.deg, dec * u.deg)
                 idx, d2d, _ = star_coord.match_to_catalog_sky(gaia_coords)
+                self._record_nearest_catalog_distance(stellar_object, float(np.ravel(d2d.arcsec)[0]))
 
                 if d2d < match_radius_arcsec * u.arcsec:
                     row = gaia_table[idx]

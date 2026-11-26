@@ -205,9 +205,9 @@ shared.field_region_cells_per_side,AST-18,measurement,Design estimate
 shared.focal_length_tolerance_fraction,STK-D71,measurement,Design estimate
 shared.low_star_fraction,STK-34,exclusion criteria,Partly measured
 shared.match_radius_arcsec,AST-12,exclusion criteria,Partly measured
-shared.max_median_catalog_offset_fraction,AST-D19,judgment,Design estimate
 shared.maximum_stars_measured,STK-D38,exclusion criteria,Design estimate
 shared.min_catalog_match_fraction_for_reused_wcs,AST-D19,judgment,Design estimate
+shared.min_match_concentration,AST-D19,judgment,Design estimate
 shared.min_stars_to_verify_reused_wcs,AST-D19,judgment,Design estimate
 shared.moffat_beta_maximum,AST-17,measurement,Design estimate
 shared.moffat_beta_minimum,AST-17,measurement,Design estimate
@@ -239,6 +239,7 @@ shared.sky_clip_sigmas,STK-D45,measurement,Design estimate
 shared.sky_grid_cells_per_side,STK-D72,exclusion criteria,Design estimate
 shared.sky_grid_clip_sigmas,STK-D72,exclusion criteria,Design estimate
 shared.sky_neighbor_spacing_pixels,STK-D45,measurement,Design estimate
+shared.solution_check_radius_factor,AST-D19,judgment,Design estimate
 shared.star_finder_box_fraction,AST-16,measurement,Partly measured
 shared.star_finder_box_maximum_px,AST-16,measurement,Partly measured
 shared.star_finder_box_minimum_px,AST-16,measurement,Partly measured

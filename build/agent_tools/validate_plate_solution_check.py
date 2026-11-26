@@ -125,7 +125,11 @@ def choose_frames(astro: Any, targets: Sequence[str], per_setup: int, limit: int
 
     from astrometricslib.drivers import header_is_plate_solved
 
-    chosen_targets = [astro.targets.get(name) for name in targets] if targets else astro.targets.list()
+    chosen_targets = (
+        [astro.targets.get(name) for name in targets]
+        if targets
+        else astro.targets.query(detail="objects", limit=None).objects
+    )
     frames: list[Any] = []
     for target in chosen_targets:
         if target is None:

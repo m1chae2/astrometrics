@@ -17,6 +17,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS, Sip
 
+from astrometricslib.pipelines.shared.header_wcs import up_angle_degrees
 from astrometricslib.pipelines.shared.registration_record import (
     RegistrationRecord,
     read_registration_record,
@@ -36,7 +37,6 @@ from astrometricslib.pipelines.stacking.post_processing.quarter_turn import (
     turn_image,
     turn_wcs,
     undo_quarter_turn,
-    up_angle_degrees,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import read_stack_plane
 

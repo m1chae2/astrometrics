@@ -14,9 +14,9 @@ class FieldCenter(BaseModel):
 
     Parameters
     ----------
-    right_ascension_deg : `float`
+    ra_deg : `float`
         Right ascension of the position, in degrees.
-    declination_deg : `float`
+    dec_deg : `float`
         Declination of the position, in degrees.
     target_ids : `list` [`str`]
         The targets that were imaged at this position.
@@ -24,8 +24,8 @@ class FieldCenter(BaseModel):
         How many frames' headers gave this position.
     """
 
-    right_ascension_deg: float
-    declination_deg: float
+    ra_deg: float
+    dec_deg: float
     target_ids: list[str] = Field(default_factory=list)
     frames_examined: int = 0
 

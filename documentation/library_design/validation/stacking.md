@@ -108,7 +108,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  for target in astro.targets.list():
+  for target in astro.targets.query(detail="objects", limit=None).objects:
       preview = astro.quality.measure_frames(target.id, kind="quarantine_preview", limit=300)
       if preview.frames_checked:
           print(target.id, preview.would_move_total, preview.frames_checked, preview.notes)

@@ -1214,9 +1214,22 @@ class StellarObject(BaseModel):
     # just the "not yet known" default, not the field's only valid shape.
     flux: Any = Field(default=None, alias="flux")
     # The star's brightness on the standard astronomical scale, where
-    # LOWER numbers mean a BRIGHTER star (the opposite of most scales).
-    # `None` means not yet known, not "magnitude zero" -- same `Any`
-    # tolerance as flux above.
+    # LOWER numbers mean a BRIGHTER star (the opposite of most scales). One
+    # field holds the value of whichever catalog named the star:
+    # - SIMBAD's V (visual band) magnitude for a star SIMBAD names;
+    # - Gaia DR3's G (broad optical band) mean magnitude for a star named
+    #   from Gaia only;
+    # - `None` when the catalog gave none or the star is not identified;
+    # - 0 on records saved by older versions for "the catalog gave none";
+    # - an instrumental magnitude (-2.5 log10 of the raw counts, about -10
+    #   to -17) on records an earlier photometry version overwrote.
+    # Only the first two are catalog magnitudes. `has_catalog_magnitude`
+    # tells them apart (a finite value of at least
+    # `BRIGHTEST_CATALOG_MAGNITUDE` that is not 0), and
+    # `StellarCatalog.query(has_catalog_magnitude=True)` filters on it.
+    # The band is not stored with the value: it is V when SIMBAD matching
+    # wrote the record and G when Gaia matching did.
+    # Same `Any` tolerance as flux above.
     magnitude: Any = Field(default=None, alias="magnitude")
     # The star's catalog colour: its blue (B) magnitude minus its visual (V)
     # magnitude, from SIMBAD. Bluer (hotter) stars have lower values. It comes
@@ -1237,8 +1250,13 @@ class StellarObject(BaseModel):
     photometry: PhotometryResult | None = Field(default_factory=PhotometryResult, alias="photometry")
     # The star's raw pixel position and shape info from source detection
     # (e.g. its centroid coordinates), used to relocate it in later
-    # pictures. Defaults to an empty dict, not a list -- every real
-    # consumer treats this as a dict (`.get("xcentroid", ...)`).
+    # pictures. It is the star finder's own row, stored as found: its
+    # ``xcentroid`` and ``ycentroid`` count pixels from 0 (the finder's and
+    # astropy's convention), unlike the 1-based positions the public calls
+    # return. The astrometry stage writes it from the finder; spectroscopy
+    # rewrites the centroid from the plate solution (also 0-based).
+    # Defaults to an empty dict, not a list -- every real consumer treats
+    # this as a dict (`.get("xcentroid", ...)`).
     star_data: Any = Field(default_factory=dict, alias="starData")
     # How big the star looks in the image it was detected in, as a radius in
     # pixels (measured by source detection). Used to size the on-screen

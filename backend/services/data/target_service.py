@@ -151,7 +151,7 @@ class TargetService:
         if target_id:
             found = self.astrometrics.targets.get(target_id)
             return _without_frames(found) if detail == "summary" and found is not None else found
-        everything = self.astrometrics.targets.list()
+        everything = self.astrometrics.targets.query(detail="objects", limit=None).objects
         return [_without_frames(target) for target in everything] if detail == "summary" else everything
 
     def get_camera_index(self) -> dict[str, Any]:
@@ -598,7 +598,7 @@ class TargetService:
         target : `Target` or `None`
             The stored target, or `None` if nothing is stored under that id.
         """
-        return self.astrometrics.targets.read_saved(target_id)
+        return self.astrometrics.targets.get(target_id, refresh="storage")
 
     def save_targets(self) -> None:
         """Commit all active targets catalog arrays.
@@ -647,7 +647,7 @@ class TargetService:
         if not target:
             raise NotFoundError(f"Target not found: {target_id}")
         try:
-            entries = self.astrometrics.targets.get_header(frame_path, target=target)
+            entries = self.astrometrics.targets.read_frame_header(frame_path, target=target, as_cards=True)
         except NotFoundError:
             logger.debug("Frame file for %s is missing, returning an empty header: %s", target_id, frame_path)
             return {"entries": [], "displayTurn": 0}

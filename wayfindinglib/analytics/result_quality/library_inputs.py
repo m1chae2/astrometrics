@@ -600,7 +600,10 @@ class LibraryInputs:
             The targets by id.
         """
         if self._targets is None:
-            self._targets = {target.id: target for target in self.astrometrics.targets.list()}
+            self._targets = {
+                target.id: target
+                for target in self.astrometrics.targets.query(detail="objects", limit=None).objects
+            }
         return self._targets
 
     def target(self, target_id: str) -> Target | None:

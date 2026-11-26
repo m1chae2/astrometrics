@@ -122,7 +122,7 @@ def camera_is_colour(astrometrics: Any, camera_name: str, configuration: Any) ->
         no frame of the camera has a readable header.
     """
     identity = camera_identity(camera_name, configuration)
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
         for frame in target.frames:
             if str(frame.role).upper() != "LIGHT" or camera_identity(frame.camera, configuration) != identity:
                 continue

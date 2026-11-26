@@ -30,8 +30,8 @@ class IdentifiedStar(BaseModel):
         detection with none) or ``catalog_only`` (a Gaia star bright enough
         to be detected that has no detection).
     x, y : `float`
-        The position in 0-based pixels of the stack (the center of the first
-        pixel is 0, 0).
+        The position in 1-based pixels of the stack (the center of the first
+        pixel is 1, 1), as in FITS and DS9.
     ra_deg, dec_deg : `float`
         The sky position, in degrees: the catalog's (moved to the date of the
         stack) when there is one, else the detection's.
@@ -98,7 +98,7 @@ class StackIdentification(BaseModel):
         Where the viewer's copy of the stack (its stretched picture) starts
         on the stack, in pixels: 0 when it is the whole stack, the crop's
         corner when it is cropped. Subtract them from ``x`` and ``y`` to place
-        a star on that copy.
+        a star on that copy (the result is still 1-based).
     viewer_width, viewer_height : `int`
         The size of that copy, in pixels.
     alias_records_updated : `int`

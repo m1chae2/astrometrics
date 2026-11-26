@@ -305,7 +305,7 @@ def test_a_listing_during_a_long_edit_does_not_orphan_the_edit(tmp_path: Path) -
     stage_target.stacking.stacked_image = new_stack
 
     # The viewer asks for the target list while the stack is still running.
-    astrometrics.targets.list()
+    astrometrics.targets.query(detail="objects", limit=None)
 
     # The stage finishes: it records the picture, then the service saves.
     stage_target.stacking.processed_image = new_picture
@@ -329,7 +329,7 @@ def test_a_listing_does_not_make_a_later_save_overwrite_other_targets(tmp_path: 
     local_database.save_target(app_config=config, target=Target(id="Target Charlie", common_name="original"))
 
     astrometrics = Astrometrics(config=config)
-    astrometrics.targets.list()
+    astrometrics.targets.query(detail="objects", limit=None)
     astrometrics.targets.get("Target Alpha").common_name = "Alpha Mutated"
 
     # Another process updates Charlie on disk after the listing.
@@ -356,7 +356,7 @@ def test_a_target_fetched_before_a_listing_is_still_the_one_the_catalog_holds(tm
     astrometrics = Astrometrics(config=config)
     stage_target = astrometrics.targets.get("Stacked Target")
 
-    listed = astrometrics.targets.list()
+    listed = astrometrics.targets.query(detail="objects", limit=None).objects
 
     assert listed[0] is stage_target
     stage_target.stacking.stacked_image = "/stacks/Stacked_Target_L_Stacked.fits"
@@ -375,7 +375,7 @@ def test_a_listing_refreshes_an_unedited_target_with_what_another_process_saved(
     local_database.save_target(
         app_config=config, target=Target(id="Target Alpha", common_name="changed by other process")
     )
-    listed = astrometrics.targets.list()
+    listed = astrometrics.targets.query(detail="objects", limit=None).objects
 
     assert listed[0] is held
     assert held.common_name == "changed by other process"
@@ -408,7 +408,7 @@ def test_a_listing_keeps_the_frame_objects_a_job_holds(tmp_path: Path) -> None:
     astrometrics = Astrometrics(config=config)
     held_frame = astrometrics.targets.get("Framed Target").frames[0]
 
-    astrometrics.targets.list()
+    astrometrics.targets.query(detail="objects", limit=None)
 
     assert astrometrics.targets.get("Framed Target").frames[0] is held_frame
     held_frame.quality_measured_file_size = 123
@@ -432,7 +432,7 @@ def test_a_listing_refreshes_held_frames_adds_new_ones_and_drops_gone_ones(tmp_p
         ],
     )
     local_database.save_target(app_config=config, target=other)
-    astrometrics.targets.list()
+    astrometrics.targets.query(detail="objects", limit=None)
 
     frames = astrometrics.targets.get("Framed Target").frames
     assert [frame.path for frame in frames] == ["/frames/c.fits", "/frames/b.fits"]
@@ -452,7 +452,7 @@ def test_a_listing_keeps_a_target_that_has_unsaved_edits(tmp_path: Path) -> None
     local_database.save_target(
         app_config=config, target=Target(id="Target Alpha", common_name="changed by other process")
     )
-    astrometrics.targets.list()
+    astrometrics.targets.query(detail="objects", limit=None)
 
     assert held.common_name == "edited here"
     astrometrics.targets.save()
@@ -466,7 +466,7 @@ def test_scripts_that_edit_listed_targets_can_still_save_them(tmp_path: Path) ->
     local_database.save_target(app_config=config, target=Target(id="Target Beta"))
     astrometrics = Astrometrics(config=config)
 
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
         target.common_name = f"{target.id} edited"
     astrometrics.targets.save()
 
@@ -483,9 +483,9 @@ def test_read_saved_returns_what_is_stored_not_what_is_in_memory(tmp_path: Path)
     target = astrometrics.targets.get("Target Alpha")
     target.stacking.stacked_image = "/stacks/Alpha_L_Stacked.fits"
 
-    assert astrometrics.targets.read_saved("Target Alpha").stacking.stacked_image == ""
+    assert astrometrics.targets.get("Target Alpha", refresh="storage").stacking.stacked_image == ""
     astrometrics.targets.save()
-    assert astrometrics.targets.read_saved("Target Alpha").stacking.stacked_image == (
+    assert astrometrics.targets.get("Target Alpha", refresh="storage").stacking.stacked_image == (
         "/stacks/Alpha_L_Stacked.fits"
     )
-    assert astrometrics.targets.read_saved("No Such Target") is None
+    assert astrometrics.targets.get("No Such Target", refresh="storage") is None

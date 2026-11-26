@@ -54,7 +54,7 @@ def test_the_main_sub_apis_are_reflected(registry: ToolRegistry) -> None:
     """Tools of the top-level and nested sub-APIs are registered."""
     names = set(registry.tools)
     for name in (
-        "target_list",
+        "target_query",
         "target_create",
         "visualization_render_fits",
         "star_query",
@@ -76,7 +76,7 @@ def test_delete_methods_are_never_offered_as_tools(registry: ToolRegistry) -> No
 
 async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
     """Running a reflected tool returns text content."""
-    reply = await registry.execute("target_list", {})
+    reply = await registry.execute("target_query", {})
     assert reply
     assert reply[0].type == "text"
 

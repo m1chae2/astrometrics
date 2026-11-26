@@ -8,7 +8,7 @@ the sky (scaled by cos(dec), wrapped at 0h/24h); a solve within the
 tolerance stops the loop without a sync; a solve outside it syncs to the
 solved position and slews back, in degrees that the mount turns into
 hours; failures are recorded and retried; and `abort_motion` stops the
-loop. `solved_center` reads the middle of a plate-solved image.
+loop.
 """
 
 import math
@@ -18,7 +18,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from astropy.wcs import WCS
 
 from astrometricslib.exceptions import PlateSolveFailedError
 from wayfindinglib.models.session.centering_exposure import CenteringExposure
@@ -233,28 +232,6 @@ def test_abort_motion_stops_the_loop(monkeypatch: pytest.MonkeyPatch, mount_call
     assert centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0), max_iterations=5) is False
     assert mount_calls["sync"] == []
     assert len(context.records.attempts) == 1
-
-
-def test_solved_center_reads_the_middle_of_the_image() -> None:
-    """The center pixel, not the reference pixel, gives the solved position."""
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    wcs.wcs.crval = [10.0, 20.0]
-    wcs.wcs.crpix = [1.0, 1.0]
-    wcs.wcs.cdelt = [-1 / 3600, 1 / 3600]
-
-    ra_deg, dec_deg = centering.solved_center(wcs, image_shape=(201, 201))
-
-    assert dec_deg == pytest.approx(20.0 + 100 / 3600, abs=1e-5)
-    assert ra_deg < 10.0
-
-
-def test_solved_center_falls_back_to_the_reference_point() -> None:
-    """Without an image size, the reference point is used, wrapped."""
-    wcs = WCS(naxis=2)
-    wcs.wcs.crval = [-5.0, 12.0]
-
-    assert centering.solved_center(wcs) == pytest.approx((355.0, 12.0))
 
 
 class _RecordingCamera:

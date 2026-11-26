@@ -56,8 +56,9 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     targets = {"M 81": Target(id="M 81", ra="09:55:33", dec="+69:03:55")}
     astrometrics = SimpleNamespace(
         targets=SimpleNamespace(
-            get=lambda target_id, refresh=False: targets.get(target_id),
-            resolve=lambda target: targets[target] if isinstance(target, str) else target,
+            get=lambda target, refresh=False, required=False: (
+                (targets[target] if isinstance(target, str) else target) if required else targets.get(target)
+            ),
         ),
         # The library's frame counting also reads frame judgments; no target
         # here has judged frames.

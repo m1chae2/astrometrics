@@ -32,10 +32,12 @@ from astrometricslib.api import _processing_stacking as _stacking
 from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.foundation.jobs.runner import background_job
+from astrometricslib.models.plate_solution import PlateSolution
 from astrometricslib.models.processing_results import (
     ProcessTargetResult,
 )
+from astrometricslib.models.stack_identification import StackIdentification
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.analysis_stage_names import (
     ANALYSIS_STAGES,
@@ -47,6 +49,7 @@ from astrometricslib.pipelines.shared.analysis_configuration import (
 )
 from astrometricslib.pipelines.shared.api_arguments import (
     check_choice,
+    check_limit,
     reject_unused_arguments,
     resolve_target,
 )
@@ -114,9 +117,9 @@ class ProcessingPipelines:
     drivers : `Drivers`, optional
         The plate solver, stacking program and SIMBAD driver to use. Any
         left out is the built-in one (Astrometry.net, Siril, astroquery).
-        They reach `stack`, the astrometry, photometry and spectroscopy
-        stages of `process_target` for one target, and
-        `run_spectroscopy_by_session`.
+        They reach `stack`, `plate_solve`, `identify_stack`, and the
+        astrometry, photometry and spectroscopy stages of `process_target`
+        for one target.
         `process_target` for several targets runs in worker processes, which
         cannot receive them, so it refuses to start when any were given.
 
@@ -314,9 +317,9 @@ class ProcessingPipelines:
             ``use_astrometry_seed`` and ``max_workers``.
         spectroscopy : `dict`, optional
             Options for the spectroscopy stage: ``path`` and ``limit`` (a
-            cap on how many stars to process, the brightest first; left out or
-            `None`, every usable identified star is processed. The user
-            removed the top-10 default on 2026-11-01).
+            cap on how many stars to process, the brightest first, at least
+            1; left out or `None`, every usable identified star is
+            processed. The user removed the top-10 default on 2026-11-01).
         asteroids : `dict`, optional
             Options for the asteroid search, which is experimental: its
             false-positive rate is not measured on real data, so a person
@@ -366,10 +369,10 @@ class ProcessingPipelines:
         Raises
         ------
         InvalidArgumentError
-            If a stage or stage option is unknown, or an argument the form
-            does not use is given. Also if several targets are asked for
-            while `Astrometrics` was given drivers, because the worker
-            processes cannot receive them.
+            If a stage or stage option is unknown, the spectroscopy ``limit``
+            is below 1, or an argument the form does not use is given. Also
+            if several targets are asked for while `Astrometrics` was given
+            drivers, because the worker processes cannot receive them.
         """
         from astrometricslib.pipelines import tasks
 
@@ -399,7 +402,7 @@ class ProcessingPipelines:
             from astrometricslib.pipelines.target_batch import process_targets_in_parallel
 
             if target is None:
-                target_ids = [item.id for item in self._targets.list()]
+                target_ids = [item.id for item in self._targets.query(detail="objects", limit=None).objects]
             else:
                 target_ids = [self._resolve(item).id for item in target]
             return process_targets_in_parallel(
@@ -435,6 +438,7 @@ class ProcessingPipelines:
                     f"Unknown {stage} option(s): {', '.join(unknown)}. "
                     f"Choose from: {', '.join(sorted(tasks.STAGE_OPTIONS[stage]))}."
                 )
+        check_limit((spectroscopy or {}).get("limit"), 1, None, name="spectroscopy limit")
         from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options
 
         moving_object_config_from_options((asteroids or {}).get("moving_object_config"))
@@ -467,59 +471,9 @@ class ProcessingPipelines:
             on_stages_planned=on_stages_planned,
         )
 
-    def run_spectroscopy_by_session(
-        self,
-        target: str | Target,
-        frame_records: list[Any],
-        max_workers: int | None = None,
-        on_item_complete: Any | None = None,
-    ) -> Any:
-        """Analyze a target's spectroscopy frames, grouped by session.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target whose spectroscopy frames should be processed.
-        frame_records : `list`
-            The frame records to process, grouped internally by session.
-        max_workers : `int`, optional
-            Maximum concurrent worker count; defaults to the
-            configured spectroscopy concurrency.
-        on_item_complete : `Callable`, optional
-            A function to run after each session finishes.
-
-        Returns
-        -------
-        summary : `BatchRunSummary`
-            Aggregated success/failure/result state across every
-            session's frames.
-        session_results : `list` [`tuple`]
-            One `(session, identify_result)` pair per session.
-        """
-        from astrometricslib.pipelines.spectroscopy import batch as spectroscopy_batch_operations
-
-        resolved = self._resolve(target)
-        with registered_job(
-            enabled=True,
-            job_type="spectroscopy_session",
-            target_id=resolved.id,
-            completed_message=f"[{resolved.id}] Session-based spectroscopy completed successfully.",
-            failed_message=f"[{resolved.id}] Session-based spectroscopy failed.",
-        ) as job:
-            return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
-                self._config,
-                resolved,
-                frame_records,
-                max_workers=max_workers,
-                on_item_complete=on_item_complete,
-                job_id=job.job_id,
-                drivers=self._drivers,
-                measured_at=datetime.now(UTC),
-            )
-
     # -- Reading and changing a target's stacks and set-aside frames --------
 
-    def plate_solve(self, image_path: str) -> Any | None:
+    def plate_solve(self, image_path: str) -> PlateSolution | None:
         """Work out where on the sky an image points, from its stars.
 
         Plate solving matches the pattern of stars in the image against a
@@ -533,18 +487,35 @@ class ProcessingPipelines:
 
         Returns
         -------
-        wcs : `astropy.wcs.WCS` or `None`
-            The pixel-to-sky mapping, or `None` when the image cannot be
-            read or too few stars are found to try a solve. When a solve is
-            tried and the star pattern cannot be matched, the star
-            identifier raises `PlateSolveFailedError` instead.
+        solution : `PlateSolution` or `None`
+            Fields: ``path``, ``ra_deg`` and ``dec_deg`` (the image center,
+            ICRS degrees), ``pixel_scale_arcsec``, ``rotation_deg`` (where the
+            image's +y axis points, degrees from north toward east),
+            ``width``, ``height`` and ``wcs_header`` (the sky map's header
+            cards; ``astropy.wcs.WCS(solution.wcs_header)`` rebuilds the
+            mapping). `None` when the image cannot be read or too few stars
+            are found to try a solve. When a solve is tried and the star
+            pattern cannot be matched, `PlateSolveFailedError` is raised
+            instead.
         """
+        from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
         from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+        from astrometricslib.pipelines.shared.header_wcs import describe_plate_solution
 
         _, wcs = StarIdentifier(config=self._config, drivers=self._drivers).process_image(
             image_path, attempt_plate_solving=True
         )
-        return wcs
+        if wcs is None:
+            return None
+        if wcs.pixel_shape:
+            width, height = wcs.pixel_shape
+        else:
+            try:
+                header = read_header(image_path, first_hdu_only=True)
+            except FITS_READ_ERRORS:
+                return None
+            width, height = int(header.get("NAXIS1", 0)), int(header.get("NAXIS2", 0))
+        return describe_plate_solution(image_path, wcs, int(width), int(height))
 
     def identify_stack(
         self,
@@ -552,7 +523,7 @@ class ProcessingPipelines:
         *,
         progress: Callable[[float, str], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
-    ) -> Any:
+    ) -> StackIdentification:
         """Name every star the stack's own star finder detected.
 
         The stack's saved plate solution is used when it is real (header
@@ -583,9 +554,10 @@ class ProcessingPipelines:
         identification : `StackIdentification`
             Fields: ``path``, ``width``, ``height``, ``solution_reused``,
             ``stars`` (each with ``id``, ``name``, ``kind`` -- ``matched``,
-            ``unmatched`` or ``catalog_only`` --, ``x`` and ``y`` in 0-based
-            pixels, ``ra_deg``, ``dec_deg``, ``g_mag``, ``gaia_source_id``,
-            ``name_source`` and ``aliases``), the three counts, ``gaia_depth``,
+            ``unmatched`` or ``catalog_only`` --, ``x`` and ``y`` in 1-based
+            pixels (the center of the first pixel is 1, 1), ``ra_deg``,
+            ``dec_deg``, ``g_mag``, ``gaia_source_id``, ``name_source`` and
+            ``aliases``), the three counts, ``gaia_depth``,
             ``catalog_only_limit``, ``gaia_tiles_missing``, ``simbad_used``,
             ``notes`` and ``alias_records_updated``.
         """
@@ -595,7 +567,7 @@ class ProcessingPipelines:
             stack_path, config=self._config, drivers=self._drivers, progress=progress, should_stop=should_stop
         )
 
-    def get_stack_identification(self, stack_path: str) -> Any | None:
+    def get_stack_identification(self, stack_path: str) -> StackIdentification | None:
         """Read the saved result of `identify_stack` for an unchanged stack.
 
         Parameters

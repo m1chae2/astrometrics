@@ -183,6 +183,7 @@ astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRES
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SIMBAD_DONE,Share of a progress bar; display only
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SOLVED,Share of a progress bar; display only
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_TILES_DONE,Share of a progress bar; display only
+astrometricslib/pipelines/astrometry/processing/stack_identification.py,_ZERO_BASED_FILE_VERSION,Version number of the older saved file layout that is converted on read; plumbing
 astrometricslib/pipelines/astrometry/processing/star_detection.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE_SOLVE_SOURCES,Decided not tuning in the #175 review (AST-D05): speed cap; the brightest stars are enough to solve
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service

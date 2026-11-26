@@ -256,7 +256,8 @@ def _named_star_marks(
     shown = 0
     for star in identification.stars:
         if star.library_id in with_photometry:
-            marks.append(OverlayMark("stars", star.x, star.y, with_photometry[star.library_id]))
+            # The identification is in 1-based pixels; the marks are 0-based.
+            marks.append(OverlayMark("stars", star.x - 1.0, star.y - 1.0, with_photometry[star.library_id]))
             shown += 1
     return f"{shown:,} {'star' if shown == 1 else 'stars'} with photometry"
 

@@ -75,7 +75,6 @@ def stack(
     last_file: str | None = None,
     since: TimeInput = None,
     until: TimeInput = None,
-    plan_only: bool = False,
     kind: StackKind = "imaging",
     camera_id: str | None = None,
     focal_length_mm: float | None = None,
@@ -122,9 +121,6 @@ def stack(
         Only frames taken at or after this time (UTC if no offset).
     until : `str`, `datetime` or `Time`, optional
         Only frames taken at or before this time.
-    plan_only : `bool`, optional
-        Only report which frames would be stacked. Nothing is stacked
-        or saved.
     kind : `str`, optional
         ``"imaging"`` (default) or ``"spectral"`` frames.
     camera_id : `str`, optional
@@ -170,9 +166,10 @@ def stack(
     Returns
     -------
     result : `StackResult`
-        The frames chosen and, unless ``plan_only``, the stack's path
-        and quality summary (``quality_summary``). To compare
-        it with the previous stack, use
+        The frames chosen, the stack's path and its quality summary
+        (``quality_summary``). To see the frame choice, or what the stack
+        would set aside, without stacking, use `predict_stack`. To compare
+        the stack with the previous one, use
         `Astrometrics.quality.measure_stack`.
 
     Raises
@@ -208,7 +205,6 @@ def stack(
         resolved,
         chosen,
         kind=kind,
-        plan_only=plan_only,
         force=force,
         preview_settings=PreviewSettings(
             denoise=denoise, denoise_strength=denoise_strength, star_toning=star_toning
@@ -334,6 +330,7 @@ def predict_stack(
     kind: StackKind = "imaging",
     camera_id: str | None = None,
     focal_length_mm: float | None = None,
+    checks: bool = True,
     register_job: bool = False,
 ) -> StackPrediction:
     """Say what a stack would do with its frames, without stacking.
@@ -349,7 +346,9 @@ def predict_stack(
     Nothing is stacked, moved, stored or saved, so the answer matches the
     stack as long as the frames, the settings and the calibration library
     stay the same. The checks read every frame, so a large target takes
-    a while.
+    a while. With ``checks=False`` only the frames are chosen, which is
+    quick and reads no frame: use it to see which frames a stack would get,
+    or to have a frame choice refused before a stack starts.
 
     Parameters
     ----------
@@ -374,14 +373,19 @@ def predict_stack(
         Only frames from this camera.
     focal_length_mm : `float`, optional
         Only frames taken at this focal length.
+    checks : `bool`, optional
+        Run the frame checks and the calibration choice. Defaults to `True`.
+        With `False`, the answer has only the frame choice (``checks_run``
+        is `False`).
     register_job : `bool`, optional
         Record the run in the job list. Defaults to `False`.
 
     Returns
     -------
     prediction : `StackPrediction`
-        The counts, the frames set aside and flagged with their reasons,
-        each group's calibration choice, and the checks' warnings.
+        The counts, the first and last chosen file, the frames set aside
+        and flagged with their reasons, each group's calibration choice,
+        and the checks' warnings.
 
     Notes
     -----
@@ -391,7 +395,7 @@ def predict_stack(
     `NotFoundError` when the target, camera or frame choice matches
     nothing.
     """
-    from astrometricslib.pipelines.stacking.stack_prediction import predict_stack
+    from astrometricslib.pipelines.stacking.stack_prediction import list_chosen_frames, predict_stack
 
     check_choice("kind", kind, STACK_KINDS)
     resolved = self._resolve(target)
@@ -407,6 +411,8 @@ def predict_stack(
         camera_id,
         focal_length_mm,
     )
+    if not checks:
+        return list_chosen_frames(resolved, chosen, kind)
     with registered_job(enabled=register_job, job_type="diagnostics", target_id=resolved.id):
         return predict_stack(resolved, chosen, kind, self.calibration._calibration_library)
 

@@ -52,6 +52,9 @@ def _optional_float(value: Any) -> float | None:
 def _to_point_source(row: dict[str, Any]) -> PointSource:
     """Turn one detector row into a `PointSource` with plain Python numbers.
 
+    The detector counts pixels from 0; the `PointSource` counts them from 1,
+    as FITS and DS9 do.
+
     Parameters
     ----------
     row : `dict` [`str`, `Any`]
@@ -67,8 +70,8 @@ def _to_point_source(row: dict[str, Any]) -> PointSource:
     pixel_count = row.get("n_pixels")
     return PointSource(
         id=None if identifier is None else int(identifier),
-        x_centroid=float(row.get("x_centroid", row.get("xcentroid"))),
-        y_centroid=float(row.get("y_centroid", row.get("ycentroid"))),
+        x_centroid=float(row.get("x_centroid", row.get("xcentroid"))) + 1.0,
+        y_centroid=float(row.get("y_centroid", row.get("ycentroid"))) + 1.0,
         flux=float(row.get("flux", 0.0)),
         peak=_optional_float(row.get("peak")),
         sharpness=_optional_float(row.get("sharpness")),
@@ -244,7 +247,7 @@ def detect_point_sources(
     Returns
     -------
     detection : `PointSourceDetection`
-        The stars found, brightest first.
+        The stars found, brightest first, in 1-based pixels.
     """
     from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 

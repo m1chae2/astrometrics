@@ -65,7 +65,9 @@ def library(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         """
         return [SimpleNamespace(path=f"/anywhere/{name}", role="LIGHT") for name in names]
 
-    fake_targets = SimpleNamespace(list=lambda: [], get=lambda target_id: SimpleNamespace(frames=frames()))
+    fake_targets = SimpleNamespace(
+        query=lambda **_k: SimpleNamespace(objects=[]), get=lambda target_id: SimpleNamespace(frames=frames())
+    )
     monkeypatch.setattr(_FAKE_LIBRARY, "targets", fake_targets)
     monkeypatch.setattr(
         frame_status.remote_transfer_tasks,

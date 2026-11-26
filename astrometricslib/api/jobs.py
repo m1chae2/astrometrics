@@ -13,7 +13,7 @@ history without any chance of altering it.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
@@ -32,6 +32,7 @@ from astrometricslib.models.job_queries import (
 )
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.pipelines.shared.api_arguments import check_limit
 
 __all__ = ["Jobs"]
 
@@ -240,7 +241,7 @@ class Jobs:
         job_type: str | None = None,
         status: str | None = None,
         active_only: bool = False,
-        detail: str = "summary",
+        detail: Literal["summary", "log_tail", "result", "lineage", "warnings"] = "summary",
         lines: int = 50,
         limit: int = 20,
         offset: int = 0,
@@ -279,6 +280,7 @@ class Jobs:
             How many log lines to return, from 1 to 200. Defaults to 50.
         limit : `int`, optional
             How many jobs or runs to return, from 1 to 50. Defaults to 20.
+            `None` is not accepted: a job list is always capped.
         offset : `int`, optional
             For a job list, how many of the newest matching jobs to skip, so
             ``limit=20, offset=20`` gives the next 20. Defaults to 0.
@@ -293,7 +295,7 @@ class Jobs:
         ------
         InvalidArgumentError
             If the detail is unknown, a detail lacks the job or target it
-            needs, or ``offset`` is negative.
+            needs, or ``limit``, ``lines`` or ``offset`` is out of range.
         NotFoundError
             If the job does not exist, or there is no logs database yet for
             a question about one job or one target. For
@@ -321,10 +323,9 @@ class Jobs:
             raise InvalidArgumentError(
                 "detail='lineage' needs a target_id, or a job_id of a job that has one."
             )
-        if offset < 0:
-            raise InvalidArgumentError("offset must be 0 or more.", details={"offset": offset})
-        limit = max(1, min(int(limit), MAXIMUM_JOBS))
-        lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
+        check_limit(limit, 1, MAXIMUM_JOBS, allow_none=False)
+        check_limit(lines, 1, MAXIMUM_LOG_LINES, name="lines", allow_none=False)
+        check_limit(offset, 0, None, name="offset", allow_none=False)
         if detail == "warnings":
             return self._warnings(job_id)
         if not Path(self._database_path).is_file():

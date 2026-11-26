@@ -51,7 +51,7 @@ def get_star_shape_review(
         The verdicts, the set-aside frames, the typical elongation and the
         per-frame series.
     """
-    resolved = context.astrometrics.targets.resolve(target)
+    resolved = context.astrometrics.targets.get(target, refresh=True, required=True)
     frames, stack, set_aside = read_star_shape_rows(context.astrometrics, resolved, night, frame_paths)
     limit = None
     if frames:

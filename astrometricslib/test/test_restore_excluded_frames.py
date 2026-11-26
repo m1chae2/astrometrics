@@ -43,7 +43,7 @@ def run_script(arguments: list[str], applied_count: int) -> tuple[MagicMock, Mag
     """
     astrometrics = MagicMock()
     target = SimpleNamespace(id="M 1")
-    astrometrics.targets.list.return_value = [target]
+    astrometrics.targets.query.return_value.objects = [target]
     astrometrics.targets.get.return_value = target
     restore = MagicMock()
     restore.side_effect = lambda pipelines, target, apply: RestoreReport(

@@ -169,8 +169,9 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
     if not sources:
         return None
     brightest = sources[0]
-    x = brightest.x_centroid
-    y = brightest.y_centroid
+    # The sources are in 1-based pixels; the array index counts from 0.
+    x = brightest.x_centroid - 1.0
+    y = brightest.y_centroid - 1.0
 
     box = ZERO_ORDER_FWHM_BOX_RADIUS_PX
     x, y = round(x), round(y)

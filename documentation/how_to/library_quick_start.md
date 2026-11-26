@@ -33,7 +33,7 @@ config = get_configuration()
 astrometrics = Astrometrics(config)
 
 # A target is one object in the sky, with its frames.
-targets = astrometrics.targets.list()
+targets = astrometrics.targets.query(detail="objects", limit=None).objects
 target = astrometrics.targets.get("M 13")
 
 # Register frames that are already on disk, then stack the light frames.

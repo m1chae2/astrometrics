@@ -74,7 +74,9 @@ class _Library:
         """Hold the timestamps of each target's frames."""
         self.frames = frames
         self.calls: list[str] = []
-        self.targets = SimpleNamespace(list=self._list, get=self._get)
+        self.targets = SimpleNamespace(
+            query=lambda **_k: SimpleNamespace(objects=self._list()), get=self._get
+        )
 
     def _target(self, target_id: str) -> SimpleNamespace:
         """Make the target object for an id.

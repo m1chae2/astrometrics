@@ -58,57 +58,46 @@ class _FakeTargetCatalog:
         self.catalog_names = {"NGC 7331"}
         self.created: list[str] = []
 
-    def get(self, target_id: str, refresh: bool = False) -> Target | None:
-        """Find one target by id.
+    def get(
+        self, target_id: str | Target, refresh: bool | str = False, *, required: bool = False
+    ) -> Target | None:
+        """Find one target by id, as the library does.
 
         Parameters
         ----------
-        target_id : `str`
-            The id.
-        refresh : `bool`, optional
+        target_id : `str` or `Target`
+            The id, or a target, which is given back as it is.
+        refresh : `bool` or `str`, optional
             Ignored.
+        required : `bool`, optional
+            Raise `NotFoundError` instead of giving `None`.
 
         Returns
         -------
         target : `Target` or `None`
             The target, or `None`.
-        """
-        return self._targets.get(target_id)
-
-    def resolve(self, target: str | Target) -> Target:
-        """Turn a target id into its `Target`, as the library does.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            A target id or a target.
-
-        Returns
-        -------
-        resolved : `Target`
-            The target.
 
         Raises
         ------
         NotFoundError
-            If no target has the id.
+            If no target has the id and ``required`` is set.
         """
-        if isinstance(target, Target):
-            return target
-        found = self.get(target, refresh=True)
-        if found is None:
-            raise NotFoundError(f"No target with id {target!r} in the library.")
+        if isinstance(target_id, Target):
+            return target_id
+        found = self._targets.get(target_id)
+        if found is None and required:
+            raise NotFoundError(f"No target with id {target_id!r} in the library.")
         return found
 
-    def list(self) -> list[Target]:
-        """Give every target.
+    def query(self, **_kwargs: object) -> SimpleNamespace:
+        """Give every target, as ``query(detail="objects")`` does.
 
         Returns
         -------
-        targets : `list` [`Target`]
-            The library's targets.
+        answer : `SimpleNamespace`
+            The library's targets in ``objects``.
         """
-        return list(self._targets.values())
+        return SimpleNamespace(objects=list(self._targets.values()))
 
     def add(self, target: Target) -> None:
         """Keep one more target.

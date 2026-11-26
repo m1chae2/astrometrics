@@ -99,8 +99,8 @@ def test_a_second_list_with_nothing_written_does_not_read(config: AppConfigurati
     catalog, access, _other = _library(config)
     reads_at_start = access.full_reads
 
-    first = catalog.list()
-    second = catalog.list()
+    first = catalog.query(detail="objects", limit=None).objects
+    second = catalog.query(detail="objects", limit=None).objects
 
     assert access.full_reads == reads_at_start
     assert [target.id for target in first] == ["M 1", "M 2"]
@@ -118,14 +118,14 @@ def test_a_write_by_another_program_is_seen_by_list(config: AppConfiguration) ->
     )
     reads_before = access.full_reads
 
-    listed = catalog.list()
+    listed = catalog.query(detail="objects", limit=None).objects
 
     assert access.full_reads == reads_before + 1
     assert sorted(target.id for target in listed) == ["M 1", "M 2", "M 3"]
     assert next(target for target in listed if target.id == "M 1") is held
     assert held.common_name == "Changed"
     # The next call has nothing new to read.
-    catalog.list()
+    catalog.query(detail="objects", limit=None)
     assert access.full_reads == reads_before + 1
 
 
@@ -141,7 +141,7 @@ def test_unsaved_edits_survive_a_refresh(config: AppConfiguration) -> None:
         lambda _old, new: new,
     )
 
-    catalog.list()
+    catalog.query(detail="objects", limit=None)
     assert edited.common_name == "My edit"
     assert untouched.common_name == "Elsewhere"
 
@@ -193,7 +193,7 @@ def test_a_target_deleted_elsewhere_is_dropped_by_refresh(config: AppConfigurati
     other.delete_by_ids("target_catalog", ["M 2"])
 
     assert catalog.get("M 2", refresh=True) is None
-    assert [target.id for target in catalog.list()] == ["M 1"]
+    assert [target.id for target in catalog.query(detail="objects", limit=None).objects] == ["M 1"]
 
 
 def test_refreshed_targets_equal_a_full_read(config: AppConfiguration) -> None:
@@ -212,7 +212,7 @@ def test_refreshed_targets_equal_a_full_read(config: AppConfiguration) -> None:
         lambda _old, new: new,
     )
     catalog.get("M 1", refresh=True)
-    listed = catalog.list()
+    listed = catalog.query(detail="objects", limit=None).objects
 
     stored = {target.id: target for target in other.get("target_catalog", {})}
     assert {target.id for target in listed} == set(stored)
@@ -228,7 +228,7 @@ def test_a_save_by_this_catalog_is_seen_by_the_next_list(config: AppConfiguratio
     catalog.save()
     reads_before = access.full_reads
 
-    listed = catalog.list()
+    listed = catalog.query(detail="objects", limit=None).objects
 
     assert access.full_reads == reads_before + 1
     assert next(item for item in listed if item.id == "M 1").common_name == "Saved"
@@ -243,7 +243,7 @@ def test_several_threads_can_refresh_together(config: AppConfiguration) -> None:
         """Refresh the catalog many times, recording any error."""
         try:
             for _ in range(20):
-                catalog.list()
+                catalog.query(detail="objects", limit=None)
                 catalog.get("M 1", refresh=True)
                 catalog.get("M 2", refresh=True)
         except BaseException as error:  # ruff: ignore[blind-except]
@@ -266,6 +266,6 @@ def test_several_threads_can_refresh_together(config: AppConfiguration) -> None:
         thread.join(timeout=60)
 
     assert failures == []
-    ids = [target.id for target in catalog.list()]
+    ids = [target.id for target in catalog.query(detail="objects", limit=None).objects]
     assert sorted(ids) == ["M 1", "M 2"]
     assert catalog.get("M 2", refresh=True).common_name == "v9"

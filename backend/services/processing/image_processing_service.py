@@ -379,9 +379,10 @@ class ImageProcessingService(BaseBackgroundService):
 
         The library checks an exact frame list when it chooses the frames
         (one camera, one optic, and not a mix of imaging and spectral
-        frames). Asking for a plan runs that check without stacking or
-        writing anything, so a bad list is refused here as an error to the
-        caller, not as a job that fails.
+        frames). Asking for the frame choice alone (`predict_stack` with
+        ``checks=False``) runs that check without stacking or writing
+        anything, so a bad list is refused here as an error to the caller,
+        not as a job that fails.
 
         Parameters
         ----------
@@ -405,7 +406,7 @@ class ImageProcessingService(BaseBackgroundService):
         wanted = {item if isinstance(item, str) else item.get("path") for item in image_files}
         frames = [frame for frame in target.frames if frame.path in wanted]
         if frames:
-            self._processing_api.stack(target_id, frames=frames, plan_only=True, register_job=False)
+            self._processing_api.predict_stack(target_id, frames=frames, checks=False)
 
     def process_target(
         self,
@@ -419,7 +420,6 @@ class ImageProcessingService(BaseBackgroundService):
         until: str | None = None,
         camera_id: str | None = None,
         focal_length_mm: float | None = None,
-        plan_only: bool = False,
         force: bool = False,
         denoise: bool | None = None,
         denoise_strength: float | None = None,
@@ -459,8 +459,6 @@ class ImageProcessingService(BaseBackgroundService):
             Only frames from this camera.
         focal_length_mm : `float`, optional
             Only frames taken at this focal length.
-        plan_only : `bool`, optional
-            Only say which frames would be stacked. No job starts.
         force : `bool`, optional
             Stack again even if nothing changed since the stack on disk.
         denoise : `bool`, optional
@@ -475,16 +473,14 @@ class ImageProcessingService(BaseBackgroundService):
         result : `dict`
             Dict describing the job: `"status"` (`"started"` or
             `"already_running"`), `"jobId"`, `"expectedOutput"`, and
-            `"logFile"`. With ``plan_only`` it is ``"status": "plan"`` and
-            ``"plan"``, the library's frame choice (count, first and last
-            file, camera), and no job starts.
+            `"logFile"`.
 
         Raises
         ------
         InvalidArgumentError
             If ``image_files`` is combined with a frame choice. The library's
-            plan raises its own errors for a choice that is out of range or
-            matches no frame.
+            frame choice raises its own errors for a choice that is out of
+            range or matches no frame.
         """
         selection = {
             name: value
@@ -512,14 +508,12 @@ class ImageProcessingService(BaseBackgroundService):
             stack_options["force"] = True
         choose_here = image_files is None
         if choose_here:
-            # The library chooses the frames. A plan is quick and writes
-            # nothing, so a choice that matches no frame, or frames from two
-            # cameras, is refused here instead of as a failed job.
+            # The library chooses the frames. The choice alone is quick and
+            # writes nothing, so a choice that matches no frame, or frames
+            # from two cameras, is refused here instead of as a failed job.
             selection["kind"] = kind or "imaging"
-            plan = self._processing_api.stack(target_id, plan_only=True, register_job=False, **selection)
-            if plan_only:
-                return {"status": "plan", "plan": plan.model_dump(mode="json")}
-        elif selection or kind is not None or plan_only:
+            self._processing_api.predict_stack(target_id, checks=False, **selection)
+        elif selection or kind is not None:
             raise InvalidArgumentError(
                 "Pass image_files, or choose the frames with kind, filter_name, first_file, last_file, "
                 "since, until, camera_id and focal_length_mm, not both."

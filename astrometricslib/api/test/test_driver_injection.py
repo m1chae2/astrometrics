@@ -21,7 +21,7 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from astrometricslib import Astrometrics, FilterType, FrameRecord, Target
+from astrometricslib import FilterType, FrameRecord, Target
 from astrometricslib._internal.drivers import (
     PlateSolveDriver,
     StackingDriver,
@@ -339,11 +339,12 @@ def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: s
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
 
-    wcs = astrometrics.processing.plate_solve(field_image)
+    solution = astrometrics.processing.plate_solve(field_image)
 
     assert len(solver.calls) == 1
     assert simbad.region_calls
-    assert wcs.wcs.crval[1] == pytest.approx(FIELD_DEC_DEG)
+    assert solution.dec_deg == pytest.approx(FIELD_DEC_DEG, abs=0.5)
+    assert solution.width > 0 and solution.pixel_scale_arcsec > 0
 
 
 def make_stacking_target(tmp_path: Path) -> Target:
@@ -496,7 +497,7 @@ def test_defaults_build_the_real_drivers() -> None:
     assert isinstance(drivers.stacking_or_default(), SirilStackingDriver)
     assert isinstance(drivers.simbad_or_default(), AstroquerySimbadDriver)
 
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock())
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
     assert isinstance(identifier.solver, AstrometryNetPlateSolveDriver)
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)

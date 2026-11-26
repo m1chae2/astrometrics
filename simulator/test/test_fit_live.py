@@ -25,7 +25,6 @@ import time
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -227,7 +226,7 @@ def test_frames_measure_the_sky_and_star_width_the_fit_aimed_at(
         time.sleep(2)
     frames = sorted(pictures.glob("*.fits"))
     assert len(frames) >= FRAMES, f"only {len(frames)} frames appeared"
-    astrometrics = Astrometrics(config_in_tmp_path, MagicMock())
+    astrometrics = Astrometrics(config_in_tmp_path)
     report = astrometrics.quality.measure_folder(
         str(pictures),
         limit=FRAMES,

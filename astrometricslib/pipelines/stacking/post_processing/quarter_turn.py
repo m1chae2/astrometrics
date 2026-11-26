@@ -49,7 +49,7 @@ from astrometricslib._internal.drivers.fits_access import (
     update_first_header,
     write_image,
 )
-from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
+from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, up_angle_degrees
 from astrometricslib.pipelines.shared.session_identification import put_wcs_in_header
 from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
 
@@ -67,7 +67,6 @@ __all__ = [
     "turn_image",
     "turn_wcs",
     "undo_quarter_turn",
-    "up_angle_degrees",
 ]
 
 # The header card that holds the degrees a stack was turned.
@@ -368,33 +367,6 @@ def registration_grid_header(header: fits.Header) -> fits.Header:
     registered = header.copy()
     put_wcs_in_header(registered, original, mark_plate_solved=header_is_plate_solved(header))
     return registered
-
-
-def up_angle_degrees(wcs: WCS, *, top_down: bool) -> float:
-    """Say where the top of the picture points on the sky.
-
-    This is the viewer's rule (`measurePlateGeometry` in
-    ``ui/common/fitsViewer/plateGeometry.ts``): the first row is at the top
-    for a file stored ``ROWORDER = TOP-DOWN`` and at the bottom otherwise.
-
-    Parameters
-    ----------
-    wcs : `astropy.wcs.WCS`
-        The celestial sky map.
-    top_down : `bool`
-        Whether the file's first row is drawn at the top.
-
-    Returns
-    -------
-    angle : `float`
-        Degrees from north toward east, 0 up to 360. 0 means north is at the
-        top.
-    """
-    matrix = np.asarray(wcs.pixel_scale_matrix, dtype=float)
-    row_step = -1.0 if top_down else 1.0
-    up_east = matrix[0, 1] * row_step
-    up_north = matrix[1, 1] * row_step
-    return math.degrees(math.atan2(up_east, up_north)) % 360.0
 
 
 def _distance_from_north(angle: float) -> float:

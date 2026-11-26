@@ -166,7 +166,7 @@ class ImageService:
             One dictionary per header card, with ``"key"``, ``"value"``,
             and ``"comment"`` entries.
         """
-        return self._astrometrics.targets.get_header(resolve_mounted_path(path))
+        return self._astrometrics.targets.read_frame_header(resolve_mounted_path(path), as_cards=True)
 
     def _allowed_image_roots(self) -> list[str]:
         """List the folders a star measurement may read images from.

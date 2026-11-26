@@ -110,9 +110,9 @@
     "processing_plate_solve": {
       "tool_class": "compute",
       "category": "image-processing",
-      "disposition": "fix",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
+      "note": "Since 2026-11-26 (#199) returns a PlateSolution: the image center, pixel scale, rotation and the sky map's header cards. Solves one image in memory and writes nothing."
     },
     "processing_predict_stack": {
       "tool_class": "unclassified",
@@ -134,13 +134,6 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
-    },
-    "processing_run_spectroscopy_by_session": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "fix",
-      "interim_block": "",
-      "note": "Needs Python objects, so it cannot be called through MCP. Consider making it a stage of pipeline_run."
     },
     "processing_set_preview_bright_object": {
       "tool_class": "unclassified",
@@ -450,33 +443,12 @@
       "interim_block": "",
       "note": "Returns the path of one frame, found by ISO, exposure and index."
     },
-    "target_get_header": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Reads one FITS header."
-    },
-    "target_get_stars": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "A script convenience, uncapped. The AI reads a target's stars through star_query."
-    },
     "target_imaged_field_centers": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this library), so it runs as a background job."
-    },
-    "target_list": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Replaced by target_query."
     },
     "target_query": {
       "tool_class": "observe",
@@ -486,18 +458,11 @@
       "note": "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each target's frames per camera; replaces target_get and target_list."
     },
     "target_read_frame_header": {
-      "tool_class": "unclassified",
+      "tool_class": "observe",
       "category": "targets",
-      "disposition": "drop",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Reads a header from any path with typed values. target_get_header already serves an AI client."
-    },
-    "target_read_saved": {
-      "tool_class": "unclassified",
-      "category": "targets",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Returns the whole target record, frames and all, which overflows the reply. Use target_query."
+      "note": "Reads one FITS header. Since 2026-11-26 (#199) it is the one header reader (target_get_header is gone); an AI client passes as_cards=true for key, value and comment text."
     },
     "target_reindex_frames": {
       "tool_class": "change-data",
@@ -505,13 +470,6 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "Writes the frame records. A dry_run mode that only reports what would change would let an AI use it."
-    },
-    "target_resolve": {
-      "tool_class": "compute",
-      "category": "targets",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Returns the whole target record, frames and all, which overflows the reply. Use target_query."
     },
     "target_save": {
       "tool_class": "change-data",

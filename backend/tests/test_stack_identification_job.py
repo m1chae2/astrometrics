@@ -127,6 +127,11 @@ def test_the_job_is_an_analysis_job_with_progress_and_a_result(tmp_path: Path) -
     assert answer["identification"]["stars"][0]["matchKind"] == "matched"
     # The overlay finds the star's library record by this id.
     assert answer["identification"]["stars"][0]["libraryId"] == "* alf Lyr"
+    # The library's 1-based pixels (1, 2) become the overlay's 0-based ones.
+    assert (answer["identification"]["stars"][0]["x"], answer["identification"]["stars"][0]["y"]) == (
+        0.0,
+        1.0,
+    )
     # It is not taken for the target's analysis result.
     assert orchestrator.get_analysis_results("M 99") is None
 

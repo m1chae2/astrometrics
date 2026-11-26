@@ -7,6 +7,7 @@ verifies that each session is tied to the equipment its own data shows.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -408,15 +409,15 @@ def test_frame_lookup_returns_only_light_frames_in_the_time_span() -> None:
             """Stand-in for the target catalog."""
 
             @staticmethod
-            def list() -> list[_Target]:
-                """Return one target.
+            def query(**_kwargs: object) -> SimpleNamespace:
+                """Answer a target query with one target.
 
                 Returns
                 -------
-                targets : `list`
-                    A single target with five frames.
+                answer : `SimpleNamespace`
+                    ``objects`` holds a single target with five frames.
                 """
-                return [_Target()]
+                return SimpleNamespace(objects=[_Target()])
 
     lookup = build_frame_lookup(_Astrometrics())
 

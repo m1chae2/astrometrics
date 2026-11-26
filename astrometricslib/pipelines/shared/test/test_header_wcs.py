@@ -2,15 +2,21 @@
 
 Description: Checks that a plate-solved header gives its two sky axes with
 the SIP distortion terms, that a header with no sky map or a broken one gives
-`None` instead of raising, that a plain dictionary of cards works, and that
-the image corners on the sky follow the SIP distortion.
+`None` instead of raising, that a plain dictionary of cards works, that
+the image corners on the sky follow the SIP distortion, and that a plate
+solution is described by its center, pixel scale and rotation.
 """
 
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.wcs import WCS
 
-from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, image_corners_on_sky
+from astrometricslib.pipelines.shared.header_wcs import (
+    celestial_wcs,
+    describe_plate_solution,
+    image_corners_on_sky,
+)
 
 
 def _solved_header(sip: bool = False) -> fits.Header:
@@ -98,3 +104,33 @@ def test_the_corners_follow_the_distortion() -> None:
     assert corners[0] != pytest.approx((float(plain_ra[0]), float(plain_dec[0])), abs=1e-6)
     expected = wcs.all_pix2world(np.array([399.5]), np.array([299.5]), 0)
     assert corners[2] == pytest.approx((float(expected[0][0]), float(expected[1][0])))
+
+
+def test_a_plate_solution_is_described_at_the_image_center() -> None:
+    """The center pixel, not the reference pixel, gives the solved position."""
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.crval = [10.0, 20.0]
+    wcs.wcs.crpix = [1.0, 1.0]
+    wcs.wcs.cdelt = [-1 / 3600, 1 / 3600]
+
+    solution = describe_plate_solution("frame.fits", wcs, 201, 201)
+
+    assert solution.dec_deg == pytest.approx(20.0 + 100 / 3600, abs=1e-5)
+    assert solution.ra_deg < 10.0
+    assert solution.pixel_scale_arcsec == pytest.approx(1.0)
+    assert solution.rotation_deg == pytest.approx(0.0)
+    assert (solution.width, solution.height) == (201, 201)
+    assert WCS(solution.wcs_header).wcs.crval[1] == pytest.approx(20.0)
+
+
+def test_a_plate_solution_of_unknown_size_uses_the_reference_point() -> None:
+    """Without an image size, the reference point is used, wrapped."""
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.crval = [-5.0, 12.0]
+    wcs.wcs.cdelt = [-1 / 3600, 1 / 3600]
+
+    solution = describe_plate_solution("frame.fits", wcs, 0, 0)
+
+    assert (solution.ra_deg, solution.dec_deg) == pytest.approx((355.0, 12.0))

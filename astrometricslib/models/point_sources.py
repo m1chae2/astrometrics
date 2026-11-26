@@ -17,7 +17,8 @@ class PointSource(BaseModel):
     id : `int` or `None`
         The detector's number for the star.
     x_centroid, y_centroid : `float`
-        The star's center in pixels, counted from 0.
+        The star's center in 1-based pixels (the center of the first pixel
+        is 1, 1), as in FITS and DS9.
     flux : `float`
         The star's total brightness, in the picture's units.
     peak : `float` or `None`

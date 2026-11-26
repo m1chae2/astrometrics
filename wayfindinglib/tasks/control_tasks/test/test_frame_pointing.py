@@ -16,7 +16,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib import AppConfiguration, Astrometrics
+from astrometricslib import AppConfiguration
+from astrometricslib._internal.testing import astrometrics_with_drivers
 from wayfindinglib.tasks.control_tasks import frame_pointing
 
 WHEN = {"DATE-OBS": "2026-09-24T22:00:00"}
@@ -31,7 +32,9 @@ def _context(records: object) -> SimpleNamespace:
     context : `types.SimpleNamespace`
         Holds ``records`` and an `Astrometrics` over a mock database.
     """
-    return SimpleNamespace(records=records, astrometrics=Astrometrics(AppConfiguration(), MagicMock()))
+    return SimpleNamespace(
+        records=records, astrometrics=astrometrics_with_drivers(AppConfiguration(), MagicMock())
+    )
 
 
 def _frame(path: Path, **header: object) -> str:

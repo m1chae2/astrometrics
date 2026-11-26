@@ -168,7 +168,7 @@ def test_simbad_lookups_by_name_and_region_are_refused_or_empty(caplog: pytest.L
 
     sky = SimpleNamespace(
         _astrometrics=SimpleNamespace(
-            targets=SimpleNamespace(list=lambda: []),
+            targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[])),
             stars=SimpleNamespace(query=lambda **_kwargs: SimpleNamespace(objects=[])),
         )
     )

@@ -234,12 +234,6 @@ CLASSIFICATION_RULES = (
         "high",
         "Changes frames or stacks on disk or in the database.",
     ),
-    _rule(
-        r"^processing_run_spectroscopy_by_session$",
-        "change-data",
-        "high",
-        "Pipeline run that writes results to the live catalog or stacks.",
-    ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
     _rule(
         r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"

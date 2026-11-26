@@ -464,7 +464,7 @@ class CalibrationCatalog:
         classify_and_sort_fits_files(list(paths), "", self._config, telescope, added_paths)
         return added_paths
 
-    def camera_profile(self, camera_name: str | None) -> CameraProfile:
+    def camera_profile(self, camera_id: str | None) -> CameraProfile:
         """Give the stored facts about a camera model.
 
         The profile holds the camera's other spellings, its saturation
@@ -473,8 +473,9 @@ class CalibrationCatalog:
 
         Parameters
         ----------
-        camera_name : `str` or `None`
-            The camera name, written in any spelling that the profile lists.
+        camera_id : `str` or `None`
+            The camera, as the other calls name it (``camera_id``), written
+            in any spelling that the profile lists.
 
         Returns
         -------
@@ -484,7 +485,7 @@ class CalibrationCatalog:
             ``is_generic_fallback`` is `True`. A name that matches nothing
             also logs a warning, once per distinct name.
         """
-        return resolve_camera_profile(camera_name, self._config)
+        return resolve_camera_profile(camera_id, self._config)
 
     def save(self) -> None:
         """Write the calibration library to its JSON file on disk."""

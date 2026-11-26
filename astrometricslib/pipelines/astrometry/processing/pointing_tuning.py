@@ -214,7 +214,7 @@ def tune_pointing_limits(inputs: TuningInputs) -> TuningResult:
     errors: list[float] = []
     scales: list[float] = []
     sides: list[float] = []
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
         path = target.spectral_stacking.stacked_image
         if not path or not os.path.exists(path):
             continue

@@ -98,7 +98,7 @@
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the Stack button's own job, so it shows in the job list and the app's Cancel reaches it."
+      "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. A choice that matches no frame is refused before a job starts. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the Stack button's own job, so it shows in the job list and the app's Cancel reaches it."
     },
     "terminal_add_script": {
       "tool_class": "author",

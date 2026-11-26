@@ -38,33 +38,37 @@ def make_service(calls: list[dict[str, Any]]) -> StackReviewService:
     frames.append(SimpleNamespace(path="/lights/SPEC_1.fits", is_spectral=True))
 
     def predict_stack(target: str, **options: Any) -> StackPrediction:
-        """Record the call and give a small prediction.
+        """Record a checked call, or refuse a mixed list as the library does.
+
+        With ``checks=False`` only the frame list is checked and nothing is
+        recorded.
 
         Returns
         -------
         prediction : `StackPrediction`
             A prediction with three frames selected.
-        """
-        calls.append({"target": target, **options})
-        return StackPrediction(target_id=target, kind="imaging", frames_selected=3, frames_kept=3)
-
-    def stack(target: str, frames: list, **_options: Any) -> None:
-        """Refuse a mixed imaging and spectral list, as the library does.
 
         Raises
         ------
         InvalidArgumentError
-            If the frames mix the two kinds.
+            If the frames mix imaging and spectral frames.
         """
-        spectral = sum(1 for frame in frames if getattr(frame, "is_spectral", False))
-        if 0 < spectral < len(frames):
-            raise InvalidArgumentError(
-                f"These frames mix imaging and spectral frames ({len(frames) - spectral} imaging, "
-                f"{spectral} spectral). Select only one kind and stack again."
+        if options.get("checks") is False:
+            frames = options.get("frames") or []
+            spectral = sum(1 for frame in frames if getattr(frame, "is_spectral", False))
+            if 0 < spectral < len(frames):
+                raise InvalidArgumentError(
+                    f"These frames mix imaging and spectral frames ({len(frames) - spectral} imaging, "
+                    f"{spectral} spectral). Select only one kind and stack again."
+                )
+            return StackPrediction(
+                target_id=target, kind="imaging", frames_selected=len(frames), frames_kept=0
             )
+        calls.append({"target": target, **options})
+        return StackPrediction(target_id=target, kind="imaging", frames_selected=3, frames_kept=3)
 
     astrometrics = SimpleNamespace(
-        processing=SimpleNamespace(predict_stack=predict_stack, stack=stack),
+        processing=SimpleNamespace(predict_stack=predict_stack),
         targets=SimpleNamespace(get=lambda target_id: SimpleNamespace(frames=frames) if target_id else None),
     )
     return StackReviewService(astrometrics)

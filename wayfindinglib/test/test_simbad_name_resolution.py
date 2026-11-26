@@ -128,7 +128,7 @@ def _sky_with_empty_library() -> Any:
         An object with the attributes the resolver reads.
     """
     astrometrics = types.SimpleNamespace(
-        targets=types.SimpleNamespace(list=lambda: []),
+        targets=types.SimpleNamespace(query=lambda **_k: types.SimpleNamespace(objects=[])),
         stars=types.SimpleNamespace(query=lambda **_: types.SimpleNamespace(objects=[])),
     )
     return types.SimpleNamespace(_astrometrics=astrometrics)

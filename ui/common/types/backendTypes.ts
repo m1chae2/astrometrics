@@ -4640,6 +4640,9 @@ export interface StackPrediction {
   camera?: string | null;
   frames_selected: number;
   frames_kept: number;
+  first_file?: string;
+  last_file?: string;
+  checks_run?: boolean;
   set_aside?: PredictedFrame[];
   flagged?: PredictedFrame[];
   groups?: PredictedGroup[];

@@ -2,7 +2,8 @@
 
 The stacking stage itself is faked. These tests check which frames are
 chosen (imaging against spectral, filter, file range, camera), that
-`plan_only` changes nothing, that a finished stack is saved, and that a
+`predict_stack(checks=False)` reports the choice and changes nothing, that a
+finished stack is saved, and that a
 request that cannot be met raises instead of returning an error.
 """
 
@@ -102,12 +103,13 @@ def test_spectral_stack_uses_only_spectra(library: tuple) -> None:
     assert record.stacked_with == ["/lights/T_Light_Spectroscopy_001.fits"]
 
 
-def test_plan_only_stacks_and_saves_nothing(library: tuple) -> None:
-    """The plan lists the frames and leaves everything else alone."""
+def test_the_frame_choice_alone_stacks_and_saves_nothing(library: tuple) -> None:
+    """`predict_stack(checks=False)` lists the frames and changes nothing."""
     pipelines, record = library
-    result = pipelines.stack(make_target(), plan_only=True, register_job=False)
+    result = pipelines.predict_stack(make_target(), checks=False)
     assert result.frames_selected == 4
-    assert result.plan_only
+    assert not result.checks_run
+    assert result.first_file and result.last_file
     assert record.stacked_with is None
     assert record.saved == 0
 

@@ -281,7 +281,7 @@ def seed(sandbox: Path) -> dict[str, int]:
     start_time = night_start.astimezone(UTC)
     # The result models are private, so take the empty ones the star record
     # already holds and fill their fields.
-    star = astrometrics.stars.create(star_id, ra="18:36:56", dec="+38:47:01")
+    star = astrometrics.stars.create(star_id, ra_deg=279.2333, dec_deg=38.7836)
     photometry = star.photometry
     photometry.timestamps = [start_time + timedelta(minutes=2 * index) for index in range(120)]
     photometry.fluxes = [
@@ -306,7 +306,7 @@ def seed(sandbox: Path) -> dict[str, int]:
 
     # A second star, so a display's star list has an unselected row.
     second_star_id = "Altair"
-    second_star = astrometrics.stars.create(second_star_id, ra="19:50:47", dec="+08:52:06")
+    second_star = astrometrics.stars.create(second_star_id, ra_deg=297.6958, dec_deg=8.8683)
     second_spectroscopy = second_star.spectroscopy
     second_spectroscopy.wavelengths_angstrom = wavelengths.tolist()
     second_spectroscopy.intensities = (intensities * 0.8).tolist()

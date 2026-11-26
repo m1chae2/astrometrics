@@ -149,15 +149,18 @@ def _identification_payload(identification: Any) -> dict[str, Any]:
     Returns
     -------
     payload : `dict`
-        ``stars`` in the overlay layout, placed on the viewer's copy of the
-        stack (moved by its crop offset), each with its ``libraryId`` (the
-        id of its library record, or `None`), the counts, ``solutionReused``,
+        ``stars`` in the overlay layout (0-based pixels), placed on the
+        viewer's copy of the stack (moved by its crop offset), each with
+        its ``libraryId`` (the id of its library record, or `None`), the
+        counts, ``solutionReused``,
         ``gaiaDepth``, ``catalogOnlyLimit``, ``gaiaTilesMissing``,
         ``simbadUsed`` and ``notes``.
     """
     # The viewer shows the stack's stretched copy, which may be a crop of it.
-    offset_x = getattr(identification, "viewer_offset_x", 0) or 0
-    offset_y = getattr(identification, "viewer_offset_y", 0) or 0
+    # The library gives 1-based pixels; the overlay layout counts from 0, so
+    # one more pixel comes off with the crop offset.
+    offset_x = (getattr(identification, "viewer_offset_x", 0) or 0) + 1.0
+    offset_y = (getattr(identification, "viewer_offset_y", 0) or 0) + 1.0
     shown_width = getattr(identification, "viewer_width", 0) or identification.width
     shown_height = getattr(identification, "viewer_height", 0) or identification.height
     stars = [
@@ -653,7 +656,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         checked = self._checked_stack_path(stack_path)
         try:
             frame_count = int(self.astrometrics.targets.read_frame_header(checked).get("STACKCNT", 0) or 0)
-        except FITS_READ_ERRORS as error:
+        except (NotFoundError, *FITS_READ_ERRORS) as error:
             raise InvalidArgumentError(f"The stack could not be read: {error}") from error
         if frame_count <= 1:
             raise InvalidArgumentError("Star names are made for stacks only, not for single frames.")
@@ -1004,7 +1007,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                         target_id,
                         fit_filter,
                     )
-            except FITS_READ_ERRORS as e:
+            except (NotFoundError, *FITS_READ_ERRORS) as e:
                 logger.warning("[%s] Could not read FITS header for auto-detection: %s", target_id, e)
 
             if not fallback_is_spec:

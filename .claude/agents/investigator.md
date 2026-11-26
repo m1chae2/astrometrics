@@ -6,6 +6,7 @@ tools:
   - mcp__astrometricslib-core__calibration_camera_profile
   - mcp__astrometricslib-core__calibration_query
   - mcp__astrometricslib-core__jobs_query
+  - mcp__astrometricslib-core__processing_find_stack_configuration
   - mcp__astrometricslib-core__processing_get_stack_identification
   - mcp__astrometricslib-core__processing_stack_summary
   - mcp__astrometricslib-core__quality_calibration_identities

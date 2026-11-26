@@ -102,6 +102,7 @@ def _run(monkeypatch: pytest.MonkeyPatch, solutions_wrong: list[bool]) -> tuple[
             wcs=object(),
             stellar_objects=_identified_stars(matched, 30),
             nearest_catalog_separations_arcsec=[0.5] * matched,
+            catalog_density_per_square_degree=7700.0,
             simbad_matched_count=0,
             reused_existing_header_wcs=True,
             header_wcs_replaced_after_verification=False,
@@ -182,13 +183,15 @@ def test_the_plate_solution_judge() -> None:
     """A good map passes, few or scattered matches fail, small fields pass.
 
     The default match radius is 10 arcsec and the search circle 20 arcsec.
+    The catalog density is not known, so the sparse-field chance share is
+    used.
     """
     good_neighbors = [0.5] * 20 + [15.0] * 10
-    assert plate_solution_problem(_identified_stars(20, 30), good_neighbors) is None
-    assert "matched a catalog star" in plate_solution_problem(_identified_stars(1, 30), good_neighbors)
+    assert plate_solution_problem(_identified_stars(20, 30), good_neighbors, None) is None
+    assert "matched a catalog star" in plate_solution_problem(_identified_stars(1, 30), good_neighbors, None)
     scattered_neighbors = [5.0] * 8 + [15.0] * 22
-    assert "match radius" in plate_solution_problem(_identified_stars(8, 30), scattered_neighbors)
-    assert plate_solution_problem(_identified_stars(0, 10), []) is None
+    assert "match radius" in plate_solution_problem(_identified_stars(8, 30), scattered_neighbors, None)
+    assert plate_solution_problem(_identified_stars(0, 10), [], None) is None
 
 
 def test_a_session_borrows_only_the_stack_of_its_own_setup(monkeypatch: pytest.MonkeyPatch) -> None:

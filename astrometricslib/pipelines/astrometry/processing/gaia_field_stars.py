@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "FieldGaiaStars",
     "TileFetcher",
+    "field_catalog_density",
     "fill_field_tiles",
     "load_field_gaia_stars",
     "tiles_under_image",
@@ -128,6 +129,41 @@ def tiles_under_image(wcs: Any, width: int, height: int, margin_deg: float | Non
         margin_deg = float(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value) / 3600.0
     level = int(resolve(catalog_store.GAIA_TILE_LEVEL).value)
     return tiles_for_footprint(image_corners_on_sky(wcs, width, height), margin_deg, level)
+
+
+def field_catalog_density(field: FieldGaiaStars, wcs: Any, width: int, height: int) -> float | None:
+    """Count the Gaia stars per square degree over an image's footprint.
+
+    The plate solution check needs it: under a wrong solution a star's
+    nearest catalog entry is a chance neighbor, and how close a chance
+    neighbor tends to be depends on how many catalog stars there are.
+
+    Parameters
+    ----------
+    field : `FieldGaiaStars`
+        The Gaia stars of the image's tiles.
+    wcs : `astropy.wcs.WCS`
+        The image's plate solution.
+    width, height : `int`
+        The image size, in pixels.
+
+    Returns
+    -------
+    density : `float` or `None`
+        The Gaia stars that fall on the image, to the tiles' depth, divided
+        by the image's area on the sky (pixel count times the area of one
+        pixel at the reference point). `None` when a tile under the image is
+        missing, so a count would be too low, or there is no sky map.
+    """
+    celestial = getattr(wcs, "celestial", None)
+    if celestial is None or field.coords is None or field.missing_tiles or width <= 0 or height <= 0:
+        return None
+    area_square_degrees = float(celestial.proj_plane_pixel_area().to_value(u.deg**2)) * width * height
+    if not np.isfinite(area_square_degrees) or area_square_degrees <= 0.0:
+        return None
+    x, y = celestial.world_to_pixel(field.coords)
+    on_image = (x >= -0.5) & (x < width - 0.5) & (y >= -0.5) & (y < height - 0.5)
+    return float(np.count_nonzero(on_image)) / area_square_degrees
 
 
 def _cache_rows(table: Table) -> list[tuple]:

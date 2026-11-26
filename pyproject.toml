@@ -350,6 +350,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "conftest.py" = ["banned-api"] # and the root test configuration
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "build/tpm/seed_library.py" = ["banned-api"] # the seeder writes the private guiding stores directly, into a throwaway library
+"build/agent_tools/validate_plate_solution_check.py" = ["banned-api"] # runs the private plate-solution check on shifted solutions of a library copy; no public call takes a shifted map
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/main_backend.py" = ["module-import-not-at-top-of-file"] # warnings.filterwarnings() must precede import

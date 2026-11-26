@@ -13,6 +13,7 @@ solver does not report them.
 
 import configparser
 import logging
+import math
 import os
 import re
 import warnings
@@ -66,6 +67,18 @@ class SessionStarIdentifier(Protocol):
             One distance, in arcseconds, for each star that had a sky
             position in the last `identify_stars_with_wcs` call, including
             stars too far from any entry to match.
+        """
+        ...
+
+    @property
+    def field_catalog_density_per_square_degree(self) -> float | None:
+        """Give the catalog stars per square degree over the last image.
+
+        Returns
+        -------
+        density : `float` or `None`
+            Counted over the image's footprint in the last
+            `identify_stars_with_wcs` call, or `None` when not known.
         """
         ...
 
@@ -138,8 +151,8 @@ class SessionStarIdentifier(Protocol):
 # area: about 17% for a 10 arcsecond radius in a Milky Way field with
 # 7,700 catalog stars per square degree, and about 30% at the 14 arcsecond
 # radius of a Nikon D5300 behind a 300 mm lens. There the concentration
-# test of `plate_solution_problem` (MIN_MATCH_CONCENTRATION) is what catches
-# a wrong solution. Both a reused header map and a photometry
+# test of `plate_solution_problem` (`match_concentration_limit`) is what
+# catches a wrong solution. Both a reused header map and a photometry
 # session's solution go through both tests (AST-D19).
 MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = TunedParameter(
     name="shared.min_catalog_match_fraction_for_reused_wcs",
@@ -184,26 +197,39 @@ SOLUTION_CHECK_RADIUS_FACTOR = TunedParameter(
     register_entry="AST-D19",
 )
 
-# Smallest share, among the stars whose nearest catalog entry lies within the
-# search circle W, of those whose entry also lies within the match radius R.
-# Under a wrong solution each nearest entry is a chance neighbor, about
-# equally likely anywhere in the circle, so the share is near (R/W)^2, 0.25
-# for W = 2R. It rises in a dense field, where a star often has several
-# entries within W: about 0.32 at 10 arcsec and 0.40 at 14 arcsec with 7,700
-# catalog stars per square degree. A right solution puts true neighbors
-# inside R. Faint detections with no true catalog star add chance neighbors
-# to both counts, which lowers the share but does not move it to the
-# wrong-solution value. On the real catalog (backup of 2026-11-24), right
-# solutions had median match distances of 6.5 arcsec (Algol, ZWO ASI533MM,
-# above the old limit of half the 10 arcsec radius) and 6.2 arcsec (M 67,
-# Nikon D5300), so a median test cannot separate them. Design estimate
-# until shifted real solutions are checked (AST-D19).
+# How far above the chance share, in standard errors, a solution's share must
+# be. Under a wrong solution each star's nearest catalog entry is a chance
+# neighbor, and of the n stars with one inside the search circle W the share
+# inside the match radius R is a binomial count over n with a chance share s0
+# (`chance_concentration`). Three standard errors sets a wrong solution aside
+# except about once in 700 (one-sided normal tail). Design estimate until
+# shifted real solutions are checked (AST-D19).
+MATCH_CONCENTRATION_SIGMAS = TunedParameter(
+    name="shared.match_concentration_sigmas",
+    default=3.0,
+    unit="standard errors",
+    description="Standard errors above the chance share a plate solution's concentration must reach.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-D19",
+)
+
+# The least share the concentration test asks for, whatever the field. With
+# many stars the chance share plus three standard errors nears the chance
+# share itself (0.25 in a sparse field, 0.32 at 10 arcsec and 0.40 at
+# 14 arcsec with 7,700 catalog stars per square degree), so this floor keeps a
+# margin above the sparse value. A right solution puts true neighbors inside
+# R: at 20% true matches in that dense field the share is about 0.55. On the
+# real catalog (backup of 2026-11-24), right solutions had median match
+# distances of 6.5 arcsec (Algol, ZWO ASI533MM) and 6.2 arcsec (M 67, Nikon
+# D5300), so a median test cannot separate them. Design estimate (AST-D19).
 MIN_MATCH_CONCENTRATION = TunedParameter(
     name="shared.min_match_concentration",
-    default=0.4,
+    default=0.35,
     unit="fraction",
     description=(
-        "Smallest share of catalog neighbors in the search circle that lie within the match radius."
+        "Least share of catalog neighbors in the search circle that must lie within the match radius."
     ),
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.HARDCODED,
@@ -212,20 +238,81 @@ MIN_MATCH_CONCENTRATION = TunedParameter(
 )
 
 
+def chance_concentration(
+    match_radius_arcsec: float, search_radius_arcsec: float, catalog_density_per_square_degree: float | None
+) -> float:
+    """Give the share a wrong solution puts inside the match radius by chance.
+
+    Under a wrong solution a star's nearest catalog entry is the nearest of
+    entries scattered at random. With ``lam`` entries expected inside the
+    match radius R (the density times pi R^2), the chance of one inside R is
+    1 - exp(-lam), and inside the search circle W it is
+    1 - exp(-lam (W/R)^2). The share is their ratio. A sparse field gives
+    (R/W)^2; a dense field draws the nearest entry inward and gives more.
+
+    Parameters
+    ----------
+    match_radius_arcsec : `float`
+        The match radius R.
+    search_radius_arcsec : `float`
+        The search circle's radius W.
+    catalog_density_per_square_degree : `float` or `None`
+        Catalog stars per square degree over the image. `None` (not known)
+        gives the sparse-field value (R/W)^2.
+
+    Returns
+    -------
+    share : `float`
+        The chance share, between (R/W)^2 and 1.
+    """
+    area_ratio = (search_radius_arcsec / match_radius_arcsec) ** 2
+    if catalog_density_per_square_degree is None or catalog_density_per_square_degree <= 0.0:
+        return 1.0 / area_ratio
+    expected_inside = catalog_density_per_square_degree / 3600.0**2 * math.pi * match_radius_arcsec**2
+    return -math.expm1(-expected_inside) / -math.expm1(-expected_inside * area_ratio)
+
+
+def match_concentration_limit(chance_share: float, stars_in_search_circle: int) -> float:
+    """Give the least concentration a solution must show to stand.
+
+    Parameters
+    ----------
+    chance_share : `float`
+        The share a wrong solution gives (`chance_concentration`).
+    stars_in_search_circle : `int`
+        The stars whose nearest catalog entry lies in the search circle.
+
+    Returns
+    -------
+    limit : `float`
+        The chance share plus `MATCH_CONCENTRATION_SIGMAS` binomial standard
+        errors, and at least `MIN_MATCH_CONCENTRATION`.
+    """
+    spread = math.sqrt(chance_share * (1.0 - chance_share) / stars_in_search_circle)
+    return max(
+        float(resolve(MIN_MATCH_CONCENTRATION).value),
+        chance_share + float(resolve(MATCH_CONCENTRATION_SIGMAS).value) * spread,
+    )
+
+
 def plate_solution_problem(
-    stellar_objects: list[StellarObject], nearest_catalog_separations_arcsec: list[float]
+    stellar_objects: list[StellarObject],
+    nearest_catalog_separations_arcsec: list[float],
+    catalog_density_per_square_degree: float | None,
 ) -> str | None:
     """Say why a run's plate solution looks wrong, judged by its stars.
 
     A wrong solution puts every star somewhere it is not. Few stars then
     find their catalog star (`MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`),
-    and each star's nearest catalog entry is a chance neighbor, spread
-    evenly over the sky around it. Among the stars with a neighbor inside
-    the search circle (`SOLUTION_CHECK_RADIUS_FACTOR` times the match
-    radius), the share whose neighbor is also inside the match radius is
-    then near the ratio of the two areas, below `MIN_MATCH_CONCENTRATION`.
-    Saving such a run would make new position-only stars at false positions
-    and give light curves to the wrong stars.
+    and each star's nearest catalog entry is a chance neighbor. Among the
+    stars with a neighbor inside the search circle
+    (`SOLUTION_CHECK_RADIUS_FACTOR` times the match radius), the share whose
+    neighbor is also inside the match radius is then near the chance share
+    of the field's catalog density (`chance_concentration`). A solution
+    stands only when its share is clearly above it
+    (`match_concentration_limit`). Saving a wrong run would make new
+    position-only stars at false positions and give light curves to the
+    wrong stars.
 
     The match radius is `CATALOG_MATCH_RADIUS_ARCSEC` as the current run
     resolves it (it follows the plate scale), the same radius the star
@@ -240,6 +327,9 @@ def plate_solution_problem(
         For each star with a sky position, the distance in arcseconds to
         its nearest catalog entry, matched or not (the star identifier's
         `nearest_catalog_separations_arcsec` from the same run).
+    catalog_density_per_square_degree : `float` or `None`
+        The catalog stars per square degree over the image, from the same
+        run. `None` when not known: the sparse-field chance share is used.
 
     Returns
     -------
@@ -266,12 +356,13 @@ def plate_solution_problem(
     concentration = sum(1 for distance in in_search_circle if distance <= match_radius) / len(
         in_search_circle
     )
-    limit = float(resolve(MIN_MATCH_CONCENTRATION).value)
+    chance_share = chance_concentration(match_radius, search_radius, catalog_density_per_square_degree)
+    limit = match_concentration_limit(chance_share, len(in_search_circle))
     if concentration < limit:
         return (
             f"only {concentration:.0%} of the {len(in_search_circle)} stars with a catalog entry within "
             f"{search_radius:.1f} arcsec have it within the {match_radius:.1f} arcsec match radius "
-            f"(limit {limit:.0%})"
+            f"(limit {limit:.0%}, chance {chance_share:.0%})"
         )
     return None
 
@@ -626,6 +717,10 @@ class SessionIdentificationResult:
     # the identification that made `stellar_objects`, and is what
     # `plate_solution_problem` needs beside the stars.
     nearest_catalog_separations_arcsec: list[float] = field(default_factory=list)
+    # The catalog stars per square degree over the image in that same
+    # identification, which sets the chance share of `plate_solution_problem`.
+    # `None` when not known.
+    catalog_density_per_square_degree: float | None = None
     # How well the plate solve that produced `wcs` fit its reference stars.
     # `fit_residual_rms_arcsec` is the root mean square (RMS) distance, in
     # arcseconds, between the matched stars' fitted positions and the
@@ -697,14 +792,17 @@ def identify_session_stars(
     height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)
 
     nearest_separations: list[float] = []
+    catalog_density: float | None = None
     if wcs is not None and stellar_objects:
         star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
         nearest_separations = list(star_identifier.nearest_catalog_separations_arcsec)
+        catalog_density = _field_catalog_density(star_identifier)
 
     (
         wcs,
         stellar_objects,
         nearest_separations,
+        catalog_density,
         reused_existing_header_wcs,
         solve_attempted,
         header_wcs_replaced,
@@ -718,6 +816,7 @@ def identify_session_stars(
         wcs,
         stellar_objects,
         nearest_separations,
+        catalog_density,
         reused_existing_header_wcs,
         solve_attempted,
         width,
@@ -738,6 +837,7 @@ def identify_session_stars(
         sources_detected=sources_detected,
         header_wcs_replaced_after_verification=header_wcs_replaced,
         nearest_catalog_separations_arcsec=nearest_separations,
+        catalog_density_per_square_degree=catalog_density,
         fit_residual_rms_arcsec=fit_statistics[0],
         matched_star_count=fit_statistics[1],
     )
@@ -801,13 +901,23 @@ def _reverify_wcs_solution(
     wcs: WCS | None,
     stellar_objects: list[StellarObject],
     nearest_separations: list[float],
+    catalog_density: float | None,
     reused_existing_header_wcs: bool,
     solve_attempted: bool,
     width: int,
     height: int,
     write_back: bool,
     fit_statistics: tuple[float | None, int | None],
-) -> tuple[WCS | None, list[StellarObject], list[float], bool, bool, bool, tuple[float | None, int | None]]:
+) -> tuple[
+    WCS | None,
+    list[StellarObject],
+    list[float],
+    float | None,
+    bool,
+    bool,
+    bool,
+    tuple[float | None, int | None],
+]:
     """Re-solve a reused header WCS that turns out to be untrustworthy.
 
     Parameters
@@ -826,6 +936,8 @@ def _reverify_wcs_solution(
         The stars identified against `wcs`.
     nearest_separations : `list` [`float`]
         The nearest catalog distances of that identification.
+    catalog_density : `float` or `None`
+        The catalog stars per square degree of that identification.
     reused_existing_header_wcs : `bool`
         Whether `wcs` came from the image header.
     solve_attempted : `bool`
@@ -847,6 +959,8 @@ def _reverify_wcs_solution(
     nearest_separations : `list` [`float`]
         The nearest catalog distances of the identification against the
         returned `wcs`.
+    catalog_density : `float` or `None`
+        The catalog stars per square degree of that identification.
     reused_existing_header_wcs : `bool`
         Whether the returned WCS is still the reused header one.
     solve_attempted : `bool`
@@ -861,13 +975,16 @@ def _reverify_wcs_solution(
         unchanged.
     """
     problem = (
-        plate_solution_problem(stellar_objects, nearest_separations) if reused_existing_header_wcs else None
+        plate_solution_problem(stellar_objects, nearest_separations, catalog_density)
+        if reused_existing_header_wcs
+        else None
     )
     if problem is None:
         return (
             wcs,
             stellar_objects,
             nearest_separations,
+            catalog_density,
             reused_existing_header_wcs,
             solve_attempted,
             False,
@@ -901,6 +1018,7 @@ def _reverify_wcs_solution(
         wcs,
         stellar_objects,
         nearest_separations,
+        catalog_density,
         reused_existing_header_wcs,
         solve_attempted,
         False,
@@ -916,6 +1034,7 @@ def _reverify_wcs_solution(
     fresh_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
     star_identifier.identify_stars_with_wcs(fresh_objects, fresh_wcs, width, height)
     fresh_separations = list(star_identifier.nearest_catalog_separations_arcsec)
+    fresh_density = _field_catalog_density(star_identifier)
     matched_after = _catalog_matched_count(fresh_objects)
 
     if matched_after <= matched_before:
@@ -935,4 +1054,30 @@ def _reverify_wcs_solution(
     )
     if write_back:
         write_wcs_to_fits_header(reference_image.path, fresh_wcs)
-    return fresh_wcs, fresh_objects, fresh_separations, False, solve_attempted, True, fresh_fit_statistics
+    return (
+        fresh_wcs,
+        fresh_objects,
+        fresh_separations,
+        fresh_density,
+        False,
+        solve_attempted,
+        True,
+        fresh_fit_statistics,
+    )
+
+
+def _field_catalog_density(star_identifier: SessionStarIdentifier) -> float | None:
+    """Read the catalog density the identifier counted over the last image.
+
+    Parameters
+    ----------
+    star_identifier : `SessionStarIdentifier`
+        The identifier that just named the stars.
+
+    Returns
+    -------
+    density : `float` or `None`
+        Catalog stars per square degree, or `None` when the identifier did
+        not count them (a stand-in, or no complete Gaia tiles).
+    """
+    return getattr(star_identifier, "field_catalog_density_per_square_degree", None)

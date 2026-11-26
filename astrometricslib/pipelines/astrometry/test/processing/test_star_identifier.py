@@ -476,3 +476,83 @@ def test_block_average_crops_a_size_not_divisible_by_the_factor() -> None:
 
     assert binned.shape == (2, 2)
     assert binned[0, 0] == pytest.approx(data[:2, :2].mean())
+
+
+def test_nearest_catalog_distances_include_far_stars_and_take_the_closer_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each star gives its nearest catalog distance, matched or not.
+
+    Star A matches a SIMBAD entry 3 arcsec away and gives that distance.
+    Star B's nearest SIMBAD entry is 25 arcsec away and its nearest Gaia
+    entry 18 arcsec away; star C's are 12 and 30 arcsec. Neither matches
+    within the 10 arcsec match radius, and each gives the closer of its
+    two distances.
+    """
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+
+    from astrometricslib.pipelines.astrometry.test.gaia_field_fakes import use_field_stars
+
+    # Three stars a tenth of a degree apart, so each has its own neighbors.
+    stars_sky = [SkyCoord(VEGA_RA_DEG * u.deg, (VEGA_DEC_DEG + 0.1 * index) * u.deg) for index in range(3)]
+
+    def north_of(index: int, arcsec: float) -> SkyCoord:
+        """Give the point ``arcsec`` north of star ``index``.
+
+        Returns
+        -------
+        point : `SkyCoord`
+            The shifted position.
+        """
+        return stars_sky[index].directional_offset_by(0 * u.deg, arcsec * u.arcsec)
+
+    simbad_points = [north_of(0, 3.0), north_of(1, 25.0), north_of(2, 12.0)]
+    simbad_table = Table({
+        "main_id": Column(["* star A", "* star B", "* star C"], dtype=object),
+        "ids": Column(["* star A", "* star B", "* star C"], dtype=object),
+        "sp_type": MaskedColumn(["A0V", "A0V", "A0V"], mask=[False] * 3, dtype=object),
+        "otype": Column(["*", "*", "*"], dtype=object),
+        "V": MaskedColumn([5.0, 6.0, 7.0], mask=[False] * 3),
+        "ra": [float(point.ra.deg) for point in simbad_points],
+        "dec": [float(point.dec.deg) for point in simbad_points],
+    })
+    gaia_points = [north_of(1, 18.0), north_of(2, 30.0)]
+    gaia_table = Table({
+        "source_id": ["11", "12"],
+        "ra": [float(point.ra.deg) for point in gaia_points],
+        "dec": [float(point.dec.deg) for point in gaia_points],
+        "phot_g_mean_mag": [12.0, 12.5],
+        "DESIGNATION": ["Gaia DR3 11", "Gaia DR3 12"],
+        "pmra": [0.0, 0.0],
+        "pmdec": [0.0, 0.0],
+    })
+    use_field_stars(
+        monkeypatch,
+        gaia_table,
+        SkyCoord([point.ra for point in gaia_points], [point.dec for point in gaia_points]),
+    )
+
+    identifier = _make_star_identifier()
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=simbad_table))
+    stellar_objects = []
+    for index in range(3):
+        star = StellarObject()
+        star.name = f"Star {index}"
+        star.star_data = {"x_centroid": float(index), "y_centroid": 0.0, "flux": 50000.0}
+        stellar_objects.append(star)
+    fake_wcs = MagicMock()
+    fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
+    fake_wcs.wcs_pix2world.side_effect = lambda x, _y, _origin: (
+        float(stars_sky[int(x)].ra.deg),
+        float(stars_sky[int(x)].dec.deg),
+    )
+
+    identifier.identify_stars_with_wcs(stellar_objects, fake_wcs, width=1000, height=1000)
+
+    assert [star.is_catalog_identified for star in stellar_objects] == [True, False, False]
+    assert sorted(identifier.nearest_catalog_separations_arcsec) == pytest.approx([3.0, 12.0, 18.0], abs=0.01)
+    assert identifier.catalog_match_separations_arcsec == pytest.approx([3.0], abs=0.01)
+
+    identifier.identify_stars_with_wcs([], fake_wcs, width=1000, height=1000)
+    assert identifier.nearest_catalog_separations_arcsec == []

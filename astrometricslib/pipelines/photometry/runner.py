@@ -521,7 +521,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 aperture_reason=session_aperture_reason or None,
             )
             if identify_result is not None and identify_result.wcs is not None:
-                solution_problem = plate_solution_problem(identify_result.stellar_objects)
+                solution_problem = plate_solution_problem(
+                    identify_result.stellar_objects, identify_result.nearest_catalog_separations_arcsec
+                )
                 if solution_problem is not None:
                     # A wrong map would save new position-only stars at false
                     # places and give light curves to the wrong stars.

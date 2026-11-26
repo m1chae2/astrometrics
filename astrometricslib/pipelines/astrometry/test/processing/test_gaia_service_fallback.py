@@ -4,7 +4,7 @@ Description: On 2026-10-10 the ESA Gaia archive timed out on the pipeline's
 G < 18 query for M 13 while VizieR returned the same stars in 10 s, and every
 remote lookup of 22 of 23 targets had failed. Each Gaia sky tile is now asked
 of the ESA archive first, VizieR second, and VizieR again at brighter limits
-(`star_identifier.make_gaia_tile_fetcher`). These tests check that order,
+(`gaia_tile_queries.make_gaia_tile_fetcher`). These tests check that order,
 that the depth actually fetched is the one reported, how a run counts
 failures and notes a gateway pause, and that VizieR's columns are mapped to
 the archive's. They use fake services, so no network is needed.
@@ -25,7 +25,7 @@ from astrometricslib._internal.drivers.gaia_cone_driver import (
 )
 from astrometricslib._internal.drivers.outside_services import ServicePausedError
 from astrometricslib.foundation.errors import ExternalServiceError
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries
 
 CENTRE_RA_DEG = 250.445
 CENTRE_DEC_DEG = 36.157
@@ -112,11 +112,11 @@ def services(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
         "query_gaia_tile_esa",
         lambda level, tile, have, magnitude, row_limit: answer("esa", magnitude),
     )
-    star_identifier_module.reset_gaia_circuit_breaker()
-    star_identifier_module.reset_gaia_query_statistics()
+    gaia_tile_queries.reset_gaia_circuit_breaker()
+    gaia_tile_queries.reset_gaia_query_statistics()
     yield state
-    star_identifier_module.reset_gaia_circuit_breaker()
-    star_identifier_module.reset_gaia_query_statistics()
+    gaia_tile_queries.reset_gaia_circuit_breaker()
+    gaia_tile_queries.reset_gaia_query_statistics()
 
 
 def _fetch() -> gaia_cone_driver.TileFetch | None:
@@ -128,7 +128,7 @@ def _fetch() -> gaia_cone_driver.TileFetch | None:
         The answer, or `None` when every service failed or no fetcher was
         given.
     """
-    fetch, _ = star_identifier_module.make_gaia_tile_fetcher()
+    fetch, _ = gaia_tile_queries.make_gaia_tile_fetcher()
     if fetch is None:
         return None
     try:
@@ -159,7 +159,7 @@ def test_vizier_answers_when_the_archive_fails_and_no_failure_counts(services: d
     assert services["calls"] == [("esa", 18.0), ("vizier", 18.0)]
     assert table.service == "VizieR"
     assert table.complete_to_g == pytest.approx(18.0)
-    statistics = star_identifier_module.get_gaia_query_statistics()
+    statistics = gaia_tile_queries.get_gaia_query_statistics()
     assert statistics["failed"] == 0
     assert not statistics["circuit_breaker_tripped"]
 
@@ -185,7 +185,7 @@ def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> N
 
     assert table is None
     assert services["calls"] == [("esa", 18.0), ("vizier", 18.0), ("vizier", 17.0), ("vizier", 16.0)]
-    statistics = star_identifier_module.get_gaia_query_statistics()
+    statistics = gaia_tile_queries.get_gaia_query_statistics()
     assert statistics["attempted"] == 1
     assert statistics["failed"] == 1
 
@@ -196,21 +196,21 @@ def test_a_gateway_pause_is_noted_for_the_run(services: dict[str, Any]) -> None:
     failure = ExternalServiceError("Gaia tile 1 failed on every service")
     failure.__cause__ = paused
 
-    star_identifier_module._record_gaia_failure(failure)
+    gaia_tile_queries._record_gaia_failure(failure)
 
-    statistics = star_identifier_module.get_gaia_query_statistics()
+    statistics = gaia_tile_queries.get_gaia_query_statistics()
     assert statistics["circuit_breaker_tripped"]
     assert statistics["failed"] == 1
-    fetch, reason = star_identifier_module.make_gaia_tile_fetcher()
+    fetch, reason = gaia_tile_queries.make_gaia_tile_fetcher()
     assert fetch is None
     assert "paused" in reason
 
 
 def test_an_ordinary_failure_does_not_set_the_pause_flag(services: dict[str, Any]) -> None:
     """A failure that is not a gateway pause only counts as a failure."""
-    star_identifier_module._record_gaia_failure(ExternalServiceError("esa is down"))
+    gaia_tile_queries._record_gaia_failure(ExternalServiceError("esa is down"))
 
-    statistics = star_identifier_module.get_gaia_query_statistics()
+    statistics = gaia_tile_queries.get_gaia_query_statistics()
     assert statistics["failed"] == 1
     assert not statistics["circuit_breaker_tripped"]
 

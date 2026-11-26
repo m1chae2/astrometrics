@@ -30,7 +30,7 @@ class CatalogMatchQuality(BaseModel):
     separation_arcsec: float | None = Field(default=None, alias="separationArcsec")
     # True when two or more catalog entries sat within
     # UNRESOLVED_COMPANION_RADIUS_ARCSEC of this star and the brightest
-    # one was chosen (see star_identifier.brightest_unresolved_entry_index).
+    # one was chosen (see simbad_matching.brightest_unresolved_entry_index).
     # Always False for a Gaia match: Gaia matching does not run this
     # disambiguation check today, so there is nothing to flag.
     is_ambiguous: bool = Field(default=False, alias="isAmbiguous")

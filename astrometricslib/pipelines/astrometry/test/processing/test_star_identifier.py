@@ -19,8 +19,9 @@ from astropy.table import Column, MaskedColumn, Table
 from astrometricslib._internal.drivers.outside_services import ServicePausedError
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
-from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier, _block_average
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries, plate_solution_steps
+from astrometricslib.pipelines.astrometry.processing.star_detection import _block_average
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 # Real-world J2000 coordinates for Vega (alf Lyr), in degrees.
 VEGA_RA_DEG = 279.23473479
@@ -243,7 +244,7 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
     })
     monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=galaxy_only_table))
 
-    with caplog.at_level("WARNING", logger=star_identifier_module.logger.name):
+    with caplog.at_level("WARNING", logger=plate_solution_steps.logger.name):
         identifier._identify_stars_with_simbad(
             wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
         )
@@ -276,35 +277,35 @@ class TestGaiaCircuitBreaker:
 
     def setup_method(self) -> None:
         """Start each test with a clean breaker (state is module-global)."""
-        star_identifier_module.reset_gaia_circuit_breaker()
+        gaia_tile_queries.reset_gaia_circuit_breaker()
 
     def teardown_method(self) -> None:
         """Leave no tripped breaker behind for other tests."""
-        star_identifier_module.reset_gaia_circuit_breaker()
+        gaia_tile_queries.reset_gaia_circuit_breaker()
 
     def test_starts_closed(self) -> None:
         """A fresh process attempts remote Gaia queries."""
-        assert star_identifier_module._gaia_remote_queries_disabled() is False
+        assert gaia_tile_queries._gaia_remote_queries_disabled() is False
 
     def test_an_ordinary_failure_does_not_disable_gaia(self) -> None:
         """Failures only count; the gateway decides when a service pauses."""
         for _ in range(10):
-            star_identifier_module._record_gaia_failure(ExternalServiceError("down"))
+            gaia_tile_queries._record_gaia_failure(ExternalServiceError("down"))
 
-        assert star_identifier_module._gaia_remote_queries_disabled() is False
+        assert gaia_tile_queries._gaia_remote_queries_disabled() is False
 
     def test_a_gateway_pause_disables_the_run_s_downloads(self) -> None:
         """A tile that fails because the gateway paused Gaia sets the flag."""
-        star_identifier_module._record_gaia_failure(_paused_failure())
+        gaia_tile_queries._record_gaia_failure(_paused_failure())
 
-        assert star_identifier_module._gaia_remote_queries_disabled() is True
+        assert gaia_tile_queries._gaia_remote_queries_disabled() is True
 
     def test_open_breaker_gives_no_tile_fetcher_and_says_so(self, caplog: pytest.LogCaptureFixture) -> None:
         """An open breaker downloads nothing, and a warning says why."""
-        star_identifier_module._record_gaia_failure(_paused_failure())
+        gaia_tile_queries._record_gaia_failure(_paused_failure())
 
         with caplog.at_level(logging.WARNING):
-            fetch, reason = star_identifier_module.make_gaia_tile_fetcher()
+            fetch, reason = gaia_tile_queries.make_gaia_tile_fetcher()
 
         assert fetch is None
         assert "paused" in reason
@@ -331,8 +332,8 @@ class TestGaiaCircuitBreaker:
             [(str(number), 10.0, 20.0, 12.0, f"Gaia DR3 {number}") for number in source_ids],
             "test",
         )
-        star_identifier_module._record_gaia_failure(_paused_failure())
-        fetch, _ = star_identifier_module.make_gaia_tile_fetcher()
+        gaia_tile_queries._record_gaia_failure(_paused_failure())
+        fetch, _ = gaia_tile_queries.make_gaia_tile_fetcher()
 
         field = load_field_gaia_stars(None, [tile], 18.0, fetch)
 

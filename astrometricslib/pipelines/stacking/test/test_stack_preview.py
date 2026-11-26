@@ -9,7 +9,6 @@ fails.
 import json
 import os
 import shutil
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,31 +16,27 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib._internal.drivers import outside_services
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, preview_settings_path_for
-from astrometricslib.pipelines.stacking.post_processing import stack_preview
-from astrometricslib.pipelines.stacking.post_processing.bright_object import BrightObjectStretch
-from astrometricslib.pipelines.stacking.post_processing.sky_level import SkyLevelChoice
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
-    PreviewSettings,
-    build_bright_object_script,
-    build_pcc_script,
-    build_picture_script,
-    build_preview_script,
-    build_stretch_script,
-    denoise_with_cosmic_clarity,
-    find_local_gaia_catalog,
-    flatten_background,
-    has_plate_solution,
+from astrometricslib.pipelines.stacking.post_processing import (
+    preview_color,
+    preview_graxpert,
+    preview_settings,
+    preview_siril,
+    preview_steps,
+    stack_preview,
+    starnet_stretch,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_color import (
     is_colour_image,
-    online_catalog_reachable,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import (
+    PreviewSettings,
     preview_is_out_of_date,
     read_preview_settings,
-    run_preview_script,
-    write_stack_preview,
 )
-
-# Bound at import, before the test setup replaces the module's own copies.
+from astrometricslib.pipelines.stacking.post_processing.sky_level import SkyLevelChoice
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import write_stack_preview
+from astrometricslib.pipelines.stacking.post_processing.sun_like_balance import SunLikeBalance
 
 
 @pytest.fixture
@@ -91,23 +86,21 @@ def _configure(
     The star toning and the star width matching are off unless asked for, so
     the tests of the other steps see the pipeline without them.
     """
-    monkeypatch.setattr(
-        stack_preview,
-        "get_configuration",
-        lambda: SimpleNamespace(
-            get_siril_executable=lambda: siril,
-            get_graxpert_executable=lambda: graxpert,
-            get_cosmic_clarity_denoise_executable=lambda: cosmic_clarity,
-            get_cosmic_clarity_denoise_path=lambda: cosmic_clarity,
-            get_cosmic_clarity_denoise_strength=lambda: strength,
-            get_preview_color_denoise_strength=lambda: 0.3,
-            get_preview_star_tone_enabled=lambda: star_tone,
-            get_preview_remove_green_noise_enabled=lambda: remove_green,
-            get_preview_colour_calibration_enabled=lambda: colour_calibration,
-            get_preview_colour_calibration_method=lambda: colour_method,
-            get_preview_star_width_match_enabled=lambda: star_width_match,
-        ),
+    configuration = SimpleNamespace(
+        get_siril_executable=lambda: siril,
+        get_graxpert_executable=lambda: graxpert,
+        get_cosmic_clarity_denoise_executable=lambda: cosmic_clarity,
+        get_cosmic_clarity_denoise_path=lambda: cosmic_clarity,
+        get_cosmic_clarity_denoise_strength=lambda: strength,
+        get_preview_color_denoise_strength=lambda: 0.3,
+        get_preview_star_tone_enabled=lambda: star_tone,
+        get_preview_remove_green_noise_enabled=lambda: remove_green,
+        get_preview_colour_calibration_enabled=lambda: colour_calibration,
+        get_preview_colour_calibration_method=lambda: colour_method,
+        get_preview_star_width_match_enabled=lambda: star_width_match,
     )
+    for module in (stack_preview, preview_settings):
+        monkeypatch.setattr(module, "get_configuration", lambda: configuration)
 
 
 class _Programs:
@@ -217,7 +210,7 @@ class _Programs:
             if self.pcc_result:
                 image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
                 fits.writeto(Path(directory) / "colour.fits", image)
-            stack_preview._last_siril_output.set(self.pcc_output)
+            preview_siril._last_siril_output.set(self.pcc_output)
             return self.pcc_result
         if self.siril_result:
             if 'save "stretched"' in commands:
@@ -230,29 +223,16 @@ class _Programs:
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Put the stand-ins in place of the real runners."""
-        monkeypatch.setattr(stack_preview, "flatten_background", self.flatten)
+        monkeypatch.setattr(preview_graxpert, "flatten_background", self.flatten)
         monkeypatch.setattr(stack_preview, "denoise_with_cosmic_clarity", self.denoise)
-        monkeypatch.setattr(stack_preview, "run_preview_script", self.siril)
+        for module in (stack_preview, starnet_stretch):
+            monkeypatch.setattr(module, "run_preview_script", self.siril)
         monkeypatch.setattr(stack_preview, "tone_stars_in_file", self.tone)
 
 
 def test_the_preview_is_named_after_the_stack() -> None:
     """Verify the picture sits beside the stack with a suffix and .jpg."""
     assert preview_path_for("/lib/M 13/M_13_L_Stacked.fits") == "/lib/M 13/M_13_L_Stacked_preview.jpg"
-
-
-def test_the_script_stretches_and_saves_without_touching_the_stack() -> None:
-    """Verify the script saves a FITS and a JPEG under new names only."""
-    commands = build_preview_script("M_13_L_Stacked.fits", "M_13_L_Stacked_preview", 0.21)
-
-    assert commands[1:6] == [
-        'load "M_13_L_Stacked.fits"',
-        "autostretch -2.8 0.210",
-        'save "processed"',
-        "mirrorx",
-        'savejpg "M_13_L_Stacked_preview" 90',
-    ]
-    assert not any('M_13_L_Stacked"' in command for command in commands if command.startswith("save"))
 
 
 def test_without_graxpert_the_stack_copy_is_stretched(
@@ -367,11 +347,11 @@ def test_a_failed_graxpert_is_reported_as_a_skipped_step(
     """Verify a skipped step reaches the caller, so it can store a notice."""
     _configure(monkeypatch, "siril-cli", "graxpert-gpu")
     _Programs(flatten_result=False).install(monkeypatch)
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
 
-    assert skipped == [stack_preview.SkippedPreviewStep("GraXpert", "GraXpert did not finish")]
+    assert skipped == [preview_steps.SkippedPreviewStep("GraXpert", "GraXpert did not finish")]
 
 
 def test_a_working_graxpert_reports_no_skipped_step(
@@ -380,7 +360,7 @@ def test_a_working_graxpert_reports_no_skipped_step(
     """Verify nothing is reported when every step worked."""
     _configure(monkeypatch, "siril-cli", "graxpert-gpu")
     _Programs().install(monkeypatch)
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
 
@@ -405,7 +385,7 @@ def test_a_graxpert_that_cannot_start_still_gives_a_picture(
         """
         raise FileNotFoundError(graxpert_executable)
 
-    monkeypatch.setattr(stack_preview, "flatten_background", cannot_start)
+    monkeypatch.setattr(preview_graxpert, "flatten_background", cannot_start)
 
     assert write_stack_preview(str(stack)) is not None
     assert 'load "stack.fits"' in programs.siril_calls[0][1]
@@ -642,16 +622,6 @@ def test_the_chosen_sky_level_reaches_siril(
         assert "autostretch -2.8 0.137" in programs.siril_calls[0][1]
 
 
-def test_the_stretch_script_saves_a_fits_and_the_picture_script_does_not_stretch() -> None:
-    """Verify the two halves of the denoise route."""
-    stretch = build_stretch_script("flat.fits", "stretched", 0.15)
-    picture = build_picture_script("denoised.fits", "preview")
-
-    assert stretch[1:4] == ['load "flat.fits"', "autostretch -2.8 0.150", 'save "stretched"']
-    assert picture[1:5] == ['load "denoised.fits"', 'save "processed"', "mirrorx", 'savejpg "preview" 90']
-    assert not any(command.startswith("autostretch") for command in picture)
-
-
 def test_a_failed_siril_leaves_no_picture_and_no_scratch_folder(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -713,201 +683,6 @@ def test_no_configured_siril_gives_no_picture(
     assert programs.flatten_calls == []
 
 
-def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Replace `run_registered` inside the module with a recorder.
-
-    Returns
-    -------
-    captured : `dict`
-        Filled in with ``arguments``, and ``script`` if one was passed, when
-        the module runs a program.
-    """
-    captured: dict = {}
-
-    def fake_subprocess_run(
-        arguments: list[str], _timeout_seconds: float
-    ) -> stack_preview.subprocess.CompletedProcess:
-        """Record the command line, and the script file if there is one.
-
-        Returns
-        -------
-        completed : `subprocess.CompletedProcess`
-            A successful result.
-        """
-        captured["arguments"] = arguments
-        if "-s" in arguments:
-            captured["script"] = Path(arguments[-1]).read_text(encoding="utf-8")
-        return stack_preview.subprocess.CompletedProcess(arguments, 0, "", "")
-
-    monkeypatch.setattr(stack_preview, "run_registered", fake_subprocess_run)
-    monkeypatch.setattr(stack_preview, "siril_process_lock", nullcontext)
-    return captured
-
-
-def test_a_flatpak_siril_gets_host_file_access(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify a Flatpak Siril gets host file access and runs in the folder."""
-    captured = _record_subprocess(monkeypatch)
-
-    succeeded = run_preview_script(str(tmp_path), ["autostretch"], "flatpak run org.siril.Siril")
-
-    assert succeeded
-    assert captured["arguments"][:4] == ["flatpak", "run", "--filesystem=host", "org.siril.Siril"]
-    assert captured["arguments"][4:6] == ["-d", str(tmp_path)]
-    assert captured["script"] == "autostretch\n"
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_graxpert_is_asked_for_a_subtracted_ai_background(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the GraXpert command line asks for AI background subtraction."""
-    captured = _record_subprocess(monkeypatch)
-
-    assert flatten_background("/opt/graxpert-gpu.sh", "/work/stack.fits", "/work/flat")
-
-    arguments = captured["arguments"]
-    assert arguments[0] == "/opt/graxpert-gpu.sh"
-    assert arguments[1:5] == ["-cli", "-cmd", "background-extraction", "-gpu"]
-    assert arguments[arguments.index("-correction") + 1] == "Subtraction"
-    assert arguments[-3:] == ["-output", "/work/flat", "/work/stack.fits"]
-
-
-@pytest.fixture
-def cosmic_clarity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Make a stand-in Cosmic Clarity folder and take its lock out of play.
-
-    Returns
-    -------
-    executable : `pathlib.Path`
-        The path of the stand-in program, with ``input`` and ``output``
-        folders beside it.
-    """
-    folder = tmp_path / "cc"
-    (folder / "input").mkdir(parents=True)
-    (folder / "output").mkdir()
-    slot_path = "astrometricslib.foundation.storage.process_locks.acquire_resource_slot"
-    monkeypatch.setattr(slot_path, lambda *args, **kwargs: nullcontext())
-    monkeypatch.setattr(stack_preview, "get_configuration", lambda: SimpleNamespace())
-    return folder / "denoise"
-
-
-def _fake_denoise_program(
-    monkeypatch: pytest.MonkeyPatch, returncode: int = 0, writes_output: bool = True
-) -> list[list[str]]:
-    """Replace `run_registered` with a program that denoises its `input`.
-
-    Returns
-    -------
-    calls : `list` [`list` [`str`]]
-        The command lines the module ran.
-    """
-    calls: list[list[str]] = []
-
-    def fake_run(arguments: list[str], _timeout_seconds: float) -> stack_preview.subprocess.CompletedProcess:
-        """Write a ``_denoised`` copy of each input file, as the program does.
-
-        Returns
-        -------
-        completed : `subprocess.CompletedProcess`
-            A result with the chosen exit code.
-        """
-        calls.append(arguments)
-        folder = Path(arguments[0]).parent
-        if writes_output:
-            for staged in (folder / "input").iterdir():
-                (folder / "output" / f"{staged.stem}_denoised.fits").write_bytes(b"denoised")
-        return stack_preview.subprocess.CompletedProcess(arguments, returncode, "", "")
-
-    monkeypatch.setattr(stack_preview, "run_registered", fake_run)
-    return calls
-
-
-def test_cosmic_clarity_gets_a_copy_and_leaves_its_folders_clean(
-    tmp_path: Path, cosmic_clarity: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify the result returns and the program's folders end empty."""
-    source = tmp_path / "in.fits"
-    source.write_bytes(b"flat")
-    calls = _fake_denoise_program(monkeypatch)
-    result = tmp_path / "denoised.fits"
-
-    assert denoise_with_cosmic_clarity(str(cosmic_clarity), str(source), str(result), 0.6)
-
-    assert result.read_bytes() == b"denoised"
-    assert source.read_bytes() == b"flat"
-    assert calls[0] == [str(cosmic_clarity), "--denoise_mode=luminance", "--denoise_strength=0.6"]
-    assert list((cosmic_clarity.parent / "input").iterdir()) == []
-    assert list((cosmic_clarity.parent / "output").iterdir()) == []
-
-
-def test_cosmic_clarity_runs_in_full_mode_when_given_a_color_strength(
-    tmp_path: Path, cosmic_clarity: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify a color strength selects the full mode with both strengths."""
-    source = tmp_path / "in.fits"
-    source.write_bytes(b"flat")
-    calls = _fake_denoise_program(monkeypatch)
-
-    assert denoise_with_cosmic_clarity(
-        str(cosmic_clarity), str(source), str(tmp_path / "out.fits"), 0.5, color_strength=0.3
-    )
-
-    assert calls[0] == [
-        str(cosmic_clarity),
-        "--denoise_mode=full",
-        "--denoise_strength=0.5",
-        "--color_denoise_strength=0.3",
-    ]
-
-
-def test_cosmic_clarity_is_not_run_over_someone_elses_files(
-    tmp_path: Path, cosmic_clarity: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify a file already in `input` stops the run and is left alone."""
-    foreign = cosmic_clarity.parent / "input" / "my_own_image.tif"
-    foreign.write_bytes(b"mine")
-    source = tmp_path / "in.fits"
-    source.write_bytes(b"flat")
-    calls = _fake_denoise_program(monkeypatch)
-
-    assert not denoise_with_cosmic_clarity(str(cosmic_clarity), str(source), str(tmp_path / "out.fits"), 1.0)
-
-    assert calls == []
-    assert foreign.read_bytes() == b"mine"
-
-
-def test_a_failed_cosmic_clarity_run_leaves_its_folders_clean(
-    tmp_path: Path, cosmic_clarity: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify a failure removes the staged copy and reports failure."""
-    source = tmp_path / "in.fits"
-    source.write_bytes(b"flat")
-    _fake_denoise_program(monkeypatch, returncode=1, writes_output=False)
-
-    assert not denoise_with_cosmic_clarity(str(cosmic_clarity), str(source), str(tmp_path / "out.fits"), 1.0)
-
-    assert list((cosmic_clarity.parent / "input").iterdir()) == []
-
-
-def test_files_this_module_left_in_cosmic_clarity_are_cleared_but_others_are_kept(
-    tmp_path: Path, cosmic_clarity: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify a killed run's leftovers go and a person's files stay."""
-    input_folder = cosmic_clarity.parent / "input"
-    output_folder = cosmic_clarity.parent / "output"
-    (input_folder / "stack_preview_4242.fits").write_bytes(b"left by a killed run")
-    (output_folder / "stack_preview_4242_denoised.fits").write_bytes(b"left by a killed run")
-    source = tmp_path / "in.fits"
-    source.write_bytes(b"flat")
-    _fake_denoise_program(monkeypatch)
-
-    assert denoise_with_cosmic_clarity(str(cosmic_clarity), str(source), str(tmp_path / "out.fits"), 1.0)
-
-    # A person's file in `input` still stops the run, and is left alone.
-    mine = input_folder / "my_own_image.tif"
-    mine.write_bytes(b"mine")
-    assert not denoise_with_cosmic_clarity(str(cosmic_clarity), str(source), str(tmp_path / "out2.fits"), 1.0)
-    assert mine.read_bytes() == b"mine"
-
-
 def test_old_scratch_folders_are_removed_and_recent_ones_kept(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -937,51 +712,10 @@ def test_a_graxpert_result_full_of_invalid_pixels_is_not_used(
     _configure(monkeypatch, "siril-cli", "graxpert-gpu", None)
     programs = _Programs()
     programs.install(monkeypatch)
-    monkeypatch.setattr(stack_preview, "_is_usable_image", lambda path: False)
+    monkeypatch.setattr(preview_steps, "_is_usable_image", lambda path: False)
 
     assert write_stack_preview(str(stack)) is not None
     assert 'load "stack.fits"' in programs.siril_calls[0][1]
-
-
-def test_the_usability_check_accepts_a_good_image_and_rejects_bad_ones(tmp_path: Path) -> None:
-    """Verify valid, mostly invalid, flat and unreadable images."""
-    good = np.random.default_rng(0).normal(0.0, 1.0, (40, 40)).astype(np.float32)
-    mostly_invalid = good.copy()
-    mostly_invalid[:30, :] = np.nan
-    flat = np.full((40, 40), 0.5, dtype=np.float32)
-    paths = {}
-    for name, data in (("good", good), ("invalid", mostly_invalid), ("flat", flat)):
-        paths[name] = tmp_path / f"{name}.fits"
-        fits.writeto(paths[name], data)
-    broken = tmp_path / "broken.fits"
-    broken.write_bytes(b"not a fits file")
-
-    assert stack_preview._is_usable_image(str(paths["good"]))
-    assert not stack_preview._is_usable_image(str(paths["invalid"]))
-    assert not stack_preview._is_usable_image(str(paths["flat"]))
-    assert not stack_preview._is_usable_image(str(broken))
-
-
-def test_the_bright_object_script_clips_stretches_and_saves_a_jpeg() -> None:
-    """The script applies Siril's mtf between two points, then saves a JPEG."""
-    stretch = BrightObjectStretch(1.0, 0.0002, 0.361, 0.509, 0.044)
-    commands = build_bright_object_script("Moon.fits", "Moon_preview", stretch)
-    assert commands[1:6] == [
-        'load "Moon.fits"',
-        "mtf 0.000200 0.361000 0.509000",
-        'save "processed"',
-        "mirrorx",
-        'savejpg "Moon_preview" 90',
-    ]
-    assert not any(command.startswith(("fmul", "autostretch")) for command in commands)
-
-
-def test_a_stack_with_values_above_one_is_multiplied_down_before_the_stretch() -> None:
-    """A scale below 1 adds an fmul command ahead of the mtf."""
-    stretch = BrightObjectStretch(0.25, 0.0005, 0.4, 1.0, 0.05)
-    commands = build_bright_object_script("Moon.fits", "Moon_preview", stretch)
-    assert commands[2] == "fmul 0.250000000"
-    assert commands[3].startswith("mtf ")
 
 
 def test_a_bright_object_skips_graxpert_and_the_denoise(
@@ -1131,18 +865,6 @@ def _write_colour_stack(path: Path) -> None:
     fits.writeto(path, image, overwrite=True)
 
 
-def test_green_removal_is_added_before_the_stretch_only_when_asked() -> None:
-    """Verify `rmgreen` sits between load and stretch, and is not a default."""
-    plain = build_preview_script("a.fits", "a_preview", 0.2)
-    with_green = build_preview_script("a.fits", "a_preview", 0.2, remove_green=True)
-    stretch_only = build_stretch_script("a.fits", "stretched", 0.2, remove_green=True)
-
-    assert "rmgreen" not in plain
-    assert with_green[1:4] == ['load "a.fits"', "rmgreen", "autostretch -2.8 0.200"]
-    assert stretch_only[1:4] == ['load "a.fits"', "rmgreen", "autostretch -2.8 0.200"]
-    assert "rmgreen" not in build_stretch_script("a.fits", "stretched", 0.2)
-
-
 def test_only_a_three_plane_fits_counts_as_a_colour_image(tmp_path: Path) -> None:
     """Verify colour is told apart from single-channel and unreadable files."""
     colour, mono, broken = tmp_path / "c.fits", tmp_path / "m.fits", tmp_path / "b.fits"
@@ -1255,23 +977,13 @@ def _write_colour_stack_with_stars(path: Path, star_count: int = 120) -> None:
     fits.writeto(path, image.astype(np.float32), overwrite=True)
 
 
-def test_the_linked_stretch_is_asked_for_only_when_wanted() -> None:
-    """Verify the shared stretch adds `-linked`, and nothing else does."""
-    separate = build_preview_script("a.fits", "a_preview", 0.2)
-    shared = build_preview_script("a.fits", "a_preview", 0.2, linked=True)
-
-    assert "autostretch -2.8 0.200" in separate
-    assert "autostretch -linked -2.8 0.200" in shared
-    assert "autostretch -linked -2.8 0.200" in build_stretch_script("a.fits", "s", 0.2, linked=True)
-
-
 def test_a_calibrated_colour_stack_is_stretched_with_one_shared_stretch(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify calibrated colours get one stretch for all channels."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -1322,34 +1034,6 @@ def _use_online_catalog(monkeypatch: pytest.MonkeyPatch, reachable: bool) -> Non
     monkeypatch.setattr(stack_preview, "online_catalog_reachable", lambda: reachable)
 
 
-def test_the_pcc_script_solves_the_field_only_when_it_has_no_solution() -> None:
-    """Verify `platesolve` comes before `pcc`, and only when asked for."""
-    unsolved = build_pcc_script("a.fits", "colour", solve=True)
-    solved = build_pcc_script("a.fits", "colour", solve=False)
-
-    assert unsolved[1:5] == [
-        'load "a.fits"',
-        "platesolve -catalog=gaia",
-        "pcc -catalog=gaia",
-        'save "colour"',
-    ]
-    assert solved[1:4] == ['load "a.fits"', "pcc -catalog=gaia", 'save "colour"']
-
-
-def test_a_header_with_a_projection_and_a_reference_position_counts_as_solved(tmp_path: Path) -> None:
-    """Verify the plate solution check reads the header only."""
-    solved, unsolved, broken = tmp_path / "s.fits", tmp_path / "u.fits", tmp_path / "b.fits"
-    header = fits.Header()
-    header["CTYPE1"], header["CRVAL1"] = "RA---TAN", 202.4
-    fits.writeto(solved, np.zeros((4, 4), dtype=np.float32), header)
-    fits.writeto(unsolved, np.zeros((4, 4), dtype=np.float32))
-    broken.write_bytes(b"not fits")
-
-    assert has_plate_solution(str(solved)) is True
-    assert has_plate_solution(str(unsolved)) is False
-    assert has_plate_solution(str(broken)) is False
-
-
 def test_pcc_runs_first_and_its_result_feeds_a_shared_stretch(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1394,7 +1078,7 @@ def test_a_failed_pcc_falls_back_to_the_stars_like_the_sun(
     _use_online_catalog(monkeypatch, reachable=True)
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs(pcc_result=False)
     programs.install(monkeypatch)
 
@@ -1406,89 +1090,6 @@ def test_a_failed_pcc_falls_back_to_the_stars_like_the_sun(
     assert any(command.startswith("mtf ") for command in final_commands)
     summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
     assert "Colour calibration (from the stars like the Sun) done" in summary
-
-
-def test_the_pcc_script_reads_a_local_catalog_when_given_one() -> None:
-    """Verify the script sets the catalog path and asks for `localgaia`."""
-    commands = build_pcc_script("a.fits", "colour", solve=True, local_catalog="/data/cat.dat")
-
-    assert commands[1:6] == [
-        "set core.catalogue_gaia_astro=/data/cat.dat",
-        'load "a.fits"',
-        "platesolve -catalog=localgaia",
-        "pcc -catalog=localgaia",
-        'save "colour"',
-    ]
-    assert not any("-catalog=gaia" in command for command in commands)
-
-
-def test_the_local_gaia_catalog_is_found_in_the_first_folder_that_has_it(tmp_path: Path) -> None:
-    """Verify the search order and the answer when nothing is installed."""
-    first, second = tmp_path / "first", tmp_path / "second"
-    first.mkdir()
-    second.mkdir()
-    (second / "siril_cat_healpix8_astro.dat").write_bytes(b"x")
-
-    assert find_local_gaia_catalog([str(first), str(second)]) == str(second / "siril_cat_healpix8_astro.dat")
-    assert find_local_gaia_catalog([str(first)]) is None
-
-
-def _fake_connection(monkeypatch: pytest.MonkeyPatch, error: Exception | None) -> list[str]:
-    """Replace the connection the check opens; record each host it is sent to.
-
-    Parameters
-    ----------
-    monkeypatch : `pytest.MonkeyPatch`
-        Test patcher.
-    error : `Exception` or `None`
-        What the connection raises, or `None` for a connection that works.
-
-    Returns
-    -------
-    attempts : `list` [`str`]
-        The host of each connection tried.
-    """
-    attempts: list[str] = []
-
-    def connect(address: tuple[str, int], timeout: float) -> nullcontext:
-        """Record the attempt, then fail or hand back a closable stand-in.
-
-        Returns
-        -------
-        connection : `contextlib.nullcontext`
-            A stand-in that closes with nothing to do.
-        """
-        attempts.append(address[0])
-        if error is not None:
-            raise error
-        return nullcontext()
-
-    monkeypatch.setattr(outside_services.clients.socket, "create_connection", connect)
-    return attempts
-
-
-def test_the_catalog_server_check_goes_through_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the check is counted as a live request of its gateway service."""
-    attempts = _fake_connection(monkeypatch, None)
-
-    events: list[outside_services.ServiceEvent] = []
-    with outside_services.record_service_events(events):
-        assert online_catalog_reachable() is True
-
-    assert attempts == ["tapvizier.u-strasbg.fr"]
-    assert any(event.service == "Siril Gaia catalog" and event.kind == "live" for event in events)
-
-
-def test_a_timeout_pauses_the_server_and_the_next_check_makes_no_connection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify one timeout pauses the host, so the next preview skips."""
-    attempts = _fake_connection(monkeypatch, TimeoutError("timed out"))
-
-    assert online_catalog_reachable() is False
-    assert online_catalog_reachable() is False
-
-    assert attempts == ["tapvizier.u-strasbg.fr"]
 
 
 def test_pcc_uses_the_local_catalog_without_asking_the_network(
@@ -1526,7 +1127,7 @@ def test_pcc_is_not_started_when_the_server_does_not_answer(
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     _use_online_catalog(monkeypatch, reachable=False)
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -1548,7 +1149,7 @@ def test_without_gaia_colours_the_colours_are_left_uncalibrated(
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
 
@@ -1582,7 +1183,7 @@ def test_starnet_splits_the_image_then_stretches_the_pieces_apart(
     """Verify StarNet splits the image and the picture is the blend."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="stars")
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -1811,7 +1412,7 @@ def test_a_record_that_cannot_be_saved_does_not_fail_the_preview(
     _configure(monkeypatch, "siril-cli", None)
     _Programs().install(monkeypatch)
     unwritable = str(stack.parent / "no" / "x.json")
-    monkeypatch.setattr(stack_preview, "preview_settings_path_for", lambda path: unwritable)
+    monkeypatch.setattr(preview_settings, "preview_settings_path_for", lambda path: unwritable)
 
     assert write_stack_preview(str(stack)) is not None
     assert read_preview_settings(str(stack)) is None
@@ -1930,7 +1531,7 @@ def test_a_failed_masked_stretch_keeps_the_normal_picture_and_is_reported(
     _Programs().install(monkeypatch)
     monkeypatch.setattr(stack_preview, "apply_masked_stretch_in_file", lambda *_: False)
     steps: list[str] = []
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     picture = write_stack_preview(str(path), steps_log=steps, skipped_steps=skipped, object_category="galaxy")
 
@@ -2013,7 +1614,7 @@ def test_a_plane_that_cannot_be_written_falls_back_to_graxpert(
     _configure(monkeypatch, "siril-cli", "graxpert-gpu")
     programs = _Programs()
     programs.install(monkeypatch)
-    monkeypatch.setattr(stack_preview, "subtract_sky_plane_in_file", lambda *arguments: False)
+    monkeypatch.setattr(preview_graxpert, "subtract_sky_plane_in_file", lambda *arguments: False)
     steps: list[str] = []
     skipped: list = []
 
@@ -2090,7 +1691,7 @@ def test_a_calibrated_colour_stack_is_not_given_green_removal(
     """Verify `rmgreen` is left out once colour calibration has run."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
@@ -2110,7 +1711,7 @@ def test_a_calibrated_colour_stack_is_stretched_from_its_measured_sky(
     """Verify a calibrated colour stack gets a measured sky and a record."""
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, []))
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
@@ -2131,11 +1732,9 @@ def test_a_failed_colour_calibration_keeps_the_green_removal(
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
     monkeypatch.setattr(
-        stack_preview,
+        preview_color,
         "balance_sun_like_stars_in_file",
-        lambda *args, **kwargs: stack_preview.SunLikeBalance(
-            applied=False, reason="the field has no Gaia star colors"
-        ),
+        lambda *args, **kwargs: SunLikeBalance(applied=False, reason="the field has no Gaia star colors"),
     )
     programs = _Programs()
     programs.install(monkeypatch)
@@ -2156,11 +1755,9 @@ def test_the_green_removal_switch_wins_over_the_calibration_rule(
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, remove_green=False)
     monkeypatch.setattr(
-        stack_preview,
+        preview_color,
         "balance_sun_like_stars_in_file",
-        lambda *args, **kwargs: stack_preview.SunLikeBalance(
-            applied=False, reason="the field has no Gaia star colors"
-        ),
+        lambda *args, **kwargs: SunLikeBalance(applied=False, reason="the field has no Gaia star colors"),
     )
     programs = _Programs()
     programs.install(monkeypatch)
@@ -2170,38 +1767,6 @@ def test_the_green_removal_switch_wins_over_the_calibration_rule(
     assert not any("rmgreen" in call[1] for call in programs.siril_calls)
     recorded = read_preview_settings(str(stack))["settings_used"]["remove_green_noise"]
     assert recorded == {"ran": False, "reason": "the setting is off"}
-
-
-@pytest.mark.parametrize(
-    ("is_colour", "switch_on", "calibrated", "expected"),
-    [
-        (True, True, False, True),
-        (True, True, True, False),
-        (True, False, False, False),
-        (False, True, False, False),
-    ],
-)
-def test_decide_remove_green_covers_every_case(
-    is_colour: bool, switch_on: bool, calibrated: bool, expected: bool
-) -> None:
-    """Verify the rule: colour, switch on, and no calibration."""
-    run_step, reason = stack_preview.decide_remove_green(is_colour, switch_on, calibrated)
-
-    assert run_step is expected
-    assert reason
-
-
-def test_the_sky_of_a_single_channel_stack_is_measured_as_before(tmp_path: Path) -> None:
-    """Verify a mono stack still gets a measured sky with no green step."""
-    path = tmp_path / "mono.fits"
-    rng = np.random.default_rng(3)
-    fits.writeto(path, rng.normal(0.01, 0.0005, (200, 200)).astype(np.float32))
-
-    sky = stack_preview.sky_background_for_file(str(path))
-
-    assert sky is not None
-    assert sky[0] == pytest.approx(0.01, abs=0.0005)
-    assert sky[1] == pytest.approx(0.0005, rel=0.1)
 
 
 def _fake_white_balance(applied: bool, calls: list[str]) -> object:
@@ -2223,9 +1788,7 @@ def _fake_white_balance(applied: bool, calls: list[str]) -> object:
         as with Gaia colors at hand.
     """
 
-    def check(
-        input_path: str, output_path: str, *_: object, as_calibration: bool = False
-    ) -> stack_preview.SunLikeBalance:
+    def check(input_path: str, output_path: str, *_: object, as_calibration: bool = False) -> SunLikeBalance:
         """Act like the check, or like the calibration from sun-like stars.
 
         Returns
@@ -2235,9 +1798,9 @@ def _fake_white_balance(applied: bool, calls: list[str]) -> object:
         """
         calls.append(input_path)
         if not applied and not as_calibration:
-            return stack_preview.SunLikeBalance(applied=False, reason="only 3 isolated sun-like stars")
+            return SunLikeBalance(applied=False, reason="only 3 isolated sun-like stars")
         shutil.copyfile(input_path, output_path)
-        return stack_preview.SunLikeBalance(
+        return SunLikeBalance(
             applied=True,
             reason="done",
             star_count=41,
@@ -2260,11 +1823,11 @@ def test_the_white_balance_check_feeds_the_stretch_when_it_corrects(
     _use_online_catalog(monkeypatch, reachable=True)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     calls: list[str] = []
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
 
@@ -2286,11 +1849,11 @@ def test_a_check_that_changes_nothing_keeps_the_calibrated_image_and_says_why(
     _write_colour_stack_with_stars(stack)
     _use_online_catalog(monkeypatch, reachable=True)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(False, []))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(False, []))
     programs = _Programs()
     programs.install(monkeypatch)
     steps: list[str] = []
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     assert write_stack_preview(str(stack), steps_log=steps, skipped_steps=skipped) is not None
 
@@ -2311,7 +1874,7 @@ def test_the_white_balance_check_does_not_run_without_calibrated_colors(
 ) -> None:
     """Verify a stack with no calibration, and a mono stack, skip the check."""
     calls: list[str] = []
-    monkeypatch.setattr(stack_preview, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
+    monkeypatch.setattr(preview_color, "balance_sun_like_stars_in_file", _fake_white_balance(True, calls))
     _configure(monkeypatch, "siril-cli", None, colour_calibration=False)
     _Programs().install(monkeypatch)
     _write_colour_stack_with_stars(stack)
@@ -2334,7 +1897,7 @@ def test_siril_saying_its_calibration_is_imprecise_becomes_a_notice(
         pcc_output="log: The photometric color calibration seems to have found an imprecise solution"
     )
     programs.install(monkeypatch)
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
 
@@ -2353,32 +1916,9 @@ def test_a_precise_pcc_gives_no_warning(
     _write_colour_stack_with_stars(stack)
     _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
     _Programs(pcc_output="log: Photometric Color Calibration succeeded.").install(monkeypatch)
-    skipped: list[stack_preview.SkippedPreviewStep] = []
+    skipped: list[preview_steps.SkippedPreviewStep] = []
 
     write_stack_preview(str(stack), skipped_steps=skipped)
 
     assert not any(step.still_used for step in skipped)
     assert "colour_calibration_warning" not in read_preview_settings(str(stack))["settings_used"]
-
-
-def test_the_text_siril_printed_can_be_read_after_a_script(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify `last_siril_output` gives the output of the last script."""
-
-    def fake_run(arguments: list[str], _timeout_seconds: float) -> stack_preview.subprocess.CompletedProcess:
-        """Give a result with some output.
-
-        Returns
-        -------
-        completed : `subprocess.CompletedProcess`
-            A successful result that printed one line.
-        """
-        return stack_preview.subprocess.CompletedProcess(arguments, 0, "log: hello from Siril\n", "")
-
-    monkeypatch.setattr(stack_preview, "run_registered", fake_run)
-    monkeypatch.setattr(stack_preview, "siril_process_lock", nullcontext)
-
-    run_preview_script(str(tmp_path), ["noop"], "siril-cli")
-
-    assert stack_preview.last_siril_output() == "log: hello from Siril\n"

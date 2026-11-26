@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 from astrometricslib._internal.drivers.outside_services import ServicePausedError
 from astrometricslib.foundation.errors import ExternalServiceError
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries
 
 
 def _run_in_thread(work: Callable[[], None]) -> None:
@@ -39,20 +39,20 @@ def test_two_runs_have_independent_breakers_and_statistics() -> None:
 
     def first_run() -> None:
         """Trip the breaker, then wait for the second run."""
-        star_identifier_module.reset_gaia_query_statistics()
-        star_identifier_module._record_gaia_failure(paused)
+        gaia_tile_queries.reset_gaia_query_statistics()
+        gaia_tile_queries._record_gaia_failure(paused)
         first_started.set()
         first_may_finish.wait(timeout=10)
-        results["first_disabled"] = star_identifier_module._gaia_remote_queries_disabled()
-        results["first_statistics"] = star_identifier_module.get_gaia_query_statistics()
+        results["first_disabled"] = gaia_tile_queries._gaia_remote_queries_disabled()
+        results["first_statistics"] = gaia_tile_queries.get_gaia_query_statistics()
 
     def second_run() -> None:
         """Reset after the first run tripped, then record a success."""
         first_started.wait(timeout=10)
-        star_identifier_module.reset_gaia_query_statistics()
-        results["second_disabled_at_start"] = star_identifier_module._gaia_remote_queries_disabled()
-        star_identifier_module._record_gaia_success()
-        results["second_statistics"] = star_identifier_module.get_gaia_query_statistics()
+        gaia_tile_queries.reset_gaia_query_statistics()
+        results["second_disabled_at_start"] = gaia_tile_queries._gaia_remote_queries_disabled()
+        gaia_tile_queries._record_gaia_success()
+        results["second_statistics"] = gaia_tile_queries.get_gaia_query_statistics()
         first_may_finish.set()
 
     threads = [threading.Thread(target=first_run), threading.Thread(target=second_run)]
@@ -73,11 +73,11 @@ def test_two_runs_have_independent_breakers_and_statistics() -> None:
 
 def test_thread_in_copied_context_sees_the_run_state() -> None:
     """A thread in a copied context uses its run's state."""
-    star_identifier_module.reset_gaia_query_statistics()
+    gaia_tile_queries.reset_gaia_query_statistics()
     run_context = contextvars.copy_context()
     thread = threading.Thread(
-        target=run_context.run, args=(star_identifier_module._record_gaia_failure, ExternalServiceError("x"))
+        target=run_context.run, args=(gaia_tile_queries._record_gaia_failure, ExternalServiceError("x"))
     )
     thread.start()
     thread.join()
-    assert star_identifier_module.get_gaia_query_statistics()["failed"] == 1
+    assert gaia_tile_queries.get_gaia_query_statistics()["failed"] == 1

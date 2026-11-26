@@ -17,7 +17,7 @@ from astrometricslib.models.tuned_parameter import TunedParameter
 MODULES = (
     "astrometricslib.pipelines.astrometry.pre_processing.fwhm",
     "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
-    "astrometricslib.pipelines.astrometry.processing.star_identifier",
+    "astrometricslib.pipelines.astrometry.processing.simbad_matching",
     "astrometricslib.pipelines.astrometry.processing.wcs_refinement",
     "astrometricslib.pipelines.astrometry.utilities.catalog_seeding",
 )

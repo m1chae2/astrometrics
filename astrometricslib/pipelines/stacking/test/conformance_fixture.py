@@ -67,6 +67,7 @@ from astrometricslib.pipelines.stacking.post_processing.normalization_scale impo
 from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
     preview_step_skipped_measurements,
 )
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     abandoned_stack_measurements,
     frame_geometry_measurements,
@@ -81,7 +82,6 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     StackNoiseResult,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.post_processing.stack_star_shape import (
     stack_star_shape_measurements,
 )

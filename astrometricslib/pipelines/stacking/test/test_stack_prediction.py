@@ -27,7 +27,7 @@ from astrometricslib._internal.drivers.calibration_library import (
     FLAT_FRAME_PATHS_KEY,
     CalibrationLibrary,
 )
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.models.target import FrameRecord, Target

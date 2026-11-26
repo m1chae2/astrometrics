@@ -13,7 +13,7 @@ from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.quality_summary import AstrometryQualitySummary
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.astrometry import runner
-from astrometricslib.pipelines.astrometry.processing import star_identifier
+from astrometricslib.pipelines.astrometry.processing import gaia_tile_queries
 from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result
 
 
@@ -41,7 +41,7 @@ def validate_with_options(
     summary : `AstrometryQualitySummary`
         The summary `validate_output` built.
     """
-    monkeypatch.setattr(star_identifier, "get_gaia_query_statistics", lambda: {})
+    monkeypatch.setattr(gaia_tile_queries, "get_gaia_query_statistics", lambda: {})
     context = SimpleNamespace(
         stellar_objects=[],
         sources_detected=5,

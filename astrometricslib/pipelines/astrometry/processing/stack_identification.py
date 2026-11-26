@@ -61,18 +61,20 @@ from astrometricslib.pipelines.astrometry.processing.catalog_matching import (
     pixels_to_sky,
 )
 from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
+from astrometricslib.pipelines.astrometry.processing.gaia_field_matching import (
+    propagate_gaia_positions,
+    read_observation_time,
+)
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     TileFetcher,
     load_field_gaia_stars,
     tiles_under_image,
 )
-from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import (
     GAIA_DEFAULT_MAGNITUDE_LIMIT,
-    StarIdentifier,
     make_gaia_tile_fetcher,
-    propagate_gaia_positions,
-    read_observation_time,
 )
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import refine_wcs_with_gaia
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,

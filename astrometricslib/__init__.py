@@ -94,8 +94,9 @@ from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import 
 
 if TYPE_CHECKING:
     from astrometricslib._internal.drivers.driver_set import Drivers
+    from astrometricslib.api.calibration import CalibrationCatalog
     from astrometricslib.api.jobs import Jobs
-    from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
+    from astrometricslib.api.processing import ProcessingPipelines
     from astrometricslib.api.quality import QualityRecords
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
@@ -115,7 +116,7 @@ configure_offline_iers()
 register_interrupted_job_cleanup(restore_interrupted_stacks)
 
 _DEFERRED_EXPORTS = {
-    "CalibrationCatalog": "astrometricslib.api.processing",
+    "CalibrationCatalog": "astrometricslib.api.calibration",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityRecords": "astrometricslib.api.quality",
     "StellarCatalog": "astrometricslib.api.stars",

@@ -1,7 +1,7 @@
 """Purpose: Shared fixtures for the astrometry pipeline tests.
 
 Description: Gaia DR3 tiles are downloaded from the ESA Gaia archive first
-and from VizieR second (see `star_identifier.make_gaia_tile_fetcher`). So
+and from VizieR second (see `gaia_tile_queries.make_gaia_tile_fetcher`). So
 that no test reaches a real service, both fail at once with a connection
 error unless a test replaces them with fakes of its own.
 """

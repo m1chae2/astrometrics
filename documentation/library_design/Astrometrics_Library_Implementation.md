@@ -95,9 +95,9 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 *Code:* `astrometricslib/pipelines/astrometry/`
 
 - **Interfaces (§4.1).** `pipeline.py`; `runner.py` (adapter).
-- **Detection and centroids (§4.2).** `processing/star_identifier.py`, `pre_processing/source_detection.py`, `pre_processing/fwhm.py`.
-- **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
-- **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets the depth and `processing/gaia_field_stars.py` fills and reads tiles. Missing tiles raise `astrometry.notice_gaia_tiles_missing`.
+- **Detection and centroids (§4.2).** `processing/star_identifier.py`, `star_detection.py`, `pre_processing/source_detection.py`, `fwhm.py`.
+- **Plate solving, Gaia and the refit (§4.2).** `processing/plate_solution_steps.py`, `wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
+- **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets depth; `gaia_tile_queries.py`, `gaia_field_stars.py` fetch and read tiles. Missing tiles raise `astrometry.notice_gaia_tiles_missing`.
 - **WCS header (§4.3).** `pipelines/shared/session_identification.write_wcs_to_fits_header`. The refit is around the center (`proj_point="center"`); `save_refit_stack_plate_solution` adds the `WCSREFIT` card; detections file version 3.
 - **Extended-source hint (§4.2).** `check_extended_source` falls back to the saved target record; type rule `target_object_category`. <!-- impl: astrometricslib.utilities.target_object_category.target_object_category -->
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
@@ -411,12 +411,12 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.CLIP_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_PASSES -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.SIP_DEGREE -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_VIZIER_TIMEOUT_SECONDS -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_ESA_TIMEOUT_SECONDS -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEPTH_STEP_MAGNITUDES -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEPTH_STEPS_DOWN -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEFAULT_MAGNITUDE_LIMIT -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MINIMUM_STARS_FOR_DEPTH_ESTIMATE -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_VIZIER_TIMEOUT_SECONDS -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_ESA_TIMEOUT_SECONDS -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_DEPTH_STEP_MAGNITUDES -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_DEPTH_STEPS_DOWN -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_DEFAULT_MAGNITUDE_LIMIT -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.star_detection.MINIMUM_STARS_FOR_DEPTH_ESTIMATE -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.OPTICS_THROUGHPUT -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.DEFAULT_FWHM_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_depth.FALLBACK_SKY_MAG_PER_ARCSEC2 -->
@@ -429,11 +429,11 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_STARS_TO_VERIFY_REUSED_WCS -->
 <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_MATCH_CONCENTRATION -->
 <!-- impl: astrometricslib.pipelines.shared.session_identification.SOLUTION_CHECK_RADIUS_FACTOR -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.UNRESOLVED_COMPANION_RADIUS_ARCSEC -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.simbad_matching.UNRESOLVED_COMPANION_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.shared.variable_star_catalogs.MATCH_RADIUS_ARCSEC -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.POINTING_ERROR_SEARCH_RADIUS_ARCSEC -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.CENTRE_STAR_SEARCH_RADIUS_FRACTION -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.CENTRE_STAR_MINIMUM_PEAK_FRACTION -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.simbad_matching.POINTING_ERROR_SEARCH_RADIUS_ARCSEC -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.simbad_matching.CENTRE_STAR_SEARCH_RADIUS_FRACTION -->
+<!-- impl: astrometricslib.pipelines.astrometry.processing.simbad_matching.CENTRE_STAR_MINIMUM_PEAK_FRACTION -->
 
 ### 5.3 Photometry settings
 

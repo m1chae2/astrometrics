@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.pipelines.stacking import stage, stage_progress
-from astrometricslib.pipelines.stacking.post_processing import stack_preview
+from astrometricslib.pipelines.stacking.post_processing import preview_settings
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import find_frames_to_quarantine
 from astrometricslib.pipelines.stacking.stage_progress import (
     LOOP_LOG_EVERY_FRAMES,
@@ -125,7 +125,7 @@ def stub_steps(
             previews.append(stacked_path)
 
     monkeypatch.setattr(stage, "_make_preview", make_preview)
-    monkeypatch.setattr(stack_preview, "preview_is_out_of_date", lambda stacked_path: preview_reason)
+    monkeypatch.setattr(preview_settings, "preview_is_out_of_date", lambda stacked_path: preview_reason)
 
 
 def run_fake_stack(monkeypatch: pytest.MonkeyPatch, job: FakeJob) -> None:

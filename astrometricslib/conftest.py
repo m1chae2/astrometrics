@@ -262,16 +262,17 @@ def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     programs, and the white-balance check must not ask the Gaia archive.
     Tests of the preview code replace these stand-ins with their own.
     """
-    monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.post_processing.stack_preview.run_preview_script",
-        lambda directory, commands, siril_executable: False,
-    )
+    for module in ("stack_preview", "starnet_stretch"):
+        monkeypatch.setattr(
+            f"astrometricslib.pipelines.stacking.post_processing.{module}.run_preview_script",
+            lambda directory, commands, siril_executable: False,
+        )
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.post_processing.sun_like_balance.gaia_star_colors_in_footprint",
         lambda corners, margin_degrees, **options: None,
     )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.post_processing.stack_preview.flatten_background",
+        "astrometricslib.pipelines.stacking.post_processing.preview_graxpert.flatten_background",
         lambda graxpert_executable, input_path, output_stem: False,
     )
     monkeypatch.setattr(

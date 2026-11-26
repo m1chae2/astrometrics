@@ -26,7 +26,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_METRICS,
     STACKING_NOTICE_PREVIEW_STEP_SKIPPED,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 
 __all__ = [
     "SkippedPreviewStep",

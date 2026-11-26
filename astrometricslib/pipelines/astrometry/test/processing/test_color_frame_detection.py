@@ -18,11 +18,11 @@ import numpy as np
 import pytest
 from scipy.ndimage import zoom
 
-from astrometricslib.pipelines.astrometry.processing.star_identifier import (
-    StarIdentifier,
+from astrometricslib.pipelines.astrometry.processing.star_detection import (
     _block_average,
     _rescale_source_centroids,
 )
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 # Reproduces this module's `_COLOR_DETECTION_BIN_FACTOR` synthetic
 # validation as a locked-in regression test: a bilinear-demosaiced RGGB
@@ -203,7 +203,7 @@ def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm() -> None:
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
         return_value=6.75,
     ):
         identifier.detect_stars(data, is_color_frame=False)
@@ -220,7 +220,7 @@ def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails() ->
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
         return_value=None,
     ):
         identifier.detect_stars(data, is_color_frame=False)
@@ -240,7 +240,7 @@ def test_mono_frame_detection_survives_a_measurement_exception() -> None:
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
         side_effect=ValueError("too few sources to measure"),
     ):
         sources, unique_sources = identifier.detect_stars(data, is_color_frame=False)
@@ -262,7 +262,7 @@ def test_mono_frame_detection_does_not_hide_a_bug_in_the_measurement() -> None:
 
     with (
         patch(
-            "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+            "astrometricslib.pipelines.astrometry.processing.star_detection.measure_blob_width_from_data",
             side_effect=AttributeError("a coding mistake"),
         ),
         pytest.raises(AttributeError),

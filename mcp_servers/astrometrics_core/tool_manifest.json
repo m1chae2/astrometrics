@@ -184,6 +184,13 @@
       "interim_block": "",
       "note": "Built 2026-11-20. Picks a typical frame of a frame's session and one reference star in both, for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is stored."
     },
+    "quality_find_stars": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-26 as a Command Console building block. Runs the shared star finder on a FITS file with the width and threshold the caller gives. Reads the file only; nothing is stored."
+    },
     "quality_forget": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -232,6 +239,20 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it replaces quality_check_spectral_frames."
+    },
+    "quality_measure_sky": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-26 as a Command Console building block. Measures the empty sky's level and noise of a FITS file. Reads the file only; nothing is stored."
+    },
+    "quality_measure_sky_gradient": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-26 as a Command Console building block. Measures the sky's tilt across a FITS file as the preview does. Reads the file only; nothing is stored."
     },
     "quality_measure_stack": {
       "tool_class": "compute",
@@ -289,12 +310,47 @@
       "interim_block": "",
       "note": "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with a plain reason when a picture cannot be found, and lists the ids no row has. Reads only."
     },
+    "quality_robust_sigma": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "A Command Console building block: a spread of numbers the caller already has. Of no use to an AI client."
+    },
     "quality_set_aside_frames": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and reason, and says whether the reason came from a stored quality row, the folder's manifest file, or nothing but the folder. Moves nothing and writes nothing."
+    },
+    "quality_sigma_clip": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "A Command Console building block: clips numbers the caller already has. Of no use to an AI client."
+    },
+    "quality_sky_corners": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-26 as a Command Console building block. Gives a plate-solved FITS file's corners on the sky from its header. Reads the header only."
+    },
+    "quality_solved_stars": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "A Command Console building block, uncapped. The AI reads a target's named stars through star_query."
+    },
+    "quality_star_widths": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-26 as a Command Console building block. Measures the star width of each color channel of a FITS file. Reads the file only; nothing is stored."
     },
     "star_analyze_periodicity": {
       "tool_class": "change-data",

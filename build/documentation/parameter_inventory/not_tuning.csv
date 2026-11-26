@@ -170,7 +170,12 @@ astrometricslib/pipelines/astrometry/processing/gaia_depth.py,_BAND_SAMPLES,Samp
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,predict_gaia_query_depth.central_obstruction_fraction,Argument default of 0 for an optic with no central obstruction; the caller passes the real value
 astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_CHILDREN_PER_TILE,A HEALPix tile always has four children one level finer; structure
 astrometricslib/pipelines/astrometry/processing/gaia_field_stars.py,_DEPTH_TOLERANCE,Rounding tolerance when comparing stored and wanted depths; no result change
+astrometricslib/pipelines/astrometry/processing/gaia_tile_queries.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling
+astrometricslib/pipelines/astrometry/processing/gaia_tile_queries.py,GAIA_ROW_LIMIT,Plumbing: query size
+astrometricslib/pipelines/astrometry/processing/gaia_tile_queries.py,GAIA_VIZIER_TIMEOUT_SECONDS,Network timeout; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
+astrometricslib/pipelines/astrometry/processing/simbad_matching.py,SimbadMatching._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
+astrometricslib/pipelines/astrometry/processing/simbad_matching.py,SimbadMatching._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_LIMIT,"Most missed catalog stars sent to the viewer; display limit, changes no name"
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,CATALOG_ONLY_MARGIN_MAG,"Which missed catalog stars the viewer shows; display choice, changes no name or measurement"
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,IDENTIFICATION_FILE_VERSION,Version number of a saved file layout; plumbing
@@ -178,13 +183,8 @@ astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRES
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SIMBAD_DONE,Share of a progress bar; display only
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_SOLVED,Share of a progress bar; display only
 astrometricslib/pipelines/astrometry/processing/stack_identification.py,_PROGRESS_TILES_DONE,Share of a progress bar; display only
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ROW_LIMIT,Plumbing: query size
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_VIZIER_TIMEOUT_SECONDS,Network timeout; affects only failure handling
+astrometricslib/pipelines/astrometry/processing/star_detection.py,FAINT_END_PERCENTILE,Percentile of the depth check only; it raises a flag and changes no result
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,MAXIMUM_PLATE_SOLVE_SOURCES,Decided not tuning in the #175 review (AST-D05): speed cap; the brightest stars are enough to solve
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.height,Fallback image size used only when the caller gives none
-astrometricslib/pipelines/astrometry/processing/star_identifier.py,StarIdentifier._identify_stars_with_simbad.width,Fallback image size used only when the caller gives none
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
@@ -453,6 +453,9 @@ astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WID
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_SATURATED_SHARE,Share of the picture's top above which a peak is a burnt-out core; plumbing of a half-maximum width.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_STARS,Cap on how many stars the star width is measured on; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,align_with_stars.star_count,Cap on how many stars are used to align two stacks; more only costs time.
+astrometricslib/pipelines/stacking/post_processing/preview_cosmic_clarity.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/preview_graxpert.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/preview_siril.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMUM_SLOPE_PAIRS,"Sampling, numerics, plumbing or math constant."
@@ -476,9 +479,6 @@ astrometricslib/pipelines/stacking/post_processing/stack_comparison.py,_sentence
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_SIGMA_ERROR_FACTOR,Statistical constant
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MEDIAN_ERROR_FACTOR,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_noise.py,_RECENT_STACK_SOLVES_KEPT,Cache size: how many recent plate solves are kept in memory; affects only run time
-astrometricslib/pipelines/stacking/post_processing/stack_preview.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/post_processing/stack_preview.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/post_processing/stack_preview.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/stack_preview.py,_STALE_SCRATCH_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_CHANNEL_TOP_PERCENTILE,Defines a channel top as its brightest few pixels; the shares of STK-62 act on it.
 astrometricslib/pipelines/stacking/post_processing/star_color_measurement.py,_FOOTPRINT_SMOOTHING_PIXELS,Smoothing before the star peak search; plumbing.

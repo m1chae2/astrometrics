@@ -26,8 +26,8 @@ from astrometricslib.foundation.storage.process_locks import acquire_resource_sl
 from astrometricslib.pipelines.stacking import stage
 from astrometricslib.pipelines.stacking.post_processing import preview_remake
 from astrometricslib.pipelines.stacking.post_processing import stack_preview as preview_module
+from astrometricslib.pipelines.stacking.post_processing.preview_siril import run_preview_script
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import archive_current_stack
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script
 from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress, begin_stage, track_stages
 from astrometricslib.utilities.stack_preview_path import preview_path_for, processed_fits_path_for

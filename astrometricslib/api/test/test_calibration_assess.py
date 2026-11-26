@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.gate_result import GateStatus

@@ -296,7 +296,7 @@ def _fallback(reason: str) -> GaiaDepthPrediction:
         A prediction flagged as a fallback.
     """
     # Imported here: the star identifier imports this module.
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import GAIA_DEFAULT_MAGNITUDE_LIMIT
+    from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import GAIA_DEFAULT_MAGNITUDE_LIMIT
 
     return GaiaDepthPrediction(
         query_depth=float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value),

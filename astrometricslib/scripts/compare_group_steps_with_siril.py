@@ -44,7 +44,7 @@ from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script
+from astrometricslib.pipelines.stacking.post_processing.preview_siril import run_preview_script
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
     SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
     _center_crop,

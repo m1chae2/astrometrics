@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing import gaia_field_matching, plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import FieldGaiaStars
 
 
@@ -69,6 +69,9 @@ def use_field_stars(
             missing_tiles=[1] if missing or table is None else [],
         )
 
-    monkeypatch.setattr(star_identifier_module, "load_field_gaia_stars", fake_load)
-    monkeypatch.setattr(star_identifier_module, "tiles_under_image", lambda *_arguments, **_keywords: [1])
+    monkeypatch.setattr(gaia_field_matching, "load_field_gaia_stars", fake_load)
+
+    monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", fake_load)
+    monkeypatch.setattr(gaia_field_matching, "tiles_under_image", lambda *_arguments, **_keywords: [1])
+    monkeypatch.setattr(plate_solution_steps, "tiles_under_image", lambda *_arguments, **_keywords: [1])
     return calls

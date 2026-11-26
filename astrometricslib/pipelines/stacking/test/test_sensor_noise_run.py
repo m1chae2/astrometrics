@@ -16,7 +16,7 @@ from astropy.io import fits
 
 from astrometricslib._internal.drivers import camera_profile_store
 from astrometricslib._internal.drivers.camera_profile_store import load_camera_profiles
-from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import ProvenancedValue, ValueProvenance
 from astrometricslib.models.quality.measurement import MeasurementStatus
@@ -127,7 +127,7 @@ def catalog(frames_folder: Path, monkeypatch: pytest.MonkeyPatch) -> Calibration
     # A rescan judges new dark and bias sets, which needs a camera profile.
     generic = next(p for p in load_camera_profiles() if p.is_generic_fallback)
     monkeypatch.setattr(
-        "astrometricslib.api.processing.resolve_camera_profile", lambda name, config=None: generic
+        "astrometricslib.api.calibration.resolve_camera_profile", lambda name, config=None: generic
     )
     calibration_catalog = CalibrationCatalog(configuration, None)
     calibration_catalog.reindex_frames("flat")

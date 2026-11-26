@@ -12,16 +12,21 @@ tools:
   - mcp__astrometricslib-core__quality_calibration_identities
   - mcp__astrometricslib-core__quality_capture_settings
   - mcp__astrometricslib-core__quality_choose_blink_pair
+  - mcp__astrometricslib-core__quality_find_stars
   - mcp__astrometricslib-core__quality_match_frame_positions
   - mcp__astrometricslib-core__quality_measure_detections
   - mcp__astrometricslib-core__quality_measure_folder
   - mcp__astrometricslib-core__quality_measure_frames
+  - mcp__astrometricslib-core__quality_measure_sky
+  - mcp__astrometricslib-core__quality_measure_sky_gradient
   - mcp__astrometricslib-core__quality_measure_stack
   - mcp__astrometricslib-core__quality_measure_star_profile
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows
   - mcp__astrometricslib-core__quality_set_aside_frames
+  - mcp__astrometricslib-core__quality_sky_corners
+  - mcp__astrometricslib-core__quality_star_widths
   - mcp__astrometricslib-core__star_get
   - mcp__astrometricslib-core__star_query
   - mcp__astrometricslib-core__target_get_frame

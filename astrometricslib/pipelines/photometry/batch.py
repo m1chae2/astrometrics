@@ -45,6 +45,7 @@ from astrometricslib.pipelines.photometry.pre_processing.observation_times impor
 )
 from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -413,7 +414,7 @@ def _summarize_session_for_star(
     if normalized.size >= 2:
         # 1.4826 x the median absolute deviation equals the standard
         # deviation for normally distributed noise and ignores outliers.
-        scatter = float(1.4826 * np.median(np.abs(normalized - np.median(normalized))))
+        scatter = robust_sigma(normalized)
 
     ensemble_sizes = [
         composition.ensemble_size

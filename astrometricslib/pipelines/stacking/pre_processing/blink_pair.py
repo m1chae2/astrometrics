@@ -40,10 +40,10 @@ from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_ELONGATI
 from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
     BAYER_CELL_SIZE_PX,
     STAR_FINDER_EXPECTED_FWHM_PX,
-    _grid_candidates,
-    _sum_bayer_cells,
     detect_stars_without_shape_cut,
+    grid_candidates,
     plateau_saturation_level_adu,
+    sum_bayer_cells,
     usable_top_level_adu,
 )
 from astrometricslib.pipelines.stacking.metrics import FRAME_SKY_UNEVENNESS
@@ -110,14 +110,14 @@ def choose_reference_stars(
     factor = BAYER_CELL_SIZE_PX if bayer_mosaic else 1
     rows, columns = plane.shape
     if bayer_mosaic:
-        plane = _sum_bayer_cells(plane)
+        plane = sum_bayer_cells(plane)
         top_level_adu = None if top_level_adu is None else top_level_adu * factor**2
     sources = detect_stars_without_shape_cut(plane, resolve(STAR_FINDER_EXPECTED_FWHM_PX).value / factor)
     if not sources:
         return []
     if top_level_adu is None:
         top_level_adu = plateau_saturation_level_adu(plane)
-    cells, _refusals = _grid_candidates(sources, plane.shape, plane, top_level_adu)
+    cells, _refusals = grid_candidates(sources, plane.shape, plane, top_level_adu)
     accepted = {(x, y) for cell in cells for x, y in cell}
     flux_of = {(float(s["x_centroid"]), float(s["y_centroid"])): float(s["flux"]) for s in sources}
     candidates = [(position, flux_of.get(position, 0.0)) for position in accepted]

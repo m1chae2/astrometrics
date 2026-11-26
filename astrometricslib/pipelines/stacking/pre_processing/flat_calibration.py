@@ -48,6 +48,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -469,7 +470,7 @@ def measure_frame_noise_fraction(frame: np.ndarray) -> float | None:
         return None
     differences = frame[:, 1:] - frame[:, :-1]
     mad = float(np.nanmedian(np.abs(differences - np.nanmedian(differences))))
-    return 1.4826 * mad / math.sqrt(2.0) / median
+    return MAD_TO_SIGMA * mad / math.sqrt(2.0) / median
 
 
 def smoothing_sigma_for_noise(noise_fraction: float) -> float | None:
@@ -642,7 +643,7 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         # listing of it), not two exposures. Their difference is zero, which
         # would read as a noiseless flat.
         if mad > 0.0 and median > 0.0:
-            single_frame_noise = 1.4826 * mad / math.sqrt(2.0) / median
+            single_frame_noise = MAD_TO_SIGMA * mad / math.sqrt(2.0) / median
     if single_frame_noise is None:
         single_frame_noise = measure_frame_noise_fraction(first)
 

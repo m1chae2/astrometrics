@@ -37,7 +37,7 @@ def test_run_sets_number_of_stars_from_stacked_image_stars(monkeypatch: pytest.M
             return context
 
     monkeypatch.setattr(astrometry_pipeline, "AstrometryPipeline", FakePipeline)
-    monkeypatch.setattr(runner, "_drop_unresolved_stars", lambda stars, **_: (stars, None))
+    monkeypatch.setattr(runner, "drop_unresolved_stars", lambda stars, **_: (stars, None))
     monkeypatch.setattr(runner, "_fill_target_position", lambda *_: None)
     monkeypatch.setattr(runner, "_write_solved_wcs_to_fits_header", lambda *_: None)
     monkeypatch.setattr(runner, "record_pipeline_stars", lambda stars, **_: (stars, None))

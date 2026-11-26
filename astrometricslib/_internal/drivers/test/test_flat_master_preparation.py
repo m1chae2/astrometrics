@@ -18,7 +18,7 @@ from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.siril_interface import build_flat_master_commands
 from astrometricslib._internal.drivers.siril_interface.staging import (
     _calibration_source_fingerprint,
-    _master_recipe,
+    master_recipe,
 )
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 
@@ -145,9 +145,9 @@ def test_only_the_flat_master_has_a_recipe_in_its_cache_key() -> None:
     The dark recipe was added when master darks became median stacks, so
     masters built the old way are not reused.
     """
-    assert _master_recipe("bias") == ""
-    assert _master_recipe("dark") != ""
-    assert _master_recipe("flat") != ""
+    assert master_recipe("bias") == ""
+    assert master_recipe("dark") != ""
+    assert master_recipe("flat") != ""
 
 
 def test_the_recipe_changes_the_fingerprint_of_the_same_frames(tmp_path: Path) -> None:

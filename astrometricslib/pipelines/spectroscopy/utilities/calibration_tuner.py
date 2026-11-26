@@ -51,6 +51,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrume
     SpectroscopyInstrument,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 from astrometricslib.utilities.spectroscopy_models import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
@@ -110,10 +111,6 @@ _NOISE_PROMINENCE_MULTIPLE = TunedParameter(
     kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D22",
 )
-
-# Converts a median absolute deviation (MAD) to a standard deviation for
-# Gaussian noise.
-_MAD_TO_SIGMA = 1.4826
 
 # The most dips passed on to the search over groups of three. The search
 # fits C(N, 3) groups, which is 220 for 12 and tens of thousands for a
@@ -588,7 +585,7 @@ class SpectroscopyCalibrationTuner:
         window -= 1 - window % 2
         size = max(window, 1)
         residual = normalized - median_filter(normalized, size=size, mode="nearest")
-        return _MAD_TO_SIGMA * median_filter(np.abs(residual), size=size, mode="nearest")
+        return MAD_TO_SIGMA * median_filter(np.abs(residual), size=size, mode="nearest")
 
     @staticmethod
     def _find_significant_dips(normalized: np.ndarray, minimum_prominence: float) -> list[tuple[int, float]]:

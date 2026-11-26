@@ -35,6 +35,7 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     find_saturation_plateau_ceiling,
 )
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -393,9 +394,7 @@ def estimate_background_noise(image: np.ndarray) -> float:
     if differences.size == 0:
         return float("nan")
     center = np.median(differences)
-    # 1.4826 turns a median absolute deviation into a standard deviation for
-    # bell-curve noise.
-    rough_scale = 1.4826 * np.median(np.abs(differences - center))
+    rough_scale = MAD_TO_SIGMA * np.median(np.abs(differences - center))
     if rough_scale <= 0:
         return 0.0
     kept = differences[np.abs(differences - center) <= resolve(NOISE_CLIP_SIGMAS).value * rough_scale]
@@ -642,7 +641,7 @@ def estimate_sky_level(image: np.ndarray, mask: np.ndarray) -> float:
         return 0.0
     level = float(np.median(values))
     for _ in range(sky_clip_passes):
-        spread = 1.4826 * float(np.median(np.abs(values - level)))
+        spread = MAD_TO_SIGMA * float(np.median(np.abs(values - level)))
         if spread <= 0:
             break
         kept = values[np.abs(values - level) <= sky_clip_sigmas * spread]

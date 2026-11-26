@@ -65,7 +65,12 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    collapse_to_2d,
+    header_card_is_true,
+    open_primary_hdu,
+)
 from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
@@ -919,8 +924,7 @@ def _emit_synthetic_notice(context: _Context, header: fits.Header) -> None:
     header : `astropy.io.fits.Header`
         The header of the frame's pixels.
     """
-    flag = header.get(SYNTHETIC_FRAME_KEYWORD, False)
-    if str(flag).strip().upper() not in ("T", "TRUE"):
+    if not header_card_is_true(header.get(SYNTHETIC_FRAME_KEYWORD, False)):
         return
     pipeline_context = PipelineRunContext(
         target_id=context.target_id,

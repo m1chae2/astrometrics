@@ -3,7 +3,7 @@
 Astrometry, spectroscopy, and photometry each find their own stars, but
 once a star is found, saving it works the same way for all three:
 
-1. Throw away any star we could never name at all (`_drop_unresolved_stars`).
+1. Throw away any star we could never name at all (`drop_unresolved_stars`).
 2. Check whether it is actually a star we already know about, just with
    a position that shifted slightly since last time
    (`_reconcile_position_only_star_ids`), or just under a different
@@ -69,7 +69,7 @@ _POSITION_ONLY_STAR_ID_PREFIX = POSITION_ONLY_STAR_ID_PREFIX
 
 
 class StarIdentificationBreakdown(NamedTuple):
-    """How a batch of stars resolved; see `_drop_unresolved_stars`."""
+    """How a batch of stars resolved; see `drop_unresolved_stars`."""
 
     catalog_matched: int
     position_only: int
@@ -99,7 +99,7 @@ def is_unresolved_star(stellar_object: Any) -> bool:
     return _UNRESOLVED_STAR_ID_PATTERN.match(stellar_object.id) is not None
 
 
-def _drop_unresolved_stars(
+def drop_unresolved_stars(
     stellar_objects: list, *, target_id: str, pipeline_name: str
 ) -> tuple[list, StarIdentificationBreakdown]:
     """Filter out stars that were never resolved to a real identity.
@@ -206,7 +206,7 @@ def _reconcile_position_only_star_ids(
     Returns
     -------
     stellar_objects : `list`
-        The same list, for chaining alongside `_drop_unresolved_stars`.
+        The same list, for chaining alongside `drop_unresolved_stars`.
     """
     from astropy import units as u
     from astropy.coordinates import SkyCoord
@@ -884,7 +884,7 @@ def record_pipeline_stars(
     `stellar_catalog` rather than overwritten, since one star can carry
     data from more than one target.
 
-    Astrometry calls `_drop_unresolved_stars` itself, earlier, because it
+    Astrometry calls `drop_unresolved_stars` itself, earlier, because it
     needs the star-identification breakdown to build its quality summary
     before this function runs. Pass `already_dropped=True` in that case so
     the drop step does not run twice; `breakdown` in the return value is
@@ -909,7 +909,7 @@ def record_pipeline_stars(
         unless `already_dropped` is `True`.
     already_dropped : `bool`, optional
         Set by astrometry, which has already called
-        `_drop_unresolved_stars` itself. Defaults to `False`.
+        `drop_unresolved_stars` itself. Defaults to `False`.
     measured_only : `bool`, optional
         Save only the stars that hold a measurement of this run (see
         `holds_measurements`), so a star this run did not measure leaves its
@@ -927,7 +927,7 @@ def record_pipeline_stars(
     """
     breakdown = None
     if not already_dropped:
-        stellar_objects, breakdown = _drop_unresolved_stars(
+        stellar_objects, breakdown = drop_unresolved_stars(
             stellar_objects, target_id=target_id, pipeline_name=pipeline_name
         )
 

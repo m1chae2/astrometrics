@@ -49,7 +49,7 @@ def test_the_target_position_is_taken_before_the_fill_can_change_it(
         target.dec = "33 01 45.0"
 
     monkeypatch.setattr(astrometry_pipeline, "AstrometryPipeline", FakePipeline)
-    monkeypatch.setattr(runner, "_drop_unresolved_stars", lambda stars, **_: (stars, None))
+    monkeypatch.setattr(runner, "drop_unresolved_stars", lambda stars, **_: (stars, None))
     monkeypatch.setattr(runner, "_fill_target_position", fill_from_solve)
     monkeypatch.setattr(runner, "_write_solved_wcs_to_fits_header", lambda *_: None)
     monkeypatch.setattr(runner, "record_pipeline_stars", lambda stars, **_: (stars, None))

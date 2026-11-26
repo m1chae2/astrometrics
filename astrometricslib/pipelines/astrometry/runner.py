@@ -43,7 +43,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import Pipel
 from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 from astrometricslib.pipelines.shared.solved_star_list import save_solved_stars
 from astrometricslib.pipelines.shared.star_recording import (
-    _drop_unresolved_stars,
+    drop_unresolved_stars,
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
@@ -395,7 +395,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 known_target=resolve_known_target(target),
             )
 
-        context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+        context.stellar_objects, star_id_breakdown = drop_unresolved_stars(
             context.stellar_objects, target_id=target.id, pipeline_name="astrometry"
         )
         # The Gaia counts are read from the identification module rather

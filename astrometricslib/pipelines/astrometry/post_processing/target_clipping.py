@@ -105,6 +105,7 @@ from astrometricslib.pipelines.shared.registration_record import (
     read_registration_record,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -222,9 +223,6 @@ SKY_RING_MINIMUM_PIXELS = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="AST-D16",
 )
-
-# Converts the median absolute deviation of Gaussian noise to its sigma.
-MAD_TO_SIGMA = 1.4826
 
 _SPEC_BY_NAME = {spec.name: spec for spec in ASTROMETRY_METRICS}
 _METRIC_ORDER = (ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION, ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION)

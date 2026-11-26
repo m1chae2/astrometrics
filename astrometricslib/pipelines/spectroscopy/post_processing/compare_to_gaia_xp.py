@@ -117,6 +117,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
     blur_to_resolution_profile,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -1032,7 +1033,7 @@ def summarize_gaia_xp(rows: Iterable[Mapping[str, Any]]) -> GaiaXpRunSummary | N
         ratios = _per_star_values(records, band_ratio)
         median_ratio = float(statistics.median(ratios)) if ratios else None
         scatter = (
-            float(1.4826 * statistics.median(abs(value - median_ratio) for value in ratios))
+            float(MAD_TO_SIGMA * statistics.median(abs(value - median_ratio) for value in ratios))
             if median_ratio is not None and len(ratios) >= 2
             else None
         )

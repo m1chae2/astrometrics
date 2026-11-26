@@ -68,6 +68,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblen
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
     traced_aperture_half_widths_px,
 )
+from astrometricslib.utilities.robust_statistics import robust_sigma
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -707,7 +708,7 @@ def _sky_scatter_near(working_image: np.ndarray, target: _PlacedTrace) -> float:
         + resolve(_SKY_SCATTER_HALF_WIDTH_PX).value
         + 1,
     ]
-    return float(1.4826 * np.median(np.abs(window - np.median(window))))
+    return robust_sigma(window)
 
 
 def estimate_neighbor_shares(
@@ -872,7 +873,7 @@ def _correct_one_star(
         working_image, True, reference_cross, edges, target.zero_order_along_px, half_width_px=half_width
     )
     outer = np.concatenate([profiles[:, :10], profiles[:, -10:]], axis=1)
-    noise_floor = max(1.4826 * float(np.median(np.abs(outer - np.median(outer)))), 1e-9)
+    noise_floor = max(robust_sigma(outer), 1e-9)
     fitted = brightest_neighbor_indices([other.trace.box_flux for other, _ in neighbors])
     star_offsets = np.array([0.0, *[float(np.nanmedian(neighbors[index][1])) for index in fitted]])
     fit = fit_neighbor_amplitudes(stored.blur, offsets, profiles, band_positions, star_offsets, noise_floor)

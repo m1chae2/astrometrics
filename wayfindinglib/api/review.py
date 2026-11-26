@@ -183,13 +183,14 @@ class ObservationReview(ControlChild):
     ) -> TuningReport:
         """Work out this library's tuned values from the observatory's records.
 
-        The wayfinding tuners (see `astrometricslib.parameters.collect_tuners`)
-        read the stored guiding, alignment and session records of one setup
-        and derive one family of values each. Each value is checked against
-        its allowed range and smallest sample. Nothing is saved unless
-        ``save`` is set; then the config is backed up and each value is
-        written with where it came from. The image-processing values are
-        tuned by `Astrometrics.quality.measure_tuned_parameters`.
+        A thin wrapper of `astrometricslib.parameters.tune` over the
+        wayfinding tuners. They read the stored guiding, alignment and
+        session records of one setup and derive one family of values each.
+        Each value is checked against its allowed range and smallest
+        sample. Nothing is saved unless ``save`` is set; then the config is
+        backed up and each value is written with where it came from. The
+        image-processing values are tuned by
+        `Astrometrics.quality.measure_tuned_parameters`.
 
         Parameters
         ----------
@@ -206,34 +207,20 @@ class ObservationReview(ControlChild):
             The values that would be set or moved, and those skipped,
             refused or unchanged.
 
-        Raises
-        ------
-        NotFoundError
-            If the setup is not in the config, or there is no active setup.
-        InvalidArgumentError
-            If ``only`` names a tuner that does not exist.
+        Notes
+        -----
+        The core raises `NotFoundError` if the setup is not in the config,
+        or there is no active setup, and `InvalidArgumentError` if ``only``
+        names a tuner that does not exist.
         """
-        import datetime
+        from astrometricslib.parameters import tune
 
-        from astrometricslib.parameters import collect_tuners, run_tuning
-
-        tuners = collect_tuners(("wayfindinglib",))
-        if only:
-            unknown = sorted(set(only) - {tuner.name for tuner in tuners})
-            if unknown:
-                raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
-            tuners = [tuner for tuner in tuners if tuner.name in set(only)]
-        configuration = self._context.config
-        setups = configuration.get_observatory_setups()
-        chosen = setups.setup_named(setup) if setup else setups.active_setup()
-        if chosen is None:
-            raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
         services: dict[str, Any] = {}
         if self._owner_provider is not None:
             wayfinder = self._owner_provider()
             services = {"wayfinder": wayfinder, "astrometrics": wayfinder.astrometrics}
-        return run_tuning(
-            tuners, chosen, configuration, services=services, today=datetime.date.today(), write=save
+        return tune(
+            ("wayfindinglib",), self._context.config, setup=setup, only=only, save=save, services=services
         )
 
     @background_job("diagnostics", grace_period_seconds=20.0)

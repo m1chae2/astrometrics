@@ -5,7 +5,7 @@
 Each check returns one of these structures. A check never saves anything, so
 these only describe; they never change a target.
 
-- `RawFrameCheckReport` is the batch check of a folder or of a target's
+- `RawFrameCheckReport` is the batch check of a target's
   frames: star count, width and roundness, trailing, sky level and jumps,
   with the frames that stand out flagged.
 - `InputQualityReport` holds the sky level, saturation and (if asked) star
@@ -39,11 +39,10 @@ __all__ = [
 
 
 class RawFrameCheckReport(BaseModel):
-    """The batch check of a folder of frames, or of a target's frames."""
+    """The batch check of a target's raw light frames."""
 
     kind: Literal["raw_check"] = "raw_check"
     target_id: str | None = None
-    folder_path: str | None = None
     # How many frames matched the selection, and how many of them were read.
     frames_matching: int = 0
     frames_checked: int = 0

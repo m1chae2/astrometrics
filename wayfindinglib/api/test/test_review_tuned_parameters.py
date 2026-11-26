@@ -1,7 +1,8 @@
 """Tests for `ObservationReview.measure_tuned_parameters` (#175).
 
-The call runs the wayfinding tuners for one setup, gives them the owning
-`Wayfinder` and its `Astrometrics`, and saves nothing unless asked.
+The call is a thin wrapper of `astrometricslib.parameters.tune`: it asks for
+the wayfinding tuners, gives them the owning `Wayfinder` and its
+`Astrometrics`, and saves nothing unless asked.
 """
 
 from types import SimpleNamespace
@@ -41,7 +42,7 @@ def _review(active: bool = True) -> ObservationReview:
 
 @pytest.fixture
 def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Replace the tuners and the tuning run with stand-ins that record calls.
+    """Replace the one tuning entry point with a stand-in that records calls.
 
     Returns
     -------
@@ -49,46 +50,48 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         One entry per tuning run.
     """
     seen: list[dict[str, Any]] = []
-    tuners = [SimpleNamespace(name="wayfinding.first"), SimpleNamespace(name="wayfinding.second")]
-    monkeypatch.setattr(parameters, "collect_tuners", lambda packages: tuners)
 
-    def fake_run(tuners: list, setup: Any, configuration: Any, **keywords: Any) -> str:
-        """Record what the run was given.
+    def fake_tune(packages: tuple[str, ...], configuration: Any, **keywords: Any) -> str:
+        """Record what the entry point was given.
 
         Returns
         -------
         report : `str`
             A stand-in report.
         """
-        seen.append({"tuners": [tuner.name for tuner in tuners], "setup": setup.name, **keywords})
+        seen.append({"packages": packages, "configuration": configuration, **keywords})
         return "report"
 
-    monkeypatch.setattr(parameters, "run_tuning", fake_run)
+    monkeypatch.setattr(parameters, "tune", fake_tune)
     return seen
 
 
-def test_runs_every_tuner_without_saving_and_passes_both_services(calls: list[dict[str, Any]]) -> None:
-    """All tuners run on the active setup with the owner and its library."""
+def test_runs_the_wayfinding_tuners_without_saving_and_passes_both_services(
+    calls: list[dict[str, Any]],
+) -> None:
+    """The wrapper asks the core for the wayfinding tuners, both services."""
     assert _review().measure_tuned_parameters() == "report"
-    assert calls[0]["tuners"] == ["wayfinding.first", "wayfinding.second"]
-    assert calls[0]["write"] is False
+    assert calls[0]["packages"] == ("wayfindinglib",)
+    assert calls[0]["setup"] is None
+    assert calls[0]["only"] is None
+    assert calls[0]["save"] is False
     assert calls[0]["services"]["astrometrics"] == "astrometrics"
     assert set(calls[0]["services"]) == {"wayfinder", "astrometrics"}
 
 
-def test_only_and_save_are_passed_on(calls: list[dict[str, Any]]) -> None:
-    """`only` picks tuners by name and `save` writes."""
+def test_setup_only_and_save_are_passed_on(calls: list[dict[str, Any]]) -> None:
+    """The setup, `only` and `save` reach the tuning core unchanged."""
     _review().measure_tuned_parameters("Scope on Camera", only=["wayfinding.second"], save=True)
-    assert calls[0]["tuners"] == ["wayfinding.second"]
-    assert calls[0]["write"] is True
+    assert calls[0]["setup"] == "Scope on Camera"
+    assert calls[0]["only"] == ["wayfinding.second"]
+    assert calls[0]["save"] is True
 
 
-def test_unknown_tuners_and_setups_are_refused(calls: list[dict[str, Any]]) -> None:
-    """An unknown tuner or setup raises before anything runs."""
+def test_unknown_tuners_and_setups_are_refused_by_the_core() -> None:
+    """The core's checks apply: an unknown tuner or setup raises."""
     with pytest.raises(InvalidArgumentError):
         _review().measure_tuned_parameters(only=["wayfinding.missing"])
     with pytest.raises(NotFoundError):
         _review().measure_tuned_parameters("Other setup")
     with pytest.raises(NotFoundError):
         _review(active=False).measure_tuned_parameters()
-    assert calls == []

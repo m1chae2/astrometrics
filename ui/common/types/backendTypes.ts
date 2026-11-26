@@ -3007,7 +3007,17 @@ export interface SensorNoiseMeasurement {
  * reason : `str` or `None`
  * Why the fit failed.
  * fwhm_px : `float` or `None`
- * Full width at half maximum, in pixels.
+ * Full width at half maximum of this one-star fit, in pixels.
+ * estimator : `str` or `None`
+ * The `StarWidthEstimator` whose ratio puts ``fwhm_px`` on the
+ * library's one star-width scale: ``"frame Moffat"`` for the Moffat
+ * fit, ``"frame Gaussian"`` for the Gaussian fit. The frame estimators
+ * are medians over many stars, so for one star the scaled width is an
+ * estimate.
+ * fwhm_on_scale_px : `float` or `None`
+ * ``fwhm_px`` on the one star-width scale (the per-frame Gaussian of
+ * the brightest stars), in pixels, comparable with every other width
+ * the library records.
  * fwhm_arcsec : `float` or `None`
  * The same width in arcseconds, when the header gives a pixel scale.
  * peak : `float` or `None`
@@ -3026,6 +3036,8 @@ export interface ProfileFit {
   fitted: boolean;
   reason?: string | null;
   fwhm_px?: number | null;
+  estimator?: string | null;
+  fwhm_on_scale_px?: number | null;
   fwhm_arcsec?: number | null;
   peak?: number | null;
   beta?: number | null;
@@ -3144,10 +3156,16 @@ export interface StarDetection {
  * averaged, smaller copy, as the run does. Positions are given back
  * in full image pixels.
  * star_width_px : `float` or `None`
- * The star width measured on this image, in pixels, on the library's
- * one star-width scale. It sizes the photometry circle. `None` when no
- * star could be measured; the active setup's typical width was used
- * instead.
+ * The star width measured on this image, in pixels, already put on the
+ * library's one star-width scale (the per-frame Gaussian of the
+ * brightest stars) with the ratio of ``star_width_estimator``. It sizes
+ * the photometry circle. `None` when no star could be measured; the
+ * active setup's typical width was used instead.
+ * star_width_estimator : `str` or `None`
+ * The `StarWidthEstimator` that measured the width: ``"stack
+ * Gaussian"`` for a stack of two or more frames, else ``"frame
+ * Gaussian, brightest stars"`` (the scale itself). `None` with no
+ * width.
  * aperture_radius_px : `float` or `None`
  * The radius, in image pixels, of the circle that photometry measures
  * every star in, sized from ``star_width_px``. It is the same for every
@@ -3164,6 +3182,7 @@ export interface DetectionsMeasurement {
   kernel_fwhm_px: number;
   binned_on_color?: boolean;
   star_width_px?: number | null;
+  star_width_estimator?: string | null;
   aperture_radius_px?: number | null;
 }
 
@@ -3184,6 +3203,14 @@ export interface DetectionsMeasurement {
  *
  * Pixel positions are 1-based, as in FITS and DS9: the center of the first
  * pixel is (1, 1). ``x`` runs along the columns and ``y`` along the rows.
+ *
+ * Every direction on the image in this result (the cut, the ring bins,
+ * the ring harmonics and the long axis of the star's core) is one angle
+ * convention: degrees from +y (increasing row) toward +x (increasing
+ * column). So a cut at ``star_elongation_angle_deg`` runs along the long
+ * axis. The stored frame metric ``frame.star_elongation_angle_deg`` is
+ * measured the other way, from +x toward +y; the two are related by
+ * ``profile angle = (90 - frame angle) mod 180``.
  *
  * Parameters
  * ----------
@@ -3287,8 +3314,11 @@ export interface DetectionsMeasurement {
  * The fraction of the ring's pixels that the neighbor masks removed.
  * ring_note : `str` or `None`
  * A sentence that says why the ring could not be analyzed, or `None`.
- * signal_to_noise : `float`
- * The peak above the sky divided by the sky noise.
+ * peak_over_sky_noise : `float`
+ * The brightest pixel above the sky divided by the sky noise (one
+ * standard deviation of a sky pixel). It is the peak's height in noise
+ * levels, not the signal-to-noise ratio of the star's total light,
+ * which `QualityBlocks.measure_aperture` gives.
  * edge_distance_px : `float`
  * How far the star's center is from the nearest image edge, in pixels.
  * coverage_fraction : `float`
@@ -3307,9 +3337,14 @@ export interface DetectionsMeasurement {
  * when ``star_shape_judgeable`` is `False`.
  * star_elongation_angle_deg : `float` or `None`
  * The direction of the long axis, from 0 up to but not including 180
- * degrees, measured from the image x axis (increasing column) toward the
- * image y axis (increasing row). It is set by noise for a round star.
- * `None` when the shape is not judgeable.
+ * degrees, from +y (increasing row) toward +x (increasing column), the
+ * convention of the cut. It is set by noise for a round star. `None`
+ * when the shape is not judgeable.
+ * star_elongation_position_angle_deg : `float` or `None`
+ * The same direction on the sky: the position angle from north toward
+ * east, 0 up to but not including 180 degrees, from the image's plate
+ * solution. `None` when the shape is not judgeable or the image has no
+ * plate solution.
  * star_shape_judgeable : `bool`
  * `True` when the frame measurement would accept this star: bright
  * enough, not clipped, no close neighbor, inside the image, and a
@@ -3370,7 +3405,7 @@ export interface StarProfileMeasurement {
   ring_masked_neighbor_count: number;
   ring_masked_fraction: number;
   ring_note?: string | null;
-  signal_to_noise?: number;
+  peak_over_sky_noise?: number;
   edge_distance_px?: number;
   coverage_fraction?: number;
   aperture_radius_px?: number;
@@ -3380,6 +3415,7 @@ export interface StarProfileMeasurement {
   sky_ring_neighbor_count?: number;
   star_elongation?: number | null;
   star_elongation_angle_deg?: number | null;
+  star_elongation_position_angle_deg?: number | null;
   star_shape_judgeable?: boolean;
   star_shape_note?: string | null;
   star_shape_detail?: string | null;

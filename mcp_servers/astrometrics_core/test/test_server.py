@@ -86,7 +86,6 @@ def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> N
     schema = registry.tools["quality_measure_frames"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
         "target",
-        "folder_path",
         "filter_name",
         "first_file",
         "last_file",
@@ -102,7 +101,7 @@ def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> N
         "exposure_seconds",
         "predict_exposure_seconds",
     }
-    assert not schema.get("required")
+    assert schema.get("required") == ["target"]
 
 
 def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
@@ -195,7 +194,7 @@ def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolReg
         "level",
         "target_id",
         "observing_night_id",
-        "camera",
+        "camera_id",
         "telescope",
         "since",
         "row_ids",

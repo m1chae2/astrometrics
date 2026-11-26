@@ -183,12 +183,18 @@ def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
     }
 
 
-def test_the_diagnostics_api_runs_the_check_on_a_folder(tmp_path: Path) -> None:
-    """`measure_frames(kind="raw_check")` runs the same check on a folder."""
+def test_the_diagnostics_api_runs_the_check_on_a_targets_frames(tmp_path: Path) -> None:
+    """`measure_frames(kind="raw_check")` checks a target's lights."""
+    from astrometricslib.models.target import FrameRecord, Target
+
     _write_batch(tmp_path, _clean_batch(3))
+    frames = [
+        FrameRecord(path=str(path), role="LIGHT", camera="ZWO ASI533", timestamp=float(number))
+        for number, path in enumerate(sorted(tmp_path.glob("*.fits")))
+    ]
 
     diagnostics = QualityRecords(AppConfiguration(), MagicMock())
-    report = diagnostics.measure_frames(folder_path=str(tmp_path), kind="raw_check", register_job=False)
+    report = diagnostics.measure_frames(Target(id="T", frames=frames), kind="raw_check", register_job=False)
 
     assert report.batch["frame_count"] == 3
     assert report.frames_checked == 3

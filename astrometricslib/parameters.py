@@ -14,7 +14,9 @@ match limits are public so that wayfindinglib judges spectra with the same
 limits the pipeline uses, and the stretched-star warning level so that its
 trailed-stars rule warns where the frame status flags. A `Tuner`
 derives one family of tuned values, and `run_tuning` stores them with their
-provenance in the config. A script and
+provenance in the config. `tune` is the one entry point that picks a
+library's tuners and a setup and runs them; both libraries'
+``measure_tuned_parameters`` call it. A script and
 `wayfindinglib` import these names from here. Each is imported from the module
 where its code lives today.
 """
@@ -56,6 +58,7 @@ from astrometricslib.foundation.tuning import (
     collect_tuners,
     read_tuned_record,
     run_tuning,
+    tune,
 )
 from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS
 from astrometricslib.models.tuned_parameter import (
@@ -114,4 +117,5 @@ __all__ = [
     "run_basis_value",
     "run_tuning",
     "setup_parameter_context",
+    "tune",
 ]

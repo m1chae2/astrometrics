@@ -165,12 +165,13 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
         return None
     data = collapse_to_2d(np.asarray(data, dtype=float))
 
-    sources = detect_point_sources(astrometrics.processing, data).sources
-    if not sources:
+    stars = detect_point_sources(astrometrics.processing, data).stars
+    if not stars:
         return None
-    brightest = sources[0]
-    x = brightest.x_centroid
-    y = brightest.y_centroid
+    brightest = stars[0]
+    # The finder gives 1-based pixels; the cutout below counts from 0.
+    x = brightest.x - 1.0
+    y = brightest.y - 1.0
 
     box = ZERO_ORDER_FWHM_BOX_RADIUS_PX
     x, y = round(x), round(y)

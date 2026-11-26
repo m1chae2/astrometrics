@@ -58,7 +58,9 @@ def quality(tmp_path: Path) -> QualityRecords:
         The quality API on a stub configuration.
     """
     configuration = SimpleNamespace(
-        get_frames_path=lambda: tmp_path / "frames", get_library_path=lambda: tmp_path
+        get_frames_path=lambda: tmp_path / "frames",
+        get_library_path=lambda: tmp_path,
+        get_stacks_path=lambda: tmp_path / "stacks",
     )
     return QualityRecords(configuration, None, targets=MagicMock())
 
@@ -311,3 +313,30 @@ def test_frame_statuses_list_the_targets_frames_with_the_flags(
     ]
     assert report.frames[0].elongation == pytest.approx(1.6)
     assert "too small for the quarantine" in report.frames[0].reason
+
+
+def test_frame_statuses_find_the_stack_time_themselves(
+    quality: QualityRecords, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With no stack time given, the newest stack file's time is used."""
+    import os
+
+    stack = tmp_path / "stacks" / "M_1_Stacked.fits"
+    stack.parent.mkdir(parents=True)
+    stack.write_bytes(b"x")
+    os.utime(stack, (200.0, 200.0))
+    target = Target(
+        id="M 1",
+        frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
+    )
+    target.stacking.stacked_image = str(stack)
+    monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
+        lambda target_id: {},
+    )
+
+    report = quality.frame_statuses(target)
+
+    assert report.stacked_at == pytest.approx(200.0)
+    assert [status.state for status in report.frames] == ["included", "not_stacked"]

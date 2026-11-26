@@ -7,7 +7,7 @@
 import type { StarProfileMeasurement } from '../../types/backendTypes';
 
 /** A star is called well measured when its peak is this many times the sky noise. The star finder's own floor is 5, so 10 leaves room above it. */
-export const GOOD_SIGNAL_TO_NOISE = 10;
+export const GOOD_PEAK_OVER_SKY_NOISE = 10;
 
 /** A star's width counts as typical when it is within this share of the frame's typical width. */
 export const WIDTH_TYPICAL_RANGE = { low: 0.7, high: 1.5 } as const;
@@ -89,7 +89,7 @@ function buildRoundRow(measurement: StarProfileMeasurement): MeasurableRow {
   const hasLimit = limit !== null && limit !== undefined;
   const round = !hasLimit || elongation <= limit;
   const angle = measurement.star_elongation_angle_deg;
-  const direction = !round && angle !== null && angle !== undefined ? `, long axis at ${angle.toFixed(0)}° from x toward y` : '';
+  const direction = !round && angle !== null && angle !== undefined ? `, long axis at ${angle.toFixed(0)}° from y toward x` : '';
   return {
     id: 'shape',
     ok: round,
@@ -112,7 +112,7 @@ function buildRoundRow(measurement: StarProfileMeasurement): MeasurableRow {
 export function buildMeasurableRows(measurement: StarProfileMeasurement, frameWidthPx: number | null): MeasurableRow[] {
   const rows: MeasurableRow[] = [];
   // The backend sends these with defaults, so an older answer may leave them out.
-  const signalToNoise = measurement.signal_to_noise ?? 0;
+  const peakOverSkyNoise = measurement.peak_over_sky_noise ?? 0;
   const edgeDistance = measurement.edge_distance_px ?? Infinity;
   const coverage = measurement.coverage_fraction ?? 1;
   const skyOuter = measurement.sky_outer_px ?? 0;
@@ -148,10 +148,10 @@ export function buildMeasurableRows(measurement: StarProfileMeasurement, frameWi
 
   rows.push({
     id: 'signal',
-    ok: signalToNoise >= GOOD_SIGNAL_TO_NOISE,
+    ok: peakOverSkyNoise >= GOOD_PEAK_OVER_SKY_NOISE,
     label: 'Bright enough',
-    value: `signal-to-noise ${signalToNoise.toFixed(0)}`,
-    detail: `The peak is ${signalToNoise.toFixed(1)} times the noise of the sky. At ${GOOD_SIGNAL_TO_NOISE} or more the star stands well above the noise.`,
+    value: `peak/noise ${peakOverSkyNoise.toFixed(0)}`,
+    detail: `The peak is ${peakOverSkyNoise.toFixed(1)} times the noise of the sky. At ${GOOD_PEAK_OVER_SKY_NOISE} or more the star stands well above the noise.`,
   });
 
   const circle = measurement.circle_neighbor_count ?? 0;

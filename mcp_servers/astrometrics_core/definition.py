@@ -26,6 +26,7 @@ BRANCH_PREFIXES = {
     "stars": "star",
     "processing": "processing",
     "quality": "quality",
+    "quality.blocks": "quality_blocks",
     "processing.calibration": "calibration",
     "visualization": "visualization",
     "jobs": "jobs",

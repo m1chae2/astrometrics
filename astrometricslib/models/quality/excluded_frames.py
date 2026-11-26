@@ -6,8 +6,6 @@ those frames, so a person or a tool can see what was moved and why, and put
 frames back:
 
 - `SetAsideFrame` describes one frame, moved or about to be moved.
-- `QuarantinePreview` says what the check would move, without moving it.
-  `QualityRecords.measure_frames(kind="quarantine_preview")` returns it.
 - `RestoreReport` says what a restore listed or moved back.
 - `SetAsideFrameRecord` is one line of `QualityRecords.set_aside_frames`: a
   frame lying in an `_excluded` folder, with the reason and where the reason
@@ -48,36 +46,10 @@ class SetAsideFrame(BaseModel):
     roundness: float | None = None
     # Median pixel value of this frame, in camera counts (ADU).
     sky_median_adu: float = Field(alias="skyMedianAdu")
-    # When the frame was moved (UTC, ISO 8601). `None` for a preview.
+    # When the frame was moved (UTC, ISO 8601). `None` before it is moved.
     moved_at: str | None = Field(default=None, alias="movedAt")
-    # The `_excluded` folder the frame is in now. `None` for a preview.
+    # The `_excluded` folder the frame is in now. `None` before it is moved.
     folder: str | None = None
-
-
-class QuarantinePreview(BaseModel):
-    """What the quarantine check would move for a target. Nothing is moved."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    kind: Literal["quarantine_preview"] = "quarantine_preview"
-    target_id: str = Field(alias="targetId")
-    # False when ``quarantine_bad_frames_enabled`` is off: a stack then moves
-    # nothing and the preview measured nothing.
-    quarantine_enabled: bool = Field(default=True, alias="quarantineEnabled")
-    # Light frames the check measured: those left after the stacker's earlier
-    # steps (minority gain, frames already set aside).
-    frames_checked: int = Field(alias="framesChecked")
-    # How many frames it would move. ``would_move`` may list fewer.
-    would_move_total: int = Field(default=0, alias="wouldMoveTotal")
-    # The frames it would move, up to the limit the caller gave.
-    would_move: list[SetAsideFrame] = Field(default_factory=list, alias="wouldMove")
-    # One sentence for each batch it would leave alone, with the reason.
-    notes: list[str] = Field(default_factory=list)
-    # Frames that could not be measured. They would stay where they are.
-    unreadable: list[str] = Field(default_factory=list)
-    # Frames the check would keep but flag, such as an uneven sky with normal
-    # stars (a gradient or an obstruction); ``kind`` is "kept".
-    flagged: list[SetAsideFrame] = Field(default_factory=list)
 
 
 class RestoreReport(BaseModel):

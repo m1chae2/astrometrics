@@ -226,14 +226,16 @@ DECISIONS = {
         "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral "
         "measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along "
         "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
-        "replaces quality_check_spectral_frames.",
+        "replaces quality_check_spectral_frames. Since 2026-11-26 it takes a target only: a folder goes "
+        "to quality_measure_folder, and the set-aside preview to processing_predict_stack.",
     ),
     "quality_measure_folder": ToolDecision(
         "keep",
         "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, "
         "sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About "
-        "12 seconds a frame, so the limit defaults to 20. It reads any folder path it is given, as "
-        "quality_measure_frames does with folder_path; it only reads.",
+        "12 seconds a frame, so the limit defaults to 20. It is the one tool for a folder of frames "
+        "(quality_measure_frames takes a target only); it reads any folder path it is given and only "
+        "reads.",
     ),
     "review_get_live_session_status": ToolDecision(
         "keep",
@@ -414,46 +416,61 @@ DECISIONS = {
         "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
         "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
     ),
-    "quality_measure_sky": ToolDecision(
+    "quality_blocks_measure_sky": ToolDecision(
         "keep",
         "Built 2026-11-26 as a Command Console building block. Measures the empty sky's level and noise "
         "of a FITS file. Reads the file only; nothing is stored.",
         tool_class="compute",
     ),
-    "quality_find_stars": ToolDecision(
+    "quality_blocks_find_stars": ToolDecision(
         "keep",
-        "Built 2026-11-26 as a Command Console building block. Runs the shared star finder on a FITS file "
-        "with the width and threshold the caller gives. Reads the file only; nothing is stored.",
+        "Built 2026-11-26 as a Command Console building block. Runs the astrometry star finder (default) "
+        "or the plain DAOStarFinder on a FITS file. Reads the file only; nothing is stored.",
         tool_class="compute",
     ),
-    "quality_star_widths": ToolDecision(
+    "quality_blocks_star_widths": ToolDecision(
         "keep",
         "Built 2026-11-26 as a Command Console building block. Measures the star width of each color "
         "channel of a FITS file. Reads the file only; nothing is stored.",
         tool_class="compute",
     ),
-    "quality_measure_sky_gradient": ToolDecision(
+    "quality_blocks_measure_sky_gradient": ToolDecision(
         "keep",
         "Built 2026-11-26 as a Command Console building block. Measures the sky's tilt across a FITS file "
         "as the preview does. Reads the file only; nothing is stored.",
         tool_class="compute",
     ),
-    "quality_sky_corners": ToolDecision(
+    "quality_blocks_sky_corners": ToolDecision(
         "keep",
         "Built 2026-11-26 as a Command Console building block. Gives a plate-solved FITS file's corners on "
-        "the sky from its header. Reads the header only.",
+        "the sky from its header, with RADESYS and EQUINOX; none for an unsolved file. Reads the header "
+        "only.",
         tool_class="compute",
     ),
-    "quality_solved_stars": ToolDecision(
+    "quality_blocks_measure_aperture": ToolDecision(
+        "keep",
+        "Built 2026-11-26 as a Command Console building block. Aperture photometry of given pixel "
+        "positions of a FITS file, with flux uncertainties from the camera profile's gain and read noise. "
+        "Reads the file only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_map_position": ToolDecision(
+        "keep",
+        "Built 2026-11-26 from the backend's images:map_position. Follows a pixel of one FITS file to "
+        "another through their plate solutions and the stacks' registration records. Reads headers and "
+        "records only; nothing is stored.",
+        tool_class="compute",
+    ),
+    "quality_blocks_solved_stars": ToolDecision(
         "withhold",
         "A Command Console building block, uncapped. The AI reads a target's named stars through star_query.",
     ),
-    "quality_robust_sigma": ToolDecision(
+    "quality_blocks_robust_sigma": ToolDecision(
         "drop",
         "A Command Console building block: a spread of numbers the caller already has. Of no use to an AI "
         "client.",
     ),
-    "quality_sigma_clip": ToolDecision(
+    "quality_blocks_sigma_clip": ToolDecision(
         "drop",
         "A Command Console building block: clips numbers the caller already has. Of no use to an AI client.",
     ),
@@ -581,8 +598,8 @@ DECISIONS = {
     ),
     "quality_frame_statuses": ToolDecision(
         "drop",
-        "Built 2026-11-26 for the File Browser's Status column. The caller must give the newest stack "
-        "file's time and the star-shape review's flagged frames, which the backend fills in for the app. "
+        "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest "
+        "stack file's time itself; the reply is one row per frame, sized for a table on screen. "
         "quality_set_aside_frames and review_get_star_shape_review serve an AI client.",
     ),
     "quality_set_aside_frames": ToolDecision(

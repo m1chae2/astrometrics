@@ -281,12 +281,12 @@ def test_cutout_pads_outside_the_image_and_is_limited(tmp_path: Path) -> None:
 
 
 def test_surroundings_report_edge_and_signal(tmp_path: Path) -> None:
-    """A star near the edge reports its edge distance and a high S/N."""
+    """A star near the edge reports its edge distance and a high peak."""
     path = _write(tmp_path, [(6.0, 50.0, 3000.0, 1.8)])
     result = measure_star_profile_in_file(path, 7.0, 51.0)
     assert result.edge_distance_px == pytest.approx(6.0, abs=0.5)
     assert result.coverage_fraction < 0.9
-    assert result.signal_to_noise > 100
+    assert result.peak_over_sky_noise > 100
 
 
 def test_surroundings_count_neighbors_in_circle_and_sky_ring(tmp_path: Path) -> None:
@@ -355,12 +355,51 @@ def test_round_star_core_shape_is_round(tmp_path: Path) -> None:
 
 
 def test_stretched_star_gives_its_ratio_and_angle(tmp_path: Path) -> None:
-    """A star stretched 4:3 at 30 degrees reads about 1.33 along 30 degrees."""
+    """A star stretched 4:3 at 30 degrees from +x reads 60 degrees from +y.
+
+    The result gives the long axis in the cut's convention (from +y toward
+    +x), so a cut at that angle runs along the star. With no plate solution
+    there is no position angle on the sky.
+    """
     path = _write_stretched_star(tmp_path, 3000.0, 2.4, 1.8, 30.0)
     result = measure_star_profile_in_file(path, 51.0, 51.0)
     assert result.star_shape_judgeable
     assert result.star_elongation == pytest.approx(2.4 / 1.8, abs=0.06)
-    assert result.star_elongation_angle_deg == pytest.approx(30.0, abs=4.0)
+    assert result.star_elongation_angle_deg == pytest.approx(60.0, abs=4.0)
+    assert result.star_elongation_position_angle_deg is None
+
+
+def test_a_plate_solved_star_gives_its_position_angle(tmp_path: Path) -> None:
+    """North up, east left: a long axis along +y points north (0 degrees)."""
+    path = _write_stretched_star(tmp_path, 3000.0, 2.4, 1.8, 90.0)
+    with fits.open(path, mode="update") as hdul:
+        hdul[0].header.update({
+            "PLTSOLVD": True,
+            "CTYPE1": "RA---TAN",
+            "CTYPE2": "DEC--TAN",
+            "CRVAL1": 150.0,
+            "CRVAL2": 20.0,
+            "CRPIX1": 50.0,
+            "CRPIX2": 50.0,
+            "CDELT1": -1.0 / 3600.0,
+            "CDELT2": 1.0 / 3600.0,
+        })
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.star_elongation_angle_deg == pytest.approx(0.0, abs=4.0) or (
+        result.star_elongation_angle_deg == pytest.approx(180.0, abs=4.0)
+    )
+    position_angle = result.star_elongation_position_angle_deg
+    assert position_angle is not None
+    assert min(position_angle, 180.0 - position_angle) < 4.0
+
+
+def test_the_fits_carry_their_estimator_and_scale_width(tmp_path: Path) -> None:
+    """Each fitted width names its estimator and gives its scale width."""
+    path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8)])
+    result = measure_star_profile_in_file(path, 51.0, 51.0)
+    assert result.moffat.estimator == "frame Moffat"
+    assert result.gaussian.estimator == "frame Gaussian"
+    assert result.moffat.fwhm_on_scale_px == pytest.approx(result.moffat.fwhm_px * 1.192, rel=1e-6)
 
 
 def test_faint_star_shape_is_not_judgeable(tmp_path: Path) -> None:

@@ -16,6 +16,8 @@ A `Tuner` derives the values of one family of parameters from one method
 `run_tuning` runs tuners for one setup, checks each value against its
 parameter's allowed range and minimum sample, reports every value that
 moves, and with ``write=True`` saves the values after backing up the config.
+`tune` is the one entry point: it picks a library's tuners and the setup,
+then calls `run_tuning`. Both libraries' ``measure_tuned_parameters`` call it.
 
 `ConfigTunedValues` gives `resolve` the stored values. A value outside the
 allowed range, or derived from fewer samples than the parameter's minimum,
@@ -31,6 +33,7 @@ from typing import Any
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.observatory_setups import SetupConfig
 from astrometricslib.foundation.parameter_context import SetupEquipmentValues
 from astrometricslib.models.tuned_parameter import ParameterSource, ParameterValue, TunedParameter
@@ -589,6 +592,64 @@ def run_tuning(
     )
 
 
+def tune(
+    packages: Iterable[str],
+    configuration: Any,
+    *,
+    setup: str | None = None,
+    only: Sequence[str] | None = None,
+    save: bool = False,
+    services: Mapping[str, Any] | None = None,
+) -> TuningReport:
+    """Run the tuners of some packages on one setup (the one entry point).
+
+    The tuners are found with `collect_tuners`, narrowed to ``only`` when it
+    is given, and run with `run_tuning` on the named setup (or the active
+    one), stamped with today's date.
+
+    Parameters
+    ----------
+    packages : `Iterable` [`str`]
+        The packages whose tuners to run, such as ``("astrometricslib",)``.
+    configuration : `Any`
+        The loaded config (an `AppConfiguration`).
+    setup : `str`, optional
+        The setup to tune. The active setup when left out.
+    only : `Sequence` [`str`], optional
+        Run only the tuners with these names.
+    save : `bool`, optional
+        Write the accepted values to the config, after one backup.
+    services : `Mapping` [`str`, `Any`], optional
+        The data access the tuners need (see `TuningInputs.services`).
+
+    Returns
+    -------
+    report : `TuningReport`
+        The values that would be set or moved, and those skipped, refused or
+        unchanged.
+
+    Raises
+    ------
+    NotFoundError
+        If the setup is not in the config, or there is no active setup.
+    InvalidArgumentError
+        If ``only`` names a tuner that does not exist.
+    """
+    tuners = collect_tuners(packages)
+    if only:
+        unknown = sorted(set(only) - {tuner.name for tuner in tuners})
+        if unknown:
+            raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
+        tuners = [tuner for tuner in tuners if tuner.name in set(only)]
+    setups = configuration.get_observatory_setups()
+    chosen = setups.setup_named(setup) if setup else setups.active_setup()
+    if chosen is None:
+        raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
+    return run_tuning(
+        tuners, chosen, configuration, services=services, today=datetime.date.today(), write=save
+    )
+
+
 __all__ = [
     "ChangeNotice",
     "ConfigTunedValues",
@@ -601,4 +662,5 @@ __all__ = [
     "collect_tuners",
     "read_tuned_record",
     "run_tuning",
+    "tune",
 ]

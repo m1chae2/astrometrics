@@ -8,8 +8,13 @@ warning level and the quarantine kept it: the frame lies in the band between
 `STRETCHED_STAR_WARNING_ELONGATION` and its session's set-aside threshold
 (`set_aside_elongation_limit`), both read from their owner.
 The capture time a capture program writes into a file name is read by
-`capture_time_from_file_name`, the one place that rule lives.
+`capture_time_from_file_name`, the one place that rule lives. The time a
+frame must be older than, the newest stack file's, comes from
+`latest_stack_time`.
 """
+
+import os
+from pathlib import Path
 
 import pytest
 
@@ -17,7 +22,11 @@ from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.frame_scanning import capture_time_from_file_name
-from astrometricslib.pipelines.stacking.frame_status import build_frame_statuses, set_aside_limits_by_path
+from astrometricslib.pipelines.stacking.frame_status import (
+    build_frame_statuses,
+    latest_stack_time,
+    set_aside_limits_by_path,
+)
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN,
     ELONGATION_RISE_ABOVE_MEDIAN,
@@ -223,3 +232,34 @@ def test_the_capture_time_is_read_from_a_file_name() -> None:
     """A capture program's date and time in the name, else nothing."""
     assert capture_time_from_file_name("M1_2026-10-03T08-15-30_120s.fits") == "2026-10-03 08:15:30"
     assert capture_time_from_file_name("M1_Light_001.fits") == ""
+
+
+def test_the_newest_stack_file_gives_the_stack_time(tmp_path: Path) -> None:
+    """The newest of the imaging, spectral and configuration stacks counts."""
+    from astrometricslib.models.target import Target
+
+    older, newer = tmp_path / "a_Stacked.fits", tmp_path / "b_Stacked.fits"
+    for path, stamp in ((older, 1000.0), (newer, 2000.0)):
+        path.write_bytes(b"x")
+        os.utime(path, (stamp, stamp))
+    target = Target(id="M 1")
+    target.stacking.stacked_image = str(older)
+    target.spectral_stacking.stacked_image = str(newer)
+
+    assert latest_stack_time(target, None) == pytest.approx(2000.0)
+    assert latest_stack_time(Target(id="M 2"), None) is None
+
+
+def test_an_old_record_finds_its_stack_in_the_stacks_folder(tmp_path: Path) -> None:
+    """A record naming the old lights folder finds the moved file by name."""
+    from astrometricslib.models.target import Target
+
+    moved = tmp_path / "stacks" / "lights" / "M 1" / "M_1_Stacked.fits"
+    moved.parent.mkdir(parents=True)
+    moved.write_bytes(b"x")
+    os.utime(moved, (1500.0, 1500.0))
+    target = Target(id="M 1")
+    target.stacking.stacked_image = str(tmp_path / "lights" / "M 1" / "M_1_Stacked.fits")
+
+    assert latest_stack_time(target, str(tmp_path / "stacks")) == pytest.approx(1500.0)
+    assert latest_stack_time(target, None) is None

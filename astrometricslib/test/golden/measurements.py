@@ -18,7 +18,6 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import numpy as np
 from astropy.io import fits
@@ -27,8 +26,6 @@ from astropy.stats import sigma_clipped_stats
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
 from astrometricslib._internal.drivers.image import AstrometricsImage
-from astrometricslib.api.quality import QualityRecords
-from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import resolve_detector_noise
@@ -38,7 +35,10 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     _read_exposure_seconds,
     measure_aperture_photometry,
 )
+from astrometricslib.pipelines.shared.api_arguments import make_frame_selection
+from astrometricslib.pipelines.shared.quality import frame_selection
 from astrometricslib.pipelines.shared.quality.quality_metrics import measure_frame_input_quality
+from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_frames
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import analyze_spectral_frame
 from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
@@ -249,11 +249,14 @@ def _saturation_threshold_adu(header: fits.Header) -> float:
 
 
 def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
-    """Measure the five luminance lights with the public quality API.
+    """Measure the five luminance lights with the library's raw-frame check.
 
     The star count, FWHM, longest streak, sky level, saturated
     pixels, shift from the previous frame and flags come from
-    ``QualityRecords.measure_frames(kind="raw_check")``. The background
+    `check_raw_frames`, the batch check behind
+    ``QualityRecords.measure_frames(kind="raw_check")``, run here on the
+    sample folder (the public method measures a target's frames). The
+    background
     level and saturated fraction come from `measure_frame_input_quality`. The
     background noise is the standard deviation of the sigma-clipped frame,
     computed the same way as the library's background level, because no
@@ -265,17 +268,12 @@ def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
         One group per frame, plus a ``"batch"`` group of batch medians.
         The first frame has no shift numbers.
     """
-    diagnostics = QualityRecords(AppConfiguration(), MagicMock())
-    report = diagnostics.measure_frames(
-        folder_path=str(SAMPLE_FOLDER),
-        kind="raw_check",
-        filter_name="Luminance",
-        first_file=LUMINANCE_FRAMES[0][-3:],
-        last_file=LUMINANCE_FRAMES[-1][-3:],
-        register_job=False,
+    selection = make_frame_selection(
+        "Luminance", LUMINANCE_FRAMES[0][-3:], LUMINANCE_FRAMES[-1][-3:], None, None, False
     )
+    report = check_raw_frames(paths=frame_selection.select_folder_paths(str(SAMPLE_FOLDER), selection))
     measured: dict[str, dict[str, float]] = {}
-    for row in report.frames:
+    for row in report["frames"]:
         name = Path(row["path"]).stem
         values: dict[str, float] = {
             "star_count": row["star_count"],
@@ -298,9 +296,9 @@ def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
         values["saturated_fraction"] = quality["saturated_pixel_fraction"]
         measured[name] = values
     measured["batch"] = {
-        "median_star_count": report.batch["median_star_count"],
-        "median_fwhm_px": report.batch["median_fwhm_px"],
-        "flagged_frame_count": report.batch["flagged_count"],
+        "median_star_count": report["batch"]["median_star_count"],
+        "median_fwhm_px": report["batch"]["median_fwhm_px"],
+        "flagged_frame_count": report["batch"]["flagged_count"],
     }
     return measured
 

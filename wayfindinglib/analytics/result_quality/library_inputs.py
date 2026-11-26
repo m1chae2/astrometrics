@@ -662,7 +662,7 @@ class LibraryInputs:
                 try:
                     rows.extend(
                         self.astrometrics.quality.query(
-                            metric=metric, level="frame", camera=camera, library_only=True
+                            metric=metric, level="frame", camera_id=camera, library_only=True
                         ).rows
                     )
                 except (AstrometricsError, sqlite3.Error) as error:

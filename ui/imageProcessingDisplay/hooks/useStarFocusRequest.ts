@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AstrometryOverlayStar } from '../../common/services/astronomyService';
-import type { RestoreView } from '../../common/fitsViewer/FitsRenderer';
+import type { RestoreView } from '../../common/fitsViewer/hooks/useViewPlacement';
 
 /**
  * Screen pixels per stack pixel when the view zooms in on a star: the star fills a few screen pixels per

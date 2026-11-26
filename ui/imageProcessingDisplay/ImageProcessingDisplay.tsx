@@ -28,8 +28,8 @@ import {
   loadImageView, markImageViewReturned, RETURN_TO_IMAGE_ACTION, saveImageView,
 } from '../common/utils/imageViewStore';
 import type { SavedImageView, SavedViewport, StarFocusHandoff } from '../common/utils/imageViewStore';
-import type { RestoreView } from '../common/fitsViewer/FitsRenderer';
-import { isStarSelected } from '../common/fitsViewer/FitsRenderer';
+import type { RestoreView } from '../common/fitsViewer/hooks/useViewPlacement';
+import { isStarSelected } from '../common/fitsViewer/utils/starOverlayLayout';
 import { publishedStarFromOverlay, useSelectionPublisher } from '../common/hooks/useSelectionPublisher';
 import type { DisplayMode } from '../common/fitsViewer/displayMode';
 import { useStarFocusRequest, type StarFocusRequest } from './hooks/useStarFocusRequest';

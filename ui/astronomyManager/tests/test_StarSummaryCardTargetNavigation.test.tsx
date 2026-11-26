@@ -118,7 +118,6 @@ describe('StarSummaryCard Target Navigation', () => {
 
     // Verify localStorage updated
     expect(window.localStorage.getItem('selectedTarget')).toBe('M 13');
-    expect(window.localStorage.getItem('appMode')).toBe('Image Processing');
     // The overlay and the star travel in the hand-off above, not in raw storage keys.
     expect(window.localStorage.getItem('astrometrics:enableAstrometryOverlay')).toBeNull();
     expect(window.localStorage.getItem('astrometrics:imageProcessingSelectedStar')).toBeNull();

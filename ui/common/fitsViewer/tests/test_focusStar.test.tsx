@@ -58,7 +58,7 @@ vi.mock('../hooks/useCanvasDrawer', async () => {
 });
 
 import { FitsRenderer } from '../FitsRenderer';
-import type { FocusStar } from '../FitsRenderer';
+import type { FocusStar } from '../hooks/useViewPlacement';
 
 const VIEW_WIDTH = 1000;
 const VIEW_HEIGHT = 800;

@@ -2,10 +2,11 @@
  * @file starOverlayLayout.ts
  * @description Pure helpers for the star overlay on the FITS viewer: where a
  * star lands on screen, which stars are in view, which of them get a text
- * label (the most important first, with a cap that grows as you zoom in), and
- * which star the pointer is over.
+ * label (the most important first, with a cap that grows as you zoom in), what
+ * each label says and where its badge goes, and which star the pointer is over.
  */
 import { AstrometryOverlayStar } from '../../services/astronomyService';
+import { formatStarListLabel } from '../../utils/starDisplayFormat';
 
 /** How many stars get a text label at the fitted view. The cap grows as you zoom in. */
 export const STAR_LABEL_BUDGET = 12;
@@ -195,4 +196,91 @@ export function findStarNearPointer(
     }
   }
   return best;
+}
+
+/**
+ * Shortens long catalog identifiers for HUD reticle badges.
+ *
+ * Shortens coordinate names from common surveys (2MASS, GPM, SDSS) while
+ * keeping enough digits that two stars in one field never share a label, and delegating to standard
+ * catalog label formatters for Gaia and unnamed field detections.
+ *
+ * @param name Full star name or catalog identifier.
+ * @returns Concise, human-readable display label.
+ */
+export function formatStarDisplayName(name: string): string {
+  if (!name) return '';
+  // Strip verbose cluster member prefix: e.g. "CI* NGC 6205 KAD 656" -> "KAD 656"
+  const clusterMemberMatch = name.match(/^(?:CI\*|Cl\*)\s*(?:NGC\s*\d+|IC\s*\d+|M\s*\d+)\s+(.+)$/i);
+  if (clusterMemberMatch) {
+    name = clusterMemberMatch[1].trim();
+  }
+  // Survey names encode the star's position. Keep whole seconds of RA and
+  // Dec (a few arcseconds), so two stars in one field never share a label:
+  // 2MASS J16413289+3626285 -> 2MASS 164132+362628.
+  const massMatch = name.match(/2MASS\s*J?([0-9]{6})[0-9]*([+-][0-9]{6})[0-9]*/i);
+  if (massMatch) {
+    return `2MASS ${massMatch[1]}${massMatch[2]}`;
+  }
+  // GPM 258.328551+36.535702 -> GPM 258.329+36.536 (degrees to about 4 arcseconds).
+  const gpmMatch = name.match(/GPM\s*([0-9]+\.[0-9]+)([+-][0-9]+\.[0-9]+)/i);
+  if (gpmMatch) {
+    return `GPM ${Number(gpmMatch[1]).toFixed(3)}${gpmMatch[2][0]}${Math.abs(Number(gpmMatch[2])).toFixed(3)}`;
+  }
+  // SDSS J164132.89+362628.5 -> SDSS 164132+362628.
+  const sdssMatch = name.match(/SDSS\s*J?([0-9]{6})[0-9.]*([+-][0-9]{6})[0-9.]*/i);
+  if (sdssMatch) {
+    return `SDSS ${sdssMatch[1]}${sdssMatch[2]}`;
+  }
+  return formatStarListLabel(name);
+}
+
+/**
+ * Checks if a given overlay star matches the currently selected star identifier.
+ *
+ * The match is exact and ignores case: the star's own id, its library record id, its name, or
+ * its display name with cluster prefixes removed (so "Cl* NGC 6205 KAD 656" matches "KAD 656").
+ * It never matches part of an id, so "detection-5" does not select "detection-50".
+ *
+ * @param star Astrometry overlay star item.
+ * @param selectedId Target selected star identifier string.
+ * @returns True if star matches the selection.
+ */
+export function isStarSelected(star: AstrometryOverlayStar, selectedId?: string | null): boolean {
+  if (!selectedId) return false;
+  const wanted = selectedId.trim().toLowerCase();
+  if (!wanted) return false;
+  const keys = [star.id || '', star.libraryId || '', star.name || ''].map((key) => key.trim().toLowerCase());
+  if (keys.includes(wanted)) return true;
+
+  // Compare formatted display names (e.g. "Cl* NGC 6205 KAD 656" vs "CI* NGC 6205 KAD 656" both normalize to "KAD 656")
+  const normSelected = formatStarDisplayName(selectedId).trim().toLowerCase();
+  const normStarName = formatStarDisplayName(star.name || star.id).trim().toLowerCase();
+  return Boolean(normSelected && normStarName && normSelected === normStarName);
+}
+
+/**
+ * Calculates badge horizontal offset (badgeX) relative to the star reticle.
+ * Defaults to placing the badge on the right side of the reticle (+20px) unless it
+ * would overflow the right edge of the container viewport, in which case it flips left.
+ *
+ * @param screenX Horizontal position of the star in screen/container pixels.
+ * @param badgeWidth Rendered width of the star label badge.
+ * @param containerW Width of the containing viewport element.
+ * @returns Offset in pixels from star center to badge origin.
+ */
+export function computeBadgePlacement(screenX: number, badgeWidth: number, containerW: number): number {
+  const placeLeft = (screenX + 20 + badgeWidth) > containerW;
+  return placeLeft ? -badgeWidth - 20 : 20;
+}
+
+/**
+ * Estimates the width of a star's label badge.
+ *
+ * @param star Astrometry overlay star item.
+ * @returns Badge width in screen pixels.
+ */
+export function estimateBadgeWidth(star: AstrometryOverlayStar): number {
+  const nameLength = formatStarDisplayName(star.name).length;
+  return Math.max(56, nameLength * 7.6 + 26);
 }

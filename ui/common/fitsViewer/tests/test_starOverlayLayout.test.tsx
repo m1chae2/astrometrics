@@ -7,14 +7,7 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, createEvent } from '@testing-library/react';
-import {
-  STAR_LABEL_BUDGET,
-  labelCapForScale,
-  StarScreenTransform,
-  chooseLabeledStarIds,
-  findStarNearPointer
-} from '../utils/starOverlayLayout';
-import { estimateBadgeWidth } from '../FitsRenderer';
+import { STAR_LABEL_BUDGET, labelCapForScale, StarScreenTransform, chooseLabeledStarIds, findStarNearPointer, estimateBadgeWidth } from '../utils/starOverlayLayout';
 
 // A fixed decoded picture, so the renderer treats the full image as ready.
 const FAKE_BITMAP = { width: 800, height: 1000 } as unknown as ImageBitmap;

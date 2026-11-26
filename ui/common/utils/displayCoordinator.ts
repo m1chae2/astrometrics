@@ -86,19 +86,10 @@ export async function navigateToElement<T = any>(
     }
   }
 
-  // 2. Local Fallback: switch local window display if not already active
-  try {
-    const isAuxWindow = Boolean(typeof window !== 'undefined' && window.location?.search && new URLSearchParams(window.location.search).get('windowId'));
-    if (!isAuxWindow && typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('appMode', intent.targetDisplay);
-    }
-  } catch {
-    // Ignore localStorage failures
-  }
-
-  // 3. Switch the display, then leave the request in the hand-off store. The
-  // store keeps it until the target display is running, so it is not lost when
-  // that display is hidden or paused at this moment.
+  // 2. Switch this window's display, then leave the request in the hand-off
+  // store. The store keeps it until the target display is running, so it is not
+  // lost when that display is hidden or paused at this moment. The app remembers
+  // the display it switched to (App.tsx saves it on `astrometrics:modeChange`).
   window.dispatchEvent(
     new CustomEvent('astrometrics:modeChange', { detail: intent.targetDisplay })
   );

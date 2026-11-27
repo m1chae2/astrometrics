@@ -47,7 +47,19 @@ def test_another_missing_name_is_a_plain_attribute_error() -> None:
 
 
 def test_the_table_maps_text_to_text() -> None:
-    """Every entry has a library-qualified key and a non-empty new call."""
+    """Every entry has a library-qualified key and a non-empty new call.
+
+    A key is ``wayfindinglib.<class>.<method>``, or ``wayfindinglib.<name>``
+    for a name the package root no longer exports.
+    """
     for old, new in RENAMES.items():
-        assert old.startswith("wayfindinglib.") and old.count(".") == 2, old
+        assert old.startswith("wayfindinglib.") and old.count(".") in (1, 2), old
         assert new.strip(), old
+
+
+def test_an_old_root_export_says_where_it_moved() -> None:
+    """``from wayfindinglib import FrameEndDetector`` names its new module."""
+    import wayfindinglib
+
+    with pytest.raises(ImportError, match=r"wayfindinglib\.logs\.FrameEndDetector"):
+        _ = wayfindinglib.FrameEndDetector

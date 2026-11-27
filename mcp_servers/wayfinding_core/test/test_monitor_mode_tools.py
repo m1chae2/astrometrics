@@ -202,7 +202,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> tuple[ToolRegistry, Wayfinder, Re
     """
     from types import SimpleNamespace
 
-    from wayfindinglib._internal.control import SkyPosition
+    from astrometricslib import SkyPosition
 
     wayfinder = Wayfinder()
     recorder = Recorder(wayfinder)

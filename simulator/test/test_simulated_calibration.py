@@ -126,7 +126,7 @@ def test_capture_focus_and_filter_commands_pass_the_safety_check(
 
     _take_command(wayfinder, tmp_path)
 
-    hardware_operations._require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
+    hardware_operations.require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
     wayfinder.control.imaging.focus_move(10)
     wayfinder.control.imaging.set_filter("L")
     assert wayfinder.recording.commands_sent() != []

@@ -1,9 +1,10 @@
-"""Purpose: Tests for recording a guider calibration and a focus model.
+"""Purpose: Tests for storing a guider calibration and a focus model.
 
-Description: The two ``record_*`` calls save numbers measured elsewhere. They
-must refuse an id that is already saved unless ``replace`` is true, and they
-cap the id, the note and the numbers. The tests use a dictionary in place of
-the library's butler, so nothing is written to a real library.
+Description: ``control.guiding.create_guider_calibration`` and
+``control.imaging.create_focus_model`` save records measured elsewhere.
+They must refuse an id that is already saved unless ``force`` is true, and
+they cap the id, the note and the numbers. The tests use a dictionary in
+place of the library's butler, so nothing is written to a real library.
 """
 
 from types import SimpleNamespace
@@ -12,8 +13,10 @@ from typing import Any
 import pytest
 
 from astrometricslib.exceptions import InvalidArgumentError
+from wayfindinglib import FocusModel, GuiderCalibration
 from wayfindinglib.api.control.guiding import GuidingControl
 from wayfindinglib.api.control.imaging import ImagingControl
+from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset
 
 
 class _Butler:
@@ -38,16 +41,16 @@ class _Butler:
         self.records[dataset_type, selector["id"]] = record
 
 
-def _calibration_arguments(**changes: Any) -> dict[str, Any]:
-    """Give valid arguments for `GuidingControl.record_calibration`.
+def _calibration(**changes: Any) -> GuiderCalibration:
+    """Give a valid guider calibration record.
 
     Returns
     -------
-    arguments : `dict`
-        The arguments, with `changes` applied.
+    calibration : `GuiderCalibration`
+        The record, with `changes` applied.
     """
-    arguments: dict[str, Any] = {
-        "calibration_id": "cal-1",
+    fields: dict[str, Any] = {
+        "id": "cal-1",
         "camera_id": "guide-cam",
         "telescope_id": "scope",
         "arcsec_per_pixel": 3.8,
@@ -56,28 +59,28 @@ def _calibration_arguments(**changes: Any) -> dict[str, Any]:
         "dec_rate_arcsec_per_sec": 15.0,
         "source_note": "PHD2 calibration, copied by hand",
     }
-    arguments.update(changes)
-    return arguments
+    fields.update(changes)
+    return GuiderCalibration(**fields)
 
 
-def _focus_arguments(**changes: Any) -> dict[str, Any]:
-    """Give valid arguments for `ImagingControl.record_focus_model`.
+def _focus_model(**changes: Any) -> FocusModel:
+    """Give a valid focus model record.
 
     Returns
     -------
-    arguments : `dict`
-        The arguments, with `changes` applied.
+    focus_model : `FocusModel`
+        The record, with `changes` applied.
     """
-    arguments: dict[str, Any] = {
-        "focus_model_id": "focus-1",
+    fields: dict[str, Any] = {
+        "id": "focus-1",
         "camera_id": "cam",
         "telescope_id": "scope",
         "backlash_steps": 40,
         "approach_direction": "inward",
         "source_note": "Fitted in another tool",
     }
-    arguments.update(changes)
-    return arguments
+    fields.update(changes)
+    return FocusModel(**fields)
 
 
 @pytest.fixture
@@ -104,35 +107,35 @@ def imaging() -> ImagingControl:
     return ImagingControl(SimpleNamespace(butler=_Butler()))
 
 
-def test_a_saved_guider_calibration_id_is_refused_unless_replace_is_true(guiding: GuidingControl) -> None:
-    """A second record with the same id needs ``replace=True``."""
-    guiding.record_calibration(**_calibration_arguments())
+def test_a_saved_guider_calibration_id_is_refused_unless_forced(guiding: GuidingControl) -> None:
+    """A second record with the same id needs ``force=True``."""
+    guiding.create_guider_calibration(_calibration())
 
     with pytest.raises(InvalidArgumentError, match="already saved"):
-        guiding.record_calibration(**_calibration_arguments(arcsec_per_pixel=4.0))
+        guiding.create_guider_calibration(_calibration(arcsec_per_pixel=4.0))
     assert guiding._context.butler.get(
         "guider_calibration", {"id": "cal-1"}
     ).arcsec_per_pixel == pytest.approx(3.8)
 
-    replaced = guiding.record_calibration(**_calibration_arguments(arcsec_per_pixel=4.0), replace=True)
+    replaced = guiding.create_guider_calibration(_calibration(arcsec_per_pixel=4.0), force=True)
     assert replaced.arcsec_per_pixel == pytest.approx(4.0)
 
 
-def test_a_saved_focus_model_id_is_refused_unless_replace_is_true(imaging: ImagingControl) -> None:
-    """A second focus model with the same id needs ``replace=True``."""
-    imaging.record_focus_model(**_focus_arguments())
+def test_a_saved_focus_model_id_is_refused_unless_forced(imaging: ImagingControl) -> None:
+    """A second focus model with the same id needs ``force=True``."""
+    imaging.create_focus_model(_focus_model())
 
     with pytest.raises(InvalidArgumentError, match="already saved"):
-        imaging.record_focus_model(**_focus_arguments(backlash_steps=60))
+        imaging.create_focus_model(_focus_model(backlash_steps=60))
 
-    replaced = imaging.record_focus_model(**_focus_arguments(backlash_steps=60), replace=True)
+    replaced = imaging.create_focus_model(_focus_model(backlash_steps=60), force=True)
     assert replaced.backlash_steps == 60
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"calibration_id": "x" * 101},
+        {"id": "x" * 101},
         {"source_note": "x" * 501},
         {"arcsec_per_pixel": 101.0},
         {"ra_rate_arcsec_per_sec": 1001.0},
@@ -142,22 +145,22 @@ def test_a_saved_focus_model_id_is_refused_unless_replace_is_true(imaging: Imagi
 def test_guider_calibration_limits(guiding: GuidingControl, changes: dict[str, Any]) -> None:
     """Too long an id or note, or an absurd number, is refused."""
     with pytest.raises(InvalidArgumentError):
-        guiding.record_calibration(**_calibration_arguments(**changes))
+        guiding.create_guider_calibration(_calibration(**changes))
     assert guiding._context.butler.records == {}
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"focus_model_id": "x" * 101},
+        {"id": "x" * 101},
         {"source_note": "x" * 501},
         {"backlash_steps": 100001},
         {"thermal_coefficient_steps_per_c": 10001.0},
-        {"filter_offsets": {"Ha": 100001}},
+        {"filter_offsets": [FilterFocusOffset(filter="Ha", offset_steps=100001)]},
     ],
 )
 def test_focus_model_limits(imaging: ImagingControl, changes: dict[str, Any]) -> None:
     """Too long an id or note, or an absurd number, is refused."""
     with pytest.raises(InvalidArgumentError):
-        imaging.record_focus_model(**_focus_arguments(**changes))
+        imaging.create_focus_model(_focus_model(**changes))
     assert imaging._context.butler.records == {}

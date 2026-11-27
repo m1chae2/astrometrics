@@ -343,8 +343,8 @@ def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
     measure.assert_not_called()
 
 
-def test_on_copied_runs_after_the_reindex_and_before_the_measuring() -> None:
-    """The copy listener hears the count once, before any measuring."""
+def test_the_job_hears_of_the_new_frames_before_the_measuring() -> None:
+    """The running job is told the new frame count, before any measuring."""
     order: list[str] = []
     measure = Mock(side_effect=lambda *args, **kwargs: order.append("measure") or _summary())
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
@@ -352,56 +352,15 @@ def test_on_copied_runs_after_the_reindex_and_before_the_measuring() -> None:
     fake_astrometrics.added_paths = ["/library/lights/M 81/a.fits", "/library/lights/M 81/b.fits"]
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
-    copied: list[int] = []
+    job = SimpleNamespace(info=lambda message: order.append(message))
 
-    def on_copied(count: int) -> None:
-        """Record the count and whether the target was saved already."""
-        order.append(f"copied-after-save={fake_astrometrics.saved}")
-        copied.append(count)
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        patch.object(remote_operations, "get_current_job", return_value=job),
+    ):
+        remote_operations.download_remote_targets(observatory, "M 81", local_path="/local/lights/M81")
 
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        remote_operations.download_remote_targets(
-            observatory, "M 81", local_path="/local/lights/M81", on_copied=on_copied
-        )
-
-    assert copied == [2]
-    assert order == ["copied-after-save=True", "measure"]
-
-
-def test_on_copied_is_not_called_when_no_frame_was_added() -> None:
-    """With nothing new, the copy listener stays silent."""
-    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    observatory = _FakeObservatory(Mock())
-    observatory.astrometrics = fake_astrometrics
-    on_copied = Mock()
-
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        remote_operations.download_remote_targets(
-            observatory, "M 81", local_path="/local/lights/M81", on_copied=on_copied
-        )
-
-    on_copied.assert_not_called()
-
-
-def test_a_failing_copy_listener_never_fails_the_sync() -> None:
-    """A copy listener error is logged; the frames are still measured."""
-    measure = Mock(return_value=_summary())
-    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
-    fake_astrometrics.added_paths = ["/library/lights/M 81/a.fits"]
-    observatory = _FakeObservatory(Mock())
-    observatory.astrometrics = fake_astrometrics
-
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        success = remote_operations.download_remote_targets(
-            observatory,
-            "M 81",
-            local_path="/local/lights/M81",
-            on_copied=Mock(side_effect=RuntimeError("socket gone")),
-        )
-
-    assert success is True
-    measure.assert_called_once()
+    assert order == ["Added 2 new frame(s) of M 81 to the library.", "measure"]
 
 
 def test_download_remote_targets_local_path_skips_download() -> None:

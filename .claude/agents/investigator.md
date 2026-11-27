@@ -65,14 +65,16 @@ tools:
   - mcp__astrometricslib-core__visualization_render
   - mcp__astrometricslib-core__visualization_render_newest
   - mcp__wayfindinglib-core__observatory_equipment_get_active
-  - mcp__wayfindinglib-core__observatory_equipment_status
-  - mcp__wayfindinglib-core__observatory_guiding_query_calibrations
-  - mcp__wayfindinglib-core__observatory_guiding_status
+  - mcp__wayfindinglib-core__observatory_equipment_get_status
+  - mcp__wayfindinglib-core__observatory_guiding_get_status
+  - mcp__wayfindinglib-core__observatory_guiding_query_guider_calibrations
+  - mcp__wayfindinglib-core__observatory_imaging_check_capture
   - mcp__wayfindinglib-core__observatory_imaging_query_focus_models
   - mcp__wayfindinglib-core__observatory_mount_get_centering_exposure
   - mcp__wayfindinglib-core__observatory_remote_check_connection
-  - mcp__wayfindinglib-core__observatory_remote_frame_locations
-  - mcp__wayfindinglib-core__observatory_remote_list
+  - mcp__wayfindinglib-core__observatory_remote_get_frame_locations
+  - mcp__wayfindinglib-core__observatory_remote_query_files
+  - mcp__wayfindinglib-core__observatory_remote_query_folders
   - mcp__wayfindinglib-core__planning_calculate_panels
   - mcp__wayfindinglib-core__planning_get_calibration_advice
   - mcp__wayfindinglib-core__planning_get_deep_catalog_status

@@ -121,7 +121,7 @@ The policy checks these rules when a state changes, comparing the prior state wi
 <!-- impl: wayfindinglib.models.policy.delegation.DelegationPolicy -->
 <!-- impl: wayfindinglib.data_access.delegation_policy_reader.validate_delegation_policy -->
 <!-- impl: wayfindinglib.data_access.delegation_policy_reader.promote_capability -->
-<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations._require_authoritative -->
+<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations.require_authoritative -->
 
 ### 2.4 Delegation phases
 

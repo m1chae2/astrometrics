@@ -19,6 +19,7 @@ service:
 
 import asyncio
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -247,3 +248,64 @@ def test_phd2_and_internal_refuse_to_run_the_loop() -> None:
 def test_the_registry_offers_the_three_protocols() -> None:
     """The guiding protocol setting can name phd2, internal or simulator."""
     assert set(build_guiding_driver_registry()) == {"phd2", "internal", "simulator"}
+
+
+def _loop_context(driver: Any, authoritative: bool = True) -> SimpleNamespace:
+    """Build a context that can start and stop this app's guide loop.
+
+    Parameters
+    ----------
+    driver : `GuidingDriver`
+        The guiding driver.
+    authoritative : `bool`, optional
+        Whether the policy lets `AUTOGUIDING` act.
+
+    Returns
+    -------
+    context : `types.SimpleNamespace`
+        The parts of a `ControlContext` `start_loop` and `stop_loop` use.
+    """
+    context = _context(driver)
+    context.delegation_policy = lambda: SimpleNamespace(is_authoritative=lambda capability: authoritative)
+    context.guide_loop_lock = threading.Lock()
+    context.guide_loop_thread = None
+    context.guide_loop_stop = None
+    return context
+
+
+def test_start_loop_runs_on_a_thread_until_stop_loop(mount: dict) -> None:
+    """The loop starts at once, refuses a second start; stop ends it."""
+    context = _loop_context(SimulatedGuidingDriver(IndiGuidingDriver(_session([]))))
+
+    live_guiding.start_loop(context, exposure_s=0.01, sleep=lambda seconds: time.sleep(0.01))
+    assert context.live_guiding.running is True
+    with pytest.raises(ConflictError, match="already running"):
+        live_guiding.start_loop(context, sleep=lambda seconds: None)
+
+    live_guiding.stop_loop(context)
+    assert not context.guide_loop_thread.is_alive()
+    assert context.live_guiding.running is False
+
+
+def test_start_loop_refuses_at_once_without_tracking(mount: dict) -> None:
+    """A mount that does not track refuses before any thread starts."""
+    mount["tracking"] = ["Idle"]
+    context = _loop_context(SimulatedGuidingDriver(IndiGuidingDriver(_session([]))))
+
+    with pytest.raises(ConflictError, match="not tracking"):
+        live_guiding.start_loop(context, sleep=lambda seconds: None)
+    assert context.guide_loop_thread is None
+
+
+def test_monitor_mode_refuses_start_and_stop(mount: dict) -> None:
+    """Without `AUTOGUIDING` authority neither call does anything."""
+    from astrometricslib.exceptions import PermissionDeniedError
+
+    context = _loop_context(SimulatedGuidingDriver(IndiGuidingDriver(_session([]))), authoritative=False)
+
+    with pytest.raises(PermissionDeniedError):
+        live_guiding.start_loop(context, sleep=lambda seconds: None)
+    with pytest.raises(PermissionDeniedError):
+        live_guiding.stop_loop(context)
+    assert context.guide_loop_thread is None
+    assert mount["exposures"] == []

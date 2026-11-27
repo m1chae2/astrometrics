@@ -4,152 +4,100 @@ Description: Lists the folders and files on the computer at the
 telescope, checks that it can be reached, compares a target's frames
 there with the drive and the library, and copies new frames and logs
 into the library. Copying adds files and records and never deletes one.
-The work is done in `tasks.control_tasks.remote_transfer_tasks`,
-`ekos_log_ingestion` and `guiding_log_ingestion`.
+Progress goes to the job the call runs in. The work is done in
+`tasks.control_tasks.remote_sync`.
 """
 
-import builtins
-from collections.abc import Callable
-from typing import Any, Literal
-
 from astrometricslib import Target
-from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import background_job, registered_job
+from astrometricslib.arguments import Page
+from astrometricslib.jobs import background_job
 from wayfindinglib.api.control.context import ControlChild
-from wayfindinglib.models.session.control_results import FrameLocationReport, FrameSyncResult, LogSyncResult
+from wayfindinglib.models.session.control_results import (
+    FrameLocationReport,
+    FrameSyncResult,
+    LogSyncResult,
+    RemoteFile,
+)
 
 __all__ = ["RemoteControl"]
-
-ListKind = Literal["folders", "target_folders", "calibration_folders", "unassociated_folders", "files"]
-"""What `RemoteControl.list` can list."""
-
-
-def _target_id(target: str | Target) -> str:
-    """Return a target's id, given the target or its id.
-
-    Parameters
-    ----------
-    target : `str` or `Target`
-        The target or its id.
-
-    Returns
-    -------
-    target_id : `str`
-        The id.
-    """
-    return target if isinstance(target, str) else target.id
-
-
-def _refuse(kind: str, **arguments: object) -> None:
-    """Refuse arguments that a kind of call does not use.
-
-    Parameters
-    ----------
-    kind : `str`
-        Names the kind of call in the message.
-    **arguments : `object`
-        Each argument that does not apply, with its value. `None` means it
-        was not given.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If any of `arguments` was given.
-    """
-    given = [name for name, value in arguments.items() if value is not None]
-    if given:
-        raise InvalidArgumentError(f"{kind} does not use {', '.join(given)}.")
 
 
 class RemoteControl(ControlChild):
     """Read and copy files from the computer at the telescope."""
 
-    def list(
-        self, kind: ListKind, folder_name: str | None = None, sizes: bool = False
-    ) -> builtins.list[str] | builtins.list[tuple[str, int]]:
-        """List folders or files on the observatory computer.
+    def check_connection(self) -> None:
+        """Check that the observatory computer can be reached.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.remote_sync.require_connection
+
+        Notes
+        -----
+        Raises `ExternalServiceError` when the computer does not answer.
+        Its ``report`` is ``"status"``: an offline computer is a status,
+        not an error.
+        """
+        from wayfindinglib.tasks.control_tasks.remote_sync import require_connection
+
+        require_connection(self._context)
+
+    def query_folders(self, kind: str = "imaging", text: str | None = None) -> Page[str]:
+        """List folders on the observatory computer.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.remote_sync.query_folders
 
         Parameters
         ----------
-        kind : `str`
-            ``"folders"`` (every folder), ``"target_folders"`` (folders
-            that are not Bias, Dark or Flat), ``"calibration_folders"``
-            (Bias, Dark and Flat), ``"unassociated_folders"`` (folders that
-            match no library target) or ``"files"`` (the FITS files in
-            one folder).
-        folder_name : `str`, optional
-            For ``"files"`` (where it is needed), the folder to list. For
-            the folder kinds, keep only the folder this name refers to.
-            Either way the name is matched the way a copy matches it
-            (ignoring case, so ``"M 42"`` finds ``"M_42"``), so a made-up
+        kind : `str`, optional
+            ``"imaging"`` (target folders, the default), ``"calibration"``
+            (Bias, Dark and Flat), ``"unassociated"`` (folders that match
+            no library target) or ``"all"``.
+        text : `str`, optional
+            Keep only the folder this name refers to, matched the way a
+            copy matches it (ignoring case, so ``"M 42"`` finds
+            ``"M_42"``).
+
+        Returns
+        -------
+        folders : `Page` [`str`]
+            The folder names.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` for an unknown `kind`.
+        """
+        from wayfindinglib.tasks.control_tasks.remote_sync import query_folders
+
+        return query_folders(self._context, kind=kind, text=text)
+
+    def query_files(self, folder: str) -> Page[RemoteFile]:
+        """List the FITS files in one folder on the observatory computer.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.remote_sync.query_files
+
+        Parameters
+        ----------
+        folder : `str`
+            The folder, matched the way a copy matches it, so a made-up
             name never reaches the remote shell.
-        sizes : `bool`, optional
-            Pair each file with its size in bytes. Used only by
-            ``"files"``.
 
         Returns
         -------
-        names : `list` [`str`] or `list` [`tuple` [`str`, `int`]]
-            Folder names (with `folder_name`, the one folder it matches,
-            or none), file paths relative to the folder, or
-            ``(path, size_in_bytes)`` pairs.
+        files : `Page` [`RemoteFile`]
+            Each file's ``path`` inside the folder and ``size_bytes``.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If `kind` is unknown, ``"files"`` has no `folder_name`, or an
-            argument is given that `kind` does not use.
-        NotFoundError
-            If `folder_name` matches no folder on the observatory computer.
-        ExternalServiceError
-            If no folder matches because the observatory computer cannot
-            be reached.
+        Notes
+        -----
+        Raises `NotFoundError` if the folder is not there and
+        `ExternalServiceError` (a status) if the computer cannot be reached.
         """
-        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
+        from wayfindinglib.tasks.control_tasks.remote_sync import query_files
 
-        if kind == "files":
-            if not folder_name:
-                raise InvalidArgumentError('kind="files" needs a folder_name.')
-            folder = tasks.matching_remote_folder(
-                self._context, folder_name, tasks.list_remote_targets(self._context)
-            )
-            if folder is None:
-                if not tasks.check_remote_connection(self._context):
-                    raise ExternalServiceError(
-                        "The observatory computer is not reachable.", report="status", log_level="INFO"
-                    )
-                raise NotFoundError(f"No folder named {folder_name!r} on the observatory computer.")
-            if sizes:
-                return tasks.list_remote_files_with_sizes(self._context, folder)
-            return tasks.list_remote_files(self._context, folder)
-        folder_lists = {
-            "folders": tasks.list_remote_targets,
-            "target_folders": tasks.list_remote_target_folders,
-            "calibration_folders": tasks.list_remote_calibration_folders,
-            "unassociated_folders": tasks.discover_unassociated_remote_targets,
-        }
-        if kind not in folder_lists:
-            raise InvalidArgumentError(f"kind must be one of: {', '.join([*folder_lists, 'files'])}.")
-        _refuse(f"kind={kind!r}", sizes=sizes or None)
-        folders = folder_lists[kind](self._context)
-        if folder_name is None:
-            return folders
-        match = tasks.matching_remote_folder(self._context, folder_name, folders)
-        return [match] if match is not None else []
+        return query_files(self._context, folder)
 
-    def check_connection(self) -> bool:
-        """Check that the observatory computer can be reached.
-
-        Returns
-        -------
-        connected : `bool`
-            Whether the computer answered.
-        """
-        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
-
-        return remote_transfer_tasks.check_remote_connection(self._context)
-
-    def frame_locations(self, target: str | Target) -> FrameLocationReport:
+    def get_frame_locations(self, target: Target) -> FrameLocationReport:
         """Show where a target's frames are: telescope, drive, library.
 
         Gives the count in each place and the frames that are in one place
@@ -157,219 +105,110 @@ class RemoteControl(ControlChild):
         lost it. It only reads. If the observatory computer cannot be
         reached, the drive and library parts are still given.
 
+        Owner:
+            wayfindinglib.tasks.control_tasks.remote_sync.get_frame_locations
+
         Parameters
         ----------
-        target : `str` or `Target`
-            The target, such as ``"M 57"``.
+        target : `Target`
+            The target.
 
         Returns
         -------
         locations : `FrameLocationReport`
             The counts and the differences, with a few file names each.
         """
-        from wayfindinglib.tasks.control_tasks import frame_locations
+        from wayfindinglib.tasks.control_tasks.remote_sync import get_frame_locations
 
-        return FrameLocationReport.model_validate(
-            frame_locations.build_frame_locations(self._context, _target_id(target))
-        )
+        return get_frame_locations(self._context, target)
 
     @background_job("remote_sync", grace_period_seconds=8.0)
     def sync_frames(
         self,
-        target: str | Target | None = None,
+        target: Target | None = None,
+        kind: str | None = None,
+        files: list[str] | None = None,
         dry_run: bool = False,
-        files: builtins.list[str] | None = None,
-        local_path: str | None = None,
-        incremental: bool | None = None,
-        log_callback: Callable[[str], None] | None = None,
-        on_copied: Callable[[int], None] | None = None,
+        force: bool = False,
     ) -> FrameSyncResult:
         """Bring new frames from the observatory computer into the library.
 
-        The arguments choose what is copied:
+        With a `target`, its folder is copied into the target's own
+        library folder (only the files not already held, unless `force`),
+        the frames are indexed, and the new frames are measured, which
+        takes about 11 s per frame. With `kind`, that calibration folder
+        goes to the calibration library. With neither, every folder is
+        copied; one folder's failure does not stop the others. The run is
+        recorded as a ``remote_sync`` job, or joins the job it runs in.
 
-        - No `target`: every folder. Bias, Dark and Flat folders go to the
-          calibration library, every other folder to its target. One
-          folder's failure does not stop the others. Uses `log_callback`.
-        - `local_path`: no copy. The FITS files already in that local
-          folder are sorted into `target` and indexed.
-        - `files`, `log_callback` or `incremental`: copy `target`'s folder
-          (only `files` when given; only files not already held unless
-          ``incremental=False``) into the target's own library folder,
-          whatever the folder is called, and index the frames.
-        - A Bias, Dark or Flat `target`: copy that folder into the
-          calibration library.
-        - Otherwise: copy the new frames of `target`, which must match a
-          target folder on the observatory computer. ``dry_run=True`` only
-          reports what would be copied.
+        Owner:
+            wayfindinglib.tasks.control_tasks.remote_sync.sync_frames
 
         Parameters
         ----------
-        target : `str` or `Target`, optional
-            The target or folder to copy, such as ``"M 13"``.
-        dry_run : `bool`, optional
-            Only report the plan. Used only by the last case.
+        target : `Target`, optional
+            The target to copy.
+        kind : `str`, optional
+            ``"bias"``, ``"dark"`` or ``"flat"``: copy that calibration
+            folder instead of a target.
         files : `list` [`str`], optional
-            Remote file paths to copy.
-        local_path : `str`, optional
-            A local folder to index instead of copying.
-        incremental : `bool`, optional
-            `False` copies every file, even those already held.
-        log_callback : `Callable` [[`str`], `None`], optional
-            Receives progress messages.
-        on_copied : `Callable` [[`int`], `None`], optional
-            Called once with the number of frames added to the library,
-            right after the copy and re-index and before the new frames are
-            measured, so a caller can show them at once. Not called when no
-            frame was added. Used for one target (or chosen files or a local
-            folder); refused for every folder and for a calibration folder.
+            Only these remote file paths.
+        dry_run : `bool`, optional
+            Only report what would be copied (a target, without `files`).
+        force : `bool`, optional
+            Copy every file, even those already held.
 
         Returns
         -------
         result : `FrameSyncResult`
             Every folder: ``succeeded``, ``failed``, ``job_id`` and
-            ``measurements``. A local folder or chosen files: ``success``,
-            ``target`` and ``measurements``. Calibration: ``success`` and the
-            counts. A target: the plan (``remote_folder``, ``remote_files``,
-            ``already_held``, ``to_transfer``, ``examples``) and, for a real
-            run, ``success``, ``transferred`` and ``measurements``.
-            ``measurements`` lists the summary (as a plain dict) of each
-            frame measurement run the sync started, the one source the
-            backend announces ``quality:measured`` from. The sync measures
-            only the frames it added, which takes about 11 s per frame, and
-            returns after that. An
-            argument that the chosen case does not use is refused with
-            `InvalidArgumentError`. A target with no remote folder raises
-            `NotFoundError`, and a real run with the frames drive not
-            mounted raises `StorageNotMountedError`.
+            ``measurements``. Chosen files or `force`: ``success``,
+            ``target`` and ``measurements``. Calibration: ``success`` and
+            the counts. A target: the plan (``remote_folder``,
+            ``remote_files``, ``already_held``, ``to_transfer``,
+            ``examples``) and, for a real run, ``success``, ``transferred``
+            and ``measurements``, the summary of each frame measurement run
+            the copy started.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` for a choice the copy does not use,
+        `NotFoundError` when the target has no remote folder, and
+        `StorageNotMountedError` when the frames drive is not mounted.
         """
-        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
+        from wayfindinglib.tasks.control_tasks.remote_sync import sync_frames
 
-        context = self._context
-        if target is None:
-            _refuse("Copying every folder", files=files, local_path=local_path, incremental=incremental)
-            _refuse("Copying every folder", dry_run=dry_run or None, on_copied=on_copied)
-            return FrameSyncResult.model_validate(tasks.sync_all_remote_folders(context, log_callback))
-        target_id = _target_id(target)
-        with registered_job(
-            job_type="remote_sync",
-            target_id=target_id,
-        ):
-            return FrameSyncResult.model_validate(
-                self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback, on_copied)
-            )
-
-    def _sync_one(
-        self,
-        target_id: str,
-        dry_run: bool,
-        files: builtins.list[str] | None,
-        local_path: str | None,
-        incremental: bool | None,
-        log_callback: Callable[[str], None] | None,
-        on_copied: Callable[[int], None] | None = None,
-    ) -> dict[str, Any]:
-        """Copy or index one target's or calibration folder's frames.
-
-        Returns
-        -------
-        result : `dict` [`str`, `Any`]
-            See `sync_frames`.
-        """
-        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
-
-        context = self._context
-        measurement_summaries: builtins.list[Any] = []
-        if local_path is not None:
-            _refuse("Indexing a local folder", dry_run=dry_run or None, files=files, incremental=incremental)
-            success = tasks.download_remote_targets(
-                context,
-                target_id,
-                local_path=local_path,
-                measurement_summaries=measurement_summaries,
-                on_copied=on_copied,
-            )
-            return {
-                "success": bool(success),
-                "target": target_id,
-                "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
-            }
-        if files is not None or log_callback is not None or incremental is not None:
-            _refuse("Copying chosen files", dry_run=dry_run or None)
-            success = tasks.download_remote_targets(
-                context,
-                target_id,
-                selected_files=files,
-                log_callback=log_callback,
-                incremental=True if incremental is None else incremental,
-                measurement_summaries=measurement_summaries,
-                on_copied=on_copied,
-            )
-            return {
-                "success": bool(success),
-                "target": target_id,
-                "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
-            }
-        if tasks.is_calibration_folder(target_id):
-            _refuse("Copying a calibration folder", dry_run=dry_run or None, on_copied=on_copied)
-            return tasks.sync_calibration_folder(context, target_id)
-        return tasks.sync_target_frames(context, target_id, dry_run, on_copied)
+        return sync_frames(self._context, target, kind=kind, files=files, dry_run=dry_run, force=force)
 
     @background_job("remote_sync", grace_period_seconds=8.0)
-    def sync_logs(
-        self,
-        dry_run: bool = False,
-        download: bool = True,
-        destination_dir: str | None = None,
-    ) -> LogSyncResult:
+    def sync_logs(self, dry_run: bool = False) -> LogSyncResult:
         """Bring the guide and Ekos logs into the library's database.
 
         Downloads the new guide logs and Ekos analyze logs, then stores the
         guiding samples and one session record per analyze file. Safe to
         repeat: a second run leaves the same data, and nothing is deleted.
         It does not refit the mount's periodic error model; that is
-        `control.guiding.refit_spectrum`.
+        ``review.guiding.measure_spectrum``.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.remote_sync.sync_logs
 
         Parameters
         ----------
         dry_run : `bool`, optional
             Only report which logs on the observatory computer are new.
-        download : `bool`, optional
-            `False` reads only what is already in `destination_dir`,
-            without contacting the observatory computer.
-        destination_dir : `str`, optional
-            Local folder for the logs. ``ekos_logs`` in the wayfinding
-            library's data folder when omitted.
 
         Returns
         -------
         result : `LogSyncResult`
             The plan (how many logs exist and are new) and, for a real run,
-            ``ingested`` (what was stored). Without downloading, only what
-            was stored. An unreachable observatory computer raises
-            `ExternalServiceError`.
+            ``ingested`` (what was stored).
 
-        Raises
-        ------
-        InvalidArgumentError
-            If `dry_run` is asked for without downloading.
+        Notes
+        -----
+        Raises `ExternalServiceError` (a status) when the observatory
+        computer cannot be reached.
         """
-        from wayfindinglib.tasks.control_tasks import ekos_log_ingestion, remote_transfer_tasks
+        from wayfindinglib.tasks.control_tasks.remote_sync import sync_logs
 
-        context = self._context
-        directory = destination_dir or context.ekos_log_directory()
-        if not download and dry_run:
-            raise InvalidArgumentError(
-                "dry_run compares with the observatory computer, so it needs download."
-            )
-        with registered_job(
-            job_type="remote_sync",
-            target_id="logs",
-        ):
-            if not download:
-                return LogSyncResult.model_validate(
-                    ekos_log_ingestion.ingest_ekos_logs(context, directory, download=False)
-                )
-            return LogSyncResult.model_validate(
-                remote_transfer_tasks.sync_remote_logs(context, dry_run, directory)
-            )
+        return sync_logs(self._context, dry_run=dry_run)

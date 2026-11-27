@@ -302,7 +302,7 @@ def test_a_wayfinder_runs_the_simulated_session_in_a_separate_process(
     context = wayfinder.control._context
     assert context._worker_client is None  # nothing starts until INDI is needed
     try:
-        assert wayfinder.control.equipment.connect() is True
+        assert wayfinder.control.equipment.connect() is None
         assert isinstance(context.driver, IndiWorkerProxy)
         assert context._worker_client._process.is_alive()
         assert "RA" in wayfinder.control._driver.status

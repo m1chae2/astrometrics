@@ -3,13 +3,13 @@
 Description: Judges weather readings against the saved safety rules,
 opens and closes the enclosure, runs the safe-state sequence, and
 changes the delegation policy that says which capabilities this app may
-command. `status` reads the rules, a fresh weather verdict, the
-enclosure and its state, the delegation policy and the agreement
-evidence for one capability. Enclosure commands need
-`OBSERVATORY_SAFETY` to be `AUTHORITATIVE`.
+command: `set_mode` for all of them at once, `update` for chosen ones.
+`get_status` reads the rules, a fresh weather verdict, the enclosure and
+its state, the delegation policy and the agreement evidence for one
+capability. Enclosure commands need `OBSERVATORY_SAFETY` to be
+`AUTHORITATIVE`.
 """
 
-import dataclasses
 from datetime import datetime
 
 from wayfindinglib.api.control.context import ControlChild
@@ -22,24 +22,17 @@ from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 
 __all__ = ["SafetyControl"]
 
-STATUS_SECTIONS = (
-    "rule_set",
-    "assessment",
-    "enclosure",
-    "enclosure_state",
-    "delegation_policy",
-    "divergence",
-)
-"""Sections `SafetyControl.status` can read."""
-
 
 class SafetyControl(ControlChild):
     """Keep the observatory safe and decide who may command it."""
 
-    def status(
+    def get_status(
         self, include: list[str] | None = None, capability: ObservatoryCapability | None = None
     ) -> SafetyStatus:
         """Read the safety rules, weather verdict, enclosure and policy.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_status.read_safety_status
 
         Parameters
         ----------
@@ -60,38 +53,92 @@ class SafetyControl(ControlChild):
         status : `SafetyStatus`
             The sections read. The others stay `None`.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If ``divergence`` is asked for without `capability`, or
-            `capability` is given without ``divergence``.
+        Notes
+        -----
+        Raises `InvalidArgumentError` if ``divergence`` is asked for
+        without `capability`, or `capability` is given without it.
         """
-        from astrometricslib.exceptions import InvalidArgumentError
-        from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
-        from wayfindinglib.tasks.control_tasks import hardware_operations
-        from wayfindinglib.tasks.control_tasks.capability_promotion import summarize_divergence_evidence
+        from wayfindinglib.tasks.control_tasks.control_status import read_safety_status
 
-        if include is None:
-            include = [name for name in STATUS_SECTIONS if name != "divergence" or capability is not None]
-        sections = hardware_operations.check_sections(include, STATUS_SECTIONS)
-        if ("divergence" in sections) != (capability is not None):
-            raise InvalidArgumentError('The "divergence" section and capability go together.')
-        context = self._context
-        status = SafetyStatus(sections=sections)
-        if "rule_set" in sections:
-            status.rule_set = get_safety_rule_set(context.butler)
-        if "assessment" in sections:
-            status.assessment = hardware_operations.refresh_safety_assessment(context)
-        if "enclosure" in sections:
-            status.enclosure = context.active_enclosure()
-        if "enclosure_state" in sections:
-            status.enclosure_state = hardware_operations.enclosure_state(context)
-        if "delegation_policy" in sections:
-            status.delegation_policy = context.delegation_policy()
-        if capability is not None:
-            summary = summarize_divergence_evidence(capability, context.butler.get_all("divergence_record"))
-            status.divergence = {**dataclasses.asdict(summary), "agreement_rate": summary.agreement_rate}
-        return status
+        return read_safety_status(self._context, include, capability)
+
+    def set_mode(self, mode: str, note: str = "", shadow_first: bool = False) -> BulkDelegationOutcome:
+        """Move every capability toward a mode and save the policy.
+
+        ``"monitor"`` moves every capability to `DELEGATED`: this app then
+        watches and computes but commands nothing, and that always fully
+        succeeds. ``"controller"`` moves every capability toward
+        `AUTHORITATIVE`; a capability that may not move yet (a correction
+        not yet `SHADOWED`, or capture before the corrections it depends
+        on) is listed in ``rejected``, never skipped silently or forced.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.delegation_changes.set_mode
+
+        Parameters
+        ----------
+        mode : `str`
+            ``"monitor"`` or ``"controller"``.
+        note : `str`, optional
+            Why, in the operator's words.
+        shadow_first : `bool`, optional
+            With ``"controller"``, first move each correction capability
+            still `DELEGATED` to `SHADOWED`, the step the rules need before
+            `AUTHORITATIVE`. The other rules still apply and still reject.
+
+        Returns
+        -------
+        outcome : `BulkDelegationOutcome`
+            Which capabilities reached the mode's state, and why the others
+            did not.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` for an unknown mode.
+        """
+        from wayfindinglib.tasks.control_tasks.delegation_changes import set_mode
+
+        return set_mode(self._context, mode, note=note, shadow_first=shadow_first)
+
+    def update(
+        self,
+        policy: DelegationPolicy,
+        changes: dict[ObservatoryCapability, DelegationState],
+        note: str = "",
+    ) -> DelegationPolicy:
+        """Change capabilities' states in the policy, and save it.
+
+        The policy's rules (shadow before authority, the safety exemption,
+        capture's dependencies, calibration presence) are checked for each
+        change before it is saved.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.delegation_changes.update_policy
+
+        Parameters
+        ----------
+        policy : `DelegationPolicy`
+            The saved policy, from ``get_status``.
+        changes : `dict` [`ObservatoryCapability`, `DelegationState`]
+            Each capability to change, with its new state, such as
+            ``{ObservatoryCapability.AUTOFOCUS: DelegationState.SHADOWED}``.
+        note : `str`, optional
+            Why, in the operator's words.
+
+        Returns
+        -------
+        policy : `DelegationPolicy`
+            The saved policy.
+
+        Notes
+        -----
+        Raises `DelegationPolicyValidationError` when a change breaks a
+        rule, and `InvalidArgumentError` when `policy` is not the saved one
+        or `changes` is empty.
+        """
+        from wayfindinglib.tasks.control_tasks.delegation_changes import update_policy
+
+        return update_policy(self._context, policy, changes, note=note)
 
     def _assess(self, readings: SensorReadings, now: datetime | None = None) -> SafetyAssessment:
         """Judge weather readings against the saved safety rules.
@@ -170,115 +217,3 @@ class SafetyControl(ControlChild):
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.close_enclosure(self._context)
-
-    def apply_promotion_decision(
-        self,
-        capability: ObservatoryCapability,
-        new_state: DelegationState,
-        *,
-        evidence_note: str = "",
-    ) -> DelegationPolicy:
-        """Apply an operator's promotion decision and save the policy.
-
-        Parameters
-        ----------
-        capability : `ObservatoryCapability`
-            The capability to change.
-        new_state : `DelegationState`
-            Its new state.
-        evidence_note : `str`, optional
-            Why, in the operator's words.
-
-        Returns
-        -------
-        policy : `DelegationPolicy`
-            The saved policy.
-        """
-        from wayfindinglib.tasks.control_tasks.capability_promotion import apply_promotion_decision
-
-        context = self._context
-        return apply_promotion_decision(
-            context.butler,
-            capability,
-            new_state,
-            evidence_note=evidence_note,
-            has_guider_calibration=context.active_guider_calibration() is not None,
-            has_focus_model=context.active_focus_model() is not None,
-        )
-
-    def enter_monitoring_mode(self, *, evidence_note: str = "") -> BulkDelegationOutcome:
-        """Move every capability to `DELEGATED` ("monitoring mode").
-
-        This app then watches and computes for every capability but
-        commands nothing. It always fully succeeds.
-
-        Parameters
-        ----------
-        evidence_note : `str`, optional
-            Why, in the operator's words.
-
-        Returns
-        -------
-        outcome : `BulkDelegationOutcome`
-            Every capability's new state.
-        """
-        return self._set_all(DelegationState.DELEGATED, evidence_note)
-
-    def enter_controller_mode(
-        self, *, evidence_note: str = "", shadow_first: bool = False
-    ) -> BulkDelegationOutcome:
-        """Move every capability toward `AUTHORITATIVE` ("controller mode").
-
-        A capability that may not move yet (a correction not yet
-        `SHADOWED`, or capture before the corrections it depends on) is
-        listed in `BulkDelegationOutcome.rejected`, never skipped silently
-        or forced.
-
-        Parameters
-        ----------
-        evidence_note : `str`, optional
-            Why, in the operator's words.
-        shadow_first : `bool`, optional
-            First move each correction capability still `DELEGATED` to
-            `SHADOWED`, the step the rules need before `AUTHORITATIVE`.
-            The other rules (calibration presence, capture's dependencies)
-            still apply and still reject.
-
-        Returns
-        -------
-        outcome : `BulkDelegationOutcome`
-            Which capabilities reached `AUTHORITATIVE`, and why the others
-            did not.
-        """
-        return self._set_all(DelegationState.AUTHORITATIVE, evidence_note, shadow_first=shadow_first)
-
-    def _set_all(
-        self, state: DelegationState, evidence_note: str, shadow_first: bool = False
-    ) -> BulkDelegationOutcome:
-        """Move every capability toward `state` and save the policy.
-
-        Parameters
-        ----------
-        state : `DelegationState`
-            The state to move toward.
-        evidence_note : `str`
-            Why, in the operator's words.
-        shadow_first : `bool`, optional
-            See `enter_controller_mode`.
-
-        Returns
-        -------
-        outcome : `BulkDelegationOutcome`
-            Every capability's resulting state, and any refusals.
-        """
-        from wayfindinglib.tasks.control_tasks.capability_promotion import set_all_capabilities
-
-        context = self._context
-        return set_all_capabilities(
-            context.butler,
-            state,
-            evidence_note=evidence_note,
-            has_guider_calibration=context.active_guider_calibration() is not None,
-            has_focus_model=context.active_focus_model() is not None,
-            shadow_first=shadow_first,
-        )

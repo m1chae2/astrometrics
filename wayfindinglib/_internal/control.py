@@ -14,7 +14,6 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.session.capture_result import CaptureResult
 from wayfindinglib.models.session.telemetry import LiveGuidingStatus, MountPointingModel, PolarAlignmentStatus
-from wayfindinglib.models.sky_position import SkyPosition
 
 __all__ = [
     "CaptureResult",
@@ -30,5 +29,4 @@ __all__ = [
     "SafetyStatus",
     "SimulatorIndiInterface",
     "SiteProfile",
-    "SkyPosition",
 ]

@@ -2,14 +2,12 @@
 
 Description: Reads the active telescope, cameras and guide scope, the
 camera profiles, the site location and the commissioning records;
-connects and disconnects the devices; reads and chooses the active
+connects the devices; reads and chooses the active
 observatory configuration and saves the telescope's safety limits; and gives
 raw access to INDI device properties for diagnosis.
 It also holds two small calculations about the equipment: the camera
 cooling ramp rate and a device's state from its raw signals.
 """
-
-from typing import Any
 
 from astrometricslib import ObservatoryConfiguration
 from wayfindinglib.api.control.context import ControlChild
@@ -18,30 +16,15 @@ from wayfindinglib.models.policy.commissioning import CommissioningRun
 
 __all__ = ["EquipmentControl"]
 
-STATUS_SECTIONS = (
-    "telescope",
-    "camera",
-    "guide_scope",
-    "guide_camera",
-    "camera_profiles",
-    "configuration",
-    "observer_location",
-    "commissioning_runs",
-    "indi_devices",
-    "indi_properties",
-)
-"""Sections `EquipmentControl.status` can read."""
-
-DEFAULT_STATUS_SECTIONS = STATUS_SECTIONS[:7]
-"""Sections read when `include` is omitted: the profile and the site.
-The commissioning records can be long, so they are read only on request."""
-
 
 class EquipmentControl(ControlChild):
     """Manage the equipment profile and the device connections."""
 
-    def status(self, include: list[str] | None = None, device_name: str | None = None) -> EquipmentStatus:
+    def get_status(self, include: list[str] | None = None, device_name: str | None = None) -> EquipmentStatus:
         """Read the equipment profile, the site and the device connections.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_status.read_equipment_status
 
         Parameters
         ----------
@@ -66,81 +49,24 @@ class EquipmentControl(ControlChild):
             The sections read. The others stay `None`. The INDI sections
             are empty when the active mount does not use INDI.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If ``indi_properties`` is asked for without `device_name`, or
-            `device_name` is given without ``indi_properties``.
+        Notes
+        -----
+        Raises `InvalidArgumentError` if ``indi_properties`` is asked for
+        without `device_name`, or `device_name` is given without it.
         """
-        from astrometricslib.exceptions import InvalidArgumentError
-        from wayfindinglib.tasks.control_tasks import equipment_activation, hardware_operations
+        from wayfindinglib.tasks.control_tasks.control_status import read_equipment_status
 
-        if include is None:
-            include = [*DEFAULT_STATUS_SECTIONS, *(["indi_properties"] if device_name is not None else [])]
-        sections = hardware_operations.check_sections(include, STATUS_SECTIONS)
-        if ("indi_properties" in sections) != (device_name is not None):
-            raise InvalidArgumentError('The "indi_properties" section and device_name go together.')
-        context = self._context
-        status = EquipmentStatus(sections=sections)
-        if "telescope" in sections:
-            status.telescope = context.active_telescope()
-        if "camera" in sections:
-            status.camera = context.active_camera()
-        if "guide_scope" in sections:
-            status.guide_scope = context.active_guide_scope()
-        if "guide_camera" in sections:
-            status.guide_camera = context.active_guide_camera()
-        if "camera_profiles" in sections:
-            status.camera_profiles = equipment_activation.list_camera_profiles(
-                context.config, context.astrometrics
-            )
-        if "configuration" in sections:
-            status.configuration = equipment_activation.get_equipment_configuration(context.config)
-        if "observer_location" in sections:
-            status.observer_location = context.observer_location()
-        if "commissioning_runs" in sections:
-            status.commissioning_runs = context.butler.get_all("commissioning_run")
-        diagnostics = (
-            context.indi_diagnostics if {"indi_devices", "indi_properties"} & set(sections) else None
-        )
-        if "indi_devices" in sections:
-            status.indi_devices = diagnostics.get_devices() if diagnostics else []
-        if device_name is not None:
-            status.indi_properties = diagnostics.get_properties(device_name) if diagnostics else {}
-        return status
+        return read_equipment_status(self._context, include, device_name)
 
-    def connect(self) -> bool:
-        """Connect every device.
+    def connect(self) -> None:
+        """Connect every device, each on a best-effort basis.
 
-        Returns
-        -------
-        success : `bool`
-            Always `True`; each driver connects on a best-effort basis.
+        Owner:
+            wayfindinglib.tasks.control_tasks.hardware_operations.connect
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.connect(self._context)
-
-    def disconnect(self) -> bool:
-        """Disconnect every device, the safe alternative to unplugging it.
-
-        Returns
-        -------
-        success : `bool`
-            Always `True`.
-        """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
-
-        return hardware_operations.disconnect(self._context)
-
-    def apply_configuration(self) -> None:
-        """Make the INDI session read the telescope hostname again.
-
-        Call it after the configuration changed, so a new hostname is used
-        on the next connection. It points the session at the host and does
-        not reconnect or move anything.
-        """
-        self._context.driver.sync_configuration()
+        hardware_operations.connect(self._context)
 
     def get_active(self) -> ObservatoryConfiguration | None:
         """Read the observatory configuration that is active now.
@@ -158,7 +84,7 @@ class EquipmentControl(ControlChild):
         configuration : `ObservatoryConfiguration` or `None`
             The active configuration, or `None` when the settings make no
             telescope or no camera active. Its telescope's pointing limits
-            are those saved with the configuration; `status` gives the
+            are those saved with the configuration; `get_status` gives the
             current ones.
         """
         from wayfindinglib.tasks.control_tasks.equipment_activation import get_active_configuration
@@ -208,7 +134,7 @@ class EquipmentControl(ControlChild):
         telescope's settings (a section is never created). A per-telescope
         minimum or maximum altitude overrides the global
         ``[Observatory.Constraints]`` section. The current limits are read
-        back with `status` (the ``telescope`` section).
+        back with `get_status` (the ``telescope`` section).
 
         Owner:
             wayfindinglib.tasks.control_tasks.equipment_activation.set_pointing_limits
@@ -248,12 +174,16 @@ class EquipmentControl(ControlChild):
         )
 
     def set_device_property(
-        self, device_name: str, property_name: str, value: Any, element: str | None = None
-    ) -> bool:
-        """Set one raw INDI property element on a device.
+        self,
+        device_name: str,
+        property_name: str,
+        value: float | str | bool = "On",
+        element: str | None = None,
+    ) -> None:
+        """Set one raw INDI property element on a device, for diagnosis.
 
-        For diagnosis only. Does nothing when the active mount does not
-        use INDI.
+        Owner:
+            wayfindinglib.tasks.control_tasks.hardware_operations.set_device_property
 
         Parameters
         ----------
@@ -261,20 +191,20 @@ class EquipmentControl(ControlChild):
             The INDI device.
         property_name : `str`
             The property to change.
-        value : `Any`
-            The new value.
+        value : `float`, `str` or `bool`, optional
+            The new value. ``"On"`` (the default) turns a switch element on.
         element : `str`, optional
             The element of the property to change.
 
-        Returns
-        -------
-        success : `bool`
-            `True` if the element was set, `False` off INDI.
+        Notes
+        -----
+        Raises `ConfigurationError` (a status) when the active mount does
+        not use INDI, and `NotFoundError` when the device, property or
+        element is not there.
         """
-        diagnostics = self._context.indi_diagnostics
-        if diagnostics is None:
-            return False
-        return diagnostics.set_property(device_name, property_name, value, element)
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        hardware_operations.set_device_property(self._context, device_name, property_name, value, element)
 
     def _save_commissioning_run(self, run: CommissioningRun) -> None:
         """Save one commissioning drill.

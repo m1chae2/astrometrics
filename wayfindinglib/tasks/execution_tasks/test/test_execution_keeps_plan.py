@@ -299,15 +299,17 @@ def test_a_first_save_stores_the_session_as_it_is(butler: DiskButler) -> None:
     assert butler.get("observation_session", {"session_id": "new"}).id == "new"
 
 
-def test_the_imaging_queue_checkpoint_keeps_the_tick(butler: DiskButler) -> None:
+def test_the_imaging_queue_checkpoint_keeps_the_tick(
+    butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The imaging queue checkpoint keeps a tick made after the load."""
     local = _stored_plan(butler)
-    control = SimpleNamespace(
-        safety=SimpleNamespace(
-            status=lambda include: SimpleNamespace(delegation_policy=None, assessment=None)
-        )
+    monkeypatch.setattr(
+        imaging_queue,
+        "read_safety_status",
+        lambda context, include: SimpleNamespace(delegation_policy=None, assessment=None),
     )
-    dependencies = imaging_queue.imaging_dependencies(control, butler)
+    dependencies = imaging_queue.imaging_dependencies(SimpleNamespace(), butler)
     _tick(butler, "night-1")
 
     local.status_detail = "cycle done"
@@ -340,7 +342,7 @@ def test_abort_keeps_the_tick_and_the_framing(butler: DiskButler) -> None:
     _tick(butler, "night-1")
 
     # Abort the old copy, as a caller holding a session object would.
-    execution.abort_session(loaded, "stop")
+    execution.abort(loaded, "stop")
 
     saved = butler.get("observation_session", {"session_id": "night-1"})
     assert saved.status == SessionStatus.ABORTED

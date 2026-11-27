@@ -1,17 +1,17 @@
 """Purpose: A point on the sky, given by its right ascension and declination.
 
-Description: `SkyPosition` is the plain coordinate pair the mount
-commands take (`control.mount.slew` and `control.mount._sync`). Both
-values are in degrees, so the name of each field says its unit. The
-model turns into JSON directly, so a remote caller can pass one as
-``{"ra_deg": ..., "dec_deg": ...}``.
+Description: `SkyPosition` is a plain ICRS (J2000) coordinate pair, for a
+place on the sky that is neither a library target nor a star, such as the
+destination of a wayfindinglib mount slew. Both values are in degrees, so
+the name of each field says its unit. The model turns into JSON directly,
+so a remote caller can pass one as ``{"ra_deg": ..., "dec_deg": ...}``.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class SkyPosition(BaseModel):
-    """A sky position in the equatorial frame, in degrees.
+    """A sky position in the ICRS (J2000) equatorial frame, in degrees.
 
     Attributes
     ----------

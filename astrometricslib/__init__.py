@@ -44,7 +44,7 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 30 names:
+The package root holds 31 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
@@ -59,8 +59,9 @@ The package root holds 30 names:
 - the input models: `CaptureSetting`, which says which calibration sets a
   call means, `EnhancementSettings`, the picture choices of one
   enhancement run, `PreviewBrightObject`, the object a target's picture
-  protects, and `JobSummary`, the recorded job that ``jobs.get_log`` and
-  ``jobs.get_warnings`` take;
+  protects, `JobSummary`, the recorded job that ``jobs.get_log`` and
+  ``jobs.get_warnings`` take, and `SkyPosition`, a place on the sky in
+  ICRS degrees that is neither a target nor a star;
 - the equipment: `ObservatoryConfiguration` and the models it is built
   from, `Telescope`, `Camera`, `GuideScope`, `Mount`, `Focuser` and
   `FilterWheel`.
@@ -117,6 +118,7 @@ from astrometricslib.models.observatory_configuration import (
 )
 from astrometricslib.models.processing_results import EnhancementSettings
 from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.sky_position import SkyPosition
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, PreviewBrightObject, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
@@ -316,6 +318,7 @@ __all__ = [
     "PreviewBrightObject",
     "ProcessingPipelines",
     "QualityRecords",
+    "SkyPosition",
     "StackingPipeline",
     "StellarCatalog",
     "StellarObject",

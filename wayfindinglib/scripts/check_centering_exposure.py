@@ -210,8 +210,8 @@ def compare_frames(wayfinder: Any, target_id: str, count: int) -> tuple[list[Fra
     """
     from astropy.io import fits
 
+    from astrometricslib import SkyPosition
     from wayfindinglib.analytics.result_quality.library_inputs import frame_exposure_seconds, target_direction
-    from wayfindinglib.models.sky_position import SkyPosition
     from wayfindinglib.tasks.control_tasks.centering_exposure import predict_star_counts
 
     target = wayfinder.astrometrics.targets.get(target_id)

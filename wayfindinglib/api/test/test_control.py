@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, SkyPosition
 from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
@@ -26,18 +26,29 @@ from astrometricslib.exceptions import (
     PermissionDeniedError,
 )
 from wayfindinglib import ObservatoryControl
-from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.api.control import equipment, guiding, imaging, mount, safety
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
+from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
-from wayfindinglib.models.policy.delegation import DelegationState, ObservatoryCapability
+from wayfindinglib.models.policy.delegation import DelegationPolicy, DelegationState, ObservatoryCapability
 from wayfindinglib.models.policy.safety import SafetyRule, SafetyRuleSet, SafetyVerdict
-from wayfindinglib.tasks.control_tasks import night_analysis
+from wayfindinglib.tasks.control_tasks import ekos_log_ingestion, external_alignment, night_analysis
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 
 _NOW = datetime(2026, 8, 5, 4, 0, 0, tzinfo=UTC)
+
+
+def _policy(control: ObservatoryControl) -> DelegationPolicy:
+    """Read the saved delegation policy, the subject of `safety.update`.
+
+    Returns
+    -------
+    policy : `DelegationPolicy`
+        The saved policy.
+    """
+    return control.safety.get_status(include=["delegation_policy"]).delegation_policy
 
 
 @pytest.fixture
@@ -141,16 +152,18 @@ def test_the_active_configuration_round_trips(
     )
     control.equipment.set_active(rig_b)
     assert control.equipment.get_active() == rig_b
-    assert control.equipment.status(include=["telescope"]).telescope.id == "Rig B"
+    assert control.equipment.get_status(include=["telescope"]).telescope.id == "Rig B"
     control.equipment.set_pointing_limits(min_altitude_deg=25.0)
-    assert control.equipment.status(include=["telescope"]).telescope.min_altitude_deg == pytest.approx(25.0)
+    assert control.equipment.get_status(include=["telescope"]).telescope.min_altitude_deg == pytest.approx(
+        25.0
+    )
 
 
 def test_guider_plate_scale_falls_back_to_main_telescope_with_no_active_rig(
     control: ObservatoryControl,
 ) -> None:
     """Verify guider_plate_scale_arcsec_per_px() is None with no active rig."""
-    assert control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px is None
+    assert control.guiding.get_status(include=["plate_scale"]).plate_scale_arcsec_per_px is None
 
 
 def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(
@@ -159,8 +172,8 @@ def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(
     """Verify the guide-aware plate scale matches the main one, by default."""
     _configure_active_rig(app_config)
 
-    assert control.equipment.status(include=["guide_scope"]).guide_scope is None
-    plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
+    assert control.equipment.get_status(include=["guide_scope"]).guide_scope is None
+    plate_scale = control.guiding.get_status(include=["plate_scale"]).plate_scale_arcsec_per_px
     expected = 206.265 * 3.76 / 450.0
     assert plate_scale == pytest.approx(expected, abs=1e-4)
 
@@ -175,8 +188,8 @@ def test_guider_plate_scale_uses_active_guide_scope_focal_length(
         "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
     })
 
-    assert control.equipment.status(include=["guide_scope"]).guide_scope.id == "Orion 50mm"
-    plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
+    assert control.equipment.get_status(include=["guide_scope"]).guide_scope.id == "Orion 50mm"
+    plate_scale = control.guiding.get_status(include=["plate_scale"]).plate_scale_arcsec_per_px
     main_plate_scale = 206.265 * 3.76 / 450.0
     guide_plate_scale = 206.265 * 3.76 / 162.0
     assert plate_scale == pytest.approx(guide_plate_scale, abs=1e-4)
@@ -199,8 +212,8 @@ def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(
         },
     })
 
-    assert control.equipment.status(include=["guide_camera"]).guide_camera.id == "GuideCam"
-    assert control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px == pytest.approx(
+    assert control.equipment.get_status(include=["guide_camera"]).guide_camera.id == "GuideCam"
+    assert control.guiding.get_status(include=["plate_scale"]).plate_scale_arcsec_per_px == pytest.approx(
         206.265 * 3.75 / 162.0, abs=1e-4
     )
 
@@ -240,11 +253,11 @@ def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(
     (logs_directory / "guide_log-2026-09-23T20-43-05.txt").write_text(_EKOS_GUIDE_LOG, encoding="utf-8")
     (logs_directory / "ekos-2026-09-23T20-31-48.analyze").write_text(_EKOS_ANALYZE_LOG, encoding="utf-8")
 
-    summary = control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
+    summary = ekos_log_ingestion.ingest_ekos_logs(control._context, str(logs_directory), download=False)
 
-    assert summary.guide_samples_stored == 1
-    assert summary.session_contexts_stored == 1
-    assert summary.nights == ["2026-09-23"]
+    assert summary["guide_samples_stored"] == 1
+    assert summary["session_contexts_stored"] == 1
+    assert summary["nights"] == ["2026-09-23"]
     (listed,) = ObservationReview(control).query(kind="ekos_sessions").sessions
     assert listed["id"] == "2026-09-23T20-31-48"
     assert listed["captures"] == 1
@@ -270,8 +283,8 @@ def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(
     (logs_directory / "guide_log-2026-09-23T20-43-05.txt").write_text(_EKOS_GUIDE_LOG, encoding="utf-8")
     (logs_directory / "ekos-2026-09-23T20-31-48.analyze").write_text(_EKOS_ANALYZE_LOG, encoding="utf-8")
 
-    control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
-    control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
+    ekos_log_ingestion.ingest_ekos_logs(control._context, str(logs_directory), download=False)
+    ekos_log_ingestion.ingest_ekos_logs(control._context, str(logs_directory), download=False)
 
     assert len(ObservationReview(control).query(kind="ekos_sessions").sessions) == 1
     assert len(control._context.records.get_guiding_samples()) == 1
@@ -479,64 +492,16 @@ def test_save_and_active_guiding_spectrum_analysis_round_trip(
 
     _configure_active_rig(app_config)
 
-    assert control.guiding.status(include=["spectrum_analysis"]).spectrum_analysis is None
+    assert control.guiding.get_status(include=["spectrum_analysis"]).spectrum_analysis is None
 
     analysis = GuidingSpectrumAnalysis(sample_count=10, duration_seconds=60.0)
     control.guiding._save_spectrum_analysis(analysis)
 
-    persisted = control.guiding.status(include=["spectrum_analysis"]).spectrum_analysis
+    persisted = control.guiding.get_status(include=["spectrum_analysis"]).spectrum_analysis
     assert persisted is not None
     assert persisted.id == "Rig A"
     assert persisted.telescope_id == "Rig A"
     assert persisted.sample_count == 10
-
-
-def test_refit_spectrum_reads_one_guide_log_through_the_task_module(
-    mocker: MockerFixture, control: ObservatoryControl
-) -> None:
-    """Verify refit_spectrum(file_path=...) reads that one log."""
-    from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
-
-    fake_records = mocker.Mock()
-    control._context.records = fake_records
-    mocker.patch.object(guiding_log_ingestion, "ingest_guide_log_file", return_value="analysis")
-
-    result = control.guiding.refit_spectrum(file_path="/tmp/log.txt", target_name="M 81")
-
-    assert result == "analysis"
-    guiding_log_ingestion.ingest_guide_log_file.assert_called_once_with(
-        control._context, fake_records, "/tmp/log.txt", "M 81"
-    )
-
-
-def test_refit_spectrum_downloads_guide_logs_through_the_task_module(
-    mocker: MockerFixture, control: ObservatoryControl
-) -> None:
-    """Verify refit_spectrum(download=True) downloads every guide log first."""
-    from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
-
-    fake_records = mocker.Mock()
-    control._context.records = fake_records
-    mocker.patch.object(guiding_log_ingestion, "fetch_and_ingest_new_guide_logs", return_value="analysis")
-
-    result = control.guiding.refit_spectrum(download=True, destination_dir="/tmp/guiding", target_name="M 81")
-
-    assert result == "analysis"
-    guiding_log_ingestion.fetch_and_ingest_new_guide_logs.assert_called_once_with(
-        control._context, fake_records, "/tmp/guiding", "M 81"
-    )
-
-
-def test_refit_spectrum_and_sync_logs_refuse_arguments_they_do_not_use(control: ObservatoryControl) -> None:
-    """Verify an argument that the chosen source does not use is an error."""
-    from astrometricslib.exceptions import InvalidArgumentError
-
-    with pytest.raises(InvalidArgumentError, match="session_id"):
-        control.guiding.refit_spectrum(session_id="2026-09-24", file_path="/tmp/log.txt")
-    with pytest.raises(InvalidArgumentError, match="target_name"):
-        control.guiding.refit_spectrum(target_name="M 81")
-    with pytest.raises(InvalidArgumentError, match="dry_run"):
-        control.remote.sync_logs(dry_run=True, download=False)
 
 
 def test_pointing_model_query_delegates_to_the_task_module(
@@ -587,11 +552,11 @@ def test_run_guider_calibration_persists_the_derived_calibration(
         measure_guide_star_centroid=lambda: next(centroids),
     )
 
-    assert control.guiding.status(include=["calibration"]).calibration is None
+    assert control.guiding.get_status(include=["calibration"]).calibration is None
 
     calibration = control.guiding._run_calibration(steps, "cal-1", "CamA", "Rig A", arcsec_per_pixel=2.0)
 
-    persisted = control.guiding.status(include=["calibration"]).calibration
+    persisted = control.guiding.get_status(include=["calibration"]).calibration
     assert persisted is not None
     assert persisted.id == calibration.id
     assert persisted.ra_rate_arcsec_per_sec == pytest.approx(calibration.ra_rate_arcsec_per_sec)
@@ -711,11 +676,11 @@ def test_refresh_safety_assessment_reflects_a_live_weather_reading(control: Obse
     weather_driver = _FakeWeatherDriver()
     control._weather_driver = weather_driver
 
-    safe = control.safety.status(include=["assessment"]).assessment
+    safe = control.safety.get_status(include=["assessment"]).assessment
     assert safe.verdict == SafetyVerdict.SAFE
 
     weather_driver.reading = 50.0
-    unsafe = control.safety.status(include=["assessment"]).assessment
+    unsafe = control.safety.get_status(include=["assessment"]).assessment
     assert unsafe.verdict == SafetyVerdict.UNSAFE
 
 
@@ -742,17 +707,17 @@ def test_execute_safe_state_delegates_to_task_function(control: ObservatoryContr
     assert outcome.enclosure_closed is True
 
 
-def test_apply_promotion_decision_and_the_divergence_status(control: ObservatoryControl) -> None:
+def test_update_and_the_divergence_status(control: ObservatoryControl) -> None:
     """Verify promotion delegation records and evidence summarizes."""
-    policy = control.safety.apply_promotion_decision(
-        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.SHADOWED
+    policy = control.safety.update(
+        _policy(control), {ObservatoryCapability.PLATE_SOLVE_ALIGNMENT: DelegationState.SHADOWED}
     )
     assert policy.state_for(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT) == DelegationState.SHADOWED
-    assert control.safety.status(include=["delegation_policy"]).delegation_policy.state_for(
+    assert control.safety.get_status(include=["delegation_policy"]).delegation_policy.state_for(
         ObservatoryCapability.PLATE_SOLVE_ALIGNMENT
     ) == (DelegationState.SHADOWED)
 
-    status = control.safety.status(
+    status = control.safety.get_status(
         include=["divergence"], capability=ObservatoryCapability.PLATE_SOLVE_ALIGNMENT
     )
     assert status.divergence["sample_count"] == 0
@@ -761,7 +726,7 @@ def test_apply_promotion_decision_and_the_divergence_status(control: Observatory
 
 def test_enter_monitoring_mode_always_fully_succeeds(control: ObservatoryControl) -> None:
     """Verify monitoring mode moves every capability to DELEGATED."""
-    outcome = control.safety.enter_monitoring_mode(evidence_note="going hands-off")
+    outcome = control.safety.set_mode("monitor", note="going hands-off")
 
     assert outcome.rejected == {}
     assert all(state == DelegationState.DELEGATED for state in outcome.applied.values())
@@ -776,14 +741,14 @@ def test_enter_controller_mode_reports_partial_success(control: ObservatoryContr
     AUTHORITATIVE without first passing through SHADOWED -- the rest must
     be visibly rejected, not silently skipped or forced.
     """
-    outcome = control.safety.enter_controller_mode()
+    outcome = control.safety.set_mode("controller")
 
     assert outcome.applied == {
         ObservatoryCapability.OBSERVATORY_SAFETY: DelegationState.AUTHORITATIVE,
         ObservatoryCapability.MOUNT_CONTROL: DelegationState.AUTHORITATIVE,
     }
     assert ObservatoryCapability.AUTOGUIDING in outcome.rejected
-    assert control.safety.status(include=["delegation_policy"]).delegation_policy.state_for(
+    assert control.safety.get_status(include=["delegation_policy"]).delegation_policy.state_for(
         ObservatoryCapability.AUTOGUIDING
     ) == (DelegationState.DELEGATED)
 
@@ -806,13 +771,14 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(
         dec_rate_arcsec_per_sec=10.0,
     )
     control.guiding._save_calibration(calibration)
-    control.imaging._save_focus_model(
+    control.imaging.create_focus_model(
         FocusModel(
             id="focus-1",
             camera_id="CamA",
             telescope_id="Rig A",
             backlash_steps=0,
             approach_direction=ApproachDirection.INWARD,
+            source_note="fitted in a test",
         )
     )
 
@@ -821,9 +787,9 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(
         ObservatoryCapability.AUTOGUIDING,
         ObservatoryCapability.AUTOFOCUS,
     ):
-        control.safety.apply_promotion_decision(capability, DelegationState.SHADOWED)
+        control.safety.update(_policy(control), {capability: DelegationState.SHADOWED})
 
-    outcome = control.safety.enter_controller_mode()
+    outcome = control.safety.set_mode("controller")
 
     assert outcome.rejected == {}
     assert all(state == DelegationState.AUTHORITATIVE for state in outcome.applied.values())
@@ -841,14 +807,16 @@ def test_connect_lazily_initializes_every_configured_driver(
     """
     monkeypatch.setenv("ASTROMETRICS_TESTING", "1")
 
-    assert control.equipment.connect() is True
+    assert control.equipment.connect() is None
     assert control._driver is not None
 
 
 def test_remote_methods_delegate_to_the_task_module(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
-    """Verify list, check_connection and sync_frames forward to the tasks."""
+    """Verify the queries, the check and sync_frames forward to the tasks."""
+    from astrometricslib import Target
+    from astrometricslib.exceptions import ExternalServiceError
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
     context = control._context
@@ -856,39 +824,53 @@ def test_remote_methods_delegate_to_the_task_module(
         resolve_remote_folder_name=lambda name: name.replace(" ", "_")
     )
     mocker.patch.object(remote_transfer_tasks, "list_remote_targets", return_value=["M_81", "Dark"])
-    mocker.patch.object(remote_transfer_tasks, "list_remote_files", return_value=["frame1.fits"])
+    mocker.patch.object(
+        remote_transfer_tasks, "list_remote_files_with_sizes", return_value=[("frame1.fits", 9)]
+    )
     mocker.patch.object(remote_transfer_tasks, "check_remote_connection", return_value=True)
     mocker.patch.object(remote_transfer_tasks, "download_remote_targets", return_value=True)
     mocker.patch.object(remote_transfer_tasks, "sync_calibration_folder", return_value={"success": True})
     mocker.patch.object(remote_transfer_tasks, "sync_target_frames", return_value={"dry_run": True})
     mocker.patch.object(remote_transfer_tasks, "sync_all_remote_folders", return_value={"succeeded": []})
 
-    assert control.remote.list("folders") == ["M_81", "Dark"]
+    assert list(control.remote.query_folders(kind="all")) == ["M_81", "Dark"]
     remote_transfer_tasks.list_remote_targets.assert_called_with(context)
 
-    assert control.remote.list("files", folder_name="M 81") == ["frame1.fits"]
-    remote_transfer_tasks.list_remote_files.assert_called_once_with(context, "M_81")
+    (remote_file,) = control.remote.query_files("M 81")
+    assert (remote_file.path, remote_file.size_bytes) == ("frame1.fits", 9)
+    remote_transfer_tasks.list_remote_files_with_sizes.assert_called_once_with(context, "M_81")
 
-    assert control.remote.check_connection() is True
+    assert control.remote.check_connection() is None
     remote_transfer_tasks.check_remote_connection.assert_called_once_with(context)
+    remote_transfer_tasks.check_remote_connection.return_value = False
+    with pytest.raises(ExternalServiceError) as unreachable:
+        control.remote.check_connection()
+    assert unreachable.value.report == "status"
+    remote_transfer_tasks.check_remote_connection.return_value = True
 
-    assert control.remote.sync_frames("M 81", local_path="/local/M81").model_dump() == {
+    target = Target(id="M 81")
+    assert control.remote.sync_frames(target, force=True).model_dump() == {
         "success": True,
         "target": "M 81",
         "measurements": [],
     }
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
-        context, "M 81", local_path="/local/M81", measurement_summaries=[], on_copied=None
+        context,
+        "M 81",
+        selected_files=None,
+        log_callback=mocker.ANY,
+        incremental=False,
+        measurement_summaries=[],
     )
-    assert control.remote.sync_frames("Dark").model_dump() == {"success": True}
+    assert control.remote.sync_frames(kind="dark").model_dump() == {"success": True}
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
-    assert control.remote.sync_frames("M 81", dry_run=True).model_dump() == {"dry_run": True}
-    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True, None)
+    assert control.remote.sync_frames(target, dry_run=True).model_dump() == {"dry_run": True}
+    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True)
     assert control.remote.sync_frames().model_dump() == {"succeeded": []}
     remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None)
 
 
-def test_remote_list_refuses_a_folder_that_is_not_listed(
+def test_remote_query_files_refuses_a_folder_that_is_not_listed(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
     """Verify a made-up folder name never reaches the remote shell."""
@@ -897,39 +879,44 @@ def test_remote_list_refuses_a_folder_that_is_not_listed(
 
     control._context.remote_transfer_driver = mocker.Mock(resolve_remote_folder_name=lambda name: name)
     mocker.patch.object(remote_transfer_tasks, "list_remote_targets", return_value=["M_81"])
-    listing = mocker.patch.object(remote_transfer_tasks, "list_remote_files")
+    mocker.patch.object(remote_transfer_tasks, "check_remote_connection", return_value=True)
+    listing = mocker.patch.object(remote_transfer_tasks, "list_remote_files_with_sizes")
 
     with pytest.raises(NotFoundError):
-        control.remote.list("files", folder_name="M_81; rm -rf ~")
+        control.remote.query_files("M_81; rm -rf ~")
     listing.assert_not_called()
 
 
 def test_sync_frames_refuses_arguments_its_case_does_not_use(control: ObservatoryControl) -> None:
     """Verify sync_frames rejects arguments that the chosen case ignores."""
+    from astrometricslib import Target
     from astrometricslib.exceptions import InvalidArgumentError
 
     with pytest.raises(InvalidArgumentError, match="dry_run"):
         control.remote.sync_frames(dry_run=True)
-    with pytest.raises(InvalidArgumentError, match="files"):
-        control.remote.sync_frames("M 81", local_path="/tmp/frames", files=["a.fits"])
+    with pytest.raises(InvalidArgumentError, match="not both"):
+        control.remote.sync_frames(Target(id="M 81"), kind="dark")
+    with pytest.raises(InvalidArgumentError, match="dry_run"):
+        control.remote.sync_frames(Target(id="M 81"), files=["a.fits"], dry_run=True)
 
 
 def test_sync_frames_of_one_target_always_records_a_job(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
     """Verify every copy of one target records a job."""
-    from wayfindinglib.api.control import remote
-    from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+    from astrometricslib import Target
+    from wayfindinglib.tasks.control_tasks import remote_sync, remote_transfer_tasks
 
     mocker.patch.object(remote_transfer_tasks, "download_remote_targets", return_value=True)
-    recorded = mocker.spy(remote, "registered_job")
+    recorded = mocker.spy(remote_sync, "registered_job")
 
-    assert control.remote.sync_frames("M 81", local_path="/tmp/frames").model_dump() == {
+    target = Target(id="M 81")
+    assert control.remote.sync_frames(target, files=["a.fits"]).model_dump() == {
         "success": True,
         "target": "M 81",
         "measurements": [],
     }
-    control.remote.sync_frames("M 81", local_path="/tmp/frames")
+    control.remote.sync_frames(target, force=True)
 
     assert [call.kwargs["target_id"] for call in recorded.call_args_list] == ["M 81", "M 81"]
 
@@ -963,14 +950,14 @@ def test_remote_transfer_driver_can_be_injected_for_tests(
 def test_unassociated_folder_listing_delegates_to_the_task_module(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
-    """Verify list("unassociated_folders") hands the context to the task."""
+    """Verify the unassociated folder query hands the context to the task."""
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
     mocker.patch.object(
         remote_transfer_tasks, "discover_unassociated_remote_targets", return_value=["Unassociated"]
     )
 
-    assert control.remote.list("unassociated_folders") == ["Unassociated"]
+    assert list(control.remote.query_folders(kind="unassociated")) == ["Unassociated"]
     remote_transfer_tasks.discover_unassociated_remote_targets.assert_called_once_with(control._context)
 
 
@@ -988,11 +975,11 @@ def test_list_camera_profiles_and_get_equipment_configuration(
         },
     })
 
-    profiles = control.equipment.status(include=["camera_profiles"]).camera_profiles
+    profiles = control.equipment.get_status(include=["camera_profiles"]).camera_profiles
     assert len(profiles) == 1
     assert profiles[0]["name"] == "CamA"
 
-    configuration = control.equipment.status(include=["configuration"]).configuration
+    configuration = control.equipment.get_status(include=["configuration"]).configuration
     assert configuration is not None
     assert configuration["camera"]["name"] == "CamA"
 
@@ -1016,7 +1003,7 @@ def test_save_and_get_commissioning_runs_round_trips(control: ObservatoryControl
     )
     control.equipment._save_commissioning_run(run)
 
-    runs = control.equipment.status(include=["commissioning_runs"]).commissioning_runs
+    runs = control.equipment.get_status(include=["commissioning_runs"]).commissioning_runs
     assert len(runs) == 1
     assert runs[0].id == "run-1"
     assert runs[0].all_passed() is True
@@ -1024,7 +1011,7 @@ def test_save_and_get_commissioning_runs_round_trips(control: ObservatoryControl
 
 def test_get_safety_rule_set_returns_none_when_unconfigured(control: ObservatoryControl) -> None:
     """Verify an unconfigured safety rule set reports None, not a default."""
-    assert control.safety.status(include=["rule_set"]).rule_set is None
+    assert control.safety.get_status(include=["rule_set"]).rule_set is None
 
 
 def test_save_and_get_safety_rule_set_round_trips(control: ObservatoryControl) -> None:
@@ -1044,7 +1031,7 @@ def test_save_and_get_safety_rule_set_round_trips(control: ObservatoryControl) -
     )
     control.safety._save_rule_set(rule_set)
 
-    fetched = control.safety.status(include=["rule_set"]).rule_set
+    fetched = control.safety.get_status(include=["rule_set"]).rule_set
     assert fetched is not None
     assert fetched.id == "default"
     assert fetched.rules[0].measurement == "wind_speed_kph"
@@ -1069,12 +1056,12 @@ def test_non_hardware_methods_do_not_reference_indi_driver() -> None:
         equipment.EquipmentControl.set_pointing_limits,
         mount.MountControl._compute_pointing_correction,
         guiding.GuidingControl._compute_correction,
-        guiding.GuidingControl.status,
+        guiding.GuidingControl.get_status,
         guiding.GuidingControl._save_calibration,
-        imaging.ImagingControl._save_focus_model,
+        imaging.ImagingControl.create_focus_model,
         safety.SafetyControl._assess,
         safety.SafetyControl._execute_safe_state,
-        safety.SafetyControl.apply_promotion_decision,
+        safety.SafetyControl.update,
     ]
     forbidden_substrings = ("wayfindinglib.drivers.indi", "import PyIndi", "from PyIndi")
 
@@ -1098,15 +1085,15 @@ def test_mount_driver_slew_end_to_end_against_simulator(control: ObservatoryCont
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
     control._driver = SimulatorIndiInterface(config=control._context.config)
-    control.safety.apply_promotion_decision(
-        ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE
+    control.safety.update(
+        _policy(control), {ObservatoryCapability.MOUNT_CONTROL: DelegationState.AUTHORITATIVE}
     )
 
-    assert control.mount.slew(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
-    assert control.mount.set_tracking(True) is True
-    assert control.mount.park() is True
-    assert control.mount.unpark() is True
-    assert control.mount.abort_motion() is True
+    assert control.mount.slew(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is None
+    assert control.mount.set_tracking(True) is None
+    assert control.mount.park() is None
+    assert control.mount.unpark() is None
+    assert control.mount.stop() is None
 
 
 def test_mount_driver_commands_refused_when_not_authoritative(control: ObservatoryControl) -> None:
@@ -1128,7 +1115,7 @@ def test_mount_driver_commands_refused_when_not_authoritative(control: Observato
 def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: ObservatoryControl) -> None:
     """Exercise focuser/filter-wheel commands through the real driver stack.
 
-    `control.imaging.focus_move()`/`.set_filter()` -> `hardware_operations`
+    `control.imaging.move_focuser()`/`.set_filter()` -> `hardware_operations`
     -> the `FocuserDriver`/`FilterWheelDriver` ABCs -> the INDI adapters ->
     `SimulatorIndiInterface`, confirming parity with pre-redesign behavior.
     """
@@ -1136,7 +1123,7 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: Observat
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
 
     control._driver = SimulatorIndiInterface(config=control._context.config)
-    # Persisted directly rather than via apply_promotion_decision(): AUTOFOCUS
+    # Persisted directly rather than via safety.update(): AUTOFOCUS
     # and CAPTURE_ORCHESTRATION each have their own multi-step validity-rule
     # promotion path (covered by their own dedicated tests), orthogonal to
     # what this test verifies -- that the driver plumbing works once a
@@ -1158,14 +1145,14 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: Observat
         {"id": "default"},
     )
 
-    assert control.imaging.focus_move(50) is True
-    assert control.imaging.status(include=["focuser"]).focuser_position == 0
-    assert control.imaging.set_filter("Luminance") is True
-    assert "Luminance" in control.imaging.status(include=["filters"]).filter_names
+    assert control.imaging.move_focuser(50) is None
+    assert control.imaging.get_status(include=["focuser"]).focuser_position == 0
+    assert control.imaging.set_filter("Luminance") is None
+    assert "Luminance" in control.imaging.get_status(include=["filters"]).filter_names
 
 
 def test_stop_capture_ends_a_running_capture_against_simulator(control: ObservatoryControl) -> None:
-    """`control.imaging.stop_capture` ends a long run started by the app.
+    """`control.imaging.stop` ends a long run started by the app.
 
     The run is on a thread with 30 s exposures. The stop must return at
     once, the run must end as stopped, and a second stop must do nothing.
@@ -1190,20 +1177,21 @@ def test_stop_capture_ends_a_running_capture_against_simulator(control: Observat
         "delegation_policy",
         {"id": "default"},
     )
-    assert control.imaging.stop_capture() is False
+    assert control.imaging.get_status(include=["capture"]).capture_running is False
+    assert control.imaging.stop() is None
     results: list = []
-    thread = threading.Thread(target=lambda: results.append(control.imaging.capture_image(30.0, count=5)))
+    thread = threading.Thread(target=lambda: results.append(control.imaging.capture(30.0, count=5)))
     thread.start()
     deadline = time.monotonic() + 5.0
     while not control._context.capture_runs.is_running() and time.monotonic() < deadline:
         time.sleep(0.01)
 
-    assert control.imaging.stop_capture() is True
+    control.imaging.stop()
     thread.join(timeout=5.0)
 
     assert not thread.is_alive()
     assert results[0].stopped is True
-    assert control.imaging.stop_capture() is False
+    assert control.imaging.get_status(include=["capture"]).capture_running is False
 
 
 def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
@@ -1215,7 +1203,7 @@ def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
     control._driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
-        control.imaging.focus_move(50)
+        control.imaging.move_focuser(50)
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
         control.imaging.set_filter("Luminance")
 
@@ -1223,12 +1211,13 @@ def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
 def test_mount_and_imaging_status_together_match_the_single_driver_read(control: ObservatoryControl) -> None:
     """Verify the separate reads together match the old single-call status.
 
-    Regression-sensitive point: `control.mount.status` and
-    `control.imaging.status` read through separate drivers
+    Regression-sensitive point: `control.mount.get_status` and
+    `control.imaging.get_status` read through separate drivers
     (`mount_driver`, `filter_wheel_driver`, `focuser_driver`,
     `camera_driver`) instead of one `IndiInterface.get_status()` call.
     Since nothing here changes the simulator's state between the reads,
-    the two together must produce the same values.
+    the two together must produce the same values. The position is in
+    degrees now, so the display texts are left out of the comparison.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
@@ -1236,11 +1225,13 @@ def test_mount_and_imaging_status_together_match_the_single_driver_read(control:
 
     golden = control._driver.get_status().model_dump(by_alias=True)
     golden.pop("guidingHistory", None)  # The backend's TelescopeService adds this.
+    for display_text in ("ra", "dec", "altitude", "azimuth"):
+        golden.pop(display_text)
 
-    mount = control.mount.status()
-    imaging = control.imaging.status(include=["current_filter", "focuser", "camera"])
+    mount = control.mount.get_status()
+    imaging = control.imaging.get_status(include=["current_filter", "focuser", "camera"])
     reassembled = {
-        **mount.model_dump(by_alias=True),
+        **mount.model_dump(by_alias=True, exclude={"ra_deg", "dec_deg", "altitude_deg", "azimuth_deg"}),
         "cameraStatus": imaging.camera_status,
         "filter": imaging.current_filter,
         "focuserPosition": imaging.focuser_position,
@@ -1251,9 +1242,9 @@ def test_mount_and_imaging_status_together_match_the_single_driver_read(control:
 
 
 def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: ObservatoryControl) -> None:
-    """Exercise capture_image, guiding.expose and mount._sync end to end.
+    """Exercise imaging.capture, guiding.capture and mount._sync end to end.
 
-    `control.imaging.capture_image()`/`control.guiding.expose()`/`control.mount._sync()`
+    `control.imaging.capture()`/`control.guiding.capture()`/`control.mount._sync()`
     -> `hardware_operations` -> the `CameraDriver`/`MountDriver` ABCs ->
     the INDI adapters -> `SimulatorIndiInterface`.
     """
@@ -1282,10 +1273,10 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: Ob
         {"id": "default"},
     )
 
-    assert control.imaging.capture_image(0.01).frames_captured == 1
-    assert control.guiding.expose(1.0).started is True
+    assert control.imaging.capture(0.01).frames_captured == 1
+    assert control.guiding.capture(1.0) is None
     assert control.guiding._get_image() is None
-    assert control.mount._sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert control.mount._sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is None
 
 
 def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: ObservatoryControl) -> None:
@@ -1295,9 +1286,9 @@ def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: Ob
     control._driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
-        control.imaging.capture_image(1.0)
+        control.imaging.capture(1.0)
     with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
-        control.guiding.expose(1.0)
+        control.guiding.capture(1.0)
     with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
         control.mount._sync(SkyPosition(ra_deg=150.0, dec_deg=20.0))
 
@@ -1305,7 +1296,7 @@ def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: Ob
 def test_enclosure_state_and_commands_against_simulator(control: ObservatoryControl) -> None:
     """Exercise enclosure state/authority gating through the real driver stack.
 
-    `control.safety.status(include=["enclosure_state"])`/`.open_enclosure()`/
+    `control.safety.get_status(include=["enclosure_state"])`/`.open_enclosure()`/
     `.close_enclosure()` -> `hardware_operations` -> `EnclosureDriver` ->
     `IndiEnclosureDriver` -> `SimulatorIndiInterface`. No dome/roof
     device is simulated today, so the enclosure state honestly
@@ -1318,7 +1309,7 @@ def test_enclosure_state_and_commands_against_simulator(control: ObservatoryCont
 
     control._driver = SimulatorIndiInterface(config=control._context.config)
 
-    assert control.safety.status(include=["enclosure_state"]).enclosure_state == EnclosureState.UNKNOWN
+    assert control.safety.get_status(include=["enclosure_state"]).enclosure_state == EnclosureState.UNKNOWN
 
 
 def test_enclosure_commands_refused_when_not_authoritative(control: ObservatoryControl) -> None:
@@ -1395,8 +1386,8 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(
         control.safety._close_enclosure()
 
 
-def test_remote_list_keeps_only_the_folder_a_name_refers_to(control: ObservatoryControl) -> None:
-    """A folder kind with a name returns the one folder the copy would use."""
+def test_remote_query_folders_keeps_only_the_folder_a_name_refers_to(control: ObservatoryControl) -> None:
+    """A folder query with a name returns the one folder the copy would use."""
     from unittest.mock import MagicMock
 
     driver = MagicMock()
@@ -1406,9 +1397,9 @@ def test_remote_list_keeps_only_the_folder_a_name_refers_to(control: Observatory
     )
     control._remote_transfer_driver = driver
 
-    assert control.remote.list("folders", folder_name="M 42") == ["M_42"]
-    assert control.remote.list("calibration_folders", folder_name="dark") == ["Dark"]
-    assert control.remote.list("target_folders", folder_name="M 31") == []
+    assert list(control.remote.query_folders(kind="all", text="M 42")) == ["M_42"]
+    assert list(control.remote.query_folders(kind="calibration", text="dark")) == ["Dark"]
+    assert list(control.remote.query_folders(text="M 31")) == []
 
 
 def test_review_groups_alignment_attempts_into_one_session_per_target(control: ObservatoryControl) -> None:
@@ -1475,7 +1466,7 @@ def test_poll_external_alignment_stores_syncs_and_polar_runs(
     }
     control._driver = driver
 
-    poll = control.mount.poll_external_alignment()
+    poll = external_alignment.poll_external_alignment(control._context)
 
     assert poll.sync_count == 1
     assert poll.polar_alignment_recorded is True
@@ -1497,7 +1488,7 @@ def test_poll_external_alignment_with_nothing_queued_stores_nothing(
     driver.drain_polar_alignment.return_value = None
     control._driver = driver
 
-    poll = control.mount.poll_external_alignment()
+    poll = external_alignment.poll_external_alignment(control._context)
 
     assert (poll.sync_count, poll.polar_alignment_recorded) == (0, False)
     assert control._context.records.get_alignment_attempts(limit=5) == []
@@ -1510,7 +1501,7 @@ def test_get_polar_alignment_prefers_the_live_run_then_the_last_stored_one(
     driver = mocker.MagicMock()
     driver.get_polar_alignment_status.return_value = {"status": "idle", "paaPoints": []}
     control._driver = driver
-    assert control.mount.get_polar_alignment().status == "idle"
+    assert external_alignment.read_polar_alignment(control._context).status == "idle"
 
     control._context.records.record_polar_alignment({
         "status": "aligned",
@@ -1522,7 +1513,7 @@ def test_get_polar_alignment_prefers_the_live_run_then_the_last_stored_one(
         "paa_points": [],
         "timestamp": 1001.0,
     })
-    stored = control.mount.get_polar_alignment()
+    stored = external_alignment.read_polar_alignment(control._context)
     assert stored.status == "aligned"
     assert stored.total_error_arcsec == pytest.approx(42.0)
 
@@ -1531,81 +1522,88 @@ def test_get_polar_alignment_prefers_the_live_run_then_the_last_stored_one(
         "totalErrorArcsec": 99.0,
         "paaPoints": [],
     }
-    assert control.mount.get_polar_alignment().total_error_arcsec == pytest.approx(99.0)
+    assert external_alignment.read_polar_alignment(control._context).total_error_arcsec == pytest.approx(99.0)
 
 
-def test_apply_configuration_tells_the_session_to_read_the_hostname_again(
-    control: ObservatoryControl, mocker: MockerFixture
-) -> None:
-    """`equipment.apply_configuration` calls `sync_configuration`."""
-    driver = mocker.MagicMock()
-    control._driver = driver
+def _calibration(**changes: object) -> GuiderCalibration:
+    """Build a guider calibration record for the tests.
 
-    control.equipment.apply_configuration()
+    Returns
+    -------
+    calibration : `GuiderCalibration`
+        A valid record, with `changes` applied.
+    """
+    fields = {
+        "id": "phd2-1",
+        "camera_id": "CamA",
+        "telescope_id": "Rig A",
+        "arcsec_per_pixel": 2.0,
+        "camera_angle_deg": 12.5,
+        "ra_rate_arcsec_per_sec": 14.0,
+        "dec_rate_arcsec_per_sec": 13.0,
+        "source_note": "PHD2 calibration of 2026-11-01",
+        **changes,
+    }
+    return GuiderCalibration(**fields)
 
-    driver.sync_configuration.assert_called_once_with()
+
+def _focus_model(**changes: object) -> FocusModel:
+    """Build a focus model record for the tests.
+
+    Returns
+    -------
+    focus_model : `FocusModel`
+        A valid record, with `changes` applied.
+    """
+    fields = {
+        "id": "focus-9",
+        "camera_id": "CamA",
+        "telescope_id": "Rig A",
+        "backlash_steps": 40,
+        "approach_direction": "inward",
+        "source_note": "Autofocus run of 2026-11-01",
+        **changes,
+    }
+    return FocusModel(**fields)
 
 
-def test_record_calibration_saves_a_record_with_its_source_note(control: ObservatoryControl) -> None:
+def test_create_guider_calibration_saves_a_record_with_its_source_note(control: ObservatoryControl) -> None:
     """A guider calibration made elsewhere is saved and read back whole."""
-    recorded = control.guiding.record_calibration(
-        calibration_id="phd2-1",
-        camera_id="CamA",
-        telescope_id="Rig A",
-        arcsec_per_pixel=2.0,
-        camera_angle_deg=12.5,
-        ra_rate_arcsec_per_sec=14.0,
-        dec_rate_arcsec_per_sec=13.0,
-        source_note="PHD2 calibration of 2026-11-01",
-    )
+    recorded = control.guiding.create_guider_calibration(_calibration())
 
     saved = {record.id: record for record in control._context.butler.get_all("guider_calibration")}
     assert saved["phd2-1"] == recorded
     assert saved["phd2-1"].source_note == "PHD2 calibration of 2026-11-01"
     assert saved["phd2-1"].camera_angle_deg == pytest.approx(12.5)
+    with pytest.raises(InvalidArgumentError, match="force=True"):
+        control.guiding.create_guider_calibration(_calibration())
+    control.guiding.create_guider_calibration(_calibration(camera_angle_deg=1.0), force=True)
 
 
 @pytest.mark.parametrize(
     "changes",
-    [
-        {"arcsec_per_pixel": 0.0},
-        {"camera_angle_deg": 200.0},
-        {"ra_rate_arcsec_per_sec": -1.0},
-        {"source_note": "  "},
-        {"calibration_id": ""},
-    ],
+    [{"arcsec_per_pixel": 150.0}, {"ra_rate_arcsec_per_sec": 2000.0}, {"source_note": "  "}, {"id": ""}],
 )
-def test_record_calibration_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
-    """A value the record does not allow, or a missing note, saves nothing."""
-    arguments = {
-        "calibration_id": "bad",
-        "camera_id": "CamA",
-        "telescope_id": "Rig A",
-        "arcsec_per_pixel": 2.0,
-        "camera_angle_deg": 0.0,
-        "ra_rate_arcsec_per_sec": 10.0,
-        "dec_rate_arcsec_per_sec": 10.0,
-        "source_note": "test",
-        **changes,
-    }
-
+def test_create_guider_calibration_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
+    """A value out of the library's range, or a missing note, saves nothing."""
     with pytest.raises(InvalidArgumentError):
-        control.guiding.record_calibration(**arguments)
+        control.guiding.create_guider_calibration(_calibration(**changes))
 
     assert [r.id for r in control._context.butler.get_all("guider_calibration")] == []
 
 
-def test_record_focus_model_saves_a_record_with_filter_offsets(control: ObservatoryControl) -> None:
+def test_create_focus_model_saves_a_record_with_filter_offsets(control: ObservatoryControl) -> None:
     """A focus model made elsewhere is saved with its offsets and note."""
-    recorded = control.imaging.record_focus_model(
-        focus_model_id="focus-9",
-        camera_id="CamA",
-        telescope_id="Rig A",
-        backlash_steps=40,
-        approach_direction="inward",
-        thermal_coefficient_steps_per_c=-3.5,
-        filter_offsets={"L": 0, "Ha": 12},
-        source_note="Autofocus run of 2026-11-01",
+    from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset
+
+    recorded = control.imaging.create_focus_model(
+        _focus_model(
+            thermal_coefficient_steps_per_c=-3.5,
+            filter_offsets=[
+                FilterFocusOffset(filter="L", offset_steps=0),
+                FilterFocusOffset(filter="Ha", offset_steps=12),
+            ],
+        )
     )
 
     saved = {record.id: record for record in control._context.butler.get_all("focus_model")}
@@ -1616,53 +1614,31 @@ def test_record_focus_model_saves_a_record_with_filter_offsets(control: Observat
 
 @pytest.mark.parametrize(
     "changes",
-    [{"backlash_steps": -1}, {"approach_direction": "sideways"}, {"source_note": ""}],
+    [{"backlash_steps": 200000}, {"thermal_coefficient_steps_per_c": 20000.0}, {"source_note": ""}],
 )
-def test_record_focus_model_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
-    """A value the record does not allow, or a missing note, saves nothing."""
-    arguments = {
-        "focus_model_id": "bad",
-        "camera_id": "CamA",
-        "telescope_id": "Rig A",
-        "backlash_steps": 0,
-        "approach_direction": "inward",
-        "source_note": "test",
-        **changes,
-    }
-
+def test_create_focus_model_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
+    """A value out of the library's range, or a missing note, saves nothing."""
     with pytest.raises(InvalidArgumentError):
-        control.imaging.record_focus_model(**arguments)
+        control.imaging.create_focus_model(_focus_model(**changes))
 
     assert control._context.butler.get_all("focus_model") == []
 
 
 def test_the_query_reads_list_every_saved_record_oldest_first(control: ObservatoryControl) -> None:
-    """The three query reads list all pairings, not only the active one."""
-    assert control.guiding.query_calibrations() == []
-    assert control.imaging.query_focus_models() == []
+    """The two query reads list all pairings, not only the active one."""
+    assert len(control.guiding.query_guider_calibrations()) == 0
+    assert len(control.imaging.query_focus_models()) == 0
     for day, camera in ((3, "Cam B"), (1, "Cam A")):
-        control.guiding.record_calibration(
-            calibration_id=f"cal-{day}",
-            camera_id=camera,
-            telescope_id="Scope",
-            arcsec_per_pixel=3.0,
-            camera_angle_deg=0.0,
-            ra_rate_arcsec_per_sec=7.0,
-            dec_rate_arcsec_per_sec=7.0,
-            source_note="test",
-            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
+        control.guiding.create_guider_calibration(
+            _calibration(id=f"cal-{day}", camera_id=camera, calibrated_at=datetime(2026, 10, day, tzinfo=UTC))
         )
-        control.imaging.record_focus_model(
-            focus_model_id=f"focus-{day}",
-            camera_id=camera,
-            telescope_id="Scope",
-            backlash_steps=10,
-            approach_direction="inward",
-            source_note="test",
-            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
+        control.imaging.create_focus_model(
+            _focus_model(
+                id=f"focus-{day}", camera_id=camera, calibrated_at=datetime(2026, 10, day, tzinfo=UTC)
+            )
         )
 
-    assert [record.id for record in control.guiding.query_calibrations()] == ["cal-1", "cal-3"]
+    assert [record.id for record in control.guiding.query_guider_calibrations()] == ["cal-1", "cal-3"]
     assert [record.id for record in control.imaging.query_focus_models()] == ["focus-1", "focus-3"]
 
 

@@ -155,7 +155,7 @@ except ExternalServiceError as error:
 
 **Rule 6.** A public name is at most library → area → object → method deep, as in `astrometrics.processing.stacking.run`. An object with fewer than three methods folds into its parent. A pipeline child of `processing` is exempt, so each pipeline keeps an object of its own.
 
-**Models.** Every returned model is a frozen, typed Pydantic model with units in its field names. A stored model, a *record*, carries an id and a revision. A record changes only through `update`, which checks the revision, saves the change and returns the new object:
+**Models.** Returned models are typed Pydantic models with units in their field names. Measurement results are frozen. A stored model, a *record*, carries an id and changes only through `update`, which saves it and returns it. `Target` and `StellarObject` stay editable; a record with a revision has it checked:
 
 ```python
 package = wayfinder.planning.packages.get(package_id, required=True)
@@ -163,7 +163,7 @@ package = wayfinder.planning.packages.update(package, status="paused")
 ```
 
 - A `Page[T]` holds `items`, `total` and `next_offset`. It supports `for`, `len` and indexing.
-- Heavy parts come only when asked for with `include=`, such as a star's light curves or a night's guiding and weather samples. A target keeps its frames, which are in memory already. A star's spectra come from `stars.get_spectrum`.
+- Heavy parts come only when asked for with `include=`, such as a star's light curves or a night's guiding and weather samples. A target keeps its frames. A star's spectra come from `stars.get_spectrum`.
 - Every model a public method takes as input can be imported from the library root, such as `CaptureSetting` and `EnhancementSettings`.
 
 ## 8. Frames and equipment

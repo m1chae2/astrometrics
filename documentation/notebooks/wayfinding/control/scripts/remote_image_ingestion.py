@@ -114,9 +114,7 @@ def run_sync() -> None:
                 f"Ingestion successful! Synchronized local frames: "
                 f"{len(target.frames)} in {elapsed:.2f} seconds."
             )
-
-            # Persist target metadata changes back to the library database
-            astrometrics.targets.save()
+            # The sync saved the target as it indexed the new frames.
             print("Target metadata persisted successfully.")
         else:
             print("Failed to download or ingest remote frames.")

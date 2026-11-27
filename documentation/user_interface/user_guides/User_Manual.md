@@ -244,7 +244,7 @@ The Image Controls panel has these buttons.
 | --- | --- |
 | `clear` or `clear()` | Clears the terminal screen. Your variables stay |
 | `clear('workspace')` | Clears your variables. The preloaded names stay |
-| `doc name` or `doc(name)` | Opens the Documentation tab at the entry for that name, such as `doc delete_images`, `doc TargetCatalog.delete_images` or `doc astrometrics.targets.delete_images`. When the name fits several entries, the terminal lists their full names. When it fits none, it suggests close names |
+| `doc name` or `doc(name)` | Opens the Documentation tab at the entry for that name, such as `doc get_rotation`, `doc TargetFrames.get_rotation` or `doc astrometrics.targets.frames.get_rotation`. When the name fits several entries, the terminal lists their full names. When it fits none, it suggests close names |
 | Ctrl+C | Stops the code that is running. The terminal prints *Stopped.* and keeps every variable set before the stop. Code waiting inside one long call, such as a long `time.sleep`, stops when that call returns |
 
 The top line of the terminal gives the Python version and these commands. Type `help` for the preloaded names, or `help(obj)` for help on a name.
@@ -257,7 +257,7 @@ The top line of the terminal gives the Python version and these commands. Type `
 | `np`, `plt`, `fits` | NumPy, Matplotlib and the FITS module of Astropy |
 | `selection` | What is picked in Image Processing now. It is read-only and always current, also when Image Processing is in another window. It holds `target`, `path` (the stack or frame shown), `kind` (*stack* or *frame*), `star` and `set_at` (when it was picked). The star is the one picked with the Astrometry overlay: `name`, `ra` and `dec` in degrees (often empty on a raw frame), and `x` and `y`, the column and row of its center counted from 0, as NumPy counts. The Star Profile panel counts pixels from 1. Type `selection` for a short summary. Fields are empty (`None`) when nothing is picked |
 | `show(...)` | Opens something in the app when the run ends: `show(target="M 31")` opens the target in Image Processing, `show(target="M 31", star="Vega")` opens its stack with the star selected, `show(target="M 31", path=...)` shows that stack or frame (with no target, the target picked in Image Processing is used), and `show(star="Vega")` opens the star in the Astronomy Manager. `display="Astronomy Manager"` or `display="Image Processing"` picks the view. If another window shows that view, it shows the result; otherwise this window switches to it |
-| `doc(...)` | Opens the Documentation tab at a name's entry, as the `doc name` command does. It also takes an object, such as `doc(astrometrics.targets.delete_images)` |
+| `doc(...)` | Opens the Documentation tab at a name's entry, as the `doc name` command does. It also takes an object, such as `doc(astrometrics.targets.frames.get_rotation)` |
 
 **Related settings.** The Displays box for Command Console in Settings > General turns this view on or off.
 

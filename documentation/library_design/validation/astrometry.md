@@ -222,7 +222,7 @@ print(refinement.applied, refinement.star_count, np.median(errors), errors.max()
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+for target in astrometrics.targets.query(include_empty=True).items:
     summary = target.quality.astrometry
     if summary is None:
         continue
@@ -270,7 +270,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 rows = []
-for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+for target in astrometrics.targets.query(include_empty=True).items:
     summary = target.quality.astrometry
     if summary is None:
         continue
@@ -692,7 +692,7 @@ for name in ["NGC 1893", "M 45", "NGC 2403", "M 81"]:
         answer = astrometrics.processing.process_target(target, stages=["astrometry"])
         result = answer.results["astrometry"]
         print(name, result.get("wcs") is not None, len(result.get("stellar_objects", [])))
-        astrometrics.targets.save()
+        astrometrics.targets.update(target)
 ```
 
 - **Acceptance criterion:** Not recorded (set after the result).

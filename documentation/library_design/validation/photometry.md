@@ -371,7 +371,7 @@ from astrometricslib.pipelines.photometry.post_processing.variability_skill impo
 
 astrometrics = Astrometrics()
 result = astrometrics.processing.process_target("M 13", stages=["photometry"])
-astrometrics.targets.save()
+astrometrics.targets.update(astrometrics.targets.get("M 13", required=True))
 print(result.quality.photometry.gate("variability_discrimination"))
 stars = astrometrics.stars.query(target_id="M 13", has_photometry=True, detail="objects", limit=None).objects
 scored = [s for s in stars if s.photometry and s.photometry.variability_score is not None]
@@ -654,7 +654,7 @@ astrometrics = Astrometrics()
 counts = []
 for _ in range(2):
     result = astrometrics.processing.process_target("M 81", stages=["photometry"])
-    astrometrics.targets.save()
+    astrometrics.targets.update(astrometrics.targets.get("M 81", required=True))
     counts.append(result.quality.photometry.photometry_metrics.cross_session_match_count)
 print(counts, result.results["photometry"]["crossSessionMatchCount"])
 ```
@@ -705,9 +705,7 @@ frames = [
     and "533" in frame.camera
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == night
 ]
-astrometrics.processing.process_target(
-    "M 57", stages=["photometry"], photometry={"frames": frames}
-)
+astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
 rows = QualityStore.from_configuration(astrometrics.config).query(
     metric="photometry.catalog_zero_point_gaia_g_mag", target_id="M 57"
 )
@@ -795,9 +793,7 @@ frames = [
     and "533" in frame.camera
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == "2026-10-03"
 ]
-astrometrics.processing.process_target(
-    "M 57", stages=["photometry"], photometry={"frames": frames}
-)
+astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
 for part in ("photon", "sky", "read"):
     for row in astrometrics.quality.query(
         metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"

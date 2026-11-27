@@ -124,7 +124,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:sync_logs": ("sync_service", "sync_telescope_logs"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
-    "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
+    "telescope:get_performance_envelope": ("wayfinder.review.performance", "get_envelope"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),

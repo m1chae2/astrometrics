@@ -1026,6 +1026,17 @@ def generate_wayfindinglib_docs() -> str:
             )
         )
         sections.append("\n---\n")
+        # The reads live on the five objects of `review`, such as
+        # `review.nights`; the class annotations name each object's class.
+        for child_name, child_class in _class_hints(review_cls).items():
+            sections.append(
+                format_class_markdown(
+                    child_class,
+                    display_title=f"review.{child_name}",
+                    console_alias=f"wayfinder.review.{child_name}",
+                )
+            )
+            sections.append("\n---\n")
 
     # 6. Public modules
     sections.append('<a id="public-modules"></a>')

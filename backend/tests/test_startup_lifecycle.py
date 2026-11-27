@@ -85,29 +85,28 @@ def test_night_review_warm_up_builds_the_newest_nights_and_survives_a_failure(
     """The newest nights are reviewed, newest first, despite one failure."""
     asked: list[str] = []
 
-    def query(kind: str, session_id: str | None = None, **_: object) -> MagicMock:
-        """Answer the nights list, or record a night review (one night fails).
+    def get(night: str, required: bool = False) -> MagicMock:
+        """Record a night review (one night fails).
 
         Returns
         -------
         answer : `MagicMock`
-            Stands in for a `ReviewQueryResult`.
+            Stands in for a `NightQuality`.
 
         Raises
         ------
         RuntimeError
             For the night ``"2026-10-02"``.
         """
-        if kind == "nights":
-            nights = [MagicMock(night_id=night) for night in ("2026-10-01", "2026-10-02", "2026-10-03")]
-            return MagicMock(night_list=nights)
-        asked.append(session_id or "")
-        if session_id == "2026-10-02":
+        asked.append(night)
+        if night == "2026-10-02":
             raise RuntimeError("no data")
         return MagicMock()
 
     fake_container = MagicMock()
-    fake_container.wayfinder.review.query.side_effect = query
+    nights = [MagicMock(night_id=night) for night in ("2026-10-01", "2026-10-02", "2026-10-03")]
+    fake_container.wayfinder.review.nights.query.return_value = nights
+    fake_container.wayfinder.review.nights.get.side_effect = get
     monkeypatch.setattr(startup, "container", fake_container)
 
     startup.warm_night_reviews(night_count=3)
@@ -248,7 +247,7 @@ def test_the_cache_warm_ups_log_a_failure_as_a_warning(
     """A failed background warm-up is a warning, not an error."""
     fake_container = MagicMock()
     fake_container.wayfinder.planning.query_sources.side_effect = RuntimeError("no catalog")
-    fake_container.wayfinder.review.query.side_effect = RuntimeError("no nights")
+    fake_container.wayfinder.review.nights.query.side_effect = RuntimeError("no nights")
     monkeypatch.setattr(startup, "container", fake_container)
     monkeypatch.setattr(startup, "warm_earth_orientation_data", MagicMock(side_effect=RuntimeError("iers")))
     fake_container.stellar_service.warm_catalog_summary_cache.side_effect = RuntimeError("cache")

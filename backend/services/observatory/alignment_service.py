@@ -4,11 +4,11 @@ Description: Centering the mount on a target by plate solving is
 ``control.mount.slew(destination, center=True)`` in the wayfinding
 library, which records each round as an alignment attempt. This service
 only runs that call on a background thread and stops it, lists the
-recorded nights through ``review.query(kind="alignment")``, reads the
-stored attempts, grouped by target, with
-``review.query_alignment_records``, and
+recorded nights through ``review.alignment.query_nights``, reads the
+stored attempts, grouped by target, with ``review.alignment.query``, and
 records the plate-solve syncs and polar alignment runs that another
-program (such as Ekos) sends to the mount.
+program (such as Ekos) sends to the mount
+(``review.alignment.record_external``).
 """
 
 import logging
@@ -89,11 +89,15 @@ class AlignmentService:
             the library.
         """
         started = self._run_started_at
-        records = self._require_review().query_alignment_records(
+        records = self._require_review().alignment.query(
             limit=RECENT_ATTEMPTS_SHOWN,
             since=None if started is None else datetime.fromtimestamp(started, UTC),
         )
-        attempts = [attempt.model_dump(mode="json", by_alias=True) for attempt in records.attempts]
+        # The live list names no night, as before the library kept it.
+        attempts = [
+            {**attempt.model_dump(mode="json", by_alias=True), "sessionId": None}
+            for attempt in records.attempts
+        ]
         if self.is_active():
             attempts.append(dict(SOLVING_ATTEMPT))
         return {
@@ -128,7 +132,7 @@ class AlignmentService:
             library reads a run in progress first, then the last stored
             run.
         """
-        return self._observatory.mount.get_polar_alignment().model_dump(by_alias=True)
+        return self._require_review().alignment.get_polar_alignment().model_dump(by_alias=True)
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List the nights that recorded alignment data, newest first.
@@ -136,11 +140,11 @@ class AlignmentService:
         Returns
         -------
         sessions : `list` [`dict` [`str`, `Any`]]
-            One summary per night, from
-            ``review.query(kind="alignment")``.
+            One summary per night, from ``review.alignment.query_nights``,
+            with camelCase keys.
         """
-        reply = self._require_review().query(kind="alignment", limit=50)
-        return reply.sessions
+        nights = self._require_review().alignment.query_nights(limit=50)
+        return [night.model_dump(mode="json", by_alias=True) for night in nights]
 
     def get_session_data(self, session_id: str = "") -> dict[str, Any]:
         """Fetch alignment attempts and polar alignment data for a session.
@@ -156,12 +160,15 @@ class AlignmentService:
             ``alignmentAttempts`` (a status the model does not know reads
             as ``aligned``), ``alignmentTargets`` (the attempts grouped by
             target, with jitter and drift rates, from
-            ``review.query_alignment_records``) and ``polarAlignment``.
+            ``review.alignment.query``) and ``polarAlignment``. ``"all"``
+            reads every night.
         """
+        if not session_id:
+            return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
+        night = None if session_id in ("all", "*") else session_id
         try:
-            records = self._require_review().query_alignment_records(
-                session_id,
-                targets=self._targets.query(include_empty=True).items if self._targets is not None else None,
+            records = self._require_review().alignment.query(
+                night=night, include=["tracking"] if self._targets is not None else None
             )
         except (StorageError, ValueError, TypeError) as exc:
             logger.debug("Error loading session %s alignment data: %s", session_id, exc)
@@ -194,9 +201,9 @@ class AlignmentService:
         """Store the plate-solve syncs and polar alignment of other programs.
 
         The library drains what the INDI session queued and stores it as
-        alignment records (``control.mount.poll_external_alignment``).
+        alignment records (``review.alignment.record_external``).
         """
-        self._observatory.mount.poll_external_alignment()
+        self._require_review().alignment.record_external()
 
     def start_alignment(self, target_ra: str, target_dec: str) -> bool:
         """Start centering the mount on a sky position, in the background.

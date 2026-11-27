@@ -63,8 +63,8 @@ describe('FileBrowser', () => {
             path: '/lib/M_31_Light_Luminance_119.fits',
             name: 'M_31_Light_Luminance_119.fits',
             camera: 'ZWO ASI 533MM Pro',
-            iso: '',
-            exposure: '60.0',
+            gain: null,
+            exposureS: 60,
             filter: 'L',
             date: '2026-11-04 21:09:58',
         };

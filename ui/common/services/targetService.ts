@@ -262,8 +262,8 @@ export async function sendTargetToPhone(
 export interface FrameStat {
     telescope: string;
     camera: string;
-    iso: string;
-    exposure: string;
+    gain: number | null;
+    exposure_s: number;
     filter: string;
     count: number;
 }

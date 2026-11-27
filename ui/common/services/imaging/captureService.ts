@@ -27,7 +27,7 @@ export interface CaptureRequest {
     /** Target the frames are recorded against. */
     targetId: string;
     /** Exposure duration in seconds. */
-    exposureSeconds: number;
+    exposureS: number;
     /** Number of frames to take. */
     count: number;
     /** Frame type: LIGHT, DARK, FLAT, or BIAS. */
@@ -52,7 +52,7 @@ export async function startCaptureSequence(request: CaptureRequest): Promise<str
     try {
         return await callBackend('imaging:capture', {
             target_id: request.targetId,
-            exposure_seconds: request.exposureSeconds,
+            exposure_s: request.exposureS,
             count: request.count,
             image_type: request.imageType,
             filter_name: request.filterName,
@@ -93,7 +93,7 @@ export async function captureTestFrame(
 export async function startOpenEndedCapture(targetId: string): Promise<string | null> {
     return startCaptureSequence({
         targetId,
-        exposureSeconds: OPEN_ENDED_CAPTURE_EXPOSURE_SECONDS,
+        exposureS: OPEN_ENDED_CAPTURE_EXPOSURE_SECONDS,
         count: OPEN_ENDED_CAPTURE_FRAME_COUNT,
         imageType: OPEN_ENDED_CAPTURE_IMAGE_TYPE,
         filterName: OPEN_ENDED_CAPTURE_FILTER,

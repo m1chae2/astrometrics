@@ -63,13 +63,13 @@ describe('useStackingJob isLoadingFrames', () => {
     it('settles to false once the frame fetch resolves', async () => {
         const targetService = await import('../common/services/targetService');
         vi.mocked(targetService.fetchFrameStatsGrouped).mockResolvedValueOnce([
-            { iso: '800', exposure: '30', count: 12 } as any,
+            { gain: 800, exposureS: 30, count: 12 } as any,
         ]);
 
         const { result } = renderHook(() => useStackingJob('M 81', true));
 
         expect(result.current.isLoadingFrames).toBe(true);
         await waitFor(() => expect(result.current.isLoadingFrames).toBe(false));
-        expect(result.current.lightFrames).toEqual([['800', '30', 12]]);
+        expect(result.current.lightFrames).toEqual([[800, 30, 12]]);
     });
 });

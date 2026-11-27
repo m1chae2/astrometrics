@@ -56,7 +56,7 @@ const prediction = {
     ],
     flagged: [],
     groups: [{
-        exposure_seconds: 30, frames_kept: 12, first_file: 'a', last_file: 'b', filter_name: 'L',
+        exposure_s: 30, frames_kept: 12, first_file: 'a', last_file: 'b', filter_name: 'L',
         gain: '100', offset: '0', binning: '1x1',
         dark: { kind: 'dark', frame_count: 30, folders: ['/lib/darks/ZWO ASI 533MM Pro/0.0/30.0'], flags: [] },
         bias: { kind: 'bias', frame_count: 20, folders: ['/lib/biases/ZWO ASI 533MM Pro/0.0'], flags: [] },

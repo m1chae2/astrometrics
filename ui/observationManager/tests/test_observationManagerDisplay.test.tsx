@@ -42,7 +42,7 @@ vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: vi.f
 
 const plannedPackage: ObservationPackage = {
     id: 'p1', name: 'M 81', target_id: 'M 81', revision: 4,
-    exposure_requests: [{ frameType: FrameType.LIGHT, filter: FilterType.L, count: 20, exposureSec: 60 }],
+    exposure_requests: [{ frameType: FrameType.LIGHT, filter: FilterType.L, count: 20, exposureS: 60 }],
 };
 
 /** Answers the library reads and package writes of the mocked backend. */

@@ -30,7 +30,7 @@ const frame = (overrides: Record<string, unknown> = {}) => ({
     file: 'M81_L_0001.fits', path: '/lib/_excluded/M81_L_0001.fits', subjectId: 'M 81/abc',
     originalPath: '/lib/M81_L_0001.fits', kind: 'trailed', reason: 'star roundness 0.62, below 0.70',
     reasonSource: 'stored_row', actionTaken: 'frame moved to _excluded/: trailed (secret internal text)',
-    exposureSeconds: 30, captureSettingId: 4, movedAt: '2026-10-30T01:00:00+00:00',
+    exposureS: 30, captureSettingId: 4, movedAt: '2026-10-30T01:00:00+00:00',
     restorable: true, restoreNote: '', ...overrides,
 });
 
@@ -83,7 +83,7 @@ describe('SetAsideFramesList', () => {
 
     it('says no record of why where the reason is missing', async () => {
         callBackendMock.mockResolvedValue([
-            frame({ kind: null, reason: '', reasonSource: 'folder_only', exposureSeconds: null, restorable: false,
+            frame({ kind: null, reason: '', reasonSource: 'folder_only', exposureS: null, restorable: false,
                     restoreNote: 'The folder does not say where it came from.' }),
         ]);
         renderList();

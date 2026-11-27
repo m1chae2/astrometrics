@@ -24,7 +24,7 @@ describe('captureService open-ended capture', () => {
     expect(jobId).toBe('job-7');
     expect(callBackendMock).toHaveBeenCalledWith('imaging:capture', {
       target_id: 'M 81',
-      exposure_seconds: 60,
+      exposure_s: 60,
       count: OPEN_ENDED_CAPTURE_FRAME_COUNT,
       image_type: 'LIGHT',
       filter_name: 'L',

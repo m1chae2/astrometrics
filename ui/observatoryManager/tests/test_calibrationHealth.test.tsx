@@ -37,12 +37,12 @@ const CAMERA = 'ZWO ASI533MM Pro';
 const libraryReply = {
     detail: 'counts',
     darks: [
-        { row_key: 'dark-ok', camera: CAMERA, iso: '0', offset: 10, binning: '1x1', temperature_c: -9, exposure: 120, count: 30 },
-        { row_key: 'dark-bad', camera: CAMERA, iso: '0', offset: 0, binning: '1x1', temperature_c: -9, exposure: 300, count: 30 },
-        { row_key: 'dark-new', camera: CAMERA, iso: '0', offset: 10, binning: '1x1', temperature_c: null, exposure: 2, count: 9 },
+        { row_key: 'dark-ok', camera: CAMERA, gain: 0, offset: 10, binning: '1x1', temperature_c: -9, exposure_s: 120, count: 30 },
+        { row_key: 'dark-bad', camera: CAMERA, gain: 0, offset: 0, binning: '1x1', temperature_c: -9, exposure_s: 300, count: 30 },
+        { row_key: 'dark-new', camera: CAMERA, gain: 0, offset: 10, binning: '1x1', temperature_c: null, exposure_s: 2, count: 9 },
     ],
-    biases: [{ row_key: 'bias-a', camera: CAMERA, iso: '0', offset: 10, binning: '1x1', count: 20 }],
-    flats: [{ row_key: 'flat-a', camera: CAMERA, filter: 'Luminance', iso: '0', offset: 10, binning: '1x1', count: 12 }],
+    biases: [{ row_key: 'bias-a', camera: CAMERA, gain: 0, offset: 10, binning: '1x1', count: 20 }],
+    flats: [{ row_key: 'flat-a', camera: CAMERA, filter: 'Luminance', gain: 0, offset: 10, binning: '1x1', count: 12 }],
     camera_totals: [{ camera: CAMERA, dark_count: 69, bias_count: 20, flat_count: 12 }],
 };
 
@@ -59,7 +59,7 @@ function health(rowKey: string, status: string, summary: string, extra: Partial<
         kind: 'dark',
         rowKey,
         camera: CAMERA,
-        gain: '0',
+        gain: 0,
         offset: 10,
         frameCount: 30,
         uniqueFrameCount: 30,

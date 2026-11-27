@@ -94,7 +94,7 @@ export const SetAsideFramesList: React.FC<SetAsideFramesListProps> = ({ targetId
                         {frame.reason && <div className="stack-summary--muted">{frame.reason}</div>}
                         <div className="stack-summary--muted">
                             {frame.file}
-                            {frame.exposureSeconds != null && <>, {formatExposureSeconds(frame.exposureSeconds)} exposure</>}
+                            {frame.exposureS != null && <>, {formatExposureSeconds(frame.exposureS)} exposure</>}
                         </div>
                         {note && <div className="stack-summary__flag">{note}</div>}
                     </li>

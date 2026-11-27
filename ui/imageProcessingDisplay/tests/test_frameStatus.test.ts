@@ -87,7 +87,7 @@ describe('buildFrameStatusLookup', () => {
 });
 
 describe('the status search filter', () => {
-    const file = { path: '/a.fits', name: 'a.fits', camera: 'ZWO', iso: '', exposure: '60', filter: 'L', date: '' } as unknown as FileItem;
+    const file = { path: '/a.fits', name: 'a.fits', camera: 'ZWO', gain: null, exposureS: 60, filter: 'L', date: '' } as unknown as FileItem;
 
     it('matches status:set-aside and status:flagged on the status text', () => {
         expect(matchesQuery({ ...file, status: 'set-aside cloud' }, 'status:set-aside')).toBe(true);

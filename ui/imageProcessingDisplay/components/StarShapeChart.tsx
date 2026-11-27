@@ -132,7 +132,7 @@ interface ChartFrame {
 /** What the chart can draw beyond the frames' statuses. */
 export interface StarShapeChartOptions {
     /** The exposure of each frame in seconds, by path. A frame with none is drawn as thin as the minimum width. */
-    exposureSeconds?: ReadonlyMap<string, number>;
+    exposureS?: ReadonlyMap<string, number>;
     /** The narrowest a bar is drawn, in axis units, so short frames stay visible when zoomed out. */
     minWidth?: number;
 }
@@ -305,7 +305,7 @@ export function buildStarShapeChart(
     statuses: ReadonlyMap<string, FrameStatusInfo> = new Map(),
     options: StarShapeChartOptions = {},
 ): StarShapeChartData {
-    const known = [...(options.exposureSeconds?.values() ?? [])].filter((value) => value > 0).sort((a, b) => a - b);
+    const known = [...(options.exposureS?.values() ?? [])].filter((value) => value > 0).sort((a, b) => a - b);
     const typicalSeconds = known.length > 0 ? known[Math.floor(known.length / 2)] : 0;
     const byPath = new Map<string, FrameStatus>((frames ?? []).map((frame) => [frame.path, frame]));
     const seriesByPath = new Map(series.map((frame) => [frame.path, frame]));
@@ -319,7 +319,7 @@ export function buildStarShapeChart(
         const kind = info?.kind ?? (flaggedPaths.has(path) ? 'flagged' : 'included');
         let lane: Lane = kind === 'flagged' ? 'Flagged' : 'Included';
         if (kind === 'set-aside') lane = `Set aside: ${setAsideCategory(status?.kind)}` as Lane;
-        const seconds = options.exposureSeconds?.get(path) ?? typicalSeconds;
+        const seconds = options.exposureS?.get(path) ?? typicalSeconds;
         all.push({ path, time, lane, durationMs: seconds * 1000, x: 0, xEnd: 0, nightIndex: 0 });
     }
     all.sort((first, second) => first.time - second.time);
@@ -377,7 +377,7 @@ interface StarShapeChartProps {
     /** The File Browser's status of each frame by path. */
     statuses?: ReadonlyMap<string, FrameStatusInfo>;
     /** The exposure of each frame in seconds, by path, or `undefined` when not known. */
-    exposureSeconds?: ReadonlyMap<string, number>;
+    exposureS?: ReadonlyMap<string, number>;
     /** Called with a frame's path when its mark is clicked. */
     onSelectFrame: (path: string) => void;
 }
@@ -387,14 +387,14 @@ interface StarShapeChartProps {
  * @param props See {@link StarShapeChartProps}.
  * @return The chart, or `null` when no frame has a time.
  */
-export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedPaths, selectedPath, frames = null, statuses, exposureSeconds, onSelectFrame }) => {
+export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedPaths, selectedPath, frames = null, statuses, exposureS, onSelectFrame }) => {
     const [xRange, setXRange] = useState<[number, number]>([FULL_X_RANGE[0], FULL_X_RANGE[1]]);
     // A bar is never drawn narrower than three pixels, whatever the zoom.
     const [plotWidth, setPlotWidth] = useState(600);
     const minWidth = (3 / Math.max(plotWidth, 1)) * (xRange[1] - xRange[0]);
     const chart = useMemo(
-        () => buildStarShapeChart(series, flaggedPaths, selectedPath, frames, statuses, { exposureSeconds, minWidth }),
-        [series, flaggedPaths, selectedPath, frames, statuses, exposureSeconds, minWidth],
+        () => buildStarShapeChart(series, flaggedPaths, selectedPath, frames, statuses, { exposureS, minWidth }),
+        [series, flaggedPaths, selectedPath, frames, statuses, exposureS, minWidth],
     );
     const wheelRef = useRef<HTMLDivElement>(null);
     const hasChart = chart.drawnCount > 0;

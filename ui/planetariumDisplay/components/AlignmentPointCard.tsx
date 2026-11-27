@@ -135,7 +135,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
     const padX = 36;
     const padY = 12;
 
-    const maxT = Math.max(1, session.elapsedSeconds);
+    const maxT = Math.max(1, session.elapsedS);
 
     let meanRa = 0;
     let meanDec = 0;
@@ -159,8 +159,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
     const toY = (val: number) => height / 2 - (val / maxVal) * (height / 2 - padY);
 
     // Construct SVG paths using relative jitter centered at 0
-    const raPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedSeconds).toFixed(1)} ${toY(p.deltaRaArcsec - meanRa).toFixed(1)}`, '');
-    const decPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedSeconds).toFixed(1)} ${toY(p.deltaDecArcsec - meanDec).toFixed(1)}`, '');
+    const raPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedS).toFixed(1)} ${toY(p.deltaRaArcsec - meanRa).toFixed(1)}`, '');
+    const decPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedS).toFixed(1)} ${toY(p.deltaDecArcsec - meanDec).toFixed(1)}`, '');
 
     return {
       width,
@@ -322,7 +322,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
                 </tr>
                 <tr>
                   <td>Total Exposure Time</td>
-                  <td>{formatDuration(session.elapsedSeconds)}</td>
+                  <td>{formatDuration(session.elapsedS)}</td>
                 </tr>
                 {Math.abs(session.driftDecArcsecPerMin) > 0.001 && (
                   <tr>

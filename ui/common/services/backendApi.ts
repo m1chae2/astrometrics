@@ -211,7 +211,7 @@ export interface ActionRegistry {
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: CatalogSourcesResult };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
-    "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
+    "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_deg: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
     "planetarium:get_class_stars": { payload: Record<string, never>; response: ClassStarColorRow[] };
     "planetarium:get_stack_pictures": { payload: Record<string, never>; response: StackSkyPicture[] };
@@ -247,8 +247,8 @@ export interface ActionRegistry {
             telescope_id: string;
             arcsec_per_pixel: number;
             camera_angle_deg: number;
-            ra_rate_arcsec_per_sec: number;
-            dec_rate_arcsec_per_sec: number;
+            ra_rate_arcsec_per_s: number;
+            dec_rate_arcsec_per_s: number;
             source_note: string;
             calibrated_at?: string;
         };
@@ -396,21 +396,21 @@ export interface ActionRegistry {
     // Matches ImagingService.capture_sequence. An earlier declaration listed
     // exposure/iso/filter/camera/delay/prefix, none of which the handler accepts;
     // a call typed against it failed on a missing target_id.
-    "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
+    "imaging:capture": { payload: { target_id: string; exposure_s: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
     "imaging:stop_capture": { payload: Record<string, never>; response: boolean };
 
     // Images
-    "images:get_target_frame": { payload: { target_id: string; iso: string; exposure: string; index?: number }; response: string };
-    "images:get_light_frame_data": { payload: { target_id: string; iso: string; exposure: string; index?: number; stretch?: boolean }; response: RenderedImage };
+    "images:get_target_frame": { payload: { target_id: string; gain: number | null; exposure_s: number; index?: number }; response: string };
+    "images:get_light_frame_data": { payload: { target_id: string; gain: number | null; exposure_s: number; index?: number; stretch?: boolean }; response: RenderedImage };
     "images:convert_fits": { payload: { path: string; stretch?: boolean }; response: RenderedImage };
-    "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_degrees?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
+    "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_deg?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
     "images:map_position": { payload: { from_path: string; x: number; y: number; to_path: string }; response: { x: number | null; y: number | null; method: string; note: string } };
     "images:measure_detections": { payload: { path: string }; response: import('../types/backendTypes').DetectionsMeasurement };
     "images:delete": { payload: { paths: string[]; target_id?: string }; response: { deleted: string[]; failed: { path: string; reason: string }[] } };
     "images:last": { payload: { stretch?: boolean }; response: { id: string; min: number; max: number; image_data: string; path: string } | null };
 
     // Calibration
-    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
+    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: number; offset: number; binning?: string; temperature_c?: number; exposure_s?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
 
@@ -481,9 +481,9 @@ export interface ActionRegistry {
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
     "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
     "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
-    "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
+    "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_s?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
     "calibration:measure_frames": { payload: { kind?: 'dark' | 'bias'; camera_id?: string; force?: boolean }; response: CalibrationMeasurementStart };
-    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
+    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; gain?: number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
 
     // Hand-off of the workspace to a paired phone
     "handoff:get_state": { payload: Record<string, never>; response: HandoffState };

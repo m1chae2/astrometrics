@@ -116,9 +116,9 @@ export const GuidingNightSummaryView: React.FC<GuidingNightSummaryViewProps> = (
                         {runs.map((run) => (
                             <tr key={run.runId}>
                                 <td>{formatStartTime(run.startedAt)}</td>
-                                <td>{formatMinutes(run.durationSeconds)}</td>
+                                <td>{formatMinutes(run.durationS)}</td>
                                 <td>{formatNumber(run.rmsPerAxisArcsec, 2)}</td>
-                                <td>{run.altitudeDegrees == null ? '-' : `${run.altitudeDegrees.toFixed(0)}°`}</td>
+                                <td>{run.altitudeDeg == null ? '-' : `${run.altitudeDeg.toFixed(0)}°`}</td>
                                 <td>{run.pierSide ?? '-'}</td>
                             </tr>
                         ))}

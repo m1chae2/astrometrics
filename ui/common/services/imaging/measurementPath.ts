@@ -45,11 +45,11 @@ export async function resolveProcessedImagePath(targetId: string): Promise<strin
  * Looks up the path of one of a target's light frames.
  *
  * @param targetId The target.
- * @param iso Gain or ISO of the frame.
- * @param exposure Exposure length of the frame.
+ * @param gain Gain or ISO of the frame.
+ * @param exposureS Exposure length of the frame, in seconds.
  * @param index Which matching frame, by order.
  * @returns The path of the frame's FITS file.
  */
-export async function resolveTargetFramePath(targetId: string, iso: string, exposure: string, index = 0): Promise<string> {
-    return callBackend('images:get_target_frame', { target_id: targetId, iso, exposure, index }, { silent: true });
+export async function resolveTargetFramePath(targetId: string, gain: number | null, exposureS: number, index = 0): Promise<string> {
+    return callBackend('images:get_target_frame', { target_id: targetId, gain, exposure_s: exposureS, index }, { silent: true });
 }

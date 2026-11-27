@@ -21,8 +21,10 @@ import { preloadedFrame } from '../utils/frameLoadCache';
 
 export interface ImageFrameInfo {
     objectId: string;
-    iso: string;
-    exposure: string;
+    /** The light frame's gain, or null when it is not known or the image is not one of the target's light frames. */
+    gain: number | null;
+    /** The light frame's exposure in seconds, or null when the image is not one of them. */
+    exposureS: number | null;
     index?: number;
     min?: number;
     max?: number;
@@ -114,7 +116,7 @@ export const useViewerState = (
             if (selectedLightRow === null || !selectedTarget || externalSelectedFilePath) return;
             const row = lightFrames[selectedLightRow];
             if (!row) return;
-            const [iso, exposure] = row;
+            const [gain, exposureS] = row;
 
             // Another image of the same target keeps the viewer's zoom and position, so the trigger
             // is not bumped here; the viewer fits again on its own when the target changes.
@@ -125,15 +127,15 @@ export const useViewerState = (
             try {
                 if (!stretch) {
                     // Linear: read the FITS file itself so the viewer holds the pixel values.
-                    const frameFile = await fetchTargetFrameAsFits(selectedTarget, String(iso), String(exposure), 0);
+                    const frameFile = await fetchTargetFrameAsFits(selectedTarget, gain, exposureS, 0);
                     if (!aborted) {
                         setImageUrl(null);
                         setImageBlob(frameFile);
                         setLoadedPath(null);
                         setImageFrameInfo({
                             objectId: selectedTarget,
-                            iso: String(iso),
-                            exposure: String(exposure),
+                            gain,
+                            exposureS,
                             index: 0,
                         });
                     }
@@ -141,8 +143,8 @@ export const useViewerState = (
                 }
                 let frameData = await fetchLightFrame(
                     selectedTarget,
-                    String(iso),
-                    String(exposure),
+                    gain,
+                    exposureS,
                     0, // index
                     2000, // maxdim
                     undefined, // center
@@ -157,8 +159,8 @@ export const useViewerState = (
                     if (aborted) return;
                     frameData = await fetchLightFrame(
                         selectedTarget,
-                        String(iso),
-                        String(exposure),
+                        gain,
+                        exposureS,
                         0,
                         2000,
                         undefined,
@@ -174,8 +176,8 @@ export const useViewerState = (
                     setLoadedPath(null);
                     setImageFrameInfo({
                         objectId: selectedTarget,
-                        iso: String(iso),
-                        exposure: String(exposure),
+                        gain,
+                        exposureS,
                         index: 0,
                         min: frameData.min,
                         max: frameData.max,
@@ -218,8 +220,8 @@ export const useViewerState = (
                         setLoadedPath(externalSelectedFilePath);
                         setImageFrameInfo({
                             objectId: selectedTarget || 'Unknown',
-                            iso: 'Unknown',
-                            exposure: 'Unknown',
+                            gain: null,
+                            exposureS: null,
                         });
                     }
                     return;
@@ -232,8 +234,8 @@ export const useViewerState = (
                     setLoadedPath(externalSelectedFilePath);
                     setImageFrameInfo({
                         objectId: selectedTarget || 'Unknown',
-                        iso: 'Unknown',
-                        exposure: 'Unknown',
+                        gain: null,
+                        exposureS: null,
                         min: data.min as number,
                         max: data.max as number
                     });

@@ -76,7 +76,7 @@ const nights = [
 
 const libraryReply = {
     detail: 'counts',
-    darks: [{ row_key: 'dark-a', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 }],
+    darks: [{ row_key: 'dark-a', camera: 'ZWO ASI533MM Pro', gain: 100, offset: 10, binning: '1x1', exposure_s: 60, count: 20 }],
     biases: [],
     flats: [],
     camera_totals: [{ camera: 'ZWO ASI533MM Pro', dark_count: 20, bias_count: 0, flat_count: 0 }],

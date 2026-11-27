@@ -81,7 +81,7 @@ export const useSourceMerging = (
   // missing nearly every naked-eye-famous star.
   //
   // This driver's backend query is a fast in-memory numpy filter over a
-  // bundled extract (no network round trip) and its maximum_query_radius_degrees
+  // bundled extract (no network round trip) and its maximum_query_radius_deg
   // is 180 -- a true whole sky. So rather than rescoping to the viewport on
   // every pan (which meant re-querying, and a brief empty gap, every time you
   // panned into a not-yet-queried region, including areas hidden behind the

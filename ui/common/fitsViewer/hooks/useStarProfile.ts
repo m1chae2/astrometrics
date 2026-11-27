@@ -65,7 +65,7 @@ export interface StarProfileController {
   /** What the panel shows now. */
   state: StarProfileState;
   /** The angle of the cut, in degrees, 0 to 179. */
-  cutAngleDegrees: number;
+  cutAngleDeg: number;
   /** Measures the star at a clicked pixel. Opens the panel only when a star is found there. */
   measureAt: (anchor: ProfileAnchor) => void;
   /** Shows a message in place of a measurement, without calling the backend. */
@@ -110,7 +110,7 @@ function describeFailure(failure: unknown): string {
  */
 export function useStarProfile(resolvePath: (() => Promise<string | null>) | undefined): StarProfileController {
   const [state, setState] = useState<StarProfileState>({ status: 'closed' });
-  const [cutAngleDegrees, setCutAngleDegrees] = useState(0);
+  const [cutAngleDeg, setCutAngleDegrees] = useState(0);
   const [cutLengthPx, setCutLengthPx] = useState<number | null>(null);
   const cutLengthPxRef = useRef<number | null>(null);
   const lengthTimerRef = useRef<number | null>(null);
@@ -120,7 +120,7 @@ export function useStarProfile(resolvePath: (() => Promise<string | null>) | und
   const latestRequestRef = useRef(0);
   const anchorRef = useRef<ProfileAnchor | null>(null);
   // The newest angle, for a click that comes after the slider moved.
-  const cutAngleDegreesRef = useRef(cutAngleDegrees);
+  const cutAngleDegreesRef = useRef(cutAngleDeg);
   // The last good answer, kept on screen while the next one is on its way.
   const lastMeasurementRef = useRef<StarProfileMeasurement | null>(null);
   const resolvePathRef = useRef(resolvePath);
@@ -158,7 +158,7 @@ export function useStarProfile(resolvePath: (() => Promise<string | null>) | und
       const measurement = await callBackend(
         'images:measure_star_profile',
         {
-          path, x: anchor.x, y: anchor.y, cut_angle_degrees: angle, search_radius_px: anchor.searchRadiusPx,
+          path, x: anchor.x, y: anchor.y, cut_angle_deg: angle, search_radius_px: anchor.searchRadiusPx,
           ...(halfLengthPx !== null ? { cut_half_length_px: halfLengthPx } : {}),
         },
         { silent: true },
@@ -264,5 +264,5 @@ export function useStarProfile(resolvePath: (() => Promise<string | null>) | und
     setState({ status: 'closed' });
   }, []);
 
-  return { state, pin, followNote, follow, cutAngleDegrees, measureAt, showUnavailable, setCutAngle, cutLengthPx, setCutLength, close };
+  return { state, pin, followNote, follow, cutAngleDeg, measureAt, showUnavailable, setCutAngle, cutLengthPx, setCutLength, close };
 }

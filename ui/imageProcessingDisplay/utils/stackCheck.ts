@@ -46,7 +46,7 @@ export const calibrationFit = (part: PredictedCalibration): CalibrationFit => {
  */
 export const groupLabel = (group: PredictedGroup): string => {
     const frames = `${group.frames_kept} frame${group.frames_kept === 1 ? '' : 's'}`;
-    const parts = [formatExposureSeconds(group.exposure_seconds), frames, group.filter_name];
+    const parts = [formatExposureSeconds(group.exposure_s), frames, group.filter_name];
     if (group.night) parts.push(group.night);
     return parts.join(', ');
 };

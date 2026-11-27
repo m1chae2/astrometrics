@@ -53,12 +53,12 @@ function sampleCutout(source: CutSource, imageX: number, imageY: number): number
  * Builds the cut through the star's center at an angle. The angle runs from +y (up a column) toward +x.
  *
  * @param source The measurement, with its cutout.
- * @param angleDegrees The angle of the cut.
+ * @param angleDeg The angle of the cut.
  * @param halfLengthPx How far the cut reaches each way (default: the length the measurement was made with). A longer one than the cutout covers just loses its outer points.
  * @returns The samples, in order of distance, without the points that have no value.
  */
-export function rebuildCut(source: CutSource, angleDegrees: number, halfLengthPx: number = source.cut_half_length_px): StarCut {
-  const angle = (angleDegrees * Math.PI) / 180;
+export function rebuildCut(source: CutSource, angleDeg: number, halfLengthPx: number = source.cut_half_length_px): StarCut {
+  const angle = (angleDeg * Math.PI) / 180;
   const sine = Math.sin(angle);
   const cosine = Math.cos(angle);
   const stepCount = Math.floor(halfLengthPx / source.cut_step_px);

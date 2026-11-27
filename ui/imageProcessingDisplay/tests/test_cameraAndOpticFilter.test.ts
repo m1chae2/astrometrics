@@ -8,7 +8,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 
 /** Make a frame record the backend would send for M 27. */
 const frame = (name: string, camera: string, focalLengthMm: number) => ({
-    path: `/lib/${name}.fits`, name: `${name}.fits`, camera, iso: '', exposure: '60', filter: 'L',
+    path: `/lib/${name}.fits`, name: `${name}.fits`, camera, gain: null, exposureS: 60, filter: 'L',
     date: '2026-11-04', focalLengthMm,
 });
 

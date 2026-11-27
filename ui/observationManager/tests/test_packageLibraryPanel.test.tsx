@@ -22,8 +22,8 @@ vi.mock('../../common/hooks/useTargetListLogic', () => ({
     }),
 }));
 
-const exposure = (filter: FilterType, count: number, exposureSec: number): ExposureRequest => (
-    { frameType: FrameType.LIGHT, filter, count, exposureSec }
+const exposure = (filter: FilterType, count: number, exposureS: number): ExposureRequest => (
+    { frameType: FrameType.LIGHT, filter, count, exposureS }
 );
 
 const plannedPackage: ObservationPackage = {

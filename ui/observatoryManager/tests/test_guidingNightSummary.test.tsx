@@ -74,7 +74,7 @@ describe('Guiding Trends for a chosen night', () => {
             lostFraction: 0.013,
             excursionCount: 4,
             statements: [{ rule: 'r1', message: 'raw', plainMessage: 'Guiding was steady.' }],
-            runs: [{ runId: 'a', startedAt: 1_762_300_000, durationSeconds: 2520, rmsPerAxisArcsec: 0.9, altitudeDegrees: 55.4, pierSide: 'East' }],
+            runs: [{ runId: 'a', startedAt: 1_762_300_000, durationS: 2520, rmsPerAxisArcsec: 0.9, altitudeDeg: 55.4, pierSide: 'East' }],
         });
         renderPanel('2026-11-04');
         expect(await screen.findByText('0.85 arcsec')).toBeTruthy();

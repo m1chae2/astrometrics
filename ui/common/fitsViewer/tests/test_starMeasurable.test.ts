@@ -71,7 +71,7 @@ describe('buildMeasurableRows', () => {
   });
 
   it('judges roundness by the core elongation against the trailing limit, not by the ring', () => {
-    const oval = { order: 2, amplitude: 1.8, amplitude_error: 0.01, amplitude_debiased: 1.8, significance: 19, significant: true, direction_degrees: 10 };
+    const oval = { order: 2, amplitude: 1.8, amplitude_error: 0.01, amplitude_debiased: 1.8, significance: 19, significant: true, direction_deg: 10 };
     const round = rowOf(buildMeasurableRows(goodStar({ ring_harmonics: [oval] }), 3.0), 'shape');
     expect(round?.ok).toBe(true);
     expect(round?.value).toBe('elongation 1.08');

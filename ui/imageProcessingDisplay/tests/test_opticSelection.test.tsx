@@ -100,7 +100,7 @@ describe('FileBrowserToolbar optic picker', () => {
         const user = userEvent.setup();
         const onOpticChange = vi.fn();
         const files = m27Frames.map(f => ({
-            ...f, name: `${f.path}`, camera: f.camera, iso: '', exposure: '60', filter: 'L', date: '2026-11-04',
+            ...f, name: `${f.path}`, camera: f.camera, gain: null, exposureS: 60, filter: 'L', date: '2026-11-04',
         }));
         render(
             <FileBrowserToolbar
@@ -126,7 +126,7 @@ describe('FileBrowserToolbar optic picker', () => {
     it('hides the picker for one optic', () => {
         render(
             <FileBrowserToolbar
-                files={[{ path: '/a', name: 'a', camera: 'X', iso: '', exposure: '1', filter: 'L', date: '', focalLengthMm: 405 }]}
+                files={[{ path: '/a', name: 'a', camera: 'X', gain: null, exposureS: 1, filter: 'L', date: '', focalLengthMm: 405 }]}
                 searchTerm=""
                 onSearchChange={() => {}}
                 selectedCamera="All"

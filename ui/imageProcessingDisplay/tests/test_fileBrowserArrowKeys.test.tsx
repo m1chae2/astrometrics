@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FileBrowser, FileBrowserToolbar, type FileItem } from '../fileBrowser/FileBrowser';
 
 const item = (name: string): FileItem => ({
-    path: `/lib/${name}`, name, camera: 'ZWO', iso: '', exposure: '60', filter: 'L', date: '2026-11-01 21:00:00',
+    path: `/lib/${name}`, name, camera: 'ZWO', gain: null, exposureS: 60, filter: 'L', date: '2026-11-01 21:00:00',
 });
 
 /** Renders the browser (and the search box) with the given selection; returns the selection spy. */

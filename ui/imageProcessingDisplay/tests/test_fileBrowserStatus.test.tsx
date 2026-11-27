@@ -12,7 +12,7 @@ import { buildFrameStatusLookup } from '../utils/frameStatus';
 import type { FrameStatusReport } from '../../common/types/backendTypes';
 
 const item = (name: string, date = '2026-11-01 21:00:00'): FileItem => ({
-    path: `/lib/${name}`, name, camera: 'ZWO', iso: '', exposure: '60', filter: 'L', date,
+    path: `/lib/${name}`, name, camera: 'ZWO', gain: null, exposureS: 60, filter: 'L', date,
 });
 
 const report: FrameStatusReport = {

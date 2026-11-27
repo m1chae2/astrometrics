@@ -19,7 +19,8 @@ import { useJobLog } from './useJobLog';
 import { useJobEndWatcher } from './useJobEndWatcher';
 import { announceFinishedStack } from '../utils/announceFinishedStack';
 
-export type LightFrameRow = [string, string, number];
+/** One light-frame group: its gain (null when not known), exposure in seconds and frame count. */
+export type LightFrameRow = [number | null, number, number];
 
 export interface StackingJobResult {
     lightFrames: LightFrameRow[];
@@ -180,8 +181,8 @@ export function useStackingJob(
                 if (!mounted) return;
 
                 const rows: LightFrameRow[] = stats.map(s => [
-                    s.iso || 'Unknown',
-                    s.exposure || '0',
+                    s.gain ?? null,
+                    s.exposureS,
                     s.count
                 ]);
 

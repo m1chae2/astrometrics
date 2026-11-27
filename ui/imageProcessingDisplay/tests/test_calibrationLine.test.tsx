@@ -13,17 +13,17 @@ import type { CalibrationGroupMatch, GroupedFrameStat } from '../../common/types
 const found = (count: number, fallbacks: string[] = []): CalibrationGroupMatch => ({ count, fallbacks, problem: '' });
 const missing = (problem: string): CalibrationGroupMatch => ({ count: 0, fallbacks: [], problem });
 const group = (
-    filter: string, exposure: string, darkMatch: CalibrationGroupMatch,
+    filter: string, exposureS: number, darkMatch: CalibrationGroupMatch,
     flatMatch: CalibrationGroupMatch, biasMatch: CalibrationGroupMatch,
-    iso = '100', offset = '10',
+    gain = 100, offset = 10,
 ): GroupedFrameStat => ({
-    filter, iso, offset, binning: '1x1', exposure, count: 10, camera: 'ASI',
+    filter, gain, offset, binning: '1x1', exposureS, count: 10, camera: 'ASI',
     darkMatch, flatMatch, biasMatch,
 });
 
 describe('buildCalibrationReport', () => {
     it('finds nothing missing when everything matches', () => {
-        const report = buildCalibrationReport([group('L', '120', found(70), found(30), found(20))]);
+        const report = buildCalibrationReport([group('L', 120, found(70), found(30), found(20))]);
         expect(report?.missing).toHaveLength(0);
         expect(report?.nearMatches).toHaveLength(0);
         expect(report?.groups[0].label).toBe('L 120 s');
@@ -31,7 +31,7 @@ describe('buildCalibrationReport', () => {
     });
 
     it('lists a group with a missing kind and keeps the reason', () => {
-        const report = buildCalibrationReport([group('L', '20', missing('no dark frames at 20 s'), found(3), found(2))]);
+        const report = buildCalibrationReport([group('L', 20, missing('no dark frames at 20 s'), found(3), found(2))]);
         expect(report?.missing).toHaveLength(1);
         expect(report?.missing[0].parts[0].status).toBe('missing');
         expect(report?.missing[0].parts[0].reason).toContain('no dark frames');
@@ -39,8 +39,8 @@ describe('buildCalibrationReport', () => {
 
     it('lists a near match apart from the missing groups', () => {
         const report = buildCalibrationReport([
-            group('L', '30', found(30, ['darks are at another temperature']), found(3), found(2)),
-            group('L', '60', missing('no darks'), found(3), found(2)),
+            group('L', 30, found(30, ['darks are at another temperature']), found(3), found(2)),
+            group('L', 60, missing('no darks'), found(3), found(2)),
         ]);
         expect(report?.nearMatches.map((g) => g.label)).toEqual(['L 30 s']);
         expect(report?.missing.map((g) => g.label)).toEqual(['L 60 s']);
@@ -54,8 +54,8 @@ describe('buildCalibrationReport', () => {
 describe('CalibrationLine', () => {
     it('says complete when nothing is missing', () => {
         render(<CalibrationLine lightFrames={[
-            group('L', '120', found(7), found(1), found(1)),
-            group('L', '60', found(7), found(1), found(1)),
+            group('L', 120, found(7), found(1), found(1)),
+            group('L', 60, found(7), found(1), found(1)),
         ]} />);
         const block = screen.getByTestId('calibration-line');
         expect(block.textContent).toContain('Complete');
@@ -67,9 +67,9 @@ describe('CalibrationLine', () => {
 
     it('lists one row per group with missing frames and the count in the heading', () => {
         render(<CalibrationLine lightFrames={[
-            group('L', '20', missing('no darks'), found(1), found(1), '0.0', '10.0'),
-            group('', '120', missing('no darks'), missing('no flats'), found(1), '800', '0'),
-            group('L', '60', found(7), found(1), found(1)),
+            group('L', 20, missing('no darks'), found(1), found(1), 0, 10),
+            group('', 120, missing('no darks'), missing('no flats'), found(1), 800, 0),
+            group('L', 60, found(7), found(1), found(1)),
         ]} />);
         const block = screen.getByTestId('calibration-line');
         expect(block.textContent).toContain('Missing calibration (2)');
@@ -82,8 +82,8 @@ describe('CalibrationLine', () => {
 
     it('turns the chip into a warning when a near match remains, with no Check list', () => {
         render(<CalibrationLine lightFrames={[
-            group('L', '30', found(30, ['darks are at another temperature']), found(1), found(1)),
-            group('L', '60', found(7), found(1), found(1)),
+            group('L', 30, found(30, ['darks are at another temperature']), found(1), found(1)),
+            group('L', 60, found(7), found(1), found(1)),
         ]} />);
         const block = screen.getByTestId('calibration-line');
         const chip = block.querySelector('.calibration-report__heading [data-status]') as HTMLElement;
@@ -94,15 +94,15 @@ describe('CalibrationLine', () => {
     });
 
     it('has no Show all groups button and no table until the chip is hovered', () => {
-        render(<CalibrationLine lightFrames={[group('L', '60', found(7), found(1), found(1))]} />);
+        render(<CalibrationLine lightFrames={[group('L', 60, found(7), found(1), found(1))]} />);
         expect(screen.queryByRole('button', { name: /all groups/i })).toBeNull();
         expect(screen.queryByTestId('calibration-all-groups')).toBeNull();
     });
 
     it('shows the table of every group while the chip is hovered and hides it again', () => {
         render(<CalibrationLine lightFrames={[
-            group('L', '20', missing('no darks'), found(3), found(2)),
-            group('L', '60', found(7), found(1), found(1)),
+            group('L', 20, missing('no darks'), found(3), found(2)),
+            group('L', 60, found(7), found(1), found(1)),
         ]} />);
         const trigger = screen.getByTestId('calibration-line').querySelector('[tabindex="0"]') as HTMLElement;
         fireEvent.mouseEnter(trigger);
@@ -116,7 +116,7 @@ describe('CalibrationLine', () => {
     it('shows the table on keyboard focus, keeps the near-match sentence in its cell and closes on Escape', () => {
         const sentence = 'No flat frames matched gain 0 and offset 0, so flat frames taken at gain 0.0, offset 10 '
             + 'were applied to the light frames.';
-        render(<CalibrationLine lightFrames={[group('L', '30', found(1), found(5, [sentence]), found(1))]} />);
+        render(<CalibrationLine lightFrames={[group('L', 30, found(1), found(5, [sentence]), found(1))]} />);
         const trigger = screen.getByTestId('calibration-line').querySelector('[tabindex="0"]') as HTMLElement;
         fireEvent.focus(trigger);
         const table = screen.getByTestId('calibration-all-groups');
@@ -127,13 +127,13 @@ describe('CalibrationLine', () => {
 });
 
 describe('calibration scope (M 31-like target with two cameras)', () => {
-    const asi = (exposure: string, darks: CalibrationGroupMatch): GroupedFrameStat => ({
+    const asi = (exposure: number, darks: CalibrationGroupMatch): GroupedFrameStat => ({
         ...group('L', exposure, darks, found(3), found(2)), camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405,
     });
-    const nikon = (exposure: string): GroupedFrameStat => ({
+    const nikon = (exposure: number): GroupedFrameStat => ({
         ...group('', exposure, missing('no darks'), found(3), found(2)), camera: 'Nikon D5300', focalLengthMm: 300,
     });
-    const groups = [asi('20', missing('no darks')), asi('120', found(5)), nikon('10'), nikon('20')];
+    const groups = [asi(20, missing('no darks')), asi(120, found(5)), nikon(10), nikon(20)];
 
     it('follows the stack configuration and leaves other cameras out', () => {
         const scope = chooseCalibrationScope('All', '', { camera: 'ZWO ASI 533MM Pro', focalLengthMm: 405 });

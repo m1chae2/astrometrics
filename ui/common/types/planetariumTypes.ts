@@ -26,7 +26,7 @@ export interface PlanetariumSource {
   azimuth?: number;
   hourAngle?: number;
   flipRequired?: boolean;
-  timeToFlipSeconds?: number;
+  timeToFlipS?: number;
   riseTime?: string;
   setTime?: string;
   transitTime?: string;

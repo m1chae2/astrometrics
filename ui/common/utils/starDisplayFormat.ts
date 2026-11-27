@@ -43,8 +43,8 @@ export function formatStarListLabel(starName: string): string {
     const positionMatch = POSITION_ONLY_STAR_ID_PATTERN.exec(starName);
     if (positionMatch) {
         const rightAscensionDegrees = Number(positionMatch[1]).toFixed(2);
-        const declinationDegrees = Number(positionMatch[2]);
-        const declinationText = `${declinationDegrees >= 0 ? '+' : '-'}${Math.abs(declinationDegrees).toFixed(2)}`;
+        const declinationDeg = Number(positionMatch[2]);
+        const declinationText = `${declinationDeg >= 0 ? '+' : '-'}${Math.abs(declinationDeg).toFixed(2)}`;
         return `${rightAscensionDegrees} ${declinationText}`;
     }
 

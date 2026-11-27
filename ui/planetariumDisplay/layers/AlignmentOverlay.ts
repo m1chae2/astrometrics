@@ -203,7 +203,7 @@ export class AlignmentOverlay implements PlanetariumOverlay {
 
       // --- Draw Single Consolidated Session Badge ---
       const labelText = isMultiFrame
-        ? `${cluster.targetName} (${cluster.frameCount} frames · ${formatDuration(cluster.elapsedSeconds)} · ${formatError(cluster.rmsTotalArcsec)} RMS)`
+        ? `${cluster.targetName} (${cluster.frameCount} frames · ${formatDuration(cluster.elapsedS)} · ${formatError(cluster.rmsTotalArcsec)} RMS)`
         : `${cluster.targetName} (${formatError(cluster.initialErrorArcsec)})`;
 
       context.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';

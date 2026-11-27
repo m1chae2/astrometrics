@@ -89,14 +89,13 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     } = useImageProcessingContext();
 
   // The exposure of each frame in seconds: the File Browser's list, then the set-aside frames' records.
-  const exposureSeconds = useMemo(() => {
+  const exposureS = useMemo(() => {
     const seconds = new Map<string, number>();
-    const add = (path: string, text: string | undefined) => {
-      const value = Number.parseFloat(text ?? '');
-      if (Number.isFinite(value) && value > 0) seconds.set(path, value);
+    const add = (path: string, value: number | null | undefined) => {
+      if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) seconds.set(path, value);
     };
-    for (const file of allFiles ?? []) add(file.path, file.exposure);
-    for (const frame of frameReport?.frames ?? []) if (!seconds.has(frame.path)) add(frame.path, frame.exposure);
+    for (const file of allFiles ?? []) add(file.path, file.exposureS);
+    for (const frame of frameReport?.frames ?? []) if (!seconds.has(frame.path)) add(frame.path, frame.exposureS);
     return seconds;
   }, [allFiles, frameReport]);
 
@@ -267,7 +266,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     review={starShapeReview}
                     frameReport={frameReport}
                     frameStatuses={frameStatuses}
-                    exposureSeconds={exposureSeconds}
+                    exposureS={exposureS}
                     selectedPath={selectedFile}
                     onSelectFrame={handleSelectFile}
                   />

@@ -33,10 +33,10 @@ const cameras = [{ name: 'ZWO ASI533MM Pro', pixelSizeUm: 3.76, sensorWidthPx: 3
 const libraryReply = {
     detail: 'counts',
     darks: [
-        { row_key: 'dark-a', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
-        { row_key: 'dark-b', camera: 'ZWO ASI533MM Pro', iso: '0', offset: 10, binning: '1x1', exposure: 60, count: 5 },
+        { row_key: 'dark-a', camera: 'ZWO ASI533MM Pro', gain: 100, offset: 10, binning: '1x1', exposure_s: 60, count: 20 },
+        { row_key: 'dark-b', camera: 'ZWO ASI533MM Pro', gain: 0, offset: 10, binning: '1x1', exposure_s: 60, count: 5 },
     ],
-    biases: [{ row_key: 'bias-a', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', count: 30 }],
+    biases: [{ row_key: 'bias-a', camera: 'ZWO ASI533MM Pro', gain: 100, offset: 10, binning: '1x1', count: 30 }],
     flats: [],
     camera_totals: [{ camera: 'ZWO ASI533MM Pro', dark_count: 25, bias_count: 30, flat_count: 0 }],
 };
@@ -90,11 +90,11 @@ describe('CameraProfilesPanel', () => {
             ...cameras[0],
             sensorNoise: [{
                 cameraName: 'ZWO ASI533MM Pro',
-                gainSetting: '0',
-                offset: '10',
+                gain: 0,
+                offset: 10,
                 binning: '1x1',
                 temperatureC: -10,
-                gain: { value: 0.783, status: 'measured', kind: 'measured', source: 'flat pairs' },
+                gainEPerAdu: { value: 0.783, status: 'measured', kind: 'measured', source: 'flat pairs' },
                 readNoise: { value: 3.8, status: 'design_estimate', kind: 'datasheet', source: 'datasheet' },
                 status: 'partly_measured',
             }],
@@ -140,8 +140,8 @@ describe('CameraProfilesPanel', () => {
         callBackendMock.mockImplementation(async (_method: string, params: { save: boolean }) => ({
             status: MeasurementStatus.MEASURED,
             cameraId: 'ZWO ASI533MM Pro',
-            gainSetting: '100',
-            offset: '10',
+            gain: 100,
+            offset: 10,
             binning: '1',
             gainEPerAdu: 0.9,
             readNoiseE: 1.6,
@@ -239,8 +239,8 @@ describe('CalibrationLibraryPanel', () => {
     it('filters by the chosen camera', async () => {
         callBackendMock.mockResolvedValue({
             ...libraryReply,
-            darks: [...libraryReply.darks, { row_key: 'dark-n', camera: 'Nikon D5300', iso: '800', offset: null, binning: '1x1', exposure: 30, count: 7 }],
-            flats: [{ row_key: 'flat-n', camera: 'Nikon D5300', iso: '800', filter: 'L', count: 4 }],
+            darks: [...libraryReply.darks, { row_key: 'dark-n', camera: 'Nikon D5300', gain: 800, offset: null, binning: '1x1', exposure_s: 30, count: 7 }],
+            flats: [{ row_key: 'flat-n', camera: 'Nikon D5300', gain: 800, filter: 'L', count: 4 }],
             camera_totals: [
                 ...libraryReply.camera_totals,
                 { camera: 'Nikon D5300', dark_count: 7, bias_count: 0, flat_count: 4 },
@@ -272,8 +272,8 @@ describe('CalibrationLibraryPanel', () => {
         callBackendMock.mockResolvedValue({
             ...libraryReply,
             darks: [
-                { row_key: 'k1', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
-                { row_key: 'k2', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '2x2', exposure: 60, count: 5 },
+                { row_key: 'k1', camera: 'ZWO ASI533MM Pro', gain: 100, offset: 10, binning: '1x1', exposure_s: 60, count: 20 },
+                { row_key: 'k2', camera: 'ZWO ASI533MM Pro', gain: 100, offset: 10, binning: '2x2', exposure_s: 60, count: 5 },
             ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
@@ -348,7 +348,7 @@ describe('CalibrationLibraryPanel', () => {
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
-            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' });
+            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gain: 100, offset: 10, binning: 1 }, rule: 'r' });
         });
         await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
         expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('20');
@@ -363,7 +363,7 @@ describe('CalibrationLibraryPanel', () => {
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
-            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100 }, rule: 'r' });
+            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gain: 100 }, rule: 'r' });
         });
         expect(await screen.findByText('No calibration row matches')).toBeTruthy();
     });

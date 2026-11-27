@@ -27,7 +27,7 @@ vi.mock('../../common/hooks/useCommandAvailability', () => ({
 
 const samplePackage: ObservationPackage = {
     id: 'p1', name: 'M 81', target_id: 'M 81',
-    exposure_requests: [{ frameType: FrameType.LIGHT, filter: FilterType.Ha, count: 10, exposureSec: 300 }],
+    exposure_requests: [{ frameType: FrameType.LIGHT, filter: FilterType.Ha, count: 10, exposureS: 300 }],
     dither_config: { enabled: true, everyNFrames: 3, pixels: 4 },
 };
 
@@ -60,7 +60,7 @@ describe('PackageEditor', () => {
     it('adds a row through the Image Planner', async () => {
         const props = renderEditor(samplePackage);
         await userEvent.click(screen.getByRole('button', { name: 'Add to List' }));
-        expect(props.onAddExposure).toHaveBeenCalledWith(expect.objectContaining({ frameType: FrameType.LIGHT, count: 1, exposureSec: 60 }));
+        expect(props.onAddExposure).toHaveBeenCalledWith(expect.objectContaining({ frameType: FrameType.LIGHT, count: 1, exposureS: 60 }));
     });
 
     it('removes a row', async () => {
@@ -84,7 +84,7 @@ describe('PackageEditor', () => {
 
     it('shows Luminance as L and puts Delete package in the Image List header', () => {
         renderEditor(
-            { ...samplePackage, exposure_requests: [{ frameType: FrameType.LIGHT, filter: 'Luminance' as FilterType, exposureSec: 60, count: 2 }] },
+            { ...samplePackage, exposure_requests: [{ frameType: FrameType.LIGHT, filter: 'Luminance' as FilterType, exposureS: 60, count: 2 }] },
             { onDeletePackage: vi.fn() },
         );
         expect(within(screen.getByRole('table')).getByText('L')).toBeInTheDocument();

@@ -177,7 +177,7 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
       model: 'gaussian', fitted: true, fwhm_px: 3.0, fwhm_arcsec: 2.25, peak: 880, r_squared: 0.97,
       curve_radius_px: [0, 1, 2], curve_values: [880, 470, 180],
     },
-    cut_angle_degrees: 0,
+    cut_angle_deg: 0,
     cut_half_length_px: 10,
     cut_distance_px: [-2, -1, 0, 1, 2],
     cut_values: [190, 480, 900, 480, 190],
@@ -194,7 +194,7 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
     ring_inner_px: 6,
     ring_outer_px: 10,
     ring_sky: 100,
-    ring_bin_angle_degrees: [2.5, 92.5, 182.5, 272.5],
+    ring_bin_angle_deg: [2.5, 92.5, 182.5, 272.5],
     ring_bin_values: [10, 12, 20, 12],
     ring_bin_counts: [30, 30, 30, 30],
     ring_harmonics: ringTerms(),
@@ -231,9 +231,9 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
 function ringTerms(): RingHarmonic[] {
   return Array.from({ length: 8 }, (_unused, index) => {
     const order = index + 1;
-    if (order === 1) return { order, amplitude: 0.13, amplitude_error: 0.02, amplitude_debiased: 0.124, significance: 6.5, significant: true, direction_degrees: 180 };
-    if (order === 2) return { order, amplitude: 0.035, amplitude_error: 0.01, amplitude_debiased: 0.033, significance: 3.5, significant: true, direction_degrees: 10 };
-    return { order, amplitude: 0.01, amplitude_error: 0.01, amplitude_debiased: 0, significance: 1, significant: false, direction_degrees: 20 };
+    if (order === 1) return { order, amplitude: 0.13, amplitude_error: 0.02, amplitude_debiased: 0.124, significance: 6.5, significant: true, direction_deg: 180 };
+    if (order === 2) return { order, amplitude: 0.035, amplitude_error: 0.01, amplitude_debiased: 0.033, significance: 3.5, significant: true, direction_deg: 10 };
+    return { order, amplitude: 0.01, amplitude_error: 0.01, amplitude_debiased: 0, significance: 1, significant: false, direction_deg: 20 };
   });
 }
 
@@ -301,7 +301,7 @@ describe('star profile', () => {
     await waitFor(() => expect(callBackendMock).toHaveBeenCalledTimes(1));
     expect(callBackendMock).toHaveBeenCalledWith(
       'images:measure_star_profile',
-      expect.objectContaining({ path: '/stacks/M31.fits', x: Number(readoutX), y: Number(readoutY), cut_angle_degrees: 0 }),
+      expect.objectContaining({ path: '/stacks/M31.fits', x: Number(readoutX), y: Number(readoutY), cut_angle_deg: 0 }),
       expect.anything(),
     );
     expect(await screen.findByTestId('star-profile-width')).toBeTruthy();
@@ -628,7 +628,7 @@ describe('pinned star followed to another image', () => {
     // The pin is the refined center (50.6, 119.8) of the star measured on image A.
     expect(mapCalls()).toHaveLength(1);
     expect(mapCalls()[0][1]).toEqual({ from_path: '/stacks/A.fits', x: 50.6, y: 119.8, to_path: '/stacks/B.fits' });
-    expect(measureCalls()[1][1]).toMatchObject({ path: '/stacks/B.fits', x: 80, y: 90, cut_angle_degrees: 30 });
+    expect(measureCalls()[1][1]).toMatchObject({ path: '/stacks/B.fits', x: 80, y: 90, cut_angle_deg: 30 });
     expect((await screen.findByTestId('star-profile-follow')).textContent).toBe('Followed by sky position');
     expect(screen.getByRole('button', { name: 'Hide optics detail' }).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: 'Log scale' }).getAttribute('aria-pressed')).toBe('true');
@@ -695,7 +695,7 @@ describe('around the star view', () => {
 
   it('shows the second tab with its plot, screen directions, and the two angle markers', () => {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor: anchorTop, measurement: makeMeasurement() }} cutAngleDegrees={30} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor: anchorTop, measurement: makeMeasurement() }} cutAngleDeg={30} onCutAngleChange={noop} onClose={noop} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     expect(screen.getByTestId('star-profile-ring-plot')).toBeTruthy();
@@ -709,7 +709,7 @@ describe('around the star view', () => {
 
   it('names the screen directions the other way round for a bottom-up picture', () => {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchorTop, firstRowAtTop: false }, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchorTop, firstRowAtTop: false }, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     expect(ringLayout().xaxis.ticktext.slice(0, 4)).toEqual(['Up<br>0°', 'Right<br>90°', 'Down<br>180°', 'Left<br>270°']);
@@ -757,7 +757,7 @@ describe('the ring is always automatic', () => {
    */
   function renderRing(measurement: StarProfileMeasurement) {
     const result = render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     return result;
@@ -780,7 +780,7 @@ describe('the ring is always automatic', () => {
     wider.ring_inner_px = 12.4;
     wider.ring_outer_px = 31.6;
     rerender(
-      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor }, measurement: wider }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor }, measurement: wider }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByText('Ring 12 to 32 px')).toBeTruthy();
   });
@@ -803,7 +803,7 @@ describe('the ring analysis from the library', () => {
    */
   function renderRing(measurement: StarProfileMeasurement, firstRowAtTop = false): void {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor, firstRowAtTop }, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor, firstRowAtTop }, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
   }
@@ -946,7 +946,7 @@ describe('StarProfilePanel', () => {
 
   it('shows only the width, one plot with a mirrored curve and a half-height line, and the angle slider', () => {
     const { container } = render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByTestId('star-profile-width').textContent).toBe('FWHM 3.20 px (2.40″)');
     // The line plot is the main view; the ring view is behind a collapsed "Optics detail" link.
@@ -981,7 +981,7 @@ describe('StarProfilePanel', () => {
   it('puts the FWHM label to the right of the right end of the half-max line, with the header value', () => {
     // The plot reaches 10 pixels each way and the right end is at 1.6, so the label goes on the right.
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(lastAnnotation).toMatchObject({
       x: 1.6, y: 445, text: 'FWHM 3.20 px', xanchor: 'left', yanchor: 'middle', xshift: 6, borderwidth: 0,
@@ -993,14 +993,14 @@ describe('StarProfilePanel', () => {
   it('moves the FWHM label to the left end when the right end is in the right quarter of the plot', () => {
     // A cut half-length of 3 and a FWHM of 3.2: the right end (1.6) is beyond half of the range.
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement({ cut_half_length_px: 3 }) }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement({ cut_half_length_px: 3 }) }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(lastAnnotation).toMatchObject({ x: -1.6, xanchor: 'right', xshift: -6 });
   });
 
   it('draws the curve in the accent blue, the points in light neutral, and a visible dashed FWHM line with a themed label', () => {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     const [points, curve, fwhmLine] = plotData['star-profile-plot'];
     expect(curve.line?.color).toBe('rgb(53, 132, 228)');
@@ -1011,7 +1011,7 @@ describe('StarProfilePanel', () => {
 
   it('writes rounded values with units in the hover labels and drops the trace-name box', () => {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     const [points, curve, fwhmLine] = plotData['star-profile-plot'];
     expect(points.hovertemplate).toBe('x %{x:.2f} px, %{y:.3g}<extra></extra>');
@@ -1022,7 +1022,7 @@ describe('StarProfilePanel', () => {
   it('closes from an icon button named by its aria-label', () => {
     const onClose = vi.fn();
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={onClose} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={onClose} />
     );
     const close = screen.getByRole('button', { name: 'Close star profile' });
     expect(close.getAttribute('title')).toBe('Close star profile');
@@ -1048,7 +1048,7 @@ describe('StarProfilePanel', () => {
       },
     });
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByTestId('star-profile-plot-yaxis-type').textContent).toBe('linear');
     expect(plotData['star-profile-plot'][0].y).toEqual([-20, 0, 900]);
@@ -1074,7 +1074,7 @@ describe('StarProfilePanel', () => {
   it('gives the clipped reason as the saturation row tooltip, and the notes as one line', () => {
     const measurement = makeMeasurement({ clipped: true, clipped_reason: 'Three pixels share the peak value.', color_note: 'Color image: channels averaged.' });
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} pictureNote="Already stretched." />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} pictureNote="Already stretched." />
     );
     expect(screen.getByTestId('star-profile-row-saturation').getAttribute('title')).toBe('Three pixels share the peak value.');
     expect(screen.getByTestId('star-profile-note').textContent).toBe('Color image: channels averaged. Already stretched.');
@@ -1083,7 +1083,7 @@ describe('StarProfilePanel', () => {
   it('shows the reason in place of the width, and draws no fitted curve or FWHM line, for a profile that is not a star', () => {
     const measurement = makeMeasurement({ star_found: false, not_a_star_reason: 'Too flat to be a star.' });
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByTestId('star-profile-width').textContent).toBe('Too flat to be a star.');
     expect(screen.queryByRole('alert')).toBeNull();
@@ -1094,7 +1094,7 @@ describe('StarProfilePanel', () => {
   it('falls back to the Gaussian fit, and says so', () => {
     const measurement = makeMeasurement({ moffat: { model: 'moffat', fitted: false, reason: 'Too few pixels.' } });
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByTestId('star-profile-width').textContent).toBe('FWHM 3.00 px (2.25″) (Gaussian)');
     expect(plotData['star-profile-plot'][1].y[0]).toBe(180);
@@ -1106,7 +1106,7 @@ describe('StarProfilePanel', () => {
       gaussian: { model: 'gaussian', fitted: false, reason: 'No fit.' },
     });
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     expect(screen.getByTestId('star-profile-width').textContent).toBe('Too few pixels above the noise.');
     expect(plotData['star-profile-plot'].map((trace) => trace.name)).toEqual(['pixels along the cut']);
@@ -1124,7 +1124,7 @@ describe('the star inspector card', () => {
     render(
       <StarProfilePanel
         state={{ status: 'ready', anchor, measurement: makeMeasurement() }}
-        cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
+        cutAngleDeg={0} onCutAngleChange={noop} onClose={noop}
         starName="Vega" identity={identity} onOpenInManager={open}
       />
     );
@@ -1138,7 +1138,7 @@ describe('the star inspector card', () => {
 
   it('has no link when the star is not in the catalog', () => {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} starName="Unnamed star" />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} starName="Unnamed star" />
     );
     expect(screen.queryByRole('button', { name: 'Open in Astronomy Manager' })).toBeNull();
   });
@@ -1147,7 +1147,7 @@ describe('the star inspector card', () => {
     const measurement = makeMeasurement({ circle_neighbor_count: 1, peak_over_sky_noise: 4 });
     render(
       <StarProfilePanel
-        state={{ status: 'ready', anchor, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} frameWidthPx={3.0}
+        state={{ status: 'ready', anchor, measurement }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} frameWidthPx={3.0}
       />
     );
     expect(screen.getByTestId('star-profile-row-width').textContent).toContain('frame typical 3.0 px');
@@ -1166,7 +1166,7 @@ describe('the star inspector card', () => {
     const { unmount } = render(
       <StarProfilePanel
         state={{ status: 'ready', anchor, measurement: makeMeasurement({ star_elongation: 1.5, star_elongation_angle_deg: 35 }) }}
-        cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
+        cutAngleDeg={0} onCutAngleChange={noop} onClose={noop}
       />
     );
     const stretched = screen.getByTestId('star-profile-row-shape').textContent ?? '';
@@ -1176,7 +1176,7 @@ describe('the star inspector card', () => {
     render(
       <StarProfilePanel
         state={{ status: 'ready', anchor, measurement: makeMeasurement({ star_elongation: null, star_elongation_angle_deg: null, star_shape_judgeable: false, star_shape_note: 'too faint', star_shape_detail: 'The star is too faint.' }) }}
-        cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop}
+        cutAngleDeg={0} onCutAngleChange={noop} onClose={noop}
       />
     );
     const faint = screen.getByTestId('star-profile-row-shape').textContent ?? '';
@@ -1187,7 +1187,7 @@ describe('the star inspector card', () => {
 
   it('opens the ring view behind the Optics detail link and closes it again', () => {
     render(
-      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+      <StarProfilePanel state={{ status: 'ready', anchor, measurement: makeMeasurement() }} cutAngleDeg={0} onCutAngleChange={noop} onClose={noop} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Optics detail' }));
     expect(screen.getByTestId('star-profile-ring-plot')).toBeTruthy();

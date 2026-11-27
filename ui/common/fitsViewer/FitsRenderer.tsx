@@ -364,7 +364,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
       <StarProfilePanel
         state={starProfile.state}
-        cutAngleDegrees={starProfile.cutAngleDegrees}
+        cutAngleDeg={starProfile.cutAngleDeg}
         onCutAngleChange={starProfile.setCutAngle}
         cutLengthPx={starProfile.cutLengthPx}
         onCutLengthChange={starProfile.setCutLength}

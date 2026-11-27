@@ -25,7 +25,7 @@ function term(order: number, amplitude: number, significant: boolean, direction 
     amplitude_debiased: amplitude,
     significance: significant ? 5 : 1,
     significant,
-    direction_degrees: direction,
+    direction_deg: direction,
   };
 }
 
@@ -60,7 +60,7 @@ describe('describeRing', () => {
 
 describe('harmonicCurve', () => {
   const source = (terms: RingHarmonic[]) => ({
-    ring_bin_angle_degrees: [], ring_bin_counts: [], ring_harmonics: terms, ring_constant: 0.5, ring_scale_value: 20,
+    ring_bin_angle_deg: [], ring_bin_counts: [], ring_harmonics: terms, ring_constant: 0.5, ring_scale_value: 20,
   });
 
   it('is the constant times the scale when nothing is significant', () => {

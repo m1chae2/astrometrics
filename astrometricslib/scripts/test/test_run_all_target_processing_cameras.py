@@ -122,6 +122,9 @@ class FakeConfig:
 class FakeAstrometrics:
     """A stand-in for `Astrometrics` that records the passes asked for."""
 
+    current: FakeAstrometrics | None = None
+    """The stand-in built last, which records the full passes."""
+
     def __init__(self, targets: list[SimpleNamespace], setups: ObservatorySetups) -> None:
         """Set up the fake.
 
@@ -149,11 +152,15 @@ class FakeAstrometrics:
         self.earlier_nights_failures: set[str] = set()
         self.odd_even_difference_calls: list[str] = []
         self.odd_even_difference_failures: set[str] = set()
+        self.picture_calls: list[str] = []
         self.processing = SimpleNamespace(
-            process_target=self.process_target,
-            stack=self.stack,
+            stacking=SimpleNamespace(run=self.stack),
+            enhancement=SimpleNamespace(run=self.make_picture),
             stack_subset=self.stack_subset,
         )
+        # The script runs a pass through `process_targets_in_parallel`; the
+        # `script` fixture sends those calls to the fake built last.
+        FakeAstrometrics.current = self
         self.quality = SimpleNamespace(
             records=SimpleNamespace(query=self.query_quality),
             frames=SimpleNamespace(record=self.record_frame_measurements),
@@ -195,6 +202,17 @@ class FakeAstrometrics:
         self.stack_calls.append({"target": target.id, **keywords})
         if target.id in self.stack_failures:
             raise RuntimeError(f"stacking {target.id} broke")
+        return SimpleNamespace()
+
+    def make_picture(self, target: Any, *arguments: Any, **keywords: Any) -> SimpleNamespace:
+        """Record one picture request.
+
+        Returns
+        -------
+        result : `types.SimpleNamespace`
+            An empty picture result.
+        """
+        self.picture_calls.append(target.id)
         return SimpleNamespace()
 
     def stack_subset(self, target: Any, frames: list[Any], **keywords: Any) -> SimpleNamespace:
@@ -291,6 +309,14 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
         run_all_target_processing,
         "stack_subset",
         lambda pipelines, target, frames, **keywords: pipelines.stack_subset(target, frames, **keywords),
+    )
+    # A full pass goes to the stand-in library built last, which records it.
+    monkeypatch.setattr(
+        run_all_target_processing,
+        "process_targets_in_parallel",
+        lambda config, target_ids, **keywords: FakeAstrometrics.current.process_target(
+            target_ids, **keywords
+        ),
     )
     return run_all_target_processing
 

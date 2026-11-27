@@ -192,7 +192,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import ProcessingPipelines
+from astrometricslib import StackingPipeline
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -575,7 +575,7 @@ def predict_weighting_mode(
 ) -> WeightingMode:
     """Predict the mode the stacker will use for a future stack.
 
-    This asks the library (`ProcessingPipelines.predict_stack_weights`),
+    This asks the library (`processing.stacking.predict_weights`),
     which runs the stacker's own rule: a configured mode wins; with none, the
     stacker weights by noise when equal weights would leave the stack at
     least 5 percent noisier (``sqrt(mean(1/t) * mean(t)) >= 1.05``).
@@ -597,8 +597,8 @@ def predict_weighting_mode(
         ``equal``; ``unknown`` for a configured mode the forward model does
         not know (such as star count).
     """
-    prediction = ProcessingPipelines.predict_stack_weights(
-        list(exposure_seconds), configured_weight, is_spectral=is_spectral
+    prediction = StackingPipeline.predict_weights(
+        list(exposure_seconds), configured_weight, kind="spectral" if is_spectral else "imaging"
     )
     return {
         "group": WeightingMode.GROUP,
@@ -614,7 +614,7 @@ def fold_exposure_lengths(exposure_seconds: Sequence[float | None]) -> list[floa
     The stacker stacks each exposure length on its own. A length with too few
     frames is folded into the nearest length that has enough. The rule is the
     stacker's own, asked of the library
-    (`ProcessingPipelines.predict_stack_weights`).
+    (`processing.stacking.predict_weights`).
 
     Parameters
     ----------
@@ -627,7 +627,7 @@ def fold_exposure_lengths(exposure_seconds: Sequence[float | None]) -> list[floa
         The group length of each frame. Every entry is `None` when a length
         cannot be read, because the frames then stay in one group.
     """
-    return ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).folded_exposure_lengths
+    return StackingPipeline.predict_weights(list(exposure_seconds)).folded_exposure_lengths
 
 
 def exposure_lengths_left_out(exposure_seconds: Sequence[float | None]) -> list[str | None]:
@@ -636,7 +636,7 @@ def exposure_lengths_left_out(exposure_seconds: Sequence[float | None]) -> list[
     A length with too few frames to stack on its own is folded into the
     nearest group only when that group is near enough in exposure. A frame
     with no such group is left out of the stack. The rule is the stacker's
-    own, asked of the library (`ProcessingPipelines.predict_stack_weights`).
+    own, asked of the library (`processing.stacking.predict_weights`).
 
     Parameters
     ----------
@@ -649,7 +649,7 @@ def exposure_lengths_left_out(exposure_seconds: Sequence[float | None]) -> list[
         For each frame, `None` when the stacker would stack it, or the
         sentence that says why it would leave it out.
     """
-    return list(ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).left_out_reasons)
+    return list(StackingPipeline.predict_weights(list(exposure_seconds)).left_out_reasons)
 
 
 def star_width_weights(widths_px: Sequence[float]) -> list[float] | None:
@@ -671,7 +671,7 @@ def star_width_weights(widths_px: Sequence[float]) -> list[float] | None:
     """
     if not widths_px:
         return None
-    return ProcessingPipelines.predict_stack_weights(
+    return StackingPipeline.predict_weights(
         [1.0] * len(widths_px), "wfwhm", star_width_px=list(widths_px)
     ).weights
 
@@ -3038,7 +3038,7 @@ def combine_group_weights(
     ``i`` of group ``g`` counts ``W_g w_i / sum(w)``, where the sum runs over
     the group's frames. This is a copy of the rule of the stacker's own
     records, for groups that are already known; a test checks it against
-    `ProcessingPipelines.predict_stack_weights`.
+    `processing.stacking.predict_weights`.
 
     Parameters
     ----------

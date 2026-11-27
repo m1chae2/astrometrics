@@ -96,6 +96,7 @@ from astrometricslib.utilities.gaia_record_ids import GAIA_DR3_PREFIX, gaia_reco
 __all__ = [
     "IDENTIFICATION_SIDECAR_SUFFIX",
     "UNNAMED_STAR",
+    "identify_stack",
     "identify_stack_stars",
     "read_stack_identification",
 ]
@@ -905,3 +906,58 @@ def _catalog_only(
             )
         )
     return found
+
+
+def identify_stack(stack_path: str, *, config: Any = None, drivers: Any = None) -> StackIdentification:
+    """Name the detected stars of a stack, reporting to the current job.
+
+    This is the owner of `processing.astrometry.identify`. It runs
+    `identify_stack_stars` with the job context: the share done and a
+    sentence go to the current job (see `get_current_job`), and a run given
+    up on (see `bind_abandonment`) stops before the next step or Gaia tile.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The imaging stack. A raw frame is refused.
+    config : `AppConfiguration`, optional
+        The settings.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver.
+
+    Returns
+    -------
+    identification : `StackIdentification`
+        The named stars. It is also saved next to the stack.
+    """
+    from astrometricslib.foundation.jobs.runner import get_current_job
+    from astrometricslib.foundation.run_abandonment import raise_if_abandoned
+
+    def report(share: float, message: str) -> None:
+        """Pass one progress step to the current job, if there is one.
+
+        Parameters
+        ----------
+        share : `float`
+            The share done, 0 to 1.
+        message : `str`
+            What is being done.
+        """
+        job = get_current_job()
+        if job is not None:
+            job.mark("running", round(share * 100), message=message)
+
+    def stopped() -> bool:
+        """Raise when the run was given up on; otherwise say to go on.
+
+        Returns
+        -------
+        stop : `bool`
+            Always `False`: a run given up on raises `RunAbandonedError`.
+        """
+        raise_if_abandoned()
+        return False
+
+    return identify_stack_stars(
+        stack_path, config=config, drivers=drivers, progress=report, should_stop=stopped
+    )

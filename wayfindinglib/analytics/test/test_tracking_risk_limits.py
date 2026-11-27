@@ -9,7 +9,8 @@ caution breakpoint.
 
 import pytest
 
-from astrometricslib.parameters import RunBasis, parameter_context, record_basis
+from astrometricslib._internal.parameters import parameter_context, record_basis
+from astrometricslib.parameters import RunBasis
 from wayfindinglib.analytics import tracking_risk
 
 

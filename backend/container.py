@@ -53,6 +53,7 @@ class Container:
         self.sync_service = None
         self.quality_measurement_service = None
         self.stack_review_service = None
+        self.job_history_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.auto_download_service = None
@@ -156,7 +157,9 @@ class Container:
             self.auto_download_service.stop()
         if self.astrometrics is not None:
             try:
-                self.astrometrics.processing.stop_stacking_programs()
+                from astrometricslib.drivers import get_stacking_driver
+
+                get_stacking_driver().stop_running_programs()
             except Exception:  # shutdown must go on to stop the rest
                 logger.exception("Could not stop the stacking programs at shutdown")
         if self.wayfinder is not None:
@@ -309,6 +312,9 @@ class Container:
         from backend.services.processing.stack_review_service import StackReviewService
 
         self.stack_review_service = StackReviewService(astrometrics=self.astrometrics)
+        from backend.services.processing.job_history_service import JobHistoryService
+
+        self.job_history_service = JobHistoryService(self.astrometrics)
         self.quality_measurement_service = QualityMeasurementService(
             astrometrics=self.astrometrics,
             socket_manager=self.socket_manager,

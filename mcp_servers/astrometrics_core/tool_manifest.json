@@ -65,12 +65,40 @@
       "interim_block": "",
       "note": "It writes a measured gain and read noise into the camera profile in the configuration file. The AI is read-only."
     },
+    "jobs_get": {
+      "tool_class": "observe",
+      "category": "jobs-history",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 one job's whole record, with its stored result. Reads the logs database only."
+    },
+    "jobs_get_lineage": {
+      "tool_class": "observe",
+      "category": "jobs-history",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the pipeline runs that produced a target's data. Reads the logs database only."
+    },
+    "jobs_get_log": {
+      "tool_class": "observe",
+      "category": "jobs-history",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the last lines of one job's log, at most 200. Reads the logs database only."
+    },
+    "jobs_get_warnings": {
+      "tool_class": "observe",
+      "category": "jobs-history",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the warnings one job detected: its failed quality checks, with value, limit and register entry. Reads the quality database only."
+    },
     "jobs_query": {
       "tool_class": "observe",
       "category": "jobs-history",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at 'started' after the app stopped still shows as active. The AI gets at most 50 jobs and 200 log lines, and not detail=full."
+      "note": "Built 2026-10-03. Lists jobs from the logs database, opened read-only. A job stuck at 'started' after the app stopped shows as stale. Since #206 the AI gets 20 jobs unless it asks, at most 50, without their stored numbers; one job, its log, its warnings and a target's lineage have their own tools."
     },
     "observatory_configuration_create": {
       "tool_class": "unclassified",
@@ -107,89 +135,68 @@
       "interim_block": "",
       "note": "Writes the database. The AI is read-only."
     },
-    "processing_acquire_job_slot": {
+    "processing_asteroids_run": {
       "tool_class": "change-data",
       "category": "image-processing",
-      "disposition": "drop",
+      "disposition": "withhold",
       "interim_block": "",
-      "note": "Internal concurrency lock exposed by reflection."
+      "note": "Since #206 the asteroid search of processing_process_target, which was withheld: The AI is read-only, so a tool that writes is not offered."
     },
-    "processing_find_stack_configuration": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why none or several match and lists the target's configurations. Reads the target record only."
-    },
-    "processing_get_stack_identification": {
+    "processing_astrometry_get_identification": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution it came from. Writes nothing."
     },
-    "processing_list_preview_bright_objects": {
-      "tool_class": "observe",
+    "processing_astrometry_get_named_stars": {
+      "tool_class": "unclassified",
       "category": "image-processing",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, which the astrometrics-backend server serves; this library tool stays withheld."
+      "note": "A Command Console building block, uncapped. The AI reads a target's named stars through star_query."
     },
-    "processing_open_in_siril": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
-    },
-    "processing_plate_solve": {
+    "processing_astrometry_solve": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Since 2026-11-26 (#199) returns a PlateSolution: the image center, pixel scale, rotation and the sky map's header cards. Solves one image in memory and writes nothing."
     },
-    "processing_predict_stack": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app runs it as the background job processing:check_stack for its Check Frames button. A library call would hold the tool open. An AI lists the frames already set aside with quality_set_aside_frames."
-    },
-    "processing_predict_stack_weights": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them."
-    },
-    "processing_process_target": {
-      "tool_class": "change-data",
+    "processing_enhancement_get_bright_objects": {
+      "tool_class": "observe",
       "category": "image-processing",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
+      "note": "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, which the astrometrics-backend server serves; this library tool stays withheld."
     },
-    "processing_set_preview_bright_object": {
-      "tool_class": "unclassified",
+    "processing_stacking_get_stack": {
+      "tool_class": "observe",
       "category": "image-processing",
-      "disposition": "withhold",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. The AI reaches it through processing_enhance, which the astrometrics-backend server serves; this library tool stays withheld."
+      "note": "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why none or several match and lists the target's configurations. Reads the target record only."
     },
-    "processing_stack_summary": {
+    "processing_stacking_get_summary": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs and each exposure group. Reads the saved summary."
     },
-    "processing_stop_stacking_programs": {
+    "processing_stacking_predict": {
       "tool_class": "unclassified",
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Stops every Siril the library started. The backend calls it when it stops."
+      "note": "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app runs it as the background job processing:check_stack for its Check Frames button. A library call would hold the tool open. An AI lists the frames already set aside with quality_set_aside_frames."
+    },
+    "processing_stacking_predict_weights": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them."
     },
     "quality_blocks_measure_aperture": {
       "tool_class": "compute",
@@ -583,12 +590,12 @@
       "interim_block": "",
       "note": "Developer check."
     },
-    "visualization_get_last_captured_image": {
+    "visualization_get_sky_picture": {
       "tool_class": "observe",
       "category": "image-processing",
-      "disposition": "fix",
-      "interim_block": "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use visualization_render_fits with a path, which returns a real image.",
-      "note": "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it into visualization_render_fits with a latest option."
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-26 for the Planetarium's Images layer: places a target's picture on the sky as a grid of sky positions. Since #206 it is visualization_get_sky_picture. Of no use to an AI client."
     },
     "visualization_get_star_overlay": {
       "tool_class": "observe",
@@ -597,33 +604,75 @@
       "interim_block": "",
       "note": "Since #206 the overlay that star_query's detail='overlay' gave. Places a target's catalog stars in pixels on its stack or a named image and writes nothing."
     },
-    "visualization_place_stack_picture_on_sky": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Built 2026-11-26 for the Planetarium's Images layer: a grid of sky positions for drawing a picture on a sky chart. Of no use to an AI client."
-    },
-    "visualization_plot": {
+    "visualization_plot_asteroids": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. Saves nothing."
+      "note": "Since #206 the asteroid track chart of visualization_plot. Saves nothing."
     },
-    "visualization_render_fits": {
+    "visualization_plot_astrometry": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the astrometry chart of visualization_plot. Saves nothing."
+    },
+    "visualization_plot_focus": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the focus against temperature chart of visualization_plot. Saves nothing."
+    },
+    "visualization_plot_image": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the figure kind of visualization_render_fits: one frame or stack at full resolution with the optional detections and named-stars overlays; the registry sends it as a PNG image. Saves nothing."
+    },
+    "visualization_plot_photometry": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the photometry chart of visualization_plot. Saves nothing."
+    },
+    "visualization_plot_spectroscopy": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the spectroscopy chart of visualization_plot. Saves nothing."
+    },
+    "visualization_plot_star": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the star chart of visualization_plot: light curve over spectrum. Saves nothing."
+    },
+    "visualization_plot_target": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-05. Draws the combined chart of a target; the registry sends it as a PNG image. Since #206 it is visualization_plot_target, and each other chart has its own tool. Saves nothing."
+    },
+    "visualization_render": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing."
+      "note": "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and a manual brightness range; 1200 pixels on its longest side unless asked. Since #206 it is visualization_render; the overlays moved to visualization_plot_image. Saves nothing."
     },
-    "visualization_stack_sky_picture_files": {
-      "tool_class": "unclassified",
+    "visualization_render_newest": {
+      "tool_class": "observe",
       "category": "image-processing",
-      "disposition": "drop",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-11-26 for the Planetarium's Images layer: names the picture and stretched stack that place a target's picture on the sky. Of no use to an AI client."
+      "note": "Since #206 the newest FITS file in the frames folder, drawn as a real image (the old visualization_get_last_captured_image sent base64 text the reply limit cut). Saves nothing."
     }
   }
 }

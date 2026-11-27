@@ -138,7 +138,7 @@ def run_analysis() -> None:
 
             start_time = time.time()
             try:
-                stacked_path = astrometrics.processing.stack(
+                stacked_path = astrometrics.processing.stacking.run(
                     target,
                     frames=target_frames,
                     rejection_sigma=(sigma_low, sigma_high),

@@ -153,7 +153,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # A short answer about a target's current stack, read from the numbers the
     # stacking stage saved with it. Nothing is measured and nothing is written.
     # A target with no saved stack summary raises `NotFoundError`.
-    "processing:stack_summary": ("astrometrics.processing", "stack_summary"),
+    "processing:stack_summary": ("stack_review_service", "get_stack_summary"),
     # Makes a stack's preview picture again from the stack that is there. It
     # takes about a minute, so the service starts it as a background job and
     # answers at once with the result or the job to follow. A write (pictures
@@ -164,11 +164,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # its plate solution. A read: the answer is kept beside the stack, so
     # only the first call per stack file asks SIMBAD. SIMBAD out of reach or
     # a stack with no plate solution is a message in the answer, not an error.
-    "processing:list_bright_objects": ("astrometrics.processing", "list_preview_bright_objects"),
+    "processing:list_bright_objects": ("stack_review_service", "list_bright_objects"),
     # Saves the user's choice of the object the masked stretch protects on
     # the target. It makes no picture: the choice is read the next time the
     # target is stacked or its preview is made.
-    "processing:set_bright_object": ("astrometrics.processing", "set_preview_bright_object"),
+    "processing:set_bright_object": ("stack_review_service", "set_bright_object"),
     # What a stack would do with its frames: which it would set aside and why,
     # and which darks, flats and bias each exposure group would use. It reads
     # every frame, so the service runs it as a background job. Nothing is
@@ -201,7 +201,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "quality:resolve_rows": ("quality_measurement_service", "resolve_rows"),
     # The job history, read-only. `detail="warnings"` lists the warnings one
     # job detected, from the stored quality rows that carry its id.
-    "jobs:query": ("astrometrics.jobs", "query"),
+    "jobs:query": ("job_history_service", "query"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "run_analysis"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),

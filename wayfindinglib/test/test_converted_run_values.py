@@ -8,12 +8,11 @@ defaults.
 
 import pytest
 
+from astrometricslib._internal.parameters import parameter_context, record_basis
 from astrometricslib.parameters import (
     ParameterSource,
     RunBasis,
     TunedParameter,
-    parameter_context,
-    record_basis,
     resolve_parameter,
 )
 from wayfindinglib.analytics import envelope_assembly

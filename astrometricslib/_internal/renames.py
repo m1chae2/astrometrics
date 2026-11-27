@@ -22,7 +22,7 @@ from typing import NoReturn
 
 from astrometricslib.foundation.errors import MovedError
 
-__all__ = ["RENAMES", "MovedNames"]
+__all__ = ["RENAMES", "MovedNames", "moved_module_name"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
@@ -128,6 +128,99 @@ RENAMES: dict[str, str] = {
         "astrometrics.quality.stacks.record_noise_growth(target), record_night_contributions(target) "
         "or record_odd_even_noise(target)"
     ),
+    # Step 4d: one object per pipeline under `processing`; no `process_target`.
+    "astrometricslib.ProcessingPipelines.stack": (
+        "astrometrics.processing.stacking.run(target, frames=astrometrics.targets.frames.query(target)), "
+        "then astrometrics.processing.enhancement.run(target) for the picture"
+    ),
+    "astrometricslib.ProcessingPipelines.predict_stack": (
+        "astrometrics.processing.stacking.predict(target, frames=...), or "
+        "astrometricslib.arguments.check_frames(frames, target) for the frame choice alone"
+    ),
+    "astrometricslib.ProcessingPipelines.predict_stack_weights": (
+        "astrometrics.processing.stacking.predict_weights(exposures_s, kind=...)"
+    ),
+    "astrometricslib.ProcessingPipelines.stack_summary": (
+        "astrometrics.processing.stacking.get_summary(target)"
+    ),
+    "astrometricslib.ProcessingPipelines.find_stack_configuration": (
+        "astrometrics.processing.stacking.get_stack(target, configuration)"
+    ),
+    "astrometricslib.ProcessingPipelines.remake_preview": (
+        "astrometrics.processing.enhancement.run(target, settings=EnhancementSettings(...), stack=...)"
+    ),
+    "astrometricslib.ProcessingPipelines.list_preview_bright_objects": (
+        "astrometrics.processing.enhancement.get_bright_objects(target, force=...)"
+    ),
+    "astrometricslib.ProcessingPipelines.set_preview_bright_object": (
+        "astrometrics.targets.update(target, preview_bright_object=PreviewBrightObject(mode=..., ...))"
+    ),
+    "astrometricslib.ProcessingPipelines.process_target": (
+        "each pipeline in turn: astrometrics.processing.astrometry.run(target), photometry.run(target), "
+        "spectroscopy.run(target), spectroscopy.record_variation(target) or asteroids.run(target)"
+    ),
+    "astrometricslib.ProcessingPipelines.plate_solve": "astrometrics.processing.astrometry.solve(path)",
+    "astrometricslib.ProcessingPipelines.identify_stack": "astrometrics.processing.astrometry.identify(path)",
+    "astrometricslib.ProcessingPipelines.get_stack_identification": (
+        "astrometrics.processing.astrometry.get_identification(path)"
+    ),
+    "astrometricslib.ProcessingPipelines.acquire_job_slot": (
+        "nothing: every pipeline run takes a job slot itself"
+    ),
+    "astrometricslib.ProcessingPipelines.open_in_siril": (
+        "nothing in the library: the app's Open in Siril button opens a stack"
+    ),
+    "astrometricslib.ProcessingPipelines.stop_stacking_programs": (
+        "nothing in the library: the app stops its Siril runs when it stops"
+    ),
+    "astrometricslib.ProcessingPipelines.ANALYSIS_STAGES": (
+        "the pipeline objects of astrometrics.processing (astrometry, photometry, spectroscopy, asteroids)"
+    ),
+    "astrometricslib.ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES": (
+        "the pipeline objects of astrometrics.processing (astrometry, photometry, spectroscopy)"
+    ),
+    "astrometricslib.ProcessingPipelines.DEFAULT_ANALYSIS_STAGES": (
+        "astrometrics.processing.astrometry.run, photometry.run and spectroscopy.run, in turn"
+    ),
+    # Step 4f: visualization and jobs.
+    "astrometricslib.Visualization.render_fits": (
+        "astrometrics.visualization.render(image) for a picture, or "
+        "astrometrics.visualization.plot_image(image, overlays=...) for a figure"
+    ),
+    "astrometricslib.Visualization.plot": (
+        "astrometrics.visualization.plot_target(target), plot_star(star), plot_astrometry(target), "
+        "plot_photometry(target), plot_spectroscopy(target), plot_focus(target) or plot_asteroids(target)"
+    ),
+    "astrometricslib.Visualization.get_last_captured_image": "astrometrics.visualization.render_newest()",
+    "astrometricslib.Visualization.stack_sky_picture_files": (
+        "astrometrics.visualization.get_sky_picture(target)"
+    ),
+    "astrometricslib.Visualization.place_stack_picture_on_sky": (
+        "astrometrics.visualization.get_sky_picture(target)"
+    ),
+    # Step 4f: names the host modules no longer offer.
+    "astrometricslib.drivers.LIBRARY_DATA_KINDS": "astrometricslib.drivers.get_library_data_version(config)",
+    "astrometricslib.drivers.LibraryFolders": "astrometricslib.drivers.library_folders(config_file)",
+    "astrometricslib.drivers.read_launch_identity": (
+        "astrometricslib.drivers.launch_identity_from_settings(settings)"
+    ),
+    "astrometricslib.drivers.healpix_pixels_of_points": "nothing public (a private sky-tile helper)",
+    "astrometricslib.drivers.tile_of_source_id": "nothing public (a private sky-tile helper)",
+    "astrometricslib.drivers.tiles_for_cone": "nothing public (a private sky-tile helper)",
+    "astrometricslib.drivers.tiles_for_footprint": "nothing public (a private sky-tile helper)",
+    "astrometricslib.parameters.run_tuning": "astrometricslib.parameters.tune(...)",
+    "astrometricslib.parameters.collect_tuners": "astrometricslib.parameters.tune(...)",
+    "astrometricslib.parameters.read_tuned_record": "astrometricslib.parameters.tune(...)",
+    "astrometricslib.parameters.record_basis": "nothing public (the pipelines record their run bases)",
+    "astrometricslib.parameters.current_parameter_context": (
+        "astrometricslib.parameters.frames_parameter_context(...)"
+    ),
+    "astrometricslib.parameters.parameter_context": (
+        "astrometricslib.parameters.frames_parameter_context(...)"
+    ),
+    "astrometricslib.parameters.setup_parameter_context": (
+        "astrometricslib.parameters.frames_parameter_context(...)"
+    ),
 }
 
 
@@ -157,3 +250,35 @@ class MovedNames:
         if moved is not None:
             raise moved
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}", name=name, obj=self)
+
+
+def moved_module_name(module_name: str, name: str) -> NoReturn:
+    """Refuse a name a public module no longer offers, saying where it went.
+
+    A host module (`astrometricslib.jobs`, `drivers`, `parameters`) calls
+    this from its module-level ``__getattr__``, which Python calls only for
+    a name the module does not have. A name in the rename table raises an
+    `ImportError` that says where it went, caused by its `MovedError`: an
+    `ImportError` passes through ``from astrometricslib.drivers import
+    <old name>`` with its message, where an `AttributeError` would be
+    replaced by a bare "cannot import name".
+
+    Parameters
+    ----------
+    module_name : `str`
+        The module's dotted name, such as ``"astrometricslib.drivers"``.
+    name : `str`
+        The name that was read.
+
+    Raises
+    ------
+    ImportError
+        When the rename table lists ``"<module>.<name>"``.
+    AttributeError
+        For any other name.
+    """
+    key = f"{module_name}.{name}"
+    if not name.startswith("__") and key in RENAMES:
+        moved = MovedError(key, RENAMES[key])
+        raise ImportError(str(moved), name=module_name) from moved
+    raise AttributeError(f"module {module_name!r} has no attribute {name!r}", name=name)

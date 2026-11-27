@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.parameters import TuningInputs, TuningSkippedError, collect_tuners
+from astrometricslib._internal.parameters import collect_tuners
+from astrometricslib.parameters import TuningInputs, TuningSkippedError
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import DEFAULT_MAGNITUDE_LIMIT
 from wayfindinglib.drivers.catalog.magnitude_limit_tuning import (
     MAGNITUDE_LIMIT_TUNER,

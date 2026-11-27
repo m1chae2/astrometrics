@@ -1,12 +1,13 @@
-"""Purpose: Unit tests for job registration in `ProcessingPipelines.stack`.
+"""Purpose: Unit tests for job registration of the stacking and picture runs.
 
-Description: A stacking run triggered from a script (as opposed to the
-backend's own independent job tracking) must show up in the UI. Verifies the
-job is recorded and closed out correctly on the success, no-output and error
-paths.
+Description: A stacking or picture run triggered from a script (as opposed to
+the backend's own independent job tracking) must show up in the UI. Verifies
+the job is recorded and closed out correctly on the success, no-output and
+error paths, and that a picture run is listed while it waits for a slot.
 """
 
 from collections.abc import Generator, Iterator
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.storage import process_locks
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
@@ -39,6 +41,7 @@ def isolated_job_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
     monkeypatch.setattr(config, "get_logs_path", lambda: logs_path)
     monkeypatch.setattr(config_loader, "get_configuration", lambda: config)
 
+    monkeypatch.setattr(process_locks, "acquire_resource_slot", lambda *_args, **_kwargs: nullcontext())
     yield config.get_logs_db_path()
 
 
@@ -56,14 +59,16 @@ def _read_jobs(logs_database_path: str, target_id: str) -> list:
 
 
 def _target(target_id: str) -> Target:
-    """Build a target with one light frame to stack.
+    """Build a target with one light frame to stack and a stack to picture.
 
     Returns
     -------
     target : `Target`
         The target.
     """
-    return Target(id=target_id, frames=[FrameRecord(path="/frames/a.fits", role="LIGHT", camera="Cam")])
+    target = Target(id=target_id, frames=[FrameRecord(path="/frames/a.fits", role="LIGHT", camera="Cam")])
+    target.stacking.stacked_image = "/stacks/a_Stacked.fits"
+    return target
 
 
 def _pipelines() -> ProcessingPipelines:
@@ -82,7 +87,7 @@ def test_a_successful_stack_records_a_completed_job(
 ) -> None:
     """Verify a successful stack is recorded as a completed job."""
     monkeypatch.setattr(stacking_tasks, "stack_frames", lambda *args, **kwargs: "/fake/stack.fits")
-    result = _pipelines().stack(_target("StackJobTarget"))
+    result = _pipelines().stacking.run(_target("StackJobTarget"))
 
     assert result.stacked_path == "/fake/stack.fits"
     jobs = _read_jobs(isolated_job_logging, "StackJobTarget")
@@ -103,7 +108,7 @@ def test_a_stack_with_no_output_records_a_failed_job(
     """
     monkeypatch.setattr(stacking_tasks, "stack_frames", lambda *args, **kwargs: None)
     with pytest.raises(ProcessingError, match="without making a stack"):
-        _pipelines().stack(_target("StackNoOutputTarget"))
+        _pipelines().stacking.run(_target("StackNoOutputTarget"))
 
     jobs = _read_jobs(isolated_job_logging, "StackNoOutputTarget")
     assert len(jobs) == 1
@@ -120,7 +125,7 @@ def test_a_stacking_error_records_a_failed_job_and_still_raises(
 
     monkeypatch.setattr(stacking_tasks, "stack_frames", _explode)
     with pytest.raises(RuntimeError, match="siril blew up"):
-        _pipelines().stack(_target("StackErrorTarget"))
+        _pipelines().stacking.run(_target("StackErrorTarget"))
 
     jobs = _read_jobs(isolated_job_logging, "StackErrorTarget")
     assert len(jobs) == 1
@@ -130,12 +135,12 @@ def test_a_stacking_error_records_a_failed_job_and_still_raises(
 def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
     isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify a remake shows a job row, with its id, before a slot frees."""
+    """Verify a picture run shows a job row and its id before a slot frees."""
     import threading
     import time
     from contextlib import contextmanager
 
-    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE, run_as_background_job
+    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE
     from astrometricslib.pipelines.stacking.post_processing import preview_remake
 
     slot_is_free = threading.Event()
@@ -149,15 +154,11 @@ def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
     remade = MagicMock(shown_in_viewer=False)
     monkeypatch.setattr(preview_remake, "remake_stack_preview", lambda *args, **kwargs: remade)
     pipelines = _pipelines()
-    monkeypatch.setattr(pipelines, "acquire_job_slot", busy_slot)
-    monkeypatch.setattr(pipelines, "_resolve", lambda target: _target("PreviewWaitTarget"))
+    monkeypatch.setattr(process_locks, "acquire_resource_slot", lambda *_args, **_kwargs: busy_slot())
+    target = _target("PreviewWaitTarget")
 
-    outcome = run_as_background_job(
-        lambda: pipelines.remake_preview("PreviewWaitTarget"), grace_period_seconds=0.3
-    )
-
-    assert outcome["status"] == "running"
-    assert outcome["jobId"] is not None
+    worker = threading.Thread(target=lambda: pipelines.enhancement.run(target, force=True), daemon=True)
+    worker.start()
     # The job is registered before the grace period ends, but its waiting
     # message is written by the worker thread, which a slow runner may not
     # have reached yet, so the message is waited for.
@@ -180,18 +181,13 @@ def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
 def test_a_finished_preview_remake_has_a_final_message_and_a_completion_time(
     isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A finished remake has a final message and a completion time."""
-    from contextlib import nullcontext
-
+    """A finished picture run has a final message and a completion time."""
     from astrometricslib.pipelines.stacking.post_processing import preview_remake
 
     remade = MagicMock(shown_in_viewer=False)
     monkeypatch.setattr(preview_remake, "remake_stack_preview", lambda *args, **kwargs: remade)
-    pipelines = _pipelines()
-    monkeypatch.setattr(pipelines, "acquire_job_slot", nullcontext)
-    monkeypatch.setattr(pipelines, "_resolve", lambda target: _target("PreviewDoneTarget"))
 
-    pipelines.remake_preview("PreviewDoneTarget")
+    _pipelines().enhancement.run(_target("PreviewDoneTarget"), force=True)
 
     job = _read_jobs(isolated_job_logging, "PreviewDoneTarget")[0]
     assert job.status == "completed"

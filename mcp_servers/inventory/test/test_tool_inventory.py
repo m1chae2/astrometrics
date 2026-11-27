@@ -52,7 +52,7 @@ from mcp_servers.inventory.tool_inventory import (
         ("star_record_periodicity", "change-data"),
         ("calibration_query", "observe"),
         ("quality_stacks_measure", "compute"),
-        ("visualization_plot", "compute"),
+        ("visualization_plot_target", "compute"),
         ("electron_run_python", "unrestricted"),
         ("backend_call_rpc", "unrestricted"),
         ("ui_run_tests", "develop"),

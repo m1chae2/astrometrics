@@ -1,4 +1,4 @@
-"""What `ProcessingPipelines.plate_solve` returns: where an image points.
+"""What `processing.astrometry.solve` returns: where an image points.
 
 `PlateSolution` holds the sky position of the image's center, its pixel
 scale and its rotation, plus the sky map (WCS, World Coordinate System)

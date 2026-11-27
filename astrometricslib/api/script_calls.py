@@ -166,7 +166,7 @@ def stack_subset(
             context=context,
             configuration=pipelines._config,
             drivers=pipelines._drivers,
-            stacking_slot=pipelines.acquire_job_slot,
+            stacking_slot=pipelines._job_slot,
             output_folder=output_folder,
             record_forecast_rows=record_forecast_rows,
         )

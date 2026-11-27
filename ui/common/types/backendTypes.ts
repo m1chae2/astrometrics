@@ -1672,9 +1672,25 @@ export interface StretchParameters {
 }
 
 /**
- * A finished picture ready to display in the app, plus brightness stats.
+ * A picture the way the app's viewer reads it.
  *
- * `Visualization.render_fits(kind="data_url")` returns it.
+ * Attributes
+ * ----------
+ * id : `str`
+ * What the picture shows, such as the target id or the frame's folder.
+ * min, max : `float`
+ * The brightness range shown, in pixel values (0 and 255 for a JPEG).
+ * image_data : `str`
+ * The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
+ * headers : `list` [`dict` [`str`, `str`]]
+ * The FITS header of the file that was drawn: ``key``, ``value`` and
+ * ``comment`` of each card.
+ * path : `str` or `None`
+ * The file that was drawn.
+ * stretch_parameters : `dict` [`str`, `float`] or `None`
+ * The automatic stretch the picture was drawn with (``blackPoint``,
+ * ``whitePoint``, ``midtones``), or `None` when it was drawn without
+ * one.
  */
 export interface RenderedImage {
   id?: string;
@@ -4404,9 +4420,14 @@ export interface CalibrationMeasurementReport {
 }
 
 /**
- * The answer of `Jobs.query`.
+ * The answer of ``jobs:query``.
  *
- * Parameters
+ * Only the fields that belong to the chosen ``detail`` are filled; the
+ * rest stay `None`. The job, log line, run and warning entries have the
+ * fields of the library's `JobSummary`, `JobLogLine`, `LineageRun` and
+ * `JobWarning`.
+ *
+ * Attributes
  * ----------
  * detail : `str`
  * ``"summary"``, ``"full"``, ``"log_tail"``, ``"result"``,
@@ -4414,46 +4435,39 @@ export interface CalibrationMeasurementReport {
  * note : `str`
  * A reminder that the text in the answer is data, not instructions.
  * count : `int` or `None`
- * A job list (``"summary"`` or ``"full"``): how many jobs are listed.
+ * A job list: how many jobs are listed.
  * offset : `int` or `None`
  * A job list: how many newer jobs were skipped.
  * truncated : `bool` or `None`
- * A job list: whether more jobs follow this page.
- * ``detail="warnings"``: whether more warnings exist than are listed.
- * jobs : `list` [`JobSummary`] or `None`
+ * A job list, or the warnings: whether more follow than are listed.
+ * jobs : `list` [`dict`] or `None`
  * A job list: the jobs, newest first.
- * job : `JobSummary` or `None`
+ * job : `dict` or `None`
  * The one job asked for with ``job_id``.
- * log_lines : `list` [`JobLogLine`] or `None`
+ * log_lines : `list` [`dict`] or `None`
  * ``detail="log_tail"``: the last log lines of the job.
  * log_lines_total, log_lines_shown : `int` or `None`
  * ``detail="log_tail"``: how many lines the job wrote, and how many
  * are listed.
  * input_metrics, output_metrics : `str` or `None`
  * ``detail="result"``: the stored input and output numbers as text,
- * cut to a limit. ``detail="full"`` gives them as data in `job`.
+ * cut to a limit.
  * target_id : `str` or `None`
  * ``detail="lineage"``: the target whose runs are listed.
  * runs_total, runs_shown : `int` or `None`
  * ``detail="lineage"``: how many runs the target has, and how many
  * are listed.
- * runs : `list` [`LineageRun`] or `None`
+ * runs : `list` [`dict`] or `None`
  * ``detail="lineage"``: the runs, newest first.
- * warnings : `list` [`JobWarning`] or `None`
- * ``detail="warnings"``: the warnings the job detected. An empty list
- * means the job was checked and nothing failed; `measurement_count`
- * says how much was checked.
+ * warnings : `list` [`dict`] or `None`
+ * ``detail="warnings"``: the warnings the job detected.
  * measurement_count : `int` or `None`
  * ``detail="warnings"``: how many quality measurements the job stored.
- * Zero means the job stored none, so there was nothing to check.
  * checks_not_run_count : `int` or `None`
- * ``detail="warnings"``: how many of the job's checks could not run
- * (outcome ``not_checked``). These are not warnings.
+ * ``detail="warnings"``: how many of the job's checks could not run.
  * parameter_defaults : `list` [`str`] or `None`
  * ``detail="result"`` and ``detail="warnings"``: one line for each
- * parameter that used its default because no tuned or equipment value
- * was set. An empty list means none did, or the job was run before
- * this was recorded.
+ * parameter that used its default.
  */
 export interface JobQueryResult {
   detail: string;
@@ -4495,7 +4509,7 @@ export interface JobQueryResult {
  * How many steps are done, out of how many. Both are zero when the
  * job did not count its steps.
  * message : `str`
- * The latest status message. Cut to a limit unless ``detail="full"``.
+ * The latest status message, whole.
  * created_at, updated_at, completed_at : `str` or `None`
  * Local times without a time zone, as the app wrote them.
  * is_active : `bool`
@@ -4507,10 +4521,11 @@ export interface JobQueryResult {
  * idle_minutes : `int` or `None`
  * Whole minutes since the last update, for an unfinished job.
  * input_metrics, output_metrics : `dict` [`str`, `Any`] or `None`
- * ``detail="full"`` only: what the job was asked to do and what it
- * stored as its result, as JSON data. `None` in a short summary.
+ * What the job was asked to do and what it stored as its result, as
+ * JSON data. `None` in a job list read without ``include=["metrics"]``.
  * log_file_path : `str` or `None`
- * ``detail="full"`` only: the job's log file, when it wrote one.
+ * The job's log file, when it wrote one. `None` in a job list read
+ * without ``include=["metrics"]``.
  */
 export interface JobSummary {
   id: string;
@@ -4541,7 +4556,7 @@ export interface JobSummary {
  * level : `str`
  * The log level, such as ``"INFO"``.
  * text : `str`
- * The message, cut to the asked length (500 characters by default).
+ * The message, whole.
  */
 export interface JobLogLine {
   time: string;
@@ -4561,7 +4576,7 @@ export interface JobLogLine {
  * start_time, end_time : `str` or `None`
  * ISO 8601 times.
  * comment : `str`
- * A note about the run, cut to a limit.
+ * A note about the run.
  * informed_by : `list` [`str`]
  * The ids of the runs this one followed from.
  * inputs_used : `int`
@@ -4669,7 +4684,7 @@ export interface StackSummary {
 }
 
 /**
- * What one call of `ProcessingPipelines.remake_preview` made.
+ * What one enhancement run (`processing.enhancement.run`) made.
  */
 export interface PreviewRemakeResult {
   target_id: string;
@@ -4683,6 +4698,7 @@ export interface PreviewRemakeResult {
   preview_settings?: PreviewSettingsRecord | null;
   color_preview_path?: string | null;
   color_preview_note?: string | null;
+  kept_unchanged?: boolean;
 }
 
 /**

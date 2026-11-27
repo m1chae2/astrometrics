@@ -16,7 +16,10 @@ The steps, in order:
    script polls ``jobs:query`` (``detail="full"``) until the job ends. The
    job log (``jobs:query`` with ``detail="log_tail"``, every line, uncut)
    holds one line ``Stage N of M: ...`` at the start of each stage, with a
-   time to the millisecond. Those lines cut the job into stages.
+   time to the millisecond. Those lines cut the job into stages. The
+   stacking run itself makes no picture: its ``preview`` stage line says
+   skipped, and the job's enhancement run (the picture) follows it, so the
+   ``preview`` stage's time is the enhancement run's time.
 3. The analysis steps run one after another, each a background job like the
    buttons in the display: ``photometry`` (``analysis:analyze_image`` on the
    new stack, the "Analyze Target" button), ``frame_measurements``

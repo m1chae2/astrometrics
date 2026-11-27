@@ -76,25 +76,14 @@ astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_va
 astrometricslib/api/_quality_building_blocks.py,QualityDetections.measure_profile.cut_angle_deg,A direction chosen by the caller; 0 means along a column
 astrometricslib/api/_target_frames.py,TargetFrames.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/calibration.py,CalibrationCatalog.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
+astrometricslib/api/jobs.py,Jobs.get_log.lines,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/jobs.py,MAXIMUM_JOBS,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_LINEAGE_RUNS,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_LOG_LINES,software plumbing
-astrometricslib/api/jobs.py,MAXIMUM_RESULT_LENGTH,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_TEXT_LENGTH,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
-astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
 astrometricslib/api/observatories.py,ObservatoryConfigurations.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/quality.py,QualityMeasurements.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/targets.py,TargetCatalog.measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/visualization.py,DEFAULT_IMAGE_FIGURE_SIZE,Figure size of a render_fits figure; display only
-astrometricslib/api/visualization.py,Visualization.plot.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/visualization.py,Visualization.render_fits.index,Index of the frame or layer; 0 means the first
-astrometricslib/api/visualization.py,_DEFAULT_FIGURE_SIZES,Plumbing or protocol constant
+astrometricslib/api/visualization.py,CHART_STAR_LIMIT,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/_system_posix.py,PR_SET_PDEATHSIG,"The Linux prctl option number for the parent-death signal, fixed by the kernel API"
 astrometricslib/foundation/config.py,CONFIG_RECHECK_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/config.py,[Observatory.Constraints] max_altitude,"Physical limit of altitude, used as the setting's default"
@@ -108,11 +97,11 @@ astrometricslib/foundation/config.py,[Processing.Parallelism] worker_niceness,Pr
 astrometricslib/foundation/config.py,[Processing.Siril] flat_match_time_limit_seconds,Operational time budget of the flat-to-light match; not tuning
 astrometricslib/foundation/config.py,[Processing] prefetch_workers,Plumbing: worker count
 astrometricslib/foundation/errors.py,RPC_CODES,Plumbing or protocol constant
+astrometricslib/foundation/jobs/background.py,JOB_RECORD_WAIT_SECONDS,Extra wait for a slow disk to write the job row; plumbing
+astrometricslib/foundation/jobs/background.py,run_as_background_job.grace_period_seconds,How long a caller waits before answering with the job id; plumbing
 astrometricslib/foundation/jobs/runner.py,JobHandle.mark.progress_current,Progress value of a finished job; plumbing
 astrometricslib/foundation/jobs/runner.py,_BorrowedJobHandle.mark.progress_current,Progress value of a finished job; plumbing
-astrometricslib/foundation/jobs/runner.py,_JOB_RECORD_WAIT_SECONDS,Extra wait for a slow job-row write after the grace period; plumbing
 astrometricslib/foundation/jobs/runner.py,background_job.grace_period_seconds,Job wait before returning a handle; plumbing
-astrometricslib/foundation/jobs/runner.py,run_as_background_job.grace_period_seconds,Job wait before returning a handle; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore._connect.timeout,Timeout or wait; affects only failure handling
 astrometricslib/foundation/jobs/store.py,JobStore.get_jobs_by_target.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_jobs.limit,Row or item cap that callers pass; plumbing
@@ -249,9 +238,10 @@ astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record 
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_LIFETIME_DAYS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_TILE_LEVEL,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ROW_LIMIT,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/shared/image_conversions.py,ImageConverter.convert_fits_to_png_with_stats.max_dimensions,Display size cap for an image; not used in results
-astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of the frame or layer; 0 means the first
-astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,DEFAULT_MAX_DIMENSIONS,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,LARGEST_MAX_DIMENSIONS,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,SMALLEST_CROP_SIDE_PX,Smallest zoomed piece of a picture; display only
+astrometricslib/pipelines/shared/image_conversions.py,SMALLEST_MAX_DIMENSIONS,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_scaling.py,PREVIEW_SAMPLE_SEED,software plumbing
 astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,Sampling size for sky median
 astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_16_BIT,Largest value of a 16-bit integer image (data format)
@@ -262,6 +252,9 @@ astrometricslib/pipelines/shared/image_scaling.py,_SKY_MAXIMUM_CLIP_ROUNDS,Round
 astrometricslib/pipelines/shared/image_scaling.py,_SKY_MINIMUM_SAMPLE_PIXELS,Fewest sampled pixels that can describe the sky; a data-sufficiency floor
 astrometricslib/pipelines/shared/image_scaling.py,_WHITE_COUNT_STRIDE,Speed stride for counting
 astrometricslib/pipelines/shared/image_scaling.py,_autostretch_parameters.full_scale,Default full scale of a floating-point image (data format)
+astrometricslib/pipelines/shared/job_history.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
+astrometricslib/pipelines/shared/job_history.py,get_job_log.lines,Row or item cap that callers pass; plumbing
+astrometricslib/pipelines/shared/job_history.py,query_jobs.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/neighbor_masking.py,NeighborField.around.exclude_radius,Argument default of 0 meaning no star is excluded
 astrometricslib/pipelines/shared/quality/background_measurement.py,BACKGROUND_LEVEL_METHOD,Version number of the background estimator (a label for stored values; not tuning)
 astrometricslib/pipelines/shared/quality/calibration_frame_measurement.py,NEIGHBOR_NOISE_COLUMN_STEP,Pixel step set by color sensor pattern
@@ -552,7 +545,7 @@ astrometricslib/visualization/helpers.py,plot_target_dashboard.limit,Row or item
 astrometricslib/visualization/helpers.py,plot_target_photometry.limit,Row or item cap that callers pass; plumbing
 astrometricslib/visualization/helpers.py,plot_target_spectroscopy.limit,Row or item cap that callers pass; plumbing
 astrometricslib/visualization/image_display.py,DETECTION_MARKER_SIZE,Size of an overlay circle on a figure; display only
-astrometricslib/visualization/image_display.py,MARKER_RADIUS_PIXELS,Size of an overlay circle on a PNG; display only
+astrometricslib/visualization/image_display.py,IMAGE_FIGURE_SIZE,Figure size of a plot_image figure; display only
 astrometricslib/visualization/image_display.py,STAR_MARKER_SIZE,Size of an overlay circle on a figure; display only
 astrometricslib/visualization/layers/dispersion_overlay.py,DispersionOverlay.render.active_index,Index of the highlighted star; 0 means the first
 astrometricslib/visualization/layers/image_overlay.py,ImageOverlay.render.percentile,Display stretch percentile; not used in results

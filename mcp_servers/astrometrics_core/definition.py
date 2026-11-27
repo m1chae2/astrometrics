@@ -26,6 +26,12 @@ BRANCH_PREFIXES = {
     "targets.frames": "target_frames",
     "stars": "star",
     "processing": "processing",
+    "processing.stacking": "processing_stacking",
+    "processing.enhancement": "processing_enhancement",
+    "processing.astrometry": "processing_astrometry",
+    "processing.photometry": "processing_photometry",
+    "processing.spectroscopy": "processing_spectroscopy",
+    "processing.asteroids": "processing_asteroids",
     "quality.records": "quality_records",
     "quality.frames": "quality_frames",
     "quality.stacks": "quality_stacks",
@@ -46,35 +52,43 @@ limit. The library lists every match by default."""
 STAR_QUERY_MAXIMUM_STARS = 200
 """Most stars one ``star_query`` call lists for an AI client."""
 
+JOBS_QUERY_DEFAULT_JOBS = 20
+"""How many jobs one ``jobs_query`` call lists when the client gives no
+limit. The library lists every match by default."""
+
 JOBS_QUERY_MAXIMUM_JOBS = 50
 """Most jobs one ``jobs_query`` call lists for an AI client."""
 
-JOBS_QUERY_MAXIMUM_LOG_LINES = 200
-"""Most log lines one ``jobs_query`` call returns to an AI client."""
+JOBS_LOG_MAXIMUM_LINES = 200
+"""Most log lines one ``jobs_get_log`` call returns to an AI client."""
+
+RENDER_DEFAULT_SIDE = 1200
+"""Longest side of a ``visualization_render`` picture when the client gives
+none, in pixels. The library's default (2000) suits the app's viewer; a
+smaller picture keeps an AI reply light."""
 
 CLIENT_LIMITS = {
-    "visualization_render_fits": ClientLimits(
-        hidden_parameters=("pixels", "figsize"), withheld_choices={"kind": ("figure",)}
-    ),
+    "visualization_render": ClientLimits(defaults={"max_dimensions": RENDER_DEFAULT_SIDE}),
     "observatory_configuration_query": ClientLimits(hidden_parameters=("camera", "telescope")),
     "star_query": ClientLimits(
         maximums={"limit": STAR_QUERY_MAXIMUM_STARS}, defaults={"limit": STAR_QUERY_DEFAULT_STARS}
     ),
     "jobs_query": ClientLimits(
-        hidden_parameters=("max_line_chars",),
-        withheld_choices={"detail": ("full",)},
-        maximums={"limit": JOBS_QUERY_MAXIMUM_JOBS, "lines": JOBS_QUERY_MAXIMUM_LOG_LINES},
+        hidden_parameters=("include",),
+        maximums={"limit": JOBS_QUERY_MAXIMUM_JOBS},
+        defaults={"limit": JOBS_QUERY_DEFAULT_JOBS},
     ),
+    "jobs_get_log": ClientLimits(maximums={"lines": JOBS_LOG_MAXIMUM_LINES}),
 }
-"""What an AI client may not send to a tool. `render_fits` draws a
-Matplotlib figure for a script or a notebook, and an array of pixels cannot
-travel in JSON, so a client gets the PNG and the data URL kinds only.
+"""What an AI client may not send to a tool. A picture from
+`visualization_render` is 1200 pixels on its longest side unless the client
+asks; an image is sent as a path (an array of pixels cannot travel in JSON).
 `star_query` lists 50 stars unless asked for more, and at most 200.
-`jobs_query` keeps the short answers: at most 50 jobs, at most 200 log lines
-cut to 500 characters, and no whole job records. The app's screens ask the
-library for more. A camera or telescope is an object that a client cannot send
-as JSON yet, so those filters are hidden until the server can build them from
-an id. An observatory configuration is named by its id."""
+`jobs_query` lists 20 jobs unless asked, at most 50, without their stored
+numbers (`jobs_get` reads one job whole); `jobs_get_log` returns at most 200
+lines. A camera or telescope is an object that a client cannot send as JSON
+yet, so those filters are hidden until the server can build them from an id.
+An observatory configuration is named by its id."""
 
 
 def build_registry() -> ToolRegistry:

@@ -36,7 +36,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import Pipel
 def moving_object_config_from_options(values: Any) -> MovingObjectConfig | None:
     """Turn the ``moving_object_config`` option into the settings model.
 
-    ``process_target(asteroids={"moving_object_config": {...}})`` passes the
+    A script that runs the search with its own settings passes the
     settings as a plain dictionary. Its keys are the field names of
     `MovingObjectConfig` (for example ``detection_threshold_sigma``). A key
     that is left out keeps the model's default value (not the value in the

@@ -78,9 +78,7 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
         if t:
             print(f"Running spectroscopy analysis on target: {t.id}")
             try:
-                res = astrometrics.processing.process_target(
-                    t, stages=["spectroscopy"], spectroscopy={"limit": 10}
-                ).results["spectroscopy"]
+                res = astrometrics.processing.spectroscopy.run(t, max_stars=10).results["spectroscopy"]
                 if res and "context" in res:
                     summary = t.quality.spectroscopy
                     failed_gates = failed_gate_names(summary)
@@ -120,16 +118,14 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
         if target:
             zwo_frames = [
                 f
-                for f in target.frames
+                for f in astrometrics.targets.frames.query(target, filter_name="Luminance")
                 if not camera_name or f.camera.upper() == camera_name.upper() or f.camera == "Unknown"
             ]
             print(f"Running Photometry Analysis on target: {target.id} ({len(zwo_frames)} matching frames)")
             try:
-                res = astrometrics.processing.process_target(
-                    target,
-                    stages=["photometry"],
-                    photometry={"frames": zwo_frames, "filter_name": "Luminance"},
-                ).results["photometry"]
+                res = astrometrics.processing.photometry.run(target, frames=zwo_frames or None).results[
+                    "photometry"
+                ]
                 status = res.get("status", "completed")
                 stars_found = res.get("starsFound", 0)
                 stars_proc = res.get("starsProcessed", 0)
@@ -183,7 +179,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
         if target and target.stacking.stacked_image:
             print(f"Running Asteroid Detection Analysis on target: {target.id}")
             try:
-                astrometrics.processing.process_target(target, stages=["asteroids"])
+                astrometrics.processing.asteroids.run(target)
                 candidates = target.asteroid_detection.candidates
                 summary = target.asteroid_detection.quality_summary
                 metrics = summary.asteroid_detection_metrics.model_dump() if summary is not None else {}
@@ -230,7 +226,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
         if target and target.stacking.stacked_image:
             print(f"Running Astrometry WCS Plate-Solve on target: {target.id}")
             try:
-                answer = astrometrics.processing.process_target(target, stages=["astrometry"])
+                answer = astrometrics.processing.astrometry.run(target)
                 res = answer.results["astrometry"]
                 if res:
                     wcs_found = res.get("wcs") is not None

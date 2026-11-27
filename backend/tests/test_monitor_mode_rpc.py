@@ -367,6 +367,11 @@ async def test_every_service_command_rpc_is_refused_in_monitor_mode(
     """RPC methods that go through a backend service are refused too."""
     from sys import modules
 
+    # The capture RPC waits a short time for an early refusal before it
+    # answers with a job id. On a slow runner the refusal can come later;
+    # the wait ends as soon as the capture thread ends, so a long one is free.
+    monkeypatch.setattr("backend.services.observatory.imaging_service.EARLY_FAILURE_WAIT_SECONDS", 30.0)
+
     from wayfindinglib._internal.control import SkyPosition
 
     monkeypatch.setattr(

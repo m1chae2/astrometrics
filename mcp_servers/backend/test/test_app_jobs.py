@@ -83,7 +83,9 @@ async def test_stack_starts_the_stack_buttons_job_with_the_frame_choice(
         monkeypatch, {"processing:stack": {"status": "started", "jobId": "job-7", "logFile": "/logs/x.log"}}
     )
 
-    reply = await app_jobs.tool_processing_stack("M 13", kind="imaging", filter_name="L", first_file="013")
+    reply = await app_jobs.tool_processing_stacking_run(
+        "M 13", kind="imaging", filter_name="L", first_file="013"
+    )
 
     assert requests == [
         {
@@ -94,7 +96,7 @@ async def test_stack_starts_the_stack_buttons_job_with_the_frame_choice(
         }
     ]
     assert reply["jobId"] == "job-7"
-    assert "jobs_query" in reply["follow"]
+    assert "jobs_get" in reply["follow"]
 
 
 @pytest.mark.anyio
@@ -102,7 +104,9 @@ async def test_stack_sends_exact_frames_as_the_buttons_frame_list(monkeypatch: p
     """``frames`` becomes ``image_files``, the Stack button's frame list."""
     requests = fake_backend(monkeypatch, {"processing:stack": {"status": "started", "jobId": "job-8"}})
 
-    await app_jobs.tool_processing_stack("M 13", frames=["/lights/a.fits", "/lights/b.fits"], force=True)
+    await app_jobs.tool_processing_stacking_run(
+        "M 13", frames=["/lights/a.fits", "/lights/b.fits"], force=True
+    )
 
     assert requests[0]["params"] == {
         "target_id": "M 13",
@@ -116,12 +120,12 @@ async def test_identify_stack_starts_the_astrometry_buttons_job(monkeypatch: pyt
     """A given stack goes straight to ``analysis:identify_stack``."""
     requests = fake_backend(monkeypatch, {"analysis:identify_stack": {"status": "started", "jobId": "job-9"}})
 
-    reply = await app_jobs.tool_processing_identify_stack("M 13", stack_path="/stacks/M_13.fits")
+    reply = await app_jobs.tool_processing_astrometry_identify("M 13", stack_path="/stacks/M_13.fits")
 
     assert [request["method"] for request in requests] == ["analysis:identify_stack"]
     assert requests[0]["params"] == {"target_id": "M 13", "stack_path": "/stacks/M_13.fits"}
     assert reply["jobId"] == "job-9"
-    assert "processing_get_stack_identification" in reply["follow"]
+    assert "processing_astrometry_get_identification" in reply["follow"]
 
 
 @pytest.mark.anyio
@@ -137,7 +141,7 @@ async def test_identify_stack_uses_the_targets_stack_when_none_is_given(
         },
     )
 
-    await app_jobs.tool_processing_identify_stack("M 13")
+    await app_jobs.tool_processing_astrometry_identify("M 13")
 
     assert [request["method"] for request in requests] == ["target:get", "analysis:identify_stack"]
     assert requests[1]["params"]["stack_path"] == "/stacks/M_13_L.fits"
@@ -149,7 +153,7 @@ async def test_identify_stack_refuses_a_target_with_no_stack(monkeypatch: pytest
     requests = fake_backend(monkeypatch, {"target:get": {"id": "M 13", "stacking": {"stackedImage": ""}}})
 
     with pytest.raises(NotFoundError, match="no imaging stack"):
-        await app_jobs.tool_processing_identify_stack("M 13")
+        await app_jobs.tool_processing_astrometry_identify("M 13")
 
     assert [request["method"] for request in requests] == ["target:get"]
 
@@ -158,32 +162,37 @@ STARTED = {"status": "started", "jobId": "job-12", "logFile": "/logs/analysis.lo
 """The backend's answer when the analysis job starts."""
 
 
+@pytest.mark.parametrize(
+    ("tool", "stage"),
+    [
+        (app_jobs.tool_processing_astrometry_run, "astrometry"),
+        (app_jobs.tool_processing_photometry_run, "photometry"),
+        (app_jobs.tool_processing_spectroscopy_run, "spectroscopy"),
+        (app_jobs.tool_processing_spectroscopy_record_variation, "spectral_variation"),
+    ],
+)
 @pytest.mark.anyio
-async def test_analyze_without_stages_leaves_the_choice_to_the_backend(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_each_pipeline_tool_starts_the_analysis_job_with_its_one_stage(
+    monkeypatch: pytest.MonkeyPatch, tool: object, stage: str
 ) -> None:
-    """No stages sends only the target, and the backend chooses the stages."""
-    chosen = {**STARTED, "stages": ["photometry", "spectroscopy"]}
-    requests = fake_backend(monkeypatch, {"analysis:analyze_image": chosen})
+    """One tool per pipeline: each sends its own stage and nothing else."""
+    requests = fake_backend(monkeypatch, {"analysis:analyze_image": {**STARTED, "stages": [stage]}})
 
-    reply = await app_jobs.tool_processing_analyze("M 13")
+    reply = await tool("M 13")
 
     assert [request["method"] for request in requests] == ["analysis:analyze_image"]
-    assert requests[0]["params"] == {"target_id": "M 13"}
+    assert requests[0]["params"] == {"target_id": "M 13", "stages": [stage]}
     assert reply["jobId"] == "job-12"
-    assert reply["stages"] == ["photometry", "spectroscopy"]
-    assert "jobs_query" in reply["follow"]
+    assert "jobs_get" in reply["follow"]
 
 
 @pytest.mark.anyio
-async def test_analyze_forwards_the_stages_camera_and_optic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stages, camera and focal length go to the backend unchanged."""
+async def test_a_pipeline_tool_forwards_the_camera_and_optic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Camera and focal length go to the backend unchanged."""
     answer = {**STARTED, "stages": ["photometry"], "configuration": "Nikon DSLR DSC D5300@300mm"}
     requests = fake_backend(monkeypatch, {"analysis:analyze_image": answer})
 
-    reply = await app_jobs.tool_processing_analyze(
-        "M 27", stages=["photometry"], camera_id="D5300", focal_length_mm=300
-    )
+    reply = await app_jobs.tool_processing_photometry_run("M 27", camera_id="D5300", focal_length_mm=300)
 
     assert requests[0]["params"] == {
         "target_id": "M 27",
@@ -195,12 +204,14 @@ async def test_analyze_forwards_the_stages_camera_and_optic(monkeypatch: pytest.
 
 
 @pytest.mark.anyio
-async def test_analyze_passes_an_already_running_answer_through(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_pipeline_tool_passes_an_already_running_answer_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The already_running answer reaches the caller with the job's id."""
     running = {"status": "already_running", "jobId": "job-3", "logFile": "/logs/analysis.log"}
     fake_backend(monkeypatch, {"analysis:analyze_image": running})
 
-    reply = await app_jobs.tool_processing_analyze("M 13")
+    reply = await app_jobs.tool_processing_astrometry_run("M 13")
 
     assert reply["status"] == "already_running"
     assert reply["jobId"] == "job-3"
@@ -213,7 +224,7 @@ async def test_remake_preview_starts_the_apps_preview_job(monkeypatch: pytest.Mo
         monkeypatch, {"processing:remake_preview": {"status": "running", "job_id": "job-11"}}
     )
 
-    reply = await app_jobs.tool_processing_remake_preview("M 13", denoise=False, starnet=True)
+    reply = await app_jobs.tool_processing_enhancement_run("M 13", denoise=False, starnet=True)
 
     assert requests[0]["method"] == "processing:remake_preview"
     assert requests[0]["params"] == {"target_id": "M 13", "denoise": False, "starnet": True}
@@ -226,7 +237,7 @@ async def test_remake_preview_forwards_the_camera_and_optic(monkeypatch: pytest.
     answer = {"status": "running", "job_id": "job-12", "configuration": "Nikon DSLR DSC D5300@300mm"}
     requests = fake_backend(monkeypatch, {"processing:remake_preview": answer})
 
-    reply = await app_jobs.tool_processing_remake_preview("M 27", camera_id="D5300", focal_length_mm=300)
+    reply = await app_jobs.tool_processing_enhancement_run("M 27", camera_id="D5300", focal_length_mm=300)
 
     assert requests[0]["params"] == {"target_id": "M 27", "camera_id": "D5300", "focal_length_mm": 300}
     assert reply["configuration"] == "Nikon DSLR DSC D5300@300mm"
@@ -287,7 +298,7 @@ async def test_a_job_tool_fails_clearly_when_the_backend_is_not_running(
     monkeypatch.setattr(definition, "post_to_backend", no_backend)
 
     with pytest.raises(ExternalServiceError, match="Could not connect to the backend"):
-        await app_jobs.tool_processing_stack("M 13")
+        await app_jobs.tool_processing_stacking_run("M 13")
 
 
 def active_job(job_id: str, job_type: str, target: str = "M 13", status: str = "running") -> dict:

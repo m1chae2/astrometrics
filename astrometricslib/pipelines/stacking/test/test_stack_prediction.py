@@ -247,7 +247,7 @@ def test_a_check_that_sets_every_frame_aside_does_not_raise(
 
 
 def test_the_exact_frames_given_are_the_ones_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A frame list reaches the check as given; a choice with it raises."""
+    """A frame list reaches the check as given; an empty one raises."""
     target = make_target(tmp_path / "lights")
     seen: list[Any] = []
 
@@ -269,10 +269,10 @@ def test_the_exact_frames_given_are_the_ones_checked(tmp_path: Path, monkeypatch
     monkeypatch.setattr(CalibrationCatalog, "_calibration_library", property(lambda _self: None))
     ticked = target.frames[2:5]
 
-    assert pipelines.predict_stack(target, frames=ticked) == "done"
+    assert pipelines.stacking.predict(target, frames=ticked) == "done"
     assert [frame.path for frame in seen] == [frame.path for frame in ticked]
     with pytest.raises(InvalidArgumentError):
-        pipelines.predict_stack(target, frames=ticked, filter_name="L")
+        pipelines.stacking.predict(target, frames=[])
 
 
 def add_calibration(tmp_path: Path, library: CalibrationLibrary, bias_offsets: list[int]) -> None:

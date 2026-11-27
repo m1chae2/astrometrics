@@ -5,18 +5,23 @@ point lands on the reference sky position, the SIP distortion terms are
 applied, the first grid row is the picture's top row (the FITS file's first
 row), and a header with no plate solution, or with only the mount's pointing,
 gives nothing. Also checks which files are used: the color picture when there
-is one, and the stretched stack named after the stack.
+is one, and the stretched stack named after the stack; and that
+`get_sky_picture` leaves out a target without files and keeps each answer
+until a file changes.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.models.target import TargetStackingResult
+from astrometricslib.models.target import Target, TargetStackingResult
+from astrometricslib.visualization import sky_placement
 from astrometricslib.visualization.sky_placement import (
     GRID_POINTS_PER_SIDE,
+    get_sky_picture,
     place_picture_on_sky,
     sky_grid,
     sky_picture_files,
@@ -150,3 +155,75 @@ def test_a_solved_stretched_stack_places_its_picture(tmp_path: Path) -> None:
     assert len(placement.grid) == GRID_POINTS_PER_SIDE**2
     assert place_picture_on_sky(str(unsolved), "/pictures/M_1.jpg") is None
     assert place_picture_on_sky(str(tmp_path / "missing.fits"), "/pictures/M_1.jpg") is None
+
+
+def _target_with_pictures(folder: Path, name: str) -> tuple[Target, Path, Path]:
+    """Make a target whose stack has a stretched stack and a color picture.
+
+    Parameters
+    ----------
+    folder : `Path`
+        Where to write the files.
+    name : `str`
+        The file name stem of the stack.
+
+    Returns
+    -------
+    target, processed, picture : `tuple` [`Target`, `Path`, `Path`]
+        The target, its plate-solved stretched stack and its picture.
+    """
+    processed = folder / f"{name}_Stacked_processed.fits"
+    fits.PrimaryHDU(np.zeros((HEIGHT, WIDTH), dtype=np.float32), header=_header(with_sip=False)).writeto(
+        processed
+    )
+    picture = folder / f"{name}_Stacked_color_preview.jpg"
+    picture.write_bytes(b"jpeg")
+    stacking = TargetStackingResult(
+        stacked_image=str(folder / f"{name}_Stacked.fits"), color_preview_image=str(picture)
+    )
+    return Target(id=name, stacking=stacking), processed, picture
+
+
+def test_a_target_without_files_or_solution_has_no_sky_picture(tmp_path: Path) -> None:
+    """No files, a missing picture, or an unsolved stack each give nothing."""
+    assert get_sky_picture(Target(id="M 1")) is None
+    target, processed, picture = _target_with_pictures(tmp_path, "M_1")
+    picture.unlink()
+    assert get_sky_picture(target) is None
+    picture.write_bytes(b"jpeg")
+    fits.PrimaryHDU(np.zeros((2, 2), dtype=np.float32)).writeto(processed, overwrite=True)
+    assert get_sky_picture(target) is None
+
+
+def test_the_sky_picture_is_kept_until_a_file_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second ask reads no header; a newer stack is read again."""
+    target, processed, picture = _target_with_pictures(tmp_path, "M_31")
+    calls: list[str] = []
+    place = sky_placement.place_picture_on_sky
+
+    def counted(processed_path: str, picture_path: str) -> object:
+        """Count each header read, then place the picture.
+
+        Returns
+        -------
+        placement : `SkyPicturePlacement` or `None`
+            The real placement.
+        """
+        calls.append(processed_path)
+        return place(processed_path, picture_path)
+
+    monkeypatch.setattr(sky_placement, "place_picture_on_sky", counted)
+
+    first = get_sky_picture(target)
+    second = get_sky_picture(target)
+
+    assert first is not None
+    assert first.picture_path == str(picture)
+    assert second == first
+    assert calls == [str(processed)]
+    later = os.path.getmtime(processed) + 10
+    os.utime(processed, (later, later))
+    get_sky_picture(target)
+    assert len(calls) == 2

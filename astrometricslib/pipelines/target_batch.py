@@ -1,7 +1,7 @@
 """Purpose: Run the full pipeline for many targets at once, in workers.
 
-Description: `ProcessingPipelines.process_target` hands a list of targets (or
-every target) to `process_targets_in_parallel`. Each target runs in its own
+Description: A script hands a list of targets (or every target) to
+`process_targets_in_parallel`. Each target runs in its own
 worker process, so one target that crashes (a bad frame, a Siril hang, a
 memory error) cannot take the others down with it. A worker runs
 `tasks.run_full_pipeline`: stack the target's frames from one camera, plate

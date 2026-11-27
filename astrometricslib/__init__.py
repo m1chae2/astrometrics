@@ -44,19 +44,23 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 25 names:
+The package root holds 30 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
   `warm_earth_orientation_data`;
 - the sub-API classes, which you normally reach as attributes of
   `Astrometrics` (`TargetCatalog`, with its `TargetFrames`,
-  `StellarCatalog`, `ProcessingPipelines`, `CalibrationCatalog`,
-  `QualityRecords`, `Visualization` and `Observatories`);
+  `StellarCatalog`, `ProcessingPipelines`, with its `StackingPipeline`,
+  `CalibrationCatalog`, `QualityRecords`, `Visualization` and
+  `Observatories`);
 - the core records: `Target`, `FrameRecord`, `StellarObject` and
   `FilterType`;
-- the input model `CaptureSetting`, which says which calibration sets a
-  call means;
+- the input models: `CaptureSetting`, which says which calibration sets a
+  call means, `EnhancementSettings`, the picture choices of one
+  enhancement run, `PreviewBrightObject`, the object a target's picture
+  protects, and `JobSummary`, the recorded job that ``jobs.get_log`` and
+  ``jobs.get_warnings`` take;
 - the equipment: `ObservatoryConfiguration` and the models it is built
   from, `Telescope`, `Camera`, `GuideScope`, `Mount`, `Focuser` and
   `FilterWheel`.
@@ -67,8 +71,8 @@ Five public modules hold the rest:
   that turn an error into a plain record and back;
 - `astrometricslib.reports`: the quality reports and row shapes that checks
   return, plus `CaptureSetting` and `observing_night_id`;
-- `astrometricslib.jobs`: the job history, and the tools that run a function
-  as a tracked background job;
+- `astrometricslib.jobs`: the job context tools that record a function's
+  work as a tracked job, and the switch that stops a running one;
 - `astrometricslib.drivers`: the data store and file tools that other apps
   share.
 - `astrometricslib.parameters`: the tuned-parameter declaration, its
@@ -101,6 +105,7 @@ from astrometricslib.foundation.config import AppConfiguration, get_configuratio
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.jobs import register_interrupted_job_cleanup
 from astrometricslib.foundation.logging import configure_logging
+from astrometricslib.models.job_queries import JobSummary
 from astrometricslib.models.observatory_configuration import (
     Camera,
     FilterWheel,
@@ -110,13 +115,15 @@ from astrometricslib.models.observatory_configuration import (
     ObservatoryConfiguration,
     Telescope,
 )
+from astrometricslib.models.processing_results import EnhancementSettings
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.target import FrameRecord, PreviewBrightObject, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
 
 if TYPE_CHECKING:
     from astrometricslib._internal.drivers.driver_set import Drivers
+    from astrometricslib.api._processing_stacking import StackingPipeline
     from astrometricslib.api._target_frames import TargetFrames
     from astrometricslib.api.calibration import CalibrationCatalog
     from astrometricslib.api.jobs import Jobs
@@ -145,6 +152,7 @@ _DEFERRED_EXPORTS = {
     "Observatories": "astrometricslib.api.observatories",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityRecords": "astrometricslib.api.quality",
+    "StackingPipeline": "astrometricslib.api._processing_stacking",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
     "TargetFrames": "astrometricslib.api._target_frames",
@@ -277,9 +285,7 @@ class Astrometrics(MovedNames):
             calibration=self.calibration,
             drivers=drivers,
         )
-        self.visualization = Visualization(
-            self.config, self._catalog_access, targets=self.targets, stars=self.stars
-        )
+        self.visualization = Visualization(self.config, self._catalog_access)
         self.quality = QualityRecords(
             self.config,
             self._catalog_access,
@@ -297,16 +303,20 @@ __all__ = [
     "CalibrationCatalog",
     "Camera",
     "CaptureSetting",
+    "EnhancementSettings",
     "FilterType",
     "FilterWheel",
     "Focuser",
     "FrameRecord",
     "GuideScope",
+    "JobSummary",
     "Mount",
     "Observatories",
     "ObservatoryConfiguration",
+    "PreviewBrightObject",
     "ProcessingPipelines",
     "QualityRecords",
+    "StackingPipeline",
     "StellarCatalog",
     "StellarObject",
     "Target",

@@ -2,7 +2,8 @@
 
 The preview step itself is faked. These tests check that the stack file is
 left alone, the old pictures are kept and put back on a failure, the
-overrides reach the step, and the target's processed image is updated.
+overrides reach the step, the target's processed image is updated, and that
+`processing.enhancement.run` keeps a picture that is up to date unless forced.
 """
 
 import json
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import ProcessingPipelines, Target
+from astrometricslib import EnhancementSettings, ProcessingPipelines, Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError, ProcessingError
 from astrometricslib.models.target import StackConfigurationResult
 from astrometricslib.pipelines.shared.stack_preview_path import (
@@ -283,38 +284,42 @@ def test_a_stack_that_is_not_the_targets_is_refused(stacked: Path, monkeypatch: 
 def test_the_method_passes_the_stack_and_does_not_save_an_unshown_picture(
     stacked: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``remake_preview`` hands the stack on; an unshown one saves nothing."""
+    """``enhancement.run`` hands the stack on; an unshown one saves nothing."""
     saved: list[int] = []
-    pipelines = make_pipelines(saved)
+    pipelines = make_pipelines(saved, monkeypatch)
     fake_preview(monkeypatch)
     target = make_target(stacked)
     other = add_configuration_stack(target, stacked.parent)
 
-    result = pipelines.remake_preview(target, stack_path=str(other))
+    result = pipelines.enhancement.run(target, stack=str(other), force=True)
 
     assert result.stack_path == str(other)
     assert result.shown_in_viewer is False
     assert saved == []
 
 
-def make_pipelines(saved: list[int]) -> ProcessingPipelines:
-    """Build pipelines whose stacking slot and target catalog are fakes.
+def make_pipelines(saved: list[int], monkeypatch: pytest.MonkeyPatch) -> ProcessingPipelines:
+    """Build pipelines whose job slot and target catalog are fakes.
 
     Parameters
     ----------
     saved : `list` [`int`]
         Gets one entry each time the catalog is saved.
+    monkeypatch : `pytest.MonkeyPatch`
+        The test's patcher, which replaces the job slot.
 
     Returns
     -------
     pipelines : `ProcessingPipelines`
         The object under test.
     """
-    pipelines = ProcessingPipelines(
-        SimpleNamespace(), SimpleNamespace(), targets=SimpleNamespace(_save=lambda: saved.append(1))
+    from astrometricslib.foundation.storage import process_locks
+
+    monkeypatch.setattr(process_locks, "acquire_resource_slot", lambda *_args, **_kwargs: nullcontext())
+    config = SimpleNamespace(get_max_concurrent_jobs=lambda: 1)
+    return ProcessingPipelines(
+        config, SimpleNamespace(), targets=SimpleNamespace(_save=lambda: saved.append(1), _config=config)
     )
-    pipelines.acquire_job_slot = nullcontext
-    return pipelines
 
 
 def test_the_method_checks_its_inputs_and_saves_the_target(
@@ -322,17 +327,56 @@ def test_the_method_checks_its_inputs_and_saves_the_target(
 ) -> None:
     """Bad inputs are refused, and a shown picture is saved to the catalog."""
     saved: list[int] = []
-    pipelines = make_pipelines(saved)
+    pipelines = make_pipelines(saved, monkeypatch)
     target = make_target(stacked)
-    with pytest.raises(InvalidArgumentError, match="kind"):
-        pipelines.remake_preview(target, kind="all")
     with pytest.raises(InvalidArgumentError, match="between 0 and 1"):
-        pipelines.remake_preview(target, denoise_strength=1.5)
+        pipelines.enhancement.run(target, EnhancementSettings(denoise_strength=1.5))
+    with pytest.raises(InvalidArgumentError, match="between 1 and 100000"):
+        pipelines.enhancement.run(target, EnhancementSettings(starnet=True, star_stretch=0.5))
     assert saved == []
 
     seen = fake_preview(monkeypatch)
-    result = pipelines.remake_preview(target, denoise=False, denoise_strength=0.4, star_toning=True)
+    result = pipelines.enhancement.run(
+        target, EnhancementSettings(denoise=False, denoise_strength=0.4, star_toning=True)
+    )
 
     assert seen == [PreviewSettings(denoise=False, denoise_strength=0.4, star_toning=True)]
     assert result.shown_in_viewer is True
+    assert result.kept_unchanged is False
     assert saved == [1]
+
+
+def test_an_up_to_date_picture_is_kept_unless_forced(stacked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A picture newer than its stack is kept; ``force`` makes it again."""
+    saved: list[int] = []
+    pipelines = make_pipelines(saved, monkeypatch)
+    seen = fake_preview(monkeypatch)
+    target = make_target(stacked)
+    picture = Path(preview_path_for(str(stacked)))
+    os.utime(stacked, (1_000_000, 1_000_000))
+    os.utime(picture, (2_000_000, 2_000_000))
+
+    kept = pipelines.enhancement.run(target)
+
+    assert kept.kept_unchanged is True
+    assert kept.preview_path == str(picture)
+    assert seen == []
+
+    remade = pipelines.enhancement.run(target, force=True)
+
+    assert remade.kept_unchanged is False
+    assert seen == [PreviewSettings()]
+
+
+def test_a_picture_older_than_its_stack_is_made_again(stacked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A new stack beside an old picture gets a new picture unforced."""
+    saved: list[int] = []
+    pipelines = make_pipelines(saved, monkeypatch)
+    seen = fake_preview(monkeypatch)
+    os.utime(Path(preview_path_for(str(stacked))), (1_000_000, 1_000_000))
+    os.utime(stacked, (2_000_000, 2_000_000))
+
+    result = pipelines.enhancement.run(make_target(stacked))
+
+    assert result.kept_unchanged is False
+    assert seen == [PreviewSettings()]

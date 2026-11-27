@@ -1313,14 +1313,14 @@ def test_the_ranking_uses_the_midpoint_of_the_log_gains() -> None:
 
 
 def test_the_group_weight_copy_agrees_with_the_librarys_prediction() -> None:
-    """`combine_group_weights` gives what `predict_stack_weights` gives."""
-    from astrometricslib import ProcessingPipelines
+    """`combine_group_weights` gives what `stacking.predict_weights` gives."""
+    from astrometricslib import StackingPipeline
     from wayfindinglib.analytics.result_quality.noise_growth import combine_group_weights, star_width_weights
 
     exposures = [10.0] * 8 + [60.0] * 6
     widths = [2.0 + 0.1 * index for index in range(14)]
     noises = {10.0: 12.0, 60.0: 30.0}
-    prediction = ProcessingPipelines.predict_stack_weights(
+    prediction = StackingPipeline.predict_weights(
         exposures, star_width_px=widths, group_frame_noise_adu=noises
     )
     assert prediction.mode == "group"

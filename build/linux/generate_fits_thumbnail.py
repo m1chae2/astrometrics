@@ -10,7 +10,7 @@ asked for.
 import sys
 import traceback
 
-# Longest picture side that `Visualization.render_fits` accepts, in pixels.
+# Longest picture side that `Visualization.render` accepts, in pixels.
 _MINIMUM_SIZE = 100
 _MAXIMUM_SIZE = 2000
 _DEFAULT_SIZE = 256
@@ -47,11 +47,18 @@ def main() -> None:
     from astrometricslib.exceptions import AstrometricsError
 
     try:
-        picture = Astrometrics().visualization.render_fits(
-            path=input_file, kind="image", max_dimensions=size, stretch=True
-        )
-        with open(output_file, "wb") as output_stream:
-            output_stream.write(picture.png_bytes)
+        picture = Astrometrics().visualization.render(input_file, max_dimensions=size, stretch=True)
+        if picture.media_type == "image/png":
+            with open(output_file, "wb") as output_stream:
+                output_stream.write(picture.picture)
+        else:
+            # A stack's saved stretched picture is a JPEG; thumbnails are PNG.
+            from io import BytesIO
+
+            from PIL import Image
+
+            with Image.open(BytesIO(picture.picture)) as decoded:
+                decoded.save(output_file, format="PNG")
     except (AstrometricsError, OSError, *_DATA_ERRORS):
         traceback.print_exc()
         sys.exit(1)

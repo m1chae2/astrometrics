@@ -1,380 +1,306 @@
-"""The stacking methods of the processing sub-API (`ProcessingPipelines`).
+"""Purpose: `StackingPipeline`, the processing sub-API's stacking pipeline.
 
-These methods stack a target's frames, predict a stack and its frame
-weights, read a stack's summary, find a stack by
-its camera and optics, and open or stop the stacking programs. They are part
-of `ProcessingPipelines` (in `processing.py`), which binds them as its methods.
+Description: `StackingPipeline` is ``Astrometrics.processing.stacking``. It
+stacks a target's frames (`run`), says what a stack would do without
+stacking (`predict`), predicts the stacker's frame weights
+(`predict_weights`), summarizes a stack (`get_summary`) and finds a target's
+stack of one observatory configuration (`get_stack`). Each method is a thin
+wrapper of one owner function, which it names. A stacking run makes only the
+stack; the enhancement pipeline (`processing.enhancement.run`) makes its
+picture.
+
+The module also keeps `_library_stack_path` and `_subset_context`, which the
+script call `stack_subset` uses through `ProcessingPipelines`.
 """
 
 import logging
 import os
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-# `ProcessingPipelines` binds the functions below as its methods, so this
-# module and `processing.py` import each other. An annotation is read
-# only when asked for, after both modules have loaded.
-from astrometricslib.api import processing as _processing
-from astrometricslib.foundation.arguments import (
-    TimeInput,
-    check_choice,
-)
-from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.foundation.jobs.runner import background_job, current_job_id
-from astrometricslib.models.processing_results import (
-    StackPrediction,
-    StackResult,
-    StackWeightPrediction,
-)
-from astrometricslib.models.quality.quality_reports import (
-    StackSummary,
-)
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.api._target_frames import _check_target
+from astrometricslib.foundation.arguments import check_choice
+from astrometricslib.foundation.jobs.runner import current_job_id
+from astrometricslib.models.observatory_configuration import ObservatoryConfiguration
+from astrometricslib.models.processing_results import StackPrediction, StackResult, StackWeightPrediction
+from astrometricslib.models.quality.quality_reports import StackSummary
 from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
-from astrometricslib.models.target import FrameRecord, StackConfigurationResult, Target
-from astrometricslib.pipelines.shared.analysis_configuration import (
-    choose_stack_configuration,
-)
-from astrometricslib.pipelines.shared.api_arguments import STACK_KINDS, StackKind, make_frame_selection
-from astrometricslib.pipelines.shared.frame_choice import FrameChoice, check_frame_list, frames_from_choice
+from astrometricslib.models.target import StackConfigurationResult, Target
+from astrometricslib.pipelines.shared.api_arguments import STACK_KINDS, StackKind
+from astrometricslib.pipelines.shared.frame_choice import FrameChoice
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
-from astrometricslib.pipelines.shared.target_records import save_quality_stamps
+
+if TYPE_CHECKING:
+    from astrometricslib.api.processing import ProcessingPipelines
+
+__all__ = ["StackingPipeline"]
 
 logger = logging.getLogger(__name__)
 
 
-@background_job("stacking", grace_period_seconds=8.0)
-def stack(
-    self: _processing.ProcessingPipelines,
-    target: str | Target,
-    frames: FrameChoice | None = None,
-    filter_name: str | None = None,
-    first_file: str | None = None,
-    last_file: str | None = None,
-    since: TimeInput | None = None,
-    until: TimeInput | None = None,
-    kind: StackKind = "imaging",
-    camera_id: str | None = None,
-    focal_length_mm: float | None = None,
-    force: bool = False,
-    denoise: bool | None = None,
-    denoise_strength: float | None = None,
-    star_toning: bool | None = None,
-    rejection_sigma: tuple[float, float] | None = None,
-    filter_wfwhm: str | None = None,
-    filter_round: str | None = None,
-    stack_weight: str | None = None,
-    generate_rejmap: bool | None = None,
-    output_file: str | None = None,
-    log_file: str | None = None,
-) -> StackResult:
-    """Stack a target's light frames, choosing which frames go in.
-
-    This runs the same stacking stage as the Stack button in the app:
-    it sets aside bad frames, stacks, trims the noisy edges, records the
-    quality summary and the preview, and saves the target. Imaging and
-    spectroscopy frames are never mixed, so ``kind`` picks one, and
-    frames from two cameras, or from two optics (focal lengths), are
-    never stacked together. An unchanged
-    stack is kept unless ``force`` is set. A target, camera or frame
-    choice that matches nothing raises `NotFoundError`; a stacking stage
-    that finishes without making a stack raises `ProcessingError`.
+class StackingPipeline(MovedNames):
+    """Stack a target's frames, and predict and summarize its stacks.
 
     Parameters
     ----------
-    target : `str` or `Target`
-        The target to stack.
-    frames : `FrameChoice`, optional
-        The exact frames to stack: the `Page` a frame query
-        returns, a list of frame records, or a list of the
-        target's frame paths. A page cut short (one with a
-        ``next_offset``) is refused. Cannot be combined with the frame
-        choices below.
-    filter_name : `str`, optional
-        Only frames of this filter, such as ``"L"`` or ``"Luminance"``.
-    first_file : `str`, optional
-        Only frames from this file onward. A bare number such as
-        ``"013"`` means frame 013.
-    last_file : `str`, optional
-        Only frames up to this file or number.
-    since : `str`, `datetime` or `Time`, optional
-        Only frames taken at or after this time (UTC if no offset).
-    until : `str`, `datetime` or `Time`, optional
-        Only frames taken at or before this time.
-    kind : `str`, optional
-        ``"imaging"`` (default) or ``"spectral"`` frames.
-    camera_id : `str`, optional
-        Only frames from this camera, such as ``"ASI 533MM"``. Chosen
-        before any other frame check. A target with frames from more
-        than one camera needs this; without it the answer is an error
-        that names the cameras and how many frames each took.
-    focal_length_mm : `float`, optional
-        Only frames taken at this focal length, such as ``405``, rounded
-        to whole millimeters. Chosen with ``camera_id``, before any other
-        frame check. A target with frames from more than one optic needs
-        this; without it the answer is an error that names the focal
-        lengths and how many frames each has.
-    force : `bool`, optional
-        Rebuild even if nothing changed since the stack on disk.
-    denoise : `bool`, optional
-        For this run's preview picture: `False` skips Cosmic Clarity,
-        `True` runs it even if the settings have it switched off. Left
-        out, the settings apply. Never written to the settings.
-    denoise_strength : `float`, optional
-        Cosmic Clarity's denoise strength for this run, from 0 to 1.
-    star_toning : `bool`, optional
-        Turn the preview's star toning on or off for this run.
-    rejection_sigma : `tuple` [`float`, `float`], optional
-        Low and high sigma-clipping bounds for pixel rejection.
-    filter_wfwhm : `str`, optional
-        Siril's weighted-FWHM frame filter.
-    filter_round : `str`, optional
-        Siril's star-roundness frame filter.
-    stack_weight : `str`, optional
-        How Siril weights each frame.
-    generate_rejmap : `bool`, optional
-        Also write the rejection maps.
-    output_file : `str`, optional
-        Where to write the stack instead of the usual place.
-    log_file : `str`, optional
-        Where to write Siril's log.
-
-    Returns
-    -------
-    result : `StackResult`
-        The frames chosen, the stack's path and its quality summary
-        (``quality_summary``). To see the frame choice, or what the stack
-        would set aside, without stacking, use `predict_stack`. To compare
-        the stack with the previous one, use
-        `astrometrics.quality.stacks.measure`.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If ``kind`` or ``denoise_strength`` is out of range, a time
-        cannot be read, ``frames`` is combined with a frame choice, the
-        frames come from more than one camera or optic, or ``frames``
-        mixes imaging and spectral frames (the message gives the counts;
-        nothing is stacked).
+    pipelines : `ProcessingPipelines`
+        The processing sub-API this pipeline belongs to.
     """
-    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
-    from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
-    from astrometricslib.pipelines.stacking.stack_request import SirilOptions, run_stack
 
-    check_choice("kind", kind, STACK_KINDS)
-    if denoise_strength is not None and not 0.0 <= denoise_strength <= 1.0:
-        raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
-    resolved = self._resolve(target)
-    chosen = self._choose_frames(
-        resolved,
-        frames,
-        kind,
-        filter_name,
-        first_file,
-        last_file,
-        since,
-        until,
-        camera_id,
-        focal_length_mm,
-    )
-    return run_stack(
-        resolved,
-        chosen,
-        kind=kind,
-        force=force,
-        preview_settings=PreviewSettings(
-            denoise=denoise, denoise_strength=denoise_strength, star_toning=star_toning
-        ),
-        siril=SirilOptions(
-            rejection_sigma=rejection_sigma,
-            filter_wfwhm=filter_wfwhm,
-            filter_round=filter_round,
-            stack_weight=stack_weight,
-            generate_rejmap=generate_rejmap,
-            output_file=output_file,
-            log_file=log_file,
-        ),
-        stacking_slot=self.acquire_job_slot,
-        save_targets=self._targets._save,
-        drivers=self._drivers,
-        measured_at=datetime.now(UTC),
-        quality_recording=FrameQualityRecording(
-            self._config,
-            self._calibration._calibration_library,
-            save_target=lambda: save_quality_stamps(self._targets, resolved),
-        ),
-    )
+    def __init__(self, pipelines: ProcessingPipelines) -> None:
+        self._pipelines = pipelines
+
+    def run(
+        self,
+        target: Target,
+        frames: FrameChoice | None = None,
+        *,
+        force: bool = False,
+        rejection_sigma: tuple[float, float] | None = None,
+        filter_wfwhm: str | None = None,
+        filter_round: str | None = None,
+        stack_weight: str | None = None,
+        generate_rejmap: bool | None = None,
+    ) -> StackResult:
+        """Stack a target's light frames, as the app's Stack button does.
+
+        The stacking stage sets aside bad frames, stacks, trims the noisy
+        edges, records the quality summary and saves the target. It makes no
+        preview picture: run `processing.enhancement.run` afterwards, as the
+        app's Stack button does. An unchanged stack is kept unless ``force``
+        is set. Imaging and spectroscopy frames are never mixed, and frames
+        from two observatory configurations (two cameras, or two optics) are
+        never stacked together.
+
+        Owner: astrometricslib.pipelines.stacking.stack_request.stack_target
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to stack.
+        frames : `FrameChoice`, optional
+            The frames to stack: the `Page` that ``targets.frames.query``
+            returns, a list of frame records or a list of the target's frame
+            paths. A page cut short is refused. To stack spectroscopy frames,
+            choose them with ``filter_name="SPEC"``. Left out, every imaging
+            light frame of the target.
+        force : `bool`, optional
+            Rebuild even if nothing changed since the stack on disk.
+        rejection_sigma : `tuple` [`float`, `float`], optional
+            Low and high sigma-clipping bounds for pixel rejection. Left
+            out, the configured value.
+        filter_wfwhm : `str`, optional
+            Siril's weighted-FWHM frame filter, such as ``"90%"``.
+        filter_round : `str`, optional
+            Siril's star-roundness frame filter.
+        stack_weight : `str`, optional
+            How Siril weights each frame.
+        generate_rejmap : `bool`, optional
+            Also write the rejection maps.
+
+        Returns
+        -------
+        result : `StackResult`
+            The frames chosen, the stack's path and its quality summary
+            (``quality_summary``).
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the frames come from more than one
+        camera or optic, or mix imaging and spectral frames; the message
+        names each group and its frame count. Raises `NotFoundError` if the
+        target has no frame to stack, and `ProcessingError` if the stage
+        finishes without making a stack.
+        """
+        from astrometricslib.pipelines.stacking.stack_request import SirilOptions, stack_target
+
+        pipelines = self._pipelines
+        return stack_target(
+            _check_target(target),
+            frames,
+            force=force,
+            siril=SirilOptions(
+                rejection_sigma=rejection_sigma,
+                filter_wfwhm=filter_wfwhm,
+                filter_round=filter_round,
+                stack_weight=stack_weight,
+                generate_rejmap=generate_rejmap,
+            ),
+            catalog=pipelines._targets,
+            calibration_library=pipelines._calibration._calibration_library,
+            drivers=pipelines._drivers,
+            measured_at=datetime.now(UTC),
+        )
+
+    def predict(self, target: Target, frames: FrameChoice | None = None) -> StackPrediction:
+        """Say what a stack would do with its frames, without stacking.
+
+        The frames are chosen as in `run`. Then the frame checks the stack
+        runs decide which frames it would set aside: clouds, trailed stars,
+        a frame off the field, a minority gain setting, a different sky
+        background, and frames an earlier run already set aside. A frame
+        with an uneven sky but normal stars is kept and listed as flagged.
+        For each exposure group of the frames that remain, the calibration
+        choice the stack makes names its dark, bias and flat frames. Nothing
+        is stacked, moved, stored or saved. The checks read every frame, so
+        a large target takes a while. To check only the frame choice, use
+        `astrometricslib.arguments.check_frames`.
+
+        Owner:
+            astrometricslib.pipelines.stacking.stack_prediction.predict_target_stack
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to check.
+        frames : `FrameChoice`, optional
+            The frames, in any form `run` takes. Left out, every imaging
+            light frame of the target.
+
+        Returns
+        -------
+        prediction : `StackPrediction`
+            The counts, the first and last chosen file, the frames set aside
+            and flagged with their reasons, each group's calibration choice,
+            and the checks' warnings.
+
+        Notes
+        -----
+        The errors are those of `run`.
+        """
+        from astrometricslib.pipelines.stacking.stack_prediction import predict_target_stack
+
+        return predict_target_stack(
+            _check_target(target), frames, calibration=self._pipelines._calibration._calibration_library
+        )
+
+    @staticmethod
+    def predict_weights(
+        exposures_s: Sequence[float | None],
+        configured_weight: str | None = None,
+        *,
+        kind: StackKind = "imaging",
+        star_width_px: Sequence[float | None] | None = None,
+        rate_variance: Sequence[float | None] | None = None,
+        group_frame_noise_adu: Mapping[float, float | None] | None = None,
+    ) -> StackWeightPrediction:
+        """Predict how the stacker would weight a set of frames.
+
+        This runs the stacker's own rules on the frame facts given, so a
+        forecast made before stacking agrees with the stack made later.
+        Nothing is read from disk or saved. The call reads no stored data,
+        so code without an `Astrometrics` can call it on the class,
+        ``StackingPipeline.predict_weights(...)``.
+
+        Owner:
+            astrometricslib.pipelines.stacking.stack_weight_prediction.predict_stack_weights
+
+        Parameters
+        ----------
+        exposures_s : `Sequence` [`float` or `None`]
+            The exposure length of each frame, in seconds. `None` marks a
+            frame whose length cannot be read.
+        configured_weight : `str`, optional
+            The ``Processing.Siril.stack_weight`` setting. A configured mode
+            wins over the stacker's own choice.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"``. A spectral stack keeps
+            its configured weight.
+        star_width_px : `Sequence` [`float` or `None`], optional
+            The weighted star width of each frame, in pixels. Needed for the
+            ``wfwhm`` weights and the weights inside each exposure group.
+        rate_variance : `Sequence` [`float` or `None`], optional
+            The variance of each frame in rate units. Needed for the
+            ``noise`` weights.
+        group_frame_noise_adu : `dict` [`float`, `float` or `None`], optional
+            The noise of one raw frame of each exposure group, in counts,
+            keyed by the group's length (``folded_exposure_lengths`` of the
+            result). Needed for the weights of an exposure-group stack.
+
+        Returns
+        -------
+        prediction : `StackWeightPrediction`
+            The weighting mode, the exposure group of each frame, and the
+            weight of each frame (or the reasons they are unknown).
+        """
+        from astrometricslib.pipelines.stacking.stack_weight_prediction import predict_stack_weights
+
+        check_choice("kind", kind, STACK_KINDS)
+        return predict_stack_weights(
+            exposures_s,
+            configured_weight,
+            is_spectral=kind == "spectral",
+            star_width_px=star_width_px,
+            rate_variance=rate_variance,
+            group_frame_noise_adu=group_frame_noise_adu,
+        )
+
+    def get_summary(self, target: Target, kind: StackKind = "imaging") -> StackSummary:
+        """Summarize a target's current stack in one short answer.
+
+        Reads the numbers the stacking stage saved with the stack, so
+        nothing is measured again: how many frames went in and how many were
+        set aside, the share of pixels rejected, the star width against what
+        the input frames predict, and what happened to each exposure group.
+
+        Owner:
+            astrometricslib.pipelines.stacking.post_processing.stack_quality_report.summarize_stack
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to summarize.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"`` stack.
+
+        Returns
+        -------
+        summary : `StackSummary`
+            The summary.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import summarize_stack
+
+        check_choice("kind", kind, STACK_KINDS)
+        return summarize_stack(_check_target(target), kind)
+
+    def get_stack(
+        self, target: Target, configuration: ObservatoryConfiguration | None = None
+    ) -> StackConfigurationResult | None:
+        """Find a target's imaging stack of one observatory configuration.
+
+        A target stacked with several configurations keeps one stack for
+        each (``stacking.stacks_by_configuration``). The result is what a
+        pipeline's ``stack=`` argument takes.
+
+        Owner:
+            astrometricslib.pipelines.shared.analysis_configuration.find_configuration_stack
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        configuration : `ObservatoryConfiguration`, optional
+            The equipment (from ``astrometrics.observatories.configurations``).
+            Left out, the target's preferred stack, or its only one.
+
+        Returns
+        -------
+        stack : `StackConfigurationResult` or `None`
+            The stack's record: ``configuration_key``, ``configuration_id``,
+            ``camera``, ``focal_length_mm`` and ``stacked_image``. `None`
+            when no stack matches, or more than one does.
+        """
+        from astrometricslib.pipelines.shared.analysis_configuration import find_configuration_stack
+
+        return find_configuration_stack(_check_target(target), configuration, self._pipelines._config)
 
 
-@background_job("stacking", grace_period_seconds=8.0)
-def _choose_frames(
-    self: _processing.ProcessingPipelines,
-    target: Target,
-    frames: FrameChoice | None,
-    kind: StackKind,
-    filter_name: str | None,
-    first_file: str | None,
-    last_file: str | None,
-    since: TimeInput | None,
-    until: TimeInput | None,
-    camera_id: str | None,
-    focal_length_mm: float | None,
-) -> list[FrameRecord]:
-    """Choose the frames of a stack, from an exact list or from choices.
-
-    `stack` and `predict_stack` both use this, so a prediction is made
-    for the frames the stack would be given.
-
-    Parameters
-    ----------
-    target : `Target`
-        The target.
-    frames : `FrameChoice` or `None`
-        The exact frames (a page, records or paths; see
-        `frames_from_choice`), or `None` to choose them with the rest.
-    kind : `str`
-        ``"imaging"`` or ``"spectral"``.
-    filter_name : `str` or `None`
-        Only frames of this filter.
-    first_file : `str` or `None`
-        Only frames from this file onward.
-    last_file : `str` or `None`
-        Only frames up to this file or number.
-    since : `str`, `datetime`, `Time` or `None`
-        Only frames taken at or after this time.
-    until : `str`, `datetime`, `Time` or `None`
-        Only frames taken at or before this time.
-    camera_id : `str` or `None`
-        Only frames from this camera.
-    focal_length_mm : `float` or `None`
-        Only frames taken at this focal length.
-
-    Returns
-    -------
-    chosen : `list` [`FrameRecord`]
-        The frames, from one camera and one optic.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If ``frames`` is combined with a choice or is empty, the
-        frames come from more than one camera or optic, or they mix
-        imaging and spectral frames. The message gives the counts.
-    """
-    from astrometricslib.pipelines.stacking.stack_request import choose_frames_to_stack
-
-    if frames is not None:
-        choices = (filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
-        if any(value is not None for value in choices):
-            raise InvalidArgumentError(
-                "Pass frames, or choose them with filter_name, first_file, last_file, since, until, "
-                "camera_id and focal_length_mm, not both."
-            )
-        chosen = frames_from_choice(frames, target)
-        check_frame_list(chosen, target_id=target.id)
-        return chosen
-    selection = make_frame_selection(filter_name, first_file, last_file, since, until, kind == "spectral")
-    return choose_frames_to_stack(target, kind, selection, camera_id, focal_length_mm)
+# -- The subset-stack noise measurements, bound by `ProcessingPipelines` --
 
 
-def predict_stack(
-    self: _processing.ProcessingPipelines,
-    target: str | Target,
-    frames: FrameChoice | None = None,
-    filter_name: str | None = None,
-    first_file: str | None = None,
-    last_file: str | None = None,
-    since: TimeInput | None = None,
-    until: TimeInput | None = None,
-    kind: StackKind = "imaging",
-    camera_id: str | None = None,
-    focal_length_mm: float | None = None,
-    checks: bool = True,
-) -> StackPrediction:
-    """Say what a stack would do with its frames, without stacking.
-
-    The frames are chosen as in `stack`. Then the same frame checks the
-    stack runs decide which frames it would set aside: clouds, trailed
-    stars, a frame off the field, a minority gain setting, a different
-    sky background, and frames an earlier run already set aside. A frame
-    with an uneven sky but normal stars is kept and listed as flagged.
-    For each exposure group of the frames that remain, the same
-    calibration choice the stack makes names the dark, bias and flat
-    frames it would use, with the library's flags for a near match.
-    Nothing is stacked, moved, stored or saved, so the answer matches the
-    stack as long as the frames, the settings and the calibration library
-    stay the same. The checks read every frame, so a large target takes
-    a while. With ``checks=False`` only the frames are chosen, which is
-    quick and reads no frame: use it to see which frames a stack would get,
-    or to have a frame choice refused before a stack starts.
-
-    Parameters
-    ----------
-    target : `str` or `Target`
-        The target to check.
-    frames : `FrameChoice`, optional
-        The exact frames to check, in any form `stack` takes. Cannot be
-        combined with the frame choices below.
-    filter_name : `str`, optional
-        Only frames of this filter.
-    first_file : `str`, optional
-        Only frames from this file onward.
-    last_file : `str`, optional
-        Only frames up to this file or number.
-    since : `str`, `datetime` or `Time`, optional
-        Only frames taken at or after this time.
-    until : `str`, `datetime` or `Time`, optional
-        Only frames taken at or before this time.
-    kind : `str`, optional
-        ``"imaging"`` (default) or ``"spectral"`` frames.
-    camera_id : `str`, optional
-        Only frames from this camera.
-    focal_length_mm : `float`, optional
-        Only frames taken at this focal length.
-    checks : `bool`, optional
-        Run the frame checks and the calibration choice. Defaults to `True`.
-        With `False`, the answer has only the frame choice (``checks_run``
-        is `False`).
-
-    Returns
-    -------
-    prediction : `StackPrediction`
-        The counts, the first and last chosen file, the frames set aside
-        and flagged with their reasons, each group's calibration choice,
-        and the checks' warnings.
-
-    Notes
-    -----
-    The errors are those of `stack`: `InvalidArgumentError` for a kind
-    out of range, a time that cannot be read, ``frames`` combined with a
-    frame choice, or frames from more than one camera or optic, and
-    `NotFoundError` when the target, camera or frame choice matches
-    nothing.
-    """
-    from astrometricslib.pipelines.stacking.stack_prediction import list_chosen_frames, predict_stack
-
-    check_choice("kind", kind, STACK_KINDS)
-    resolved = self._resolve(target)
-    chosen = self._choose_frames(
-        resolved,
-        frames,
-        kind,
-        filter_name,
-        first_file,
-        last_file,
-        since,
-        until,
-        camera_id,
-        focal_length_mm,
-    )
-    if not checks:
-        return list_chosen_frames(resolved, chosen, kind)
-    # A prediction is a read, not a pipeline run, so it records no job.
-    return predict_stack(resolved, chosen, kind, self._calibration._calibration_library)
-
-
-def _library_stack_path(
-    self: _processing.ProcessingPipelines, target: Target, kind: StackKind, *, must_exist: bool = True
-) -> str:
+def _library_stack_path(self: Any, target: Target, kind: StackKind, *, must_exist: bool = True) -> str:
     """Find the path of a target's library stack for the subset jobs.
 
     Parameters
@@ -405,9 +331,7 @@ def _library_stack_path(
     return os.path.join(folder, f"{target.id.replace(' ', '_')}{tag}_Stacked.fits")
 
 
-def _subset_context(
-    self: _processing.ProcessingPipelines, target: Target, job_id: str | None
-) -> PipelineRunContext | None:
+def _subset_context(target: Target, job_id: str | None) -> PipelineRunContext | None:
     """Make the shared facts of one subset-stack run.
 
     Parameters
@@ -429,156 +353,3 @@ def _subset_context(
         STACKING_PIPELINE_VERSION,
         {"job_id": job_id or current_job_id(), "measured_at": datetime.now(UTC)},
     )
-
-
-def find_stack_configuration(
-    self: _processing.ProcessingPipelines,
-    target: str | Target,
-    camera_id: str | None = None,
-    focal_length_mm: float | None = None,
-) -> StackConfigurationResult:
-    """Find the target's one imaging stack of a camera and optic.
-
-    A target stacked with several cameras or optics keeps one stack for
-    each (``stacking.stacks_by_configuration``). This picks the one a
-    camera and focal length name, the way `process_target` does: the
-    camera by its full name, an alias or part of its name, the focal
-    length after rounding to whole millimeters.
-
-    Parameters
-    ----------
-    target : `str` or `Target`
-        The target.
-    camera_id : `str`, optional
-        The camera. Left out, any camera.
-    focal_length_mm : `float`, optional
-        The optic's focal length in millimeters. Left out, any optic.
-
-    Returns
-    -------
-    record : `StackConfigurationResult`
-        The stack's record: ``configuration_key``, ``camera``,
-        ``focal_length_mm`` and ``stacked_image``. When neither is
-        given, or no stack or more than one matches,
-        `InvalidArgumentError` is raised, and its message lists the
-        target's configurations.
-    """
-    return choose_stack_configuration(self._resolve(target), camera_id, focal_length_mm, self._config)
-
-
-def stack_summary(
-    self: _processing.ProcessingPipelines, target: str | Target, kind: StackKind = "imaging"
-) -> StackSummary:
-    """Summarize a target's current stack in one short answer.
-
-    Reads the numbers the stacking stage saved with the stack, so nothing
-    is measured again. The answer covers how many frames went in and how
-    many were set aside, the share of pixels rejected, the star width
-    against what the input frames predict, and what happened
-    to each exposure group (its frames, whether it clipped, how far it
-    was moved to line up, and why it was left out if it was).
-
-    Parameters
-    ----------
-    target : `str` or `Target`
-        The target to summarize.
-    kind : `str`, optional
-        ``"imaging"`` (default) or ``"spectral"`` stack.
-
-    Returns
-    -------
-    summary : `StackSummary`
-        The summary.
-    """
-    from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import summarize_stack
-
-    check_choice("kind", kind, STACK_KINDS)
-    return summarize_stack(self._resolve(target), kind)
-
-
-def predict_stack_weights(
-    exposure_seconds: Sequence[float | None],
-    configured_weight: str | None = None,
-    *,
-    is_spectral: bool = False,
-    star_width_px: Sequence[float | None] | None = None,
-    rate_variance: Sequence[float | None] | None = None,
-    group_frame_noise_adu: Mapping[float, float | None] | None = None,
-) -> StackWeightPrediction:
-    """Predict how the stacker would weight a set of frames.
-
-    This runs the stacker's own rules on the frame facts you give, so a
-    forecast made before stacking agrees with the stack made later.
-    Nothing is read from disk or saved.
-
-    Parameters
-    ----------
-    exposure_seconds : `Sequence` [`float` or `None`]
-        The exposure length of each frame, in seconds. `None` marks a
-        frame whose length cannot be read.
-    configured_weight : `str`, optional
-        The ``Processing.Siril.stack_weight`` setting. A configured mode
-        wins over the stacker's own choice.
-    is_spectral : `bool`, optional
-        Whether the stack is spectral. Those keep their configured weight.
-    star_width_px : `Sequence` [`float` or `None`], optional
-        The weighted star width of each frame, in pixels. Needed for the
-        ``wfwhm`` weights and the weights inside each exposure group.
-    rate_variance : `Sequence` [`float` or `None`], optional
-        The variance of each frame in rate units. Needed for the
-        ``noise`` weights.
-    group_frame_noise_adu : `dict` [`float`, `float` or `None`], optional
-        The noise of one raw frame of each exposure group, in counts,
-        keyed by the group's length (``folded_exposure_lengths`` of the
-        result). Needed for the weights of an exposure-group stack.
-
-    Returns
-    -------
-    prediction : `StackWeightPrediction`
-        The weighting mode, the exposure group of each frame, and the
-        weight of each frame (or the reasons they are unknown).
-
-    Notes
-    -----
-    The call reads no stored data, so it is a static method. Code that
-    holds no `Astrometrics` handle can call it on the class,
-    ``ProcessingPipelines.predict_stack_weights(...)``.
-    """
-    from astrometricslib.pipelines.stacking.stack_weight_prediction import predict_stack_weights
-
-    return predict_stack_weights(
-        exposure_seconds,
-        configured_weight,
-        is_spectral=is_spectral,
-        star_width_px=star_width_px,
-        rate_variance=rate_variance,
-        group_frame_noise_adu=group_frame_noise_adu,
-    )
-
-
-def open_in_siril(self: _processing.ProcessingPipelines, file_path: str) -> None:
-    """Open a stack in the Siril program's window, for a person to inspect.
-
-    This uses the stacking program chosen for this API (Siril unless a
-    caller chose another one that has a window; one without a window raises
-    `ProcessingError`). Siril starts as its
-    own process and keeps running after the call returns. If the program
-    cannot start, the failure is logged and nothing is raised. Nothing is
-    stacked, read or saved.
-
-    Parameters
-    ----------
-    file_path : `str`
-        The FITS file to open. An empty string opens Siril alone.
-    """
-    self._drivers.stacking_or_default().open_in_viewer(file_path)
-
-
-def stop_stacking_programs(self: _processing.ProcessingPipelines) -> None:
-    """Stop every stacking program this library started and still runs.
-
-    The backend calls this when it stops, so no Siril process outlives
-    it. A person's own Siril window, opened by hand, is not touched.
-    Safe to call more than once, and when nothing is running.
-    """
-    self._drivers.stacking_or_default().stop_running_programs()

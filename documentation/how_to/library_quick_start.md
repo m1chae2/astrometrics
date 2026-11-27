@@ -36,18 +36,17 @@ astrometrics = Astrometrics(config)
 targets = astrometrics.targets.query(include_empty=True)
 target = astrometrics.targets.get("M 13")
 
-# Bring new frames into the library, then stack the light frames.
+# Bring new frames into the library, stack the light frames, then make the picture.
 astrometrics.targets.frames.add(target, ["/path/to/M_13_Light_001.fits"])
-result = astrometrics.processing.stack(target)
+result = astrometrics.processing.stacking.run(target)
+astrometrics.processing.enhancement.run(target)
 print(result.stacked_path, result.frames_selected)
 
 # Look at the stack with the detected stars and the named stars.
-figure = astrometrics.visualization.render_fits(
-    result.stacked_path, target=target, kind="figure", overlays=["detections", "stars"]
-)
+figure = astrometrics.visualization.plot_image(result.stacked_path, overlays=["detections", "stars"])
 ```
 
-`targets.get` returns `None` when the target does not exist. Create it first with `astrometrics.targets.create("M 13")`. The `processing.stack` call runs the same stage as the Stack button in the app and returns a `StackResult`. The `visualization.render_fits` call with `kind="figure"` draws the stack as a Matplotlib figure with the app's stretch. Its `overlays` mark the stars the astrometry run detects and name the stars that have photometry, as Image Processing does. Without `overlays` it draws only the picture. A notebook shows the figure in the page. The app's Command Console already holds `astrometrics` and `wayfinder`, so the same lines run there without the first two.
+`targets.get` returns `None` when the target does not exist. Create it first with `astrometrics.targets.create("M 13")`. The `processing.stacking.run` and `processing.enhancement.run` calls run the two pipelines behind the Stack button in the app: the first returns a `StackResult`, the second makes the stack's picture. The `visualization.plot_image` call draws the stack as a Matplotlib figure with the app's stretch, with its axes counting pixels from 1. (`visualization.render` gives the same picture as PNG bytes.) Its `overlays` mark the stars the astrometry run detects and name the stars that have photometry, as Image Processing does. Without `overlays` it draws only the picture. A notebook shows the figure in the page. The app's Command Console already holds `astrometrics` and `wayfinder`, so the same lines run there without the first two.
 
 ## 4. Promote a console function into the library
 

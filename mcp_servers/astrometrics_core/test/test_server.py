@@ -56,7 +56,9 @@ def test_the_main_sub_apis_are_reflected(registry: ToolRegistry) -> None:
     for name in (
         "target_query",
         "target_create",
-        "visualization_render_fits",
+        "visualization_render",
+        "visualization_plot_image",
+        "jobs_get_warnings",
         "star_query",
         "quality_stacks_measure",
         "quality_records_query",
@@ -96,30 +98,26 @@ def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> N
 
 
 def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`jobs_query` takes the documented arguments, none required."""
+    """`jobs_query` takes the documented filters, none required."""
     schema = registry.tools["jobs_query"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
-        "job_id",
         "target_id",
         "job_type",
         "status",
-        "active_only",
-        "detail",
-        "lines",
+        "active",
+        "until",
         "limit",
         "offset",
-        "before",
     }
     assert not schema.get("required")
 
 
-def test_jobs_query_keeps_ai_answers_small(registry: ToolRegistry) -> None:
-    """`jobs_query` caps jobs and log lines and withholds whole records."""
-    schema = registry.tools["jobs_query"]["tool_def"].input_schema
-    assert schema["properties"]["limit"]["maximum"] == 50
-    assert schema["properties"]["lines"]["maximum"] == 200
-    assert "full" not in schema["properties"]["detail"]["enum"]
-    assert "max_line_chars" not in schema["properties"]
+def test_jobs_tools_keep_ai_answers_small(registry: ToolRegistry) -> None:
+    """`jobs_query` caps jobs and `jobs_get_log` caps log lines."""
+    assert registry.tools["jobs_query"]["tool_def"].input_schema["properties"]["limit"]["maximum"] == 50
+    log_schema = registry.tools["jobs_get_log"]["tool_def"].input_schema
+    assert log_schema["properties"]["lines"]["maximum"] == 200
+    assert log_schema["required"] == ["job"]
 
 
 def test_manifest_covers_every_registered_tool(registry: ToolRegistry) -> None:
@@ -145,7 +143,7 @@ def test_profile_offers_no_writer_or_device_command(registry: ToolRegistry) -> N
 
 
 def test_a_rendered_frame_reaches_the_client_as_an_image(tmp_path: Path) -> None:
-    """`visualization_render_fits` replies with a PNG and its description."""
+    """`visualization_render` replies with a PNG and its description."""
     generator = np.random.default_rng(1)
     data = generator.normal(1000.0, 20.0, (200, 300)).astype(np.float32)
     data[100, 150] = 50000.0
@@ -153,35 +151,29 @@ def test_a_rendered_frame_reaches_the_client_as_an_image(tmp_path: Path) -> None
     fits.PrimaryHDU(data).writeto(frame)
 
     copy = ToolRegistry()
-    copy.register("view", "View a frame.")(lambda: Visualization(None, None).render_fits(str(frame)))
+    copy.register("view", "View a frame.")(lambda: Visualization(None, None).render(str(frame)))
     content = asyncio.run(copy.execute("view", {}))
 
     assert content[0].type == "image"
     assert content[0].mime_type == "image/png"
     assert Image.open(BytesIO(base64.b64decode(content[0].data))).size[0] > 0
-    assert "brightness_range_shown" in json.loads(content[1].text)
+    description = json.loads(content[1].text)
+    assert description["full_width_px"] == 300
+    assert "picture" not in description
 
 
-def test_render_fits_offers_the_overlays_but_not_the_figure_kind(registry: ToolRegistry) -> None:
-    """A client may ask for overlays, but not for a figure or its inputs."""
-    schema = registry.tools["visualization_render_fits"]["tool_def"].input_schema
-    assert schema["properties"]["kind"]["enum"] == ["image", "data_url"]
-    assert schema["properties"]["overlays"]["type"] == "array"
-    assert "pixels" not in schema["properties"]
-    assert "figsize" not in schema["properties"]
+def test_render_takes_the_image_as_a_path(registry: ToolRegistry) -> None:
+    """The image is sent as a path; the overlays are on the figure tool."""
+    tool = registry.tools["visualization_render"]
+    schema = tool["tool_def"].input_schema
+    assert schema["properties"]["image"]["type"] == "string"
+    assert schema["required"] == ["image"]
+    assert "overlays" in registry.tools["visualization_plot_image"]["tool_def"].input_schema["properties"]
 
 
-def test_a_figure_request_is_refused_before_the_method_runs(registry: ToolRegistry) -> None:
-    """``kind="figure"`` and a hidden argument get an error reply."""
-    for arguments in ({"path": "/x.fits", "kind": "figure"}, {"figsize": [4, 4]}):
-        content = asyncio.run(registry.execute("visualization_render_fits", arguments))
-        assert content[0].type == "text"
-        assert "invalid_argument" in content[0].text
-
-
-def test_a_large_or_full_jobs_request_is_refused_before_the_method_runs(registry: ToolRegistry) -> None:
-    """Too many lines, a whole record or an uncut log gets an error reply."""
-    for arguments in ({"lines": 201}, {"limit": 51}, {"detail": "full"}, {"max_line_chars": None}):
+def test_a_large_jobs_request_is_refused_before_the_method_runs(registry: ToolRegistry) -> None:
+    """Too many jobs or a heavy part gets an error reply."""
+    for arguments in ({"limit": 51}, {"include": ["metrics"]}):
         content = asyncio.run(registry.execute("jobs_query", arguments))
         assert "invalid_argument" in content[0].text
 

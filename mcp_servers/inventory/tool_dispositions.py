@@ -153,7 +153,6 @@ DECISIONS = {
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
     # ---- Fix first ----
-    "target_save": ToolDecision("withhold", "Writes the database. The AI is read-only."),
     "star_get_spectrum": ToolDecision(
         "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     ),
@@ -267,9 +266,6 @@ DECISIONS = {
         "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it "
         "into visualization_render_fits with a latest option.",
     ),
-    "target_get_frame": ToolDecision(
-        "keep", "Returns the path of one frame, found by ISO, exposure and index."
-    ),
     "observatory_mount_poll_external_alignment": ToolDecision(
         "drop",
         "The backend calls it to store the syncs other programs queued. It writes records, and the AI "
@@ -369,6 +365,26 @@ DECISIONS = {
         "keep",
         "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this "
         "library), so it runs as a background job.",
+    ),
+    "target_resolve": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). Turns a name into a sky position: the library's targets, then its "
+        "stars, then SIMBAD. Reads only; a name the library does not know uses the network.",
+        tool_class="observe",
+    ),
+    "target_count_by_camera": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). The light frames each camera took, and each target's frames per "
+        "configured camera. Reads only.",
+        tool_class="observe",
+    ),
+    "target_count_by_night": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). How many targets have frames from each observing night. Reads only.",
+        tool_class="observe",
+    ),
+    "target_frames_get_newest": ToolDecision(
+        "keep", "Built 2026-11-27 (#206). A target's newest light frame. Reads only.", tool_class="observe"
     ),
     "target_query": ToolDecision(
         "keep",
@@ -838,12 +854,6 @@ DECISIONS = {
         "Browser. The AI lists them with quality_set_aside_frames.",
         "change-data",
     ),
-    "quality_forget": ToolDecision(
-        "withhold",
-        "Deletes the stored quality measurements of the given frames from the quality database. The AI is "
-        "read-only, so it reads the stored numbers with quality_query instead.",
-        "change-data",
-    ),
     # ---- Records: dropped ----
     # ---- No use, empty, or cannot be called through MCP ----
     # ---- Not wanted by the user ----
@@ -866,6 +876,7 @@ DECISIONS = {
             "star_update",
             "target_add",
             "target_create",
+            "target_update",
             "planning_create_mosaic",
             "planning_create_sequence",
             "planning_create_package",
@@ -933,7 +944,19 @@ DECISIONS = {
 }
 """Tool name -> the decision about it. Every served tool has one."""
 
-TOOL_RENAMES: dict[str, str] = {}
+TOOL_RENAMES: dict[str, str] = {
+    # Step 4a of #206: targets and their frames.
+    "target_select_frames": "target_frames_query",
+    "target_read_frame_header": "target_frames_get_header",
+    "target_display_turn": "target_frames_get_rotation",
+    "target_sessions": "target_frames_get_nights",
+    "target_imaged_field_centers": "target_measure_field_centers",
+    "target_add_frames": "target_frames_add",
+    "target_reindex_frames": "target_frames_scan",
+    "quality_frame_statuses": "target_frames_get_statuses",
+    "quality_set_aside_frames": "target_frames_get_set_aside",
+    "quality_put_back_set_aside_frames": "target_frames_restore",
+}
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies
 to the new name. Empty when every row uses the current name."""

@@ -31,14 +31,17 @@ tools:
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows
-  - mcp__astrometricslib-core__quality_set_aside_frames
   - mcp__astrometricslib-core__star_get
   - mcp__astrometricslib-core__star_query
-  - mcp__astrometricslib-core__target_get_frame
-  - mcp__astrometricslib-core__target_imaged_field_centers
+  - mcp__astrometricslib-core__target_count_by_camera
+  - mcp__astrometricslib-core__target_count_by_night
+  - mcp__astrometricslib-core__target_frames_get_header
+  - mcp__astrometricslib-core__target_frames_get_newest
+  - mcp__astrometricslib-core__target_frames_get_nights
+  - mcp__astrometricslib-core__target_frames_get_set_aside
+  - mcp__astrometricslib-core__target_measure_field_centers
   - mcp__astrometricslib-core__target_query
-  - mcp__astrometricslib-core__target_read_frame_header
-  - mcp__astrometricslib-core__target_sessions
+  - mcp__astrometricslib-core__target_resolve
   - mcp__astrometricslib-core__typegen_contract_validator
   - mcp__astrometricslib-core__visualization_plot
   - mcp__astrometricslib-core__visualization_render_fits

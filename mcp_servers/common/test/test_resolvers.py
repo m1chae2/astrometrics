@@ -7,7 +7,6 @@ subject as a string id and calls the method with the object.
 """
 
 import json
-from typing import Any
 
 import pytest
 
@@ -39,9 +38,9 @@ class _FakeTargets:
     def __init__(self) -> None:
         """Hold the target ``M 31`` and remember the lookups."""
         self.held = Target(id="M 31")
-        self.lookups: list[tuple[str, Any]] = []
+        self.lookups: list[str] = []
 
-    def get(self, target: str, refresh: bool = False) -> Target | None:
+    def get(self, target: str) -> Target | None:
         """Find the one target by id.
 
         Returns
@@ -49,7 +48,7 @@ class _FakeTargets:
         target : `Target` or `None`
             The target when the id is ``M 31``.
         """
-        self.lookups.append((target, refresh))
+        self.lookups.append(target)
         return self.held if target == "M 31" else None
 
 
@@ -127,11 +126,11 @@ def test_the_table_names_each_library_type() -> None:
 
 
 def test_an_id_becomes_the_object_and_an_unknown_id_is_an_error() -> None:
-    """The lookup reads storage again; an unknown id is a reported error."""
+    """The id is looked up once; an unknown id is a reported error."""
     api = _FakeApi()
     parameter = subject_kind_of(str | Target)
     assert resolve_subject(api, parameter, "target", "M 31") is api.targets.held
-    assert api.targets.lookups == [("M 31", True)]
+    assert api.targets.lookups == ["M 31"]
     target = Target(id="Given")
     assert resolve_subject(api, parameter, "target", target) is target
     with pytest.raises(NotFoundError) as raised:

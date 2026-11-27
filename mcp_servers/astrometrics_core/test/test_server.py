@@ -71,7 +71,7 @@ def test_delete_methods_are_never_offered_as_tools(registry: ToolRegistry) -> No
     """Deleting is left to the app's own UI, so no delete tool is reflected."""
     names = set(registry.tools)
     assert not [name for name in names if "_delete" in name or name.startswith("delete")]
-    assert "target_save" in names
+    assert "target_update" in names
 
 
 async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:

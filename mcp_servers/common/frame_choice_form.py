@@ -12,21 +12,22 @@ argument as a filter object:
 * ``since`` and ``until``: ISO 8601 times (UTC when no offset is given);
 * ``filter_name``, ``first_file``, ``last_file``: the filter and a range of
   file names or frame numbers;
-* ``camera``: only frames from this camera;
+* ``configuration``: only frames taken with this observatory configuration,
+  by its id (``observatory_configuration_query`` lists them);
+* ``gain`` and ``exposure_s``: only frames of this gain and exposure length;
 * ``paths``: the exact frame paths, instead of the filters above.
 
-`build_frame_choice` makes the choice through the public library: the
-target's frame query (``targets.frames.query``) when the library has one,
-else ``targets.select_frames`` with the night and camera applied to its
-records. The method then gets the frames it would get from a script.
+`build_frame_choice` makes the choice through the public library, with the
+target's frame query (``targets.frames.query``), so the method gets the
+frames it would get from a script.
 """
 
 import types
 import typing
 from typing import Any, Union
 
-from astrometricslib.arguments import FrameChoice, observing_night_id
-from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.arguments import FrameChoice
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from mcp_servers.common.resolvers import SUBJECT_KINDS, SubjectParameter, resolve_subject
 
 FRAME_FILTER_FIELDS: dict[str, dict[str, Any]] = {
@@ -43,7 +44,12 @@ FRAME_FILTER_FIELDS: dict[str, dict[str, Any]] = {
     "filter_name": {"type": "string", "description": "Only frames of this filter, such as 'L' or 'Ha'."},
     "first_file": {"type": "string", "description": "Only frames from this file name or frame number on."},
     "last_file": {"type": "string", "description": "Only frames up to this file name or frame number."},
-    "camera": {"type": "string", "description": "Only frames from this camera, such as 'ASI 533MM'."},
+    "configuration": {
+        "type": "string",
+        "description": "Only frames taken with this observatory configuration, by its id.",
+    },
+    "gain": {"type": "number", "description": "Only frames with this gain (or ISO) setting."},
+    "exposure_s": {"type": "number", "description": "Only frames of this exposure length, in seconds."},
     "paths": {
         "type": "array",
         "items": {"type": "string"},
@@ -51,9 +57,6 @@ FRAME_FILTER_FIELDS: dict[str, dict[str, Any]] = {
     },
 }
 """The fields of the filter object, with their JSON schemas."""
-
-_SELECT_FRAMES_FIELDS = ("filter_name", "first_file", "last_file", "since", "until")
-"""The filters ``targets.select_frames`` applies itself."""
 
 
 def is_frame_choice(hint: Any) -> bool:
@@ -94,7 +97,7 @@ def frame_filter_schema(description: str) -> dict[str, Any]:
         "additionalProperties": False,
         "description": (
             f"{description} Choose the frames with a filter (night, since/until, filter_name, "
-            "first_file/last_file, camera) or give their paths."
+            "first_file/last_file, configuration, gain, exposure_s) or give their paths."
         ),
     }
 
@@ -123,6 +126,8 @@ def build_frame_choice(api_root: Any, name: str, form: Any, call_arguments: dict
     ------
     InvalidArgumentError
         If paths are combined with filters, or no target is named.
+    NotFoundError
+        If the configuration id names no configuration.
 
     Notes
     -----
@@ -143,18 +148,15 @@ def build_frame_choice(api_root: Any, name: str, form: Any, call_arguments: dict
         raise InvalidArgumentError(f"{name}: say whose frames to use with 'target'.")
     target_kind = SubjectParameter(SUBJECT_KINDS["astrometricslib", "Target"])
     target = resolve_subject(api_root, target_kind, "target", target_value)
-    targets = (api_root if hasattr(api_root, "targets") else api_root.astrometrics).targets
-    frame_query = getattr(getattr(targets, "frames", None), "query", None)
-    if callable(frame_query):
-        return frame_query(target, **filters)
-    records = targets.select_frames(
-        target, **{key: filters[key] for key in _SELECT_FRAMES_FIELDS if key in filters}
-    )
-    night = filters.get("night")
-    camera = filters.get("camera")
-    return [
-        record
-        for record in records
-        if (night is None or (record.timestamp is not None and observing_night_id(record.timestamp) == night))
-        and (camera is None or record.camera.casefold() == str(camera).casefold())
-    ]
+    astrometrics = api_root if hasattr(api_root, "targets") else api_root.astrometrics
+    configuration_id = filters.pop("configuration", None)
+    if configuration_id is not None:
+        configuration = astrometrics.observatories.configurations.get(str(configuration_id))
+        if configuration is None:
+            raise NotFoundError(
+                f"{name}: no observatory configuration with id {configuration_id!r}.",
+                details={"configuration": configuration_id},
+                report="error",
+            )
+        filters["configuration"] = configuration
+    return astrometrics.targets.frames.query(target, **filters)

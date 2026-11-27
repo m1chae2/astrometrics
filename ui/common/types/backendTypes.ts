@@ -209,6 +209,7 @@ export interface StackChoice {
  */
 export interface StackConfigurationResult {
   configurationKey: string;
+  configurationId?: string | null;
   camera?: string;
   focalLengthMm?: number | null;
   framesStacked?: number;

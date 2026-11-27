@@ -115,7 +115,7 @@ def test_a_long_frame_list_is_cut_with_a_note() -> None:
     assert reply_characters(shaped.reply) <= reply_budget()
     assert len(shaped.notes) == 1
     assert "of 3,000 frames" in shaped.notes[0]
-    assert "target_select_frames" in shaped.notes[0]
+    assert "target_frames_query" in shaped.notes[0]
 
 
 def test_a_page_of_targets_loses_frames_before_targets() -> None:

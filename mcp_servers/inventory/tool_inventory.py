@@ -376,7 +376,7 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
-        r"^(target_query|target_imaged_field_centers|planning_query_sources|planning_lookup_coordinates"
+        r"^(target_query|target_measure_field_centers|planning_query_sources|planning_lookup_coordinates"
         r"|planning_query_plans|planning_query_catalogs)$",
         "observe",
         "high",
@@ -401,7 +401,7 @@ CLASSIFICATION_RULES = (
         "Reads the job history and lineage. The logs database is opened read-only.",
     ),
     _rule(
-        r"^quality_(query|metrics|set_aside_frames)$",
+        r"^(quality_query|quality_metrics|target_frames_get_set_aside)$",
         "observe",
         "high",
         (

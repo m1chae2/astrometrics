@@ -275,20 +275,6 @@
       "interim_block": "",
       "note": "Built 2026-11-20. Picks a typical frame of a frame's session and one reference star in both, for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is stored."
     },
-    "quality_forget": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Deletes the stored quality measurements of the given frames from the quality database. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
-    "quality_frame_statuses": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest stack file's time itself; the reply is one row per frame, sized for a table on screen. quality_set_aside_frames and review_get_star_shape_review serve an AI client."
-    },
     "quality_get_aperture_record": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -359,13 +345,6 @@
       "interim_block": "",
       "note": "Built 2026-10-21. Lists the declared quality metrics (or one, given its name, or those of one checkpoint). The default detail is a short summary (unit, checkpoint, levels, purpose); detail=full adds the meaning, which way is better and how it is estimated. Fixed text, nothing is read from disk."
     },
-    "quality_put_back_set_aside_frames": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Moves chosen set-aside frames out of a target's _excluded folder back into the target and rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File Browser. The AI lists them with quality_set_aside_frames."
-    },
     "quality_query": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -386,13 +365,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with a plain reason when a picture cannot be found, and lists the ids no row has. Reads only."
-    },
-    "quality_set_aside_frames": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and reason, and says whether the reason came from a stored quality row, the folder's manifest file, or nothing but the folder. Moves nothing and writes nothing."
     },
     "star_analyze_periodicity": {
       "tool_class": "change-data",
@@ -457,12 +429,19 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "target_add_frames": {
-      "tool_class": "unclassified",
+    "target_count_by_camera": {
+      "tool_class": "observe",
       "category": "targets",
-      "disposition": "withhold",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Moves files into the library from any path. The AI is read-only; wayfindinglib calls it."
+      "note": "Built 2026-11-27 (#206). The light frames each camera took, and each target's frames per configured camera. Reads only."
+    },
+    "target_count_by_night": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#206). How many targets have frames from each observing night. Reads only."
     },
     "target_create": {
       "tool_class": "change-data",
@@ -471,12 +450,75 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "target_display_turn": {
+    "target_frames_add": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves files into the library from any path. The AI is read-only; wayfindinglib calls it."
+    },
+    "target_frames_get_header": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Reads one FITS header. Since 2026-11-26 (#199) it is the one header reader (target_get_header is gone); an AI client passes as_cards=true for key, value and comment text."
+    },
+    "target_frames_get_newest": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#206). A target's newest light frame. Reads only."
+    },
+    "target_frames_get_nights": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-01. Groups one target's frames into nights. Reads only."
+    },
+    "target_frames_get_rotation": {
       "tool_class": "unclassified",
       "category": "targets",
       "disposition": "drop",
       "interim_block": "",
       "note": "Built 2026-11-26 for the image viewer: the quarter turn that shows a raw frame the same way round as its stack, for display only. Of no use to an AI client."
+    },
+    "target_frames_get_set_aside": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and reason, and says whether the reason came from a stored quality row, the folder's manifest file, or nothing but the folder. Moves nothing and writes nothing."
+    },
+    "target_frames_get_statuses": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest stack file's time itself; the reply is one row per frame, sized for a table on screen. quality_set_aside_frames and review_get_star_shape_review serve an AI client."
+    },
+    "target_frames_query": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. review_frame_guiding already serves an AI client."
+    },
+    "target_frames_restore": {
+      "tool_class": "change-data",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves chosen set-aside frames out of a target's _excluded folder back into the target and rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File Browser. The AI lists them with quality_set_aside_frames."
+    },
+    "target_frames_scan": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the frame records. A dry_run mode that only reports what would change would let an AI use it."
     },
     "target_get": {
       "tool_class": "observe",
@@ -485,14 +527,7 @@
       "interim_block": "",
       "note": "Replaced by target_query."
     },
-    "target_get_frame": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Returns the path of one frame, found by ISO, exposure and index."
-    },
-    "target_imaged_field_centers": {
+    "target_measure_field_centers": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
@@ -506,40 +541,19 @@
       "interim_block": "",
       "note": "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each target's frames per camera; replaces target_get and target_list."
     },
-    "target_read_frame_header": {
+    "target_resolve": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Reads one FITS header. Since 2026-11-26 (#199) it is the one header reader (target_get_header is gone); an AI client passes as_cards=true for key, value and comment text."
+      "note": "Built 2026-11-27 (#206). Turns a name into a sky position: the library's targets, then its stars, then SIMBAD. Reads only; a name the library does not know uses the network."
     },
-    "target_reindex_frames": {
-      "tool_class": "change-data",
-      "category": "targets",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Writes the frame records. A dry_run mode that only reports what would change would let an AI use it."
-    },
-    "target_save": {
-      "tool_class": "change-data",
-      "category": "targets",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Writes the database. The AI is read-only."
-    },
-    "target_select_frames": {
+    "target_update": {
       "tool_class": "unclassified",
       "category": "targets",
-      "disposition": "drop",
+      "disposition": "withhold",
       "interim_block": "",
-      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. review_frame_guiding already serves an AI client."
-    },
-    "target_sessions": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-01. Groups one target's frames into nights. Reads only."
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "typegen_contract_validator": {
       "tool_class": "develop",

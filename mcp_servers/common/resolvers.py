@@ -1,16 +1,18 @@
 """Purpose: Turn the id a client sends into the library object a method takes.
 
 Description: A client sends only JSON, so it names a target, a star, an
-observing session or an observation package by its id. The library's public
-methods work on the objects themselves (`Target`, `StellarObject`,
-`ObservationSession`, `ObservationPackage`). This module is the one place
-that turns an id into its object for the MCP tools. It looks the id up
-through the libraries' public API (``targets.get``, ``stars.get``,
-``planning.get_plan``, ``planning.query_plans``).
+observing session, an observation package or an observatory configuration by
+its id. The library's public methods work on the objects themselves
+(`Target`, `StellarObject`, `ObservationSession`, `ObservationPackage`,
+`ObservatoryConfiguration`). This module is the one place that turns an id
+into its object for the MCP tools. It looks the id up through the libraries'
+public API (``targets.get``, ``stars.get``,
+``observatories.configurations.get``, ``planning.get_plan``,
+``planning.query_plans``).
 
 `SUBJECT_KINDS` is the table: one row per object type, keyed by the type's
-library and class name, so no private class is imported. A new subject
-type, such as an observatory configuration, is one more row.
+library and class name, so no private class is imported. A new subject type
+is one more row.
 
 `subject_kind_of` tells whether a parameter's type hint names a subject (the
 object alone, or with `str` and `None` beside it, or a list of them), and
@@ -50,7 +52,7 @@ def _astrometrics(api_root: Any) -> Any:
 
 
 def _find_target(api_root: Any, target_id: str) -> Any:
-    """Look up a target by id, reading storage again first.
+    """Look up a target by id (the library reads what storage changed).
 
     Parameters
     ----------
@@ -64,7 +66,25 @@ def _find_target(api_root: Any, target_id: str) -> Any:
     target : `Target` or `None`
         The target, up to date with what another program wrote, or `None`.
     """
-    return _astrometrics(api_root).targets.get(target_id, refresh=True)
+    return _astrometrics(api_root).targets.get(target_id)
+
+
+def _find_configuration(api_root: Any, configuration_id: str) -> Any:
+    """Look up a stored observatory configuration by id.
+
+    Parameters
+    ----------
+    api_root : `Astrometrics` or `Wayfinder`
+        The server's API object.
+    configuration_id : `str`
+        The configuration's id.
+
+    Returns
+    -------
+    configuration : `ObservatoryConfiguration` or `None`
+        The configuration, or `None`.
+    """
+    return _astrometrics(api_root).observatories.configurations.get(configuration_id)
 
 
 def _find_star(api_root: Any, star_id: str) -> Any:
@@ -152,6 +172,9 @@ SUBJECT_KINDS: dict[tuple[str, str], SubjectKind] = {
     for kind in (
         SubjectKind("astrometricslib", "Target", "target", _find_target),
         SubjectKind("astrometricslib", "StellarObject", "star", _find_star),
+        SubjectKind(
+            "astrometricslib", "ObservatoryConfiguration", "observatory configuration", _find_configuration
+        ),
         SubjectKind("wayfindinglib", "ObservationSession", "observing session", _find_session),
         SubjectKind("wayfindinglib", "ObservationPackage", "observation package", _find_package),
     )

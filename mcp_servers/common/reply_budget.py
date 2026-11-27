@@ -507,7 +507,7 @@ HEAVY_LISTS: tuple[HeavyList, ...] = (
         ("frames",),
         20,
         "frames",
-        "List a target's frames with target_select_frames (filter_name=, since=, until=, limit=).",
+        "List a target's frames with target_frames_query (night=, filter_name=, since=, until=, limit=).",
     ),
     HeavyList("Page", ("items",), 50, "items", _PAGE_NOTE),
     HeavyList(

@@ -23,6 +23,7 @@ MANIFEST_PATH = Path(__file__).resolve().parent / "tool_manifest.json"
 
 BRANCH_PREFIXES = {
     "targets": "target",
+    "targets.frames": "target_frames",
     "stars": "star",
     "processing": "processing",
     "quality": "quality",
@@ -45,7 +46,6 @@ CLIENT_LIMITS = {
         hidden_parameters=("pixels", "figsize"), withheld_choices={"kind": ("figure",)}
     ),
     "observatory_configuration_query": ClientLimits(hidden_parameters=("camera", "telescope")),
-    "target_select_frames": ClientLimits(hidden_parameters=("configuration",)),
     "jobs_query": ClientLimits(
         hidden_parameters=("max_line_chars",),
         withheld_choices={"detail": ("full",)},
@@ -57,9 +57,9 @@ Matplotlib figure for a script or a notebook, and an array of pixels cannot
 travel in JSON, so a client gets the PNG and the data URL kinds only.
 `jobs_query` keeps the short answers: at most 50 jobs, at most 200 log lines
 cut to 500 characters, and no whole job records. The app's screens ask the
-library for more. A camera, telescope or observatory configuration is an
-object that a client cannot send as JSON yet, so those filters are hidden
-until the server can build them from an id."""
+library for more. A camera or telescope is an object that a client cannot send
+as JSON yet, so those filters are hidden until the server can build them from
+an id. An observatory configuration is named by its id."""
 
 
 def build_registry() -> ToolRegistry:

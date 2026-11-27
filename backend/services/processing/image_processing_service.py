@@ -139,7 +139,7 @@ class ImageProcessingService(BaseBackgroundService):
             background and records its progress in the job list.
         """
         return run_as_background_job(
-            lambda: self._calibration.frames.record_measurements(
+            lambda: self._calibration.frames.record(
                 kind=kind,
                 setting=None if camera_id is None else CaptureSetting(camera=camera_id),
                 force=force,
@@ -201,7 +201,7 @@ class ImageProcessingService(BaseBackgroundService):
             """
             try:
                 only_kind = next(iter(kinds)) if len(kinds) == 1 else None
-                return self._calibration.frames.record_measurements(kind=only_kind, force=False)
+                return self._calibration.frames.record(kind=only_kind, force=False)
             finally:
                 self._finish_calibration_pass()
 

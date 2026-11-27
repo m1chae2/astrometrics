@@ -165,7 +165,6 @@
       "/tmp/claude-1000"
     ],
     "ask": [
-      "mcp__astrometricslib-core__calibration_save",
       "mcp__astrometricslib-core__target_save",
       "mcp__astrometricslib-core__star_save_all",
       "mcp__astrometrics-backend__backend_call_rpc",

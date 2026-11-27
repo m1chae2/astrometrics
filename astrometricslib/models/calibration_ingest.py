@@ -207,10 +207,10 @@ class CalibrationIngestReport(BaseModel):
     downloaded new frames learns at once whether they were found, where
     they were filed and whether the new sets are good enough. The rescan
     measures no frame of a dark or bias set: those sets are judged from the
-    numbers `calibration.frames.record_measurements` stored, so a new frame
+    numbers `calibration.frames.record` stored, so a new frame
     without numbers gives a set whose checks are ``not_checked`` with the
     reason. A new set of flats is measured, as it always was. The app
-    starts `calibration.frames.record_measurements` after an ingest or a sync
+    starts `calibration.frames.record` after an ingest or a sync
     that added darks or biases; a script must call it itself.
     """
 

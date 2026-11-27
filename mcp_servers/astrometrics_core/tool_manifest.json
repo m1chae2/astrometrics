@@ -16,7 +16,7 @@
       "interim_block": "",
       "note": "Moves files into the calibration library from any path. The AI is read-only."
     },
-    "calibration_frames_record_measurements": {
+    "calibration_frames_record": {
       "tool_class": "compute",
       "category": "calibration",
       "disposition": "withhold",
@@ -47,9 +47,9 @@
     "calibration_measure_sensor_noise": {
       "tool_class": "compute",
       "category": "calibration",
-      "disposition": "withhold",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Since 2026-11-27 (#206) it only reads: it measures a setting's gain and read noise from the library's flats and biases and writes nothing. Withheld until an AI use is reviewed; calibration_record_sensor_noise is the writer."
+      "note": "Since 2026-11-27 (#206) it only reads: it measures a setting's gain and read noise from the library's flats and biases and writes nothing, like the other measure_ tools. calibration_record_sensor_noise is the writer and stays withheld."
     },
     "calibration_query": {
       "tool_class": "observe",

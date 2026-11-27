@@ -86,7 +86,7 @@ def test_measure_frames_starts_the_job_and_answers_with_its_id(monkeypatch: pyte
         asked.update(arguments)
         return {"frameCount": 3, "measuredCount": 0, "unchangedCount": 3}
 
-    monkeypatch.setattr(container.astrometrics.calibration.frames, "record_measurements", fake_measure)
+    monkeypatch.setattr(container.astrometrics.calibration.frames, "record", fake_measure)
 
     result = serialize_rpc_result(asyncio.run(rpc_registry.execute(MEASURE, {"kind": "bias", "force": True})))
 

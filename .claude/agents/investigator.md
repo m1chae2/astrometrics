@@ -5,6 +5,7 @@ tools:
   - mcp__astrometricslib-core__calibration_assess
   - mcp__astrometricslib-core__calibration_get_profile
   - mcp__astrometricslib-core__calibration_match
+  - mcp__astrometricslib-core__calibration_measure_sensor_noise
   - mcp__astrometricslib-core__calibration_query
   - mcp__astrometricslib-core__jobs_query
   - mcp__astrometricslib-core__observatory_configuration_get

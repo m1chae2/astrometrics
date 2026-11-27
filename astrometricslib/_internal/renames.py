@@ -46,7 +46,7 @@ RENAMES: dict[str, str] = {
         "astrometrics.calibration.frames.add(paths) or frames.scan(), which save the index"
     ),
     "astrometricslib.CalibrationCatalog.measure_frames": (
-        "astrometrics.calibration.frames.record_measurements(kind, setting=CaptureSetting(camera=...))"
+        "astrometrics.calibration.frames.record(kind, setting=CaptureSetting(camera=...))"
     ),
     "astrometricslib.CalibrationCatalog.camera_profile": "astrometrics.calibration.get_profile(camera)",
 }

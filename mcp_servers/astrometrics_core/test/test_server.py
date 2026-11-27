@@ -58,9 +58,9 @@ def test_the_main_sub_apis_are_reflected(registry: ToolRegistry) -> None:
         "target_create",
         "visualization_render_fits",
         "star_query",
-        "quality_measure_stack",
-        "quality_query",
-        "quality_metrics",
+        "quality_stacks_measure",
+        "quality_records_query",
+        "quality_records_get_metrics",
         "calibration_query",
         "typegen_contract_validator",
     ):
@@ -82,26 +82,17 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
 
 
 def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`quality_measure_frames` takes the documented, optional arguments."""
-    schema = registry.tools["quality_measure_frames"]["tool_def"].input_schema
+    """`quality_frames_measure` takes a frame choice and optional settings."""
+    schema = registry.tools["quality_frames_measure"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
-        "target",
-        "filter_name",
-        "first_file",
-        "last_file",
-        "since",
-        "until",
-        "trend_frames",
-        "trend_threshold_percent",
-        "kind",
+        "frames",
         "include",
-        "remeasure",
-        "camera_id",
-        "limit",
-        "exposure_seconds",
-        "predict_exposure_seconds",
+        "trend_frames",
+        "trend_threshold_pct",
+        "bias_level_adu",
+        "predict_exposure_s",
     }
-    assert schema.get("required") == ["target"]
+    assert schema.get("required") == ["frames"]
 
 
 def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
@@ -199,22 +190,22 @@ def test_the_quality_root_replaces_the_diagnostics_tools(registry: ToolRegistry)
     """Quality tools are named ``quality_*``; none is ``diagnostics_*``."""
     names = set(registry.tools)
     assert not [name for name in names if name.startswith("diagnostics_")]
-    assert {"quality_measure_frames", "quality_measure_stack"} <= names
+    assert {"quality_frames_measure", "quality_stacks_measure"} <= names
     assert "quality_check_spectral_frames" not in names
 
 
 def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`quality_query` offers the stored-read filters, none required."""
-    schema = registry.tools["quality_query"]["tool_def"].input_schema
+    """`quality_records_query` offers the stored-read filters, all optional."""
+    schema = registry.tools["quality_records_query"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
         "metric",
         "level",
-        "target_id",
-        "observing_night_id",
-        "camera_id",
+        "target",
+        "night",
+        "camera",
         "telescope",
         "since",
-        "row_ids",
+        "until",
         "latest_only",
         "variant",
         "library_only",
@@ -224,36 +215,27 @@ def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolReg
     assert not schema.get("required")
 
 
-async def test_quality_metrics_reply_is_json_with_levels_as_a_list(registry: ToolRegistry) -> None:
-    """The summary reply is JSON under the size limit."""
-    reply = await registry.execute("quality_metrics", {})
+async def test_quality_metrics_reply_is_json_under_the_size_limit(registry: ToolRegistry) -> None:
+    """The metric list fits one reply; the levels are a list of names."""
+    reply = await registry.execute("quality_records_get_metrics", {"checkpoint": "frame"})
     assert len(reply[0].text.encode()) < MAXIMUM_REPLY_BYTES
     specs = json.loads(reply[0].text)
     assert specs
     for spec in specs:
+        assert spec["checkpoint"] == "frame"
         assert isinstance(spec["levels"], list)
         assert all(isinstance(level, str) for level in spec["levels"])
-        assert "estimator" not in spec
-        assert "meaning" not in spec
-    one = json.loads((await registry.execute("quality_metrics", {"name": specs[0]["name"]}))[0].text)
-    assert [spec["name"] for spec in one] == [specs[0]["name"]]
-
-
-async def test_quality_metrics_full_detail_with_a_checkpoint_is_json(registry: ToolRegistry) -> None:
-    """Full detail for one checkpoint is JSON with whole declarations."""
-    reply = await registry.execute("quality_metrics", {"detail": "full", "checkpoint": "frame"})
-    specs = json.loads(reply[0].text)
-    assert specs
-    for spec in specs:
-        assert spec["checkpoint"] == "frame"
         assert isinstance(spec["decisions"], list)
-        assert "estimator" in spec
+    one = json.loads(
+        (await registry.execute("quality_records_get_metric", {"name": specs[0]["name"]}))[0].text
+    )
+    assert one["name"] == specs[0]["name"]
 
 
 def test_quality_metrics_offers_optional_arguments(registry: ToolRegistry) -> None:
-    """`quality_metrics` takes `name`, `checkpoint` and `detail`."""
-    schema = registry.tools["quality_metrics"]["tool_def"].input_schema
-    assert set(schema["properties"]) == {"name", "checkpoint", "detail"}
+    """`quality_records_get_metrics` takes an optional `checkpoint`."""
+    schema = registry.tools["quality_records_get_metrics"]["tool_def"].input_schema
+    assert set(schema["properties"]) == {"checkpoint"}
     assert not schema.get("required")
 
 

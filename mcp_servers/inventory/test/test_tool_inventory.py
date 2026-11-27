@@ -51,7 +51,7 @@ from mcp_servers.inventory.tool_inventory import (
         ("star_get", "observe"),
         ("star_record_periodicity", "change-data"),
         ("calibration_query", "observe"),
-        ("quality_measure_stack", "compute"),
+        ("quality_stacks_measure", "compute"),
         ("visualization_plot", "compute"),
         ("electron_run_python", "unrestricted"),
         ("backend_call_rpc", "unrestricted"),

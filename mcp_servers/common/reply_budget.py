@@ -35,7 +35,7 @@ reference furthest beyond the statement's limit; see
 ``evidence_order.py``), so cutting a list from the end keeps the references
 that matter most. Cutting never removes a statement, and a statement that
 lost references says how many (``evidence_omitted_count``), so the loss is
-visible. The rows stay readable with ``QualityRecords.query``.
+visible. The rows stay readable with ``quality.records.query``.
 """
 
 from __future__ import annotations
@@ -268,7 +268,7 @@ def _fit_target_report(report: BaseModel, limit: int) -> BaseModel:
                     "context_omitted_reason": (
                         "The context readings were left out so the report fits the reply budget of "
                         f"{limit:,} characters. The statements still cite the rows they used; read "
-                        "any metric with QualityRecords.query."
+                        "any metric with quality.records.query."
                     ),
                 }
             )
@@ -360,7 +360,7 @@ def _fit_night_quality(quality: BaseModel, limit: int) -> BaseModel:
     """
     note = (
         f"The evidence lists of the statements were cut to fit the reply budget of {limit:,} characters. "
-        "Read the rows with QualityRecords.query."
+        "Read the rows with quality.records.query."
     )
 
     def shrink(current: BaseModel, round_number: int) -> BaseModel | None:
@@ -525,7 +525,6 @@ HEAVY_LISTS: tuple[HeavyList, ...] = (
         "ObservationSessionWithProgress", ("weather_samples",), 0, "weather samples", _NIGHT_SAMPLES_NOTE
     ),
     HeavyList("LiveGuidingStatus", ("history",), 50, "guiding samples", "The newest samples are first."),
-    HeavyList("QualityQueryResult", ("rows",), 50, "rows", _PAGE_NOTE),
     HeavyList("FrameStatusReport", ("frames",), 50, "frames", "Ask about fewer frames."),
 )
 """The heavy lists of the replies, by model. ``test_reply_shaper.py`` checks

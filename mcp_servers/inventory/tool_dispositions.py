@@ -234,14 +234,6 @@ DECISIONS = {
         "replaces quality_check_spectral_frames. Since 2026-11-26 it takes a target only: a folder goes "
         "to quality_measure_folder, and the set-aside preview to processing_predict_stack.",
     ),
-    "quality_measure_folder": ToolDecision(
-        "keep",
-        "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, "
-        "sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About "
-        "12 seconds a frame, so the limit defaults to 20. It is the one tool for a folder of frames "
-        "(quality_measure_frames takes a target only); it reads any folder path it is given and only "
-        "reads.",
-    ),
     "review_get_live_session_status": ToolDecision(
         "keep",
         "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
@@ -476,6 +468,7 @@ DECISIONS = {
         "keep",
         "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
         "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
+        tool_class="compute",
     ),
     "quality_blocks_measure_sky": ToolDecision(
         "keep",
@@ -522,10 +515,6 @@ DECISIONS = {
         "records only; nothing is stored.",
         tool_class="compute",
     ),
-    "quality_blocks_solved_stars": ToolDecision(
-        "withhold",
-        "A Command Console building block, uncapped. The AI reads a target's named stars through star_query.",
-    ),
     "quality_blocks_robust_sigma": ToolDecision(
         "drop",
         "A Command Console building block: a spread of numbers the caller already has. Of no use to an AI "
@@ -539,6 +528,7 @@ DECISIONS = {
         "keep",
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
+        tool_class="compute",
     ),
     "quality_choose_blink_pair": ToolDecision(
         "keep",
@@ -546,17 +536,6 @@ DECISIONS = {
         "for the viewer's Blink button. Reads the frames and the stored measurements only; nothing is "
         "stored.",
         tool_class="compute",
-    ),
-    "quality_match_frame_positions": ToolDecision(
-        "keep",
-        "Built 2026-11-20. Says where positions of one frame lie in another frame of the same field, "
-        "allowing for drift and a meridian flip. Reads the files only; nothing is stored.",
-        tool_class="compute",
-    ),
-    "quality_measure_tuned_parameters": ToolDecision(
-        "withhold",
-        "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "
-        "up and writes the configuration file. The AI does not change settings.",
     ),
     "quality_measure_stack": ToolDecision(
         "keep",
@@ -657,6 +636,33 @@ DECISIONS = {
         "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with "
         "a plain reason when a picture cannot be found, and lists the ids no row has. Reads only.",
         tool_class="observe",
+    ),
+    "quality_records_get": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). Reads one stored quality row by its id, even when a newer row replaced "
+        "it, so a cited row can be read back. Writes nothing and creates no table.",
+        tool_class="observe",
+    ),
+    "quality_records_get_metric": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). Reads the whole declaration of one quality metric by name. Fixed text, "
+        "nothing is read from disk.",
+    ),
+    "quality_stacks_record_night_contributions": ToolDecision(
+        "withhold",
+        "Built 2026-11-27 (#206) from processing_measure_noise kind=night_contributions. Stacks the library "
+        "stack's frames without each night into the target's _subsets folder and writes the noise into the "
+        "quality database. It takes minutes. The AI is read-only, so it reads the stored numbers with "
+        "quality_records_query instead.",
+        "change-data",
+    ),
+    "quality_stacks_record_odd_even_noise": ToolDecision(
+        "withhold",
+        "Built 2026-11-27 (#206) from processing_measure_noise kind=odd_even_difference. Stacks two halves "
+        "of the library stack's frames into the target's _subsets folder and writes the noise of their "
+        "difference into the quality database, about one library stack's time. The AI is read-only, so it "
+        "reads the stored numbers with quality_records_query instead.",
+        "change-data",
     ),
     "quality_frame_statuses": ToolDecision(
         "drop",
@@ -1005,6 +1011,27 @@ TOOL_RENAMES: dict[str, str] = {
     "calibration_reindex_frames": "calibration_frames_scan",
     "calibration_measure_frames": "calibration_frames_record",
     "calibration_camera_profile": "calibration_get_profile",
+    # Step 4e of #206: quality has the objects records, frames, stacks,
+    # detections and blocks.
+    "quality_query": "quality_records_query",
+    "quality_capture_settings": "quality_records_get_capture_settings",
+    "quality_calibration_identities": "quality_records_get_calibration_identities",
+    "quality_resolve_rows": "quality_records_get_paths",
+    "quality_metrics": "quality_records_get_metrics",
+    "quality_measure_frames": "quality_frames_measure",
+    "quality_record_frame_measurements": "quality_frames_record",
+    "quality_choose_blink_pair": "quality_frames_get_blink_partner",
+    "quality_map_position": "quality_frames_map_positions",
+    "quality_measure_stack": "quality_stacks_measure",
+    "quality_get_aperture_record": "quality_stacks_get_aperture_record",
+    "processing_measure_noise": "quality_stacks_record_noise_growth",
+    "quality_measure_star_profile": "quality_detections_measure_profile",
+    "quality_measure_detections": "quality_detections_measure_detections",
+    "quality_blocks_star_widths": "quality_detections_measure_widths",
+    "quality_blocks_find_stars": "quality_blocks_measure_stars",
+    "quality_blocks_sky_corners": "quality_blocks_measure_sky_corners",
+    "quality_blocks_robust_sigma": "quality_blocks_measure_robust_sigma",
+    "quality_blocks_sigma_clip": "quality_blocks_measure_clipped_values",
 }
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies

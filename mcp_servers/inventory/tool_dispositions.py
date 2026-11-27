@@ -215,9 +215,10 @@ DECISIONS = {
     ),
     "review_get_live_session_status": ToolDecision(
         "keep",
-        "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
-        "which is reading from the telescope computer and adds files only. A folder argument is now "
-        "checked against the allowed roots. Reports pier side, camera temperature, exposure counts and "
+        "Served 2026-10-03. force=true copies the newest Ekos and KStars logs into the wayfinding "
+        "library's log folder, which is reading from the telescope computer and adds files only. Since "
+        "#206 it is review_nights_get_live_status and takes no folder. Reports pier side, camera "
+        "temperature, exposure counts and "
         "dither settings; the guide algorithm is not in the logs and the reply says so.",
         "ingest",
     ),
@@ -243,30 +244,33 @@ DECISIONS = {
         "with the optional detections and named-stars overlays; the registry sends it as a PNG image. "
         "Saves nothing.",
     ),
-    "observatory_mount_poll_external_alignment": ToolDecision(
+    "review_alignment_get_polar_alignment": ToolDecision(
         "drop",
-        "The backend calls it to store the syncs other programs queued. It writes records, and the AI "
-        "is read-only.",
+        "Since #206 the home of observatory_mount_get_polar_alignment. The backend shows it; an AI reads "
+        "the stored runs through review_alignment_query.",
+    ),
+    "review_alignment_record_external": ToolDecision(
+        "drop",
+        "Since #206 the home of observatory_mount_poll_external_alignment. The backend calls it to store "
+        "the syncs other programs queued. It writes records, and the AI is read-only.",
         "ingest",
     ),
-    "observatory_mount_get_polar_alignment": ToolDecision(
-        "drop",
-        'The backend shows it. An AI reads the stored runs through review_query(kind="alignment").',
-    ),
-    "review_query_alignment_sessions": ToolDecision(
-        "drop",
-        "The backend calls it with plate-solve attempts it has already read. The AI reads nights through "
-        'review_query(kind="alignment"), which groups them already.',
-    ),
     "review_query_alignment_records": ToolDecision(
-        "drop",
-        "The backend reads the stored attempts for its alignment views and passes in library targets. "
-        'The AI reads nights through review_query(kind="alignment").',
+        "keep",
+        "Since #206 review_alignment_query: the stored plate-solve attempts of a night or a time range, "
+        "grouped by target, with the latest polar alignment run. Reads only.",
+    ),
+    "review_alignment_query_nights": ToolDecision(
+        "keep", "Since #206: one alignment summary per recorded night, newest first. Reads only."
+    ),
+    "review_alignment_get_pointing_model": ToolDecision(
+        "keep",
+        "Since #206 (was review_query kind pointing_model): fits one night's pointing model. Saves nothing.",
     ),
     "review_frame_guiding": ToolDecision(
         "keep",
         "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. "
-        "Reads only.",
+        "Since #206 it is review_targets_get_frame_guiding and takes a frame filter. Reads only.",
     ),
     "app_status": ToolDecision("keep", "Built 2026-10-03. Reads health, connections, resources and jobs."),
     "app_controls": ToolDecision(
@@ -559,8 +563,13 @@ DECISIONS = {
     ),
     "review_get_advisory": ToolDecision(
         "keep",
-        "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star "
-        "result, worked out on demand. Saves nothing.",
+        "Built 2026-10-06; split 2026-10-31. Since #206 review_targets_get_report: the target dataset "
+        "report, worked out on demand. Saves nothing.",
+    ),
+    "review_targets_get_result": ToolDecision(
+        "keep",
+        "Since #206 (was review_get_advisory kind result): how far one star's results can be trusted. "
+        "Saves nothing.",
     ),
     "planning_get_tonight_advice": ToolDecision(
         "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."
@@ -605,9 +614,26 @@ DECISIONS = {
     # ---- Keep ----
     "review_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 "
-        "characters. The recorded-data tables are read through the butler, which creates a missing table. "
-        "Kind night_quality needs session_id (the night) and returns a typed review.",
+        "Built 2026-10-03. Since #206 review_nights_query: the recorded nights and what data each has. "
+        "The other kinds became the review_nights, review_guiding and review_alignment reads. Reads only.",
+    ),
+    **dict.fromkeys(
+        (
+            "review_nights_get",
+            "review_nights_get_target_changes",
+            "review_nights_get_capture",
+            "review_nights_get_sky_coverage",
+            "review_nights_get_recurring_issues",
+            "review_nights_query_ekos_sessions",
+            "review_nights_get_ekos_session",
+            "review_guiding_get_night",
+            "review_guiding_query_runs",
+        ),
+        ToolDecision(
+            "keep",
+            "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. "
+            "Saves nothing; the server keeps the reply under its size limit.",
+        ),
     ),
     "jobs_query": ToolDecision(
         "keep",
@@ -690,7 +716,7 @@ DECISIONS = {
         "drop",
         "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest "
         "stack file's time itself; the reply is one row per frame, sized for a table on screen. "
-        "quality_set_aside_frames and review_get_star_shape_review serve an AI client.",
+        "quality_set_aside_frames and review_targets_get_star_shapes serve an AI client.",
     ),
     "quality_set_aside_frames": ToolDecision(
         "keep",
@@ -723,15 +749,10 @@ DECISIONS = {
         "error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history.",
         "observe",
     ),
-    "review_measure_tuned_parameters": ToolDecision(
-        "withhold",
-        "Built 2026-11-16 (#175). Works out the wayfinding tuned values; with save=True it backs up and "
-        "writes the configuration file. The AI does not change settings.",
-    ),
     "review_measure_guiding_spectrum": ToolDecision(
         "keep",
         "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights "
-        "optionally left out. It stores nothing.",
+        "optionally left out. Unlike review_guiding_record_spectrum it stores nothing.",
         "observe",
     ),
     "review_measure_focus_temperature_coefficient": ToolDecision(
@@ -861,7 +882,7 @@ DECISIONS = {
     "target_select_frames": ToolDecision(
         "drop",
         "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. "
-        "review_frame_guiding already serves an AI client.",
+        "review_targets_get_frame_guiding already serves an AI client.",
     ),
     "calibration_camera_profile": ToolDecision(
         "keep",
@@ -933,6 +954,11 @@ DECISIONS = {
         "drop",
         "Starts this app's guide loop, which sends guide pulses: the dropped control side.",
         "actuate",
+    ),
+    "review_guiding_record_spectrum": ToolDecision(
+        "drop",
+        "Since #206 the home of observatory_guiding_refit_spectrum: recomputes and stores the mount's "
+        "model. The user does not want an AI to trigger it.",
     ),
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
@@ -1065,6 +1091,19 @@ TOOL_RENAMES: dict[str, str] = {
     "processing_identify_stack": "processing_astrometry_identify",
     "processing_get_stack_identification": "processing_astrometry_get_identification",
     "quality_blocks_solved_stars": "processing_astrometry_get_named_stars",
+    # Step 5b of #206: review has the objects nights, targets, guiding,
+    # performance and alignment.
+    "review_query": "review_nights_query",
+    "review_get_live_session_status": "review_nights_get_live_status",
+    "review_get_advisory": "review_targets_get_report",
+    "review_get_star_shape_review": "review_targets_get_star_shapes",
+    "review_frame_guiding": "review_targets_get_frame_guiding",
+    "review_measure_guiding_spectrum": "review_guiding_measure_spectrum",
+    "review_measure_unguided_mount_error": "review_guiding_measure_unguided_error",
+    "review_get_performance_envelope": "review_performance_get_envelope",
+    "review_get_sky_rate_prediction": "review_performance_predict_sky_rate",
+    "review_measure_focus_temperature_coefficient": "review_performance_measure_focus_temperature",
+    "review_query_alignment_records": "review_alignment_query",
     # Step 4f of #206: visualization.
     "visualization_render_fits": "visualization_render",
     "visualization_plot": "visualization_plot_target",
@@ -1074,8 +1113,6 @@ TOOL_RENAMES: dict[str, str] = {
     "observatory_mount_status": "observatory_mount_get_status",
     "observatory_mount_abort_motion": "observatory_mount_stop",
     "observatory_mount_manual_move": "observatory_mount_move",
-    "observatory_mount_get_polar_alignment": "review_alignment_get_polar_alignment",
-    "observatory_mount_poll_external_alignment": "review_alignment_record_external",
     "observatory_imaging_status": "observatory_imaging_get_status",
     "observatory_imaging_capture_image": "observatory_imaging_capture",
     "observatory_imaging_stop_capture": "observatory_imaging_stop",

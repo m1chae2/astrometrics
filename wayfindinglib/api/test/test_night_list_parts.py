@@ -38,8 +38,8 @@ TONIGHT_DAY = 5
 NOW = FIRST_NIGHT + TONIGHT_DAY * 86400.0 + 3600.0
 """A moment during the night in progress."""
 
-LIMIT = night_history.MAXIMUM_LIMIT
-"""The largest limit the night list takes, enough to list every test night."""
+LIMIT = 50
+"""Most nights a test lists, enough to list every test night."""
 
 
 class Rig:
@@ -121,7 +121,7 @@ class Rig:
         nights : `list` [`NightListEntry`]
             The list.
         """
-        return night_history.build_night_list(self.control._context, limit, now=self.now)
+        return night_history.build_night_list(self.control._context, now=self.now)[-limit:]
 
     def reference(self, limit: int = LIMIT) -> list[NightListEntry]:
         """Build the list the old way: every frame and session, in one go.

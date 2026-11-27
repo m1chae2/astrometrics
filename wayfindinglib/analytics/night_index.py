@@ -1,6 +1,6 @@
 """Purpose: Index the recorded nights so the night list is kept in two parts.
 
-Description: The list of nights (`review.query(kind="nights")`) says, for
+Description: The list of nights (`review.nights.query`) says, for
 each observing night, which targets were imaged, how many light frames the
 active equipment took, and whether the night has guiding, Ekos and sky
 background data. Building it from scratch reads every frame of the library,

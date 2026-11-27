@@ -336,7 +336,7 @@ def download_remote_targets(
             if job is not None:
                 job.info(f"Added {len(added_paths)} new frame(s) of {target_id} to the library.")
         # After the copy: the new frames that hold a plate solve give the
-        # mount's pointing error, for review.query(kind="alignment").
+        # mount's pointing error, for review.alignment.query.
         record_frame_pointing_errors(context, added_paths)
         if added_paths:
             summary = record_new_frame_measurements(context, target, added_paths)

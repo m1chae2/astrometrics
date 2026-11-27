@@ -55,5 +55,5 @@ def test_profile_offers_no_device_command_or_writer(registry: ToolRegistry) -> N
 def test_tools_with_a_known_hazard_are_blocked_for_now(registry: ToolRegistry) -> None:
     """A read-only tool with an interim block is not offered."""
     copy = _profile_copy(registry)
-    assert "observatory_mount_status" not in copy.tools
-    assert "observatory_mount_status" in copy.withheld
+    assert "observatory_mount_get_status" not in copy.tools
+    assert "observatory_mount_get_status" in copy.withheld

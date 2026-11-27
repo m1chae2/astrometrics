@@ -258,10 +258,10 @@ def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(
     assert summary["guide_samples_stored"] == 1
     assert summary["session_contexts_stored"] == 1
     assert summary["nights"] == ["2026-09-23"]
-    (listed,) = ObservationReview(control).query(kind="ekos_sessions").sessions
-    assert listed["id"] == "2026-09-23T20-31-48"
-    assert listed["captures"] == 1
-    assert "guide_focal_mm=121" in listed["equipmentFingerprint"]
+    (listed,) = ObservationReview(control).nights.query_ekos_sessions()
+    assert listed.id == "2026-09-23T20-31-48"
+    assert listed.captures == 1
+    assert "guide_focal_mm=121" in listed.equipment_fingerprint
     context = night_analysis.ekos_session_record(control._context, "2026-09-23T20-31-48")
     assert context.equipment.guide_pixel_scale_arcsec_per_px == pytest.approx(6.39)
     (run,) = night_analysis.guiding_runs(control._context)
@@ -286,7 +286,7 @@ def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(
     ekos_log_ingestion.ingest_ekos_logs(control._context, str(logs_directory), download=False)
     ekos_log_ingestion.ingest_ekos_logs(control._context, str(logs_directory), download=False)
 
-    assert len(ObservationReview(control).query(kind="ekos_sessions").sessions) == 1
+    assert len(ObservationReview(control).nights.query_ekos_sessions()) == 1
     assert len(control._context.records.get_guiding_samples()) == 1
 
 
@@ -329,7 +329,7 @@ def _configure_two_rigs(app_config: AppConfiguration) -> None:
 
 def test_the_performance_envelope_is_none_without_active_equipment(control: ObservatoryControl) -> None:
     """Verify no telescope and camera means no envelope, not a made-up one."""
-    assert ObservationReview(control).get_performance_envelope() is None
+    assert ObservationReview(control).performance.get_envelope() is None
 
 
 def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(
@@ -345,13 +345,13 @@ def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
     _configure_two_rigs(app_config)
 
-    before = ObservationReview(control).get_performance_envelope()
+    before = ObservationReview(control).performance.get_envelope()
     app_config.update_config({
         "Observatory.Telescope": {"active_telescope": "Long"},
         "Observatory.Camera": {"default_primary_camera": "Main B"},
         "Observatory.GuideScope": {"active_guide_scope": "Guide 240"},
     })
-    after = ObservationReview(control).get_performance_envelope()
+    after = ObservationReview(control).performance.get_envelope()
 
     assert before.value("imaging_plate_scale") == pytest.approx(206.265 * 3.76 / 400.0)
     assert after.value("imaging_plate_scale") == pytest.approx(206.265 * 5.94 / 1000.0)
@@ -372,7 +372,7 @@ def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
     _configure_two_rigs(app_config)
 
-    envelope = ObservationReview(control).get_performance_envelope()
+    envelope = ObservationReview(control).performance.get_envelope()
 
     for name in ("guiding_rms_limit", "trailing_limit", "guide_snr_low_limit", "guiding_rms_high_limit"):
         assert envelope.value(name) is None
@@ -519,10 +519,10 @@ def test_pointing_model_query_delegates_to_the_task_module(
         return_value={"sample_count": 3, "raw_rms_arcsec": 2.0, "residual_rms_arcsec": 1.0},
     )
 
-    result = ObservationReview(control).query(kind="pointing_model", session_id="s1")
+    result = ObservationReview(control).alignment.get_pointing_model("s1")
 
-    assert result.model.sample_count == 3
-    assert result.model.raw_rms_arcsec == pytest.approx(2.0)
+    assert result["sample_count"] == 3
+    assert result["raw_rms_arcsec"] == pytest.approx(2.0)
     pointing_log_ingestion.compute_pointing_model.assert_called_once_with(
         control._context, fake_records, "s1"
     )
@@ -1400,49 +1400,6 @@ def test_remote_query_folders_keeps_only_the_folder_a_name_refers_to(control: Ob
     assert list(control.remote.query_folders(kind="all", text="M 42")) == ["M_42"]
     assert list(control.remote.query_folders(kind="calibration", text="dark")) == ["Dark"]
     assert list(control.remote.query_folders(text="M 31")) == []
-
-
-def test_review_groups_alignment_attempts_into_one_session_per_target(control: ObservatoryControl) -> None:
-    """`review.query_alignment_sessions` groups dictionaries by target."""
-    attempts = [
-        {
-            "status": "aligned",
-            "ra": 10.0,
-            "dec": 20.0,
-            "delta_ra_arcsec": 1.0,
-            "delta_dec_arcsec": 0.0,
-            "timestamp": 100.0,
-            "target_name": "M 31",
-        },
-        {
-            "status": "aligned",
-            "ra": 10.0,
-            "dec": 20.0,
-            "deltaRaArcsec": 2.0,
-            "deltaDecArcsec": 0.0,
-            "timestamp": 110.0,
-            "targetName": "M 31",
-        },
-        {
-            "status": "aligned",
-            "ra": 200.0,
-            "dec": -5.0,
-            "delta_ra_arcsec": 1.0,
-            "delta_dec_arcsec": 1.0,
-            "timestamp": 120.0,
-            "target_name": "M 51",
-        },
-    ]
-    result = ObservationReview(control).query_alignment_sessions(attempts)
-
-    assert len(result.attempts) == 3
-    assert [session.target_name for session in result.targets] == ["M 31", "M 51"]
-
-
-def test_review_refuses_an_alignment_attempt_with_an_unknown_status(control: ObservatoryControl) -> None:
-    """A status the model does not know is an invalid argument."""
-    with pytest.raises(InvalidArgumentError, match="not valid"):
-        ObservationReview(control).query_alignment_sessions([{"status": "synced"}])
 
 
 def test_poll_external_alignment_stores_syncs_and_polar_runs(

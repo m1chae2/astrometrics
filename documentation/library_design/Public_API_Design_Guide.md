@@ -52,8 +52,7 @@ The checks treat the first two positional arguments as subject and operands. The
 | --- | --- |
 | `get` | Read one stored item by its id. Returns `None` when absent; `required=True` raises instead. |
 | `get_<noun>` | Read a cheap derived fact about a subject. Writes nothing. |
-| `query` | Read every stored item that matches the filters (Section 5). |
-| `query_<noun>` | The same, for an object that holds more than one kind of item, such as `query_focus_models`. |
+| `query`, `query_<noun>` | Read every stored item that matches the filters (Section 5). `query_<noun>` names the kind when an object holds more than one. |
 | `count_by_<field>` | Count the matching items by the values of one field. |
 | `resolve` | Turn a name into one `Resolution`. |
 | `create`, `create_<noun>` | Make and store a new item; the noun names the kind when an object holds several. |

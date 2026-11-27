@@ -9,6 +9,8 @@ It also holds two small calculations about the equipment: the camera
 cooling ramp rate and a device's state from its raw signals.
 """
 
+from typing import Any
+
 from astrometricslib import ObservatoryConfiguration
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import EquipmentStatus
@@ -177,7 +179,7 @@ class EquipmentControl(ControlChild):
         self,
         device_name: str,
         property_name: str,
-        value: float | str | bool = "On",
+        value: Any = "On",
         element: str | None = None,
     ) -> None:
         """Set one raw INDI property element on a device, for diagnosis.
@@ -191,7 +193,7 @@ class EquipmentControl(ControlChild):
             The INDI device.
         property_name : `str`
             The property to change.
-        value : `float`, `str` or `bool`, optional
+        value : `Any`, optional
             The new value. ``"On"`` (the default) turns a switch element on.
         element : `str`, optional
             The element of the property to change.

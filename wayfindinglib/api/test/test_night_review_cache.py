@@ -103,7 +103,7 @@ def _ask(review: ObservationReview) -> Any:
     quality : `NightQuality`
         The review.
     """
-    return review.query(kind="night_quality", session_id=REVIEWED).night_quality
+    return review.nights.get(REVIEWED, required=True)
 
 
 def _science_database(review: ObservationReview) -> Path:
@@ -194,8 +194,8 @@ def test_a_change_of_active_equipment_builds_again(
 
 def test_the_list_of_nights_is_kept_too(review: ObservationReview, builds: dict[str, int]) -> None:
     """The nights list is built once while the data are unchanged."""
-    review.query(kind="nights")
-    review.query(kind="nights")
+    review.nights.query()
+    review.nights.query()
 
     assert builds["nights"] == 1
 
@@ -204,11 +204,11 @@ def test_live_guiding_samples_do_not_rebuild_the_list_of_nights(
     review: ObservationReview, builds: dict[str, int]
 ) -> None:
     """Guiding samples are not read by the list of nights, so it is kept."""
-    first = review.query(kind="nights").night_list
+    first = list(review.nights.query())
     review._context.records.record_guiding_samples([
         {"session_id": REVIEWED, "timestamp": 1.0, "dra": 0.1, "ddec": 0.1, "source": "phd2_log"}
     ])
-    second = review.query(kind="nights").night_list
+    second = list(review.nights.query())
 
     assert builds["nights"] == 1
     assert first == second
@@ -218,7 +218,7 @@ def test_a_new_guiding_run_rebuilds_the_list_of_nights(
     review: ObservationReview, builds: dict[str, int]
 ) -> None:
     """A new guiding run is read by the list of nights, so it rebuilds."""
-    review.query(kind="nights")
+    review.nights.query()
     review._context.butler.put(
         GuidingRunSummary(
             id="guide_log-new.txt#0",
@@ -238,7 +238,7 @@ def test_a_new_guiding_run_rebuilds_the_list_of_nights(
         "guiding_run",
         {"id": "guide_log-new.txt#0"},
     )
-    nights = review.query(kind="nights").night_list
+    nights = list(review.nights.query())
 
     assert builds["nights"] == 2
     assert "2026-01-01" in [night.night_id for night in nights]
@@ -308,7 +308,7 @@ def test_a_night_with_no_data_is_not_kept(review: ObservationReview, builds: dic
 
     for _ in range(2):
         with pytest.raises(NotFoundError):
-            review.query(kind="night_quality", session_id="1999-01-01")
+            review.nights.get("1999-01-01", required=True)
 
     assert builds["night_quality"] == 2
 

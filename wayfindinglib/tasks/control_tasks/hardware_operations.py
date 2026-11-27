@@ -1070,7 +1070,7 @@ def set_device_property(
     context: ControlContext,
     device_name: str,
     property_name: str,
-    value: float | str | bool = "On",
+    value: Any = "On",
     element: str | None = None,
 ) -> None:
     """Set one raw INDI property element on a device, for diagnosis.
@@ -1083,7 +1083,7 @@ def set_device_property(
         The INDI device.
     property_name : `str`
         The property to change.
-    value : `float`, `str` or `bool`, optional
+    value : `Any`, optional
         The new value. ``"On"`` turns a switch element on.
     element : `str`, optional
         The element of the property to change.

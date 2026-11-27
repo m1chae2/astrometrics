@@ -5,7 +5,7 @@ session. These two functions read the parts a script usually wants: which
 frames the session saved and when, and how Ekos names its time zones. They
 only read files. The full session record, with its guiding, focus and
 temperature readings, is private to the library; read it through
-`ObservationReview.query` (``kind="ekos_sessions"``) once the log has been
+`review.nights.query_ekos_sessions` once the log has been
 ingested.
 
 `FrameEndDetector` reads the camera status text the telescope status

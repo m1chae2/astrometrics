@@ -2,8 +2,8 @@
 
 Description: The user decided on 2026-10-24 (issue #95, settled decision
 S10) that, in monitor mode, every motion and capture command stays
-refused, while device settings and the app's own INDI connect and
-disconnect stay allowed.
+refused, while device settings and the app's own INDI connect stay
+allowed.
 The library test (`wayfindinglib/test/test_monitor_mode_sends_no_commands.py`)
 proves it through the library facade. This file proves it through the
 wayfindinglib-core server's tools, which call the same facade.
@@ -35,16 +35,15 @@ from wayfindinglib import Wayfinder
 pytestmark = pytest.mark.anyio
 
 COMMAND_TOOL_CLASSES = frozenset({"actuate", "safe-stop"})
-"""Manifest classes of hardware commands (``safe-stop``: `abort_motion`)."""
+"""Manifest classes of hardware commands (``safe-stop``: the stops)."""
 
 ALLOWED_IN_MONITOR_MODE = frozenset({
     "observatory_equipment_connect",
-    "observatory_equipment_disconnect",
     "observatory_equipment_set_device_property",
 })
 """Commands that stay allowed in monitor mode: the user's decision of
 2026-10-24 (issue #95, settled decision S10). Device settings and the app's
-own INDI connect and disconnect move nothing and take no picture. Decision
+own INDI connect move nothing and take no picture. Decision
 U4 of the same day: nothing else is allowed, not even stopping a run."""
 
 CALLER_SUPPLIED_STEP_TOOLS: frozenset[str] = frozenset()
@@ -52,34 +51,30 @@ CALLER_SUPPLIED_STEP_TOOLS: frozenset[str] = frozenset()
 now (issue #134), so no tool is left in this list. A JSON call could not
 carry the steps, and they touch no driver themselves."""
 
-JSON_CANNOT_CARRY_THE_ARGUMENT = frozenset({
-    "observatory_guiding_run_loop",
-    "observatory_guiding_stop_loop",
-})
-"""Tools whose argument a JSON call cannot carry: a `threading.Event`, or a
-sky position (the tool's schema asks for text). They must fail without
-sending a command, though not with `permission_denied`."""
+JSON_CANNOT_CARRY_THE_ARGUMENT: frozenset[str] = frozenset()
+"""Tools whose argument a JSON call cannot carry. They must fail without
+sending a command, though not with `permission_denied`. None is left since
+the guide loop's start and stop take no event (issue #206)."""
 
-QUIET_BUT_NOT_REFUSED_TOOLS = frozenset({"execution_advance_session"})
+QUIET_BUT_NOT_REFUSED_TOOLS = frozenset({"execution_run"})
 """Commands that record instead of refusing; they must still send nothing."""
 
 SAMPLE_ARGUMENTS = {
-    "observatory_guiding_expose": {"exposure_seconds": 1.0},
-    "observatory_guiding_run_loop": {},
-    "observatory_guiding_stop_loop": {},
-    "observatory_imaging_capture_image": {"exposure_seconds": 1.0},
-    "observatory_imaging_focus_move": {"steps": 10},
-    "observatory_imaging_set_filter": {"filter_name": "L"},
-    "observatory_imaging_stop_capture": {},
-    "observatory_mount_abort_motion": {},
-    "observatory_mount_cancel_centering": {"run_is_active": True},
-    "observatory_mount_manual_move": {"direction": "north"},
+    "observatory_guiding_capture": {"exposure_s": 1.0},
+    "observatory_guiding_start": {},
+    "observatory_guiding_stop": {},
+    "observatory_imaging_capture": {"exposure_s": 1.0},
+    "observatory_imaging_move_focuser": {"steps": 10},
+    "observatory_imaging_set_filter": {"name": "L"},
+    "observatory_imaging_stop": {},
+    "observatory_mount_stop": {},
+    "observatory_mount_move": {"direction": "north"},
     "observatory_mount_park": {},
-    "observatory_mount_set_slew_rate": {"rate_index": 1},
-    "observatory_mount_set_tracking": {"enabled": True},
+    "observatory_mount_set_slew_rate": {"rate": 1},
+    "observatory_mount_set_tracking": {"on": True},
     "observatory_mount_slew": {"destination": "M 81"},
     "observatory_mount_unpark": {},
-    "execution_advance_session": {},
+    "execution_run": {},
 }
 """Sample arguments in the form the tool schemas accept. A command with no
 entry fails `test_every_refused_command_has_sample_arguments`."""
@@ -206,7 +201,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> tuple[ToolRegistry, Wayfinder, Re
 
     wayfinder = Wayfinder()
     recorder = Recorder(wayfinder)
-    wayfinder.control.safety.enter_monitoring_mode(evidence_note="test of monitor mode")
+    wayfinder.control.safety.set_mode("monitor", note="test of monitor mode")
     # Module paths are given as text: MCP may import only the public API.
     monkeypatch.setattr(
         "wayfindinglib.tasks.control_tasks.hardware_operations.resolve_destination",
@@ -252,7 +247,7 @@ def test_every_refused_command_has_sample_arguments() -> None:
 async def test_every_command_tool_is_refused_or_quiet_in_monitor_mode(server: tuple, tool_name: str) -> None:
     """A command tool answers `permission_denied` and sends nothing.
 
-    `advance_session` records instead of refusing. Its queue cannot be
+    `execution.run` records instead of refusing. Its queue cannot be
     built from the public API without an active rig, so here it only proves
     that an unknown session sends nothing; the library test runs a real
     queue. A tool whose argument JSON cannot carry fails early. All must
@@ -276,7 +271,7 @@ async def test_every_command_tool_is_refused_or_quiet_in_monitor_mode(server: tu
 
 
 async def test_connect_and_device_settings_stay_allowed_in_monitor_mode(server: tuple) -> None:
-    """Connect, disconnect and a device setting still work as tools (S10).
+    """Connect and a device setting still work as tools (S10).
 
     The recording drivers see the allowed calls, so the "no command"
     results above are not a broken test rig.
@@ -293,12 +288,10 @@ async def test_connect_and_device_settings_stay_allowed_in_monitor_mode(server: 
             "element": "TRACK_SIDEREAL",
         },
     )
-    disconnect = await registry.execute("observatory_equipment_disconnect", {})
 
-    for content in (connect, setting, disconnect):
+    for content in (connect, setting):
         assert not isinstance(content, ToolErrorContent), _text(content)
     assert recorder.calls_to("connect") > 0
-    assert recorder.calls_to("disconnect") > 0
     assert recorder.indi_session.set_property.call_count == 1
     assert recorder.commands_sent() == []
 

@@ -286,45 +286,6 @@ def guiding_night_analysis(
     return analyze_guiding_session_request(request)
 
 
-def guiding_night_summaries(
-    context: ControlContext, latest_nights: int | None = None
-) -> list[dict[str, Any]]:
-    """Summarise the guiding analysis of every recorded night.
-
-    Parameters
-    ----------
-    context : `ControlContext`
-        Supplies the recorded data.
-    latest_nights : `int` or `None`, optional
-        Cover only the most recent nights. Each night is analysed against
-        the nights before it, so this bounds the cost.
-
-    Returns
-    -------
-    summaries : `list` [`dict`]
-        One row per night, oldest first: its samples, the share of lost
-        frames, the guide signal, the guiding error, and the rule names of
-        its statements (a warning is one of them).
-    """
-    contexts, runs = recorded_sessions(context)
-    library_cache: LibraryCache = {}
-    rows = []
-    for night in sorted({run.session_id for run in runs})[-latest_nights if latest_nights else None :]:
-        analysis = guiding_night_analysis(context, night, contexts, runs, library_cache)
-        if analysis is None:
-            continue
-        rows.append({
-            "sessionId": night,
-            "limitsEquipmentMatch": analysis.input_quality.limits_equipment_match,
-            "samples": analysis.input_quality.samples_analyzed,
-            "lostFraction": analysis.input_quality.lost_fraction,
-            "medianSnr": analysis.input_quality.median_snr,
-            "rmsPerAxisArcsec": analysis.performance.rms_per_axis_arcsec,
-            "recommendations": [r.rule for r in analysis.recommendations],
-        })
-    return rows
-
-
 def capture_night_analysis(
     context: ControlContext,
     session_id: str,
@@ -390,51 +351,6 @@ def capture_night_analysis(
         limits=read_capture_limits(context.astrometrics),
     )
     return analyze_capture_session_request(request)
-
-
-def capture_night_summaries(
-    context: ControlContext, latest_nights: int | None = None
-) -> list[dict[str, Any]]:
-    """Summarise the capture analysis of every recorded night.
-
-    Parameters
-    ----------
-    context : `ControlContext`
-        Supplies the recorded data.
-    latest_nights : `int` or `None`, optional
-        Cover only the most recent nights, to bound the cost.
-
-    Returns
-    -------
-    summaries : `list` [`dict`]
-        One row per night, oldest first: its light frames, Ekos exposures
-        with no frame, the median star width, and the rule names of its
-        statements (a warning is one of them).
-    """
-    contexts, runs = recorded_sessions(context)
-    library_cache: LibraryCache = {}
-    catalog = get_equipment_catalog(context.config)
-    telescope, camera = catalog.active_telescope(), catalog.active_camera()
-    if telescope is None or camera is None:
-        return []
-    frames = capture_library(context, telescope.name, camera.name, library_cache)
-    nights = set(capture_history.frames_by_night(frames)) | {
-        record.session_id for record in contexts if record.captures
-    }
-    rows = []
-    for night in sorted(nights)[-latest_nights if latest_nights else None :]:
-        analysis = capture_night_analysis(context, night, contexts, runs, library_cache)
-        if analysis is None:
-            continue
-        rows.append({
-            "sessionId": night,
-            "lightFrames": analysis.input_quality.light_frames,
-            "capturesWithoutFrame": analysis.input_quality.captures_without_frame,
-            "medianStarWidthArcsec": analysis.performance.star_quality.median_star_width_arcsec,
-            "dutyCycle": analysis.performance.efficiency.duty_cycle,
-            "recommendations": [r.rule for r in analysis.recommendations],
-        })
-    return rows
 
 
 def sky_coverage_analysis(context: ControlContext) -> SkyAnalysis | None:
@@ -558,38 +474,6 @@ def guiding_runs(context: ControlContext, session_id: str | None = None) -> list
         (run for run in runs if session_id is None or run.session_id == session_id),
         key=lambda run: run.started_at,
     )
-
-
-def ekos_session_summaries(context: ControlContext) -> list[dict[str, Any]]:
-    """Summarise every recorded Ekos session, without its full detail.
-
-    Parameters
-    ----------
-    context : `ControlContext`
-        Supplies the butler.
-
-    Returns
-    -------
-    summaries : `list` [`dict`]
-        One entry per session, oldest first: its id, observing night,
-        start and end times, equipment fingerprint, and how many exposures,
-        aborted exposures, autofocus runs and mount positions it holds.
-    """
-    records = sorted(context.butler.get_all("ekos_session_context"), key=lambda c: c.started_at)
-    return [
-        {
-            "id": record.id,
-            "sessionId": record.session_id,
-            "startedAt": record.started_at,
-            "endedAt": record.ended_at,
-            "equipmentFingerprint": record.equipment.equipment_fingerprint if record.equipment else None,
-            "captures": len(record.captures),
-            "abortedCaptures": len(record.aborted_captures),
-            "autofocusRuns": len(record.autofocus_runs),
-            "mountPositions": len(record.mount_positions),
-        }
-        for record in records
-    ]
 
 
 def ekos_session_record(context: ControlContext, session_file_id: str) -> EkosSessionContext | None:

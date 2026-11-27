@@ -64,7 +64,7 @@ def compute_pointing_correction(
         Supplies `alignment_convergence_tolerance_arcsec`.
     pointing_model : `MountPointingModel` | `None`, optional
         Tonight's session-scoped fitted model
-        (`review.query(kind="pointing_model")`). `None` (default)
+        (`review.alignment.get_pointing_model`). `None` (default)
         disables the feedforward, reproducing the behavior without a
         pointing model exactly: `converged` is judged against the raw
         measured error.

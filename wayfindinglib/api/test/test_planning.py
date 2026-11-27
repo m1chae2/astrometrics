@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import AppConfiguration, Target, Telescope
+from astrometricslib import AppConfiguration, StellarObject, Target, Telescope
 from astrometricslib._internal.results import RestoreReport
 from astrometricslib.arguments import Page
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
@@ -412,7 +412,7 @@ def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler:
     """Quality takes a target; calibration advice, a camera and frame type."""
     planning = _planning(isolated_butler, _target("M 81"))
     review = _review(isolated_butler, _target("M 81"))
-    report = review.get_advisory("quality", target="M 81")
+    report = review.targets.get_report(_target("M 81"))
     assert isinstance(report, TargetDatasetReport)
     assert report.target_id == "M 81"
     assert report.needs_attention.warning_count == 0
@@ -420,14 +420,6 @@ def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler:
     calibration = planning.get_calibration_advice("c1", FrameType.DARK)
     assert isinstance(calibration, CalibrationAdvisory)
     assert calibration.existing_count == 0
-    with pytest.raises(InvalidArgumentError, match="object_id"):
-        review.get_advisory("quality", target="M 81", object_id="star-1")
-    with pytest.raises(NotFoundError):
-        review.get_advisory("quality", target="NOT-A-TARGET")
-    with pytest.raises(InvalidArgumentError, match="kind"):
-        review.get_advisory("tonight", target="M 81")
-    with pytest.raises(InvalidArgumentError, match="object_id"):
-        review.get_advisory("result", target="M 81")
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
         planning.get_tonight_advice(at="not a time")
 
@@ -958,7 +950,7 @@ def test_tonight_advice_and_a_result_advisory_reach_the_task_functions(isolated_
     ranking = planning.get_tonight_advice(at="2026-10-24T04:00:00Z")
     assert isinstance(ranking, TonightRanking)
     with pytest.raises(NotFoundError):
-        review.get_advisory("result", target="M 81", object_id="no-such-star")
+        review.targets.get_result(StellarObject(id="no-such-star"), target=_target("M 81"))
 
 
 @pytest.mark.parametrize(

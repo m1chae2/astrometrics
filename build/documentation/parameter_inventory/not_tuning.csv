@@ -610,10 +610,10 @@ wayfindinglib/api/planning.py,ObservationPlanning.calculate_panels.rotation_deg,
 wayfindinglib/api/planning.py,ObservationPlanning.get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
 wayfindinglib/api/planning.py,ObservationPlanning.get_visibility.timezone_offset_hours,0 means UTC; the caller passes the offset
 wayfindinglib/api/planning.py,ObservationPlanning.query_sources.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.frame_guiding.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.get_live_session_status.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.query.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.query_alignment_records.limit,Row or item cap that callers pass; plumbing
+wayfindinglib/api/review/alignment.py,ReviewAlignment.query_nights.offset,Pagination start; 0 means from the first row
+wayfindinglib/api/review/guiding.py,ReviewGuiding.query_runs.offset,Pagination start; 0 means from the first row
+wayfindinglib/api/review/nights.py,ReviewNights.query.offset,Pagination start; 0 means from the first row
+wayfindinglib/api/review/nights.py,ReviewNights.query_ekos_sessions.offset,Pagination start; 0 means from the first row
 wayfindinglib/data_access/site_profile_reader.py,FALLBACK_SITE,"Stand-in site used only when Observatory.Location is missing, with a warning; a placeholder, not tuned (WAY-D131)"
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_HEALPIX_LEVEL,Download chunking choice; no result change
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_MAX_ATTEMPTS,Network retry count
@@ -719,6 +719,7 @@ wayfindinglib/session_analysis/recurring_issues.py,_SEVERITY_RANK,Severity order
 wayfindinglib/session_analysis/rule_support.py,_SEVERITY_ORDER,Severity ordering
 wayfindinglib/session_analysis/sky/processing/measure_sky_performance.py,_MINIMUM_SPREAD,Division guard
 wayfindinglib/session_analysis/sky/sky_bins.py,_AZIMUTH_SECTOR_WIDTH,360 degrees divided by the 8 named sectors
+wayfindinglib/tasks/control_tasks/alignment_history.py,query_alignment_nights.offset,Pagination start; 0 means from the first row
 wayfindinglib/tasks/control_tasks/centering.py,IMAGE_WAIT_SECONDS,Wait timeout; plumbing
 wayfindinglib/tasks/control_tasks/centering.py,SETTLE_SECONDS,Decided not tuning in the #175 review (WAY-D139): operational wait after a slew
 wayfindinglib/tasks/control_tasks/centering_exposure.py,ARCSEC_PER_RADIAN,unit or physical constant
@@ -735,14 +736,15 @@ wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.count,Frame 
 wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.delay_seconds,Delay between frames; 0 means none
 wayfindinglib/tasks/control_tasks/live_guiding.py,HISTORY_LIMIT,History buffer size
 wayfindinglib/tasks/control_tasks/live_guiding.py,RETRY_SECONDS,Retry pause between cycles
+wayfindinglib/tasks/control_tasks/live_session_status_task.py,LIVE_SECTION_ITEMS,Reply count cap per section; size only
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,MAXIMUM_STATUS_CHARACTERS,Reply size cap; plumbing
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,get_live_session_status.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/control_tasks/mount_error_tasks.py,_SAMPLE_READ_LIMIT,Read limit; plumbing
 wayfindinglib/tasks/control_tasks/mount_error_tasks.py,measure_guiding_spectrum.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/tasks/control_tasks/night_history.py,DEFAULT_LIMIT,Reply count default
 wayfindinglib/tasks/control_tasks/night_history.py,MAXIMUM_LIMIT,Reply count cap
-wayfindinglib/tasks/control_tasks/night_history.py,MAXIMUM_REPLY_CHARACTERS,Reply size cap; plumbing
-wayfindinglib/tasks/control_tasks/night_history.py,SHRINK_LEVELS,Reply shrinking steps; size only
+wayfindinglib/tasks/control_tasks/night_history.py,query_ekos_sessions.offset,Pagination start; 0 means from the first row
+wayfindinglib/tasks/control_tasks/night_history.py,query_guiding_runs.offset,Pagination start; 0 means from the first row
+wayfindinglib/tasks/control_tasks/night_history.py,query_nights.offset,Pagination start; 0 means from the first row
 wayfindinglib/tasks/control_tasks/pointing_log_ingestion.py,compute_pointing_model.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/control_tasks/remote_transfer_tasks.py,EXAMPLE_FILE_COUNT,Example list size
 wayfindinglib/tasks/control_tasks/remote_transfer_tasks.py,PROGRESS_POLL_SECONDS,Progress poll interval
@@ -751,7 +753,6 @@ wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_GUIDE_FINGERPRINT_F
 wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_SAMPLE_READ_LIMIT,Read limit; plumbing
 wayfindinglib/tasks/control_tasks/target_changes.py,POSITION_WINDOW_SECONDS,Poll window; plumbing
 wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentinel for unsolved position
-wayfindinglib/tasks/control_tasks/target_changes.py,find_target_changes.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
 wayfindinglib/tasks/execution_tasks/session_recorder.py,ObservationSessionRecorder.__init__.snapshot_interval_seconds,Recording cadence; plumbing
 wayfindinglib/tasks/planning_tasks/depth_goal_tasks.py,DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size

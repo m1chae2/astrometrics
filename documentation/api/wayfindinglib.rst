@@ -58,6 +58,7 @@ Observation planning API
 
 .. automodapi:: wayfindinglib.api.planning
    :no-inheritance-diagram:
+   :skip: ObservationPlanning
 
 .. automodapi:: wayfindinglib.api.planning.sessions
    :no-inheritance-diagram:

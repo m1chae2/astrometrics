@@ -2,8 +2,7 @@
 
 Description: Checks the telescope's meridian-flip delay, altitude limits and
 aperture; an observatory configuration's plate scale, field of view, guide
-plate scale, key, date range, short description and date check; and the
-page of configurations.
+plate scale, key, date range, short description and date check.
 """
 
 from datetime import date
@@ -13,7 +12,6 @@ import pytest
 from pydantic import ValidationError
 
 from astrometricslib import Camera, GuideScope, ObservatoryConfiguration, Telescope
-from astrometricslib.models.observatory_configuration import ObservatoryConfigurationPage
 
 
 def _make_telescope(**overrides: Any) -> Telescope:
@@ -177,10 +175,3 @@ def test_a_configuration_cannot_end_before_it_starts() -> None:
     configuration = ObservatoryConfiguration(telescope=_make_telescope(), camera=_make_camera())
     with pytest.raises(ValidationError):
         configuration.name = "changed"
-
-
-def test_a_page_can_be_looped_counted_and_indexed() -> None:
-    """The page offers `for`, `len` and indexing over its items."""
-    item = ObservatoryConfiguration(telescope=_make_telescope(), camera=_make_camera())
-    page = ObservatoryConfigurationPage(items=[item], total=3, next_offset=1)
-    assert list(page) == [item] and len(page) == 1 and page[0] is item

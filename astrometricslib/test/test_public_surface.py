@@ -62,14 +62,22 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "AppConfiguration",
     "Astrometrics",
     "CalibrationCatalog",
+    "Camera",
     "FilterType",
+    "FilterWheel",
+    "Focuser",
     "FrameRecord",
+    "GuideScope",
+    "Mount",
+    "Observatories",
+    "ObservatoryConfiguration",
     "ProcessingPipelines",
     "QualityRecords",
     "StellarCatalog",
     "StellarObject",
     "Target",
     "TargetCatalog",
+    "Telescope",
     "Visualization",
     "configure_logging",
     "configure_offline_iers",
@@ -298,6 +306,8 @@ def test_every_public_name_actually_resolves() -> None:
 
 
 SUB_API_MEMBERS = {
+    "observatories": {"configurations"},
+    "observatories.configurations": {"create", "get", "query", "scan", "update"},
     "targets": {
         "add",
         "add_frames",
@@ -428,6 +438,7 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
     assert _public_members(astrometrics) == {
         "config",
         "jobs",
+        "observatories",
         "processing",
         "quality",
         "stars",

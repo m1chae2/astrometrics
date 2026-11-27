@@ -198,8 +198,9 @@ CHILDREN = {
         "connect",
         "disconnect",
         "apply_configuration",
-        "set_active_telescope",
-        "set_active_camera",
+        "get_active",
+        "set_active",
+        "set_pointing_limits",
         "set_device_property",
     },
 }

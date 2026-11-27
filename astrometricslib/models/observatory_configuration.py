@@ -17,7 +17,6 @@ rules that seed configurations and match frames to them are in
 `astrometricslib.pipelines.shared.equipment`.
 """
 
-from collections.abc import Iterator
 from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -411,61 +410,3 @@ class ObservatoryConfiguration(BaseModel):
     def fov_height_deg(self) -> float:
         """Field of view across the sensor's height, in degrees."""
         return self.plate_scale_arcsec_per_px * self.camera.sensor_height_px / ARCSEC_PER_DEGREE
-
-
-class ObservatoryConfigurationPage(BaseModel):
-    """One page of observatory configurations.
-
-    A stand-in for the library's general `Page` until that type exists; it
-    has the same fields, so swapping it is a change of name only.
-
-    Attributes
-    ----------
-    items : `list` [`ObservatoryConfiguration`]
-        The configurations on this page.
-    total : `int`
-        How many configurations matched in all.
-    next_offset : `int` or `None`
-        The offset of the next page, or `None` on the last page.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    items: list[ObservatoryConfiguration] = Field(default_factory=list)
-    total: int = 0
-    next_offset: int | None = None
-
-    def __iter__(self) -> Iterator[ObservatoryConfiguration]:  # type: ignore[override]
-        """Go through the configurations on this page.
-
-        Returns
-        -------
-        configurations : `Iterator` [`ObservatoryConfiguration`]
-            Each configuration in turn.
-        """
-        return iter(self.items)
-
-    def __len__(self) -> int:
-        """Count the configurations on this page.
-
-        Returns
-        -------
-        count : `int`
-            The number of items.
-        """
-        return len(self.items)
-
-    def __getitem__(self, index: int) -> ObservatoryConfiguration:
-        """Give one configuration of this page.
-
-        Parameters
-        ----------
-        index : `int`
-            Its position on the page.
-
-        Returns
-        -------
-        configuration : `ObservatoryConfiguration`
-            The configuration at that position.
-        """
-        return self.items[index]

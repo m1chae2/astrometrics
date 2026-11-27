@@ -48,7 +48,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 `Observatories` is `Astrometrics.observatories`. Its `configurations` child (`ObservatoryConfigurations`) keeps every observatory configuration: one set of equipment (telescope, main camera, and optionally guide scope, guide camera, focuser, filter wheel and mount) used together over a range of dates. Each method is a thin wrapper of a function in `pipelines/shared/equipment.py`.
 
 - `get(configuration_id)` reads one configuration, or `None`.
-- `query(camera=, telescope=, time=, text=, limit=None, offset=0)` lists them, every match by default, as a page (`items`, `total`, `next_offset`). The page is a stand-in, `ObservatoryConfigurationPage`, until the library's general `Page` exists.
+- `query(camera=, telescope=, time=, text=, limit=None, offset=0)` lists them, every match by default, as a `Page` (`items`, `total`, `next_offset`).
 - `create(configuration)` stores a new one: any change of equipment is a new configuration. `update(configuration, **changes)` changes only the name, notes and dates, refuses a copy whose revision is no longer the stored one, and returns the saved configuration.
 - `scan()` creates the configurations the settings and the frames imply and points each frame at its own. The first call of any method scans once by itself.
 

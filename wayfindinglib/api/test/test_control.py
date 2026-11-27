@@ -1669,3 +1669,12 @@ def test_library_path_is_the_configured_wayfinding_folder(control: ObservatoryCo
     """`library_path` names the folder that holds `wayfinding.db`."""
     assert control.library_path == control._context.butler.library_path
     assert control.library_path.is_dir()
+
+
+def test_the_old_equipment_choices_say_where_they_moved(control: ObservatoryControl) -> None:
+    """`set_active_camera` and `set_active_telescope` raise "moved to set_active"."""
+    from astrometricslib.exceptions import MovedError
+
+    for name in ("set_active_camera", "set_active_telescope"):
+        with pytest.raises(MovedError, match="set_active"):
+            getattr(control.equipment, name)

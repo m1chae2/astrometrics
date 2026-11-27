@@ -50,10 +50,10 @@ from astrometricslib.models.observatory_configuration import (
     FilterWheel,
     Mount,
     ObservatoryConfiguration,
-    ObservatoryConfigurationPage,
     Telescope,
     configuration_key_for,
 )
+from astrometricslib.models.page import Page
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.utilities.observing_night import observing_night_id
 
@@ -323,7 +323,7 @@ def query_configurations(
     limit: int | None = None,
     offset: int = 0,
     config: Any = None,
-) -> ObservatoryConfigurationPage:
+) -> Page[ObservatoryConfiguration]:
     """List stored configurations.
 
     Parameters
@@ -350,7 +350,7 @@ def query_configurations(
 
     Returns
     -------
-    page : `ObservatoryConfigurationPage`
+    page : `Page` [`ObservatoryConfiguration`]
         The matches, oldest start date first.
 
     Raises
@@ -383,10 +383,7 @@ def query_configurations(
             if needle not in haystack:
                 continue
         matches.append(configuration)
-    end = None if limit is None else offset + limit
-    items = matches[offset:end]
-    next_offset = end if end is not None and end < len(matches) else None
-    return ObservatoryConfigurationPage(items=items, total=len(matches), next_offset=next_offset)
+    return Page.of(matches, offset=offset, limit=limit)
 
 
 def create_configuration(
@@ -709,7 +706,7 @@ def seed_configurations(
 
 def scan_configurations(
     store: ObservatoryConfigurationStore, config: Any, catalog: Any
-) -> ObservatoryConfigurationPage:
+) -> Page[ObservatoryConfiguration]:
     """Seed the configurations of every target's frames, and save the frames.
 
     Runs `seed_configurations` over every target of the catalog and saves
@@ -726,7 +723,7 @@ def scan_configurations(
 
     Returns
     -------
-    created : `ObservatoryConfigurationPage`
+    created : `Page` [`ObservatoryConfiguration`]
         The configurations this scan created; empty when it found nothing
         new.
     """
@@ -736,4 +733,4 @@ def scan_configurations(
     if result.changed_targets:
         catalog._touched_target_ids.update(target.id for target in result.changed_targets)
         target_records.save_targets(catalog)
-    return ObservatoryConfigurationPage(items=result.created, total=len(result.created))
+    return Page.of(result.created)

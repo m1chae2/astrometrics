@@ -16,13 +16,14 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from astrometricslib._internal.drivers.observatory_configuration_store import ObservatoryConfigurationStore
+from astrometricslib._internal.renames import MovedNames
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.observatory_configuration import (
     Camera,
     ObservatoryConfiguration,
-    ObservatoryConfigurationPage,
     Telescope,
 )
+from astrometricslib.models.page import Page
 
 if TYPE_CHECKING:
     from astrometricslib.api.targets import TargetCatalog
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 __all__ = ["Observatories", "ObservatoryConfigurations"]
 
 
-class ObservatoryConfigurations:
+class ObservatoryConfigurations(MovedNames):
     """Every set of equipment the observatory used, past and present.
 
     Any change of equipment is a new configuration (`create`); only the
@@ -66,7 +67,7 @@ class ObservatoryConfigurations:
             scan_configurations(self._store, self._config, self._targets)
             self._seeded = True
 
-    def scan(self) -> ObservatoryConfigurationPage:
+    def scan(self) -> Page[ObservatoryConfiguration]:
         """Create the configurations the settings and frames imply.
 
         Adds a configuration for each camera-and-optic pairing in the
@@ -81,7 +82,7 @@ class ObservatoryConfigurations:
 
         Returns
         -------
-        created : `ObservatoryConfigurationPage`
+        created : `Page` [`ObservatoryConfiguration`]
             The configurations this scan created.
         """
         from astrometricslib.pipelines.shared.equipment import scan_configurations
@@ -120,7 +121,7 @@ class ObservatoryConfigurations:
         text: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> ObservatoryConfigurationPage:
+    ) -> Page[ObservatoryConfiguration]:
         """List the stored configurations.
 
         Owner: astrometricslib.pipelines.shared.equipment.query_configurations
@@ -146,7 +147,7 @@ class ObservatoryConfigurations:
 
         Returns
         -------
-        page : `ObservatoryConfigurationPage`
+        page : `Page` [`ObservatoryConfiguration`]
             The matches (``items``, ``total``, ``next_offset``), oldest
             start date first.
 
@@ -228,7 +229,7 @@ class ObservatoryConfigurations:
         return update_configuration(self._store, configuration, **changes)
 
 
-class Observatories:
+class Observatories(MovedNames):
     """The observatory's equipment.
 
     Parameters

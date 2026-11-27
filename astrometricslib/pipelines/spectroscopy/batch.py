@@ -280,7 +280,6 @@ def _fallback_independent_frame_analysis(
         return result
 
     with registered_job(
-        enabled=True,
         job_type="analysis",
         target_id=target.id,
         completed_message=f"[{target.id}] Analysis completed successfully.",

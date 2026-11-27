@@ -94,9 +94,7 @@ def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_co
     """
     target = Target(id="NoMatchingFramesTarget")
 
-    result = tasks.analyze_target(
-        target, pipeline_type="photometry", filter_type="LUMINANCE", register_job=False
-    )
+    result = tasks.analyze_target(target, pipeline_type="photometry", filter_type="LUMINANCE")
 
     assert_result_keys(result, "photometry")
     assert result["status"] == "completed"
@@ -123,7 +121,6 @@ def test_an_unknown_analysis_mode_is_rejected_by_name() -> None:
             Target(id="UnknownModeTarget"),
             pipeline_type="not_a_real_mode",
             path="unused.fits",
-            register_job=False,
         )
 
 

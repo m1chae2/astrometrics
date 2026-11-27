@@ -840,7 +840,7 @@ Every Python example assumes the library is installed and configured with your o
   3. Repeat on a night with a known cause.
 
      ```python
-     quality = review.query(kind="night_quality", session_id="2026-10-02", register_job=False)
+     quality = review.query(kind="night_quality", session_id="2026-10-02")
      for entry in quality.targets:
          print(entry.target_id, entry.frames_taken, entry.needs_attention, entry.loss_account)
      ```

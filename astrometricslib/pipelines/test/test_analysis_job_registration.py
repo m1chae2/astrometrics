@@ -120,22 +120,30 @@ def test_a_failing_run_records_a_failed_job_and_still_raises(
     assert jobs[0].progress_current == 0
 
 
-def test_register_job_false_records_nothing(
+def test_a_run_inside_the_callers_job_joins_it(
     isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the opt-out really opts out.
+    """Verify a run inside a job the caller made records no second job.
 
-    The backend's analysis orchestrator relies on this: it already
-    tracks its own job for a UI-triggered run, so without this opt-out
-    `analyze_target` would register a second, redundant job for the
-    same run.
+    Every run records a job, whoever starts it; there is no opt-out. The
+    backend's analysis orchestrator makes its own job row and enters it
+    with `running_as_job`, so the run joins that row instead of listing
+    the same work twice.
     """
+    from astrometricslib.foundation.jobs.runner import running_as_job
+    from astrometricslib.foundation.jobs.store import JobStore
+
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
     target = Target(id="NoJobTarget")
 
-    tasks.analyze_target(target, pipeline_type="astrometry", path="unused.fits", register_job=False)
-
+    with running_as_job(
+        "backend-job", JobStore(isolated_job_logging), job_type="analysis", target_id="other"
+    ):
+        tasks.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
     assert _read_jobs(isolated_job_logging, "NoJobTarget") == []
+
+    tasks.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
+    assert len(_read_jobs(isolated_job_logging, "NoJobTarget")) == 1
 
 
 def test_log_handlers_are_detached_after_a_successful_run(

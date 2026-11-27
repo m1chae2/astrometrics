@@ -50,7 +50,7 @@ from astrometricslib.arguments import (
     reject_unused_arguments,
 )
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.jobs import background_job, registered_job
 from astrometricslib.parameters import resolve_parameter
 from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.analytics.frame_counting import (
@@ -2788,9 +2788,7 @@ class ObservationPlanning(MovedNames):
     # -- Suggestions -------------------------------------------------------
 
     @background_job("planning", grace_period_seconds=20.0)
-    def refresh_suggestions(
-        self, target: str | list[str] | None = None, register_job: bool = True
-    ) -> PackageChange:
+    def refresh_suggestions(self, target: str | list[str] | None = None) -> PackageChange:
         """Update suggested packages, the checklist and finished packages.
 
         One run does four things:
@@ -2831,9 +2829,6 @@ class ObservationPlanning(MovedNames):
             One target id, or a list of ids, to refresh (after new frames
             were measured). `None` refreshes every library target and the
             ranking.
-        register_job : `bool`, optional
-            Record the run as a job in the job history, with its log.
-            Defaults to `True`.
 
         Returns
         -------
@@ -2843,7 +2838,6 @@ class ObservationPlanning(MovedNames):
             skipped.
         """
         with registered_job(
-            enabled=register_job and get_current_job() is None,
             job_type="planning",
             target_id="package_suggestions",
         ):
@@ -3113,7 +3107,6 @@ class ObservationPlanning(MovedNames):
         sample_count: int | None = None,
         query_timeout_seconds: float | None = None,
         request_delay_seconds: float | None = None,
-        register_job: bool = True,
     ) -> DeepCatalogStatus:
         """Report the installed deep-star catalog, and maybe its full size.
 
@@ -3138,9 +3131,6 @@ class ObservationPlanning(MovedNames):
             Seconds to wait for each count. Estimate only.
         request_delay_seconds : `float`, optional
             Seconds to pause between counts. Estimate only.
-        register_job : `bool`, optional
-            Record the estimate as a job in the job history, with its log.
-            Defaults to `True`.
 
         Returns
         -------
@@ -3171,10 +3161,9 @@ class ObservationPlanning(MovedNames):
         if "estimate" in sections:
             from wayfindinglib.drivers.catalog.deep_star_catalog_builder import estimate_catalog_size
 
-            # Under a job already (a caller may run this as one), join it
-            # rather than listing the same work twice.
+            # Under a job already (a caller may run this as one), the
+            # estimate joins it rather than listing the same work twice.
             with registered_job(
-                enabled=register_job and get_current_job() is None,
                 job_type="planning",
                 target_id="deep_catalog",
             ):

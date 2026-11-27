@@ -132,7 +132,11 @@ def test_the_active_configuration_round_trips(
 
     rig_b = configurations.create(
         active.model_copy(
-            update={"id": "", "name": "", "telescope": Telescope(id="Rig B", name="Rig B", focal_length_mm=135.0)}
+            update={
+                "id": "",
+                "name": "",
+                "telescope": Telescope(id="Rig B", name="Rig B", focal_length_mm=135.0),
+            }
         )
     )
     control.equipment.set_active(rig_b)
@@ -880,8 +884,8 @@ def test_remote_methods_delegate_to_the_task_module(
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
     assert control.remote.sync_frames("M 81", dry_run=True).model_dump() == {"dry_run": True}
     remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True, None)
-    assert control.remote.sync_frames(register_job=False).model_dump() == {"succeeded": []}
-    remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None, False)
+    assert control.remote.sync_frames().model_dump() == {"succeeded": []}
+    remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None)
 
 
 def test_remote_list_refuses_a_folder_that_is_not_listed(
@@ -910,10 +914,10 @@ def test_sync_frames_refuses_arguments_its_case_does_not_use(control: Observator
         control.remote.sync_frames("M 81", local_path="/tmp/frames", files=["a.fits"])
 
 
-def test_sync_frames_of_one_target_records_a_job_only_when_asked(
+def test_sync_frames_of_one_target_always_records_a_job(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
-    """Verify one target's copy records a job with register_job=True only."""
+    """Verify every copy of one target records a job."""
     from wayfindinglib.api.control import remote
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
@@ -925,10 +929,9 @@ def test_sync_frames_of_one_target_records_a_job_only_when_asked(
         "target": "M 81",
         "measurements": [],
     }
-    control.remote.sync_frames("M 81", local_path="/tmp/frames", register_job=True)
+    control.remote.sync_frames("M 81", local_path="/tmp/frames")
 
-    assert [call.kwargs["enabled"] for call in recorded.call_args_list] == [False, True]
-    assert recorded.call_args_list[1].kwargs["target_id"] == "M 81"
+    assert [call.kwargs["target_id"] for call in recorded.call_args_list] == ["M 81", "M 81"]
 
 
 def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control: ObservatoryControl) -> None:
@@ -1189,9 +1192,7 @@ def test_stop_capture_ends_a_running_capture_against_simulator(control: Observat
     )
     assert control.imaging.stop_capture() is False
     results: list = []
-    thread = threading.Thread(
-        target=lambda: results.append(control.imaging.capture_image(30.0, count=5, register_job=False))
-    )
+    thread = threading.Thread(target=lambda: results.append(control.imaging.capture_image(30.0, count=5)))
     thread.start()
     deadline = time.monotonic() + 5.0
     while not control._context.capture_runs.is_running() and time.monotonic() < deadline:
@@ -1281,7 +1282,7 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: Ob
         {"id": "default"},
     )
 
-    assert control.imaging.capture_image(0.01, register_job=False).frames_captured == 1
+    assert control.imaging.capture_image(0.01).frames_captured == 1
     assert control.guiding.expose(1.0).started is True
     assert control.guiding._get_image() is None
     assert control.mount._sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
@@ -1294,7 +1295,7 @@ def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: Ob
     control._driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
-        control.imaging.capture_image(1.0, register_job=False)
+        control.imaging.capture_image(1.0)
     with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
         control.guiding.expose(1.0)
     with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
@@ -1672,7 +1673,7 @@ def test_library_path_is_the_configured_wayfinding_folder(control: ObservatoryCo
 
 
 def test_the_old_equipment_choices_say_where_they_moved(control: ObservatoryControl) -> None:
-    """`set_active_camera` and `set_active_telescope` raise "moved to set_active"."""
+    """The old camera and telescope choices raise "moved to set_active"."""
     from astrometricslib.exceptions import MovedError
 
     for name in ("set_active_camera", "set_active_telescope"):

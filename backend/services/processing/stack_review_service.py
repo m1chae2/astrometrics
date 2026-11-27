@@ -279,7 +279,6 @@ class StackReviewService:
                         starnet=starnet,
                         star_strength=star_strength,
                         star_stretch=star_stretch,
-                        register_job=True,
                         stack_path=stack_path,
                     )
             finally:
@@ -312,9 +311,7 @@ class StackReviewService:
         """
         quality = self._astrometrics.quality
         return self._start(
-            lambda: quality.measure_stack(
-                target_id, kind=kind, include=[], compare_to="previous", register_job=True
-            )
+            lambda: quality.measure_stack(target_id, kind=kind, include=[], compare_to="previous")
         )
 
     def start_stack_check(
@@ -407,7 +404,6 @@ class StackReviewService:
                 until=until,
                 camera_id=camera_id,
                 focal_length_mm=focal_length_mm,
-                register_job=True,
             )
         )
 

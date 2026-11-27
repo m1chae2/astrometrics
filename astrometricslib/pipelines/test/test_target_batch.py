@@ -171,7 +171,7 @@ class TestProcessTargetsInParallel:
         run_mock = MagicMock()
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 
-        pipelines.process_target(None, camera_id="ASI294", register_job=False)
+        pipelines.process_target(None, camera_id="ASI294")
 
         called_item_ids = run_mock.call_args[0][0]
         assert called_item_ids == ["M13", "M31"]
@@ -182,7 +182,7 @@ class TestProcessTargetsInParallel:
         run_mock = MagicMock()
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 
-        pipelines.process_target(["M31"], camera_id="ASI294", register_job=False)
+        pipelines.process_target(["M31"], camera_id="ASI294")
 
         called_item_ids = run_mock.call_args[0][0]
         assert called_item_ids == ["M31"]

@@ -110,19 +110,17 @@ def test_depth_goal_methods_pass_the_target_and_the_level() -> None:
     wayfinder.planning.set_depth_goal.assert_called_once_with("NGC 7331", "deep")
 
 
-def test_history_reads_register_no_job() -> None:
-    """Each history read passes ``register_job=False`` and its arguments."""
+def test_history_reads_pass_their_arguments() -> None:
+    """Each history read passes its arguments; a read records no job."""
     wayfinder = _wayfinder()
     service = AdvisoryService(wayfinder)
     history = wayfinder.review
     service.list_nights()
-    history.query.assert_called_with(kind="nights", limit=10, register_job=False)
+    history.query.assert_called_with(kind="nights", limit=10)
     service.get_night_quality("2026-10-23")
-    history.query.assert_called_with(kind="night_quality", session_id="2026-10-23", register_job=False)
+    history.query.assert_called_with(kind="night_quality", session_id="2026-10-23")
     service.list_target_changes("2026-10-23", limit=5)
-    history.query.assert_called_with(
-        kind="target_changes", session_id="2026-10-23", limit=5, register_job=False
-    )
+    history.query.assert_called_with(kind="target_changes", session_id="2026-10-23", limit=5)
 
 
 def test_live_status_does_not_refresh_the_logs() -> None:

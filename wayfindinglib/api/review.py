@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from astrometricslib import Target
 from astrometricslib.arguments import TimeInput, check_limit, to_epoch_seconds
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.jobs import background_job
 from astrometricslib.parameters import TuningReport
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
@@ -232,7 +232,6 @@ class ObservationReview(ControlChild):
         ekos_file_id: str | None = None,
         include: list[str] | None = None,
         limit: int = 10,
-        register_job: bool = True,
     ) -> ReviewQueryResult:
         """Analyse or list past observing nights, in replies of bounded size.
 
@@ -281,9 +280,6 @@ class ObservationReview(ControlChild):
             How many of the most recent nights, runs, sessions or target
             changes to cover, and how many items of each Ekos section. From
             1 to 50.
-        register_job : `bool`, optional
-            Record the analysis as a job in the job history, with its log.
-            Defaults to `True`.
 
         Returns
         -------
@@ -299,19 +295,13 @@ class ObservationReview(ControlChild):
         """
         from wayfindinglib.tasks.control_tasks import night_history
 
-        with registered_job(
-            enabled=register_job and get_current_job() is None,
-            job_type="diagnostics",
-            target_id=kind,
-        ):
-            if kind in TYPED_KINDS:
-                typed = self._answer_typed(kind, session_id, ekos_file_id, include, limit)
-                return ReviewQueryResult(kind=kind, **{TYPED_KIND_FIELDS[kind]: typed})
-            return ReviewQueryResult.model_validate(
-                night_history.build_night_history(
-                    self._context, kind, session_id, ekos_file_id, include, limit
-                )
-            )
+        # A read, not a pipeline run: it records no job of its own.
+        if kind in TYPED_KINDS:
+            typed = self._answer_typed(kind, session_id, ekos_file_id, include, limit)
+            return ReviewQueryResult(kind=kind, **{TYPED_KIND_FIELDS[kind]: typed})
+        return ReviewQueryResult.model_validate(
+            night_history.build_night_history(self._context, kind, session_id, ekos_file_id, include, limit)
+        )
 
     def _answer_typed(
         self,

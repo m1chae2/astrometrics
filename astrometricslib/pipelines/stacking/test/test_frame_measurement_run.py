@@ -596,7 +596,7 @@ def test_the_processing_api_runs_the_job_and_checks_the_limit(
     """The public method stores rows, saves only stamps, checks the limit."""
     pipelines, catalog_access = _pipelines(tmp_path, biases)
 
-    summary = pipelines.record_frame_measurements(target, register_job=False)
+    summary = pipelines.record_frame_measurements(target)
 
     assert summary.target_id == "M 99"
     assert summary.frames_measured == 3
@@ -604,10 +604,10 @@ def test_the_processing_api_runs_the_job_and_checks_the_limit(
     assert catalog_access.merge_and_record.call_count == 1
     assert catalog_access.merge_and_record.call_args.args[0] == "target_catalog"
     assert QualityStore(str(tmp_path / "astrometrics.db")).query(target_id="M 99")
-    again = pipelines.record_frame_measurements(target, register_job=False)
+    again = pipelines.record_frame_measurements(target)
     assert again.frames_measured == 0
     with pytest.raises(InvalidArgumentError, match="limit"):
-        pipelines.record_frame_measurements(target, limit=0, register_job=False)
+        pipelines.record_frame_measurements(target, limit=0)
 
 
 def test_the_stamps_are_saved_every_few_frames_and_at_the_end(

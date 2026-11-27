@@ -551,7 +551,6 @@ class CalibrationCatalog(MovedNames):
         exposure_seconds: float | None = None,
         telescope: str | None = None,
         filter_name: str | None = None,
-        register_job: bool = True,
     ) -> list[CalibrationSetHealth]:
         """Check whether the calibration sets in the library are good enough.
 
@@ -592,8 +591,6 @@ class CalibrationCatalog(MovedNames):
             Flats only: the telescope the flats were taken through.
         filter_name : `str`, optional
             Flats only: the filter, such as ``"L"`` or ``"SPEC"``.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -617,7 +614,7 @@ class CalibrationCatalog(MovedNames):
                 "filter_name": filter_name is not None,
             },
         )
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
+        with registered_job(job_type="diagnostics", target_id="calibration"):
             if kind == "flat":
                 return self._assess_flat_sets(telescope, camera_id, filter_name, gain, offset, binning)
             return self._assess_dark_or_bias_sets(
@@ -904,7 +901,6 @@ class CalibrationCatalog(MovedNames):
         kind: Literal["dark", "bias"] | None = None,
         camera_id: str | None = None,
         force: bool = False,
-        register_job: bool = True,
     ) -> CalibrationMeasurementReport:
         """Measure the dark and bias frames that are new or changed.
 
@@ -924,8 +920,6 @@ class CalibrationCatalog(MovedNames):
             Only this camera's frames.
         force : `bool`, optional
             Measure every frame again, even if its file has not changed.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -939,7 +933,7 @@ class CalibrationCatalog(MovedNames):
 
         if kind is not None:
             check_choice("kind", kind, ("dark", "bias"))
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration") as job:
+        with registered_job(job_type="diagnostics", target_id="calibration") as job:
 
             def report_progress(done: int, total: int) -> None:
                 """Tell the job how far the run is."""
@@ -1000,7 +994,6 @@ class CalibrationCatalog(MovedNames):
         telescope: str | None = None,
         filter_name: str | None = None,
         save: bool = False,
-        register_job: bool = True,
     ) -> SensorNoiseMeasurement:
         """Measure a camera setting's gain and read noise.
 
@@ -1038,8 +1031,6 @@ class CalibrationCatalog(MovedNames):
         save : `bool`, optional
             Write a measured result into the camera profile, with a backup
             of the config first. Defaults to `False`.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -1047,7 +1038,7 @@ class CalibrationCatalog(MovedNames):
             The gain, read noise, spreads, counts and a source sentence for
             the profile, or the reason nothing was measured.
         """
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
+        with registered_job(job_type="diagnostics", target_id="calibration"):
             return measure_sensor_noise_from_library(
                 self._calibration_library,
                 self._config,

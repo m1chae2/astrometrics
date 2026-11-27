@@ -163,7 +163,6 @@ def run_stack(
     force: bool,
     preview_settings: PreviewSettings,
     siril: SirilOptions,
-    register_job: bool,
     stacking_slot: Callable[[], AbstractContextManager],
     save_targets: Callable[[], None],
     drivers: Drivers | None = None,
@@ -187,9 +186,6 @@ def run_stack(
         This run's preview choices.
     siril : `SirilOptions`
         This run's Siril settings.
-    register_job : `bool`
-        Record the run in the job list. When `False`, a job the caller
-        already runs (named in the log context) still gets the provenance.
     stacking_slot : `Callable`
         Gives the context manager that holds a stacking slot.
     save_targets : `Callable`
@@ -231,7 +227,6 @@ def run_stack(
     # job list and returns its job id.
     with (
         registered_job(
-            enabled=register_job,
             job_type="stacking",
             target_id=target.id,
             log_file=siril.log_file,

@@ -138,7 +138,7 @@ class AlignmentService:
             One summary per night, from
             ``review.query(kind="alignment")``.
         """
-        reply = self._require_review().query(kind="alignment", limit=50, register_job=False)
+        reply = self._require_review().query(kind="alignment", limit=50)
         return reply.sessions
 
     def get_session_data(self, session_id: str = "") -> dict[str, Any]:

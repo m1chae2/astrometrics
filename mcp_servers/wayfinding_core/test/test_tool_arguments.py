@@ -2,8 +2,8 @@
 
 Description: The tools pass a client's JSON arguments to the `Wayfinder`
 methods as they are. These tests check that a coordinate dictionary and an
-ISO time with an offset work, and that the server, not the client, decides
-`register_job`. The library's own tests check the conversions themselves.
+ISO time with an offset work, and that no tool asks the client whether to
+record a job. The library's own tests check the conversions themselves.
 """
 
 import pytest
@@ -14,7 +14,7 @@ pytestmark = pytest.mark.anyio
 
 
 def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry: ToolRegistry) -> None:
-    """Clients are not asked for `register_job`; the server decides it."""
+    """Clients are not asked whether to record a job; every run records one."""
     schema = registry.tools["planning_get_deep_catalog_status"]["tool_def"].input_schema
     assert "register_job" not in schema["properties"]
     assert "include" in schema["properties"]

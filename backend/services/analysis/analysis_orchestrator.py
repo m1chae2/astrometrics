@@ -254,6 +254,36 @@ class AnalysisOrchestrator(BaseBackgroundService):
     Handles spectroscopy extraction and photometry analysis.
     """
 
+    def _as_current_job(self, job_id: str, target_id: str) -> Any:
+        """Make this service's job row the current job of the library.
+
+        A pipeline run records a job unless it runs inside one. Inside this
+        block the backend's own row is the current job, so the run joins
+        it: its stage progress moves this job's bar, and no second job is
+        listed.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The backend's job row.
+        target_id : `str`
+            The target the job works on.
+
+        Returns
+        -------
+        context : `AbstractContextManager`
+            ``running_as_job`` over the job store, or a do-nothing context
+            when this service has no job store.
+        """
+        import contextlib
+
+        from astrometricslib.jobs import running_as_job
+
+        repository = self._job_service.repository if self._job_service else None
+        if repository is None:
+            return contextlib.nullcontext()
+        return running_as_job(job_id, repository, job_type="analysis", target_id=target_id)
+
     def __init__(
         self,
         config_service: AppConfiguration | None = None,
@@ -1125,7 +1155,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
         self._record_steps(job_id, requested=list(stages))
-        with self.astrometrics.processing.acquire_job_slot():
+        with self._as_current_job(job_id, target_id), self.astrometrics.processing.acquire_job_slot():
             outcome = self.astrometrics.processing.process_target(
                 target,
                 stages=stages,
@@ -1134,9 +1164,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 spectroscopy=spectroscopy_options or None,
                 spectral_variation=spectral_variation_options or None,
                 run_prerequisites=True,
-                # This job is already tracked (job_id), so the stages
-                # register none of their own.
-                register_job=False,
+                # This job is already tracked (job_id) and is the current
+                # job, so the stages join it instead of recording their own.
                 **(configuration or {}),
                 on_stages_planned=lambda requested, added: self._record_steps(
                     job_id, requested=list(requested), prerequisites=list(added)
@@ -1293,7 +1322,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
         try:
-            with self.astrometrics.processing.acquire_job_slot():
+            with self._as_current_job(job_id, target_id), self.astrometrics.processing.acquire_job_slot():
                 # The worker count comes from the configured photometry
                 # workers. Each session's stars are identified against a
                 # real catalog (reusing an existing FITS-header WCS when
@@ -1305,8 +1334,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
                     photometry={"filter_name": filter_name, "use_astrometry_seed": True},
                     # This orchestrator already created and is tracking
                     # its own job (job_id, above) for this exact call, via
-                    # _submit_job/job_wrapper, so the stage registers none.
-                    register_job=False,
+                    # _submit_job/job_wrapper; it is the current job, so the
+                    # stage joins it instead of recording its own.
                 ).results["photometry"]
             self._update_job_progress(job_id, target_id, 2, 2, filter_name=filter_name)
 

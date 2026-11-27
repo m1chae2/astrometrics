@@ -232,7 +232,6 @@ def test_frames_measure_the_sky_and_star_width_the_fit_aimed_at(
         limit=FRAMES,
         camera_id=CAMERA,
         bias_level_adu=BIAS_LEVEL_ADU,
-        register_job=False,
     )
     gain_e_per_adu = 0.783
     sky_adu = report.medians["frame.sky_rate_e_per_s_per_px"] / gain_e_per_adu

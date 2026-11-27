@@ -29,7 +29,6 @@ class _Calibration:
         kind: str | None = None,
         camera_id: str | None = None,
         force: bool = False,
-        register_job: bool = True,
     ) -> dict[str, int]:
         """Record the call and wait for the release.
 
@@ -38,7 +37,7 @@ class _Calibration:
         report : `dict` [`str`, `int`]
             A small report.
         """
-        self.calls.append({"kind": kind, "force": force, "register_job": register_job})
+        self.calls.append({"kind": kind, "force": force})
         self.release.wait(timeout=5.0)
         return {"measuredCount": 1}
 
@@ -84,7 +83,7 @@ def test_new_darks_start_one_measurement_and_the_end_is_announced() -> None:
     assert service.measure_new_calibration_frames(["dark"]) is True
     _wait_until_idle(service)
 
-    assert calibration.calls == [{"kind": "dark", "force": False, "register_job": True}]
+    assert calibration.calls == [{"kind": "dark", "force": False}]
     assert events == [("calibration:measured", {})]
 
 
@@ -156,7 +155,7 @@ def _sync(folder: str, added_by_folder: dict[str, int]) -> _Recorder:
     """
     recorder = _Recorder()
     remote = SimpleNamespace(
-        sync_frames=lambda target, on_copied=None, register_job=None: SimpleNamespace(
+        sync_frames=lambda target, on_copied=None: SimpleNamespace(
             success=True, measurements=None, added_by_folder=added_by_folder
         )
     )

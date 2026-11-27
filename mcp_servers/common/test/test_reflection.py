@@ -87,10 +87,11 @@ def test_generate_tool_schema_builds_json_schema():  # ruff: ignore[missing-retu
 async def test_a_background_job_method_records_its_own_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A `@background_job` method is called with register_job=True.
+    """A `@background_job` method runs as one recorded job.
 
-    The method records its own job, so the tool's reply carries that job's
-    id next to the real result of a fast call.
+    The server records the call as a job of the marked type, the method's
+    own job joins it, and the tool's reply carries that job's id next to
+    the real result of a fast call.
     """
     configuration = get_configuration()
     stacks_path = tmp_path / "stacks"
@@ -104,7 +105,7 @@ async def test_a_background_job_method_records_its_own_job(
         """A stand-in `Astrometrics`-like object with one marked method."""
 
         @background_job("unit_test_job", grace_period_seconds=2.0)
-        def do_work(self, target: str, register_job: bool = False) -> dict:
+        def do_work(self, target: str) -> dict:
             """Stand in for real pipeline work that records its own job.
 
             Returns
@@ -112,8 +113,8 @@ async def test_a_background_job_method_records_its_own_job(
             result : `dict`
                 A trivial, fixed result.
             """
-            received.update(target=target, register_job=register_job)
-            with registered_job(enabled=register_job, job_type="unit_test_job", target_id=target):
+            received.update(target=target)
+            with registered_job(job_type="unit_test_job", target_id=target):
                 return {"stackedImage": "Vega_Stacked.fits"}
 
     isolated_registry = ToolRegistry()
@@ -124,8 +125,8 @@ async def test_a_background_job_method_records_its_own_job(
 
     result = await isolated_registry.execute("fake_do_work", {"target": "Vega"})
 
-    assert "register_job" not in schema["properties"]
-    assert received == {"target": "Vega", "register_job": True}
+    assert set(schema["properties"]) == {"target"}
+    assert received == {"target": "Vega"}
     assert '"stackedImage": "Vega_Stacked.fits"' in result[0].text
     assert '"jobId": null' not in result[0].text
 

@@ -21,7 +21,7 @@ from astrometricslib._internal.renames import MovedNames
 from astrometricslib.foundation.arguments import TimeInput, check_choice, check_limit, reject_unused_arguments
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.foundation.jobs.runner import background_job
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
@@ -1004,9 +1004,7 @@ class TargetCatalog(MovedNames):
             self._touched_target_ids = touched_before
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def imaged_field_centers(
-        self, max_frames_per_target: int = 12, register_job: bool = True
-    ) -> ImagedFieldCenters:
+    def imaged_field_centers(self, max_frames_per_target: int = 12) -> ImagedFieldCenters:
         """List the distinct sky positions the library has imaged.
 
         Reads the position from the FITS header of the first few frames of
@@ -1017,8 +1015,6 @@ class TargetCatalog(MovedNames):
         ----------
         max_frames_per_target : `int`, optional
             How many frames of each target to read. Defaults to 12.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -1028,18 +1024,18 @@ class TargetCatalog(MovedNames):
         """
         from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import derive_field_centers
 
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id="library"):
-            found = derive_field_centers(
-                self._look_at_every_target(), max_frames_per_target=max_frames_per_target
-            )
-            return ImagedFieldCenters(
-                centers=[
-                    FieldCenter(
-                        ra_deg=float(center["right_ascension_deg"]),
-                        dec_deg=float(center["declination_deg"]),
-                        target_ids=[str(target_id) for target_id in center["target_ids"]],
-                        frames_examined=int(center["frames_examined"]),
-                    )
-                    for center in found
-                ]
-            )
+        # A read, not a pipeline run: it records no job of its own.
+        found = derive_field_centers(
+            self._look_at_every_target(), max_frames_per_target=max_frames_per_target
+        )
+        return ImagedFieldCenters(
+            centers=[
+                FieldCenter(
+                    ra_deg=float(center["right_ascension_deg"]),
+                    dec_deg=float(center["declination_deg"]),
+                    target_ids=[str(target_id) for target_id in center["target_ids"]],
+                    frames_examined=int(center["frames_examined"]),
+                )
+                for center in found
+            ]
+        )

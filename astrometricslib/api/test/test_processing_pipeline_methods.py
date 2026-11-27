@@ -86,9 +86,7 @@ def test_the_astrometry_stage_forwards_its_options(
     pipelines, recorder = recording_pipelines
     target = Target(id="AstrometryParamsTarget", stacked_image="/fake/stack.fits")
 
-    pipelines.process_target(
-        target, stages=["astrometry"], astrometry={"path": "/override.fits"}, register_job=False
-    )
+    pipelines.process_target(target, stages=["astrometry"], astrometry={"path": "/override.fits"})
 
     assert len(recorder.calls) == 1
     assert recorder.calls[0]["pipeline_type"] == "astrometry"
@@ -108,7 +106,6 @@ def test_the_photometry_stage_forwards_its_options(
         stages=["photometry"],
         run_prerequisites=False,
         photometry={"frames": [frame], "filter_name": "L", "use_astrometry_seed": False, "max_workers": 3},
-        register_job=False,
     )
 
     assert len(recorder.calls) == 1
@@ -132,7 +129,6 @@ def test_the_spectroscopy_stage_forwards_its_options(
         stages=["spectroscopy"],
         spectroscopy={"limit": 5},
         run_prerequisites=False,
-        register_job=False,
     )
 
     assert len(recorder.calls) == 1
@@ -149,9 +145,9 @@ def test_an_option_a_stage_does_not_know_is_refused(
     target = Target(id="UnknownOptionTarget", stacked_image="/fake/stack.fits")
 
     with pytest.raises(InvalidArgumentError, match="Unknown astrometry option"):
-        pipelines.process_target(target, stages=["astrometry"], astrometry={"limit": 5}, register_job=False)
+        pipelines.process_target(target, stages=["astrometry"], astrometry={"limit": 5})
     with pytest.raises(InvalidArgumentError, match="does not use: on_item_complete"):
-        pipelines.process_target(target, on_item_complete=lambda *_: None, register_job=False)
+        pipelines.process_target(target, on_item_complete=lambda *_: None)
     assert recorder.calls == []
 
 
@@ -166,7 +162,7 @@ def test_process_target_runs_all_three_stages_in_order(
         stacked_spectral_target="/fake/spec.fits",
     )
 
-    results = pipelines.process_target(target, register_job=False)
+    results = pipelines.process_target(target)
 
     assert [call["pipeline_type"] for call in recorder.calls] == [
         "astrometry",
@@ -187,9 +183,7 @@ def test_process_target_stages_subset_runs_only_the_requested_stages(
         stacked_spectral_target="/fake/spec.fits",
     )
 
-    results = pipelines.process_target(
-        target, stages=["spectroscopy", "photometry"], run_prerequisites=False, register_job=False
-    )
+    results = pipelines.process_target(target, stages=["spectroscopy", "photometry"], run_prerequisites=False)
 
     assert [call["pipeline_type"] for call in recorder.calls] == ["photometry", "spectroscopy"]
     assert set(results.results) == {"photometry", "spectroscopy"}
@@ -202,7 +196,7 @@ def test_process_target_skips_spectroscopy_without_spectral_data(
     pipelines, recorder = recording_pipelines
     target = Target(id="ProcessTargetNoSpectraTarget", stacked_image="/fake/stack.fits")
 
-    results = pipelines.process_target(target, register_job=False)
+    results = pipelines.process_target(target)
 
     assert "spectroscopy" not in [call["pipeline_type"] for call in recorder.calls]
     assert results.results["spectroscopy"] == {"status": "skipped", "reason": "target has no spectral data"}
@@ -312,9 +306,7 @@ def test_one_target_photometry_defaults_to_the_batch_camera_and_primary_optic(
     """Verify photometry gets the batch's camera and the primary optic."""
     pipelines, recorder = setups_pipelines
 
-    pipelines.process_target(
-        _mixed_target(), stages=["photometry"], run_prerequisites=False, register_job=False
-    )
+    pipelines.process_target(_mixed_target(), stages=["photometry"], run_prerequisites=False)
 
     assert _photometry_paths(recorder) == ["/asi405.fits", "/asi_spec.fits"]
 
@@ -331,7 +323,6 @@ def test_one_target_photometry_uses_the_camera_and_optic_asked_for(
         camera_id="Nikon",
         focal_length_mm=300.0,
         run_prerequisites=False,
-        register_job=False,
     )
 
     assert _photometry_paths(recorder) == ["/nikon300.fits"]
@@ -371,7 +362,6 @@ def test_one_target_analyzes_the_stack_of_the_configuration_asked_for(
         camera_id=_NIKON,
         focal_length_mm=300.0,
         run_prerequisites=False,
-        register_job=False,
     )
 
     astrometry_call = next(call for call in recorder.calls if call["pipeline_type"] == "astrometry")
@@ -391,7 +381,6 @@ def test_one_target_photometry_option_frames_still_win(
         stages=["photometry"],
         photometry={"frames": [own_frame]},
         run_prerequisites=False,
-        register_job=False,
     )
 
     assert _photometry_paths(recorder) == ["/own.fits"]
@@ -404,13 +393,11 @@ def test_one_target_spectroscopy_needs_spectral_frames_in_the_selection(
     pipelines, recorder = setups_pipelines
     target = _mixed_target()
 
-    ran = pipelines.process_target(
-        target, stages=["spectroscopy"], run_prerequisites=False, register_job=False
-    )
+    ran = pipelines.process_target(target, stages=["spectroscopy"], run_prerequisites=False)
     assert ran.results["spectroscopy"]["pipeline_type"] == "spectroscopy"
 
     skipped = pipelines.process_target(
-        target, stages=["spectroscopy"], camera_id="Nikon", run_prerequisites=False, register_job=False
+        target, stages=["spectroscopy"], camera_id="Nikon", run_prerequisites=False
     )
     assert skipped.results["spectroscopy"]["status"] == "skipped"
     assert len(recorder.calls) == 1
@@ -423,8 +410,8 @@ def test_one_target_still_refuses_the_batch_only_callback(
     pipelines, recorder = setups_pipelines
 
     with pytest.raises(InvalidArgumentError, match="does not use: on_item_complete"):
-        pipelines.process_target(_mixed_target(), on_item_complete=lambda *_: None, register_job=False)
-    pipelines.process_target(_mixed_target(), stages=["astrometry"], camera_id="ZWO", register_job=False)
+        pipelines.process_target(_mixed_target(), on_item_complete=lambda *_: None)
+    pipelines.process_target(_mixed_target(), stages=["astrometry"], camera_id="ZWO")
     assert len(recorder.calls) == 1
 
 

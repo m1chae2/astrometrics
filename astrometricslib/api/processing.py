@@ -236,7 +236,6 @@ class ProcessingPipelines(MovedNames):
         camera_id: str | None = None,
         focal_length_mm: float | None = None,
         on_item_complete: Callable[[str, dict, int, int], None] | None = None,
-        register_job: bool = True,
         run_prerequisites: bool = True,
         spectral_variation: dict[str, Any] | None = None,
         on_stages_planned: Callable[[tuple[str, ...], tuple[str, ...]], None] | None = None,
@@ -337,9 +336,6 @@ class ProcessingPipelines(MovedNames):
         on_item_complete : `Callable`, optional
             For several targets, called as ``(target_id, result,
             completed_count, total_count)`` after each target finishes.
-        register_job : `bool`, optional
-            For one target, whether each stage shows up in the job list.
-            Defaults to `True`.
         run_prerequisites : `bool`, optional
             For one target, whether to add astrometry before photometry or
             spectroscopy when its result is missing or out of date.
@@ -460,7 +456,6 @@ class ProcessingPipelines(MovedNames):
             chosen_stages,
             {stage: options or {} for stage, options in stage_options.items()},
             self._storage,
-            register_job,
             drivers=self._drivers,
             frame_selection=frame_selection,
             measured_at=datetime.now(UTC),

@@ -706,7 +706,7 @@ frames = [
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == night
 ]
 astrometrics.processing.process_target(
-    "M 57", stages=["photometry"], photometry={"frames": frames}, register_job=False
+    "M 57", stages=["photometry"], photometry={"frames": frames}
 )
 rows = QualityStore.from_configuration(astrometrics.config).query(
     metric="photometry.catalog_zero_point_gaia_g_mag", target_id="M 57"
@@ -796,7 +796,7 @@ frames = [
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == "2026-10-03"
 ]
 astrometrics.processing.process_target(
-    "M 57", stages=["photometry"], photometry={"frames": frames}, register_job=False
+    "M 57", stages=["photometry"], photometry={"frames": frames}
 )
 for part in ("photon", "sky", "read"):
     for row in astrometrics.quality.query(

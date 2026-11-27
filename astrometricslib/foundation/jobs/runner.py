@@ -130,8 +130,7 @@ def current_job_id() -> str | None:
     """Give the id of the job the calling work is running as, if any.
 
     Rows that a run stores carry this id, so `Jobs.query` can list the
-    warnings of the job. A run that registered no job of its own, such as
-    one called with ``register_job=False`` from inside a larger job, uses the
+    warnings of the job. A run inside a larger job joins it and uses the
     enclosing job's id. The backend's analysis jobs are created by the backend
     and tracked with `capture_job_logs`, which names the job in the log
     context, so the log context is read too.
@@ -369,6 +368,49 @@ JOB_LOG_PACKAGES: tuple[str, ...] = ("astrometricslib", "wayfindinglib")
 PARAMETER_DEFAULTS_KEY = "parameter_defaults"
 """The key in a job's ``output_metrics`` that lists the notices of the
 parameters that used their defaults."""
+
+
+class _BorrowedJobHandle(JobHandle):
+    """The handle of a job row its caller made and finishes itself.
+
+    Work that joins it may report progress and log lines, but how the job
+    ends is the caller's decision, so a finished or failed status the work
+    reports is not stored.
+    """
+
+    def mark(
+        self,
+        status: str,
+        progress_current: int = 100,
+        *,
+        progress_total: int | None = None,
+        message: str | None = None,
+        output_metrics: dict | None = None,
+    ) -> None:
+        """Record progress, but leave a finished status to the caller.
+
+        Parameters
+        ----------
+        status : `str`
+            The status the work reports. A final one is ignored.
+        progress_current : `int`, optional
+            How far along the job is.
+        progress_total : `int`, optional
+            What "all the way along" means.
+        message : `str`, optional
+            A status line.
+        output_metrics : `dict`, optional
+            Structured results.
+        """
+        if status in _TERMINAL_STATUSES:
+            return
+        super().mark(
+            status,
+            progress_current,
+            progress_total=progress_total,
+            message=message,
+            output_metrics=output_metrics,
+        )
 
 
 def _record_default_notices(job_id: str, job_store: JobStore | None, notices: list[str]) -> None:
@@ -631,7 +673,6 @@ def close_interrupted_jobs(configuration: Any | None = None) -> list[ProcessingJ
 @contextmanager
 def registered_job(
     *,
-    enabled: bool,
     job_type: str,
     target_id: str,
     log_file: str | None = None,
@@ -651,14 +692,14 @@ def registered_job(
     can finish cleanly but still produce no image) should call
     `handle.mark(...)` itself; that choice is respected.
 
-    Callers that already have a job row, such as the backend's analysis
-    orchestrator, want `capture_job_logs` instead.
+    Every pipeline run records a job this way, whoever starts it. Work that
+    runs inside a job that is already current (one recorded here, or a row
+    the caller made and entered with `running_as_job`) is part of that job:
+    it joins it instead of listing the same work twice, and the outer owner
+    decides how the job ends.
 
     Parameters
     ----------
-    enabled : `bool`
-        Whether to record anything at all. When `False` the handle still
-        works, it just does nothing.
     job_type : `str`
         What kind of job this is, such as "analysis" or "stacking". Also
         used as the log file name prefix.
@@ -677,17 +718,11 @@ def registered_job(
         Used to log messages and report progress.
     """
     running_job = _current_job.get()
-    if (
-        enabled
-        and running_job is not None
-        and running_job.job_id is not None
-        and running_job.job_type == job_type
-        and running_job.target_id == target_id
-    ):
-        # The caller is already running as this very job, for example the
-        # MCP wrapper around a stacking method that registers its own job.
-        # Join it instead of listing the same work twice. The outer owner
-        # decides how the job ends.
+    if running_job is not None and running_job.job_id is not None:
+        # The work already runs as a job, for example a stage of a target's
+        # analysis or a call the backend or the MCP server runs as its own
+        # job. Join it instead of listing the same work twice. The outer
+        # owner decides how the job ends.
         try:
             yield running_job
         except Exception:
@@ -702,28 +737,27 @@ def registered_job(
     handle = JobHandle()
 
     with ExitStack() as log_capture:
-        if enabled:
-            try:
-                job_id, log_file_path, job_store = _create_job_row(
-                    job_type=job_type, target_id=target_id, log_file=log_file
-                )
-                log_capture.enter_context(
-                    capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_store)
-                )
-                handle = JobHandle(
-                    job_id=job_id,
-                    log_file_path=log_file_path,
-                    job_store=job_store,
-                    job_type=job_type,
-                    target_id=target_id,
-                )
-                listener = _job_started_listener.get()
-                if listener is not None:
-                    listener(handle)
-            except (sqlite3.Error, OSError, AstrometricsError) as registration_error:
-                # A job we cannot record is still a job worth doing.
-                logger.warning("Could not register %s job: %s", job_type, registration_error)
-                handle = JobHandle()
+        try:
+            job_id, log_file_path, job_store = _create_job_row(
+                job_type=job_type, target_id=target_id, log_file=log_file
+            )
+            log_capture.enter_context(
+                capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_store)
+            )
+            handle = JobHandle(
+                job_id=job_id,
+                log_file_path=log_file_path,
+                job_store=job_store,
+                job_type=job_type,
+                target_id=target_id,
+            )
+            listener = _job_started_listener.get()
+            if listener is not None:
+                listener(handle)
+        except (sqlite3.Error, OSError, AstrometricsError) as registration_error:
+            # A job we cannot record is still a job worth doing.
+            logger.warning("Could not register %s job: %s", job_type, registration_error)
+            handle = JobHandle()
 
         job_token = _current_job.set(handle if handle.job_id else _current_job.get())
         try:
@@ -753,14 +787,15 @@ def running_as_job(
 ) -> Generator[JobHandle]:
     """Run the enclosed work as a job row that its caller already made.
 
-    The backend makes its own job row, then calls library work with
-    ``register_job=False``. Without this, the library has no current job, so
-    its stage progress never reaches the row. Inside this block the row is
-    the current job, so `get_current_job` gives its handle and progress
-    reaches the store.
+    The backend makes its own job row, then calls library work. Without
+    this, the library has no current job, so the work records a second job
+    and its stage progress never reaches the row. Inside this block the row
+    is the current job, so the work joins it, `get_current_job` gives its
+    handle and progress reaches the store.
 
-    This does not create a row and does not decide how the job ends. The
-    caller still marks the job completed or failed.
+    This does not create a row and does not decide how the job ends: a
+    finished or failed status the work reports is not stored. The caller
+    still marks the job completed or failed.
 
     Parameters
     ----------
@@ -780,7 +815,7 @@ def running_as_job(
     handle : `JobHandle`
         The handle of the existing job.
     """
-    handle = JobHandle(
+    handle = _BorrowedJobHandle(
         job_id=job_id,
         log_file_path=log_file_path,
         job_store=job_store,
@@ -827,11 +862,10 @@ def background_job(job_type: str, *, grace_period_seconds: float = 5.0) -> Calla
     This is metadata only: it stamps the given job type and grace period
     onto the function and returns it unchanged. Calling the decorated
     method directly in Python runs it to completion, as the backend and the
-    tests do. The method records its own job when called with
-    ``register_job=True``. A server that must stay responsive (the MCP
-    servers) checks for this marker, calls the method with
-    ``register_job=True`` through `run_as_background_job`, and so answers
-    with a job id when the work takes longer than the grace period.
+    tests do. A server that must stay responsive (the MCP servers) checks
+    for this marker and calls the method through `run_as_background_job`
+    with this job type, so the call is recorded as a job and the server
+    answers with its id when the work takes longer than the grace period.
 
     Parameters
     ----------
@@ -859,18 +893,20 @@ def run_as_background_job(
     work_fn: Callable[[], Any],
     *,
     grace_period_seconds: float = 5.0,
+    job_type: str | None = None,
+    target_id: str | None = None,
 ) -> dict[str, Any]:
-    """Run work that records its own job in a background thread.
+    """Run work as a recorded job in a background thread.
 
-    The work is a call of a method made with ``register_job=True``, so the
-    method itself writes the job row (through `registered_job`). This
-    function only notices that row, waits a while for the work to finish,
-    and stores the work's result on the job. A fast call hands back its
-    real result directly. A slow call gets the job id (and log file path)
-    to poll with, and the thread keeps running to completion whatever the
-    caller does next: a caller disconnecting can no longer kill the work
-    partway through, which a synchronous call wrapped in a cancellable
-    request could.
+    With `job_type`, the work runs inside its own `registered_job`, and a
+    pipeline it calls joins that job. Without it, the work must record its
+    own job. This function notices the job row, waits a while for the work
+    to finish, and stores the work's result on the job. A fast call hands
+    back its real result directly. A slow call gets the job id (and log
+    file path) to poll with, and the thread keeps running to completion
+    whatever the caller does next: a caller disconnecting can no longer
+    kill the work partway through, which a synchronous call wrapped in a
+    cancellable request could.
 
     Parameters
     ----------
@@ -880,6 +916,11 @@ def run_as_background_job(
     grace_period_seconds : `float`, optional
         How long to wait before giving up and returning a job id instead
         of the real result, by default 5.0.
+    job_type : `str`, optional
+        Record the work as a job of this type (see `registered_job`).
+    target_id : `str`, optional
+        The target the job works on, with `job_type`. Defaults to the job
+        type.
 
     Returns
     -------
@@ -904,7 +945,11 @@ def run_as_background_job(
     def _run() -> None:
         listener_token = _job_started_listener.set(_remember_first_job)
         try:
-            outcome["result"] = work_fn()
+            if job_type is None:
+                outcome["result"] = work_fn()
+            else:
+                with registered_job(job_type=job_type, target_id=target_id or job_type):
+                    outcome["result"] = work_fn()
         except Exception as work_error:
             # This thread is a boundary: nobody would catch the error here.
             # A caller still waiting gets it from `outcome`; the job itself

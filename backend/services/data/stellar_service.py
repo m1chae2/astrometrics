@@ -953,7 +953,7 @@ class StellarService:
             ``size_megabytes`` (from ``planning.get_deep_catalog_status``),
             plus ``installCommand``: the command that downloads it.
         """
-        status = self.wayfinder.planning.get_deep_catalog_status(register_job=False).model_dump(
+        status = self.wayfinder.planning.get_deep_catalog_status().model_dump(
             mode="json", exclude={"estimate"}
         )
         status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND

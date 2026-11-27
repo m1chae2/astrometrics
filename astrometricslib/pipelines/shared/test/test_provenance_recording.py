@@ -60,7 +60,7 @@ def make_summary(**overrides) -> PipelineQualitySummaryBase:  # ruff: ignore[mis
 
 
 def test_recording_with_no_job_id_does_nothing_at_all(isolated_config: str) -> None:
-    """Check a job-less run (register_job=False) leaves the summary bare."""
+    """Check a job-less run () leaves the summary bare."""
     summary = make_summary()
     record_pipeline_run(
         summary=summary, job_id=None, target_id="M13", pipeline_name="photometry", pipeline_version="1.2.0"

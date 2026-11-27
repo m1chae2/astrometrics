@@ -856,11 +856,11 @@ def test_a_failing_call_is_a_note_and_other_rows_still_run() -> None:
     assert any("nothing recorded" in note for note in measurements.notes)
 
 
-def test_collect_registers_no_job() -> None:
-    """The review query is asked not to record a job in the library."""
+def test_collect_passes_no_job_switch() -> None:
+    """The review query is a read; no job switch is passed to it."""
     wayfinder = _fake_wayfinder()
     collect_measurements(wayfinder, 0.0, 0.0)
-    assert any("'register_job': False" in call for call in wayfinder.calls if call.startswith("query"))
+    assert not any("register_job" in call for call in wayfinder.calls if call.startswith("query"))
 
 
 # ----------------------------------------------------------------------

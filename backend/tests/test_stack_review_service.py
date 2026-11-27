@@ -81,7 +81,6 @@ def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
             "starnet": False,
             "star_strength": None,
             "star_stretch": None,
-            "register_job": True,
             "stack_path": None,
         }
     ]
@@ -275,9 +274,7 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     assert reply.result is not None
     assert reply.result["comparison"] is None
     assert "No previous stack" in reply.result["notes"][0]
-    assert calls == [
-        {"target": "M 81", "kind": "spectral", "include": [], "compare_to": "previous", "register_job": True}
-    ]
+    assert calls == [{"target": "M 81", "kind": "spectral", "include": [], "compare_to": "previous"}]
 
 
 def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_back(
@@ -310,7 +307,7 @@ def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_
         result : `PreviewRemakeResult`
             Never returns: the cancel stops it.
         """
-        with registered_job(enabled=True, job_type="preview", target_id=target) as job:
+        with registered_job(job_type="preview", target_id=target) as job:
             seen["job_id"] = job.job_id
             picture.write_text("half-made picture")
             working.set()

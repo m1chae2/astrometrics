@@ -258,7 +258,7 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     target = Target(id="Injection Field")
 
     result = astrometrics.processing.process_target(
-        target, stages=["astrometry"], astrometry={"path": field_image}, register_job=False
+        target, stages=["astrometry"], astrometry={"path": field_image}
     )
 
     assert len(solver.calls) == 1
@@ -323,7 +323,6 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
         stages=["photometry"],
         run_prerequisites=False,
         photometry={"frames": frames, "max_workers": 1},
-        register_job=False,
     )
 
     assert "photometry" in result.results
@@ -388,7 +387,7 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
         patch.object(astrometrics.processing, "acquire_job_slot", nullcontext),
         patch.object(astrometrics.processing, "_target_catalog", MagicMock()),
     ):
-        result = astrometrics.processing.stack(target, frames=list(target.frames), register_job=False)
+        result = astrometrics.processing.stack(target, frames=list(target.frames))
 
     assert stacker.stacked_frame_paths == [[frame.path for frame in target.frames]]
     assert result.stacked_path == stacker.output_path

@@ -89,7 +89,7 @@ def plate_scale(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @property
         def plate_scale_arcsec_per_px(self) -> float:
-            """Return a fixed plate scale.
+            """A fixed plate scale.
 
             Returns
             -------

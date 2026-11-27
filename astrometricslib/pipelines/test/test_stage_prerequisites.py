@@ -249,7 +249,7 @@ def test_a_stale_result_adds_astrometry_before_photometry(
     target = _target_with_astrometry(_stack_file(tmp_path), _NOW - timedelta(hours=1))
 
     with caplog.at_level(logging.INFO, logger=tasks.logger.name):
-        result = pipelines.process_target(target, stages=["photometry"], register_job=False)
+        result = pipelines.process_target(target, stages=["photometry"])
 
     assert any(
         "Running astrometry first: photometry needs it and its result is older than the stack" in message
@@ -268,7 +268,7 @@ def test_a_current_result_is_not_rerun(
     """Verify a current astrometry result leaves photometry to run alone."""
     target = _target_with_astrometry(_stack_file(tmp_path), _NOW + timedelta(hours=1))
 
-    result = pipelines.process_target(target, stages=["photometry"], register_job=False)
+    result = pipelines.process_target(target, stages=["photometry"])
 
     assert recorder.stages == ["photometry"]
     assert result.prerequisites_run == []
@@ -280,7 +280,7 @@ def test_spectroscopy_also_adds_astrometry(
     """Verify spectroscopy needs astrometry as photometry does."""
     target = _target_with_astrometry(_stack_file(tmp_path), None, spectral=True)
 
-    result = pipelines.process_target(target, stages=["spectroscopy"], register_job=False)
+    result = pipelines.process_target(target, stages=["spectroscopy"])
 
     assert recorder.stages == ["astrometry", "spectroscopy"]
     assert result.prerequisites_run == ["astrometry"]
@@ -292,7 +292,7 @@ def test_a_requested_astrometry_is_not_counted_as_a_prerequisite(
     """Verify astrometry the caller asked for runs once, as a stage."""
     target = _target_with_astrometry(_stack_file(tmp_path), None)
 
-    result = pipelines.process_target(target, stages=["astrometry", "photometry"], register_job=False)
+    result = pipelines.process_target(target, stages=["astrometry", "photometry"])
 
     assert recorder.stages == ["astrometry", "photometry"]
     assert result.prerequisites_run == []
@@ -304,7 +304,7 @@ def test_spectroscopy_with_no_spectral_data_adds_no_astrometry(
     """Verify a stage that has nothing to run does not trigger astrometry."""
     target = _target_with_astrometry(_stack_file(tmp_path), None)
 
-    result = pipelines.process_target(target, stages=["spectroscopy"], register_job=False)
+    result = pipelines.process_target(target, stages=["spectroscopy"])
 
     assert recorder.calls == []
     assert result.results["spectroscopy"]["status"] == "skipped"
@@ -320,7 +320,7 @@ def test_no_stack_and_no_image_skips_the_dependent_stage(
     target = Target(id="NoStackTarget")
 
     with caplog.at_level(logging.INFO, logger=tasks.logger.name):
-        result = pipelines.process_target(target, stages=["photometry"], register_job=False)
+        result = pipelines.process_target(target, stages=["photometry"])
 
     assert any(
         "Running astrometry first: photometry needs it and its result is missing" in m
@@ -341,9 +341,7 @@ def test_a_caller_given_image_stands_in_for_the_missing_stack(
     image_path = _stack_file(tmp_path)
     target = Target(id="NoStackTarget")
 
-    result = pipelines.process_target(
-        target, stages=["photometry"], astrometry={"path": image_path}, register_job=False
-    )
+    result = pipelines.process_target(target, stages=["photometry"], astrometry={"path": image_path})
 
     assert recorder.stages == ["astrometry", "photometry"]
     assert recorder.calls[0]["path"] == image_path
@@ -356,9 +354,7 @@ def test_a_caller_given_image_that_is_missing_skips_the_dependent_stage(
     """Verify a named image that is not on disk blocks the dependent stage."""
     target = Target(id="NoStackTarget")
 
-    result = pipelines.process_target(
-        target, stages=["photometry"], astrometry={"path": "/gone/image.fits"}, register_job=False
-    )
+    result = pipelines.process_target(target, stages=["photometry"], astrometry={"path": "/gone/image.fits"})
 
     assert recorder.calls == []
     assert "does not exist" in result.stages_skipped["photometry"]
@@ -374,7 +370,6 @@ def test_a_caller_given_image_is_used_even_when_a_stack_exists_and_is_current(
         target,
         stages=["photometry"],
         astrometry={"path": _stack_file(tmp_path)},
-        register_job=False,
     )
 
     assert recorder.stages == ["astrometry", "photometry"]
@@ -387,7 +382,7 @@ def test_a_failed_prerequisite_skips_the_dependent_stage(
     recorder.failures["astrometry"] = ProcessingError("no stars found")
     target = _target_with_astrometry(_stack_file(tmp_path), None)
 
-    result = pipelines.process_target(target, stages=["photometry"], register_job=False)
+    result = pipelines.process_target(target, stages=["photometry"])
 
     assert recorder.stages == ["astrometry"]
     assert result.stages_run == []
@@ -401,7 +396,7 @@ def test_a_prerequisite_with_no_solution_skips_the_dependent_stage(
     recorder.results["astrometry"] = {"wcs": None}
     target = _target_with_astrometry(_stack_file(tmp_path), None)
 
-    result = pipelines.process_target(target, stages=["photometry"], register_job=False)
+    result = pipelines.process_target(target, stages=["photometry"])
 
     assert recorder.stages == ["astrometry"]
     assert "could not be plate solved" in result.stages_skipped["photometry"]
@@ -413,9 +408,7 @@ def test_run_prerequisites_false_runs_only_the_requested_stages(
     """Verify the old behavior is available by asking for it."""
     target = _target_with_astrometry(_stack_file(tmp_path), None)
 
-    result = pipelines.process_target(
-        target, stages=["photometry"], run_prerequisites=False, register_job=False
-    )
+    result = pipelines.process_target(target, stages=["photometry"], run_prerequisites=False)
 
     assert recorder.stages == ["photometry"]
     assert result.prerequisites_run == []
@@ -470,7 +463,7 @@ def test_a_current_spectroscopy_result_is_not_rerun(
     """Verify spectral variation alone runs when spectroscopy is current."""
     target = _spectral_variation_target(tmp_path, _NOW + timedelta(hours=1))
 
-    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+    result = pipelines.process_target(target, stages=["spectral_variation"])
 
     assert recorder.stages == ["spectral_variation"]
     assert result.prerequisites_run == []
@@ -487,7 +480,7 @@ def test_a_missing_or_old_spectroscopy_result_adds_spectroscopy_and_astrometry(
     target = _spectral_variation_target(tmp_path, spectroscopy_at)
     target.quality.astrometry = None
 
-    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+    result = pipelines.process_target(target, stages=["spectral_variation"])
 
     assert recorder.stages == ["astrometry", "spectroscopy", "spectral_variation"]
     assert result.prerequisites_run == ["astrometry", "spectroscopy"]
@@ -509,7 +502,7 @@ def test_spectral_variation_with_no_raw_frames_is_skipped_and_adds_nothing(
     """Verify a target with no raw frames skips the stage with a reason."""
     target = _spectral_variation_target(tmp_path, None, with_raw_frames=False)
 
-    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+    result = pipelines.process_target(target, stages=["spectral_variation"])
 
     assert recorder.stages == []
     assert result.results["spectral_variation"]["status"] == "skipped"
@@ -523,7 +516,7 @@ def test_a_failed_spectroscopy_prerequisite_skips_spectral_variation(
     target = _spectral_variation_target(tmp_path, None)
     recorder.failures["spectroscopy"] = ProcessingError("no spectra")
 
-    result = pipelines.process_target(target, stages=["spectral_variation"], register_job=False)
+    result = pipelines.process_target(target, stages=["spectral_variation"])
 
     assert "spectral_variation" not in recorder.stages
     assert result.stages_skipped["spectral_variation"].startswith("needs spectroscopy:")
@@ -557,7 +550,7 @@ def test_a_cancelled_run_stops_before_the_next_stage(
     ):
         patch.setattr(_RecordingPipelineMatch, "__call__", cancel_during_astrometry)
         with pytest.raises(RunAbandonedError):
-            pipelines.process_target(target, stages=["photometry"], register_job=False)
+            pipelines.process_target(target, stages=["photometry"])
 
     assert recorder.stages == ["astrometry"]
 

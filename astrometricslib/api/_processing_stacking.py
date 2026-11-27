@@ -87,7 +87,6 @@ def stack(
     generate_rejmap: bool | None = None,
     output_file: str | None = None,
     log_file: str | None = None,
-    register_job: bool = True,
 ) -> StackResult:
     """Stack a target's light frames, choosing which frames go in.
 
@@ -159,10 +158,6 @@ def stack(
         Where to write the stack instead of the usual place.
     log_file : `str`, optional
         Where to write Siril's log.
-    register_job : `bool`, optional
-        Record the run in the job list. Defaults to `True`. When the
-        caller already runs a job, the stack's provenance is recorded
-        against that job.
 
     Returns
     -------
@@ -219,7 +214,6 @@ def stack(
             output_file=output_file,
             log_file=log_file,
         ),
-        register_job=register_job,
         stacking_slot=self.acquire_job_slot,
         save_targets=self._targets.save,
         drivers=self._drivers,
@@ -316,7 +310,6 @@ def predict_stack(
     camera_id: str | None = None,
     focal_length_mm: float | None = None,
     checks: bool = True,
-    register_job: bool = False,
 ) -> StackPrediction:
     """Say what a stack would do with its frames, without stacking.
 
@@ -362,8 +355,6 @@ def predict_stack(
         Run the frame checks and the calibration choice. Defaults to `True`.
         With `False`, the answer has only the frame choice (``checks_run``
         is `False`).
-    register_job : `bool`, optional
-        Record the run in the job list. Defaults to `False`.
 
     Returns
     -------
@@ -398,8 +389,8 @@ def predict_stack(
     )
     if not checks:
         return list_chosen_frames(resolved, chosen, kind)
-    with registered_job(enabled=register_job, job_type="diagnostics", target_id=resolved.id):
-        return predict_stack(resolved, chosen, kind, self.calibration._calibration_library)
+    # A prediction is a read, not a pipeline run, so it records no job.
+    return predict_stack(resolved, chosen, kind, self.calibration._calibration_library)
 
 
 def measure_noise(
@@ -410,7 +401,6 @@ def measure_noise(
     maximum_steps: int | None = None,
     include: list[str] | None = None,
     keep_halves: bool = False,
-    register_job: bool = True,
 ) -> NoiseGrowthResult | NightContributionResult | OddEvenDifferenceNoiseResult:
     """Stack parts of a target's library stack and measure the noise.
 
@@ -515,8 +505,6 @@ def measure_noise(
     keep_halves : `bool`, optional
         Applies to ``"odd_even_difference"`` only. Keep the two half
         stacks in the ``_subsets`` folder. Defaults to `False`.
-    register_job : `bool`, optional
-        Record the run in the job list. Defaults to `True`.
 
     Returns
     -------
@@ -559,7 +547,7 @@ def measure_noise(
         sections = frozenset(("odd_even_difference",))
     resolved = self._resolve(target)
     library_stack_path = self._library_stack_path(resolved, "imaging")
-    with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+    with registered_job(job_type="stacking", target_id=resolved.id) as job:
         context = self._subset_context(resolved, job.job_id)
         shared = {
             "context": context,

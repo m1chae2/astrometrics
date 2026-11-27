@@ -193,7 +193,7 @@ def _choose_search_circles(
 
     circles = [(ra, dec, radius) for ra, dec, radius in arguments.near or []]
     if arguments.near_targets:
-        field_centers = Astrometrics(config).targets.imaged_field_centers(register_job=False).centers
+        field_centers = Astrometrics(config).targets.imaged_field_centers().centers
         for field_center in field_centers:
             circles.append((
                 field_center.ra_deg,
@@ -270,7 +270,6 @@ def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
             magnitude_max=arguments.magnitude_limit,
             query_timeout_seconds=arguments.timeout_seconds,
             request_delay_seconds=arguments.request_delay_seconds,
-            register_job=False,
         ).estimate
     except ExternalServiceError as estimate_error:
         print(f"Could not estimate: {estimate_error}")

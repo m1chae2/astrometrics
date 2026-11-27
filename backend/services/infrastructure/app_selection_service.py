@@ -5,6 +5,11 @@ the target, the shown file or the selected star changes. The Command
 Console's ``selection`` object reads the latest one when a script asks for
 it, so a console in another window sees the same pick. Nothing is saved to
 disk: the selection starts empty each time the backend starts.
+
+The selection is kept as the app sends it: a target name and a star
+position on the picture shown. The console's ``selection`` object
+(`console_helpers.ConsoleSelection`) turns it into library terms: a
+`Target`, and a position in the file shown.
 """
 
 import threading
@@ -35,7 +40,8 @@ class SelectedStar:
     x : `float` or `None`
         Column of the star's center on the shown picture, in pixels,
         1-based as in FITS and DS9 (the center of the first pixel is 1),
-        the same as the Star Profile panel.
+        the same as the Star Profile panel. The app sends it that way, so
+        it is stored unchanged.
     y : `float` or `None`
         Row of the star's center on the shown picture, in pixels, 1-based
         the same way.
@@ -43,7 +49,9 @@ class SelectedStar:
     Notes
     -----
     Only a star picked with the Astrometry overlay is sent, not the Star
-    Profile pin.
+    Profile pin. On a stack, the shown picture is the stack's processed
+    copy, which may be a crop of the stack; `console_helpers.console_star`
+    moves the position into the stack file for the console.
     """
 
     id: str | None = None

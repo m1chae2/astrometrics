@@ -452,7 +452,7 @@ export interface ActionRegistry {
     "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
     "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
     "ui:inspect_variable": { payload: { variable_name: string }; response: void };
-    /** Image Processing tells the backend what is picked now, for the Command Console's `selection` object. Pixels count from 0. */
+    /** Image Processing tells the backend what is picked now, for the Command Console's `selection` object. The star's `x` and `y` count pixels from 1, on the picture shown. */
     "ui:set_selection": {
         payload: {
             target?: string | null;

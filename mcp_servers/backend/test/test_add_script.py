@@ -5,7 +5,8 @@ My scripts list, and never run it. These tests replace the backend with a
 small fake that keeps scripts in memory. They check the saved text and its
 header, that an existing name is refused, that a bad file name is refused
 before any call, that no code-running RPC method is ever used, and that
-the profile offers the tool and still withholds the code runner.
+the profile offers the tool and still withholds the code runner. The
+description must state the console script convention.
 """
 
 import asyncio
@@ -132,3 +133,17 @@ def test_the_profile_offers_the_tool_and_withholds_the_code_runner() -> None:
     assert "terminal_add_script" in registry.tools
     assert "electron_run_python" in registry.withheld
     assert "backend_call_rpc" in registry.withheld
+
+
+def test_the_description_states_the_script_convention() -> None:
+    """The tool tells the AI how to write a script that can be promoted.
+
+    The analysis goes in a function with explicit inputs, the console
+    helpers only in driver lines, and ``selection`` gives library objects
+    and 1-based pixels.
+    """
+    description = definition.build_registry().tools["terminal_add_script"]["tool_def"].description
+    assert "function with explicit inputs" in description
+    assert "driver lines" in description
+    assert "the library's Target" in description and "x_px and y_px" in description
+    assert "counted from 1" in description

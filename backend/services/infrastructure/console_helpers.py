@@ -8,7 +8,9 @@ code itself:
   `KeyboardInterrupt` in its thread (the same thing Ctrl+C does in a plain
   Python prompt) and collects the requests a run makes to the app.
 * `ConsoleSelection` is the read-only ``selection`` object of the console.
-  It reads what is picked in Image Processing each time it is used.
+  It reads what is picked in Image Processing each time it is used, and
+  turns it into library terms: the target as a `Target`, and the star's
+  position as 1-based pixels of the file shown (`console_star`).
 * `make_show_request` checks the arguments of ``show(...)`` and turns them
   into a request that the app carries out with its own navigation.
 * `lookup_doc` finds the API reference entry that documents a name or an
@@ -24,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.services.infrastructure.app_selection_service import AppSelection
+from backend.services.infrastructure.app_selection_service import AppSelection, SelectedStar
 
 #: The displays ``show(...)`` can open, by the words a script may use.
 SHOW_DISPLAYS = {
@@ -220,6 +222,77 @@ def _format_number(value: float | None, digits: int) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
+@dataclass(frozen=True)
+class ConsoleStar:
+    """The star picked in Image Processing (``selection.star``).
+
+    Attributes
+    ----------
+    id : `str` or `None`
+        The star's id on the picture (its catalog key, or its name).
+    name : `str` or `None`
+        The star's name, such as ``"Vega"``.
+    library_id : `str` or `None`
+        The id of the star's record in the library, when it has one. Give
+        it to ``astrometrics.stars.get`` for the `StellarObject`.
+    ra_deg : `float` or `None`
+        Right ascension (ICRS), in degrees. Usually `None` on a raw frame.
+    dec_deg : `float` or `None`
+        Declination (ICRS), in degrees. Usually `None` on a raw frame.
+    x_px : `float` or `None`
+        Column of the star's center in the file ``selection.path``, in
+        pixels counted from 1 (the center of the first pixel is 1), as the
+        library, FITS and DS9 count.
+    y_px : `float` or `None`
+        Row of the star's center, counted from 1 the same way.
+    """
+
+    id: str | None = None
+    name: str | None = None
+    library_id: str | None = None
+    ra_deg: float | None = None
+    dec_deg: float | None = None
+    x_px: float | None = None
+    y_px: float | None = None
+
+
+def console_star(star: SelectedStar, offset_px: tuple[float, float] = (0.0, 0.0)) -> ConsoleStar:
+    """Turn the star the app sent into the console's star, in file pixels.
+
+    This is the one place where the app's star position becomes the
+    position the console gives. The app sends the column and row of the
+    star's center on the picture it shows, already counted from 1 (the
+    Astrometry overlay counts that way). On a stack, that picture is the
+    stack's processed copy, which may be a crop of the stack. Adding the
+    crop's corner, ``offset_px``, gives the position in the stack file
+    itself, so a script can pass ``selection.path`` and the position to a
+    library call. On a raw frame the offset is zero.
+
+    Parameters
+    ----------
+    star : `SelectedStar`
+        The star as the app sent it.
+    offset_px : `tuple` [`float`, `float`], optional
+        Where the shown picture starts in the file, in pixels: ``(0, 0)``
+        when it is the whole file.
+
+    Returns
+    -------
+    star : `ConsoleStar`
+        The star, with ``x_px`` and ``y_px`` in 1-based pixels of the file.
+    """
+    offset_x, offset_y = offset_px
+    return ConsoleStar(
+        id=star.id,
+        name=star.name,
+        library_id=star.library_id,
+        ra_deg=star.ra,
+        dec_deg=star.dec,
+        x_px=None if star.x is None else star.x + offset_x,
+        y_px=None if star.y is None else star.y + offset_y,
+    )
+
+
 class ConsoleSelection:
     """What is picked in Image Processing, read each time it is used.
 
@@ -228,19 +301,37 @@ class ConsoleSelection:
     and works when Image Processing is in another window. It cannot be
     changed from the console: pick something in Image Processing instead.
     Every attribute is `None` when nothing is picked.
+
+    The values are in the library's own terms, so a function that takes
+    them works the same after it moves into the library: ``target`` is a
+    `Target` and ``star`` gives 1-based pixels of the file ``path``.
     """
 
-    __slots__ = ("_read",)
+    __slots__ = ("_find_offset", "_find_target", "_read")
 
-    def __init__(self, read: Callable[[], AppSelection]) -> None:
+    def __init__(
+        self,
+        read: Callable[[], AppSelection],
+        find_target: Callable[[str], Any] | None = None,
+        find_offset: Callable[[str], tuple[float, float]] | None = None,
+    ) -> None:
         """Make the selection object.
 
         Parameters
         ----------
         read : callable
             Returns the latest `AppSelection`.
+        find_target : callable, optional
+            Looks a target up by its name and returns the library's
+            `Target`, or `None`. With none, ``target`` is always `None`.
+        find_offset : callable, optional
+            Given a stack's path, returns where the picture Image Processing
+            shows for it starts in the stack, in pixels. With none, the
+            offset is zero.
         """
         object.__setattr__(self, "_read", read)
+        object.__setattr__(self, "_find_target", find_target)
+        object.__setattr__(self, "_find_offset", find_offset)
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Refuse every change, because the selection follows the app.
@@ -262,9 +353,16 @@ class ConsoleSelection:
         )
 
     @property
-    def target(self) -> str | None:
-        """The target's name, such as ``"M 31"``."""
-        return self._read().target
+    def target(self) -> Any:
+        """The picked target as the library's `Target`, or `None`.
+
+        It is `None` when nothing is picked or the library has no target of
+        that name.
+        """
+        name = self._read().target
+        if name is None or self._find_target is None:
+            return None
+        return self._find_target(name)
 
     @property
     def path(self) -> str | None:
@@ -277,21 +375,42 @@ class ConsoleSelection:
         return self._read().kind
 
     @property
-    def star(self) -> Any:
+    def star(self) -> ConsoleStar | None:
         """The selected star, or `None`.
 
-        It has ``id``, ``name``, ``library_id``, ``ra`` and ``dec``
-        (degrees; usually `None` on a raw frame) and ``x`` and ``y`` (the
-        1-based column and row of the star's center on the shown picture,
-        as FITS, DS9 and the Star Profile panel count). Any may be `None`.
-        Only a star picked with the Astrometry overlay counts.
+        It has ``id``, ``name``, ``library_id``, ``ra_deg`` and ``dec_deg``
+        (usually `None` on a raw frame), and ``x_px`` and ``y_px``: the
+        column and row of the star's center in the file ``path``, counted
+        from 1 as the library, FITS, DS9 and the Star Profile panel count.
+        Any may be `None`. Only a star picked with the Astrometry overlay
+        counts.
         """
-        return self._read().star
+        selection = self._read()
+        if selection.star is None:
+            return None
+        return console_star(selection.star, self._offset(selection))
 
     @property
     def set_at(self) -> Any:
         """When Image Processing sent this selection (UTC), or `None`."""
         return self._read().set_at
+
+    def _offset(self, selection: AppSelection) -> tuple[float, float]:
+        """Find where the shown picture starts in the shown file.
+
+        Parameters
+        ----------
+        selection : `AppSelection`
+            The selection the star belongs to.
+
+        Returns
+        -------
+        offset_px : `tuple` [`float`, `float`]
+            The crop corner of a stack's processed copy, or ``(0, 0)``.
+        """
+        if selection.kind != "stack" or not selection.path or self._find_offset is None:
+            return (0.0, 0.0)
+        return self._find_offset(selection.path)
 
     def __repr__(self) -> str:
         """Give a short readable summary of the selection.
@@ -309,14 +428,14 @@ class ConsoleSelection:
         when = selection.set_at.strftime("%Y-%m-%d %H:%M:%S UTC") if selection.set_at else "unknown time"
         lines = [f"Image Processing selection (set {when})", f"  target: {selection.target or '-'}"]
         lines.append(f"  file:   {selection.kind or '-'}  {selection.path or '-'}")
-        star = selection.star
-        if star is None:
+        if selection.star is None:
             lines.append("  star:   -")
         else:
+            star = console_star(selection.star, self._offset(selection))
             lines.append(
                 f"  star:   {star.name or star.id or '-'}"
-                f"  ra {_format_number(star.ra, 5)}  dec {_format_number(star.dec, 5)}"
-                f"  x {_format_number(star.x, 1)}  y {_format_number(star.y, 1)}"
+                f"  ra_deg {_format_number(star.ra_deg, 5)}  dec_deg {_format_number(star.dec_deg, 5)}"
+                f"  x_px {_format_number(star.x_px, 1)}  y_px {_format_number(star.y_px, 1)}"
             )
         return "\n".join(lines)
 
@@ -345,6 +464,41 @@ def _display_name(display: str) -> str:
     if name is None:
         raise ValueError(f"show() opens 'Image Processing' or 'Astronomy Manager', not {display!r}.")
     return name
+
+
+def show_argument_text(value: Any) -> str | None:
+    """Turn a ``show`` argument into the text the app opens it by.
+
+    ``show`` takes a name, or the object a script already holds: a `Target`
+    (``selection.target``), a `StellarObject` or the selected star
+    (``selection.star``).
+
+    Parameters
+    ----------
+    value : `Any`
+        A text, the selected star (found by ``library_id``, then
+        ``name``), an object with ``id`` (a `Target` or a `StellarObject`),
+        or `None`.
+
+    Returns
+    -------
+    text : `str` or `None`
+        The name or id to open, or `None` when there is none.
+
+    Raises
+    ------
+    TypeError
+        If the value is neither a text nor an object with a usable id.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    # The selected star is found by its library record first, then its name.
+    fields = ("library_id", "name", "id") if isinstance(value, ConsoleStar) else ("id",)
+    for field_name in fields:
+        text = getattr(value, field_name, None)
+        if isinstance(text, str) and text:
+            return text
+    raise TypeError(f"show() takes a name or a library object, not {type(value).__name__}.")
 
 
 def make_show_request(

@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.api.control.context import ControlContext
 from wayfindinglib.api.control.equipment import EquipmentControl
 from wayfindinglib.api.control.guiding import GuidingControl
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
 __all__ = ["ObservatoryControl"]
 
 
-class ObservatoryControl:
+class ObservatoryControl(MovedNames):
     """Operate the observatory through six topic children.
 
     Parameters

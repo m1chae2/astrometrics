@@ -16,7 +16,7 @@ def test_the_astrometricslib_reference_lists_its_public_modules() -> None:
     """Each public module has a block, with its names."""
     text = generate_astrometricslib_docs()
 
-    for module in ("exceptions", "reports", "jobs", "drivers"):
+    for module in ("arguments", "exceptions", "reports", "jobs", "drivers"):
         assert f"### `astrometricslib.{module}`" in text
     assert "`NotFoundError`" in text
     assert "`observing_night_id" in text

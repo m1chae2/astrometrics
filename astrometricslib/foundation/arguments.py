@@ -1,13 +1,19 @@
-"""Purpose: Small argument checks for the `wayfindinglib` public calls.
+"""Purpose: The argument rules every public method of both libraries shares.
 
-Description: Copies of the science library's checks of a choice, an
-``include`` list, a count (the one ``limit`` rule: a value outside the
-documented range is refused, never clamped), arguments a kind does not use,
-and a time, so this library does not reach into the science library's
-private package. `TimeInput` names
-the kinds of time a public call takes. Each refuses a bad
-value with `InvalidArgumentError`. Only `wayfindinglib` itself, and the tests
-of either library, may import this module.
+Description: A public method checks its arguments the same way in
+astrometricslib and in wayfindinglib, so the rules live here, once. Scripts
+and wayfindinglib import them from the public module
+`astrometricslib.arguments`.
+
+* `TimeInput` names the kinds of time a method takes, and `to_epoch_seconds`
+  turns any of them into seconds since 1970. A time with no time zone is UTC.
+* `check_choice` and `check_include` refuse a value a method does not know.
+* `check_limit` holds the one ``limit`` rule: a count outside the documented
+  range is refused, never quietly moved into it.
+* `reject_unused_arguments` refuses an argument that the chosen ``kind`` does
+  not use.
+
+Each check raises `InvalidArgumentError`, never a built-in exception.
 """
 
 from collections.abc import Collection, Iterable, Mapping
@@ -16,7 +22,7 @@ from typing import Any
 
 from astropy.time import Time
 
-from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 __all__ = [
     "TimeInput",
@@ -27,9 +33,11 @@ __all__ = [
     "to_epoch_seconds",
 ]
 
-TimeInput = str | datetime | Time | None
-"""A time a public call takes: an ISO 8601 string, a `datetime` or an astropy
-`Time` (no time zone means UTC), or `None` for no bound."""
+
+TimeInput = str | datetime | Time
+"""A time as a public method takes it: ISO 8601 text, a `datetime` or an
+astropy `Time`. A time with no time zone is UTC. A method whose time is
+optional says ``TimeInput | None``."""
 
 
 def check_choice(name: str, value: Any, choices: Collection[str]) -> None:
@@ -56,25 +64,25 @@ def check_choice(name: str, value: Any, choices: Collection[str]) -> None:
 
 
 def check_include(include: Iterable[str] | None, allowed: Collection[str]) -> frozenset[str]:
-    """Check the sections a caller asked for with ``include=``.
+    """Check the parts a caller asked for with ``include=``.
 
     Parameters
     ----------
     include : `Iterable` [`str`] or `None`
-        The sections asked for. `None` means none.
+        The parts asked for. `None` means none.
     allowed : `Collection` [`str`]
-        The sections the method offers.
+        The parts the method offers.
 
     Returns
     -------
     sections : `frozenset` [`str`]
-        The sections asked for.
+        The parts asked for.
 
     Raises
     ------
     InvalidArgumentError
-        If a section is not offered, or ``include`` is a single string
-        rather than a list.
+        If a part is not offered, or ``include`` is a single string rather
+        than a list.
     """
     if include is None:
         return frozenset()
@@ -100,9 +108,9 @@ def check_limit(
 ) -> None:
     """Refuse a count (``limit``, ``offset``, ``lines``) outside its range.
 
-    The same rule as the science library's own ``check_limit``: a value
-    outside the documented range raises, it is never clamped. `None` is
-    accepted when ``allow_none`` is set; each method says what `None` means.
+    This is the one ``limit`` rule of the public methods: a value outside
+    the documented range raises, it is never clamped. `None` is accepted
+    when ``allow_none`` is set; each method says what `None` means.
 
     Parameters
     ----------
@@ -165,7 +173,7 @@ def reject_unused_arguments(
         )
 
 
-def to_epoch_seconds(value: TimeInput | Any, name: str = "time") -> float | None:
+def to_epoch_seconds(value: TimeInput | None, name: str = "time") -> float | None:
     """Turn a time into seconds since 1970-01-01 UTC.
 
     Parameters

@@ -20,6 +20,7 @@ _DOCS_CACHE: dict[str, dict[str, str]] = {}
 PUBLIC_LIBRARY_MODULES = {
     "astrometricslib": (
         "astrometricslib",
+        "astrometricslib.arguments",
         "astrometricslib.exceptions",
         "astrometricslib.reports",
         "astrometricslib.jobs",

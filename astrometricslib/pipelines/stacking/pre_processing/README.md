@@ -14,9 +14,9 @@ These terms appear throughout:
 - *Siril* is the external program that builds the masters and stacks the frames.
 - A *session* is the set of light frames of one camera, filter and exposure length taken less than 4 h apart. The frame-quality check judges each session on its own.
 
-Before the numbered checks, the stage keeps the stack to one camera (`camera_selection.py`). Frames from two cameras differ in pixel size, gain, noise and calibration frames, so a stack that mixes them has no single meaning. `choose_camera_frames` picks a named camera's frames for `ProcessingPipelines.stack`. `ensure_single_camera` stops the stage with an error when the frames still come from more than one camera. Frames with no camera recorded do not count.
+Before the numbered checks, the stage keeps the stack to one camera (`pipelines/shared/camera_selection.py`). Frames from two cameras differ in pixel size, gain, noise and calibration frames, so a stack that mixes them has no single meaning. `choose_camera_frames` picks a named camera's frames for `ProcessingPipelines.stack`. `ensure_single_camera` stops the stage with an error when the frames still come from more than one camera. Frames with no camera recorded do not count.
 
-The stage also keeps the stack to one optic (`optic_selection.py`). A camera used behind two telescopes or lenses makes frames at two image scales, so a stack that mixes them has no single pixel scale. An optic is known by its focal length in whole millimeters. `choose_optic_frames` picks the frames at one focal length when `ProcessingPipelines.stack` is given `focal_length_mm`. `ensure_single_optic` stops the stage with an error when the frames still come from more than one optic. Frames with no focal length recorded do not count.
+The stage also keeps the stack to one optic (`pipelines/shared/optic_selection.py`). A camera used behind two telescopes or lenses makes frames at two image scales, so a stack that mixes them has no single pixel scale. An optic is known by its focal length in whole millimeters. `choose_optic_frames` picks the frames at one focal length when `ProcessingPipelines.stack` is given `focal_length_mm`. `ensure_single_optic` stops the stage with an error when the frames still come from more than one optic. Frames with no focal length recorded do not count.
 
 1. Gain check (`frame_homogeneity.py`). Frames taken at different camera gain settings have different read noise, so mixing them hurts the stack. The check keeps the most common gain and sets the others aside.
 2. Frame-quality check (`frame_quarantine.py`). It measures each light frame and moves a frame with clouds, trailed stars or a pointing far off the session's field into an `_excluded` folder beside it. It skips spectral frames. [The frame-quality check](#the-frame-quality-check) describes it.
@@ -72,8 +72,6 @@ The limits are in `frame_quarantine.py`.
 
 ## Files
 
-- `camera_selection.py`: the one-camera rule.
-- `optic_selection.py`: the one-optic rule.
 - `frame_homogeneity.py`: the gain check.
 - `frame_quarantine.py`: the frame-quality check and its limits.
 - `blink_pair.py`: picks what the viewer's Blink button needs for a flagged or set-aside frame: a typical frame of the same session (stored star elongation and sky unevenness closest to the session medians) and one bright, isolated, unsaturated star near the center, with its position in both frames. The star comes from the star-shape measurement's candidate rules, and the position is mapped with the star matching of the pointing check, which allows for a meridian flip. It stores nothing. `QualityRecords.choose_blink_pair` and `QualityRecords.match_frame_positions` call it.

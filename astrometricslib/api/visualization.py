@@ -16,16 +16,13 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.foundation.arguments import check_choice, reject_unused_arguments
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import RenderedImage, Target, ViewableImage
-from astrometricslib.pipelines.shared.api_arguments import (
-    TargetLookup,
-    check_choice,
-    reject_unused_arguments,
-    resolve_target,
-)
+from astrometricslib.pipelines.shared.api_arguments import TargetLookup, resolve_target
 from astrometricslib.visualization.sky_placement import (
     SkyPicturePlacement,
     place_picture_on_sky,
@@ -70,7 +67,7 @@ _DEFAULT_FIGURE_SIZES = {
 }
 
 
-class Visualization:
+class Visualization(MovedNames):
     """Draw FITS frames as pictures, and plot the results of the pipelines.
 
     To draw the stars of a target on its stacked image, read their pixel

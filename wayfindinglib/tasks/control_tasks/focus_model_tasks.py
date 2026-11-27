@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -30,7 +31,6 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import equipment_light_frames, normalize_name
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset

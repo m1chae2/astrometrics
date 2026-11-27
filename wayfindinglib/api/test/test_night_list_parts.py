@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import bump_data_version
-from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames, record_ekos_captures

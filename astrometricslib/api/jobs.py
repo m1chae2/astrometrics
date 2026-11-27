@@ -22,6 +22,8 @@ from typing import Any, Literal
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.foundation.arguments import check_limit
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
@@ -36,7 +38,6 @@ from astrometricslib.models.job_queries import (
 )
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import QualityMeasurement
-from astrometricslib.pipelines.shared.api_arguments import check_limit
 
 __all__ = ["Jobs"]
 
@@ -185,7 +186,7 @@ def _warning_from_row(row: QualityMeasurement) -> JobWarning:
     )
 
 
-class Jobs:
+class Jobs(MovedNames):
     """Read-only view of the job history and the data lineage.
 
     Nothing is opened when this is built; each query opens the logs

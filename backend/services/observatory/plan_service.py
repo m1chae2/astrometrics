@@ -39,8 +39,8 @@ import time
 from datetime import datetime
 from typing import Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
-from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservationPackage
 
 logger = logging.getLogger(__name__)

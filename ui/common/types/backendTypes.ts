@@ -66,6 +66,10 @@ export enum TargetObjectType {
  * Facts about the error.
  * retryable : `bool`
  * Whether the same call may succeed if tried again later.
+ * report : `str`
+ * How to show the error: ``"status"``, ``"error"`` or ``"notify"``.
+ * log_level : `str`
+ * The `logging` level name to log the error at.
  * request_id : `str` or `None`
  * The id of the call that failed. It also appears on every log line of
  * that call.
@@ -75,6 +79,8 @@ export interface ErrorInfo {
   message: string;
   details?: Record<string, any>;
   retryable?: boolean;
+  report?: string;
+  logLevel?: string;
   requestId?: string | null;
 }
 

@@ -62,6 +62,7 @@ from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING
 
 from astrometricslib import configure_offline_iers
+from wayfindinglib._internal.renames import MovedNames
 
 # A library only writes log messages. A program decides where they go, by
 # calling `configure_logging`. The null handler stops Python from printing a
@@ -126,7 +127,7 @@ def __getattr__(name: str) -> object:
     return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)
 
 
-class Wayfinder:
+class Wayfinder(MovedNames):
     """The entry point to the wayfinding library.
 
     Builds and holds the four sub-APIs, `control`, `planning`,

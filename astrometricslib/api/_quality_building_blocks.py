@@ -40,6 +40,7 @@ from astrometricslib._internal.drivers.fits_access import (
     read_header,
     read_header_and_data,
 )
+from astrometricslib._internal.renames import MovedNames
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.quality.detections import StarDetection
@@ -248,7 +249,7 @@ def _source_positions(sources: list[dict[str, Any]]) -> np.ndarray:
     ).reshape(-1, 2)
 
 
-class QualityBlocks:
+class QualityBlocks(MovedNames):
     """The library's small measurements, for a script to combine.
 
     Reached as ``astrometrics.quality.blocks``. Each method takes a FITS path
@@ -422,7 +423,7 @@ class QualityBlocks:
             If the finder is unknown, or a width, threshold or isolation
             distance is not above zero.
         """
-        from astrometricslib.pipelines.shared.api_arguments import check_choice
+        from astrometricslib.foundation.arguments import check_choice
 
         check_choice("finder", finder, FINDERS)
         for name, value in (

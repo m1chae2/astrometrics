@@ -93,6 +93,9 @@ class CatalogUnavailableError(ExternalServiceError):
     log the message at warning level.
     """
 
+    report = "status"
+    log_level = "WARNING"
+
 
 @dataclass(frozen=True)
 class CatalogUse:

@@ -31,7 +31,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from backend.services.infrastructure.background_logging import background_log_context
 
 logger = logging.getLogger(__name__)

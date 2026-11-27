@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from astrometricslib import Target
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache, get_camera_data_versions
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from astrometricslib.parameters import (
@@ -56,7 +57,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel, observing_night_id
+from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,

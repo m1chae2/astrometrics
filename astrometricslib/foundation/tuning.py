@@ -33,7 +33,7 @@ from typing import Any
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
 from astrometricslib.foundation.observatory_setups import SetupConfig
 from astrometricslib.foundation.parameter_context import SetupEquipmentValues
 from astrometricslib.models.tuned_parameter import ParameterSource, ParameterValue, TunedParameter
@@ -90,7 +90,7 @@ class TuningResult(BaseModel):
     source: str = Field(min_length=1)
 
 
-class TuningSkippedError(Exception):
+class TuningSkippedError(ProcessingError):
     """Raised by a tuner that has too little data to derive anything.
 
     The message says what is missing, for example ``"fewer than 5 nights of

@@ -16,7 +16,9 @@ from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, 
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_paths import resolve_allowed_image
 from backend.services.data.image_service import ImageService
+from backend.services.error_logging import log_failure
 from backend.services.infrastructure.phone_share import send_file_to_phone
+from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ class TargetService:
             self.astrometrics = Astrometrics(config)
         else:
             self.astrometrics = astrometrics
+        self.subjects = SubjectResolver(self.astrometrics)
         self.image_service = ImageService(target_service=self)
 
     def get_all_targets_list(self) -> list[dict[str, Any]]:
@@ -491,7 +494,9 @@ class TargetService:
         A target that is not in the library raises the library's
         `NotFoundError`.
         """
-        return self.astrometrics.quality.frame_statuses(target_id).model_dump(by_alias=True)
+        return self.astrometrics.quality.frame_statuses(self.subjects.target(target_id)).model_dump(
+            by_alias=True
+        )
 
     def put_back_frames(self, target_id: str, paths: list[str]) -> dict:
         """Move set-aside frames back into a target.
@@ -511,7 +516,7 @@ class TargetService:
             A frame that could not be moved is not in the list.
 
         """
-        restored = self.astrometrics.quality.put_back_set_aside_frames(target_id, paths)
+        restored = self.astrometrics.quality.put_back_set_aside_frames(self.subjects.target(target_id), paths)
         return {"restored": restored}
 
     def _existing_stack_path(self, recorded_path: str | None) -> str | None:
@@ -567,8 +572,8 @@ class TargetService:
         """
         try:
             self.astrometrics.targets.save()
-        except AstrometricsError, sqlite3.Error, OSError:
-            logger.exception("Failed to save target %s", target.id)
+        except (AstrometricsError, sqlite3.Error, OSError) as error:
+            log_failure(logger, error, "Failed to save target %s", target.id)
             raise
 
     def read_saved_target(self, target_id: str) -> Target | None:
@@ -600,8 +605,8 @@ class TargetService:
         """
         try:
             self.astrometrics.targets.save()
-        except AstrometricsError, sqlite3.Error, OSError:
-            logger.exception("Failed to save targets")
+        except (AstrometricsError, sqlite3.Error, OSError) as error:
+            log_failure(logger, error, "Failed to save targets")
             raise
 
     def get_frame_header(self, frame_path: str, target_id: str | None = None) -> dict[str, Any]:

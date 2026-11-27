@@ -19,6 +19,8 @@ import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from astrometricslib.exceptions import AstrometricsError
+from backend.services.error_logging import log_failure
 from backend.services.infrastructure.background_logging import background_log_context
 from wayfindinglib import FrameEndDetector
 
@@ -146,6 +148,8 @@ class AutoDownloadService:
                 return
             self._schedule(target_name, FILE_WRITE_DELAY_SECONDS)
             self._restart_idle_timer()
+        except AstrometricsError as error:
+            log_failure(logger, error, "Automatic frame download could not handle a camera status")
         except Exception:  # the status poll must never fail because of this feature
             logger.exception("Automatic frame download could not handle a camera status")
 
@@ -195,6 +199,8 @@ class AutoDownloadService:
                 if not self._is_enabled():
                     return
                 self._start_log_sync(respect_interval=False)
+            except AstrometricsError as error:
+                log_failure(logger, error, "The last guide log download could not start")
             except Exception:  # a timer thread must log, never die silently
                 logger.exception("The last guide log download could not start")
 
@@ -261,6 +267,8 @@ class AutoDownloadService:
                 return
             self._last_start[target] = now
             logger.info("Camera frame finished; downloading new frames of %s.", target)
+        except AstrometricsError as error:
+            log_failure(logger, error, "Automatic frame download of %s failed to start", target)
         except Exception:  # a timer thread must log, never die silently
             logger.exception("Automatic frame download of %s failed to start", target)
 

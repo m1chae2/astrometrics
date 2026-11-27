@@ -24,7 +24,7 @@ from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
 from mcp_servers.common.profile import find_withheld_tools, load_manifest
 from mcp_servers.common.reflection import register_reflected_tools
 from mcp_servers.common.tool_registry import ToolRegistry
-from mcp_servers.inventory.tool_dispositions import DECISIONS, INTERIM_BLOCKS
+from mcp_servers.inventory.tool_dispositions import INTERIM_BLOCKS, decision_for
 from mcp_servers.inventory.tool_inventory import (
     RUNTIME_MANIFEST_PATHS,
     ToolRecord,
@@ -81,7 +81,7 @@ def test_served_tools_are_the_public_api_minus_the_decisions_table(server: str) 
     reflected = _reflected_tool_names(api_class(), branch_prefixes)
     assert reflected
 
-    undecided = sorted(reflected - DECISIONS.keys())
+    undecided = sorted(name for name in reflected if decision_for(name) is None)
     assert not undecided, (
         f"Public methods with no row in mcp_servers/inventory/tool_dispositions.py DECISIONS: {undecided}. "
         "Decide whether an AI may use each one, add the row, and run "
@@ -91,7 +91,7 @@ def test_served_tools_are_the_public_api_minus_the_decisions_table(server: str) 
     manifest = load_manifest(RUNTIME_MANIFEST_PATHS[server])
     withheld = find_withheld_tools(sorted(reflected), manifest)
     served = reflected - withheld.keys()
-    not_served_by_decision = {name for name in reflected if DECISIONS[name].disposition != "keep"}
+    not_served_by_decision = {name for name in reflected if decision_for(name).disposition != "keep"}
     assert served == reflected - not_served_by_decision - INTERIM_BLOCKS.keys() - APP_JOB_TOOLS.keys()
 
 

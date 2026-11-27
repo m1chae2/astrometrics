@@ -40,6 +40,7 @@ The classes are:
 - A **disposition** says what happens to the tool: `keep`, `fix`, `withhold`, `drop` or `undecided`. Only `keep` is offered. `fix` means the tool needs a change before an AI client can use it. `withhold` means an AI client never gets it, because it writes, runs code or reaches every backend method. `drop` means it is out of scope or a broader tool replaced it. A tool with no row is `undecided` and is not offered.
 - A row can also correct the drafted class, and carries a short note that says why. A server quotes the note when it refuses the tool.
 - `INTERIM_BLOCKS` hides a few `keep` tools until a known problem is fixed.
+- `TOOL_RENAMES` maps an old tool name to a new one when a public method is renamed. The row under the old name then decides the new name (`decision_for`), so a reviewed disposition carries over. A rename to a tool no server serves, or one whose new name has its own row, is a problem.
 
 The script checks the table against the tools the servers serve now. It prints each mismatch as `PROBLEM` and exits with code 1. A served tool with no row, a row for a tool no server serves, and a withheld tool with no note are all problems. `test/test_served_tools.py` checks that the tools each library server offers are its reflected public methods minus the rows that say not to offer them, so a new library method fails a test until it has a row.
 

@@ -1,16 +1,25 @@
 """Purpose: Turn the libraries' public methods into MCP tools.
 
 Description: Reads each public method's signature, type hints and numpydoc
-docstring to build a JSON schema, and registers the method as a tool. A tool
-only passes the client's arguments to the method: the library methods accept
-what a client can send (a target id, an ISO time, a position dictionary) and
-convert it themselves. A method marked with `background_job` is run as a
-recorded job in a background thread, so a slow call answers with the id of
-its job instead of blocking the server. A server can
-also narrow what a client may send to one tool with `ClientLimits`: hide
-arguments a client cannot send (an array of pixels), withhold choices of
-no use to it (a Matplotlib figure) and lower a count's maximum so that the
-answer stays small.
+docstring to build a JSON schema, and registers the method as a tool. A
+client sends only JSON, so before the call the tool turns three kinds of
+argument into what the method takes, chosen by the parameter's type hint:
+
+* a subject (`Target`, `StellarObject`, an observing session or an
+  observation package): the client sends its id, and `resolvers` looks it
+  up through the public API;
+* an input model (a pydantic model, or a list of them): the tool offers
+  the model's JSON schema, and `input_models` builds the model;
+* a frame choice (`FrameChoice`): the client sends a small filter, and
+  `frame_choice_form` builds the choice with the public frame query.
+
+Every other argument is passed on as it is. A method marked with
+`background_job` is run as a recorded job in a background thread, so a
+slow call answers with the id of its job instead of blocking the server.
+A server can also narrow what a client may send to one tool with
+`ClientLimits`: hide arguments a client cannot send (an array of pixels),
+withhold choices of no use to it (a Matplotlib figure) and lower a count's
+maximum so that the answer stays small.
 """
 
 import asyncio
@@ -22,6 +31,20 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Union
 
 from astrometricslib.exceptions import InvalidArgumentError
+from mcp_servers.common.frame_choice_form import build_frame_choice, frame_filter_schema, is_frame_choice
+from mcp_servers.common.input_models import (
+    ModelParameter,
+    build_model_argument,
+    model_parameter_of,
+    model_schema,
+)
+from mcp_servers.common.resolvers import (
+    SUBJECT_ENTRY_METHODS,
+    SubjectParameter,
+    resolve_subject,
+    subject_kind_of,
+    subject_schema,
+)
 
 
 @dataclass(frozen=True)
@@ -46,6 +69,109 @@ class ClientLimits:
     hidden_parameters: tuple[str, ...] = ()
     withheld_choices: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     maximums: Mapping[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ParameterPlan:
+    """Which of a method's parameters the tool turns into objects first.
+
+    Attributes
+    ----------
+    subjects : `Mapping` [`str`, `SubjectParameter`]
+        Parameters that take a subject, sent as an id.
+    models : `Mapping` [`str`, `ModelParameter`]
+        Parameters that take an input model, sent as JSON.
+    frame_choices : `tuple` [`str`, ...]
+        Parameters that take a `FrameChoice`, sent as a filter object.
+    """
+
+    subjects: Mapping[str, SubjectParameter] = field(default_factory=dict)
+    models: Mapping[str, ModelParameter] = field(default_factory=dict)
+    frame_choices: tuple[str, ...] = ()
+
+
+def plan_parameters(func: Callable[..., Any], method_name: str | None = None) -> ParameterPlan:
+    """Find the parameters a tool must turn into objects before the call.
+
+    Parameters
+    ----------
+    func : `Callable`
+        The library method.
+    method_name : `str`, optional
+        Its name. The subject parameter of ``get``, ``add``, ``create`` and
+        ``resolve`` is left alone (`SUBJECT_ENTRY_METHODS`): an id enters
+        the library there, or the object is new. Defaults to the
+        function's own name.
+
+    Returns
+    -------
+    plan : `ParameterPlan`
+        The subject, input model and frame choice parameters. A parameter
+        whose name holds ``path`` is never a subject: it takes a file path
+        or an object.
+    """
+    try:
+        type_hints = typing.get_type_hints(func)
+    except NameError, TypeError, AttributeError:
+        return ParameterPlan()
+    name = method_name or getattr(func, "__name__", "")
+    subjects: dict[str, SubjectParameter] = {}
+    models: dict[str, ModelParameter] = {}
+    frame_choices: list[str] = []
+    for parameter_name in inspect.signature(func).parameters:
+        hint = type_hints.get(parameter_name)
+        if hint is None:
+            continue
+        if is_frame_choice(hint):
+            frame_choices.append(parameter_name)
+            continue
+        subject = subject_kind_of(hint)
+        if subject is not None:
+            if name not in SUBJECT_ENTRY_METHODS and "path" not in parameter_name:
+                subjects[parameter_name] = subject
+            continue
+        model = model_parameter_of(hint)
+        if model is not None:
+            models[parameter_name] = model
+    return ParameterPlan(subjects, models, tuple(frame_choices))
+
+
+def prepare_arguments(api_root: Any, plan: ParameterPlan, kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Turn a client's JSON arguments into what the method takes.
+
+    Subjects are looked up first, so a frame filter can use the call's
+    target; then input models are built; then frame choices.
+
+    Parameters
+    ----------
+    api_root : `Astrometrics` or `Wayfinder`
+        The server's API object, through which ids are looked up.
+    plan : `ParameterPlan`
+        Which parameters to turn into objects.
+    kwargs : `Mapping` [`str`, `Any`]
+        The client's arguments.
+
+    Returns
+    -------
+    arguments : `dict` [`str`, `Any`]
+        The arguments to call the method with.
+
+    Notes
+    -----
+    The lookups raise `NotFoundError` if an id names nothing, and
+    `InvalidArgumentError` if a model or a frame filter is not valid.
+    """
+    arguments = dict(kwargs)
+    for name, subject in plan.subjects.items():
+        if name in arguments:
+            arguments[name] = resolve_subject(api_root, subject, name, arguments[name])
+    for name, model in plan.models.items():
+        if name in arguments:
+            arguments[name] = build_model_argument(model, name, arguments[name])
+    for name in plan.frame_choices:
+        if name in arguments:
+            arguments[name] = build_frame_choice(api_root, name, arguments[name], arguments)
+    return arguments
 
 
 def parse_docstring_params(doc: str) -> dict[str, str]:
@@ -149,13 +275,17 @@ def get_json_schema_type(python_type: Any) -> str:
     return "string"
 
 
-def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
+def generate_tool_schema(func: Callable[..., Any], plan: ParameterPlan | None = None) -> dict[str, Any]:
     """Generate a JSON Schema object from signature and docstrings.
 
     Parameters
     ----------
     func : `Callable`
         The target function to introspect.
+    plan : `ParameterPlan`, optional
+        The parameters the tool turns into objects. A subject is offered as
+        its id, an input model as the model's JSON schema (its nested
+        definitions under ``$defs``), and a frame choice as a filter object.
 
     Returns
     -------
@@ -176,6 +306,8 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
 
     properties = {}
     required_params = []
+    definitions: dict[str, Any] = {}
+    plan = plan or ParameterPlan()
 
     for param_name, param in signature.parameters.items():
         if param_name in ("self", "args", "kwargs"):
@@ -185,12 +317,23 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
         js_type = get_json_schema_type(param_type)
         desc = param_descs.get(param_name, f"Parameter {param_name}")
 
-        properties[param_name] = {"type": js_type, "description": desc}
+        if param_name in plan.subjects:
+            properties[param_name] = subject_schema(plan.subjects[param_name], desc)
+        elif param_name in plan.models:
+            properties[param_name], nested = model_schema(plan.models[param_name], desc)
+            definitions.update(nested)
+        elif param_name in plan.frame_choices:
+            properties[param_name] = frame_filter_schema(desc)
+        else:
+            properties[param_name] = {"type": js_type, "description": desc}
 
         if param.default == inspect.Parameter.empty:
             required_params.append(param_name)
 
-    return {"type": "object", "properties": properties, "required": required_params}
+    schema: dict[str, Any] = {"type": "object", "properties": properties, "required": required_params}
+    if definitions:
+        schema["$defs"] = definitions
+    return schema
 
 
 # Methods whose names start with one of these are never offered as tools.
@@ -308,9 +451,9 @@ def register_reflected_tools(
 ) -> int:
     """Register the public methods of a library's API object as tools.
 
-    A tool passes the client's arguments to the method as they are. The
-    library methods accept what a client can send: a target id for a
-    target, an ISO string for a time, a dictionary for a sky position.
+    A tool turns the client's ids, model JSON and frame filters into
+    objects (see `plan_parameters`) and passes every other argument on as
+    it is.
 
     Parameters
     ----------
@@ -367,7 +510,8 @@ def register_reflected_tools(
             if not summary:
                 summary = f"Reflected tool {tool_name}"
 
-            schema = generate_tool_schema(method)
+            plan = plan_parameters(method, method_name)
+            schema = generate_tool_schema(method, plan)
             for hidden_name in SERVER_ONLY_PARAMETERS:
                 schema["properties"].pop(hidden_name, None)
                 if hidden_name in schema["required"]:
@@ -376,14 +520,21 @@ def register_reflected_tools(
             if tool_limits is not None:
                 _apply_client_limits(schema, method, tool_limits)
 
-            registry.register(tool_name, summary, schema)(_make_executor(method, tool_name, tool_limits))
+            registry.register(tool_name, summary, schema)(
+                _make_executor(method, tool_name, tool_limits, api_root=api_object, plan=plan)
+            )
             count += 1
 
     return count
 
 
 def _make_executor(
-    target_callable: Callable[..., Any], tool_name: str = "", limits: ClientLimits | None = None
+    target_callable: Callable[..., Any],
+    tool_name: str = "",
+    limits: ClientLimits | None = None,
+    *,
+    api_root: Any = None,
+    plan: ParameterPlan | None = None,
 ) -> Callable[..., Any]:
     """Wrap a library method as an asynchronous tool function.
 
@@ -395,6 +546,11 @@ def _make_executor(
         The tool's name, for the message of a refused call.
     limits : `ClientLimits`, optional
         What a client may not send. A call that sends it is refused.
+    api_root : `Any`, optional
+        The server's API object, through which ids are looked up.
+    plan : `ParameterPlan`, optional
+        The parameters turned into objects before the call. None when
+        omitted.
 
     Returns
     -------
@@ -416,6 +572,9 @@ def _make_executor(
         """
         if limits is not None:
             _check_client_limits(tool_name, kwargs, limits)
+        if plan is not None and (plan.subjects or plan.models or plan.frame_choices):
+            # A lookup reads storage, so it runs off the event loop too.
+            kwargs = await asyncio.to_thread(prepare_arguments, api_root, plan, kwargs)
         if grace_period is not None:
             # A method marked with `@background_job` runs slowly enough that
             # calling it directly would block this server's single

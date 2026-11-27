@@ -177,7 +177,7 @@ async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ru
 
 
 async def test_a_target_id_reaches_the_method_as_the_client_sent_it() -> None:
-    """The tool does not look targets up; the library method does."""
+    """A parameter typed only as `str` reaches the method as the text sent."""
 
     class FakeApi:
         """A stand-in with one method that takes a target."""

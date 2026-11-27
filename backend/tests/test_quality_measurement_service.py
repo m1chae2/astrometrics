@@ -16,12 +16,16 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import Target
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.infrastructure import thread_management
 from backend.services.infrastructure.sync_service import SyncService
 from backend.services.processing.quality_measurement_service import QualityMeasurementService
+
+_TARGETS = SimpleNamespace(get=lambda target_id, refresh=False: Target(id=target_id))
+"""A stand-in target catalog that holds every target asked for."""
 
 
 class _Sockets:
@@ -62,7 +66,7 @@ class _Processing:
         self.release = threading.Event()
         self.release.set()
 
-    def record_frame_measurements(self, target_id: str, limit: int | None = None) -> SimpleNamespace:
+    def record_frame_measurements(self, target: Target, limit: int | None = None) -> SimpleNamespace:
         """Wait to be released, then report the configured counts.
 
         Returns
@@ -70,6 +74,7 @@ class _Processing:
         summary : `SimpleNamespace`
             The fields of `FrameMeasurementSummary` the service reads.
         """
+        target_id = target.id
         self.calls.append((target_id, limit))
         self.release.wait(timeout=5.0)
         return SimpleNamespace(
@@ -90,7 +95,7 @@ def _service(processing: _Processing, sockets: _Sockets) -> QualityMeasurementSe
     service : `QualityMeasurementService`
         A service over the stand-in processing API and socket manager.
     """
-    return QualityMeasurementService(SimpleNamespace(quality=processing), sockets)
+    return QualityMeasurementService(SimpleNamespace(quality=processing, targets=_TARGETS), sockets)
 
 
 def _wait_until_idle() -> None:
@@ -352,7 +357,7 @@ class _SubsetProcessing:
         """Start with no calls."""
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    def measure_noise(self, target_id: str, kind: str = "growth", **options: Any) -> SimpleNamespace:
+    def measure_noise(self, target: Target, kind: str = "growth", **options: Any) -> SimpleNamespace:
         """Record the call and report what the chosen kind stores.
 
         Returns
@@ -360,7 +365,7 @@ class _SubsetProcessing:
         result : `SimpleNamespace`
             The fields of the kind's result that the service reads.
         """
-        self.calls.append((target_id, kind, options))
+        self.calls.append((target.id, kind, options))
         if kind == "odd_even_difference":
             return SimpleNamespace(rows_written=9)
         if kind == "night_contributions":
@@ -405,7 +410,7 @@ def test_the_noise_rpc_is_declared_and_served_by_the_service() -> None:
 def test_the_noise_growth_rpc_starts_the_job_and_announces_its_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     """The series runs with the given steps and the event lists every night."""
     processing, sockets = _SubsetProcessing(), _Sockets()
-    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    service = QualityMeasurementService(SimpleNamespace(processing=processing, targets=_TARGETS), sockets)
     monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
 
     reply = asyncio.run(
@@ -442,7 +447,7 @@ def test_the_night_contribution_rpc_starts_the_job_and_announces_its_rows(
 ) -> None:
     """The nights job runs on its own thread and announces what it stored."""
     processing, sockets = _SubsetProcessing(), _Sockets()
-    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    service = QualityMeasurementService(SimpleNamespace(processing=processing, targets=_TARGETS), sockets)
     monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
 
     reply = asyncio.run(
@@ -462,7 +467,7 @@ def test_the_odd_even_difference_rpc_starts_the_job_and_announces_its_rows(
 ) -> None:
     """The odd–even difference job runs on its own thread, announcing rows."""
     processing, sockets = _SubsetProcessing(), _Sockets()
-    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    service = QualityMeasurementService(SimpleNamespace(processing=processing, targets=_TARGETS), sockets)
     monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
 
     reply = asyncio.run(
@@ -479,7 +484,7 @@ def test_the_odd_even_difference_rpc_starts_the_job_and_announces_its_rows(
 def test_the_series_counts_the_odd_even_difference_rows_by_default() -> None:
     """By default the series' announcement counts the odd–even rows."""
     processing, sockets = _SubsetProcessing(), _Sockets()
-    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    service = QualityMeasurementService(SimpleNamespace(processing=processing, targets=_TARGETS), sockets)
 
     assert service.start_noise_measurement("M 57")["started"] is True
     assert sockets.sent.wait(timeout=5.0)
@@ -506,7 +511,7 @@ def test_a_failed_subset_job_is_logged_and_sends_no_event() -> None:
         raise NotFoundError("no stack")
 
     processing.measure_noise = fail
-    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    service = QualityMeasurementService(SimpleNamespace(processing=processing, targets=_TARGETS), sockets)
 
     assert service.start_noise_measurement("M 13")["started"] is True
     _wait_until_idle()

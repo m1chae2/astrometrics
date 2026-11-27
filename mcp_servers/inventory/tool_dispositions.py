@@ -15,6 +15,11 @@ offer every public library method as a tool, so a new public method has no
 row until someone adds one. Until then the inventory marks it
 ``undecided``, no client gets it, and a test fails. Adding a library
 method is therefore also a choice about the AI tool list.
+
+When a public method is renamed, its tool is renamed too. ``TOOL_RENAMES``
+maps the old tool name to the new one, so the reviewed decision recorded
+under the old name holds for the new name (`decision_for`) until someone
+moves the row.
 """
 
 import re
@@ -194,9 +199,6 @@ DECISIONS = {
     "planning_get_constellation_lines": ToolDecision(
         "drop",
         "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",
-    ),
-    "execution_build_divergence_record": ToolDecision(
-        "drop", "Builds a record and writes nothing. The only arguments MCP can send are useless.", "compute"
     ),
     "execution_advance_session": ToolDecision(
         "drop", "Needs callables that MCP cannot send. No MCP use today."
@@ -931,6 +933,32 @@ DECISIONS = {
 }
 """Tool name -> the decision about it. Every served tool has one."""
 
+TOOL_RENAMES: dict[str, str] = {}
+"""Old tool name -> new tool name, for a tool whose public method was
+renamed. The decision recorded under the old name in ``DECISIONS`` applies
+to the new name. Empty when every row uses the current name."""
+
+
+def decision_for(name: str) -> ToolDecision | None:
+    """Find the decision about a tool, following ``TOOL_RENAMES``.
+
+    Parameters
+    ----------
+    name : `str`
+        The tool's current name.
+
+    Returns
+    -------
+    decision : `ToolDecision` or `None`
+        The row under the name itself, else the row under the old name a
+        rename maps to it, else `None`.
+    """
+    if name in DECISIONS:
+        return DECISIONS[name]
+    old_name = next((old for old, new in TOOL_RENAMES.items() if new == name), None)
+    return DECISIONS.get(old_name) if old_name is not None else None
+
+
 CATEGORY_RULES = (
     (
         re.compile(
@@ -1011,16 +1039,24 @@ def find_problems(served_names: set[str], valid_classes: set[str]) -> list[str]:
     problems : `list` [`str`]
         One message per problem: a served tool with no decision, a decision
         or interim block for a tool no server serves, an unknown
-        disposition or class, or a tool that is not offered with no note.
+        disposition or class, or a tool that is not offered with no note. A
+        decision under an old name of a served tool (``TOOL_RENAMES``) is
+        not a problem; a rename to a tool no server serves, or a rename
+        whose new name has its own row, is.
     """
-    problems = [f"{name!r} has no decision" for name in sorted(served_names - DECISIONS.keys())]
+    problems = [f"{name!r} has no decision" for name in sorted(served_names) if decision_for(name) is None]
+    for old_name, new_name in TOOL_RENAMES.items():
+        if new_name not in served_names:
+            problems.append(f"rename {old_name!r} -> {new_name!r}, which no server serves")
+        if old_name in DECISIONS and new_name in DECISIONS:
+            problems.append(f"rename {old_name!r} -> {new_name!r}, but both names have a decision")
     problems += [
         f"interim block for {name!r}, which no server serves"
         for name in INTERIM_BLOCKS
         if name not in served_names
     ]
     for name, decision in DECISIONS.items():
-        if name not in served_names:
+        if name not in served_names and TOOL_RENAMES.get(name) not in served_names:
             problems.append(f"decision for {name!r}, which no server serves")
         if decision.disposition not in DISPOSITIONS or decision.disposition == "undecided":
             problems.append(f"{name}: unknown disposition {decision.disposition!r}")

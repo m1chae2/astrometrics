@@ -31,6 +31,9 @@ RENAMES: dict[str, str] = {
         "wayfinder.control.equipment.set_active(configuration), and "
         "wayfinder.control.equipment.set_pointing_limits(...) for the limits"
     ),
+    "wayfindinglib.ObservationExecution.build_divergence_record": (
+        "wayfindinglib's internals (record_divergence); it is no longer public"
+    ),
 }
 
 

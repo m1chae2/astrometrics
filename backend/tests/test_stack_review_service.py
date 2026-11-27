@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import Target
 from astrometricslib._internal.results import PreviewRemakeResult
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.reports import SetAsideFrameRecord
@@ -143,11 +144,12 @@ def test_a_remake_by_camera_and_optic_asks_the_library_for_the_stack() -> None:
     processing = SimpleNamespace(
         remake_preview=remake_preview, find_stack_configuration=find_stack_configuration
     )
-    service = StackReviewService(SimpleNamespace(processing=processing))
+    targets = SimpleNamespace(get=lambda target_id, refresh=False: Target(id=target_id))
+    service = StackReviewService(SimpleNamespace(processing=processing, targets=targets))
 
     reply = service.start_preview_remake("M 81", camera_id="D5300", focal_length_mm=300.0)
 
-    assert found == [("M 81", "D5300", 300.0)]
+    assert found == [(Target(id="M 81"), "D5300", 300.0)]
     assert calls[0]["stack_path"] == "/s/M_81_Nikon_300mm.fits"
     assert reply.configuration == "Nikon@300mm"
     with pytest.raises(InvalidArgumentError, match="spectral"):

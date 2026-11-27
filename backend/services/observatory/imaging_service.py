@@ -12,7 +12,9 @@ import logging
 import threading
 from typing import Any
 
+from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.jobs import registered_job
+from backend.services.error_logging import log_failure
 from backend.services.processing.job_service import JobService
 from wayfindinglib import ObservatoryControl
 
@@ -98,6 +100,9 @@ class ImagingService:
                         dither=dither,
                         delay_seconds=delay_seconds,
                     )
+            except AstrometricsError as error:
+                state["error"] = error
+                log_failure(logger, error, "Capture for %s failed", target_id)
             except Exception as error:  # the top of a background job: record it, never lose it
                 state["error"] = error
                 logger.exception("Capture for %s failed", target_id)

@@ -111,7 +111,6 @@ EXECUTION_MEMBERS = frozenset({
     "advance_session",
     "abort_session",
     "reconcile_session",
-    "build_divergence_record",
     "create_recorder",
 })
 """The public members of `ObservationExecution`."""

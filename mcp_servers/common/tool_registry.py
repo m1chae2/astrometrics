@@ -9,7 +9,9 @@ When a client calls a tool, the registry:
 3. for a server that reads files, refuses a path outside the library folders
    (the "sandbox");
 4. runs the tool and turns its result into MCP content: a picture becomes an
-   image, a model or record becomes JSON, and a long answer is cut short;
+   image, a model or record becomes JSON, and a long answer is cut short
+   (`reply_budget.shape_reply` cuts its heavy lists first and notes what
+   it left out);
 5. turns a failure into the shared error reply (see `tool_errors`).
 
 The library servers (astrometricslib-core, wayfindinglib-core) and the backend
@@ -34,7 +36,7 @@ from astrometricslib.drivers import is_path_inside, resolve_mounted_path
 from astrometricslib.exceptions import ErrorInfo, to_error_info
 from astrometricslib.jobs import log_context, new_request_id
 from mcp_servers.common.profile import find_withheld_tools, load_manifest, refusal_message
-from mcp_servers.common.reply_budget import fit_reply_to_budget
+from mcp_servers.common.reply_budget import serialize_reply, shape_reply
 from mcp_servers.common.tool_errors import ToolErrorContent, error_content, log_tool_failure
 
 logger = logging.getLogger(__name__)
@@ -352,11 +354,13 @@ def result_content(result: Any) -> list[Any]:
         ``png_bytes`` and ``description``) and a matplotlib figure become an
         image and a short text. Anything else becomes indented JSON text;
         a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
-        indentation. A target report, a ranking or a night review is first
-        shortened by `fit_reply_to_budget` (whole references or
-        candidates, never part of a statement). A list still too long keeps as
-        many whole items as fit (see `_whole_items_that_fit`); anything else is
-        cut.
+        indentation. The reply is first shortened by `shape_reply`: a
+        target report, a ranking or a night review loses whole references
+        or candidates (never part of a statement), and the heavy lists
+        (`HEAVY_LISTS`, such as a target's frames) are cut, with a second
+        text that says what was left out and how to ask for it. A list
+        still too long keeps as many whole items as fit (see
+        `_whole_items_that_fit`); anything else is cut.
     """
     if isinstance(result, list) and result and isinstance(result[0], (TextContent, ImageContent)):
         return result
@@ -370,25 +374,26 @@ def result_content(result: Any) -> list[Any]:
         ]
     if callable(getattr(result, "savefig", None)):
         return _figure_as_image(result)
-    # The library replies in full to every caller. A target report, tonight's
-    # ranking or a night review is shortened here, before the character cut
-    # below, so what is cut is whole references and candidates (the most
-    # extreme evidence of each statement is kept) and the reply stays valid
-    # JSON. Any other result passes through unchanged.
-    serialized = _serialize_result(fit_reply_to_budget(result))
+    # The library replies in full to every caller. The reply is shortened
+    # here, before the character cut below, so what is cut is whole
+    # references, candidates and list items, and the reply stays valid JSON.
+    # A reply that fits passes through unchanged.
+    shaped = shape_reply(result)
+    notes = [TextContent(type="text", text=note) for note in shaped.notes]
+    serialized = serialize_reply(shaped.reply)
     text = json.dumps(serialized, indent=2, default=str)
     if len(text) > MAXIMUM_REPLY_BYTES:
         # The indentation alone can be a third of a long list; drop it before
         # cutting anything.
         text = json.dumps(serialized, separators=(",", ":"), default=str)
     if len(text) > MAXIMUM_REPLY_BYTES and isinstance(serialized, list):
-        return _whole_items_that_fit(serialized)
+        return _whole_items_that_fit(serialized) + notes
     if len(text) > MAXIMUM_REPLY_BYTES:
         text = text[:MAXIMUM_REPLY_BYTES] + (
             f"\n\n... [Output truncated: payload exceeded {MAXIMUM_REPLY_BYTES} bytes. "
             "Use specific filtering arguments or limit queries to avoid context blowout.]"
         )
-    return [TextContent(type="text", text=text)]
+    return [TextContent(type="text", text=text), *notes]
 
 
 def _whole_items_that_fit(items: list[Any]) -> list[TextContent]:
@@ -489,29 +494,3 @@ def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:
         ),
         TextContent(type="text", text=json.dumps(description, indent=2)),
     ]
-
-
-def _serialize_result(value: Any) -> Any:
-    """Turn models and records into plain JSON-ready values, recursively.
-
-    Parameters
-    ----------
-    value : `Any`
-        Value to convert.
-
-    Returns
-    -------
-    serialized : `Any`
-        The value as plain dicts, lists and scalars.
-    """
-    if callable(getattr(value, "serialize", None)):
-        return value.serialize()
-    if callable(getattr(value, "model_dump", None)):
-        return value.model_dump()
-    if callable(getattr(value, "to_dict", None)):
-        return value.to_dict()
-    if isinstance(value, list):
-        return [_serialize_result(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _serialize_result(item) for key, item in value.items()}
-    return value

@@ -1,6 +1,7 @@
 """Tests of the File Browser's frame statuses and the Put back call.
 
-`TargetService.get_frame_statuses` passes the target to the library's
+`TargetService.get_frame_statuses` looks the target up with the shared
+resolver and passes it to the library's
 frame-status rule (`quality.frame_statuses`, tested in the library, which
 finds the newest stack file itself) and passes its answer through.
 `put_back_frames` moves chosen set-aside frames back through the library.
@@ -10,10 +11,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib import Target
 from astrometricslib.exceptions import NotFoundError
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.data.target_service import TargetService
+from backend.services.subject_resolver import SubjectResolver
 
 
 def _service() -> TargetService:
@@ -22,10 +25,14 @@ def _service() -> TargetService:
     Returns
     -------
     service : `TargetService`
-        A service with a mocked library.
+        A service with a mocked library that holds every target but "Nope".
     """
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
+    service.astrometrics.targets.get.side_effect = lambda target_id, refresh=False: (
+        None if target_id == "Nope" else Target(id=target_id)
+    )
+    service.subjects = SubjectResolver(service.astrometrics)
     service.astrometrics.quality.frame_statuses.return_value.model_dump.return_value = {"frames": []}
     return service
 
@@ -36,7 +43,7 @@ def test_the_library_rule_gets_only_the_target() -> None:
 
     service.get_frame_statuses("M 1")
 
-    service.astrometrics.quality.frame_statuses.assert_called_once_with("M 1")
+    service.astrometrics.quality.frame_statuses.assert_called_once_with(Target(id="M 1"))
     service.astrometrics.quality.frame_statuses.return_value.model_dump.assert_called_once_with(by_alias=True)
 
 
@@ -56,12 +63,13 @@ def test_the_flagged_reason_reaches_the_answer() -> None:
 
 
 def test_an_unknown_target_is_the_librarys_not_found_error() -> None:
-    """A target that is not there raises the library's `NotFoundError`."""
+    """A target that is not there is a `NotFoundError` reported as an error."""
     service = _service()
-    service.astrometrics.quality.frame_statuses.side_effect = NotFoundError("No target named 'Nope'.")
 
-    with pytest.raises(NotFoundError, match="Nope"):
+    with pytest.raises(NotFoundError, match="Nope") as raised:
         service.get_frame_statuses("Nope")
+    assert raised.value.report == "error"
+    service.astrometrics.quality.frame_statuses.assert_not_called()
 
 
 def test_put_back_goes_through_the_library_and_reports_what_moved() -> None:
@@ -73,7 +81,7 @@ def test_put_back_goes_through_the_library_and_reports_what_moved() -> None:
 
     assert result == {"restored": ["/frames/lights/M 1/c.fits"]}
     service.astrometrics.quality.put_back_set_aside_frames.assert_called_once_with(
-        "M 1", ["/frames/lights/M 1/_excluded/c.fits"]
+        Target(id="M 1"), ["/frames/lights/M 1/_excluded/c.fits"]
     )
 
 

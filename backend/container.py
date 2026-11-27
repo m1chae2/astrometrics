@@ -75,7 +75,6 @@ class Container:
         self.maintenance_service = None
         self.library_backup_service = None
         self.target_imaging_executor = None
-        self.execution_service = None
         self.stellar_service = None
 
         self.initialized = False
@@ -348,12 +347,6 @@ class Container:
         from backend.services.observatory.indi_diagnostics_service import IndiDiagnosticsService
 
         self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
-
-        # Adapter over wayfindinglib's Observation Execution astrometrics,
-        # which had no route into the application at all before this.
-        from backend.services.observatory.execution_service import ExecutionService
-
-        self.execution_service = ExecutionService(wayfinder=self.wayfinder)
 
         from backend.services.observatory.mosaic_service import MosaicService
 

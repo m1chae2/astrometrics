@@ -314,3 +314,30 @@ def test_default_output_dir_follows_xdg_cache_home(tmp_path: Path, monkeypatch: 
     assert tool_inventory.default_output_dir() == tmp_path / "astrometrics" / "mcp_tool_inventory"
     assert main([]) == 0
     assert (tmp_path / "astrometrics" / "mcp_tool_inventory" / tool_inventory.MANIFEST_FILE_NAME).is_file()
+
+
+def test_a_renamed_tool_keeps_its_reviewed_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The old name's row decides the new name; a bad rename is a problem."""
+    from mcp_servers.inventory import tool_dispositions
+
+    old_name, new_name = "star_get", "star_read_one"
+    monkeypatch.setattr(tool_dispositions, "TOOL_RENAMES", {old_name: new_name})
+    assert tool_dispositions.decision_for(new_name) is DECISIONS[old_name]
+    record = ToolRecord(server="astrometricslib-core", name=new_name, description="Reads one star.")
+    apply_decisions(record)
+    assert record.disposition == DECISIONS[old_name].disposition
+
+    served = (set(DECISIONS) - {old_name}) | {new_name}
+    problems = tool_dispositions.find_problems(served, set(TOOL_CLASSES))
+    assert not [problem for problem in problems if old_name in problem or new_name in problem]
+
+    problems = tool_dispositions.find_problems(set(DECISIONS) - {old_name}, set(TOOL_CLASSES))
+    assert f"rename {old_name!r} -> {new_name!r}, which no server serves" in problems
+
+
+def test_the_rename_table_holds_only_real_renames() -> None:
+    """Each rename maps a name with a decision to a name without one."""
+    from mcp_servers.inventory.tool_dispositions import TOOL_RENAMES
+
+    for old_name, new_name in TOOL_RENAMES.items():
+        assert old_name in DECISIONS and new_name not in DECISIONS

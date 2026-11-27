@@ -3,7 +3,7 @@
 Description: `Wayfinder.execution` is an `ObservationExecution`. It
 advances a session's queue (one cycle, or until it is done), runs the
 meridian flip, recovers from device faults and lost guide stars, records
-divergences and telemetry, and reconciles a session after the night.
+telemetry, and reconciles a session after the night.
 Callers never import `wayfindinglib.tasks.execution_tasks` directly.
 
 Execution is the one part of the library that uses both of the others:
@@ -26,11 +26,9 @@ from wayfindinglib.drivers.phd2.phd2_client import DEFAULT_PHD2_PORT, PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import FaultRecord, RecoveryPolicy
-from wayfindinglib.models.session.divergence import DivergenceRecord
 from wayfindinglib.models.session.guide_star_loss import GuideStarLossEvent
 from wayfindinglib.models.session.meridian_flip import MeridianFlipOutcome
 from wayfindinglib.models.session.observation_session import ObservationSession
-from wayfindinglib.tasks.execution_tasks.divergence_recording import record_divergence
 from wayfindinglib.tasks.execution_tasks.fault_recovery import recover_fault
 from wayfindinglib.tasks.execution_tasks.guide_star_loss_recovery import attempt_guide_star_recovery
 from wayfindinglib.tasks.execution_tasks.meridian_flip import MeridianFlipSteps, execute_meridian_flip
@@ -294,43 +292,6 @@ class ObservationExecution(MovedNames):
         """
         return attempt_guide_star_recovery(
             event_id, observation_session_id, comparison_input_id, reacquire_guide_star, config
-        )
-
-    # -- Divergence recording ----------------------------------------------
-
-    def build_divergence_record(
-        self,
-        record_id: str,
-        observation_session_id: str,
-        queued_observation_package_id: str | None,
-        capability: Any,
-        comparison_input_id: str,
-        intended_value: float,
-        observed_value: float,
-        tolerance: float,
-        divergence_unit: str,
-        converged: bool | None = None,
-        detail: str = "",
-    ) -> DivergenceRecord:
-        """Build one `DivergenceRecord` from a computed/observed value pair.
-
-        Returns
-        -------
-        record : `DivergenceRecord`
-            The constructed divergence record.
-        """
-        return record_divergence(
-            record_id=record_id,
-            observation_session_id=observation_session_id,
-            queued_observation_package_id=queued_observation_package_id,
-            capability=capability,
-            comparison_input_id=comparison_input_id,
-            intended_value=intended_value,
-            observed_value=observed_value,
-            tolerance=tolerance,
-            divergence_unit=divergence_unit,
-            converged=converged,
-            detail=detail,
         )
 
     # -- Telemetry recording -------------------------------------------------

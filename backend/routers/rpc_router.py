@@ -273,14 +273,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Mosaics
     "mosaic:preview": ("mosaic_service", "preview_mosaic"),
     "mosaic:create": ("mosaic_service", "create_mosaic"),
-    # Observing sessions. Only the operations whose inputs are plain data;
-    # the rest take bundles of hardware-driving callables and belong to
-    # whatever owns the run loop (see ExecutionService's module docstring).
-    "execution:list_sessions": ("execution_service", "list_sessions"),
-    "execution:get_session": ("execution_service", "get_session"),
-    "execution:abort_session": ("execution_service", "abort_session"),
-    "execution:reconcile_session": ("execution_service", "reconcile_session"),
-    "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
     # Night plan and observation packages. `plan:list_packages` lists the
     # package library and `plan:current_session` reads tonight's session.
     # `plan:tick_checklist_item` writes and sends the `plan:changed` event;

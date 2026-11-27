@@ -17,6 +17,7 @@ from astrometricslib.exceptions import (
     NotFoundError,
 )
 from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment
+from backend.services.error_logging import log_failure
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 if TYPE_CHECKING:
@@ -1191,8 +1192,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         logger.info("[%s] %s", target_id, message)
         try:
             self._target_service.save_targets()
-        except AstrometricsError, sqlite3.Error, OSError:
-            logger.exception("[%s] Failed to record target after the analysis", target_id)
+        except (AstrometricsError, sqlite3.Error, OSError) as error:
+            log_failure(logger, error, "[%s] Failed to record target after the analysis", target_id)
         if self._notification_service and outcome.stages_run:
             self._notification_service.notify(target_id, message, status="success")
 

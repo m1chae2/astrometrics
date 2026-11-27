@@ -44,7 +44,6 @@ import {
 
 
 
-/** Summary of one persisted observation session, from execution:list_sessions. */
 /** Answer to a request to stop a stacking job. */
 /** The answer of `target:get_frame_header`: the header and the turn that shows the frame like the stack. */
 export interface FrameHeaderAnswer {
@@ -67,13 +66,6 @@ export interface CancelAnalysisResult {
     cancelled: boolean;
     /** Why the job was not stopped; null when it was. */
     reason?: string | null;
-}
-
-export interface ObservationSessionSummary {
-    id: string;
-    status: string;
-    nightDate: string;
-    entryCount: number;
 }
 
 /** How much of the downloaded deep-star (Gaia DR3) catalog is installed, from planetarium:get_deep_catalog_status. */
@@ -326,11 +318,6 @@ export interface ActionRegistry {
     // Observation Execution (wayfindinglib). Covers the operations whose
     // inputs are plain data; session advancement, meridian flips, and fault
     // recovery take injected callables and are driven in-process, not here.
-    "execution:list_sessions": { payload: Record<string, never>; response: ObservationSessionSummary[] };
-    "execution:get_session": { payload: { session_id: string }; response: Record<string, any> };
-    "execution:abort_session": { payload: { session_id: string; reason: string }; response: Record<string, any> };
-    "execution:reconcile_session": { payload: { session_id: string }; response: Record<string, any> };
-    "execution:build_divergence_record": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
     // Night plan (#95). `plan:list_packages` lists the package library;
     // `plan:current_session` is tonight's session or null (never created by a
@@ -655,7 +642,6 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
  */
 const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
-    'execution:list_sessions',
     'plan:current_session',
     'plan:list_packages',
     'plan:package_for_target',

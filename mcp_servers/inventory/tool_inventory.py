@@ -36,10 +36,10 @@ from typing import Any
 
 from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
-    DECISIONS,
     DISPOSITIONS,
     INTERIM_BLOCKS,
     categorize_tool,
+    decision_for,
     find_problems,
 )
 
@@ -272,12 +272,6 @@ CLASSIFICATION_RULES = (
         "change-data",
         "high",
         "Writes settings to local storage.",
-    ),
-    _rule(
-        r"^execution_build_divergence_record$",
-        "compute",
-        "high",
-        "Builds a divergence record and writes nothing.",
     ),
     _rule(
         r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
@@ -628,11 +622,12 @@ def apply_decisions(record: ToolRecord) -> None:
     ----------
     record : `ToolRecord`
         The record to update in place. It already has a drafted class. A
-        tool with no row in ``DECISIONS`` stays ``undecided``, so no
+        tool with no row in ``DECISIONS`` (under its name, or under an old
+        name that ``TOOL_RENAMES`` maps to it) stays ``undecided``, so no
         client gets it.
     """
     record.interim_block = INTERIM_BLOCKS.get(record.name, "")
-    decision = DECISIONS.get(record.name)
+    decision = decision_for(record.name)
     if decision:
         record.note = decision.note
         record.disposition = decision.disposition

@@ -12,7 +12,8 @@ from typing import Any
 
 from astrometricslib import CaptureSetting, FrameRecord, Target
 from astrometricslib._internal.frames import frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject, StoredCaptureSetting
+from astrometricslib.arguments import Page
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.efficiency import (
     PINNED_METRIC_VERSIONS,
@@ -156,32 +157,33 @@ class FakeLibrary:
             frames=SimpleNamespace(get_set_aside=lambda _target: ()),
         )
         self.quality = SimpleNamespace(
-            query=self._query,
-            capture_settings=lambda ids=None: {1: SETTING},
+            records=SimpleNamespace(
+                query=self._query,
+                get_calibration_identities=lambda target=None, **_k: [],
+                get_capture_settings=lambda ids=None: [StoredCaptureSetting(id=1, setting=SETTING)],
+            )
         )
 
     def _query(
         self,
         metric: str | None = None,
         level: str | None = None,
-        target_id: str | None = None,
-        observing_night_id: str | None = None,
+        target: Target | None = None,
+        night: str | None = None,
         **_: Any,
-    ) -> QualityQueryResult:
-        """Answer ``quality.query`` from the stored rows.
+    ) -> Page:
+        """Answer ``quality.records.query`` from the stored rows.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows that match.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self.rows
-                if (metric is None or row.metric == metric)
-                and (level is None or row.subject.level.value == level)
-                and (target_id is None or row.subject.target_id == target_id)
-                and (observing_night_id is None or row.subject.observing_night_id == observing_night_id)
-            ]
-        )
+        return Page.of([
+            row
+            for row in self.rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (target is None or row.subject.target_id == target.id)
+            and (night is None or row.subject.observing_night_id == night)
+        ])

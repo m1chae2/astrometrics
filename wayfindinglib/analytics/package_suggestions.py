@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import Astrometrics, CaptureSetting
+from astrometricslib import Astrometrics, CaptureSetting, Target
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -120,7 +120,7 @@ def read_target_noise(astrometrics: Astrometrics, target_id: str) -> TargetNoise
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The science library handle (`quality.query`).
+        The science library handle (`quality.records.query`).
     target_id : `str`
         The target.
 
@@ -131,13 +131,13 @@ def read_target_noise(astrometrics: Astrometrics, target_id: str) -> TargetNoise
         read failed. `None` means "unknown", never "below the goal".
     """
     try:
-        rows = astrometrics.quality.query(
+        rows = astrometrics.quality.records.query(
             metric=NORMALIZED_NOISE_METRIC,
             level=SubjectLevel.STACK.value,
-            target_id=target_id,
+            target=Target(id=target_id),
             library_only=True,
             latest_only=True,
-        ).rows
+        )
     except AstrometricsError, OSError:
         return None
     pinned = PINNED_STACK_METRICS[NORMALIZED_NOISE_METRIC]

@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from astrometricslib import CaptureSetting
+from astrometricslib._internal.quality import StoredCaptureSetting
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
 from wayfindinglib.models.sky_position import SkyPosition
@@ -173,30 +174,32 @@ class _Quality:
         rows of the same frames still carry setting 1.
         """
         self._zero_point_setting = zero_point_setting
+        self.records = self
         self._rows = {
             centering_exposure.ZERO_POINT_METRIC: zero_points,
             centering_exposure.STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: widths,
         }
 
-    def capture_settings(self) -> dict[int, CaptureSetting]:
+    def get_capture_settings(self, ids: list[int] | None = None) -> list[StoredCaptureSetting]:
         """Give the one capture setting.
 
         Returns
         -------
-        settings : `dict` [`int`, `CaptureSetting`]
+        settings : `list` [`StoredCaptureSetting`]
             Setting 1: the test camera and telescope, luminance, gain 0.
         """
-        return {
-            1: CaptureSetting(camera="Cam", telescope="Scope", filter_name="L", gain=0, offset=10, binning=1)
-        }
+        setting = CaptureSetting(
+            camera="Cam", telescope="Scope", filter_name="L", gain=0, offset=10, binning=1
+        )
+        return [StoredCaptureSetting(id=1, setting=setting)]
 
-    def query(self, metric: str, **_: Any) -> SimpleNamespace:
+    def query(self, metric: str, **_: Any) -> list[SimpleNamespace]:
         """Give the rows of a metric.
 
         Returns
         -------
-        answer : `types.SimpleNamespace`
-            With ``rows``.
+        rows : `list` [`types.SimpleNamespace`]
+            The stand-in rows.
         """
         rows = [
             SimpleNamespace(
@@ -211,7 +214,7 @@ class _Quality:
             )
             for index, value in enumerate(self._rows[metric])
         ]
-        return SimpleNamespace(rows=rows)
+        return rows
 
 
 def _profile(has_noise: bool = True, generic: bool = False) -> SimpleNamespace:

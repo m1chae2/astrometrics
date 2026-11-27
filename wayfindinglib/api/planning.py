@@ -1319,7 +1319,9 @@ class ObservationPlanning(MovedNames):
 
         # A library with no quality records gives an empty dictionary.
         return allowed_capture_values_for_camera(
-            self._astrometrics, session.camera_id, self._astrometrics.quality.capture_settings().values()
+            self._astrometrics,
+            session.camera_id,
+            [stored.setting for stored in self._astrometrics.quality.records.get_capture_settings()],
         )
 
     def add_to_queue(

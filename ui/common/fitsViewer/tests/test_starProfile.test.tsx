@@ -552,6 +552,7 @@ describe('describeFollow', () => {
     expect(describeFollow('sky')).toBe('Followed by sky position');
     expect(describeFollow('stack alignment')).toBe('Followed by stack alignment');
     expect(describeFollow('stack alignment + sky')).toBe('Followed by stack alignment and sky position');
+    expect(describeFollow('star matching')).toBe('Followed by matching the stars');
     expect(describeFollow('same pixel')).toBe('Same pixel (guess)');
   });
 });

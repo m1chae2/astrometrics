@@ -313,10 +313,33 @@ class StackReviewService:
             target with no previous stack gives a report with no comparison and
             a note that says so.
         """
-        quality = self._astrometrics.quality
-        return self._start(
-            lambda: quality.measure_stack(target_id, kind=kind, include=[], compare_to="previous")
-        )
+        stacks = self._astrometrics.quality.stacks
+
+        def compare() -> Any:
+            """Measure the chosen stack against the previous one.
+
+            Returns
+            -------
+            report : `StackQualityReport`
+                The library's report.
+
+            Raises
+            ------
+            NotFoundError
+                If the target has no spectral stack when one was asked for.
+            """
+            target = self._subjects.target(target_id)
+            stack = None
+            if kind == "spectral":
+                stack = target.spectral_stacking.stacked_image
+                if not stack:
+                    raise NotFoundError(
+                        f"Target '{target.id}' has no spectral stack.",
+                        details={"target": target.id, "kind": kind},
+                    )
+            return stacks.measure(target, stack=stack, include=[], compare_to="previous")
+
+        return self._start(compare)
 
     def start_stack_check(
         self,

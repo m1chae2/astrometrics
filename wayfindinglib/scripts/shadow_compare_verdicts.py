@@ -898,7 +898,7 @@ def run_comparison(
 
     index = build_rule_index(ALL_RULES)
     astrometrics = wayfinder.astrometrics
-    registered = [spec.name for spec in astrometrics.quality.metrics() if ".gate_" in spec.name]
+    registered = [spec.name for spec in astrometrics.quality.records.get_metrics() if ".gate_" in spec.name]
     unruled = gates_without_rule(registered, index)
     differences: list[Difference] = []
     gate_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -914,7 +914,7 @@ def run_comparison(
             for gate_name, (status, _detail) in state.gates.items():
                 gate_counts[f"{PIPELINE_METRIC_PREFIX[pipeline]}.gate_{gate_name}"][status] += 1
         try:
-            rows = astrometrics.quality.query(target_id=target.id, latest_only=True).rows
+            rows = astrometrics.quality.records.query(target=target, latest_only=True)
             reason_differences, counts = compare_flag_reasons_to_warnings(
                 target.id, old_states, warning_rows_from_measurements(rows), new_rows_since
             )

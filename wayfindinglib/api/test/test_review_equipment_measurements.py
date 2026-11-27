@@ -7,6 +7,7 @@ Description: Checks `ObservationReview.measure_unguided_mount_error`,
 recorded in the Butler and the log database. None of it touches a real library.
 """
 
+from types import SimpleNamespace
 from typing import ClassVar
 
 import numpy as np
@@ -389,7 +390,10 @@ def _stub_sky_library(
     control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch, prediction: object
 ) -> None:
     """Replace the library handles the sky prediction reads with stand-ins."""
-    quality = type("Quality", (), {"capture_settings": staticmethod(lambda: {"a": _Setting()})})()
+    records = SimpleNamespace(
+        get_capture_settings=lambda ids=None: [SimpleNamespace(id=1, setting=_Setting())]
+    )
+    quality = SimpleNamespace(records=records)
     astrometrics = type("Astrometrics", (), {"quality": quality})()
     monkeypatch.setattr(control._context, "_astrometrics", astrometrics)
     monkeypatch.setattr(sky_rate_tasks, "LibraryInputs", _Inputs)

@@ -2,7 +2,7 @@
 
 Description: The science library measures a target's light frames and stores
 the numbers in the quality database
-(`astrometrics.quality.record_frame_measurements`). The library also
+(`astrometrics.quality.frames.record`). The library also
 guards that work: only one run measures a target at a time, and only one run
 reads frames at a time in the whole process, so this service does not have to.
 It does four small things.
@@ -10,10 +10,11 @@ It does four small things.
 - When the app asks for a measurement, it starts the library call on a
   background thread (so the request returns at once) and announces the result.
 - When the app asks for the noise-against-frame-count series, each night's
-  contribution or the odd–even difference noise
-  (`astrometrics.processing.measure_noise` with the kind ``"growth"``,
-  ``"night_contributions"`` or ``"odd_even_difference"``), it
-  starts that library call the same way. All of them stack some of a target's
+  contribution or the odd–even difference noise (the RPC's kind
+  ``"growth"``, ``"night_contributions"`` or ``"odd_even_difference"``, which
+  is `astrometrics.quality.stacks.record_noise_growth`,
+  `record_night_contributions` or `record_odd_even_noise`), it starts that
+  library call the same way. All of them stack some of a target's
   frames into the target's ``_subsets`` folder, never over the library
   stack, so they take minutes and run only when asked. None starts by itself
   after a stack. The series includes the odd–even difference noise unless the
@@ -21,8 +22,12 @@ It does four small things.
 - When a frame sync or an ingestion has already measured the frames it added,
   it announces the summaries of those runs.
 - When the app asks for the stored quality numbers (`query_measurements`), it
-  reads them from the library and answers with the plain list of rows that the
-  screens expect.
+  reads them from the library (`quality.records`) and answers with the plain
+  list of rows that the screens expect. It also answers the Image Viewer's
+  reads of the declared metrics (`list_metrics`), the picture behind each
+  row (`resolve_rows`) and the frame to blink against (`choose_blink_pair`),
+  turning the app's ids into library objects and the library's models into
+  the replies the screens expect.
 
 An announcement is the ``quality:measured`` event sent to every connected app
 window, so the screens that show quality numbers can read them again. Every
@@ -120,9 +125,11 @@ class QualityMeasurementService:
     ) -> list[QualityMeasurement]:
         """Read the stored quality measurements as a plain list.
 
-        The library answers with a result that holds the rows and the paging;
-        the screens read just the rows, as a list, so this gives them that.
-        Nothing is measured or written, and there is no limit.
+        The library answers with a page of rows; the screens read just the
+        rows, as a list, so this gives them that. Cited rows (``row_ids``)
+        are read one by one with ``quality.records.get``, so a citation finds
+        its row even when a newer one replaced it. Nothing is measured or
+        written, and there is no limit.
 
         Parameters
         ----------
@@ -155,19 +162,110 @@ class QualityMeasurementService:
         rows : `list` [`QualityMeasurement`]
             The matching measurements, oldest first.
         """
-        return self._astrometrics.quality.query(
-            metric=metric,
-            level=level,
-            target_id=target_id,
-            observing_night_id=observing_night_id,
-            camera_id=camera_id,
-            telescope=telescope,
-            since=since,
-            row_ids=row_ids,
-            latest_only=latest_only,
-            variant=variant,
-            library_only=library_only,
-        ).rows
+        records = self._astrometrics.quality.records
+        if row_ids is not None:
+            # Exactly the cited rows, even when newer ones replaced them.
+            found = (records.get(int(row_id)) for row_id in dict.fromkeys(row_ids))
+            return [row for row in found if row is not None]
+        target = None if target_id is None else self._subjects.target(target_id)
+        return list(
+            records.query(
+                metric=metric,
+                level=level,
+                target=target,
+                night=observing_night_id,
+                camera=camera_id,
+                telescope=telescope,
+                since=since,
+                latest_only=latest_only,
+                variant=variant,
+                library_only=library_only,
+            )
+        )
+
+    def list_metrics(
+        self, name: str | None = None, checkpoint: str | None = None, detail: str = "summary"
+    ) -> list[Any]:
+        """List the declared quality metrics, short or whole.
+
+        Parameters
+        ----------
+        name : `str`, optional
+            One metric name. The list then holds only that metric.
+        checkpoint : `str`, optional
+            Only the metrics measured at this checkpoint.
+        detail : {``"summary"``, ``"full"``}, optional
+            ``"summary"`` (default) gives the name, unit, checkpoint, levels
+            and purpose of each; ``"full"`` the whole declaration.
+
+        Returns
+        -------
+        metrics : `list`
+            The declarations (``"full"``) or their short forms, as dicts.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``detail`` or ``name`` is unknown.
+        """
+        from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
+
+        if detail not in ("summary", "full"):
+            raise InvalidArgumentError("detail must be one of: summary, full.")
+        records = self._astrometrics.quality.records
+        if name is not None:
+            try:
+                specs = [records.get_metric(name)]
+            except NotFoundError as error:
+                raise InvalidArgumentError(error.message) from error
+            if checkpoint is not None:
+                specs = [spec for spec in specs if spec.checkpoint.value == checkpoint]
+        else:
+            specs = records.get_metrics(checkpoint)
+        if detail == "full":
+            return specs
+        return [
+            {
+                "name": spec.name,
+                "unit": spec.unit,
+                "checkpoint": spec.checkpoint,
+                "levels": tuple(spec.levels),
+                "purpose": spec.purpose,
+            }
+            for spec in specs
+        ]
+
+    def resolve_rows(self, row_ids: list[int]) -> Any:
+        """Find the picture behind each stored quality row.
+
+        Parameters
+        ----------
+        row_ids : `list` [`int`]
+            The store's row ids, such as the ones a statement cites.
+
+        Returns
+        -------
+        resolution : `QualityRowResolution`
+            The library's answer (`quality.records.get_paths`).
+        """
+        return self._astrometrics.quality.records.get_paths(row_ids)
+
+    def choose_blink_pair(self, target: str, path: str) -> Any:
+        """Pick a typical frame and a reference star to blink a frame against.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's id or name.
+        path : `str`
+            The frame to examine.
+
+        Returns
+        -------
+        pair : `BlinkPair`
+            The library's answer (`quality.frames.get_blink_partner`).
+        """
+        return self._astrometrics.quality.frames.get_blink_partner(self._subjects.target(target), path)
 
     def start_frame_measurements(self, target_id: str, limit: int | None = None) -> dict[str, Any]:
         """Start measuring a target's light frames in the background.
@@ -192,9 +290,13 @@ class QualityMeasurementService:
         def run() -> None:
             """Measure the frames; the top of a background thread."""
             try:
-                summary = self._astrometrics.quality.record_frame_measurements(
-                    self._subjects.target(target_id), limit=limit
-                )
+                target = self._subjects.target(target_id)
+                frames = None
+                if limit is not None:
+                    # The newest light frames: the library measures the ones
+                    # among them that changed since they were measured.
+                    frames = list(self._astrometrics.targets.frames.query(target, order_by="newest"))[:limit]
+                summary = self._astrometrics.quality.frames.record(target, frames=frames)
             except AstrometricsError as error:
                 logger.warning(
                     "Measuring the frames of %s failed (%s): %s", target_id, error.code, error.message
@@ -230,8 +332,8 @@ class QualityMeasurementService:
         ``"night_contributions"`` (what each night gave) and
         ``"odd_even_difference"`` (the noise of the difference of two halves).
         Nothing starts one by itself after a stack; a caller asks for it.
-        The library refuses an option that the chosen kind does not use, and
-        that error is logged here.
+        An unknown kind, or an option the chosen kind does not use, is
+        refused and the error is logged here.
 
         Parameters
         ----------
@@ -275,10 +377,36 @@ class QualityMeasurementService:
             -------
             counts : `tuple` [`int`, `list` [`str`]]
                 The rows written and the observing nights they belong to.
+
+            Raises
+            ------
+            InvalidArgumentError
+                If the kind is unknown or an option does not apply to it.
             """
-            result = self._astrometrics.processing.measure_noise(
-                self._subjects.target(target_id), kind=kind, **options
-            )
+            from astrometricslib.exceptions import InvalidArgumentError
+
+            used = {"growth": {"maximum_steps", "include"}, "odd_even_difference": {"keep_halves"}}
+            if kind not in ("growth", "night_contributions", "odd_even_difference"):
+                raise InvalidArgumentError(
+                    "kind must be one of: growth, night_contributions, odd_even_difference."
+                )
+            unused = sorted(set(options) - used.get(kind, set()))
+            if unused:
+                raise InvalidArgumentError(f"kind {kind!r} does not use: {', '.join(unused)}.")
+            stacks = self._astrometrics.quality.stacks
+            target = self._subjects.target(target_id)
+            if kind == "night_contributions":
+                result = stacks.record_night_contributions(target)
+            elif kind == "odd_even_difference":
+                result = stacks.record_odd_even_noise(target, keep_halves=bool(options.get("keep_halves")))
+            else:
+                # The app's series includes the odd–even difference noise
+                # unless the caller turns it off.
+                result = stacks.record_noise_growth(
+                    target,
+                    maximum_steps=options.get("maximum_steps"),
+                    include=options.get("include", ["odd_even_difference"]),
+                )
             if kind == "night_contributions":
                 return result.rows_written, sorted(entry.night_id for entry in result.nights)
             if kind == "odd_even_difference":

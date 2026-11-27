@@ -128,11 +128,15 @@ def read_target_rows(astrometrics: Any, target_id: str) -> TargetRows:
         The rows and their capture settings. A library with no measurements
         gives empty lists.
     """
-    rows = list(astrometrics.quality.query(target_id=target_id, library_only=True).rows)
+    rows = list(astrometrics.quality.records.query(target=Target(id=target_id), library_only=True))
     ids = sorted({
         row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
     })
-    settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+    settings = (
+        {stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings(ids)}
+        if ids
+        else {}
+    )
     return TargetRows(rows=rows, settings=settings)
 
 
@@ -158,16 +162,16 @@ def read_earlier_nights_rows(astrometrics: Any, target_id: str) -> list[QualityM
         The rows; empty when the target has no subset stack.
     """
     return [
-        *astrometrics.quality.query(
-            target_id=target_id, level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
-        ).rows,
-        *astrometrics.quality.query(
-            target_id=target_id,
+        *astrometrics.quality.records.query(
+            target=Target(id=target_id), level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
+        ),
+        *astrometrics.quality.records.query(
+            target=Target(id=target_id),
             level="frame",
             metric=FRAME_WEIGHT_METRIC,
             variant=EARLIER_NIGHTS_VARIANT,
             latest_only=False,
-        ).rows,
+        ),
     ]
 
 
@@ -190,17 +194,16 @@ def read_forecast_runs(
     -------
     runs : `list` [`StackRunRecord`]
         The library runs and the earlier-nights subset runs, oldest first,
-        each with its calibration record where one is stored. A library
-        without ``calibration_identities`` (an old one) gives runs with none,
-        and the forecast check then counts them as confounded.
+        each with its calibration record where one is stored. A run with no
+        stored record gets none, and the forecast check then counts it as
+        confounded.
     """
     from wayfindinglib.analytics.result_quality.forecast import (
         attach_calibration_identities,
         stack_runs_from_measurements,
     )
 
-    reader = getattr(astrometrics.quality, "calibration_identities", None)
-    identities = list(reader(target_id=target_id)) if callable(reader) else []
+    identities = astrometrics.quality.records.get_calibration_identities(Target(id=target_id))
     runs = stack_runs_from_measurements(
         [*library_rows, *read_earlier_nights_rows(astrometrics, target_id)], include_earlier_nights=True
     )
@@ -221,11 +224,15 @@ def _read_library_stack_rows(astrometrics: Any) -> tuple[list[QualityMeasurement
         One library-wide query of stack-level rows (library stacks, every run
         kept) and one read of the capture settings they point at.
     """
-    rows = list(astrometrics.quality.query(level="stack", library_only=True, latest_only=False).rows)
+    rows = list(astrometrics.quality.records.query(level="stack", library_only=True, latest_only=False))
     ids = sorted({
         row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
     })
-    settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+    settings = (
+        {stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings(ids)}
+        if ids
+        else {}
+    )
     return rows, settings
 
 
@@ -272,8 +279,7 @@ def read_noise_history(astrometrics: Any, config: Any | None = None) -> NoiseHis
             The noise history.
         """
         rows, settings = _read_library_stack_rows(astrometrics)
-        reader = getattr(astrometrics.quality, "calibration_identities", None)
-        identities = list(reader()) if callable(reader) else []
+        identities = astrometrics.quality.records.get_calibration_identities()
         return NoiseHistory(
             model_errors=noise_model_errors_by_setting_group(rows, settings),
             fixed_pattern_shares=fixed_pattern_shares_by_setup(rows, identities),

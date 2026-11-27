@@ -13,7 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib import Target
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+from astrometricslib.arguments import Page
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from backend.container import container
 from backend.public_interface import RPC_METHODS
@@ -62,26 +64,29 @@ def test_query_returns_measurements_as_json(library_folder: Path, monkeypatch: p
     )
     asked: dict[str, object] = {}
 
-    def fake_query(**arguments: object) -> QualityQueryResult:
+    def fake_query(**arguments: object) -> Page:
         """Record the arguments and give one measurement.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The answer holding the one stored measurement.
         """
         asked.update(arguments)
-        return QualityQueryResult(rows=[stored], total_matching=1)
+        return Page.of([stored])
 
-    monkeypatch.setattr(container.astrometrics.quality, "query", fake_query)
+    monkeypatch.setattr(container.astrometrics.quality.records, "query", fake_query)
+    monkeypatch.setattr(
+        container.astrometrics.targets, "get", lambda target_id, *args, **kwargs: Target(id=target_id)
+    )
 
     result = serialize_rpc_result(
         asyncio.run(rpc_registry.execute("quality:query", {"target_id": "M31", "library_only": True}))
     )
 
-    assert asked["target_id"] == "M31"
+    assert asked["target"].id == "M31"
     assert asked["library_only"] is True
-    assert asked["row_ids"] is None
+    assert "row_ids" not in asked
     assert len(result) == 1
     assert result[0]["value"] == pytest.approx(2.5)
     assert result[0]["measuredAt"].startswith("2026-10-01T03:00")
@@ -100,7 +105,7 @@ def test_metrics_lists_the_declared_metrics_as_json() -> None:
 def test_resolve_rows_passes_the_ids_to_the_library_and_returns_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The route passes the ids to `resolve_rows`; the reply is plain JSON."""
+    """The route passes the ids to `get_paths`; the reply is plain JSON."""
     from astrometricslib._internal.quality import QualityRowFile, QualityRowResolution
 
     asked: dict[str, object] = {}
@@ -123,7 +128,7 @@ def test_resolve_rows_passes_the_ids_to_the_library_and_returns_json(
             not_found_row_ids=[9],
         )
 
-    monkeypatch.setattr(container.astrometrics.quality, "resolve_rows", fake_resolve_rows)
+    monkeypatch.setattr(container.astrometrics.quality.records, "get_paths", fake_resolve_rows)
 
     result = serialize_rpc_result(
         asyncio.run(rpc_registry.execute("quality:resolve_rows", {"row_ids": [3, 9]}))

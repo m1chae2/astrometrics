@@ -349,7 +349,7 @@ class CalibrationSummary(BaseModel):
     """The calibration a stack run used, kept for the confound rules.
 
     Built from a stored calibration record
-    (`QualityRecords.calibration_identities`) by
+    (`quality.records.get_calibration_identities`) by
     `calibration_summary_from_record`. The record is read with duck typing
     because the record's class is not in the science library's public root.
 
@@ -1182,8 +1182,8 @@ def attach_calibration_identities(
     """Put each run's stored calibration record on the run.
 
     The calibration is not a measurement row: it is a record of master file
-    identities, read with `QualityRecords.calibration_identities`. A run is
-    matched on its run id and its stack's subject id. A run with no record
+    identities, read with `quality.records.get_calibration_identities`. A run
+    is matched on its run id and its stack's subject id. A run with no record
     keeps ``calibration`` as ``None``, and the confound rules then count it as
     confounded.
 
@@ -1850,7 +1850,7 @@ def fixed_pattern_shares_by_setup(
         Stack-level rows of every target, with every run kept.
     identities : `Iterable` [`Any`]
         The stored calibration records of every run
-        (``QualityRecords.calibration_identities()``).
+        (``quality.records.get_calibration_identities()``).
 
     Returns
     -------
@@ -1951,7 +1951,7 @@ def aperture_record_reader(astrometrics: Any) -> Callable[[str], dict[str, Any] 
     Returns
     -------
     reader : `Callable` [[`str`], `dict` or `None`]
-        Reads a record file (`QualityRecords.get_aperture_record`) and gives
+        Reads a record file (`quality.stacks.get_aperture_record`) and gives
         its content as a dictionary. It gives `None` for a file that is
         missing, unreadable or of another version.
     """
@@ -1969,7 +1969,7 @@ def aperture_record_reader(astrometrics: Any) -> Callable[[str], dict[str, Any] 
         record : `dict` or `None`
             The file's content, or `None`.
         """
-        record = astrometrics.quality.get_aperture_record(path)
+        record = astrometrics.quality.stacks.get_aperture_record(path)
         return None if record is None else record.model_dump()
 
     return read

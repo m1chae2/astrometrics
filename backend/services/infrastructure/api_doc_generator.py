@@ -857,6 +857,20 @@ def generate_astrometricslib_docs() -> str:
             )
         )
         sections.append("\n---\n")
+        # The five objects of `astrometrics.quality`, found through the
+        # class's annotations so no private module is imported here.
+        import typing
+
+        for child_name, child_cls in typing.get_type_hints(qual_cls).items():
+            sections.append(f'<a id="class-{child_cls.__name__.lower()}"></a>')
+            sections.append(
+                format_class_markdown(
+                    child_cls,
+                    display_title=child_cls.__name__,
+                    console_alias=f"astrometrics.quality.{child_name}",
+                )
+            )
+            sections.append("\n---\n")
 
     # 7. Utility Functions
     sections.append('<a id="utility-functions"></a>')

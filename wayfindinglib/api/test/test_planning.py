@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import AppConfiguration, Target, Telescope
-from astrometricslib._internal.quality import QualityQueryResult
 from astrometricslib._internal.results import RestoreReport
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.review import ObservationReview
@@ -154,10 +154,12 @@ class _FakeAstrometrics:
         """
         self.targets = _FakeTargetCatalog(targets)
         self.quality = SimpleNamespace(
-            query=lambda **_arguments: QualityQueryResult(),
-            capture_settings=lambda ids=None: {},
-            metrics=lambda **_arguments: [],
-            calibration_identities=lambda **_arguments: [],
+            records=SimpleNamespace(
+                query=lambda **_arguments: Page.of([]),
+                get_capture_settings=lambda ids=None: [],
+                get_metrics=lambda checkpoint=None: [],
+                get_calibration_identities=lambda target=None, **_arguments: [],
+            )
         )
         self.stars = SimpleNamespace(get=lambda object_id, **_: None)
         self.processing = SimpleNamespace(

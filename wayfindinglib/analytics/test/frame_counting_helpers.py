@@ -1,9 +1,9 @@
 """Purpose: Stand-ins for the frame counting tests.
 
 Description: Builds frame records, frame-level quality rows and a small fake
-science library (`targets.get` and `quality.query`) so the counting, progress
-and suggestion tests run with no real data. The fake keeps its frames in
-memory and never touches a file or a database.
+science library (`targets.get` and `quality.records.query`) so the counting,
+progress and suggestion tests run with no real data. The fake keeps its
+frames in memory and never touches a file or a database.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -12,7 +12,8 @@ from typing import Any
 
 from astrometricslib import FilterType, FrameRecord, Target
 from astrometricslib._internal.frames import frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import NotFoundError
 from astrometricslib.reports import (
     LimitTier,
@@ -153,7 +154,7 @@ class FakeLibrary:
     frames_by_target : `dict` [`str`, `list` [`FrameRecord`]]
         The frames of each target.
     rows : `list` [`QualityMeasurement`], optional
-        Every stored row. `quality.query` filters them.
+        Every stored row. `quality.records.query` filters them.
     object_types : `dict` [`str`, `str`], optional
         The stored SIMBAD object type of each target. A target left out has
         none.
@@ -177,8 +178,11 @@ class FakeLibrary:
         self.calibration = no_camera_profiles_calibration()
         self.config = NO_CAMERAS
         self.quality = SimpleNamespace(
-            query=self._query,
-            capture_settings=lambda ids=None: {},
+            records=SimpleNamespace(
+                query=self._query,
+                get_calibration_identities=lambda target=None, **_k: [],
+                get_capture_settings=lambda ids=None: [],
+            )
         )
 
     def _get_target(
@@ -231,26 +235,24 @@ class FakeLibrary:
         """
         return [Target(id=target_id) for target_id in self.frames_by_target]
 
-    def _query(self, **arguments: Any) -> QualityQueryResult:
-        """Filter the stored rows the way `quality.query` does.
+    def _query(self, **arguments: Any) -> Page:
+        """Filter the stored rows the way `quality.records.query` does.
 
         Parameters
         ----------
         **arguments : `Any`
-            The `quality.query` arguments. Only `metric`, `level` and
-            `target_id` are used.
+            The `quality.records.query` arguments. Only `metric`, `level` and
+            `target` are used.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The matching rows.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self.rows
-                if (arguments.get("metric") is None or row.metric == arguments["metric"])
-                and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
-                and (arguments.get("target_id") is None or row.subject.target_id == arguments["target_id"])
-            ]
-        )
+        return Page.of([
+            row
+            for row in self.rows
+            if (arguments.get("metric") is None or row.metric == arguments["metric"])
+            and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
+            and (arguments.get("target") is None or row.subject.target_id == arguments["target"].id)
+        ])

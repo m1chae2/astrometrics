@@ -664,9 +664,9 @@ class LibraryInputs:
             for metric in (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, SKY_RATE_METRIC, READ_NOISE_METRIC):
                 try:
                     rows.extend(
-                        self.astrometrics.quality.query(
-                            metric=metric, level="frame", camera_id=camera, library_only=True
-                        ).rows
+                        self.astrometrics.quality.records.query(
+                            metric=metric, level="frame", camera=camera, library_only=True
+                        )
                     )
                 except (AstrometricsError, sqlite3.Error) as error:
                     self.notes.append(f"The library's {metric} rows for {camera} could not be read: {error}")
@@ -771,7 +771,14 @@ class LibraryInputs:
         notes_before = len(self.notes)
         rows = self.camera_rows(camera)
         ids = sorted({row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id})
-        settings = dict(self.astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+        settings = (
+            {
+                stored.id: stored.setting
+                for stored in self.astrometrics.quality.records.get_capture_settings(ids)
+            }
+            if ids
+            else {}
+        )
         owners = (
             self.target(target_id)
             for target_id in sorted({row.subject.target_id for row in rows if row.subject.target_id})
@@ -1054,7 +1061,9 @@ class LibraryInputs:
             that could not be fitted, with the reason.
         """
         representatives: dict[str, CaptureSetting] = {}
-        for setting in self.astrometrics.quality.capture_settings().values():
+        for setting in (
+            stored.setting for stored in self.astrometrics.quality.records.get_capture_settings()
+        ):
             representatives.setdefault(baseline_key(setting), setting)
         models: dict[str, SkyModel] = {}
         unavailable: list[str] = []

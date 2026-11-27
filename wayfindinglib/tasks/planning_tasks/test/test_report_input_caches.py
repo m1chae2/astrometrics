@@ -48,29 +48,30 @@ class _Quality:
     def __init__(self) -> None:
         """Start with no reads."""
         self.reads = 0
+        self.records = self
 
-    def query(self, **_filters: Any) -> SimpleNamespace:
+    def query(self, **_filters: Any) -> list[Any]:
         """Count a read and give no rows.
 
         Returns
         -------
-        answer : `SimpleNamespace`
-            An answer with no rows.
+        rows : `list`
+            No rows.
         """
         self.reads += 1
-        return SimpleNamespace(rows=[])
+        return []
 
-    def capture_settings(self, ids: list[int]) -> dict[int, CaptureSetting]:
+    def get_capture_settings(self, ids: list[int] | None = None) -> list[Any]:
         """Give no settings.
 
         Returns
         -------
-        settings : `dict`
+        settings : `list`
             Empty.
         """
-        return {}
+        return []
 
-    def calibration_identities(self) -> list[Any]:
+    def get_calibration_identities(self, target: Any = None, **_filters: Any) -> list[Any]:
         """Give no calibration records.
 
         Returns

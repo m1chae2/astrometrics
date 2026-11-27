@@ -72,7 +72,7 @@ def summaries() -> dict:
     summaries : `dict` [`str`, `MetricSummary`]
         Every registered metric, by name.
     """
-    return {summary.name: summary for summary in Astrometrics().quality.metrics()}
+    return {summary.name: summary for summary in Astrometrics().quality.records.get_metrics()}
 
 
 def test_every_registered_context_metric_is_shown_by_the_context_section(summaries: dict) -> None:

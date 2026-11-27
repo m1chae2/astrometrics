@@ -179,7 +179,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "quality:set_aside_frames": ("target_service", "get_set_aside_frames"),
     # A typical frame and a reference star for the viewer's Blink button
     # (a read).
-    "quality:choose_blink_pair": ("astrometrics.quality", "choose_blink_pair"),
+    "quality:choose_blink_pair": ("quality_measurement_service", "choose_blink_pair"),
     # Compares a target's stack with the previous one. A failed plate solve can
     # take about ten minutes, so the service starts it as a background job.
     "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),
@@ -197,8 +197,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # service gives the screens the plain list of rows) and `metrics` lists
     # the declared metrics. Neither writes anything.
     "quality:query": ("quality_measurement_service", "query_measurements"),
-    "quality:metrics": ("astrometrics.quality", "metrics"),
-    "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
+    "quality:metrics": ("quality_measurement_service", "list_metrics"),
+    "quality:resolve_rows": ("quality_measurement_service", "resolve_rows"),
     # The job history, read-only. `detail="warnings"` lists the warnings one
     # job detected, from the stored quality rows that carry its id.
     "jobs:query": ("astrometrics.jobs", "query"),

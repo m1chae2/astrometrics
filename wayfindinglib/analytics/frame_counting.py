@@ -28,8 +28,9 @@ no stored quality judgment yet is counted as captured but does not make the
 row met: only judged frames complete it.
 
 The frames come from the science library's root, `Astrometrics.targets.get`
-(the target record's frame list), not from `quality.query`, which holds only
-the frames that were measured. The judgments come from `quality.query`.
+(the target record's frame list), not from `quality.records.query`, which
+holds only the frames that were measured. The judgments come from
+`quality.records.query`.
 
 The counting functions are pure. `TargetFrameReader` is the one place that
 reads the science library.
@@ -467,7 +468,8 @@ class TargetFrameReader:
     ----------
     astrometrics : `Astrometrics`
         The science library handle. Only its root reads are used:
-        `targets.get` for the frames and `quality.query` for the judgments.
+        `targets.get` for the frames and `quality.records.query` for the
+        judgments.
     """
 
     def __init__(self, astrometrics: Astrometrics) -> None:
@@ -517,9 +519,9 @@ class TargetFrameReader:
         if target is None:
             return TargetFrames(note=f"No target {target_id!r} in the library.")
         try:
-            rows = self._astrometrics.quality.query(
-                target_id=target_id, level=SubjectLevel.FRAME.value, latest_only=True
-            ).rows
+            rows = self._astrometrics.quality.records.query(
+                target=Target(id=target_id), level=SubjectLevel.FRAME.value, latest_only=True
+            )
         except (AstrometricsError, OSError) as error:
             logger.warning("Could not read the frame judgments of %s: %s", target_id, error)
             return TargetFrames(

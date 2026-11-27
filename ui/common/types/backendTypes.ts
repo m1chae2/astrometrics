@@ -2735,7 +2735,7 @@ export interface MeasurementReference {
  * The store's row id. Filled only when the measurement is read back.
  * unit : `str` or `None`
  * The metric's unit from its declaration. Not stored:
- * `QualityRecords.query` fills it on a read.
+ * `quality.records.query` fills it on a read.
  */
 export interface QualityMeasurement {
   metric: string;
@@ -3332,7 +3332,7 @@ export interface DetectionsMeasurement {
  * The brightest pixel above the sky divided by the sky noise (one
  * standard deviation of a sky pixel). It is the peak's height in noise
  * levels, not the signal-to-noise ratio of the star's total light,
- * which `QualityBlocks.measure_aperture` gives.
+ * which `quality.blocks.measure_aperture` gives.
  * edge_distance_px : `float`
  * How far the star's center is from the nearest image edge, in pixels.
  * coverage_fraction : `float`

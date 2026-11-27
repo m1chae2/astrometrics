@@ -469,25 +469,25 @@ def _library_rows(
 
     astrometrics = context.astrometrics
     since = datetime.fromtimestamp(now - resolve_parameter(ZERO_POINT_LOOKBACK_DAYS).value * 86400.0, UTC)
-    settings = astrometrics.quality.capture_settings()
+    settings = {stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings()}
     camera_names = equipment_spellings(astrometrics, equipment.camera_name)
     telescope_name = normalize_name(equipment.telescope_name)
     by_key: dict[str, list[QualityMeasurement]] = {}
     chosen: dict[str, CaptureSetting] = {}
-    zero_points = astrometrics.quality.query(
+    zero_points = astrometrics.quality.records.query(
         metric=ZERO_POINT_METRIC, level="frame", since=since, library_only=True
     )
-    widths = astrometrics.quality.query(
+    widths = astrometrics.quality.records.query(
         metric=STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, level="frame", since=since, library_only=True
     )
     # The photometry rows carry no capture setting; the frame measurements of
     # the same frame do, so a zero point takes its frame's setting from them.
     setting_by_frame = {
         row.subject.subject_id: row.subject.capture_setting_id
-        for row in widths.rows
+        for row in widths
         if row.subject.capture_setting_id
     }
-    for row in zero_points.rows:
+    for row in zero_points:
         setting_id = row.subject.capture_setting_id or setting_by_frame.get(row.subject.subject_id)
         setting = settings.get(setting_id) if setting_id else None
         if setting is None or normalize_name(setting.camera) not in camera_names:
@@ -507,7 +507,7 @@ def _library_rows(
     key = max(by_key, key=lambda name: len(by_key[name]))
     width_rows = [
         row
-        for row in widths.rows
+        for row in widths
         if (found := settings.get(row.subject.capture_setting_id) if row.subject.capture_setting_id else None)
         is not None
         and baseline_key(found) == key

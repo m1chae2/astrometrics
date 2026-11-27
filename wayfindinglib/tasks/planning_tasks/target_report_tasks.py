@@ -1011,7 +1011,7 @@ def _more_frames_for_setting(
         reason = (
             f"{len(frames)} frames have an exposure, a sky rate and a read noise; the forecast needs "
             f"{resolve_parameter(MINIMUM_FRAMES_FOR_FORECAST).value}. Measure the target's frames "
-            f"(QualityRecords.measure_frames)."
+            f"(quality.frames.record)."
         )
         if problems:
             reason += " First problem: " + problems[0]
@@ -2372,9 +2372,9 @@ def _build_target_dataset_report(
     stack_rows: list[QualityMeasurement] = []
     for metric in PINNED_STACK_METRICS:
         stack_rows.extend(
-            astrometrics.quality.query(
-                metric=metric, target_id=target.id, library_only=True, latest_only=False
-            ).rows
+            astrometrics.quality.records.query(
+                metric=metric, target=target, library_only=True, latest_only=False
+            )
         )
     # The calibration of each run is not a measurement row; it is a record of
     # master file identities. A run with none counts as confounded.
@@ -2532,7 +2532,7 @@ def _build_target_dataset_report(
     if not observations:
         starting_point = _starting_point(target, target_goal, context, config, now)
 
-    metric_summaries = {summary.name: summary for summary in astrometrics.quality.metrics()}
+    metric_summaries = {spec.name: spec for spec in astrometrics.quality.records.get_metrics()}
     # Each statement lists its most extreme evidence first, so a shortened
     # reply (the MCP tools shorten it) keeps the references that matter most.
     statements = order_statements_evidence(

@@ -177,7 +177,7 @@ def _how_to_get(metric: str) -> str:
         One plain sentence.
     """
     if metric.startswith("frame."):
-        return "Measure the target's frames again (QualityRecords.measure_frames)."
+        return "Measure the target's frames again (quality.frames.record)."
     if metric.startswith("stacking."):
         return "Stack the target again, so the stacker records it."
     return "Run the pipeline that records this metric."
@@ -1232,7 +1232,7 @@ def judge_results(
     measurements : `Iterable` [`QualityMeasurement`]
         Rows read back from the quality store, each with its row id.
     capture_settings : `Mapping` [`int`, `CaptureSetting`]
-        The capture settings by id (``QualityRecords.capture_settings``).
+        The capture settings by id (``quality.records.get_capture_settings``).
     rules : `Sequence` [`QualityRule`], optional
         The rules to judge. Rules with ``computed_by`` set are skipped,
         because another module makes their statements.

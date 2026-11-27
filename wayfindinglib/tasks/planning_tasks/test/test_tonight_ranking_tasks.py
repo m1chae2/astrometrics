@@ -16,7 +16,8 @@ import pytest
 
 from astrometricslib import CaptureSetting, FrameRecord, Target
 from astrometricslib._internal.frames import frame_is_spectral, frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject, StoredCaptureSetting
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import ConfigurationError
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality import forecast as fc
@@ -216,34 +217,38 @@ class FakeLibrary:
         self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=tuple(targets)))
         self.calibration = no_camera_profiles_calibration()
         self.config = NO_CAMERAS
+        settings = {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING}
         self.quality = SimpleNamespace(
-            query=self._query,
-            capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING},
+            records=SimpleNamespace(
+                query=self._query,
+                get_calibration_identities=lambda target=None, **_k: [],
+                get_capture_settings=lambda ids=None: [
+                    StoredCaptureSetting(id=key, setting=value) for key, value in settings.items()
+                ],
+            )
         )
 
     def _query(
         self,
         metric: str | None = None,
         level: str | None = None,
-        target_id: str | None = None,
+        target: Target | None = None,
         **_: Any,
-    ) -> QualityQueryResult:
-        """Answer ``quality.query`` from the stored rows.
+    ) -> Page:
+        """Answer ``quality.records.query`` from the stored rows.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows that match the metric, level and target.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self.rows
-                if (metric is None or row.metric == metric)
-                and (level is None or row.subject.level.value == level)
-                and (target_id is None or row.subject.target_id == target_id)
-            ]
-        )
+        return Page.of([
+            row
+            for row in self.rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (target is None or row.subject.target_id == target.id)
+        ])
 
 
 def _rank(library: FakeLibrary, **extra: Any) -> Any:

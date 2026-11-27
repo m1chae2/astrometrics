@@ -482,7 +482,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
 
     target = make_target(STAR, 1)
     library = FakeLibrary([target], make_rows(target, REVIEWED))
-    good_query = library.quality.query
+    good_query = library.quality.records.query
     state = {"fail": True}
 
     def flaky(**keywords: Any) -> Any:
@@ -490,7 +490,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows.
 
         Raises
@@ -502,7 +502,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
             raise AstrometricsError("busy")
         return good_query(**keywords)
 
-    library.quality.query = flaky
+    library.quality.records.query = flaky
     inputs = LibraryInputs(library, _butler(SITE), config)
     assert inputs.camera_observations(SETTING.camera) == []
     assert inputs.notes

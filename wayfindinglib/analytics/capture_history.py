@@ -13,8 +13,9 @@ change of equipment starts the capture history afresh.
 
 The frame record supplies when and how a frame was taken. Everything that was
 measured on the pixels (star width, star shape, saturated pixels, background)
-is read from the stored quality measurements with `astrometrics.quality.query`,
-never from the frame record's `measurements` object. Each metric is pinned to
+is read from the stored quality measurements with
+`astrometrics.quality.records.query`, never from the frame record's
+`measurements` object. Each metric is pinned to
 the definition version this code was written for (`PINNED_FRAME_METRICS`). A
 stored row of another version is not used, so the frame shows that value as
 missing; remeasuring the frames brings it back (issue #95).
@@ -26,6 +27,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
+from astrometricslib import Target
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -162,9 +164,12 @@ def read_frame_measurements(
     """
     by_frame: dict[str, dict[str, tuple[float, int | None]]] = defaultdict(dict)
     for metric, version in (PINNED_FRAME_METRICS if metrics is None else metrics).items():
-        for row in astrometrics.quality.query(
-            metric=metric, level="frame", target_id=target_id, latest_only=True
-        ).rows:
+        for row in astrometrics.quality.records.query(
+            metric=metric,
+            level="frame",
+            target=None if target_id is None else Target(id=target_id),
+            latest_only=True,
+        ):
             if row.definition_version != version:
                 continue
             if row.subject.channel is not None or row.status == MeasurementStatus.NOT_MEASURED:

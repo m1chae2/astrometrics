@@ -21,8 +21,9 @@ import numpy as np
 import pytest
 
 from astrometricslib import Astrometrics, CaptureSetting
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number, fold_exposure_lengths
+from astrometricslib.arguments import Page
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
@@ -629,7 +630,7 @@ def test_stop_signal_says_so_with_no_noise_at_all() -> None:
 
 def test_pinned_versions_match_the_registry() -> None:
     """The registry has not moved past a version this module reads."""
-    registry = {spec.name: spec for spec in Astrometrics().quality.metrics(detail="full")}
+    registry = {spec.name: spec for spec in Astrometrics().quality.records.get_metrics()}
     for metric, version in fc.PINNED_STACK_METRICS.items():
         assert registry[metric].definition_version == version, metric
 
@@ -2227,6 +2228,7 @@ class _StoreStandIn:
         """
         self._rows = rows
         self._identities = identities
+        self.records = self
 
     def query(
         self,
@@ -2235,26 +2237,24 @@ class _StoreStandIn:
         variant: str | None = None,
         library_only: bool = False,
         **_: object,
-    ) -> QualityQueryResult:
-        """Answer ``quality.query`` the way the library does for these filters.
+    ) -> Page:
+        """Answer ``quality.records.query`` the way the library does here.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows that match.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self._rows
-                if (metric is None or row.metric == metric)
-                and (level is None or row.subject.level.value == level)
-                and (variant is None or row.subject.variant == variant)
-                and not (library_only and row.subject.variant is not None)
-            ]
-        )
+        return Page.of([
+            row
+            for row in self._rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (variant is None or row.subject.variant == variant)
+            and not (library_only and row.subject.variant is not None)
+        ])
 
-    def calibration_identities(self, **_: object) -> list[CalibrationIdentities]:
+    def get_calibration_identities(self, target: object = None, **_: object) -> list[CalibrationIdentities]:
         """Give the stored calibration records.
 
         Returns
@@ -2293,7 +2293,7 @@ def test_rows_as_the_library_writes_a_subset_give_an_provisional_status() -> Non
     runs = fc.stack_runs_from_measurements([*library_rows, *subset_rows], include_earlier_nights=True)
     subset = next(run for run in runs if run.is_earlier_nights_subset)
     frames_status = recommended_additional_frames_status_of_target(
-        astrometrics, "T", store.query(library_only=True).rows, everyone
+        astrometrics, "T", list(store.query(library_only=True)), everyone
     )
 
     assert subset.stack_subject_id == subset_subject

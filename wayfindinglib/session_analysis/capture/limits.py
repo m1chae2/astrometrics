@@ -40,7 +40,7 @@ def read_capture_limits(astrometrics: Any) -> CaptureLimits:
         If the library does not list a limit it should. That is a fault in
         the library's declaration, not in the night's data.
     """
-    (declaration,) = astrometrics.quality.metrics(name=SATURATED_PIXEL_METRIC, detail="full")
+    declaration = astrometrics.quality.records.get_metric(SATURATED_PIXEL_METRIC)
     by_unit = {limit.unit: limit.value for limit in declaration.limits}
     tolerance = resolve_parameter(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     if "pixels" not in by_unit or "fraction" not in by_unit:

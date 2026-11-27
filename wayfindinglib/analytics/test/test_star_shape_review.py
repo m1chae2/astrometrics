@@ -239,7 +239,7 @@ def test_the_pinned_versions_match_the_registered_metrics() -> None:
 def _row(
     metric: str, subject: str, value: float, level: str = "frame", reason: str = "", version: int = 1
 ) -> Any:
-    """Build a stored row as `astrometrics.quality.query` returns it.
+    """Build a stored row as `astrometrics.quality.records.query` returns it.
 
     Returns
     -------
@@ -265,6 +265,7 @@ class _Quality:
         """Keep the rows and the set-aside frames."""
         self.rows = rows
         self.set_aside = set_aside or []
+        self.records = self
 
     def set_aside_frames(self, target: Any) -> list[Any]:
         """Answer with the set-aside frames.
@@ -276,13 +277,13 @@ class _Quality:
         """
         return list(self.set_aside)
 
-    def query(self, metric: str, level: str, target_id: str | None = None, latest_only: bool = True) -> Any:
+    def query(self, metric: str, level: str, target: Any = None, latest_only: bool = True) -> list[Any]:
         """Answer with the rows of one metric, or refuse an unknown one.
 
         Returns
         -------
-        result : `types.SimpleNamespace`
-            Has ``rows``.
+        rows : `list`
+            The rows of the metric.
 
         Raises
         ------
@@ -291,7 +292,7 @@ class _Quality:
         """
         if metric == STACK_ELONGATION_METRIC and not any(row.metric == metric for row in self.rows):
             raise InvalidArgumentError("not registered")
-        return SimpleNamespace(rows=[row for row in self.rows if row.metric == metric])
+        return [row for row in self.rows if row.metric == metric]
 
 
 class _Target:

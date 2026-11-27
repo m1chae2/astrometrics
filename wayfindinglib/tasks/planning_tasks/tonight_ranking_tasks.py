@@ -800,7 +800,9 @@ def rank_tonight(
     inputs = LibraryInputs(astrometrics, butler, config, known_site=site_profile)
     site_profile = inputs.site
     targets = list(inputs.targets().values())
-    capture_settings = astrometrics.quality.capture_settings()
+    capture_settings = {
+        stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings()
+    }
     models, unavailable = inputs.all_sky_models()
 
     location = earth_location(site_profile.latitude_deg, site_profile.longitude_deg, site_profile.elevation_m)
@@ -878,19 +880,19 @@ def rank_tonight(
         if not visible:
             skipped["targets not visible at that time"] += 1
             continue
-        frame_rows = astrometrics.quality.query(target_id=target.id, level="frame", library_only=True).rows
+        frame_rows = list(astrometrics.quality.records.query(target=target, level="frame", library_only=True))
         all_observations = build_target_observations(target, frame_rows, capture_settings)
         history = [
-            *astrometrics.quality.query(
-                target_id=target.id, level="stack", library_only=True, latest_only=False
-            ).rows,
-            *astrometrics.quality.query(
-                target_id=target.id,
+            *astrometrics.quality.records.query(
+                target=target, level="stack", library_only=True, latest_only=False
+            ),
+            *astrometrics.quality.records.query(
+                target=target,
                 level="frame",
                 metric=FRAME_WEIGHT_METRIC,
                 library_only=True,
                 latest_only=False,
-            ).rows,
+            ),
         ]
         all_runs = stack_runs_from_measurements(history)
         # Whether the target's "take N more" count is confirmed, provisional

@@ -1416,9 +1416,9 @@ def frame_observations_from_measurements(
     ----------
     measurements : `Iterable` [`QualityMeasurement`]
         Rows from the measurement store (for example
-        ``QualityRecords.query``). Rows of other metrics are ignored.
+        ``quality.records.query``). Rows of other metrics are ignored.
     capture_settings : `Mapping` [`int`, `CaptureSetting`]
-        The capture settings by id (``QualityRecords.capture_settings``).
+        The capture settings by id (``quality.records.get_capture_settings``).
     start_epoch_by_frame : `Mapping` [`str`, `float`], optional
         When each frame's exposure began, by frame id.
     direction_by_frame : `Mapping` [`str`, `tuple`], optional

@@ -39,6 +39,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib import Target
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.parameters import (
@@ -295,12 +296,14 @@ def read_stack_roundness_low_limit(astrometrics: Any, exclude_subject: str | Non
         stored elongation.
     """
     try:
-        result = astrometrics.quality.query(metric=STACK_ELONGATION_METRIC, level="stack", latest_only=True)
+        result = astrometrics.quality.records.query(
+            metric=STACK_ELONGATION_METRIC, level="stack", latest_only=True
+        )
     except InvalidArgumentError:
         return None
     elongations = [
         float(row.value)
-        for row in result.rows
+        for row in result
         if row.subject.channel is None
         and row.status != MeasurementStatus.NOT_MEASURED
         and row.value is not None
@@ -364,12 +367,14 @@ def _query_rows(astrometrics: Any, metric: str, level: str, target_id: str) -> l
         channel. Empty when the metric is not registered (yet).
     """
     try:
-        result = astrometrics.quality.query(metric=metric, level=level, target_id=target_id, latest_only=True)
+        result = astrometrics.quality.records.query(
+            metric=metric, level=level, target=Target(id=target_id), latest_only=True
+        )
     except InvalidArgumentError:
         return []
     return [
         row
-        for row in result.rows
+        for row in result
         if row.subject.channel is None
         and row.status != MeasurementStatus.NOT_MEASURED
         and row.value is not None

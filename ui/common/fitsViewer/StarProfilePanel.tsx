@@ -121,6 +121,7 @@ export function describeFollow(method: string): string {
   if (method === 'sky') return 'Followed by sky position';
   if (method === 'stack alignment') return 'Followed by stack alignment';
   if (method === 'stack alignment + sky') return 'Followed by stack alignment and sky position';
+  if (method === 'star matching') return 'Followed by matching the stars';
   return 'Same pixel (guess)';
 }
 

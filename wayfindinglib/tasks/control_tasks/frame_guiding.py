@@ -152,18 +152,21 @@ def _add_image_quality(
     wanted = [row["file"] for row in frames][:MAXIMUM_QUALITY_FRAMES]
     from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 
+    wanted_files = set(wanted)
+    chosen = [
+        frame
+        for frame in target.frames
+        if os.path.basename(frame.path) in wanted_files
+        and str(frame.role).upper() == "LIGHT"
+        and not frame.is_spectral
+    ]
+    if not chosen:
+        return "Image quality could not be measured: none of the frames is an imaging light frame."
     try:
-        report = astrometrics.quality.measure_frames(
-            target=target,
-            kind="raw_check",
-            filter_name=selection.filter_name,
-            first_file=wanted[0],
-            last_file=wanted[-1],
-            limit=len(wanted),
-        )
+        checks = astrometrics.quality.frames.measure(chosen).checks
     except (InvalidArgumentError, NotFoundError) as error:
         return f"Image quality could not be measured: {error}"
-    by_file = {os.path.basename(row["path"]): row for row in report.frames}
+    by_file = {os.path.basename(row["path"]): row for row in (checks.frames if checks is not None else [])}
     for row in frames:
         measured = by_file.get(row["file"])
         if measured is None:

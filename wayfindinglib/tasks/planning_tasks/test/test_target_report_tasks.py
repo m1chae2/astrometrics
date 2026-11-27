@@ -21,7 +21,8 @@ import pytest
 
 from astrometricslib import AppConfiguration, Astrometrics, CaptureSetting, Target
 from astrometricslib._internal.frames import frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject, StoredCaptureSetting
+from astrometricslib.arguments import Page
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.reports import (
     MeasurementStatus,
@@ -92,7 +93,7 @@ def _count_row(row: dict[str, Any]) -> SimpleNamespace:
 
 
 class _FakeQuality:
-    """Answers `query` and `capture_settings` from a list of rows."""
+    """Answers ``quality.records`` reads from a list of rows."""
 
     def __init__(self, rows: list[QualityMeasurement], settings: dict[int, CaptureSetting]) -> None:
         """Hold the rows and the settings.
@@ -122,18 +123,18 @@ class _FakeQuality:
         """
         return []
 
-    def query(self, **filters: Any) -> QualityQueryResult:
+    def query(self, **filters: Any) -> Page:
         """Filter the rows the way the store does.
 
         Parameters
         ----------
         **filters
-            The query arguments. ``metric``, ``level``, ``target_id`` and
+            The query arguments. ``metric``, ``level``, ``target`` and
             ``camera`` are applied; the others are accepted and ignored.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The matching rows.
         """
         rows = self._rows
@@ -141,8 +142,8 @@ class _FakeQuality:
             rows = [row for row in rows if row.metric == filters["metric"]]
         if filters.get("level"):
             rows = [row for row in rows if row.subject.level.value == filters["level"]]
-        if filters.get("target_id"):
-            rows = [row for row in rows if row.subject.target_id == filters["target_id"]]
+        if filters.get("target"):
+            rows = [row for row in rows if row.subject.target_id == filters["target"].id]
         if filters.get("camera"):
             rows = [
                 row
@@ -150,19 +151,19 @@ class _FakeQuality:
                 if self._settings.get(row.subject.capture_setting_id or -1, SETTING).camera
                 == filters["camera"]
             ]
-        return QualityQueryResult(rows=list(rows))
+        return Page.of(list(rows))
 
-    def calibration_identities(
-        self, run_ids: list[str] | None = None, target_id: str | None = None
+    def get_calibration_identities(
+        self, target: Any = None, *, run_ids: list[str] | None = None
     ) -> list[Any]:
         """Give the stored calibration records (none in this fake).
 
         Parameters
         ----------
+        target : `Target`, optional
+            Only this target's stacks.
         run_ids : `list` [`str`], optional
             Only these runs.
-        target_id : `str`, optional
-            Only this target's stacks.
 
         Returns
         -------
@@ -171,17 +172,17 @@ class _FakeQuality:
         """
         return []
 
-    def metrics(self, **_arguments: Any) -> list[Any]:
+    def get_metrics(self, checkpoint: str | None = None) -> list[Any]:
         """Give the registered metrics, from the real registry.
 
         Returns
         -------
-        metrics : `list` [`MetricSummary`]
-            The summaries.
+        metrics : `list` [`MetricSpec`]
+            The declarations.
         """
-        return Astrometrics().quality.metrics()
+        return Astrometrics().quality.records.get_metrics(checkpoint)
 
-    def capture_settings(self, ids: list[int] | None = None) -> dict[int, CaptureSetting]:
+    def get_capture_settings(self, ids: list[int] | None = None) -> list[StoredCaptureSetting]:
         """Give the settings, or the ones asked for.
 
         Parameters
@@ -191,10 +192,14 @@ class _FakeQuality:
 
         Returns
         -------
-        settings : `dict` [`int`, `CaptureSetting`]
-            The settings.
+        settings : `list` [`StoredCaptureSetting`]
+            The settings with their ids.
         """
-        return {key: value for key, value in self._settings.items() if ids is None or key in ids}
+        return [
+            StoredCaptureSetting(id=key, setting=value)
+            for key, value in sorted(self._settings.items())
+            if ids is None or key in ids
+        ]
 
 
 class _Library:
@@ -222,11 +227,13 @@ class _Library:
         self.target = self._build_target()
         self.set_aside = self._set_aside_frames()
         self.rows.extend(self._stack_rows())
-        self.quality = _FakeQuality(self.rows, {1: SETTING})
+        self.quality = SimpleNamespace(records=_FakeQuality(self.rows, {1: SETTING}))
         self.targets = SimpleNamespace(
             get=lambda target_id, required=False: self.target if target_id == "T" else None,
             frames=SimpleNamespace(
-                get_set_aside=lambda target: self.quality.set_aside_frames(getattr(target, "id", None))
+                get_set_aside=lambda target: self.quality.records.set_aside_frames(
+                    getattr(target, "id", None)
+                )
             ),
         )
         self.processing = SimpleNamespace()
@@ -826,7 +833,7 @@ def test_each_setting_states_its_own_science_goal(isolated_butler: DiskButler) -
             "f021.fits",
         )):
             row.subject.capture_setting_id = 2
-    library.quality = _FakeQuality(library.rows, {1: SETTING, 2: grating})
+    library.quality = SimpleNamespace(records=_FakeQuality(library.rows, {1: SETTING, 2: grating}))
 
     report = _report(library, isolated_butler)
 
@@ -1145,8 +1152,8 @@ def _busy_library() -> _Library:
         2: SETTING.model_copy(update={"exposure_s": 30.0}),
         3: SETTING.model_copy(update={"exposure_s": 120.0}),
     }
-    library.quality = _FakeQuality(library.rows, settings)
-    registered = Astrometrics().quality.metrics(detail="full")
+    library.quality = SimpleNamespace(records=_FakeQuality(library.rows, settings))
+    registered = Astrometrics().quality.records.get_metrics()
     frames = []
     for index in range(32, 532):
         setting_id = 1 + index % 3

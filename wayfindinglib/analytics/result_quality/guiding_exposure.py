@@ -443,7 +443,7 @@ def assess_guiding_exposure(
             reason=(
                 f"Only {len(star_widths_arcsec)} frames have a star width; the rule needs "
                 f"{resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value} to set the allowed guide error. "
-                "Measure the target's frames (QualityRecords.measure_frames)."
+                "Measure the target's frames (quality.frames.record)."
             )
         )
     ranked_widths = sorted(star_widths_arcsec)

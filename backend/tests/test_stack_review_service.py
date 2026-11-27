@@ -256,7 +256,7 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     )
     calls: list[dict[str, Any]] = []
 
-    def measure_stack(target: str, **options: Any) -> StackQualityReport:
+    def measure_stack(target: Any, **options: Any) -> StackQualityReport:
         """Record the call and give an empty report.
 
         Returns
@@ -264,13 +264,22 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
         report : `StackQualityReport`
             A report with a note and no comparison.
         """
-        calls.append({"target": target, **options})
+        calls.append({"target": target.id, **options})
         return StackQualityReport(
             stack_path="/s/M_81_Stacked.fits",
             notes=["No previous stack is kept, so there is nothing to compare with."],
         )
 
-    service = StackReviewService(SimpleNamespace(quality=SimpleNamespace(measure_stack=measure_stack)))
+    from astrometricslib import Target
+
+    target = Target(id="M 81")
+    target.spectral_stacking.stacked_image = "/s/M_81_SPEC_Stacked.fits"
+    service = StackReviewService(
+        SimpleNamespace(
+            quality=SimpleNamespace(stacks=SimpleNamespace(measure=measure_stack)),
+            targets=SimpleNamespace(get=lambda target_id, *args, **kwargs: target),
+        )
+    )
 
     reply = service.start_stack_comparison("M 81", "spectral")
 
@@ -278,7 +287,9 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     assert reply.result is not None
     assert reply.result["comparison"] is None
     assert "No previous stack" in reply.result["notes"][0]
-    assert calls == [{"target": "M 81", "kind": "spectral", "include": [], "compare_to": "previous"}]
+    assert calls == [
+        {"target": "M 81", "stack": "/s/M_81_SPEC_Stacked.fits", "include": [], "compare_to": "previous"}
+    ]
 
 
 def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_back(

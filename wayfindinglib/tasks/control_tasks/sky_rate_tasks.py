@@ -72,7 +72,7 @@ def get_sky_rate_prediction(
     camera_names = equipment_spellings(astrometrics, camera.name)
     telescope_name = normalize_name(telescope.name)
     representatives = {}
-    for setting in astrometrics.quality.capture_settings().values():
+    for setting in (stored.setting for stored in astrometrics.quality.records.get_capture_settings()):
         if normalize_name(setting.camera) not in camera_names:
             continue
         if normalize_name(setting.telescope) != telescope_name:

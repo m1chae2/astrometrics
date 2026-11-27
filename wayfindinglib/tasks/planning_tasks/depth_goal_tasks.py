@@ -182,7 +182,7 @@ def read_target_depth(astrometrics: Any, target_id: str, kind: DepthKind) -> Dep
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The science library handle (``quality.query``).
+        The science library handle (``quality.records.query``).
     target_id : `str`
         The target.
     kind : `DepthKind`
@@ -209,13 +209,13 @@ def read_target_depth(astrometrics: Any, target_id: str, kind: DepthKind) -> Dep
         rows : `list`
             The rows of the library stack, without group stacks.
         """
-        found = astrometrics.quality.query(
+        found = astrometrics.quality.records.query(
             metric=name,
             level=SubjectLevel.STACK.value,
-            target_id=target_id,
+            target=Target(id=target_id),
             library_only=True,
             latest_only=True,
-        ).rows
+        )
         return [
             row
             for row in found

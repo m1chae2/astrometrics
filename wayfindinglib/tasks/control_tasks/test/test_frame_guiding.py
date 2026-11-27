@@ -163,23 +163,25 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
     target = Target(id="T 1", frames=frames)
     asked: dict[str, object] = {}
 
-    def measure_frames(**arguments: object) -> SimpleNamespace:
-        """Answer like the raw frame check, with one row per frame.
+    def measure(frames: list[FrameRecord]) -> SimpleNamespace:
+        """Answer like the frame check, with one batch-check row per frame.
 
         Returns
         -------
         report : `types.SimpleNamespace`
             Rows for both frames, the second one flagged.
         """
-        asked.update(arguments)
+        asked["files"] = [frame.path.rsplit("/", 1)[-1] for frame in frames]
         return SimpleNamespace(
-            frames=[
-                {"path": "/x/T_1_001.fits", "star_count": 900, "fwhm_px": 3.1, "flags": []},
-                {"path": "/x/T_1_002.fits", "star_count": 400, "fwhm_px": 4.5, "flags": ["soft"]},
-            ]
+            checks=SimpleNamespace(
+                frames=[
+                    {"path": "/x/T_1_001.fits", "star_count": 900, "fwhm_px": 3.1, "flags": []},
+                    {"path": "/x/T_1_002.fits", "star_count": 400, "fwhm_px": 4.5, "flags": ["soft"]},
+                ]
+            )
         )
 
-    diagnostics = SimpleNamespace(measure_frames=measure_frames)
+    diagnostics = SimpleNamespace(frames=SimpleNamespace(measure=measure))
     library = SimpleNamespace(
         targets=_targets(target),
         quality=diagnostics,
@@ -187,8 +189,7 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
     rows = _samples(1000.0, 20, 1.0) + _samples(1060.0, 20, 4.0)
     report = link_frames_to_guiding(_control(rows, library), "T 1", FrameRange(), 50, include_quality=True)
     first, second = report["frames"]
-    assert (asked["first_file"], asked["last_file"]) == ("T_1_001.fits", "T_1_002.fits")
-    assert asked["kind"] == "raw_check"
+    assert asked["files"] == ["T_1_001.fits", "T_1_002.fits"]
     assert first["star_count"] == 900
     assert second["quality_flags"] == ["soft"]
     assert second["rms_ra_arcsec"] == pytest.approx(4.0)

@@ -515,8 +515,10 @@ def review_night_quality(context: ControlContext, night_id: str) -> NightQuality
         If the night has neither frame measurements nor guiding data.
     """
     astrometrics = context.astrometrics
-    capture_settings = astrometrics.quality.capture_settings()
-    night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True).rows
+    capture_settings = {
+        stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings()
+    }
+    night_rows = list(astrometrics.quality.records.query(night=night_id, library_only=True))
     inputs = LibraryInputs(astrometrics, context.butler, context.config)
     # The targets are listed once and handed to every step that needs them.
     targets: dict[str, Target] = inputs.targets()
@@ -580,7 +582,9 @@ def review_night_quality(context: ControlContext, night_id: str) -> NightQuality
             moonless or None,
         )
         target_night_rows = rows_by_target[target_id]
-        stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True).rows
+        stack_rows = list(
+            astrometrics.quality.records.query(target=goal_target, level="stack", library_only=True)
+        )
         statements = _target_statements(
             target_night_rows, stack_rows, capture_settings, _main_setting_id(target_night_rows)
         )

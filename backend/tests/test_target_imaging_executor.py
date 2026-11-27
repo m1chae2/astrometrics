@@ -17,7 +17,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from astrometricslib import AppConfiguration, Target, Telescope
-from astrometricslib._internal.quality import QualityQueryResult
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import ConfigurationError
 from backend.services.observatory.plan_service import PlanService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
@@ -62,7 +62,11 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
         # The library's frame counting also reads frame judgments; no target
         # here has judged frames.
         quality=SimpleNamespace(
-            capture_settings=lambda ids=None: {}, query=lambda **kwargs: QualityQueryResult()
+            records=SimpleNamespace(
+                get_capture_settings=lambda ids=None: [],
+                get_calibration_identities=lambda target=None, **kwargs: [],
+                query=lambda **kwargs: Page.of([]),
+            )
         ),
         # No camera has a profile here, so no setting is checked.
         config=SimpleNamespace(get_cameras=lambda: []),

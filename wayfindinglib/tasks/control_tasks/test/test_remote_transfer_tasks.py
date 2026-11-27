@@ -229,7 +229,7 @@ def _download_with_one_new_frame(
     Parameters
     ----------
     measure : `Mock`
-        Stands in for ``astrometrics.quality.record_frame_measurements``.
+        Stands in for ``astrometrics.quality.frames.record``.
     measurement_summaries : `list`, optional
         Collects the measurement summary, as the caller of a sync would.
 
@@ -241,7 +241,7 @@ def _download_with_one_new_frame(
         The stand-in science library, to check what was called.
     """
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
 
@@ -331,7 +331,7 @@ def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
     """With nothing new, the measurement is not started."""
     measure = Mock()
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
 
@@ -348,7 +348,7 @@ def test_on_copied_runs_after_the_reindex_and_before_the_measuring() -> None:
     order: list[str] = []
     measure = Mock(side_effect=lambda *args, **kwargs: order.append("measure") or _summary())
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     fake_astrometrics.added_paths = ["/library/lights/M 81/a.fits", "/library/lights/M 81/b.fits"]
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
@@ -387,7 +387,7 @@ def test_a_failing_copy_listener_never_fails_the_sync() -> None:
     """A copy listener error is logged; the frames are still measured."""
     measure = Mock(return_value=_summary())
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     fake_astrometrics.added_paths = ["/library/lights/M 81/a.fits"]
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics

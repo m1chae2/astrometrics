@@ -219,11 +219,12 @@ class ImageService:
         Returns
         -------
         result : `dict`
-            The library's answer (`QualityRecords.map_position`): ``x`` and
-            ``y`` (1-based, on the second image), ``method`` ("sky", "stack
-            alignment", "stack alignment + sky", "same pixel" or "none") and
-            ``note``. When the position cannot be followed, ``x`` and ``y`` are
-            `None`, ``method`` is "none" and ``note`` says why.
+            The library's answer (`quality.frames.map_positions`, for one
+            point): ``x`` and ``y`` (1-based, on the second image), ``method``
+            ("sky", "stack alignment", "stack alignment + sky", "star
+            matching", "same pixel" or "none") and ``note``. When the
+            position cannot be followed, ``x`` and ``y`` are `None`,
+            ``method`` is "none" and ``note`` says why.
 
         Notes
         -----
@@ -232,7 +233,11 @@ class ImageService:
         library's `NotFoundError`.
         """
         source, destination = self._resolve(from_path), self._resolve(to_path)
-        return self._astrometrics.quality.map_position(source, float(x), float(y), destination).model_dump()
+        mapping = self._astrometrics.quality.frames.map_positions(
+            source, destination, points=[(float(x), float(y))]
+        )
+        (point,) = mapping.points
+        return {"x": point.mapped_x, "y": point.mapped_y, "method": mapping.method, "note": mapping.note}
 
     def measure_star_profile(
         self,
@@ -276,12 +281,11 @@ class ImageService:
         `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
         resolved = self._resolve(path)
-        result = self._astrometrics.quality.measure_star_profile(
+        result = self._astrometrics.quality.detections.measure_profile(
             resolved,
-            x,
-            y,
+            (x, y),
             radius_px=radius_px,
-            cut_angle_degrees=cut_angle_degrees,
+            cut_angle_deg=cut_angle_degrees,
             cut_half_length_px=cut_half_length_px,
             search_radius_px=search_radius_px,
         )
@@ -320,7 +324,7 @@ class ImageService:
             resolved,
             self._detection_cache,
             self._detection_cache_lock,
-            lambda: self._astrometrics.quality.measure_detections(resolved).model_dump(),
+            lambda: self._astrometrics.quality.detections.measure_detections(resolved).model_dump(),
         )
 
     @staticmethod

@@ -25,15 +25,18 @@ def _library(metrics: object = None) -> SimpleNamespace:
     Parameters
     ----------
     metrics : `Callable`, optional
-        A stand-in for ``quality.metrics``. The real one when left out.
+        A stand-in for ``quality.records.get_metric``. The real one when left
+        out.
 
     Returns
     -------
     library : `types.SimpleNamespace`
-        An object with ``quality.metrics``.
+        An object with ``quality.records.get_metric``.
     """
-    records = QualityRecords(AppConfiguration(), MagicMock())
-    return SimpleNamespace(quality=SimpleNamespace(metrics=metrics or records.metrics))
+    records = QualityRecords(AppConfiguration(), MagicMock()).records
+    return SimpleNamespace(
+        quality=SimpleNamespace(records=SimpleNamespace(get_metric=metrics or records.get_metric))
+    )
 
 
 def test_the_limits_come_from_the_librarys_own_rows() -> None:
@@ -50,4 +53,4 @@ def test_a_library_without_the_saturation_limits_is_refused() -> None:
     """A missing limit is a fault of the library, not a quiet default."""
     declaration = SimpleNamespace(limits=[])
     with pytest.raises(ConfigurationError):
-        read_capture_limits(_library(lambda **_: [declaration]))
+        read_capture_limits(_library(lambda _name: declaration))

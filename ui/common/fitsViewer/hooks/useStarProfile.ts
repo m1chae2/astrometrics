@@ -29,7 +29,7 @@ export interface PinnedStar {
 
 /** How a followed star was found on the new image. */
 export interface FollowNote {
-  /** "sky", "stack alignment", "stack alignment + sky" or "same pixel". */
+  /** "sky", "stack alignment", "stack alignment + sky", "star matching" or "same pixel". */
   method: string;
   /** The backend's sentence about it. */
   note: string;

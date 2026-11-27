@@ -4,17 +4,18 @@ Description: The app's quality screens read three groups of facts from the
 wayfinding library, and this service gives each read its own method so each
 RPC reply has one fixed type.
 
-* Review advice, from `Wayfinder.review.get_advisory` (the target
-  dataset report and the statements about one star's result, chosen by a
-  ``kind``), `get_star_shape_review` (how round a target's stars are) and
-  `get_tonight_advice` (the ranking of targets for tonight).
-  The RPC route cannot fix an argument, so each read has its own method
-  here.
+* Review advice, from `Wayfinder.review.targets` (`get_report`, the target
+  dataset report; `get_result`, the statements about one star's result;
+  `get_star_shapes`, how round a target's stars are) and
+  `get_tonight_advice` (the ranking of targets for tonight). The app sends
+  ids, which `SubjectResolver` turns into the library's objects.
 * The depth goal of a target, from `Wayfinder.planning.get_depth_goal` and
   `set_depth_goal`: the plain level a person chose (Quick look, Good or
   Deep), how deep the image is, and the time to reach the level.
-* Night history, from `Wayfinder.review`: the list of nights, one
-  night's quality review, and the slews that changed target. These reads
+* Night history, from `Wayfinder.review.nights`: the list of nights, one
+  night's quality review, and the slews that changed target. The app asks
+  for the newest few; the library gives every one, oldest first, and this
+  service keeps the newest. These reads
   never register a background job.
 * Two live facts: the status of the running session (read from the logs
   already on disk, without copying new ones) and the safety status limited
@@ -27,6 +28,12 @@ is passed up as it is.
 
 from datetime import datetime
 from typing import Any
+
+from astrometricslib.arguments import check_limit
+from backend.services.subject_resolver import SubjectResolver
+
+MAXIMUM_LIMIT = 50
+"""Most nights, target changes or section items one history reply holds."""
 
 
 class AdvisoryService:
@@ -42,6 +49,17 @@ class AdvisoryService:
         """
         self.wayfinder = wayfinder
 
+    @property
+    def _resolver(self) -> SubjectResolver:
+        """Give the lookup of targets and stars by id.
+
+        Returns
+        -------
+        resolver : `SubjectResolver`
+            Over the Wayfinder's science library.
+        """
+        return SubjectResolver(self.wayfinder.astrometrics)
+
     def get_target_report(self, target: str) -> Any:
         """Read the dataset report of one target.
 
@@ -55,7 +73,7 @@ class AdvisoryService:
         report : `TargetDatasetReport`
             The report for the target, with its warnings and recommendations.
         """
-        return self.wayfinder.review.get_advisory(kind="quality", target=target)
+        return self.wayfinder.review.targets.get_report(self._resolver.target(target))
 
     def get_star_shape_review(
         self, target: str, night: str | None = None, frame_paths: list[str] | None = None
@@ -78,7 +96,9 @@ class AdvisoryService:
             each with a sentence and its numbers, and the per-frame series
             for a chart.
         """
-        return self.wayfinder.review.get_star_shape_review(target, night=night, frame_paths=frame_paths)
+        return self.wayfinder.review.targets.get_star_shapes(
+            self._resolver.target(target), frame_paths, night=night
+        )
 
     def get_tonight_ranking(self, at: str | datetime | None = None) -> Any:
         """Read the ranking of targets for one moment.
@@ -110,7 +130,10 @@ class AdvisoryService:
         statements : `list` [`TargetStatement`]
             The statements, in the order the library gives them.
         """
-        return self.wayfinder.review.get_advisory(kind="result", target=target, object_id=object_id)
+        resolver = self._resolver
+        return self.wayfinder.review.targets.get_result(
+            resolver.star(object_id), target=resolver.target(target)
+        )
 
     def get_depth_goal(self, target: str) -> Any:
         """Read the depth goal status of one target.
@@ -158,7 +181,8 @@ class AdvisoryService:
         nights : `list` [`NightListEntry`]
             One entry per night, in the order the library gives them.
         """
-        return self.wayfinder.review.query(kind="nights", limit=limit).night_list
+        check_limit(limit, 1, MAXIMUM_LIMIT, allow_none=False)
+        return list(self.wayfinder.review.nights.query())[-limit:]
 
     def get_night_quality(self, session_id: str) -> Any:
         """Read the quality review of one night.
@@ -173,7 +197,7 @@ class AdvisoryService:
         review : `NightQuality`
             The night's targets, warnings and guiding summary.
         """
-        return self.wayfinder.review.query(kind="night_quality", session_id=session_id).night_quality
+        return self.wayfinder.review.nights.get(session_id, required=True)
 
     def list_target_changes(self, session_id: str | None = None, limit: int = 10) -> Any:
         """List the slews that moved the mount to a new target.
@@ -190,9 +214,8 @@ class AdvisoryService:
         changes : `list` [`TargetChange`]
             The target changes, in the order the library gives them.
         """
-        return self.wayfinder.review.query(
-            kind="target_changes", session_id=session_id, limit=limit
-        ).target_changes
+        check_limit(limit, 1, MAXIMUM_LIMIT, allow_none=False)
+        return self.wayfinder.review.nights.get_target_changes(session_id)[-limit:]
 
     def get_live_session_status(
         self, window_minutes: float = 10.0, include: list[str] | None = None, limit: int = 10
@@ -208,16 +231,24 @@ class AdvisoryService:
         include : `list` [`str`], optional
             Detail sections to add.
         limit : `int`, optional
-            The most items per section.
+            The most items per section. The library keeps 10 at most, so
+            only a smaller value changes the reply.
 
         Returns
         -------
         status : `LiveSessionStatus`
             The session status.
         """
-        return self.wayfinder.review.get_live_session_status(
-            window_minutes=window_minutes, refresh=False, include=include, limit=limit
-        )
+        check_limit(limit, 1, MAXIMUM_LIMIT, allow_none=False)
+        status = self.wayfinder.review.nights.get_live_status(window_min=window_minutes, include=include)
+        for section in status.details.values():
+            items = section.get("items") if isinstance(section, dict) else None
+            if items is not None and len(items) > limit:
+                # Keep `limit` items spread over the night, with the ends.
+                step = (len(items) - 1) / max(limit - 1, 1)
+                section["items"] = [items[round(index * step)] for index in range(limit)]
+                section["shown"] = limit
+        return status
 
     def get_safety_status(self) -> Any:
         """Read who is in control of the equipment.

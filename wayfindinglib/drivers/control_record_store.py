@@ -451,7 +451,7 @@ class ControlRecordStore:
         )
 
     def get_session_alignment_attempts(
-        self, session_id: str | None = None, limit: int = 10000
+        self, session_id: str | None = None, limit: int | None = 10000
     ) -> list[dict[str, Any]]:
         """Read the alignment attempts of one night, or of every night.
 
@@ -460,8 +460,9 @@ class ControlRecordStore:
         session_id : `str`, optional
             The night's session id or date (``YYYY-MM-DD``). `None`, ``"all"``
             or ``"*"`` reads every night.
-        limit : `int`, optional
-            Most rows to return when reading every night. Defaults to 10000.
+        limit : `int` or `None`, optional
+            Most rows to return when reading every night, the oldest first.
+            Defaults to 10000; `None` returns every row.
 
         Returns
         -------
@@ -469,7 +470,11 @@ class ControlRecordStore:
             The attempts, oldest first.
         """
         if session_id in ("all", "*", None):
-            return self._read("SELECT * FROM alignment_attempts ORDER BY timestamp ASC LIMIT ?", (limit,))
+            # SQLite reads a negative LIMIT as no limit.
+            return self._read(
+                "SELECT * FROM alignment_attempts ORDER BY timestamp ASC LIMIT ?",
+                (-1 if limit is None else limit,),
+            )
         return self._read(
             f"SELECT * FROM alignment_attempts WHERE session_id = ? OR {_NIGHT_OF_TIMESTAMP} = ? "
             "ORDER BY timestamp ASC",

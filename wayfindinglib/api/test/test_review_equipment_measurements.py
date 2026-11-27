@@ -1,12 +1,14 @@
 """Purpose: Tests for the review measurements of the equipment itself.
 
-Description: Checks `ObservationReview.measure_unguided_mount_error`,
-`measure_guiding_spectrum`, `measure_focus_temperature_coefficient`,
-`get_sky_rate_prediction` and the `exclude_nights` argument of
-`get_performance_envelope`, on an isolated configuration with synthetic nights
+Description: Checks `review.guiding.measure_unguided_error`,
+`measure_spectrum` and `record_spectrum`,
+`review.performance.measure_focus_temperature`, `predict_sky_rate` and the
+`exclude_nights` and `until` arguments of `review.performance.get_envelope`,
+on an isolated configuration with synthetic nights
 recorded in the Butler and the log database. None of it touches a real library.
 """
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -33,6 +35,9 @@ from wayfindinglib.models.session.ekos_session import (
 )
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.tasks.control_tasks import focus_model_tasks, sky_rate_tasks
+
+_TIME = datetime.fromtimestamp(1.79e9, UTC)
+"""The moment the sky rate tests predict for."""
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +116,7 @@ def test_the_review_measures_the_mount_from_the_recorded_nights(
     control: ObservatoryControl, mount_nights: list[str]
 ) -> None:
     """The pooled error and drift match what the nights were built with."""
-    result = ObservationReview(control).measure_unguided_mount_error()
+    result = ObservationReview(control).guiding.measure_unguided_error()
     summary = result.summary
     assert [run.session_id for run in result.runs] == mount_nights
     assert summary.nights_used == mount_nights
@@ -125,7 +130,7 @@ def test_the_review_measures_the_mount_from_the_recorded_nights(
 
 def test_the_review_can_measure_one_night(control: ObservatoryControl, mount_nights: list[str]) -> None:
     """A night id limits the measurement to that night's runs."""
-    result = ObservationReview(control).measure_unguided_mount_error(session_id=mount_nights[1])
+    result = ObservationReview(control).guiding.measure_unguided_error(mount_nights[1])
     assert [run.session_id for run in result.runs] == [mount_nights[1]]
 
 
@@ -133,7 +138,7 @@ def test_excluded_nights_are_left_out_of_the_mount_measurement(
     control: ObservatoryControl, mount_nights: list[str]
 ) -> None:
     """A leave-one-out measurement uses the other nights and says which."""
-    result = ObservationReview(control).measure_unguided_mount_error(exclude_nights=[mount_nights[2]])
+    result = ObservationReview(control).guiding.measure_unguided_error(exclude_nights=[mount_nights[2]])
     assert result.excluded_nights == [mount_nights[2]]
     assert result.summary.nights_used == mount_nights[:2]
     assert result.summary.periodic_error.runs_used == 2
@@ -141,13 +146,13 @@ def test_excluded_nights_are_left_out_of_the_mount_measurement(
 
 def test_the_mount_measurement_stores_nothing(control: ObservatoryControl, mount_nights: list[str]) -> None:
     """Measuring leaves the saved guiding spectrum model untouched."""
-    ObservationReview(control).measure_unguided_mount_error()
+    ObservationReview(control).guiding.measure_unguided_error()
     assert control._context.active_guiding_spectrum_analysis() is None
 
 
 def test_no_recorded_guiding_gives_an_empty_measurement(control: ObservatoryControl) -> None:
     """With nothing recorded there are no runs and no pooled numbers."""
-    result = ObservationReview(control).measure_unguided_mount_error()
+    result = ObservationReview(control).guiding.measure_unguided_error()
     assert result.runs == []
     assert result.summary.periodic_error is None
 
@@ -157,12 +162,22 @@ def test_the_guiding_spectrum_leaves_out_excluded_nights_and_stores_nothing(
 ) -> None:
     """Leaving a night out removes its samples from the spectrum."""
     review = ObservationReview(control)
-    everything = review.measure_guiding_spectrum()
-    without_last = review.measure_guiding_spectrum(exclude_nights=[mount_nights[2]])
-    one_night = review.measure_guiding_spectrum(session_id=mount_nights[0])
+    everything = review.guiding.measure_spectrum()
+    without_last = review.guiding.measure_spectrum(exclude_nights=[mount_nights[2]])
+    one_night = review.guiding.measure_spectrum(mount_nights[0])
     assert without_last.sample_count == pytest.approx(everything.sample_count * 2 / 3, rel=0.01)
     assert one_night.sample_count == pytest.approx(everything.sample_count / 3, rel=0.01)
     assert control._context.active_guiding_spectrum_analysis() is None
+
+
+def test_recording_the_spectrum_keeps_it_as_the_mount_model(
+    control: ObservatoryControl, mount_nights: list[str]
+) -> None:
+    """`record_spectrum` saves what `measure_spectrum` works out."""
+    review = ObservationReview(control)
+    recorded = review.guiding.record_spectrum()
+    assert recorded.sample_count == review.guiding.measure_spectrum().sample_count
+    assert control._context.active_guiding_spectrum_analysis() is not None
 
 
 def test_the_envelope_can_be_fitted_without_chosen_nights(control: ObservatoryControl) -> None:
@@ -172,9 +187,9 @@ def test_the_envelope_can_be_fitted_without_chosen_nights(control: ObservatoryCo
     record_guiding_night(control, 7, snr=300.0)
     review = ObservationReview(control)
 
-    everything = review.get_performance_envelope()
-    without_middle = review.get_performance_envelope(exclude_nights=[middle])
-    without_both = review.get_performance_envelope(
+    everything = review.performance.get_envelope()
+    without_middle = review.performance.get_envelope(exclude_nights=[middle])
+    without_both = review.performance.get_envelope(
         exclude_nights=[middle, observing_night_id(FIRST_NIGHT + 7 * 86400.0)]
     )
 
@@ -185,12 +200,14 @@ def test_the_envelope_can_be_fitted_without_chosen_nights(control: ObservatoryCo
 
 
 def test_excluding_the_latest_night_equals_judging_before_it(control: ObservatoryControl) -> None:
-    """For the last night, leave-one-out and `before_night` agree."""
+    """For the last night, leave-one-out and `until` in that night agree."""
     record_good_history(control)
     last = record_guiding_night(control, 6, snr=30.0, lost=200)
     review = ObservationReview(control)
-    assert review.get_performance_envelope(exclude_nights=[last]).value("guide_snr_low_limit") == (
-        review.get_performance_envelope(before_night=last).value("guide_snr_low_limit")
+    assert review.performance.get_envelope(exclude_nights=[last]).value("guide_snr_low_limit") == (
+        review.performance.get_envelope(until=datetime.fromtimestamp(FIRST_NIGHT + 6 * 86400.0, UTC)).value(
+            "guide_snr_low_limit"
+        )
     )
 
 
@@ -266,7 +283,7 @@ def test_the_focus_slope_is_fitted_from_autofocus_runs(
     control: ObservatoryControl, focus_history: list[str]
 ) -> None:
     """The slope, its uncertainty, the nights and the range are reported."""
-    fit = ObservationReview(control).measure_focus_temperature_coefficient(source="autofocus_runs")
+    fit = ObservationReview(control).performance.measure_focus_temperature(source="autofocus_runs")
     assert fit.coefficient_steps_per_c == pytest.approx(
         -12.0, abs=max(4.0 * fit.uncertainty_steps_per_c, 0.5)
     )
@@ -279,14 +296,14 @@ def test_the_focus_slope_is_fitted_from_autofocus_runs(
 
 def test_the_focus_fit_can_leave_a_night_out(control: ObservatoryControl, focus_history: list[str]) -> None:
     """An excluded night is not among the nights used."""
-    fit = ObservationReview(control).measure_focus_temperature_coefficient(exclude_nights=[focus_history[0]])
+    fit = ObservationReview(control).performance.measure_focus_temperature(exclude_nights=[focus_history[0]])
     assert fit.nights_used == focus_history[1:]
     assert fit.nights_excluded == [focus_history[0]]
 
 
 def test_the_focus_fit_says_why_when_the_history_is_thin(control: ObservatoryControl) -> None:
     """With no focus history there is no slope and a plain message."""
-    fit = ObservationReview(control).measure_focus_temperature_coefficient()
+    fit = ObservationReview(control).performance.measure_focus_temperature()
     assert fit.coefficient_steps_per_c is None
     assert "needs" in fit.message
 
@@ -294,7 +311,7 @@ def test_the_focus_fit_says_why_when_the_history_is_thin(control: ObservatoryCon
 def test_the_focus_fit_refuses_an_unknown_source(control: ObservatoryControl) -> None:
     """A source other than the three names is refused."""
     with pytest.raises(InvalidArgumentError, match="source"):
-        ObservationReview(control).measure_focus_temperature_coefficient(source="logs")  # type: ignore[arg-type]
+        ObservationReview(control).performance.measure_focus_temperature(source="logs")  # type: ignore[arg-type]
 
 
 def test_focus_pairs_from_frames_use_only_the_frames_where_the_position_changed() -> None:
@@ -421,8 +438,8 @@ def test_the_sky_rate_prediction_reports_both_units_and_the_excluded_nights(
     )
     _stub_sky_library(control, monkeypatch, prediction)
     _Inputs.asked.clear()
-    result = ObservationReview(control).get_sky_rate_prediction(
-        1.79e9, 150.0, 40.0, filter_name="L", exclude_nights=["2026-09-24"]
+    result = ObservationReview(control).performance.predict_sky_rate(
+        150.0, 40.0, time=_TIME, filter_name="L", exclude_nights=["2026-09-24"]
     )
     assert result.sky_rate_e_per_s_per_px == pytest.approx(2.0)
     assert result.sky_rate_adu_per_s_per_px == pytest.approx(4.0)
@@ -435,11 +452,11 @@ def test_the_sky_rate_prediction_reports_both_units_and_the_excluded_nights(
 def test_the_sky_rate_prediction_refuses_an_impossible_declination(control: ObservatoryControl) -> None:
     """A declination beyond the pole is refused."""
     with pytest.raises(InvalidArgumentError, match="dec_deg"):
-        ObservationReview(control).get_sky_rate_prediction(1.79e9, 150.0, 95.0)
+        ObservationReview(control).performance.predict_sky_rate(150.0, 95.0, time=_TIME)
 
 
 def test_the_sky_rate_prediction_says_why_when_the_library_has_no_frames(control: ObservatoryControl) -> None:
     """With no frames of the equipment the answer is a message."""
-    result = ObservationReview(control).get_sky_rate_prediction(1.79e9, 150.0, 40.0)
+    result = ObservationReview(control).performance.predict_sky_rate(150.0, 40.0, time=_TIME)
     assert result.sky_rate_e_per_s_per_px is None
     assert result.message

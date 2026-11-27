@@ -1,7 +1,7 @@
 """Purpose: End-to-end tests for the capture analysis on the facade.
 
-Description: Runs the capture analysis behind `review.query`
-(`night_analysis.capture_night_analysis` and `capture_night_summaries`) against
+Description: Runs the capture analysis behind `review.nights.get_capture`
+(`night_analysis.capture_night_analysis`) against
 a real isolated configuration, a real Butler and a real log database. The
 science library's frame records are replaced by synthetic light frames, so the
 tests state only what makes a night different. The main thing verified is that
@@ -9,6 +9,8 @@ a night is judged only against the equipment's earlier nights, never against
 itself, and that clipping is found from the frames for the
 recommendations.
 """
+
+from datetime import UTC, datetime
 
 import pytest
 
@@ -20,7 +22,7 @@ from wayfindinglib.api.test.capture_night_helpers import (
     record_ekos_captures,
     record_good_history,
 )
-from wayfindinglib.api.test.guiding_night_helpers import record_guiding_night
+from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
 from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.tasks.control_tasks import night_analysis
 
@@ -77,8 +79,10 @@ def test_a_soft_night_is_not_judged_against_itself(control: ObservatoryControl, 
     add_frames(library, 8, star_width_arcsec=12.0)
 
     analysis = night_analysis.capture_night_analysis(control._context, night)
-    with_everything = ObservationReview(control).get_performance_envelope()
-    before = ObservationReview(control).get_performance_envelope(before_night=night)
+    with_everything = ObservationReview(control).performance.get_envelope()
+    before = ObservationReview(control).performance.get_envelope(
+        until=datetime.fromtimestamp(FIRST_NIGHT + 6 * 86400.0, UTC)
+    )
 
     assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] != []
     assert before.thresholds["night_star_width_high_limit"].sample_count == 6
@@ -135,16 +139,3 @@ def test_a_clipped_spectral_star_is_found_from_the_frames_alone(
     (recommendation,) = [r for r in analysis.recommendations if r.rule == "spectral_star_clipped"]
     assert recommendation.confidence.value == "partly_measured"
     assert "stacking" not in recommendation.message
-
-
-def test_the_summary_has_one_row_per_night_oldest_first(
-    control: ObservatoryControl, library: Library
-) -> None:
-    """Verify the overview lists every night with its flag and kinds."""
-    record_good_history(control, library, nights=3)
-
-    rows = night_analysis.capture_night_summaries(control._context)
-
-    assert [row["sessionId"] for row in rows] == sorted(row["sessionId"] for row in rows)
-    assert len(rows) == 3
-    assert {"lightFrames", "capturesWithoutFrame", "recommendations"} <= set(rows[0])

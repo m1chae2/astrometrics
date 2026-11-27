@@ -15,7 +15,7 @@ points is off by some arcminutes. Centering closes that gap in a loop:
    where it really points (a sync) and slew to the target again.
 
 Each iteration is recorded as an alignment attempt in the log database,
-so `review.query(kind="alignment")` can show it. A call to
+so `review.alignment.query` can show it. A call to
 `control.mount.abort_motion` stops the loop before its next step.
 """
 

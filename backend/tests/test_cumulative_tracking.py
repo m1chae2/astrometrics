@@ -58,7 +58,7 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
 
     data = service.get_session_data("all")
 
-    mock_logger.get_session_alignment_attempts.assert_called_once_with("all")
+    mock_logger.get_session_alignment_attempts.assert_called_once_with(None, limit=None)
     mock_logger.get_polar_alignments.assert_called_once_with(session_id=None, limit=1)
 
     assert len(data["alignmentAttempts"]) == 2
@@ -81,5 +81,5 @@ def test_get_cumulative_tracking_data_delegates_to_all_sessions() -> None:
 
     data = service.get_cumulative_tracking_data()
 
-    mock_logger.get_session_alignment_attempts.assert_called_once_with("all")
+    mock_logger.get_session_alignment_attempts.assert_called_once_with(None, limit=None)
     assert data["alignmentAttempts"] == []

@@ -144,8 +144,8 @@ def measure_guiding_spectrum(
 ) -> GuidingSpectrumAnalysis:
     """Work out the guiding spectrum from recorded samples, storing nothing.
 
-    Unlike `control.guiding.refit_spectrum` this never saves its result, so
-    it can be run with nights left out and thrown away.
+    Unlike `record_guiding_spectrum` this never saves its result, so it can
+    be run with nights left out and thrown away.
 
     Parameters
     ----------
@@ -176,3 +176,28 @@ def measure_guiding_spectrum(
             and observing_night_id(sample["timestamp"]) not in excluded
         ]
     return analyze_guiding_telemetry(samples)
+
+
+def record_guiding_spectrum(context: ControlContext, night: str | None = None) -> GuidingSpectrumAnalysis:
+    """Work out the guiding spectrum and keep it as the mount's model.
+
+    The same analysis as `measure_guiding_spectrum`, on every recorded
+    night or one. The result is saved for the active telescope, where the
+    guider's status and the guiding loop read it as the mount's periodic
+    error and backlash.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the measured guide samples and saves the analysis.
+    night : `str`, optional
+        Use only this night. Every recorded night when omitted.
+
+    Returns
+    -------
+    analysis : `GuidingSpectrumAnalysis`
+        The saved spectrum.
+    """
+    analysis = measure_guiding_spectrum(context, night)
+    context.save_guiding_spectrum_analysis(analysis)
+    return analysis

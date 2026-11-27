@@ -1,6 +1,6 @@
 """Purpose: The star-shape review of one target, for the screen.
 
-Description: `review.get_star_shape_review` returns a `StarShapeReview`. It
+Description: `review.targets.get_star_shapes` returns a `StarShapeReview`. It
 turns the star-shape measurements that `astrometricslib` stores (how
 stretched the stars are, which way, and how wide they are at the center and
 in the corners) into short plain verdicts: are the stars round, does the

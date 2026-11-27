@@ -1,7 +1,7 @@
 """Purpose: Tests for grouping plate-solve attempts into target sessions.
 
 Description: Checks `group_alignment_attempts`, which
-`ObservationReview.query_alignment_sessions` uses. Jitter is the scatter
+`review.alignment.query` uses. Jitter is the scatter
 around the settled offset, not the offset itself; runs split at long gaps;
 a single sync has no jitter; right ascension stays in degrees; the average
 right ascension wraps at 0h/24h; unnamed solves group across 0h; and the

@@ -17,7 +17,7 @@ reasons, because its warnings are the rows. The old side covers stacking,
 spectral stacking, astrometry, photometry, spectroscopy and asteroid detection,
 plus a star's match distance and gaps, read against their limits. The new side
 is the statements of
-`review.get_advisory`, kind ``"quality"`` for a target and ``"result"`` for a
+`review.targets.get_report` for a target and `review.targets.get_result` for a
 star. A rule is tied to a gate when the rule reads the gate's metric
 (``<pipeline>.gate_<name>``). A gate that no rule reads is listed as having no
 rule. Detection labels (period, transit, spectral feature verdicts) stay in
@@ -928,7 +928,7 @@ def run_comparison(
                 Difference(target.id, UNATTRIBUTED, COULD_NOT_JUDGE, repr(error)[:120], "warning rows")
             )
         try:
-            report = wayfinder.review.get_advisory(kind="quality", target=target)
+            report = wayfinder.review.targets.get_report(target)
             differences += compare_target_pipelines(target.id, old_states, report.statements, index)
         except Exception as error:  # ruff: ignore[blind-except] - one bad target must not stop the run
             differences.append(
@@ -965,7 +965,7 @@ def _compare_target_stars(wayfinder: Any, target: Any, differences: list[Differe
             continue
         count += 1
         try:
-            statements = wayfinder.review.get_advisory(kind="result", target=target, object_id=star.id)
+            statements = wayfinder.review.targets.get_result(star, target=target)
             differences += compare_star(target.id, star.id, spectroscopy, statements)
         except Exception as error:  # ruff: ignore[blind-except] - one bad star must not stop the run
             differences.append(

@@ -13,13 +13,16 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from astrometricslib.arguments import observing_night_id
+from astrometricslib.arguments import TimeInput, observing_night_id, to_epoch_seconds
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.analytics.tracking_risk import TrackedTarget, build_tracking_risk_map
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
-    from wayfindinglib.models.equipment_and_site.performance_envelope import TrackingRiskMap
+    from wayfindinglib.models.equipment_and_site.performance_envelope import (
+        PerformanceEnvelope,
+        TrackingRiskMap,
+    )
     from wayfindinglib.models.session.telemetry import AlignmentTargetSession
 
 __all__ = ["tracking_risk_map"]
@@ -125,3 +128,44 @@ def tracking_risk_map(
                 )
     solve_count = sum(s.frame_count for s in sessions) if targets else 0
     return build_tracking_risk_map(latitude, targets, plate_scale, solve_count)
+
+
+def get_performance_envelope(
+    context: ControlContext,
+    until: TimeInput | None = None,
+    exclude_nights: Collection[str] | None = None,
+) -> PerformanceEnvelope | None:
+    """Work out the active equipment's limits, with its tracking risk.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the active equipment and the recorded data.
+    until : `str`, `datetime` or `astropy.time.Time`, optional
+        Use only the nights that began before the observing night of this
+        moment for the baseline limits. Every recorded night when omitted.
+    exclude_nights : `Collection` [`str`], optional
+        Nights to leave out of every source of the limits.
+
+    Returns
+    -------
+    envelope : `PerformanceEnvelope` or `None`
+        The limits, with ``tracking_risk`` filled in. `None` if no
+        telescope and camera are active.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if `until` cannot be read as a time.
+    """
+    from wayfindinglib.tasks.control_tasks import night_analysis
+
+    until_seconds = to_epoch_seconds(until, "until")
+    before_night = None if until_seconds is None else observing_night_id(until_seconds)
+    excluded = list(exclude_nights) if exclude_nights is not None else None
+    contexts, runs = night_analysis.recorded_sessions(context)
+    envelope = night_analysis.performance_envelope(
+        context, None, before_night, contexts, runs, {}, exclude_nights=excluded
+    )
+    if envelope is None:
+        return None
+    return envelope.model_copy(update={"tracking_risk": tracking_risk_map(context, excluded)})

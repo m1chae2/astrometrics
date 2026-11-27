@@ -1,7 +1,7 @@
 """Purpose: Review the quality of one observing night.
 
 Description: `build_night_quality` is the work behind
-`review.query(kind="night_quality", session_id=...)`
+`review.nights.get(night)`
 (use case UC1 in `Wayfinding_Quality_Use_Cases.md`). For each target imaged
 that night it states where the time went: frames set aside, and the efficiency
 lost in the frames kept, against the user's own best nights with the same
@@ -487,6 +487,39 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
         lambda: review_data_version(context),
         lambda: review_night_quality(context, night_id),
     )
+
+
+def get_night_quality(context: ControlContext, night: str, required: bool = False) -> NightQuality | None:
+    """Review one night, or say there is nothing to review.
+
+    The owner of `review.nights.get`: `build_night_quality`, with a night
+    that has nothing recorded read as `None` unless `required` is set.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        As in `build_night_quality`.
+    night : `str`
+        The night, named for the local date on which it began.
+    required : `bool`, optional
+        Raise `NotFoundError` instead of returning `None`.
+
+    Returns
+    -------
+    quality : `NightQuality` or `None`
+        The review, or `None` when nothing is recorded for the night.
+
+    Raises
+    ------
+    NotFoundError
+        If nothing is recorded for the night and `required` is set.
+    """
+    try:
+        return build_night_quality(context, night)
+    except NotFoundError:
+        if required:
+            raise
+        return None
 
 
 def review_night_quality(context: ControlContext, night_id: str) -> NightQuality:

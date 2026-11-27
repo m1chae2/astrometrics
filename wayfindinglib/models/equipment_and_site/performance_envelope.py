@@ -96,7 +96,7 @@ class PerformanceEnvelope(BaseModel):
         anyone can redo it. `QualityLimit` has no place for them.
     tracking_risk : `TrackingRiskMap` or `None`
         How risky each part of the sky is for tracking with this
-        equipment. Filled in by `review.get_performance_envelope`;
+        equipment. Filled in by `review.performance.get_envelope`;
         `None` in the envelopes the night analyses use internally.
     """
 

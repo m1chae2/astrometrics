@@ -332,3 +332,71 @@ class EkosGuideStat(BaseModel):
     snr: float
     sky_background: float = Field(alias="skyBackground")
     star_count: int = Field(alias="starCount")
+
+
+class EkosSessionSummary(BaseModel):
+    """One recorded Ekos session in a few fields, without its detail.
+
+    Attributes
+    ----------
+    id : `str`
+        The session's id, the analyze file's time stamp.
+    night : `str`
+        The observing night the session belongs to.
+    started_at, ended_at : `float`
+        Seconds since the Unix epoch.
+    equipment_fingerprint : `str` or `None`
+        The equipment the session used, when it is known.
+    captures, aborted_captures, autofocus_runs : `int`
+        How many exposures, aborted exposures and autofocus runs it holds.
+    align_events, guide_state_events, mount_state_events : `int`
+        How many plate-solve, guider and mount state changes it holds.
+    temperatures, mount_positions : `int`
+        How many temperature readings and mount positions it holds.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    id: str
+    night: str
+    started_at: float = Field(alias="startedAt")
+    ended_at: float = Field(alias="endedAt")
+    equipment_fingerprint: str | None = Field(default=None, alias="equipmentFingerprint")
+    captures: int = 0
+    aborted_captures: int = Field(default=0, alias="abortedCaptures")
+    autofocus_runs: int = Field(default=0, alias="autofocusRuns")
+    align_events: int = Field(default=0, alias="alignEvents")
+    guide_state_events: int = Field(default=0, alias="guideStateEvents")
+    mount_state_events: int = Field(default=0, alias="mountStateEvents")
+    temperatures: int = 0
+    mount_positions: int = Field(default=0, alias="mountPositions")
+
+    @classmethod
+    def of(cls, record: EkosSessionContext) -> EkosSessionSummary:
+        """Summarize one stored session record.
+
+        Parameters
+        ----------
+        record : `EkosSessionContext`
+            The stored session.
+
+        Returns
+        -------
+        summary : `EkosSessionSummary`
+            Its id, night, times, equipment and section counts.
+        """
+        return cls(
+            id=record.id,
+            night=record.session_id,
+            started_at=record.started_at,
+            ended_at=record.ended_at,
+            equipment_fingerprint=record.equipment.equipment_fingerprint if record.equipment else None,
+            captures=len(record.captures),
+            aborted_captures=len(record.aborted_captures),
+            autofocus_runs=len(record.autofocus_runs),
+            align_events=len(record.align_events),
+            guide_state_events=len(record.guide_state_events),
+            mount_state_events=len(record.mount_state_events),
+            temperatures=len(record.temperatures),
+            mount_positions=len(record.mount_positions),
+        )

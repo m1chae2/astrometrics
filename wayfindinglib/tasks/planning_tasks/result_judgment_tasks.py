@@ -1,7 +1,7 @@
 """Purpose: Say how far to trust one star's science result.
 
 Description: `judge_star_result` is the work behind
-`ObservationReview.get_advisory(kind="result", target=..., object_id=...)`
+`review.targets.get_result(star)`
 (use case UC5 in `Wayfinding_Quality_Use_Cases.md`). It reads the star's
 record through the public root of the science library (`stars.get`), finds
 which per-star results exist (a spectrum, a period search, a repeating-dip
@@ -20,25 +20,30 @@ Control.
 
 from typing import Any
 
+from astrometricslib import StellarObject, Target
 from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.judge_results import order_statements
 from wayfindinglib.analytics.result_quality.star_result_rules import judge_star_record
 from wayfindinglib.models.quality.statements import TargetStatement
 
 
-def judge_star_result(target_id: str, object_id: str, *, astrometrics: Any) -> list[TargetStatement]:
-    """Judge the science results held for one star of a target.
+def judge_star_result(
+    star: StellarObject, *, astrometrics: Any, target: Target | None = None
+) -> list[TargetStatement]:
+    """Judge the science results held for one star.
 
     Parameters
     ----------
-    target_id : `str`
-        The target the star was found in. A star that is recorded as belonging
-        to other targets only is refused.
-    object_id : `str`
-        The star's id in the stellar catalog.
+    star : `StellarObject`
+        The star whose results are judged. Its record is read again with
+        its light curves, so a star read without them gives the same
+        answer.
     astrometrics : `Astrometrics`
         The science library handle (keyword only). Its ``stars`` catalog is
         read; nothing is written.
+    target : `Target`, optional
+        The target the star was found in. A star that is recorded as
+        belonging to other targets only is refused.
 
     Returns
     -------
@@ -52,15 +57,15 @@ def judge_star_result(target_id: str, object_id: str, *, astrometrics: Any) -> l
         If the star is not in the catalog, or is recorded for other targets
         only.
     """
-    star = astrometrics.stars.get(object_id, include=["light_curves"])
-    if star is None:
-        raise NotFoundError(f"No star {object_id!r} in the catalog.", details={"object_id": object_id})
-    if star.target_ids and target_id not in star.target_ids:
+    record = astrometrics.stars.get(star.id, include=["light_curves"]) if star.id else star
+    if record is None:
+        raise NotFoundError(f"No star {star.id!r} in the catalog.", details={"object_id": star.id})
+    if target is not None and record.target_ids and target.id not in record.target_ids:
         raise NotFoundError(
-            f"Star {object_id!r} is not recorded for target {target_id!r}.",
-            details={"object_id": object_id, "target_id": target_id, "target_ids": list(star.target_ids)},
+            f"Star {star.id!r} is not recorded for target {target.id!r}.",
+            details={"object_id": star.id, "target_id": target.id, "target_ids": list(record.target_ids)},
         )
-    statements = judge_star_record(star.id or object_id, star.spectroscopy, star.photometry)
+    statements = judge_star_record(record.id or star.id, record.spectroscopy, record.photometry)
     return order_statements(statements)
 
 

@@ -342,7 +342,7 @@ def download_remote_targets(
             except Exception:  # a listener must never fail the sync: log it
                 logger.exception("The copy listener of the %s sync failed", target_id)
         # After the copy: the new frames that hold a plate solve give the
-        # mount's pointing error, for review.query(kind="alignment").
+        # mount's pointing error, for review.alignment.query.
         record_frame_pointing_errors(context, added_paths)
         if added_paths:
             summary = record_new_frame_measurements(context, target, added_paths)

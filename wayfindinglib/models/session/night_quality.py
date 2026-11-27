@@ -1,6 +1,6 @@
 """Purpose: The quality of one observing night, for the night review.
 
-Description: `review.query(kind="night_quality", session_id=...)`
+Description: `review.nights.get(night)`
 returns a `NightQuality` (use case UC1 in `Wayfinding_Quality_Use_Cases.md`).
 It lists each target imaged that night with where its time went (the loss
 account against a stated goal and reference), the warnings the night's

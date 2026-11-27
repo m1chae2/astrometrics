@@ -147,7 +147,7 @@ def get_live_session_status(
 MAXIMUM_STATUS_CHARACTERS = 30_000
 """Largest live status, measured as indented JSON. A caller that relays the
 status as text may cut it at 40,000 characters, in the middle of the data.
-Same budget as `night_history.MAXIMUM_REPLY_CHARACTERS`."""
+A client's adapter may cut it further."""
 
 
 def _status_size(status: LiveSessionStatus) -> int:
@@ -207,3 +207,66 @@ def fit_status_to_budget(
                 value["shown"] = len(kept)
         status.unavailable.append(f"{name}: only the newest {len(kept)} of {length} items are shown.")
     return status
+
+
+LIVE_SECTION_ITEMS = 10
+"""Most items of each included Ekos section the live status keeps; a longer
+list is sampled evenly, keeping the first and the last."""
+
+
+def get_live_status(
+    context: ControlContext,
+    window_min: float | None = None,
+    force: bool = False,
+    include: list[str] | None = None,
+) -> LiveSessionStatus:
+    """Report how the current observing session is going, right now.
+
+    The owner of `review.nights.get_live_status`.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the remote-transfer driver and the log folder.
+    window_min : `float`, optional
+        Length of the recent-guiding window, in minutes. `None` uses the
+        live status's own window (ten minutes).
+    force : `bool`, optional
+        Copy the newest Ekos and KStars logs from the observatory computer
+        first. `False` reads the logs already copied (by
+        ``control.remote.sync_logs`` or an earlier call).
+    include : `list` [`str`], optional
+        Sections of tonight's Ekos record to add under ``details`` (names
+        from `night_history.EKOS_SECTIONS`), each sampled to
+        `LIVE_SECTION_ITEMS` items.
+
+    Returns
+    -------
+    status : `LiveSessionStatus`
+        Kept under `MAXIMUM_STATUS_CHARACTERS` of JSON.
+
+    Raises
+    ------
+    NotFoundError
+        If no readable Ekos analyze log exists.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if `include` names an unknown section.
+    """
+    from astrometricslib.exceptions import NotFoundError
+
+    directory = context.ekos_log_directory()
+    status = get_live_session_status(
+        context,
+        directory,
+        window_minutes=window_min,
+        refresh=force,
+        include=include,
+        limit=LIVE_SECTION_ITEMS,
+    )
+    if status is None:
+        raise NotFoundError(
+            f"No readable Ekos analyze log found in {directory}.", details={"destination_dir": directory}
+        )
+    return fit_status_to_budget(status)

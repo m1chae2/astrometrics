@@ -1,6 +1,7 @@
 """Purpose: A result model that leaves out the fields a reply did not fill.
 
-Description: Several calls (`review.query`, `control.remote.sync_frames` and
+Description: Several calls (`review.targets.get_frame_guiding`,
+`control.remote.sync_frames` and
 others) answer with different fields in different cases. A result model
 for them names every field that can appear. A field the case did not
 fill is left out when the model is turned into plain data (`model_dump`),

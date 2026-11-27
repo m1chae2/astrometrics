@@ -4,7 +4,7 @@ Description: The Ekos analyze log records the mount's state changes
 (``Slewing``, ``Tracking`` and so on) and, now and then, where the mount
 pointed (altitude, azimuth and declination). The stored
 `EkosSessionContext` keeps both. This module reads them and answers one
-question for `review.query(kind="target_changes")`: when did the
+question for `review.nights.get_target_changes`: when did the
 mount finish a slew and start tracking at a new place in the sky, and
 which library target is that?
 
@@ -266,9 +266,7 @@ def slew_end_positions(context: ControlContext) -> list[tuple[float, float]]:
     return positions
 
 
-def find_target_changes(
-    context: ControlContext, session_id: str | None = None, limit: int = 10
-) -> list[TargetChange]:
+def find_target_changes(context: ControlContext, session_id: str | None = None) -> list[TargetChange]:
     """List the slews that moved the mount to a new place in the sky.
 
     Parameters
@@ -279,8 +277,6 @@ def find_target_changes(
     session_id : `str`, optional
         Keep only this observing night, such as ``"2026-09-24"``. Every
         recorded night when omitted.
-    limit : `int`, optional
-        How many of the newest changes to return.
 
     Returns
     -------
@@ -323,4 +319,4 @@ def find_target_changes(
                 note=note,
             )
         )
-    return changes[-limit:]
+    return changes

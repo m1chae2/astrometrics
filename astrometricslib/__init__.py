@@ -43,7 +43,7 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 28 names:
+The package root holds 30 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
@@ -57,8 +57,9 @@ The package root holds 28 names:
   `FilterType`;
 - the input models: `CaptureSetting`, which says which calibration sets a
   call means, `EnhancementSettings`, the picture choices of one
-  enhancement run, and `PreviewBrightObject`, the object a target's
-  picture protects;
+  enhancement run, `PreviewBrightObject`, the object a target's picture
+  protects, and `JobSummary`, the recorded job that ``jobs.get_log`` and
+  ``jobs.get_warnings`` take;
 - the equipment: `ObservatoryConfiguration` and the models it is built
   from, `Telescope`, `Camera`, `GuideScope`, `Mount`, `Focuser` and
   `FilterWheel`.
@@ -69,8 +70,8 @@ Five public modules hold the rest:
   that turn an error into a plain record and back;
 - `astrometricslib.reports`: the quality reports and row shapes that checks
   return, plus `CaptureSetting` and `observing_night_id`;
-- `astrometricslib.jobs`: the job history, and the tools that run a function
-  as a tracked background job;
+- `astrometricslib.jobs`: the job context tools that record a function's
+  work as a tracked job, and the switch that stops a running one;
 - `astrometricslib.drivers`: the data store and file tools that other apps
   share.
 - `astrometricslib.parameters`: the tuned-parameter declaration, its
@@ -103,6 +104,7 @@ from astrometricslib.foundation.config import AppConfiguration, get_configuratio
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.jobs import register_interrupted_job_cleanup
 from astrometricslib.foundation.logging import configure_logging
+from astrometricslib.models.job_queries import JobSummary
 from astrometricslib.models.observatory_configuration import (
     Camera,
     FilterWheel,
@@ -282,9 +284,7 @@ class Astrometrics(MovedNames):
             calibration=self.calibration,
             drivers=drivers,
         )
-        self.visualization = Visualization(
-            self.config, self._catalog_access, targets=self.targets, stars=self.stars
-        )
+        self.visualization = Visualization(self.config, self._catalog_access)
         self.quality = QualityRecords(
             self.config,
             self._catalog_access,
@@ -309,6 +309,7 @@ __all__ = [
     "Focuser",
     "FrameRecord",
     "GuideScope",
+    "JobSummary",
     "Mount",
     "Observatories",
     "ObservatoryConfiguration",

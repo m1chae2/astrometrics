@@ -53,13 +53,13 @@ def test_drawing_a_file_follows_the_same_folder_rule(tmp_path: Path) -> None:
     library = tmp_path / "library"
     library.mkdir()
     astrometrics = MagicMock()
-    astrometrics.visualization.render_fits.return_value = None
+    astrometrics.visualization.render.return_value = None
     service = _service(library, astrometrics)
     with pytest.raises(InvalidArgumentError):
         service.convert_fits("/etc/hostname")
-    astrometrics.visualization.render_fits.assert_not_called()
+    astrometrics.visualization.render.assert_not_called()
     assert service.convert_fits(str(library / "frame.fits")) is None
-    drawn = astrometrics.visualization.render_fits.call_args.args[0]
+    drawn = astrometrics.visualization.render.call_args.args[0]
     assert drawn == str((library / "frame.fits").resolve())
 
 

@@ -140,7 +140,7 @@ def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
     import time
     from contextlib import contextmanager
 
-    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE, run_as_background_job
+    from astrometricslib.foundation.jobs.runner import WAITING_FOR_SLOT_MESSAGE
     from astrometricslib.pipelines.stacking.post_processing import preview_remake
 
     slot_is_free = threading.Event()
@@ -157,12 +157,8 @@ def test_a_preview_remake_is_listed_while_it_waits_for_a_slot(
     monkeypatch.setattr(process_locks, "acquire_resource_slot", lambda *_args, **_kwargs: busy_slot())
     target = _target("PreviewWaitTarget")
 
-    outcome = run_as_background_job(
-        lambda: pipelines.enhancement.run(target, force=True), grace_period_seconds=0.3
-    )
-
-    assert outcome["status"] == "running"
-    assert outcome["jobId"] is not None
+    worker = threading.Thread(target=lambda: pipelines.enhancement.run(target, force=True), daemon=True)
+    worker.start()
     # The job is registered before the grace period ends, but its waiting
     # message is written by the worker thread, which a slow runner may not
     # have reached yet, so the message is waited for.

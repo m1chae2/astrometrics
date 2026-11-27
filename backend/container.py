@@ -53,6 +53,7 @@ class Container:
         self.sync_service = None
         self.quality_measurement_service = None
         self.stack_review_service = None
+        self.job_history_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.auto_download_service = None
@@ -311,6 +312,9 @@ class Container:
         from backend.services.processing.stack_review_service import StackReviewService
 
         self.stack_review_service = StackReviewService(astrometrics=self.astrometrics)
+        from backend.services.processing.job_history_service import JobHistoryService
+
+        self.job_history_service = JobHistoryService(self.astrometrics)
         self.quality_measurement_service = QualityMeasurementService(
             astrometrics=self.astrometrics,
             socket_manager=self.socket_manager,

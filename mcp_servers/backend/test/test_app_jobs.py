@@ -96,7 +96,7 @@ async def test_stack_starts_the_stack_buttons_job_with_the_frame_choice(
         }
     ]
     assert reply["jobId"] == "job-7"
-    assert "jobs_query" in reply["follow"]
+    assert "jobs_get" in reply["follow"]
 
 
 @pytest.mark.anyio
@@ -183,7 +183,7 @@ async def test_each_pipeline_tool_starts_the_analysis_job_with_its_one_stage(
     assert [request["method"] for request in requests] == ["analysis:analyze_image"]
     assert requests[0]["params"] == {"target_id": "M 13", "stages": [stage]}
     assert reply["jobId"] == "job-12"
-    assert "jobs_query" in reply["follow"]
+    assert "jobs_get" in reply["follow"]
 
 
 @pytest.mark.anyio

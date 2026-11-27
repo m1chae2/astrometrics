@@ -34,8 +34,8 @@ STACK_KINDS = ["imaging", "spectral"]
 """The two kinds of stack. Imaging and spectrum frames are never mixed."""
 
 FOLLOW_A_JOB = (
-    "Follow the job with jobs_query (job_id, or target_id and job_type). It shows in the app's job list, "
-    "where the person can see its log."
+    "Follow the job with jobs_get (job id), or list jobs with jobs_query (target_id and job_type). "
+    "It shows in the app's job list, where the person can see its log."
 )
 """The hint every job reply carries, so the AI knows how to follow it."""
 
@@ -874,7 +874,7 @@ async def tool_observatory_remote_sync_frames(target: str, dry_run: bool = False
         "store their guiding samples. It adds or updates records and never deletes. Run it with dry_run "
         "true first to see how many logs are new. A real run is a remote_sync job named logs in the job "
         "list, and it waits until the logs are stored; after two minutes the call stops waiting while the "
-        "job goes on, so follow it with jobs_query. Needs the app's backend to be running."
+        "job goes on, so follow it with jobs_get. Needs the app's backend to be running."
     ),
     {
         "type": "object",

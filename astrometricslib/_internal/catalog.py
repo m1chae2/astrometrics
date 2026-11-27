@@ -25,7 +25,7 @@ from astrometricslib.models.star_catalog import (
     StarOverlay,
 )
 from astrometricslib.models.stellar_source import FileItem, GroupedFrameStat, TargetFilesResponse
-from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
+from astrometricslib.models.target import FitsHeaderEntry, ImageCrop, RenderedImage
 
 __all__ = [
     "FailedDeletion",
@@ -33,6 +33,7 @@ __all__ = [
     "FileItem",
     "FitsHeaderEntry",
     "GroupedFrameStat",
+    "ImageCrop",
     "ImageDeletionResult",
     "ImagedFieldCenters",
     "OverlayStar",
@@ -49,5 +50,4 @@ __all__ = [
     "TargetReindexChange",
     "TargetSessionContribution",
     "TargetStarCount",
-    "ViewableImage",
 ]

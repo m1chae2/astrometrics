@@ -70,6 +70,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "Focuser",
     "FrameRecord",
     "GuideScope",
+    "JobSummary",
     "Mount",
     "Observatories",
     "ObservatoryConfiguration",
@@ -200,29 +201,20 @@ EXPECTED_MODULE_NAMES = {
         "TuningReport",
         "TuningResult",
         "TuningSkippedError",
-        "collect_tuners",
-        "read_tuned_record",
-        "run_tuning",
         "tune",
         "collect_parameters",
-        "current_parameter_context",
         "equipment_values_to_write",
         "factor_for",
         "frames_parameter_context",
-        "parameter_context",
-        "record_basis",
         "resolve_parameter",
         "run_basis_value",
-        "setup_parameter_context",
     }),
     "astrometricslib.drivers": frozenset({
-        "LIBRARY_DATA_KINDS",
         "OFFLINE_VARIABLE",
         "AbstractButler",
         "Butler",
         "DatasetSpec",
         "LaunchIdentity",
-        "LibraryFolders",
         "VersionedCache",
         "build_pixel_query",
         "bump_data_version",
@@ -240,7 +232,6 @@ EXPECTED_MODULE_NAMES = {
         "get_target_data_version",
         "get_target_document_signs",
         "header_is_plate_solved",
-        "healpix_pixels_of_points",
         "is_loopback_host",
         "is_path_inside",
         "launch_identity_from_settings",
@@ -250,16 +241,12 @@ EXPECTED_MODULE_NAMES = {
         "pixel_source_id_range",
         "pixels_near_circles",
         "read_data_versions",
-        "read_launch_identity",
         "require_local_host",
         "require_mounted_storage",
         "require_online",
         "resolve_mounted_path",
         "scratch_directory",
         "stop_process_group",
-        "tile_of_source_id",
-        "tiles_for_cone",
-        "tiles_for_footprint",
     }),
 }
 """Names each public module of astrometricslib offers (its `__all__`)."""
@@ -410,14 +397,20 @@ SUB_API_MEMBERS = {
         "star_widths",
     },
     "visualization": {
-        "get_last_captured_image",
+        "get_sky_picture",
         "get_star_overlay",
-        "place_stack_picture_on_sky",
-        "plot",
-        "render_fits",
-        "stack_sky_picture_files",
+        "plot_asteroids",
+        "plot_astrometry",
+        "plot_focus",
+        "plot_image",
+        "plot_photometry",
+        "plot_spectroscopy",
+        "plot_star",
+        "plot_target",
+        "render",
+        "render_newest",
     },
-    "jobs": {"query"},
+    "jobs": {"get", "get_lineage", "get_log", "get_warnings", "query"},
 }
 """Each sub-API of `Astrometrics`, by attribute path, and its members."""
 
@@ -483,7 +476,7 @@ def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
     assert astrometrics.processing._targets is astrometrics.targets
     assert astrometrics.quality._targets is astrometrics.targets
     assert astrometrics.processing._calibration is astrometrics.calibration
-    assert astrometrics.visualization._stars is astrometrics.stars
+    assert astrometrics.visualization._storage is astrometrics._catalog_access
 
 
 def test_each_public_module_offers_exactly_its_pinned_names() -> None:

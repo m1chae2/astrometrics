@@ -21,9 +21,16 @@ back to the FITS row order; see ``_JPEG_ORIENTATION_COMMAND`` in
 (column, row from the top) is the FITS pixel (x = column, y = row), counted
 from 0. This was checked on M 31: the stack's pixels and both pictures
 correlate 1.0 unflipped and 0.35 when flipped.
+
+`get_sky_picture` is the owner of ``Visualization.get_sky_picture``. It keeps
+each answer and reads the header again only when the stretched stack or the
+picture file changes (its modification time), so a sky chart that asks for
+every target's picture again and again reads each header once.
 """
 
 import logging
+import os
+import threading
 
 import numpy as np
 from astropy.io import fits
@@ -34,7 +41,8 @@ from astrometricslib._internal.drivers.fits_access import (
     header_is_plate_solved,
     read_header,
 )
-from astrometricslib.models.target import TargetStackingResult
+from astrometricslib.foundation.paths import resolve_mounted_path
+from astrometricslib.models.target import Target, TargetStackingResult
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.utilities.stack_preview_path import is_processed_fits_path, processed_fits_path_for
 
@@ -43,6 +51,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GRID_POINTS_PER_SIDE",
     "SkyPicturePlacement",
+    "get_sky_picture",
     "place_picture_on_sky",
     "sky_grid",
     "sky_picture_files",
@@ -71,7 +80,7 @@ class SkyPicturePlacement(BaseModel):
         the picture's top-left corner.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
     picture_path: str = Field(alias="picturePath")
     width: int
@@ -181,3 +190,48 @@ def place_picture_on_sky(processed_path: str, picture_path: str) -> SkyPicturePl
         grid_size=GRID_POINTS_PER_SIDE,
         grid=grid,
     )
+
+
+# Each answer by its two paths, with the files' modification times when it
+# was worked out. A target whose files are unchanged is answered from here.
+_placements: dict[str, tuple[tuple[float, float], SkyPicturePlacement | None]] = {}
+_placements_lock = threading.Lock()
+
+
+def get_sky_picture(target: Target) -> SkyPicturePlacement | None:
+    """Say where a target's stack picture lies on the sky.
+
+    The picture is the color picture when the target has one, else the
+    stack's preview (`sky_picture_files`). Both files are looked for where
+    the drive is mounted now. The answer is kept until either file changes.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+
+    Returns
+    -------
+    placement : `SkyPicturePlacement` or `None`
+        The picture and its grid of sky positions, or `None` when the target
+        has no stretched stack, no picture or no plate solution. That is a
+        status, not an error.
+    """
+    processed, picture = sky_picture_files(target.stacking)
+    processed = resolve_mounted_path(processed) if processed else ""
+    picture = resolve_mounted_path(picture) if picture else ""
+    if not processed or not picture or not os.path.isfile(processed) or not os.path.isfile(picture):
+        return None
+    try:
+        stamp = (os.path.getmtime(processed), os.path.getmtime(picture))
+    except OSError:
+        return None
+    key = f"{processed}|{picture}"
+    with _placements_lock:
+        cached = _placements.get(key)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    placement = place_picture_on_sky(processed, picture)
+    with _placements_lock:
+        _placements[key] = (stamp, placement)
+    return placement

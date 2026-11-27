@@ -401,7 +401,7 @@ print(measure_image_fwhm("/path/to/your_stack.fits"), "px")
 import time
 
 from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_tile_esa, query_gaia_tile_vizier
-from astrometricslib.drivers import tiles_for_cone
+from astrometricslib._internal.drivers.sky_tiles import tiles_for_cone
 
 for tile in tiles_for_cone(250.42, 36.46, 0.3, 7):  # M 13
     for query in (query_gaia_tile_vizier, query_gaia_tile_esa):

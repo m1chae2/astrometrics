@@ -170,7 +170,7 @@ them the same way.
     model, with its confidence;
   - "Show on sky" to center the Planetarium on a candidate, and "Send to plan" to add it.
 - **Decisions it supports:** which targets to image tonight, and in what order.
-- **Done right when:** the ranking comes from `wayfindinglib` (`get_advisory(kind="tonight")`),
+- **Done right when:** the ranking comes from `wayfindinglib` (`planning.sky.get_tonight_advice`),
   uses the user's own measured data and tonight's sky model, and a target with no data yet is
   marked as new rather than ranked.
 

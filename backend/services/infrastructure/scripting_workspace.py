@@ -26,6 +26,7 @@ from backend.services.infrastructure.console_helpers import (
     describe_show_request,
     lookup_doc,
     make_show_request,
+    show_argument_text,
 )
 from backend.services.infrastructure.scripting_figures import browser_pyplot
 
@@ -35,19 +36,30 @@ logger = logging.getLogger(__name__)
 #: They are the public entry points a library user has in a script or a
 #: notebook. The app's internal services are deliberately not among them.
 PRELOADED_OBJECTS = {
-    "astrometrics": "Astrometrics: targets, stars, processing, quality and visualization",
-    "wayfinder": "Wayfinder: telescope control, planning, execution and review",
+    "astrometrics": (
+        "Astrometrics: observatories, targets (and targets.frames), stars, calibration, "
+        "processing.<pipeline> (stacking, enhancement, astrometry, photometry, spectroscopy, asteroids), "
+        "quality (records, frames, stacks, detections, blocks), visualization and jobs"
+    ),
+    "wayfinder": "Wayfinder: telescope control, planning, execution and review of past nights",
     "np": "NumPy",
     "plt": "Matplotlib pyplot (figures open in their own windows)",
     "fits": "astropy.io.fits, for reading FITS files",
     "selection": (
-        "What is picked in Image Processing now (read-only): target, path, kind (stack or frame) "
-        "and star (the Astrometry overlay pick: name, ra and dec in degrees, x and y as the 1-based "
-        "pixel column and row, as FITS and DS9 count)"
+        "What is picked in Image Processing now (read-only): target (the library's Target, or None), "
+        "path, kind (stack or frame) and star (the Astrometry overlay pick: name, library_id, ra_deg "
+        "and dec_deg, and x_px and y_px, the star's column and row in the file at path, counted from 1)"
     ),
     "show": 'show(target="M 31", star=..., path=...) opens it in Image Processing or the Astronomy Manager',
     "doc": "doc(name) opens the name's entry in the Documentation tab; also typed as: doc name",
 }
+
+#: The script convention ``help`` prints, so a function written in the
+#: console can move into the library almost unchanged.
+SCRIPT_CONVENTION = (
+    "Keep an analysis in a function with explicit inputs, such as def measure_night(target, night): ..., "
+    "and use selection, show, doc and print only in the few lines that call it."
+)
 
 #: The commands the terminal itself handles. They are typed alone on a line
 #: and never reach Python, so a variable with the same name still works.
@@ -331,7 +343,9 @@ class ConsoleWorkspaceMixin:
             "inspect_api": inspect_api,
             "doc": self._doc,
             "show": self._show,
-            "selection": ConsoleSelection(self._current_selection),
+            "selection": ConsoleSelection(
+                self._current_selection, find_target=self._find_target, find_offset=self._shown_offset
+            ),
         }
 
         try:
@@ -398,6 +412,8 @@ class ConsoleWorkspaceMixin:
             'Example: astrometrics.visualization.plot_image("/path/to/stack.fits", '
             'overlays=["detections", "stars"])'
         )
+        lines.append("")
+        lines.extend(textwrap.wrap(SCRIPT_CONVENTION, HELP_LINE_WIDTH))
         return "\n".join(lines)
 
     def _current_selection(self) -> AppSelection:
@@ -412,6 +428,58 @@ class ConsoleWorkspaceMixin:
         service = getattr(self.container, "app_selection_service", None) if self.container else None
         return service.current() if service is not None else AppSelection()
 
+    def _library(self) -> Any:
+        """Return the console's ``astrometrics`` object, or `None`.
+
+        Returns
+        -------
+        astrometrics : `Astrometrics` or `None`
+            The library object of the app container, or `None` when the
+            console has no container.
+        """
+        return getattr(self.container, "astrometrics", None) if self.container else None
+
+    def _find_target(self, name: str) -> Any:
+        """Look the picked target up in the library, for ``selection.target``.
+
+        Parameters
+        ----------
+        name : `str`
+            The target name Image Processing sent, such as ``"M 31"``.
+
+        Returns
+        -------
+        target : `Target` or `None`
+            The library's target, or `None` when it has none of that name.
+        """
+        astrometrics = self._library()
+        return None if astrometrics is None else astrometrics.targets.get(name)
+
+    def _shown_offset(self, path: str) -> tuple[float, float]:
+        """Find where Image Processing's picture of a stack starts in it.
+
+        Image Processing shows a stack's processed copy, which may be a crop
+        of the stack. The stack's saved star names record the crop's corner.
+
+        Parameters
+        ----------
+        path : `str`
+            The stack.
+
+        Returns
+        -------
+        offset_px : `tuple` [`float`, `float`]
+            The crop's corner in pixels, or ``(0, 0)`` when the copy is the
+            whole stack or nothing records it.
+        """
+        astrometrics = self._library()
+        identification = (
+            None if astrometrics is None else astrometrics.processing.astrometry.get_identification(path)
+        )
+        if identification is None:
+            return (0.0, 0.0)
+        return (float(identification.viewer_offset_x or 0), float(identification.viewer_offset_y or 0))
+
     def _find_star(self, text: str) -> tuple[str, str] | None:
         """Look a star up in the library by its name or id.
 
@@ -425,7 +493,7 @@ class ConsoleWorkspaceMixin:
         star : `tuple` of `str` or `None`
             The star's library id and name, or `None` when it is not there.
         """
-        astrometrics = getattr(self.container, "astrometrics", None) if self.container else None
+        astrometrics = self._library()
         if astrometrics is None:
             return None
         star = astrometrics.stars.get(text)
@@ -435,9 +503,9 @@ class ConsoleWorkspaceMixin:
 
     def _show(
         self,
-        target: str | None = None,
+        target: Any = None,
         *,
-        star: str | None = None,
+        star: Any = None,
         path: str | None = None,
         display: str | None = None,
     ) -> None:
@@ -451,10 +519,11 @@ class ConsoleWorkspaceMixin:
 
         Parameters
         ----------
-        target : `str`, optional
-            The target, such as ``"M 31"``.
-        star : `str`, optional
-            A star's name or library id, such as ``"Vega"``.
+        target : `str` or `Target`, optional
+            The target, such as ``"M 31"`` or ``selection.target``.
+        star : `str`, `StellarObject` or `ConsoleStar`, optional
+            A star's name or library id, such as ``"Vega"``, or a star
+            object such as ``selection.star``.
         path : `str`, optional
             A stack or frame to show in Image Processing. With no
             ``target``, the target picked in Image Processing is used.
@@ -464,13 +533,14 @@ class ConsoleWorkspaceMixin:
         Notes
         -----
         `make_show_request` raises `TypeError` when no target, star or path
-        is given, and `ValueError` when the arguments do not fit together
+        is given (`show_argument_text` when one is not a name or a library
+        object), and `ValueError` when the arguments do not fit together
         or the star is not in the library. The user reads it in the
         terminal like any other error in their code.
         """
         request = make_show_request(
-            target=target,
-            star=star,
+            target=show_argument_text(target),
+            star=show_argument_text(star),
             path=path,
             display=display,
             selection=self._current_selection(),

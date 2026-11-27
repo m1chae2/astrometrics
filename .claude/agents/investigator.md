@@ -32,7 +32,11 @@ tools:
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows
   - mcp__astrometricslib-core__quality_set_aside_frames
+  - mcp__astrometricslib-core__star_count_by_class
+  - mcp__astrometricslib-core__star_count_by_target
   - mcp__astrometricslib-core__star_get
+  - mcp__astrometricslib-core__star_get_statistics
+  - mcp__astrometricslib-core__star_measure_periodicity
   - mcp__astrometricslib-core__star_query
   - mcp__astrometricslib-core__target_get_frame
   - mcp__astrometricslib-core__target_imaged_field_centers
@@ -40,6 +44,7 @@ tools:
   - mcp__astrometricslib-core__target_read_frame_header
   - mcp__astrometricslib-core__target_sessions
   - mcp__astrometricslib-core__typegen_contract_validator
+  - mcp__astrometricslib-core__visualization_get_star_overlay
   - mcp__astrometricslib-core__visualization_plot
   - mcp__astrometricslib-core__visualization_render_fits
   - mcp__wayfindinglib-core__observatory_equipment_get_active

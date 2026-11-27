@@ -958,9 +958,8 @@ def _compare_target_stars(wayfinder: Any, target: Any, differences: list[Differe
     count : `int`
         How many stars with a spectrum were compared.
     """
-    answer = wayfinder.astrometrics.stars.query(target_id=target.id, detail="objects", limit=None)
     count = 0
-    for star in answer.objects or []:
+    for star in wayfinder.astrometrics.stars.query(target=target, include=["light_curves"]):
         spectroscopy = star.spectroscopy
         if spectroscopy is None or not spectroscopy.intensities:
             continue

@@ -85,7 +85,6 @@ astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item c
 astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/stars.py,StellarCatalog.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/targets.py,TargetCatalog.get_frame.index,Index of the frame or layer; 0 means the first
 astrometricslib/api/targets.py,TargetCatalog.imaged_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
@@ -293,9 +292,7 @@ astrometricslib/pipelines/shared/solved_star_list.py,SOLVED_STARS_FILE_VERSION,V
 astrometricslib/pipelines/shared/star_analysis.py,MAXIMUM_ROWS_PER_LIST,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,TOP_CANDIDATES,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,_round.digits,Rounding digits for display
-astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,Read cap for ranking
-astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_LIMITS,Reply size limits
-astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_MAXIMUM_RADIUS_DEGREES,Reply size cap on query radius
+astrometricslib/pipelines/shared/star_catalog_queries.py,query_stars.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
 astrometricslib/pipelines/shared/target_overview.py,MAXIMUM_FRAME_ROWS,Reply row cap
 astrometricslib/pipelines/shared/target_overview.py,QUALITY_LIST_LENGTH,Reply list length

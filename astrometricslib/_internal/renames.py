@@ -26,7 +26,19 @@ __all__ = ["RENAMES", "MovedNames"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
-RENAMES: dict[str, str] = {}
+RENAMES: dict[str, str] = {
+    # Step 4b (stars).
+    "astrometricslib.StellarCatalog.dataset_version": (
+        "astrometricslib.drivers.get_library_data_version(config) (the library's write counters)"
+    ),
+    "astrometricslib.StellarCatalog.find_or_create_by_position": (
+        "astrometrics.stars.query(ra_deg=..., dec_deg=..., radius_deg=...) to find the star, then "
+        "astrometrics.stars.create(name, ra_deg, dec_deg) for a new one"
+    ),
+    "astrometricslib.StellarCatalog.analyze_periodicity": (
+        "astrometrics.stars.record_periodicity(star) (measure_periodicity(star) saves nothing)"
+    ),
+}
 
 
 class MovedNames:

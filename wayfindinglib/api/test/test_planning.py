@@ -160,7 +160,7 @@ class _FakeAstrometrics:
             set_aside_frames=lambda _target_id: [],
             calibration_identities=lambda **_arguments: [],
         )
-        self.stars = SimpleNamespace(get=lambda object_id: None)
+        self.stars = SimpleNamespace(get=lambda object_id, **_: None)
         self.processing = SimpleNamespace(
             restore_excluded_frames=lambda target, apply=False: RestoreReport(
                 targetId=getattr(target, "id", target), applied=False

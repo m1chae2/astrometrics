@@ -373,7 +373,7 @@ astrometrics = Astrometrics()
 result = astrometrics.processing.process_target("M 13", stages=["photometry"])
 astrometrics.targets.save()
 print(result.quality.photometry.gate("variability_discrimination"))
-stars = astrometrics.stars.query(target_id="M 13", has_photometry=True, detail="objects", limit=None).objects
+stars = astrometrics.stars.query(target=astrometrics.targets.get("M 13"), has_photometry=True)
 scored = [s for s in stars if s.photometry and s.photometry.variability_score is not None]
 listed = [s for s in scored if s.known_variability == KnownVariability.KNOWN_VARIABLE]
 unlisted = [s for s in scored if s.known_variability == KnownVariability.NOT_LISTED]
@@ -561,7 +561,7 @@ from astrometricslib.scripts.validate_spectral_and_period_analysis import valida
 passed = validate_period_searches(25)
 ```
 <!-- impl: astrometricslib.scripts.validate_spectral_and_period_analysis.validate_period_searches --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.box_search -->
-  1. On a real star, use the public `Astrometrics().stars.analyze_periodicity(star_id)` and compare the saved period and verdict with the known ones. <!-- impl: astrometricslib.api.stars.StellarCatalog.analyze_periodicity -->
+  1. On a real star, use the public `Astrometrics().stars.record_periodicity(star)` and compare the saved period and verdict with the known ones. <!-- impl: astrometricslib.api.stars.StellarCatalog.record_periodicity -->
 
 - **Acceptance criterion:** The share of pure-noise curves called "detected" stays near 1%. The script fails above 3%.
 - **What to look at:** The share of pure-noise curves called "detected" (should stay near 1%; the script fails above 3%). The share of injected signals detected at each amplitude or depth.
@@ -705,9 +705,7 @@ frames = [
     and "533" in frame.camera
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == night
 ]
-astrometrics.processing.process_target(
-    "M 57", stages=["photometry"], photometry={"frames": frames}
-)
+astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
 rows = QualityStore.from_configuration(astrometrics.config).query(
     metric="photometry.catalog_zero_point_gaia_g_mag", target_id="M 57"
 )
@@ -795,9 +793,7 @@ frames = [
     and "533" in frame.camera
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == "2026-10-03"
 ]
-astrometrics.processing.process_target(
-    "M 57", stages=["photometry"], photometry={"frames": frames}
-)
+astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
 for part in ("photon", "sky", "read"):
     for row in astrometrics.quality.query(
         metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"

@@ -189,7 +189,7 @@ def seed(sandbox: Path) -> dict[str, int]:
         How many targets, frames, calibration frames and guiding samples
         were written.
     """
-    from astrometricslib import Astrometrics, FrameRecord, Target
+    from astrometricslib import Astrometrics, FrameRecord, StellarObject, Target
     from astrometricslib.foundation.config import AppConfiguration
     from wayfindinglib.drivers.control_record_store import ControlRecordStore
 
@@ -279,47 +279,45 @@ def seed(sandbox: Path) -> dict[str, int]:
     wavelengths = np.linspace(4000.0, 7500.0, 300)
     intensities = np.exp(-(((wavelengths - 5500.0) / 1800.0) ** 2)) + rng.normal(0, 0.01, wavelengths.size)
     start_time = night_start.astimezone(UTC)
-    # The result models are private, so take the empty ones the star record
-    # already holds and fill their fields.
-    star = astrometrics.stars.create(star_id, ra_deg=279.2333, dec_deg=38.7836)
-    photometry = star.photometry
+    # The result models are private, so take the empty ones a blank star
+    # record holds and fill their fields.
+    blank_star = StellarObject()
+    photometry = blank_star.photometry
     photometry.timestamps = [start_time + timedelta(minutes=2 * index) for index in range(120)]
     photometry.fluxes = [
         float(1.0e5 * (1 + 0.02 * np.sin(index / 6.0) + rng.normal(0, 0.003))) for index in range(120)
     ]
     photometry.magnitudes = [float(0.03 + 0.02 * np.sin(index / 6.0)) for index in range(120)]
-    spectroscopy = star.spectroscopy
+    spectroscopy = blank_star.spectroscopy
     spectroscopy.wavelengths_angstrom = wavelengths.tolist()
     spectroscopy.intensities = intensities.tolist()
     spectroscopy.self_determined_spectral_type = "A0V"
-    astrometrics.stars.update(
+    astrometrics.stars.create(
         star_id,
-        {
-            "photometry": photometry,
-            "spectroscopy": spectroscopy,
-            "spectral_type": "A0V",
-            "magnitude": 0.03,
-            "b_minus_v": 0.0,
-            "target_ids": ["M 13"],
-        },
+        ra_deg=279.2333,
+        dec_deg=38.7836,
+        photometry=photometry,
+        spectroscopy=spectroscopy,
+        spectral_type="A0V",
+        magnitude=0.03,
+        b_minus_v=0.0,
+        target_ids=["M 13"],
     )
 
     # A second star, so a display's star list has an unselected row.
-    second_star_id = "Altair"
-    second_star = astrometrics.stars.create(second_star_id, ra_deg=297.6958, dec_deg=8.8683)
-    second_spectroscopy = second_star.spectroscopy
+    second_spectroscopy = StellarObject().spectroscopy
     second_spectroscopy.wavelengths_angstrom = wavelengths.tolist()
     second_spectroscopy.intensities = (intensities * 0.8).tolist()
     second_spectroscopy.self_determined_spectral_type = "A7V"
-    astrometrics.stars.update(
-        second_star_id,
-        {
-            "spectroscopy": second_spectroscopy,
-            "spectral_type": "A7V",
-            "magnitude": 0.76,
-            "b_minus_v": 0.22,
-            "target_ids": ["M 13"],
-        },
+    astrometrics.stars.create(
+        "Altair",
+        ra_deg=297.6958,
+        dec_deg=8.8683,
+        spectroscopy=second_spectroscopy,
+        spectral_type="A7V",
+        magnitude=0.76,
+        b_minus_v=0.22,
+        target_ids=["M 13"],
     )
 
     # One observing night with guiding samples, and the run that holds them.

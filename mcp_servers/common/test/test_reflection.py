@@ -199,3 +199,44 @@ async def test_a_target_id_reaches_the_method_as_the_client_sent_it() -> None:
 
     assert '"target": "M 13"' in result[0].text
     assert '"type": "str"' in result[0].text
+
+
+async def test_a_client_default_fills_an_argument_the_client_leaves_out() -> None:
+    """A `ClientLimits` default fills an argument the client leaves out.
+
+    A query returns every match by default, so a tool gives it a page size
+    unless the client chose one, and the schema says so.
+    """
+    from mcp_servers.common.reflection import ClientLimits
+
+    received: list[int | None] = []
+
+    class FakeApi:
+        """A stand-in API with one query."""
+
+        def query(self, limit: int | None = None) -> int:
+            """Record the limit the method got.
+
+            Parameters
+            ----------
+            limit : `int` or `None`
+                Most items to return.
+
+            Returns
+            -------
+            count : `int`
+                How many calls were made.
+            """
+            received.append(limit)
+            return len(received)
+
+    registry = ToolRegistry()
+    limits = {"fake_query": ClientLimits(maximums={"limit": 200}, defaults={"limit": 50})}
+    register_reflected_tools(registry, FakeApi(), {"": "fake"}, limits=limits)
+    schema = next(t for t in registry.get_tool_definitions() if t.name == "fake_query").input_schema
+
+    await registry.execute("fake_query", {})
+    await registry.execute("fake_query", {"limit": 7})
+
+    assert received == [50, 7]
+    assert "uses 50 when it is left out" in schema["properties"]["limit"]["description"]

@@ -64,7 +64,7 @@ def test_get_sources(mock_global: MagicMock, mock_local: MagicMock) -> None:
     # Mock the local Astrometrics instance on the engine
     sky._astrometrics = MagicMock()
     sky._astrometrics.targets.query.return_value.objects = [target]
-    sky._astrometrics.stars.query.return_value.objects = []
+    sky._astrometrics.stars.query.return_value = []
 
     # 1. Local only
     result_local = sky.get_sources(12.0, 34.0, 5.0, include_catalog=False)
@@ -90,7 +90,7 @@ def test_astrometrics_catalog_includes_letterless_plate_solved_targets() -> None
 
     fake_astrometrics = MagicMock()
     fake_astrometrics.targets.query.return_value.objects = [plate_solved_target]
-    fake_astrometrics.stars.query.return_value.objects = []
+    fake_astrometrics.stars.query.return_value = []
 
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
@@ -114,7 +114,7 @@ def test_astrometrics_catalog_skips_unparseable_target_without_dropping_others()
 
     fake_astrometrics = MagicMock()
     fake_astrometrics.targets.query.return_value.objects = [good_target, bad_target]
-    fake_astrometrics.stars.query.return_value.objects = []
+    fake_astrometrics.stars.query.return_value = []
 
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
@@ -138,7 +138,7 @@ def test_astrometrics_catalog_filters_stellar_objects_by_radius() -> None:
 
     fake_astrometrics = MagicMock()
     fake_astrometrics.targets.query.return_value.objects = []
-    fake_astrometrics.stars.query.return_value.objects = [near_star, far_star, no_coordinates_star]
+    fake_astrometrics.stars.query.return_value = [near_star, far_star, no_coordinates_star]
 
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
@@ -175,13 +175,17 @@ def test_astrometrics_catalog_leaves_the_stars_alone_when_asked_not_to_load_them
 def test_get_library_star_summaries_reads_the_region_summaries_from_astrometrics() -> None:
     """Verifies the summaries come from the library's fast region read."""
     fake_sky = MagicMock()
-    fake_sky._astrometrics.stars.query.return_value.stars = [{"id": "S1"}]
+    fake_sky._astrometrics.stars.query.return_value = [StellarObject(id="S1", ra=250.2, dec=36.5)]
 
     summaries = get_library_star_summaries(fake_sky, 250.17, 36.46, 2.0)
 
-    assert summaries == [{"id": "S1"}]
+    assert [(row["id"], row["ra"], row["dec"]) for row in summaries] == [("S1", 250.2, 36.5)]
+    assert set(summaries[0]) == {
+        "id", "name", "ra", "dec", "targetIds", "hasSpectra", "hasPhotometry", "magnitude",
+        "hasCatalogMagnitude", "spectralType",
+    }  # fmt: skip
     fake_sky._astrometrics.stars.query.assert_called_once_with(
-        ra_deg=250.17, dec_deg=36.46, radius_deg=2.0, magnitude_min=None, magnitude_max=None, limit=None
+        ra_deg=250.17, dec_deg=36.46, radius_deg=2.0, magnitude_min=None, magnitude_max=None
     )
 
 
@@ -307,15 +311,13 @@ def test_astrometrics_catalog_reads_only_the_stars_near_the_search_circle() -> N
     """
     fake_astrometrics = MagicMock()
     fake_astrometrics.targets.query.return_value.objects = []
-    fake_astrometrics.stars.query.return_value.objects = []
+    fake_astrometrics.stars.query.return_value = []
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
 
     astrometrics_catalog(fake_sky, ra_deg=250.17, dec_deg=36.46, radius_deg=1.0)
 
-    fake_astrometrics.stars.query.assert_called_once_with(
-        ra_deg=250.17, dec_deg=36.46, radius_deg=1.0, detail="objects", limit=None
-    )
+    fake_astrometrics.stars.query.assert_called_once_with(ra_deg=250.17, dec_deg=36.46, radius_deg=1.0)
 
 
 def test_resolve_target_coordinates_asks_the_library_for_the_named_star_only() -> None:
@@ -330,12 +332,12 @@ def test_resolve_target_coordinates_asks_the_library_for_the_named_star_only() -
     placed = StellarObject(id="* alf Lyr", name="Vega", ra=279.23, dec=38.78)
     fake_sky = MagicMock()
     fake_sky._astrometrics.targets.query.return_value.objects = []
-    fake_sky._astrometrics.stars.query.return_value.objects = [unset, placed]
+    fake_sky._astrometrics.stars.query.return_value = [unset, placed]
 
     resolved = resolve_target_coordinates(fake_sky, "Vega")
 
     assert resolved is placed
-    fake_sky._astrometrics.stars.query.assert_called_once_with(name="Vega", detail="objects", limit=None)
+    fake_sky._astrometrics.stars.query.assert_called_once_with(text="Vega")
 
 
 def _location_config(**location: str) -> SimpleNamespace:

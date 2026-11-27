@@ -150,45 +150,41 @@ def _library_star_sources(
         detections are never included.
     """
     only_catalog_magnitudes = not include_stars_without_catalog_magnitude
-    rows = (
-        sky._astrometrics.stars.query(
-            ra_deg=ra_deg,
-            dec_deg=dec_deg,
-            radius_deg=radius_deg,
-            # Without uncataloged stars, the database can skip every star that
-            # is too faint or has no catalog magnitude.
-            magnitude_max=limiting_magnitude if only_catalog_magnitudes else None,
-            has_catalog_magnitude=True if only_catalog_magnitudes else None,
-            limit=None,
-        ).stars
-        or []
+    stars = sky._astrometrics.stars.query(
+        ra_deg=ra_deg,
+        dec_deg=dec_deg,
+        radius_deg=radius_deg,
+        # Without uncataloged stars, the database can skip every star that
+        # is too faint or has no catalog magnitude.
+        magnitude_max=limiting_magnitude if only_catalog_magnitudes else None,
+        has_catalog_magnitude=True if only_catalog_magnitudes else None,
     )
     sources = []
-    for row in rows:
+    for star in stars:
         # A star with either coordinate exactly zero has no position saved
         # yet, so there is nowhere to draw it.
-        if not row["ra"] or not row["dec"]:
+        if not star.right_ascension or not star.declination:
             continue
         if not _keeps_star(
-            row["magnitude"],
-            row["hasCatalogMagnitude"],
+            star.magnitude,
+            star.has_catalog_magnitude,
             limiting_magnitude,
             include_stars_without_catalog_magnitude,
             magnitude_min,
         ):
             continue
-        name = row["name"] or row["id"]
+        name = star.name or star.id
         sources.append(
             SkySource(
-                id=row["id"],
-                ra=float(row["ra"]),
-                dec=float(row["dec"]),
+                id=star.id,
+                ra=float(star.right_ascension),
+                dec=float(star.declination),
                 name=name,
                 common_name=name,
-                spectral_type=row["spectralType"],
-                magnitude=row["magnitude"],
-                has_spectra=row["hasSpectra"],
-                has_photometry=row["hasPhotometry"],
+                spectral_type=star.spectral_type,
+                magnitude=star.magnitude,
+                has_spectra=star.has_spectra,
+                has_photometry=star.has_photometry,
                 type="star",
             )
         )

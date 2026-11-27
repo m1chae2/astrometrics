@@ -193,10 +193,10 @@ describe('Planetarium drill-in column', () => {
       if (delay === 400) started.push(Number(id));
       return id;
     }) as typeof window.setTimeout);
-    const clearSpy = vi.spyOn(window, 'clearTimeout').mockImplementation((id?: number) => {
+    const clearSpy = vi.spyOn(window, 'clearTimeout').mockImplementation(((id?: number) => {
       cleared.add(Number(id));
       realClearTimeout(id);
-    });
+    }) as typeof window.clearTimeout);
     try {
       const { unmount } = renderPlanetarium();
       fireEvent.click(levelOneRadio('M 81'));

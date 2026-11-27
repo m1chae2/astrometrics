@@ -15,9 +15,9 @@ pytestmark = pytest.mark.anyio
 
 def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry: ToolRegistry) -> None:
     """Clients are not asked whether to record a job; every run records one."""
-    schema = registry.tools["planning_get_deep_catalog_status"]["tool_def"].input_schema
+    schema = registry.tools["planning_catalogs_predict_deep_catalog"]["tool_def"].input_schema
     assert "register_job" not in schema["properties"]
-    assert "include" in schema["properties"]
+    assert "magnitude_max" in schema["properties"]
     advisory = registry.tools["review_get_advisory"]["tool_def"].input_schema
     assert advisory["required"] == ["kind", "target"]
 
@@ -25,7 +25,7 @@ def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry
 async def test_visibility_accepts_coordinates_and_an_offset_time(registry: ToolRegistry) -> None:
     """Visibility runs with a coordinate dictionary and a local ISO time."""
     result = await registry.execute(
-        "planning_get_visibility",
+        "planning_sky_get_visibility",
         {
             "objects": [{"id": "M 52", "ra_deg": 351.2, "dec_deg": 61.59}],
             "time": "2026-10-02T22:00:00-06:00",

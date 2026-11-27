@@ -186,7 +186,7 @@ DECISIONS = {
     # ---- Drop ----
     "planning_get_constellation_lines": ToolDecision(
         "drop",
-        "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",
+        "Draws the Planetarium: about 750 line segments (89 KB) of fixed stick figures, no use to an AI.",
     ),
     "execution_advance_session": ToolDecision(
         "drop", "Needs callables that MCP cannot send. No MCP use today."
@@ -389,9 +389,6 @@ DECISIONS = {
         "first, cut at a limit with the total reported. Replaces planning_find_sources, "
         "planning_get_sources, planning_get_library_star_summaries and planning_get_online_catalog_sources.",
     ),
-    "planning_lookup_coordinates": ToolDecision(
-        "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
-    ),
     "processing_get_stack_identification": ToolDecision(
         "keep",
         "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution "
@@ -576,15 +573,20 @@ DECISIONS = {
     "planning_get_tonight_advice": ToolDecision(
         "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."
     ),
-    "planning_get_calibration_advice": ToolDecision(
+    "planning_get_plan": ToolDecision("keep", "Built 2026-10-06. Reads the recorded session of one night."),
+    "planning_query_plans": ToolDecision("keep", "Lists the recorded sessions. Reads only."),
+    "planning_packages_get": ToolDecision(
+        "keep", "Since #206 (step 5a). Reads one observation package by id. Reads only.", tool_class="observe"
+    ),
+    "planning_packages_query": ToolDecision(
         "keep",
-        "How many calibration frames of one kind the library holds, worked out on demand. Saves nothing.",
+        "Since #206 (step 5a) the package list of planning_query_plans. Reads only.",
+        tool_class="observe",
     ),
-    "planning_get_plan": ToolDecision(
-        "keep", "Built 2026-10-06. Reads one recorded session, by id or by night."
-    ),
-    "planning_query_plans": ToolDecision(
-        "keep", "Lists the recorded sessions, the observation packages or the suggestion log. Reads only."
+    "planning_packages_query_suggestion_log": ToolDecision(
+        "keep",
+        "Since #206 (step 5a) the suggestion log of planning_query_plans. Reads only.",
+        tool_class="observe",
     ),
     "planning_get_package_for_target": ToolDecision(
         "keep", "Reads the one package that stands for a target. Reads only."
@@ -601,9 +603,13 @@ DECISIONS = {
         "change-data",
     ),
     "planning_get_deep_catalog_status": ToolDecision(
+        "keep", "Built 2026-10-06. Reads how much of the deep-star catalog file is installed."
+    ),
+    "planning_catalogs_predict_deep_catalog": ToolDecision(
         "keep",
-        "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
-        "saves nothing.",
+        "Since #206 (step 5a) the size estimate of planning_get_deep_catalog_status: queries the Gaia "
+        "archive for a sample of chunks and saves nothing.",
+        tool_class="compute",
     ),
     "planning_calculate_panels": ToolDecision("keep", "Works out mosaic panel centers. Saves nothing."),
     "planning_build_deep_star_catalog": ToolDecision(
@@ -960,21 +966,14 @@ DECISIONS = {
             "target_create",
             "target_update",
             "planning_create_mosaic",
-            "planning_create_sequence",
             "planning_create_package",
             "planning_create_session",
             "planning_add_to_queue",
             "planning_reorder_queue",
             "planning_remove_from_queue",
-            "planning_set_entry_exposures",
-            "planning_add_checklist_items",
-            "planning_set_framing",
             "planning_update_package",
-            "planning_reopen_package",
-            "planning_dismiss_package",
             "planning_undismiss_package",
             "planning_refresh_suggestions",
-            "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),
@@ -1085,6 +1084,33 @@ TOOL_RENAMES: dict[str, str] = {
     "visualization_render_fits": "visualization_render",
     "visualization_plot": "visualization_plot_target",
     "visualization_stack_sky_picture_files": "visualization_get_sky_picture",
+    # Step 5a of #206: planning has the objects sessions, packages, sky and
+    # catalogs. The queue edits merge into sessions_update and the package
+    # edits into packages_update; lookup_coordinates and
+    # get_calibration_advice went to the core (targets.resolve and
+    # calibration.query).
+    "planning_get_plan": "planning_sessions_get",
+    "planning_query_plans": "planning_sessions_query",
+    "planning_create_session": "planning_sessions_create",
+    "planning_add_to_queue": "planning_sessions_add",
+    "planning_remove_from_queue": "planning_sessions_remove",
+    "planning_reorder_queue": "planning_sessions_update",
+    "planning_get_package_for_target": "planning_packages_get_for_target",
+    "planning_create_package": "planning_packages_create",
+    "planning_update_package": "planning_packages_update",
+    "planning_undismiss_package": "planning_packages_restore",
+    "planning_refresh_suggestions": "planning_packages_record_suggestions",
+    "planning_get_depth_goal": "planning_packages_get_depth_goal",
+    "planning_set_depth_goal": "planning_packages_set_depth_goal",
+    "planning_create_mosaic": "planning_packages_create_mosaic",
+    "planning_get_visibility": "planning_sky_get_visibility",
+    "planning_get_tonight_advice": "planning_sky_get_tonight_advice",
+    "planning_get_constellation_lines": "planning_sky_get_constellation_lines",
+    "planning_calculate_panels": "planning_sky_get_panels",
+    "planning_query_catalogs": "planning_catalogs_query",
+    "planning_query_sources": "planning_catalogs_query_sources",
+    "planning_get_deep_catalog_status": "planning_catalogs_get_deep_status",
+    "planning_build_deep_star_catalog": "planning_catalogs_record_deep_catalog",
 }
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies

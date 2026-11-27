@@ -17,8 +17,9 @@ def test_the_wayfinder_sub_apis_are_reflected(registry: ToolRegistry) -> None:
     assert "observatory_mount_status" in names
     assert "observatory_remote_list" in names
     assert not any(name.startswith("observatory_get_") for name in names)
-    assert "planning_get_visibility" in names
-    assert "planning_calculate_panels" in names
+    assert "planning_sky_get_visibility" in names
+    assert "planning_sky_get_panels" in names
+    assert "planning_sessions_get" in names
 
 
 def test_history_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
@@ -31,13 +32,12 @@ def test_history_query_has_the_documented_arguments(registry: ToolRegistry) -> N
 async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
     """Running a reflected tool returns text content."""
     reply = await registry.execute(
-        "planning_calculate_panels",
+        "planning_sky_get_panels",
         {
-            "ra_deg": 250.172,
-            "dec_deg": 36.4599,
+            "center": {"id": "M 13", "ra_deg": 250.172, "dec_deg": 36.4599},
             "rows": 2,
             "cols": 2,
-            "overlap_percent": 10.0,
+            "overlap_pct": 10.0,
         },
     )
     assert reply

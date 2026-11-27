@@ -11,9 +11,9 @@ import json
 import pytest
 
 from astrometricslib import StellarObject, Target
-from astrometricslib.exceptions import NotFoundError
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from mcp_servers.common.reflection import plan_parameters, register_reflected_tools
-from mcp_servers.common.resolvers import SUBJECT_KINDS, resolve_subject, subject_kind_of
+from mcp_servers.common.resolvers import SUBJECT_KINDS, resolve_subject, subject_kind_of, subject_schema
 from mcp_servers.common.tool_registry import ToolRegistry
 from wayfindinglib import ObservationPackage, ObservationSession
 
@@ -111,8 +111,22 @@ def test_other_hints_are_not_subjects() -> None:
     """Plain text, mixed unions and unrelated models are not subjects."""
     assert subject_kind_of(str) is None
     assert subject_kind_of(str | Target | dict) is None
-    assert subject_kind_of(Target | StellarObject) is None
     assert subject_kind_of(int | None) is None
+
+
+def test_a_target_or_star_is_a_sky_object_named_or_placed() -> None:
+    """``Target | StellarObject`` takes a name or a point with its position."""
+    from mcp_servers.common.resolvers import SKY_OBJECT
+
+    parameter = subject_kind_of(Target | StellarObject)
+    assert parameter.kind is SKY_OBJECT
+    assert subject_kind_of(list[Target | StellarObject] | None).many
+    point = resolve_subject(None, parameter, "objects", {"id": "P", "ra_deg": 10.0, "dec_deg": 20.0})
+    assert (point.id, point.right_ascension, point.declination) == ("P", 10.0, 20.0)
+    with pytest.raises(InvalidArgumentError, match="ra_deg"):
+        resolve_subject(None, parameter, "objects", {"id": "P"})
+    schema = subject_schema(parameter, "The objects.")
+    assert schema["anyOf"] == [{"type": "string"}, {"type": "object"}]
 
 
 def test_the_table_names_each_library_type() -> None:

@@ -187,7 +187,7 @@ def test_collect_inventory_covers_all_four_servers() -> None:
         ("star_get", "observe", "stars"),
         ("processing_stack", "process", "image-processing"),
         ("processing_process_target", "change-data", "image-processing"),
-        ("planning_get_visibility", "observe", "planning-sessions"),
+        ("planning_sessions_get", "observe", "planning-sessions"),
         ("execution_abort_session", "change-data", "planning-sessions"),
         ("observatory_mount_slew", "actuate", "observatory-control"),
         ("observatory_remote_sync_frames", "ingest", "observatory-sync"),

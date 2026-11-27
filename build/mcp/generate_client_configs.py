@@ -394,7 +394,7 @@ AGENT_PROMPT = (
     "along the spectrum, a predicted peak at another exposure), use `quality_frames_measure` "
     "on them: a spectrum frame gets the spectrum check. "
     "To tell whether guiding spoiled a frame, use `review_frame_guiding`. "
-    "To plan a night over several hours, use `planning_get_visibility`. "
+    "To plan a night over several hours, use `planning_sky_get_visibility`. "
     "For the live session (pier side, camera temperature, "
     "exposure and dither counts), use `review_get_live_session_status`; it cannot report the "
     "guide algorithm, because the logs do not record it. Do not try to get around "

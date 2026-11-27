@@ -236,36 +236,28 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
     _rule(
-        r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
-        r"|set_framing|update_package|reopen_package|dismiss_package|undismiss_package|delete_package"
-        r"|tick_checklist_item)$",
+        r"^planning_(sessions_(add|remove|update)|packages_(update|restore|delete))$",
         "change-data",
         "high",
-        "Changes the saved queue or checklist.",
+        "Changes the saved queue, checklist or packages.",
     ),
     _rule(
-        r"^planning_refresh_suggestions$",
+        r"^planning_packages_record_suggestions$",
         "change-data",
         "high",
         "Writes suggested and finished packages and tonight's checklist.",
     ),
     _rule(
-        r"^planning_(build_deep_star_catalog|create_mosaic)$",
+        r"^planning_(catalogs_record_deep_catalog|packages_create_mosaic)$",
         "change-data",
         "high",
         "Builds or stores catalog or plan data.",
     ),
     _rule(
-        r"^planning_create_(package|session)$",
+        r"^planning_(packages|sessions)_create$",
         "change-data",
         "high",
         "Records packages and sessions.",
-    ),
-    _rule(
-        r"^planning_create_sequence$",
-        "change-data",
-        "high",
-        "Builds a sequence plan and writes nothing.",
     ),
     _rule(
         r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
@@ -344,16 +336,16 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(review_frame_guiding|planning_get_visibility)$",
+        r"^(review_frame_guiding|planning_sky_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",
     ),
     _rule(
-        r"^planning_get_deep_catalog_status$",
+        r"^planning_catalogs_predict_deep_catalog$",
         "compute",
         "high",
-        "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
+        "Queries the Gaia archive for a sample of chunks. Saves nothing.",
     ),
     _rule(
         r"^observatory_remote_frame_locations$",
@@ -376,8 +368,10 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
-        r"^(target_query|target_measure_field_centers|planning_query_sources|planning_lookup_coordinates"
-        r"|planning_query_plans|planning_query_catalogs)$",
+        r"^(target_query|target_measure_field_centers|planning_catalogs_query(_sources)?"
+        r"|planning_sessions_(get|query)|planning_packages_(get|get_for_target|query|query_suggestion_log"
+        r"|get_depth_goal)|planning_sky_(get_tonight_advice|get_constellation_lines|get_panels)"
+        r"|planning_catalogs_get_deep_status)$",
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",

@@ -70,6 +70,60 @@ RENAMES: dict[str, str] = {
         "astrometrics.targets.frames.restore(target, frames)"
     ),
     "astrometricslib.QualityRecords.forget": "astrometrics.targets.frames.delete(target, frames)",
+    # Step 4d: one object per pipeline under `processing`; no `process_target`.
+    "astrometricslib.ProcessingPipelines.stack": (
+        "astrometrics.processing.stacking.run(target, frames=astrometrics.targets.frames.query(target)), "
+        "then astrometrics.processing.enhancement.run(target) for the picture"
+    ),
+    "astrometricslib.ProcessingPipelines.predict_stack": (
+        "astrometrics.processing.stacking.predict(target, frames=...), or "
+        "astrometricslib.arguments.check_frames(frames, target) for the frame choice alone"
+    ),
+    "astrometricslib.ProcessingPipelines.predict_stack_weights": (
+        "astrometrics.processing.stacking.predict_weights(exposures_s, kind=...)"
+    ),
+    "astrometricslib.ProcessingPipelines.stack_summary": (
+        "astrometrics.processing.stacking.get_summary(target)"
+    ),
+    "astrometricslib.ProcessingPipelines.find_stack_configuration": (
+        "astrometrics.processing.stacking.get_stack(target, configuration)"
+    ),
+    "astrometricslib.ProcessingPipelines.remake_preview": (
+        "astrometrics.processing.enhancement.run(target, settings=EnhancementSettings(...), stack=...)"
+    ),
+    "astrometricslib.ProcessingPipelines.list_preview_bright_objects": (
+        "astrometrics.processing.enhancement.get_bright_objects(target, force=...)"
+    ),
+    "astrometricslib.ProcessingPipelines.set_preview_bright_object": (
+        "astrometrics.targets.update(target, preview_bright_object=PreviewBrightObject(mode=..., ...))"
+    ),
+    "astrometricslib.ProcessingPipelines.process_target": (
+        "each pipeline in turn: astrometrics.processing.astrometry.run(target), photometry.run(target), "
+        "spectroscopy.run(target), spectroscopy.record_variation(target) or asteroids.run(target)"
+    ),
+    "astrometricslib.ProcessingPipelines.plate_solve": "astrometrics.processing.astrometry.solve(path)",
+    "astrometricslib.ProcessingPipelines.identify_stack": "astrometrics.processing.astrometry.identify(path)",
+    "astrometricslib.ProcessingPipelines.get_stack_identification": (
+        "astrometrics.processing.astrometry.get_identification(path)"
+    ),
+    "astrometricslib.ProcessingPipelines.acquire_job_slot": (
+        "nothing: every pipeline run takes a job slot itself"
+    ),
+    "astrometricslib.ProcessingPipelines.open_in_siril": (
+        "nothing in the library: the app's Open in Siril button opens a stack"
+    ),
+    "astrometricslib.ProcessingPipelines.stop_stacking_programs": (
+        "nothing in the library: the app stops its Siril runs when it stops"
+    ),
+    "astrometricslib.ProcessingPipelines.ANALYSIS_STAGES": (
+        "the pipeline objects of astrometrics.processing (astrometry, photometry, spectroscopy, asteroids)"
+    ),
+    "astrometricslib.ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES": (
+        "the pipeline objects of astrometrics.processing (astrometry, photometry, spectroscopy)"
+    ),
+    "astrometricslib.ProcessingPipelines.DEFAULT_ANALYSIS_STAGES": (
+        "astrometrics.processing.astrometry.run, photometry.run and spectroscopy.run, in turn"
+    ),
 }
 
 

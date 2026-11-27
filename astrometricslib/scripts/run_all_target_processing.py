@@ -74,6 +74,7 @@ from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import parse_set_aside_action
+from astrometricslib.pipelines.target_batch import process_targets_in_parallel
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
@@ -746,9 +747,10 @@ def _stack_one_target(
     optic, imaging (not spectral) frames. Every one of them is measured first
     (`QualityRecords.record_frame_measurements`), so the stack's
     predicted noise has the sky of each frame. They then go to the public
-    `ProcessingPipelines.stack`, which sets aside bad frames, stacks, and
-    records the stack's quality rows. No astrometry, photometry or
-    spectroscopy runs, and no spectral stack is made.
+    `processing.stacking.run`, which sets aside bad frames, stacks, and
+    records the stack's quality rows, and `processing.enhancement.run`
+    makes the stack's picture. No astrometry, photometry or spectroscopy
+    runs, and no spectral stack is made.
 
     Parameters
     ----------
@@ -808,7 +810,8 @@ def _stack_one_target(
         f"failed: {measurement.frames_failed}"
     )
     stack_started_at = datetime.now(UTC)
-    astrometrics.processing.stack(target, frames=standard_frames, force=force)
+    astrometrics.processing.stacking.run(target, frames=standard_frames, force=force)
+    astrometrics.processing.enhancement.run(target)
     notes = []
     if earlier_nights:
         notes.append(_stack_earlier_nights_note(astrometrics, target, stack_started_at))
@@ -1377,7 +1380,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # erase real frame history rather than fail loudly.
     # Which cameras to process, and which targets each one gets, come from the
     # setups in the config file. Ids are passed explicitly to every pass:
-    # omitting them makes `process_target(None, ...)` walk the entire
+    # passing every target id to `process_targets_in_parallel` walks the entire
     # catalog, which would silently ignore a --target selection and
     # reprocess everything.
     camera_names = camera_pass_order(
@@ -1542,14 +1545,16 @@ def run_full_processing(argv: list[str] | None = None) -> None:
                 )
 
             # The full camera name is passed rather than a partial match:
-            # `process_target` matches it as a case-insensitive substring
+            # the batch matches it as a case-insensitive substring
             # against each frame's camera, so a partial string risks matching
             # more than one camera.
-            summary = astrometrics.processing.process_target(
+            summary = process_targets_in_parallel(
+                astrometrics.config,
                 runnable_ids,
                 camera_id=camera_name,
                 focal_length_mm=focal_length_mm,
                 on_item_complete=record_finished_target,
+                measured_at=datetime.now(UTC),
             )
             _print_pass_summary(f"{camera_name}{optic_label}", summary)
 
@@ -1558,10 +1563,11 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         print(f"\nWrote {row_count} row(s) to {arguments.review_list}.")
 
 
-# This guard is REQUIRED, not stylistic boilerplate: `process_target`, given
-# several targets, runs them across a `ProcessPoolExecutor`, and Python 3.14
-# on Linux defaults to the "forkserver" start method, which re-imports this
-# module inside every worker process. Without the guard, each worker
+# This guard is REQUIRED, not stylistic boilerplate:
+# `process_targets_in_parallel` runs the targets across a
+# `ProcessPoolExecutor`, and Python 3.14 on Linux defaults to the
+# "forkserver" start method, which re-imports this module inside every worker
+# process. Without the guard, each worker
 # re-executes the whole script body, tries to start its own worker pool, and
 # the run dies immediately with "An attempt has been made to start a new
 # process before the current process has finished its bootstrapping phase."

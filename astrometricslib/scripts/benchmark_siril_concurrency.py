@@ -128,12 +128,13 @@ def time_one_slot_count(
 
     worker_source = (
         "import json, sys, time;"
+        "from datetime import UTC, datetime;"
         f"sys.path.insert(0, {os.getcwd()!r});"
-        "from astrometricslib import Astrometrics;"
-        "a = Astrometrics();"
+        "from astrometricslib import get_configuration;"
+        "from astrometricslib.pipelines.target_batch import process_targets_in_parallel;"
         "t0 = time.monotonic();"
-        f"s = a.processing.process_target({target_ids!r}, camera_id={camera_name!r},"
-        f" focal_length_mm={focal_length_mm!r});"
+        f"s = process_targets_in_parallel(get_configuration(), {target_ids!r}, camera_id={camera_name!r},"
+        f" focal_length_mm={focal_length_mm!r}, measured_at=datetime.now(UTC));"
         "print('BENCHMARK_RESULT ' + json.dumps({"
         "'wall_seconds': round(time.monotonic() - t0, 1),"
         "'succeeded': len(s.succeeded), 'failed': len(s.failed)}))"

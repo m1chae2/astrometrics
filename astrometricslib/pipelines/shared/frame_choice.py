@@ -13,6 +13,9 @@ quietly leave frames out. Paths are matched against the target's own frames.
 `check_frame_list` is the one frame-list check: the list is not empty, and
 its frames come from one camera, one optic, and one kind (imaging or
 spectral). A stack and its prediction run it on an exact frame list.
+`check_frames` does both steps; it is public as
+`astrometricslib.arguments.check_frames`, so an adapter can refuse a frame
+choice before it starts a job.
 
 Every refusal is an `InvalidArgumentError` or a `NotFoundError`.
 """
@@ -28,7 +31,7 @@ from astrometricslib.pipelines.shared.camera_selection import ensure_single_came
 from astrometricslib.pipelines.shared.optic_selection import ensure_single_optic
 from astrometricslib.utilities.frame_identity import frame_is_spectral
 
-__all__ = ["FrameChoice", "check_frame_list", "frames_from_choice"]
+__all__ = ["FrameChoice", "check_frame_list", "check_frames", "frames_from_choice"]
 
 
 FrameChoice = Page[FrameRecord] | Sequence[FrameRecord] | Sequence[str | os.PathLike[str]]
@@ -135,3 +138,34 @@ def check_frame_list(frames: Sequence[FrameRecord], *, target_id: str | None = N
                 "spectral_frames": spectral_count,
             },
         )
+
+
+def check_frames(frames: FrameChoice, target: Target | None = None) -> list[FrameRecord]:
+    """Check a ``frames=`` argument as a pipeline run would, without running.
+
+    The check reads no frame file, so it is quick.
+
+    Parameters
+    ----------
+    frames : `FrameChoice`
+        A `Page` of frame records, a list of frame records, or a list of
+        file paths.
+    target : `Target`, optional
+        The target the frames belong to. Needed when ``frames`` holds paths.
+
+    Returns
+    -------
+    records : `list` [`FrameRecord`]
+        The frames, in the order given.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if ``frames`` is a page cut short, empty,
+    or of the wrong form, or its frames come from more than one camera or
+    optic, or mix imaging and spectral frames; the message names each group
+    and its count. Raises `NotFoundError` if a path is not one of the
+    target's frames.
+    """
+    records = frames_from_choice(frames, target)
+    check_frame_list(records, target_id=target.id if target is not None else None)
+    return records

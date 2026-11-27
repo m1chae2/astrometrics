@@ -249,7 +249,7 @@ class JobHandle:
         ----------
         slot : `contextlib.AbstractContextManager`
             The slot to take, such as the result of
-            ``ProcessingPipelines.acquire_job_slot()``.
+            ``acquire_resource_slot(config, "job", ...)``.
         working_message : `str`, optional
             The job's message once the slot is won. The work's own stage
             reports replace it.

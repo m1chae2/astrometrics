@@ -19,6 +19,12 @@ A target stacked with several cameras or optics keeps one imaging stack for
 each (``stacks_by_configuration``). A run can name one of those stacks; its
 own pictures are made again, and the target's main stack and its
 processed-image pointer stay as they were.
+
+`enhance_target` is the owner of `processing.enhancement.run`. It checks the
+run's settings, keeps a picture that is already up to date for its stack
+(unless forced), records a ``preview`` job that holds a job slot, makes the
+picture with `remake_stack_preview` and saves the target when the viewer
+shows the new picture.
 """
 
 import logging
@@ -279,3 +285,184 @@ def remake_stack_preview(
         color_preview_path=color_outcome.path if color_outcome is not None and color_outcome.made else None,
         color_preview_note=color_outcome.summary() if color_outcome is not None else None,
     )
+
+
+def _check_enhancement_settings(settings: Any) -> PreviewSettings:
+    """Check one run's picture choices and turn them into `PreviewSettings`.
+
+    Parameters
+    ----------
+    settings : `EnhancementSettings` or `None`
+        The choices. `None` uses the configured values.
+
+    Returns
+    -------
+    preview_settings : `PreviewSettings`
+        The same choices.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``denoise_strength``, ``star_strength`` or ``star_stretch`` is out
+        of range.
+    """
+    if settings is None:
+        return PreviewSettings()
+    if settings.denoise_strength is not None and not 0.0 <= settings.denoise_strength <= 1.0:
+        raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
+    if settings.star_strength is not None and not 0.0 <= settings.star_strength <= 1.0:
+        raise InvalidArgumentError("star_strength must be between 0 and 1.")
+    if settings.star_stretch is not None and not 1.0 <= settings.star_stretch <= 100000.0:
+        raise InvalidArgumentError("star_stretch must be between 1 and 100000.")
+    return PreviewSettings(
+        denoise=settings.denoise,
+        denoise_strength=settings.denoise_strength,
+        star_toning=settings.star_toning,
+        starnet=settings.starnet,
+        star_strength=settings.star_strength,
+        star_stretch=settings.star_stretch,
+    )
+
+
+def _stack_to_enhance(target: Any, stack_path: str | None) -> tuple[str | None, bool]:
+    """Find the stack a run makes the picture of, and whether it is spectral.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    stack_path : `str` or `None`
+        The stack the caller named, or `None`.
+
+    Returns
+    -------
+    stack_path : `str` or `None`
+        The stack: the one named, else the main imaging stack, else the
+        spectral stack. `None` when the target has neither.
+    spectral : `bool`
+        Whether it is the spectral stack.
+    """
+    spectral_stack = target.spectral_stacking.stacked_image or None
+    if stack_path:
+        is_spectral = bool(spectral_stack) and os.path.realpath(stack_path) == os.path.realpath(
+            spectral_stack
+        )
+        return stack_path, is_spectral
+    if target.stacking.stacked_image:
+        return target.stacking.stacked_image, False
+    return spectral_stack, spectral_stack is not None
+
+
+def _picture_is_current(stacked_path: str) -> bool:
+    """Say whether a stack's picture is up to date with the stack and settings.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The stack.
+
+    Returns
+    -------
+    current : `bool`
+        `True` when the picture exists, is newer than the stack, and was made
+        with the picture settings now in force (see
+        `preview_settings.preview_is_out_of_date`).
+    """
+    from astrometricslib.pipelines.stacking.post_processing.preview_settings import preview_is_out_of_date
+
+    picture = preview_path_for(stacked_path)
+    if not (os.path.isfile(picture) and os.path.isfile(stacked_path)):
+        return False
+    if os.path.getmtime(picture) < os.path.getmtime(stacked_path):
+        return False
+    return preview_is_out_of_date(stacked_path) is None
+
+
+def enhance_target(
+    target: Any,
+    settings: Any = None,
+    stack: Any = None,
+    *,
+    keep_previous: bool = True,
+    force: bool = False,
+    catalog: Any,
+    measured_at: datetime | None = None,
+) -> PreviewRemakeResult:
+    """Make a target's preview picture from its stack, as one recorded job.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target that owns the stack.
+    settings : `EnhancementSettings`, optional
+        Picture choices for this run. Left out, the configured values.
+    stack : `StackConfigurationResult` or `str`, optional
+        The stack: the main imaging stack (the default), the spectral stack,
+        or one of the target's stacks by camera and optic.
+    keep_previous : `bool`, optional
+        Copy the current pictures aside first. On by default.
+    force : `bool`, optional
+        Make the picture even when it is up to date. Without it, and with no
+        ``settings``, a picture newer than the stack and made with the
+        settings now in force is kept (``kept_unchanged`` in the result).
+    catalog : `TargetCatalog`
+        The target catalog: its settings, and the save of the target.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the notice rows.
+
+    Returns
+    -------
+    result : `PreviewRemakeResult`
+        Where the picture went and the steps that made it.
+
+    Raises
+    ------
+    NotFoundError
+        If the target has no stack, or its file is missing.
+    """
+    from astrometricslib.foundation.jobs.runner import current_job_id, registered_job
+    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
+    from astrometricslib.pipelines.pipeline_runs import stack_choice_path
+
+    preview_settings = _check_enhancement_settings(settings)
+    stacked_path, spectral = _stack_to_enhance(target, stack_choice_path(stack))
+    if not stacked_path:
+        raise NotFoundError(
+            f"Target '{target.id}' has no stack to make a picture of.", details={"target": target.id}
+        )
+    if not force and settings is None and _picture_is_current(stacked_path):
+        processed_path = processed_fits_path_for(stacked_path)
+        return PreviewRemakeResult(
+            target_id=target.id,
+            stack_path=stacked_path,
+            preview_path=preview_path_for(stacked_path),
+            processed_fits_path=processed_path if os.path.isfile(processed_path) else None,
+            preview_settings=_read_settings_record(stacked_path),
+            kept_unchanged=True,
+        )
+    config = catalog._config
+    slot = acquire_resource_slot(
+        config, "job", config.get_max_concurrent_jobs(), work_name=f"preview {target.id}"
+    )
+    # The job is recorded first, so a run waiting for a slot shows in the
+    # job list and returns its job id.
+    with (
+        registered_job(job_type="preview", target_id=target.id) as job,
+        job.holding_slot(slot, working_message="Making the preview"),
+    ):
+        result = remake_stack_preview(
+            target,
+            spectral,
+            preview_settings,
+            keep_previous,
+            job_id=current_job_id(),
+            measured_at=measured_at,
+            configuration=config,
+            stack_path=stacked_path,
+        )
+        # Not a final status: `registered_job` completes the job on the way
+        # out and keeps this message.
+        job.mark("running", 100, message="Preview made")
+    if result.shown_in_viewer:
+        catalog._save()
+    return result

@@ -16,7 +16,7 @@ The step is built to be undone:
   each frame came from and why it was moved (the rule, the frame's value and
   the limit, in plain words).
 - `restore_quarantined_frames` moves the frames back.
-- `ProcessingPipelines.predict_stack` shows which frames the step would
+- `processing.stacking.predict` shows which frames the step would
   move, without moving any.
 - It judges each frame against the other frames of its own session, camera,
   filter and exposure, so a poor night is not mistaken for a few bad frames.

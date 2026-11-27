@@ -1,10 +1,11 @@
-"""Data structures for what the processing methods report back.
+"""Data structures for what the processing pipelines take and report back.
 
-`ProcessingPipelines` stacks a target, makes its preview picture again, and
-runs the analysis stages. Each of those returns one of these structures, so a
-caller reads named fields instead of
-guessing at the keys of a dictionary.
+`ProcessingPipelines` holds one object per pipeline: stacking, enhancement
+(the preview picture), astrometry, photometry, spectroscopy and the asteroid
+search. Each run returns one of these structures, so a caller reads named
+fields instead of guessing at the keys of a dictionary.
 
+- `EnhancementSettings` holds the picture choices for one enhancement run.
 - `StackResult` says which frames were chosen, where the stack went and its
   quality summary.
 - `PreviewRemakeResult` says where the new preview picture went and which
@@ -20,7 +21,7 @@ guessing at the keys of a dictionary.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
@@ -29,6 +30,7 @@ from astrometricslib.models.target import PreviewBrightObject, TargetQualitySumm
 __all__ = [
     "BrightObjectChoice",
     "BrightObjectChoices",
+    "EnhancementSettings",
     "PredictedCalibration",
     "PredictedFrame",
     "PredictedGroup",
@@ -43,7 +45,7 @@ __all__ = [
 
 
 class StackResult(BaseModel):
-    """What one call of `ProcessingPipelines.stack` chose and made."""
+    """What one stacking run (`processing.stacking.run`) chose and made."""
 
     target_id: str
     # "imaging" or "spectral": the two are never stacked together.
@@ -145,8 +147,46 @@ class PreviewSettingsRecord(BaseModel):
     custom: bool = False
 
 
+class EnhancementSettings(BaseModel):
+    """Picture choices for one enhancement run that replace the settings.
+
+    Each field left as `None` uses the configured value. The values apply to
+    the run they are given to and are never written to the configuration.
+
+    Attributes
+    ----------
+    denoise : `bool` or `None`
+        `False` skips Cosmic Clarity. `True` runs it even if the settings
+        have it switched off.
+    denoise_strength : `float` or `None`
+        Cosmic Clarity's denoise strength, from 0 to 1.
+    star_toning : `bool` or `None`
+        Turn the star toning on or off.
+    starnet : `bool`
+        Stretch the stars and the rest of the picture on their own, using
+        StarNet through Siril. It adds about 35 to 55 seconds. The star
+        toning is not used with it, and a failed StarNet run gives the
+        normal picture. Off by default.
+    star_strength : `float` or `None`
+        With ``starnet``, how much of the stars layer is blended, from 0 to
+        1. Left out, 0.8.
+    star_stretch : `float` or `None`
+        With ``starnet``, the arcsinh strength of the stars' own stretch,
+        from 1 to 100000. Larger values lift fainter stars. Left out, 1000.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    denoise: bool | None = None
+    denoise_strength: float | None = None
+    star_toning: bool | None = None
+    starnet: bool = False
+    star_strength: float | None = None
+    star_stretch: float | None = None
+
+
 class PreviewRemakeResult(BaseModel):
-    """What one call of `ProcessingPipelines.remake_preview` made."""
+    """What one enhancement run (`processing.enhancement.run`) made."""
 
     target_id: str
     stack_path: str
@@ -170,6 +210,9 @@ class PreviewRemakeResult(BaseModel):
     # One sentence on the color picture: what it was made from, or why it
     # was not made. None for a spectral stack's remake.
     color_preview_note: str | None = None
+    # True when the picture was already up to date for this stack and its
+    # settings, so it was kept and nothing was made (``force`` remakes it).
+    kept_unchanged: bool = False
 
 
 class ProcessTargetResult(BaseModel):

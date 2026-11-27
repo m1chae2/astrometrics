@@ -25,7 +25,7 @@ from astrometricslib._internal.drivers.interfaces.reddening_driver import Redden
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib._internal.drivers.interfaces.stacking_driver import StackingDriver
 
-__all__ = ["Drivers"]
+__all__ = ["Drivers", "get_stacking_driver"]
 
 
 @dataclass(frozen=True)
@@ -144,3 +144,19 @@ class Drivers:
         )
 
         return AstroqueryGaiaReddeningDriver()
+
+
+def get_stacking_driver() -> StackingDriver:
+    """Give the built-in stacking program's driver (Siril).
+
+    The backend uses it for the two things a desktop app does with the
+    stacking program that are not a pipeline run: open a stack in Siril's
+    window (``open_in_viewer(path)``) and stop every Siril this program
+    started when the app stops (``stop_running_programs()``).
+
+    Returns
+    -------
+    engine : `StackingDriver`
+        A new `SirilStackingDriver`.
+    """
+    return Drivers().stacking_or_default()

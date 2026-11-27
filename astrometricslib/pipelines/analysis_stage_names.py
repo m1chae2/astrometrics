@@ -1,8 +1,8 @@
 """The names of the analysis stages, and which of them a caller may choose.
 
 This is the one list of stage names. `tasks.run_target_stages` runs them in
-this order, `ProcessingPipelines.process_target` checks a caller's stages
-against it, and the app and its AI tools offer the selectable subset. The
+this order, and `pipeline_runs` runs one of them for each pipeline's public
+``run``. The app and its AI tools offer the selectable subset. The
 module holds only names, so the public API can show the lists without loading
 the pipelines.
 """

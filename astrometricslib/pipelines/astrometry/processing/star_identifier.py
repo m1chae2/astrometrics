@@ -38,6 +38,7 @@ from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
 )
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.models.plate_solution import PlateSolution
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.astrometry.processing.gaia_depth import (
@@ -502,3 +503,45 @@ class StarIdentifier(PlateSolutionSteps):
         # keep the Star_N placeholder id from
         # _build_stellar_objects_from_sources -- it is at least unique
         # and non-empty.
+
+
+def solve_image(image_path: str, *, config: Any = None, drivers: Any = None) -> PlateSolution | None:
+    """Plate solve one image in memory and describe the solution.
+
+    This is the owner of `processing.astrometry.solve`. Nothing is written:
+    neither the image nor the catalog.
+
+    Parameters
+    ----------
+    image_path : `str`
+        The FITS file to solve.
+    config : `AppConfiguration`, optional
+        The settings.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver.
+
+    Returns
+    -------
+    solution : `PlateSolution` or `None`
+        The image center, pixel scale, rotation and the sky map's header
+        cards. `None` when the image cannot be read or too few stars are
+        found to try a solve. A solve that is tried and fails raises
+        `PlateSolveFailedError`.
+    """
+    from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+    from astrometricslib.pipelines.shared.header_wcs import describe_plate_solution
+
+    _, wcs = StarIdentifier(config=config, drivers=drivers).process_image(
+        image_path, attempt_plate_solving=True
+    )
+    if wcs is None:
+        return None
+    if wcs.pixel_shape:
+        width, height = wcs.pixel_shape
+    else:
+        try:
+            header = read_header(image_path, first_hdu_only=True)
+        except FITS_READ_ERRORS:
+            return None
+        width, height = int(header.get("NAXIS1", 0)), int(header.get("NAXIS2", 0))
+    return describe_plate_solution(image_path, wcs, int(width), int(height))

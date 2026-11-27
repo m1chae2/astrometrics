@@ -1,9 +1,10 @@
 """Purpose: Unit tests for job registration in the asteroid stage.
 
-Description: `ProcessingPipelines.process_target(stages=["asteroids"])` runs
-the asteroid search through the same entry point as the other stages. The
-run must show up in the job list, closed out correctly on both success and
-failure, so a search started from a script appears in the app.
+Description: `processing.asteroids.run(target)` runs the asteroid search
+through the same stage runner as the other pipelines. The run must show up in
+the job list, closed out correctly on both success and failure, so a search
+started from a script appears in the app. A script that wants other search
+settings passes them to the stage runner, which checks them before any work.
 """
 
 from collections.abc import Iterator
@@ -100,7 +101,7 @@ def test_a_successful_run_records_a_completed_job(
     logs_database_path, config = isolated_job_logging
     monkeypatch.setattr(AsteroidDetectionPipeline, "process", _fake_process_with_zero_candidates)
 
-    result = _pipelines(config).process_target(Target(id="AsteroidJobTarget"), stages=["asteroids"])
+    result = _pipelines(config).asteroids.run(Target(id="AsteroidJobTarget"))
 
     assert result.stages_run == ["asteroids"]
     jobs = _read_jobs(logs_database_path, "AsteroidJobTarget")
@@ -130,7 +131,7 @@ def test_a_failing_run_records_a_failed_job_and_still_raises(
     monkeypatch.setattr(AsteroidDetectionPipeline, "process", _explode)
 
     with pytest.raises(RuntimeError, match="pipeline blew up"):
-        _pipelines(config).process_target(Target(id="AsteroidJobFailureTarget"), stages=["asteroids"])
+        _pipelines(config).asteroids.run(Target(id="AsteroidJobFailureTarget"))
 
     jobs = _read_jobs(logs_database_path, "AsteroidJobFailureTarget")
     assert len(jobs) == 1
@@ -157,7 +158,7 @@ def test_the_api_supplies_the_time_so_the_analysis_run_stores_quality_rows(
     monkeypatch.setattr(quality_store, "get_configuration", lambda: config)
     monkeypatch.setattr(AsteroidDetectionPipeline, "process", _fake_process_with_zero_candidates)
 
-    _pipelines(config).process_target(Target(id="AsteroidQualityTarget"), stages=["asteroids"])
+    _pipelines(config).asteroids.run(Target(id="AsteroidQualityTarget"))
 
     store = QualityStore(str(library_path / "astrometrics.db"))
     rows = store.query(target_id="AsteroidQualityTarget", latest_only=False)
@@ -169,8 +170,11 @@ def test_the_api_supplies_the_time_so_the_analysis_run_stores_quality_rows(
 def test_a_dictionary_of_settings_reaches_the_pipeline(
     isolated_job_logging: tuple[str, AppConfiguration], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A settings dictionary given to `process_target` reaches the pipeline."""
-    _, config = isolated_job_logging
+    """A settings dictionary given to the stage runner reaches the pipeline."""
+    from unittest.mock import MagicMock
+
+    from astrometricslib.pipelines.tasks import run_target_stages
+
     seen: list[float] = []
 
     def remember_settings(self: AsteroidDetectionPipeline, *args: object, **kwargs: object) -> list:
@@ -186,10 +190,11 @@ def test_a_dictionary_of_settings_reaches_the_pipeline(
 
     monkeypatch.setattr(AsteroidDetectionPipeline, "process", remember_settings)
 
-    _pipelines(config).process_target(
+    run_target_stages(
         Target(id="AsteroidSettingsTarget"),
-        stages=["asteroids"],
-        asteroids={"moving_object_config": {"detection_threshold_sigma": 4.0}},
+        ("asteroids",),
+        {"asteroids": {"moving_object_config": {"detection_threshold_sigma": 4.0}}},
+        MagicMock(),
     )
 
     assert seen == [4.0]
@@ -205,14 +210,11 @@ def test_bad_settings_are_refused_before_any_work(
 ) -> None:
     """A misspelled key, a bad value or a non-dictionary is refused."""
     from astrometricslib.foundation.errors import InvalidArgumentError
+    from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options
 
-    logs_database_path, config = isolated_job_logging
+    logs_database_path, _unused_config = isolated_job_logging
 
     with pytest.raises(InvalidArgumentError):
-        _pipelines(config).process_target(
-            Target(id="AsteroidRefusedTarget"),
-            stages=["asteroids"],
-            asteroids={"moving_object_config": settings},
-        )
+        moving_object_config_from_options(settings)
 
     assert _read_jobs(logs_database_path, "AsteroidRefusedTarget") == []

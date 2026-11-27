@@ -43,19 +43,22 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 25 names:
+The package root holds 28 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
   `warm_earth_orientation_data`;
 - the sub-API classes, which you normally reach as attributes of
   `Astrometrics` (`TargetCatalog`, with its `TargetFrames`,
-  `StellarCatalog`, `ProcessingPipelines`, `CalibrationCatalog`,
-  `QualityRecords`, `Visualization` and `Observatories`);
+  `StellarCatalog`, `ProcessingPipelines`, with its `StackingPipeline`,
+  `CalibrationCatalog`, `QualityRecords`, `Visualization` and
+  `Observatories`);
 - the core records: `Target`, `FrameRecord`, `StellarObject` and
   `FilterType`;
-- the input model `CaptureSetting`, which says which calibration sets a
-  call means;
+- the input models: `CaptureSetting`, which says which calibration sets a
+  call means, `EnhancementSettings`, the picture choices of one
+  enhancement run, and `PreviewBrightObject`, the object a target's
+  picture protects;
 - the equipment: `ObservatoryConfiguration` and the models it is built
   from, `Telescope`, `Camera`, `GuideScope`, `Mount`, `Focuser` and
   `FilterWheel`.
@@ -109,13 +112,15 @@ from astrometricslib.models.observatory_configuration import (
     ObservatoryConfiguration,
     Telescope,
 )
+from astrometricslib.models.processing_results import EnhancementSettings
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.target import FrameRecord, PreviewBrightObject, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
 
 if TYPE_CHECKING:
     from astrometricslib._internal.drivers.driver_set import Drivers
+    from astrometricslib.api._processing_stacking import StackingPipeline
     from astrometricslib.api._target_frames import TargetFrames
     from astrometricslib.api.calibration import CalibrationCatalog
     from astrometricslib.api.jobs import Jobs
@@ -144,6 +149,7 @@ _DEFERRED_EXPORTS = {
     "Observatories": "astrometricslib.api.observatories",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityRecords": "astrometricslib.api.quality",
+    "StackingPipeline": "astrometricslib.api._processing_stacking",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
     "TargetFrames": "astrometricslib.api._target_frames",
@@ -297,6 +303,7 @@ __all__ = [
     "CalibrationCatalog",
     "Camera",
     "CaptureSetting",
+    "EnhancementSettings",
     "FilterType",
     "FilterWheel",
     "Focuser",
@@ -305,8 +312,10 @@ __all__ = [
     "Mount",
     "Observatories",
     "ObservatoryConfiguration",
+    "PreviewBrightObject",
     "ProcessingPipelines",
     "QualityRecords",
+    "StackingPipeline",
     "StellarCatalog",
     "StellarObject",
     "Target",

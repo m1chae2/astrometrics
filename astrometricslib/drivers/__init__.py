@@ -23,9 +23,12 @@ and the HEALPix sky-tile helpers (`tile_of_source_id`, `tiles_for_cone`,
 `pixel_source_id_range`, `build_pixel_query`), and `get_simbad_driver`, the
 SIMBAD driver every caller shares: it answers from the library's stored
 answers first and asks SIMBAD only when it must, and `get_gaia_archive`, the
-ESA Gaia archive connection (``launch_job`` and ``launch_job_async``). Both
-send every request through the outside-service gateway, which applies one rate
-limit and one pause rule to each service host. `header_is_plate_solved` says
+ESA Gaia archive connection (``launch_job`` and ``launch_job_async``), and
+`get_stacking_driver`, the built-in stacking program (Siril), which opens a
+stack in Siril's window and stops the Siril runs this program started. The
+SIMBAD driver and the Gaia archive send every request through the
+outside-service gateway, which applies one rate limit and one pause rule to
+each service host. `header_is_plate_solved` says
 whether a FITS header's sky map came from a plate solve, not from the place
 the mount was told to point; the library, the backend and the Planetarium all
 use this one test.
@@ -35,6 +38,7 @@ Each name here is imported from the module where its code lives today.
 """
 
 from astrometricslib._internal.drivers.cached_simbad_driver import get_simbad_driver
+from astrometricslib._internal.drivers.driver_set import get_stacking_driver
 from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
 from astrometricslib._internal.drivers.outside_services import get_gaia_archive
 from astrometricslib._internal.drivers.sky_tiles import (
@@ -106,6 +110,7 @@ __all__ = [
     "get_library_data_version",
     "get_simbad_driver",
     "get_stack_quality_data_version",
+    "get_stacking_driver",
     "get_target_camera_names",
     "get_target_data_version",
     "get_target_document_signs",

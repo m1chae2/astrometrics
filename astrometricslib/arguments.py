@@ -13,6 +13,8 @@ way.
   it works with ``for``, ``len`` and indexing.
 * `FrameChoice`: the ``frames=`` argument, a `Page` of frame records, a list
   of frame records or a list of paths. A page cut short is refused.
+  `check_frames` checks one as a pipeline run would (one camera, one optic,
+  one kind), without reading a frame.
 * `check_choice`, `check_include`, `check_limit` and
   `reject_unused_arguments`: the argument checks, each raising
   `InvalidArgumentError`.
@@ -30,7 +32,7 @@ from astrometricslib.foundation.arguments import (
     to_epoch_seconds,
 )
 from astrometricslib.models.page import Page
-from astrometricslib.pipelines.shared.frame_choice import FrameChoice
+from astrometricslib.pipelines.shared.frame_choice import FrameChoice, check_frames
 from astrometricslib.utilities.observing_night import observing_night_id
 
 __all__ = [
@@ -38,6 +40,7 @@ __all__ = [
     "Page",
     "TimeInput",
     "check_choice",
+    "check_frames",
     "check_include",
     "check_limit",
     "observing_night_id",

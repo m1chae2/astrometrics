@@ -64,6 +64,7 @@ def stack_frames(
     drivers: Drivers | None = None,
     measured_at: datetime | None = None,
     quality_recording: FrameQualityRecording | None = None,
+    make_preview: bool = True,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -118,6 +119,10 @@ def stack_frames(
         for the frame quality rows. The stage stores them only for an imaging
         stack with the quarantine step turned on, and only when both this and
         ``measured_at`` are given. Left out (tests), none are stored.
+    make_preview : `bool`, optional
+        Make the stack's preview picture too (on by default, as the batch
+        does). The public stacking run turns it off, because the
+        enhancement pipeline makes the picture.
 
     Returns
     -------
@@ -154,6 +159,7 @@ def stack_frames(
             drivers,
             measured_at,
             quality_recording,
+            make_preview=make_preview,
         )
 
 
@@ -173,6 +179,8 @@ def _stack_frames_guarded(
     drivers: Drivers | None = None,
     measured_at: datetime | None = None,
     quality_recording: FrameQualityRecording | None = None,
+    *,
+    make_preview: bool = True,
 ) -> str | None:
     """Do the work of `stack_frames` while the target's guard is held.
 
@@ -210,6 +218,7 @@ def _stack_frames_guarded(
         drivers,
         measured_at,
         quality_recording,
+        make_preview=make_preview,
     )
     # Each `begin_stage` writes one "Stage N of M" line to the job's log and
     # moves the job's progress (see `stage_progress.py`).
@@ -233,9 +242,12 @@ def _stack_frames_guarded(
             _save_stack_plate_solution(run, run.stacked_path)
             _record_stack_star_shapes(run, run.stacked_path, only_if_missing=True)
             was_turned = _turn_stack_north_up(run, run.stacked_path)
-            _remake_preview_if_out_of_date(
-                run, "the stack was turned so that north is near the top" if was_turned else None
-            )
+            if run.make_preview:
+                _remake_preview_if_out_of_date(
+                    run, "the stack was turned so that north is near the top" if was_turned else None
+                )
+            else:
+                skip_remaining_stages("the stack is already up to date")
             finish_stages()
             return run.stacked_path
         begin_stage(
@@ -666,8 +678,11 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     raise_if_abandoned()
     # The quality rows above are measured on the stack as Siril registered it.
     _turn_stack_north_up(run, stacked_path)
-    begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
-    _make_preview(run, stacked_path)  # run.preview_path
+    if run.make_preview:
+        begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
+        _make_preview(run, stacked_path)  # run.preview_path
+    else:
+        skip_stage(PREVIEW_STAGE, "the enhancement pipeline makes the picture")
     _save_stack_inputs(run, stacked_path)
     _log_finished_stack(run)
 
@@ -1259,7 +1274,8 @@ def _log_finished_stack(run: StackRun) -> None:
         "Stack of '%s' finished: stack %s; preview %s; %d frames submitted, %d set aside.",
         run.target.id,
         run.stacked_path,
-        run.preview_path or "not made (see the warning above)",
+        run.preview_path
+        or ("not made (see the warning above)" if run.make_preview else "left to the enhancement pipeline"),
         run.frames_submitted,
         len(run.excluded_frames),
     )

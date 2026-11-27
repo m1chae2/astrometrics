@@ -119,7 +119,7 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     PlateSolveFailedError
         If the star pattern could not be matched.
     """
-    solution = context.astrometrics.processing.plate_solve(str(path))
+    solution = context.astrometrics.processing.astrometry.solve(str(path))
     if solution is None:
         raise PlateSolveFailedError(f"No plate solution for {path.name}.")
     return solution.ra_deg, solution.dec_deg

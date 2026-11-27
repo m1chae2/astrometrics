@@ -37,7 +37,7 @@ def make_service(calls: list[dict[str, Any]]) -> StackReviewService:
     frames = [SimpleNamespace(path=f"/lights/L_{number}.fits") for number in (1, 2, 3)]
     frames.append(SimpleNamespace(path="/lights/SPEC_1.fits", is_spectral=True))
 
-    def predict_stack(target: str, **options: Any) -> StackPrediction:
+    def predict_stack(target: Any, **options: Any) -> StackPrediction:
         """Record a checked call, or refuse a mixed list as the library does.
 
         With ``checks=False`` only the frame list is checked and nothing is
@@ -61,15 +61,20 @@ def make_service(calls: list[dict[str, Any]]) -> StackReviewService:
                     f"These frames mix imaging and spectral frames ({len(frames) - spectral} imaging, "
                     f"{spectral} spectral). Select only one kind and stack again."
                 )
+            # The frame-list check gets the target the service looked up.
             return StackPrediction(
-                target_id=target, kind="imaging", frames_selected=len(frames), frames_kept=0
+                target_id=target.id, kind="imaging", frames_selected=len(frames), frames_kept=0
             )
         calls.append({"target": target, **options})
         return StackPrediction(target_id=target, kind="imaging", frames_selected=3, frames_kept=3)
 
     astrometrics = SimpleNamespace(
         processing=SimpleNamespace(predict_stack=predict_stack),
-        targets=SimpleNamespace(get=lambda target_id: SimpleNamespace(frames=frames) if target_id else None),
+        targets=SimpleNamespace(
+            get=lambda target_id, refresh=False: (
+                SimpleNamespace(id=target_id, frames=frames) if target_id else None
+            )
+        ),
     )
     return StackReviewService(astrometrics)
 

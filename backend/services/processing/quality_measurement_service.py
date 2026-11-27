@@ -37,6 +37,7 @@ from typing import Any, Protocol
 
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import QualityMeasurement
+from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ class QualityMeasurementService:
         suggestion_trigger: Callable[[list[str]], None] | None = None,
     ) -> None:
         self._astrometrics = astrometrics
+        self._subjects = SubjectResolver(astrometrics)
         self._socket_manager = socket_manager
         self._suggestion_trigger = suggestion_trigger
 
@@ -190,7 +192,9 @@ class QualityMeasurementService:
         def run() -> None:
             """Measure the frames; the top of a background thread."""
             try:
-                summary = self._astrometrics.quality.record_frame_measurements(target_id, limit=limit)
+                summary = self._astrometrics.quality.record_frame_measurements(
+                    self._subjects.target(target_id), limit=limit
+                )
             except AstrometricsError as error:
                 logger.warning(
                     "Measuring the frames of %s failed (%s): %s", target_id, error.code, error.message
@@ -272,7 +276,9 @@ class QualityMeasurementService:
             counts : `tuple` [`int`, `list` [`str`]]
                 The rows written and the observing nights they belong to.
             """
-            result = self._astrometrics.processing.measure_noise(target_id, kind=kind, **options)
+            result = self._astrometrics.processing.measure_noise(
+                self._subjects.target(target_id), kind=kind, **options
+            )
             if kind == "night_contributions":
                 return result.rows_written, sorted(entry.night_id for entry in result.nights)
             if kind == "odd_even_difference":

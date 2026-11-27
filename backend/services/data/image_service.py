@@ -138,7 +138,12 @@ class ImageService:
             The picture as a data URL, with its brightness range.
         """
         picture = self._astrometrics.visualization.render_fits(
-            target=target_id, iso=iso, exposure=exposure, index=index, stretch=stretch, kind="data_url"
+            target=self.target_service.subjects.target(target_id),
+            iso=iso,
+            exposure=exposure,
+            index=index,
+            stretch=stretch,
+            kind="data_url",
         )
         return _viewer_payload(picture)
 
@@ -150,7 +155,9 @@ class ImageService:
         path : `str`
             Filesystem path of the matching frame.
         """
-        return self._astrometrics.targets.get_frame(target_id, iso, exposure, index)
+        return self._astrometrics.targets.get_frame(
+            self.target_service.subjects.target(target_id), iso, exposure, index
+        )
 
     def _resolve(self, path: str) -> str:
         """Give the real path of an image the app sent, in the allowed folders.

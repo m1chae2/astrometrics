@@ -18,8 +18,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import TargetCatalog
-from astrometricslib.exceptions import InvalidArgumentError, StorageError
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, StorageError
 from backend.services.coordinate_text import parse_coordinate_text
+from backend.services.error_logging import log_failure
 from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,8 @@ class AlignmentService:
                 logger.info(
                     "Centering on RA=%s, DEC=%s finished; centered: %s", target_ra, target_dec, centered
                 )
+            except AstrometricsError as error:
+                log_failure(logger, error, "Centering on RA=%s, DEC=%s failed", target_ra, target_dec)
             except Exception:  # the top of a background thread: log it, never lose it
                 logger.exception("Centering on RA=%s, DEC=%s failed", target_ra, target_dec)
 

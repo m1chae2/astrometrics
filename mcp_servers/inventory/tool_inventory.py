@@ -36,10 +36,10 @@ from typing import Any
 
 from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
-    DECISIONS,
     DISPOSITIONS,
     INTERIM_BLOCKS,
     categorize_tool,
+    decision_for,
     find_problems,
 )
 
@@ -622,11 +622,12 @@ def apply_decisions(record: ToolRecord) -> None:
     ----------
     record : `ToolRecord`
         The record to update in place. It already has a drafted class. A
-        tool with no row in ``DECISIONS`` stays ``undecided``, so no
+        tool with no row in ``DECISIONS`` (under its name, or under an old
+        name that ``TOOL_RENAMES`` maps to it) stays ``undecided``, so no
         client gets it.
     """
     record.interim_block = INTERIM_BLOCKS.get(record.name, "")
-    decision = DECISIONS.get(record.name)
+    decision = decision_for(record.name)
     if decision:
         record.note = decision.note
         record.disposition = decision.disposition

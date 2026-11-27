@@ -10,6 +10,7 @@ from typing import Any
 
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment, run_as_background_job
+from backend.services.error_logging import log_failure
 from backend.services.infrastructure.base_service import BaseBackgroundService
 from backend.services.processing.stack_review_service import abandon_preview_job, is_preview_job_running
 
@@ -337,8 +338,8 @@ class ImageProcessingService(BaseBackgroundService):
         try:
             self._processing_api.open_in_siril(path)
             return True
-        except AstrometricsError, OSError, ValueError:
-            logger.exception("Failed to launch Siril for %s", target_id)
+        except (AstrometricsError, OSError, ValueError) as error:
+            log_failure(logger, error, "Failed to launch Siril for %s", target_id)
             return False
 
     def _refuse_unusable_frame_list(self, target_id: str, image_files: list | None) -> None:
@@ -373,7 +374,7 @@ class ImageProcessingService(BaseBackgroundService):
         wanted = {item if isinstance(item, str) else item.get("path") for item in image_files}
         frames = [frame for frame in target.frames if frame.path in wanted]
         if frames:
-            self._processing_api.predict_stack(target_id, frames=frames, checks=False)
+            self._processing_api.predict_stack(target, frames=frames, checks=False)
 
     def stack_target(
         self,
@@ -730,8 +731,8 @@ def start_siril_processing_task(
             # still waiting for a slot, and its status stays "cancelled".
             logger.info("Stacking %s was cancelled.", target_id)
             return None
-        except ProcessingError:
-            logger.exception("Stacking %s made no stack", target_id)
+        except ProcessingError as error:
+            log_failure(logger, error, "Stacking %s made no stack", target_id)
             final_path = None
         finally:
             with _stack_abandonments_lock:

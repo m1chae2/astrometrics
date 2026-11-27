@@ -31,6 +31,7 @@ from astrometricslib.jobs import (
     report_started_jobs,
     run_as_background_job,
 )
+from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ class StackReviewService:
 
     def __init__(self, astrometrics: Any, wait_seconds: float = DEFAULT_WAIT_SECONDS) -> None:
         self._astrometrics = astrometrics
+        self._subjects = SubjectResolver(astrometrics)
         self._wait_seconds = wait_seconds
 
     def _start(self, work: Callable[[], Any]) -> StackReviewStart:
@@ -243,7 +245,9 @@ class StackReviewService:
                     "a spectral stack (spectral stacks are kept only for the main configuration).",
                     details={"target_id": target_id, "kind": kind},
                 )
-            record = processing.find_stack_configuration(target_id, camera_id, focal_length_mm)
+            record = processing.find_stack_configuration(
+                self._subjects.target(target_id), camera_id, focal_length_mm
+            )
             stack_path = record.stacked_image
             configuration_key = record.configuration_key
 
@@ -394,7 +398,7 @@ class StackReviewService:
             # The frame choice alone runs the library's frame-list checks
             # (for example a mix of imaging and spectral frames) and reads no
             # frame, so a bad list is refused before a job starts.
-            processing.predict_stack(target_id, frames=frames, checks=False)
+            processing.predict_stack(self._subjects.target(target_id), frames=frames, checks=False)
         return self._start(
             lambda: processing.predict_stack(
                 target_id,

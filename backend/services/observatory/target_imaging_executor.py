@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib.arguments import observing_night_id
+from astrometricslib.exceptions import AstrometricsError
+from backend.services.error_logging import log_failure
 from backend.services.observatory.plan_service import PlanService
 from wayfindinglib import ObservationSession, Wayfinder
 
@@ -294,6 +296,8 @@ class TargetImagingExecutor:
                 session = self._wayfinder.execution.advance_session(session_id, stop=self._stop)
                 if session is not None:
                     logger.info("Sequencer stopped: %s %s", session.status, session.status_detail)
+            except AstrometricsError as error:
+                log_failure(logger, error, "Imaging loop stopped")
             except Exception:  # the top of a background thread: log it, never lose it
                 logger.exception("Imaging loop crashed")
 

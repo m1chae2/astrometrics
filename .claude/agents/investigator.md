@@ -6,6 +6,8 @@ tools:
   - mcp__astrometricslib-core__calibration_camera_profile
   - mcp__astrometricslib-core__calibration_query
   - mcp__astrometricslib-core__jobs_query
+  - mcp__astrometricslib-core__observatory_configuration_get
+  - mcp__astrometricslib-core__observatory_configuration_query
   - mcp__astrometricslib-core__processing_find_stack_configuration
   - mcp__astrometricslib-core__processing_get_stack_identification
   - mcp__astrometricslib-core__processing_plate_solve
@@ -40,6 +42,7 @@ tools:
   - mcp__astrometricslib-core__typegen_contract_validator
   - mcp__astrometricslib-core__visualization_plot
   - mcp__astrometricslib-core__visualization_render_fits
+  - mcp__wayfindinglib-core__observatory_equipment_get_active
   - mcp__wayfindinglib-core__observatory_equipment_status
   - mcp__wayfindinglib-core__observatory_guiding_query_calibrations
   - mcp__wayfindinglib-core__observatory_guiding_status

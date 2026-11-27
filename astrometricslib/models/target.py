@@ -29,6 +29,7 @@ __all__ = [
     "FitsHeaderEntry",
     "FrameMeasurements",
     "FrameRecord",
+    "ImageCrop",
     "ImageType",
     "RenderedImage",
     "StretchParameters",
@@ -36,7 +37,6 @@ __all__ = [
     "TargetObjectType",
     "TargetQualitySummaries",
     "TargetStackingResult",
-    "ViewableImage",
 ]
 
 
@@ -716,43 +716,96 @@ class StretchParameters(BaseModel):
     midtones: float = Field(alias="midtones")
 
 
+class ImageCrop(BaseModel):
+    """The piece of an image a picture shows, in full-image pixels.
+
+    Attributes
+    ----------
+    left_px, top_px : `int`
+        The column and row of the piece's first pixel, counted from 1.
+    width_px, height_px : `int`
+        The piece's size in pixels.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    left_px: int
+    top_px: int
+    width_px: int
+    height_px: int
+
+
 class RenderedImage(BaseModel):
-    """A finished picture ready to display in the app, plus brightness stats.
+    """A picture of an image, as the bytes of a PNG or JPEG file.
 
-    `Visualization.render_fits(kind="data_url")` returns it.
+    `Visualization.render` returns it. A Jupyter notebook shows it as a
+    picture. A client that needs text, such as a web page, turns
+    ``picture`` into a data URL itself.
+
+    Attributes
+    ----------
+    picture : `bytes`
+        The picture file.
+    media_type : `str`
+        ``"image/png"``, or ``"image/jpeg"`` for the stretched picture the
+        enhancement stage saved beside a stack.
+    path : `str` or `None`
+        The file that was drawn, or `None` for an array.
+    black, white : `float`
+        The pixel values drawn black and white. 0 and 255 for the saved
+        JPEG picture.
+    width_px, height_px : `int`
+        The picture's size.
+    full_width_px, full_height_px : `int` or `None`
+        The whole image's size. `None` for the saved JPEG picture.
+    crop : `ImageCrop` or `None`
+        The piece of the image shown, or `None` for the whole image.
+    stretched : `bool`
+        Whether the automatic stretch (or the saved stretched picture) was
+        used.
+    stretch_parameters : `StretchParameters` or `None`
+        The automatic stretch the picture was drawn with, or `None` when it
+        was drawn without one (a manual range, a linear view, an image with
+        no measurable sky, or the saved JPEG picture).
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(frozen=True)
 
-    # What the picture shows, such as the target id or the frame's folder.
-    id: str = Field(default="", alias="id")
-    # The brightness range shown, in pixel values (0 and 255 for a JPEG).
-    min: float = Field(alias="min")
-    max: float = Field(alias="max")
-    # The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
-    image_data: str = Field(alias="imageData")
-    # The FITS header of the file that was drawn.
-    headers: list[FitsHeaderEntry] = Field(default_factory=list, alias="headers")
-    # The file that was drawn.
-    path: str | None = Field(default=None, alias="path")
-    # The automatic stretch the picture was drawn with, or `None` when it
-    # was drawn without one (a manual range, a linear view, an image with
-    # no measurable sky, or Siril's own preview picture).
-    stretch_parameters: StretchParameters | None = Field(default=None, alias="stretchParameters")
-
-
-class ViewableImage(BaseModel):
-    """A picture a client should show as an image, not as text.
-
-    `Visualization.render_fits(kind="image")` returns it. It holds the PNG
-    picture and a text description to show beside it.
-    """
-
-    # The PNG file.
-    png_bytes: bytes
-    # What the picture shows: the file, the brightness range, the size and
-    # the crop.
-    description: dict[str, Any] = Field(default_factory=dict)
-    # The automatic stretch the picture was drawn with, or `None` when it
-    # was drawn without one.
+    picture: bytes
+    media_type: str = "image/png"
+    path: str | None = None
+    black: float
+    white: float
+    width_px: int
+    height_px: int
+    full_width_px: int | None = None
+    full_height_px: int | None = None
+    crop: ImageCrop | None = None
+    stretched: bool = True
     stretch_parameters: StretchParameters | None = None
+
+    def __repr__(self) -> str:
+        """Describe the picture in one short line.
+
+        Returns
+        -------
+        text : `str`
+            The file name, the picture's size and its type.
+        """
+        name = self.path.replace("\\", "/").rsplit("/", 1)[-1] if self.path else "array"
+        return f"RenderedImage({name!r}, {self.width_px}x{self.height_px} px, {self.media_type})"
+
+    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, bytes]:
+        """Let Jupyter show the picture itself.
+
+        Parameters
+        ----------
+        include, exclude : `Any`, optional
+            Jupyter's choice of formats. Not used.
+
+        Returns
+        -------
+        bundle : `dict` [`str`, `bytes`]
+            The picture under its media type.
+        """
+        return {self.media_type: self.picture}

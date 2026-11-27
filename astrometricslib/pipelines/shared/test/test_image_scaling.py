@@ -202,7 +202,7 @@ def test_an_image_without_sky_has_no_autostretch_parameters() -> None:
 
 
 def test_the_viewer_pictures_carry_the_stretch(tmp_path: Path) -> None:
-    """Both picture kinds report the stretch; a manual range reports none."""
+    """Whole and zoomed pictures report the stretch; a manual range not."""
     from astropy.io import fits
 
     from astrometricslib.pipelines.shared import image_conversions
@@ -210,14 +210,13 @@ def test_the_viewer_pictures_carry_the_stretch(tmp_path: Path) -> None:
     path = str(tmp_path / "sky.fits")
     fits.PrimaryHDU(_sky_with_stars().astype(np.float32)).writeto(path)
 
-    viewable = image_conversions.render_viewable_image(path, 200, True, None, None, None)
-    assert viewable.stretch_parameters is not None
-    assert 0.0 < viewable.stretch_parameters.midtones < 0.5
-    rendered = image_conversions.render_data_url(path, max_dimensions=200)
-    assert rendered.model_dump(by_alias=True)["stretchParameters"]["blackPoint"] == pytest.approx(
-        viewable.stretch_parameters.black_point
-    )
-    manual = image_conversions.render_viewable_image(path, 200, True, 100.0, 50.0, None)
+    zoomed = image_conversions.render_image(path, crop=(25, 25, 40), max_dimensions=200)
+    assert zoomed.stretch_parameters is not None
+    assert 0.0 < zoomed.stretch_parameters.midtones < 0.5
+    whole = image_conversions.render_image(path, max_dimensions=200)
+    assert whole.stretch_parameters is not None
+    assert 0.0 < whole.stretch_parameters.midtones < 0.5
+    manual = image_conversions.render_image(path, brightness=(75.0, 125.0), max_dimensions=200)
     assert manual.stretch_parameters is None
 
 

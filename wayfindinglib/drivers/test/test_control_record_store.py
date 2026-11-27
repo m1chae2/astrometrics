@@ -14,8 +14,9 @@ from typing import Any
 
 import pytest
 
+from astrometricslib._internal.parameters import parameter_context, record_basis
 from astrometricslib.exceptions import InvalidArgumentError, StorageError
-from astrometricslib.parameters import RunBasis, parameter_context, record_basis, resolve_parameter
+from astrometricslib.parameters import RunBasis, resolve_parameter
 from wayfindinglib.drivers.control_record_store import SPURIOUS_ALIGNMENT_ERROR_ARCSEC, ControlRecordStore
 
 

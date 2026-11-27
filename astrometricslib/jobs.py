@@ -1,14 +1,21 @@
 """Purpose: Job tracking and the logging context of a job.
 
 Description: The `Jobs` class that `Astrometrics.jobs` is an instance of, the
-job store and its records, the decorators and helpers that run a function as a
-tracked background job, the switch that gives up on a running job
-(`RunAbandonment`), the program identity that a job records as its owner
-(`current_process_identity`, `process_is_alive`), and the logging context,
-including the marker for background work. Each name is imported from the
-module where its code lives today.
+job store and its records, the job context tools (`registered_job`,
+`running_as_job`, `get_current_job`, `report_started_jobs` and the
+`background_job` marker that tells a client a method is slow), the switch that
+gives up on a running job (`RunAbandonment`, `raise_if_abandoned`), the program
+identity that a job records as its owner (`current_process_identity`,
+`process_is_alive`), and the logging context, including the marker for
+background work. A pipeline run records a job whoever starts it; a client that
+wants a slow call to answer with a job id runs it in a thread of its own
+around these tools. Each name is imported from the module where its code lives
+today.
 """
 
+from typing import NoReturn
+
+from astrometricslib._internal.renames import moved_module_name
 from astrometricslib.api.jobs import Jobs
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
@@ -19,7 +26,6 @@ from astrometricslib.foundation.jobs.runner import (
     get_current_job,
     registered_job,
     report_started_jobs,
-    run_as_background_job,
     running_as_job,
 )
 from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
@@ -57,6 +63,21 @@ __all__ = [
     "raise_if_abandoned",
     "registered_job",
     "report_started_jobs",
-    "run_as_background_job",
     "running_as_job",
 ]
+
+
+def __getattr__(name: str) -> NoReturn:
+    """Refuse a name this module no longer offers, saying where it went.
+
+    Parameters
+    ----------
+    name : `str`
+        The name that was read.
+
+    Notes
+    -----
+    Always raises: an `ImportError` that says where the name went for a
+    name in the rename table, and an `AttributeError` for any other name.
+    """
+    moved_module_name(__name__, name)

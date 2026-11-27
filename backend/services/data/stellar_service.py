@@ -29,7 +29,6 @@ from astrometricslib.drivers import (
 )
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
-from backend.services.data.stack_sky_pictures import StackSkyPictures
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
 
 logger = logging.getLogger(__name__)
@@ -172,7 +171,6 @@ class StellarService:
         # RPC worker thread, and shares identical concurrent ones.
         self._heavy_reads = HeavyReadLimiter()
         self._socket_manager = None
-        self._stack_sky_pictures = StackSkyPictures(self.astrometrics, resolve_mounted_path)
 
     def set_socket_manager(self, socket_manager: Any) -> None:
         """Give this service a socket manager to notify the UI through.
@@ -704,8 +702,9 @@ class StellarService:
 
         For the Planetarium's Images layer. A target is listed only when it
         has a stretched stack with a plate solution and a picture file; the
-        rest are left out. Each stack's header is read once and kept until
-        the stack or its picture changes (see `StackSkyPictures`).
+        rest are left out. The library reads each stack's header once and
+        keeps the answer until the stack or its picture changes
+        (`Visualization.get_sky_picture`).
 
         Returns
         -------
@@ -717,9 +716,9 @@ class StellarService:
         """
         pictures = []
         for target in self.astrometrics.targets.query(include_empty=True).items:
-            entry = self._stack_sky_pictures.entry_for(target)
-            if entry is not None:
-                pictures.append(entry)
+            placement = self.astrometrics.visualization.get_sky_picture(target)
+            if placement is not None:
+                pictures.append({**placement.model_dump(by_alias=True), "targetId": target.id})
         return pictures
 
     def save_objects(self) -> str:

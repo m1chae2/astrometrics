@@ -2577,7 +2577,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  answer = astro.jobs.query(job_id="<job id>", detail="warnings")
+  answer = astro.jobs.get_warnings(astro.jobs.get("<job id>", required=True))
   print(answer.measurement_count, answer.checks_not_run_count)
   for warning in answer.warnings:
       print(
@@ -2585,7 +2585,7 @@ Every Python example assumes the library is installed and configured with your o
       )
   ```
 
-  `Jobs.query` lists the stored rows of the job whose check failed. An empty list with a nonzero `measurement_count` means the job was checked and nothing failed; a zero count means the job stored no rows; an unknown id raises `NotFoundError`. <!-- impl: astrometricslib.api.jobs.Jobs.query -->
+  `Jobs.get_warnings` lists the stored rows of the job whose check failed. An empty list with a nonzero `measurement_count` means the job was checked and nothing failed; a zero count means the job stored no rows; an unknown id raises `NotFoundError`. <!-- impl: astrometricslib.api.jobs.Jobs.get_warnings -->
 - **Acceptance criterion:** Each flag reason stored in a summary from before the field was removed appears as the reason of a warning row of the same pipeline. The comparison script `wayfindinglib/scripts/shadow_compare_verdicts.py` reads the reasons from the raw stored JSON, since the models no longer have the field, checks this word for word and counts the reasons that have no row.
 - **What to look at:** The count of flag reasons with no warning row in the script's report, separated into old data (stored before the notice rows existed) and rows that should exist.
 - **Our result:** Code: this change (issue 97, phase 1b). Unit tests on made-up rows show each notice is stored with the outcome `failed`, a limit of zero and the job id, and that the abandoned-stack row carries the time budget as its limit. The comparison on the data copy is reported in the pull request; stored summaries there predate the notice rows. Not measured: a restack that stores the rows.

@@ -1,10 +1,13 @@
 """Purpose: Unit tests for plot_target_dashboard and helpers.
 
 Description: Verifies standalone stellar plotting, target plotting,
-error checking, and layout generation.
+error checking, and layout generation. The target charts read their stars
+from the catalog storage through the star query owner; here a stand-in
+storage answers that query with its own ``query`` return value.
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
@@ -23,6 +26,30 @@ from astrometricslib.visualization.helpers import (
     plot_target_dashboard,
     plot_target_spectroscopy,
 )
+
+
+@pytest.fixture(autouse=True)
+def stars_from_the_stand_in_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer the star query owner from the stand-in storage's ``query``.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the owner for the test.
+    """
+    from astrometricslib.pipelines.shared import star_catalog_queries
+
+    def query(storage: Any, filters: Any, **_: Any) -> list:
+        """Give the stars the stand-in storage holds.
+
+        Returns
+        -------
+        stars : `list`
+            The stand-in's ``query`` return value.
+        """
+        return list(storage.query())
+
+    monkeypatch.setattr(star_catalog_queries, "query_stars", query)
 
 
 def test_plot_stellar_photometry_renders_light_curve() -> None:

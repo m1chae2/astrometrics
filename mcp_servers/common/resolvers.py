@@ -1,13 +1,13 @@
 """Purpose: Turn the id a client sends into the library object a method takes.
 
 Description: A client sends only JSON, so it names a target, a star, an
-observing session, an observation package or an observatory configuration by
-its id. The library's public methods work on the objects themselves
+observing session, an observation package, an observatory configuration or a
+job by its id. The library's public methods work on the objects themselves
 (`Target`, `StellarObject`, `ObservationSession`, `ObservationPackage`,
-`ObservatoryConfiguration`). This module is the one place that turns an id
-into its object for the MCP tools. It looks the id up through the libraries'
-public API (``targets.get``, ``stars.get``,
-``observatories.configurations.get``, ``planning.get_plan``,
+`ObservatoryConfiguration`, `JobSummary`). This module is the one place that
+turns an id into its object for the MCP tools. It looks the id up through the
+libraries' public API (``targets.get``, ``stars.get``,
+``observatories.configurations.get``, ``jobs.get``, ``planning.get_plan``,
 ``planning.query_plans``).
 
 `SUBJECT_KINDS` is the table: one row per object type, keyed by the type's
@@ -106,6 +106,24 @@ def _find_star(api_root: Any, star_id: str) -> Any:
         The star, or `None`.
     """
     return _astrometrics(api_root).stars.get(star_id)
+
+
+def _find_job(api_root: Any, job_id: str) -> Any:
+    """Look up a recorded job by id.
+
+    Parameters
+    ----------
+    api_root : `Astrometrics` or `Wayfinder`
+        The server's API object.
+    job_id : `str`
+        The job's id.
+
+    Returns
+    -------
+    job : `JobSummary` or `None`
+        The job, or `None`.
+    """
+    return _astrometrics(api_root).jobs.get(job_id)
 
 
 def _find_session(api_root: Any, session_id: str) -> Any:
@@ -229,6 +247,7 @@ SUBJECT_KINDS: dict[tuple[str, str], SubjectKind] = {
             "astrometricslib", "ObservatoryConfiguration", "observatory configuration", _find_configuration
         ),
         SubjectKind("astrometricslib", "Camera", "camera", _find_camera),
+        SubjectKind("astrometricslib", "JobSummary", "job", _find_job),
         SubjectKind("wayfindinglib", "ObservationSession", "observing session", _find_session),
         SubjectKind("wayfindinglib", "ObservationPackage", "observation package", _find_package),
     )

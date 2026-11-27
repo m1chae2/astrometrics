@@ -1,4 +1,4 @@
-"""Tests for `Jobs.query(detail="warnings")`.
+"""Tests for `Jobs.get_warnings` and its owner, `job_history.get_job_warnings`.
 
 A warning is a stored quality measurement of the job whose check failed. The
 tests store rows with every outcome under two jobs and check what is listed,
@@ -13,7 +13,7 @@ import pytest
 
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.api.jobs import Jobs
-from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.foundation.errors import NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.models.quality.gate_result import GateStatus
@@ -110,8 +110,7 @@ def jobs(tmp_path: Path) -> Jobs:
 
 def test_a_failed_check_is_a_warning_and_a_passed_one_is_not(jobs: Jobs) -> None:
     """List only the failed row, with value, limit and register entry."""
-    answer = jobs.query(job_id="job-a", detail="warnings")
-    assert answer.detail == "warnings"
+    answer = jobs.get_warnings(jobs.get("job-a"))
     assert [warning.metric for warning in answer.warnings] == ["stacking.gate_flat_noise"]
     warning = answer.warnings[0]
     assert warning.pipeline == "stacking"
@@ -120,34 +119,37 @@ def test_a_failed_check_is_a_warning_and_a_passed_one_is_not(jobs: Jobs) -> None
     assert warning.limit == pytest.approx(0.5)
     assert warning.register_entry == "STK-05"
     assert warning.reason == "stacking.gate_flat_noise reason"
-    assert answer.job.id == "job-a"
 
 
 def test_checks_that_did_not_run_are_counted_but_not_listed(jobs: Jobs) -> None:
     """Count a not-checked row and all rows; list neither."""
-    answer = jobs.query(job_id="job-a", detail="warnings")
+    answer = jobs.get_warnings(jobs.get("job-a"))
     assert answer.checks_not_run_count == 1
     assert answer.measurement_count == 4
 
 
 def test_a_job_with_rows_and_no_failure_has_an_empty_list(jobs: Jobs) -> None:
     """An empty list with rows means checked, nothing failed."""
-    answer = jobs.query(job_id="job-b", detail="warnings")
+    answer = jobs.get_warnings(jobs.get("job-b"))
     assert answer.warnings == []
     assert answer.measurement_count == 1
 
 
 def test_a_known_job_with_no_rows_is_distinct_from_an_unknown_job(jobs: Jobs) -> None:
     """Give zero measurements for a quiet job and an error for a bad id."""
-    answer = jobs.query(job_id="job-c", detail="warnings")
+    from astrometricslib.pipelines.shared.job_history import get_job_warnings
+
+    answer = jobs.get_warnings(jobs.get("job-c"))
     assert answer.warnings == []
     assert answer.measurement_count == 0
     with pytest.raises(NotFoundError):
-        jobs.query(job_id="no-such-job", detail="warnings")
+        get_job_warnings(jobs._config, "no-such-job")
 
 
 def test_rows_of_a_job_missing_from_the_logs_are_still_listed(tmp_path: Path) -> None:
-    """List rows whose job the logs lost, with no job summary."""
+    """The owner lists rows whose job the logs lost."""
+    from astrometricslib.pipelines.shared.job_history import get_job_warnings
+
     (tmp_path / "library").mkdir()
     QualityStore(str(tmp_path / "library" / "astrometrics.db")).write_measurements([
         _row("stacking.gate_flat_noise", "job-lost", GateStatus.FAILED)
@@ -156,24 +158,18 @@ def test_rows_of_a_job_missing_from_the_logs_are_still_listed(tmp_path: Path) ->
         get_logs_db_path=lambda: str(tmp_path / "missing.db"),
         get_library_path=lambda: str(tmp_path / "library"),
     )
-    answer = Jobs(configuration, None).query(job_id="job-lost", detail="warnings")
-    assert answer.job is None
+    answer = get_job_warnings(configuration, "job-lost")
     assert len(answer.warnings) == 1
+    assert answer.parameter_defaults == []
 
 
 def test_rows_with_no_job_are_not_listed_for_any_job(jobs: Jobs) -> None:
     """A row with no job id belongs to no job."""
-    answer = jobs.query(job_id="job-a", detail="warnings")
+    answer = jobs.get_warnings(jobs.get("job-a"))
     assert all(warning.pipeline != "photometry" for warning in answer.warnings)
 
 
-def test_warnings_need_a_job_id(jobs: Jobs) -> None:
-    """The detail refuses a call that names no job."""
-    with pytest.raises(InvalidArgumentError):
-        jobs.query(detail="warnings")
-
-
-def test_the_defaults_a_job_used_are_listed_for_result_and_warnings(tmp_path: Path) -> None:
+def test_the_defaults_a_job_used_are_listed(tmp_path: Path) -> None:
     """Give the stored default notices, or an empty list if none."""
     logs = tmp_path / "log.db"
     job_store = JobStore(str(logs))
@@ -199,7 +195,6 @@ def test_the_defaults_a_job_used_are_listed_for_result_and_warnings(tmp_path: Pa
         get_logs_db_path=lambda: str(logs), get_library_path=lambda: str(tmp_path / "library")
     )
     interface = Jobs(configuration, None)
-    for detail in ("result", "warnings"):
-        answer = interface.query(job_id="job-d", detail=detail)
-        assert answer.parameter_defaults == ["a.value: no equipment profile value; using the default 1"]
-        assert interface.query(job_id="job-e", detail=detail).parameter_defaults == []
+    answer = interface.get_warnings(interface.get("job-d"))
+    assert answer.parameter_defaults == ["a.value: no equipment profile value; using the default 1"]
+    assert interface.get_warnings(interface.get("job-e")).parameter_defaults == []

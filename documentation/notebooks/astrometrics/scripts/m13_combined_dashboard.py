@@ -1,7 +1,8 @@
 """Purpose: User script for launching interactive combined dashboard.
 
-Description: Demonstrates high-level plot_target_dashboard API usage for
-astrometry, photometry, and spectroscopy analysis.
+Description: Demonstrates the chart methods of `Visualization`
+(`plot_target`, `plot_spectroscopy`) for astrometry, photometry, and
+spectroscopy analysis.
 
 **Architecture Note:** This script demonstrates the **Visualization Layer**.
 It relies on the data processed by the other scripts and stored in the
@@ -19,7 +20,7 @@ target = astrometrics.targets.get("M 57")
 if not target:
     raise ValueError("Target 'M 57' not found in library.")
 
-# astrometrics.visualization.plot("dashboard", target, limit=30)
-astrometrics.visualization.plot("spectroscopy", target)
+# astrometrics.visualization.plot_target(target, limit=30)
+astrometrics.visualization.plot_spectroscopy(target)
 
 plt.show()

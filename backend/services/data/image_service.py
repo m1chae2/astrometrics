@@ -1,19 +1,24 @@
 """Draw FITS frames for the app's viewer, measure stars on them, delete them.
 
-The service is a thin adapter over the library's `Visualization.render_fits`,
+The service is a thin adapter over the library's `Visualization.render`,
 `QualityRecords` and `TargetCatalog`. It turns the paths the app sends into
 paths on this computer, refuses a path outside the folders the app may read
 (`image_paths.resolve_allowed_image`), and shapes each picture the way the
-viewer reads it. A frame's header is read through ``target:get_frame_header``
+viewer reads it (`ViewerImage`): the library gives the picture's bytes, and
+this service turns them into a data URL and adds the file's FITS header. A
+frame's header alone is read through ``target:get_frame_header``
 (`TargetService.get_frame_header`).
 """
 
+import base64
 import logging
 import os
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.drivers import resolve_mounted_path
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
@@ -63,7 +68,42 @@ def _detection_source(resolved: str) -> str:
     return stack if same_size else resolved
 
 
-def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
+class ViewerImage(BaseModel):
+    """A picture the way the app's viewer reads it.
+
+    Attributes
+    ----------
+    id : `str`
+        What the picture shows, such as the target id or the frame's folder.
+    min, max : `float`
+        The brightness range shown, in pixel values (0 and 255 for a JPEG).
+    image_data : `str`
+        The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
+    headers : `list` [`dict` [`str`, `str`]]
+        The FITS header of the file that was drawn: ``key``, ``value`` and
+        ``comment`` of each card.
+    path : `str` or `None`
+        The file that was drawn.
+    stretch_parameters : `dict` [`str`, `float`] or `None`
+        The automatic stretch the picture was drawn with (``blackPoint``,
+        ``whitePoint``, ``midtones``), or `None` when it was drawn without
+        one.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(default="", alias="id")
+    min: float = Field(alias="min")
+    max: float = Field(alias="max")
+    image_data: str = Field(alias="imageData")
+    headers: list[dict[str, str]] = Field(default_factory=list, alias="headers")
+    path: str | None = Field(default=None, alias="path")
+    stretch_parameters: dict[str, float] | None = Field(default=None, alias="stretchParameters")
+
+
+def _viewer_payload(
+    picture: Any | None, image_id: str, read_header: Callable[[str], Any]
+) -> dict[str, Any] | None:
     """Shape a rendered picture the way the app's viewer reads it.
 
     The viewer reads the picture as ``imageData``; the last-image panel
@@ -73,6 +113,11 @@ def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
     ----------
     picture : `RenderedImage` or `None`
         The picture the library drew.
+    image_id : `str`
+        What the picture shows, copied into the reply.
+    read_header : `Callable` [[`str`], `astropy.io.fits.Header`]
+        Reads a file's FITS header (the library's
+        ``targets.frames.get_header``).
 
     Returns
     -------
@@ -82,7 +127,28 @@ def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
     """
     if picture is None:
         return None
-    payload = picture.model_dump(by_alias=True)
+    headers: list[dict[str, str]] = []
+    if picture.path:
+        try:
+            header = read_header(picture.path)
+            headers = [
+                {"key": key, "value": str(header[key]), "comment": str(header.comments[key] or "")}
+                for key in header.keys()
+                if key
+            ]
+        except (OSError, ValueError, NotFoundError) as error:
+            logger.warning("Could not read the header of %s while drawing it: %s", picture.path, error)
+    stretch = picture.stretch_parameters
+    encoded = base64.b64encode(picture.picture).decode("ascii")
+    payload = ViewerImage(
+        id=image_id,
+        min=picture.black,
+        max=picture.white,
+        image_data=f"data:{picture.media_type};base64,{encoded}",
+        headers=headers,
+        path=picture.path,
+        stretch_parameters=None if stretch is None else stretch.model_dump(by_alias=True),
+    ).model_dump(by_alias=True)
     payload["image_data"] = payload["imageData"]
     return payload
 
@@ -137,16 +203,17 @@ class ImageService:
         -------
         result : `dict` or `None`
             The picture as a data URL, with its brightness range.
+
+        Notes
+        -----
+        A gain or exposure that is not a number raises
+        `InvalidArgumentError`, and no matching frame `NotFoundError`.
         """
-        picture = self._astrometrics.visualization.render_fits(
-            target=self.target_service.subjects.target(target_id),
-            iso=iso,
-            exposure=exposure,
-            index=index,
-            stretch=stretch,
-            kind="data_url",
-        )
-        return _viewer_payload(picture)
+        path = self.get_target_frame_by_id(target_id, iso, exposure, index)
+        picture = self._astrometrics.visualization.render(path, stretch=stretch)
+        # The reply uses the stored target id, whatever spelling the app sent.
+        shown_id = self.target_service.subjects.target(target_id).id
+        return _viewer_payload(picture, shown_id, self._astrometrics.targets.frames.get_header)
 
     def get_target_frame_by_id(self, target_id: str, iso: str, exposure: str, index: int = 0) -> str:
         """Find the path of a target's frame by gain, exposure and order.
@@ -403,7 +470,12 @@ class ImageService:
         result : `dict` or `None`
             The picture as a data URL, or `None` if no FITS file exists.
         """
-        return _viewer_payload(self._astrometrics.visualization.get_last_captured_image(stretch=stretch))
+        picture = self._astrometrics.visualization.render_newest(stretch=stretch)
+        # The panel names the picture after the folder the frame is in.
+        folder = (
+            os.path.basename(os.path.dirname(picture.path)) if picture is not None and picture.path else ""
+        )
+        return _viewer_payload(picture, folder, self._astrometrics.targets.frames.get_header)
 
     def convert_fits(self, path: str, maxdim: int = 2000, stretch: bool = True) -> dict[str, Any] | None:
         """Draw a FITS file, named by its path, for the viewer.
@@ -429,7 +501,7 @@ class ImageService:
         A path outside the library folders and the scratch folder raises
         `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
-        picture = self._astrometrics.visualization.render_fits(
-            self._resolve(path), kind="data_url", max_dimensions=maxdim, stretch=stretch
+        picture = self._astrometrics.visualization.render(
+            self._resolve(path), max_dimensions=maxdim, stretch=stretch
         )
-        return _viewer_payload(picture)
+        return _viewer_payload(picture, "", self._astrometrics.targets.frames.get_header)

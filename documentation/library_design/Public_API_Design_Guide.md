@@ -67,7 +67,7 @@ The checks treat the first two positional arguments as subject and operands. The
 | `predict`, `predict_<noun>` | Compute what a run or an observation would give, without running it. |
 | `record`, `record_<noun>` | Compute a result and store it. |
 | `run` | Run a pipeline. |
-| `render` | Make a picture of an image as data (a `RenderedImage`). |
+| `render`, `render_<noun>` | Make a picture of an image as data (a `RenderedImage`), such as `render_newest` for the newest frame. |
 | `plot_<noun>` | Draw a Matplotlib figure. |
 | `set_<setting>` | Change one setting of a device or a library store. |
 

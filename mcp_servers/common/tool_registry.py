@@ -350,9 +350,10 @@ def result_content(result: Any) -> list[Any]:
     Returns
     -------
     content : `list`
-        Content a tool already built is passed on. A picture (an object with
-        ``png_bytes`` and ``description``) and a matplotlib figure become an
-        image and a short text. Anything else becomes indented JSON text;
+        Content a tool already built is passed on. A picture (a
+        `RenderedImage`: an object with ``picture`` bytes and a
+        ``media_type``) and a matplotlib figure become an image and a short
+        text. Anything else becomes indented JSON text;
         a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
         indentation. The reply is first shortened by `shape_reply`: a
         target report, a ranking or a night review loses whole references
@@ -364,11 +365,13 @@ def result_content(result: Any) -> list[Any]:
     """
     if isinstance(result, list) and result and isinstance(result[0], (TextContent, ImageContent)):
         return result
-    if hasattr(result, "png_bytes") and hasattr(result, "description"):
+    if isinstance(getattr(result, "picture", None), bytes) and hasattr(result, "media_type"):
         # A picture goes back as a real image, not as base64 text.
         return [
             ImageContent(
-                type="image", data=base64.b64encode(result.png_bytes).decode("ascii"), mime_type="image/png"
+                type="image",
+                data=base64.b64encode(result.picture).decode("ascii"),
+                mime_type=result.media_type,
             ),
             TextContent(type="text", text=json.dumps(_picture_description(result), indent=2, default=str)),
         ]
@@ -438,19 +441,16 @@ def _picture_description(picture: Any) -> dict[str, Any]:
 
     Parameters
     ----------
-    picture : `ViewableImage`
+    picture : `RenderedImage`
         The picture.
 
     Returns
     -------
     description : `dict` [`str`, `Any`]
-        Its description, with the automatic stretch it was drawn with when
-        it has one.
+        Every field but the picture's bytes: the file, the brightness range
+        shown, the sizes, the crop and the automatic stretch, if any.
     """
-    stretch = getattr(picture, "stretch_parameters", None)
-    if stretch is None:
-        return picture.description
-    return {**picture.description, "stretch_parameters": stretch.model_dump()}
+    return picture.model_dump(mode="json", exclude={"picture"})
 
 
 def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:

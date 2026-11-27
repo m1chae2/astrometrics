@@ -1040,8 +1040,8 @@ def build_script_header(description: str) -> str:
         "fields are None when nothing is picked), show(target=..., star=..., path=..., display=...) "
         "(opens a target, star or file in Image Processing or the Astronomy Manager when the run ends) "
         "and doc(name) (opens that name's API reference entry). The app's internal services are not "
-        "available. astrometrics.visualization.render_fits(path, kind='figure', overlays=['detections', "
-        "'stars']) draws a frame or stack with its detected and named stars."
+        "available. astrometrics.visualization.plot_image(path, overlays=['detections', 'stars']) draws a "
+        "frame or stack with its detected and named stars."
     ),
     {
         "type": "object",

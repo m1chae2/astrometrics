@@ -389,13 +389,13 @@ CLASSIFICATION_RULES = (
         "Reads the summary saved with a target's stack. Measures and saves nothing.",
     ),
     _rule(
-        r"^visualization_render_fits$",
+        r"^visualization_render(_newest)?$",
         "observe",
         "high",
         "Draws a picture of a frame. Saves nothing.",
     ),
     _rule(
-        r"^jobs_query$",
+        r"^jobs_(get|query|get_log|get_warnings|get_lineage)$",
         "observe",
         "high",
         "Reads the job history and lineage. The logs database is opened read-only.",

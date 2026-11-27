@@ -9,9 +9,6 @@
 # Rules: verb, banned-argument(<name>), no-default(<name>), no-return-annotation,
 # return-union, bool-return, unit-suffix(<name>), depth, fold, owner.
 
-astrometrics.jobs.query: banned-argument(detail)
-astrometrics.jobs.query: banned-argument(max_line_chars)
-astrometrics.jobs.query: owner
 astrometrics.processing.acquire_job_slot: owner
 astrometrics.processing.acquire_job_slot: verb
 astrometrics.processing.find_stack_configuration: owner
@@ -98,15 +95,3 @@ astrometrics.quality.query: owner
 astrometrics.quality.record_frame_measurements: owner
 astrometrics.quality.resolve_rows: owner
 astrometrics.quality.resolve_rows: verb
-astrometrics.visualization.get_last_captured_image: owner
-astrometrics.visualization.place_stack_picture_on_sky: owner
-astrometrics.visualization.place_stack_picture_on_sky: verb
-astrometrics.visualization.plot: banned-argument(figsize)
-astrometrics.visualization.plot: owner
-astrometrics.visualization.plot: verb
-astrometrics.visualization.render_fits: banned-argument(figsize)
-astrometrics.visualization.render_fits: owner
-astrometrics.visualization.render_fits: return-union
-astrometrics.visualization.render_fits: verb
-astrometrics.visualization.stack_sky_picture_files: owner
-astrometrics.visualization.stack_sky_picture_files: verb

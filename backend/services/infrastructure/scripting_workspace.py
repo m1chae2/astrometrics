@@ -395,7 +395,7 @@ class ConsoleWorkspaceMixin:
             )
         )
         lines.append(
-            'Example: astrometrics.visualization.render_fits("/path/to/stack.fits", kind="figure", '
+            'Example: astrometrics.visualization.plot_image("/path/to/stack.fits", '
             'overlays=["detections", "stars"])'
         )
         return "\n".join(lines)

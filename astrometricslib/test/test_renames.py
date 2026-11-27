@@ -94,3 +94,27 @@ def test_the_table_maps_text_to_text() -> None:
     for old, new in RENAMES.items():
         assert old.startswith("astrometricslib.") and old.count(".") == 2, old
         assert new.strip(), old
+
+
+@pytest.mark.parametrize(
+    ("module_name", "name"),
+    [
+        ("astrometricslib.jobs", "run_as_background_job"),
+        ("astrometricslib.drivers", "LibraryFolders"),
+        ("astrometricslib.parameters", "run_tuning"),
+    ],
+)
+def test_a_name_a_host_module_dropped_says_where_it_went(module_name: str, name: str) -> None:
+    """Importing a dropped host-module name raises with the new call."""
+    import importlib
+
+    module = importlib.import_module(module_name)
+    with pytest.raises(ImportError, match="moved to"):
+        getattr(module, name)
+    assert not hasattr(module, "no_such_name")
+
+
+def test_a_from_import_of_a_dropped_name_keeps_the_message() -> None:
+    """``from ... import`` of a dropped name says where it went, too."""
+    with pytest.raises(ImportError, match="moved to"):
+        from astrometricslib.drivers import LibraryFolders  # ruff: ignore[unused-import]

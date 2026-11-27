@@ -713,6 +713,48 @@ class JobStore:
             logger.exception("Error querying jobs")
             return []
 
+    def count_jobs(
+        self,
+        target_id: str | None = None,
+        job_type: str | None = None,
+        status: str | None = None,
+        active_only: bool = False,
+        before: str | None = None,
+    ) -> int:
+        """Count the jobs `query_jobs` would find with the same filters.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Only jobs for this target.
+        job_type : `str`, optional
+            Only jobs of this type.
+        status : `str`, optional
+            Only jobs with this status.
+        active_only : `bool`, optional
+            Only jobs that are still running. Defaults to `False`.
+        before : `str`, optional
+            Only jobs created strictly before this ISO time.
+
+        Returns
+        -------
+        count : `int`
+            How many jobs match. 0 if the count fails.
+        """
+        try:
+            conn = self._connect()
+            count = conn.execute(
+                "SELECT COUNT(*) FROM processing_jobs WHERE (? IS NULL OR target_id = ?) "
+                "AND (? IS NULL OR job_type = ?) AND (? IS NULL OR status = ?) "
+                "AND (? = 0 OR status IN ('started', 'running')) AND (? IS NULL OR created_at < ?)",
+                (target_id, target_id, job_type, job_type, status, status, int(active_only), before, before),
+            ).fetchone()[0]
+            conn.close()
+            return int(count)
+        except sqlite3.Error:
+            logger.exception("Error counting jobs")
+            return 0
+
     def get_recent_log_entries_for_job(self, job_id: str, limit: int = 50) -> tuple[list[dict], int]:
         """Read the last few log entries of a job without loading them all.
 

@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import CaptureSetting
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
 from wayfindinglib.models.sky_position import SkyPosition

@@ -42,11 +42,11 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target
 from astrometricslib.drivers import VersionedCache, get_stack_quality_data_version
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, resolve_parameter
-from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.analytics.result_quality.forecast import (
     NoiseHistory,

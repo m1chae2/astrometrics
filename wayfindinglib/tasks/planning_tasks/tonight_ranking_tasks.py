@@ -52,7 +52,7 @@ from typing import Any
 import numpy as np
 from astropy.time import Time
 
-from astrometricslib import Target, Telescope
+from astrometricslib import CaptureSetting, Target, Telescope
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -60,7 +60,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.result_quality.capture_overheads import (
     AUTOFOCUS_RUNS_PER_HOUR,
     DITHER_EVERY_FRAMES,

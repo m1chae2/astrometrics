@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, CaptureSetting
 from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number, fold_exposure_lengths
 from astrometricslib.models.quality.calibration_identities import (
@@ -29,7 +29,6 @@ from astrometricslib.models.quality.calibration_identities import (
 )
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
-    CaptureSetting,
     MeasurementStatus,
     QualityMeasurement,
     SubjectLevel,

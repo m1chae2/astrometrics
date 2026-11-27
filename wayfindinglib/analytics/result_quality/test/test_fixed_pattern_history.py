@@ -19,13 +19,14 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads

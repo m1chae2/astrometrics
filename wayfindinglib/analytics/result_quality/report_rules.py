@@ -40,6 +40,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from astrometricslib import CaptureSetting
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -47,7 +48,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, LimitTier, MeasurementReference, QualityLimit
+from astrometricslib.reports import LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.capture_overheads import (
     EXPOSURE_MATCH_SECONDS,

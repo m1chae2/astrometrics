@@ -51,7 +51,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import Telescope
+from astrometricslib import CaptureSetting, Telescope
 from astrometricslib.parameters import (
     EquipmentKind,
     HardcodedKind,
@@ -60,7 +60,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import (
     EfficiencyFactor,

@@ -125,7 +125,6 @@ EXPECTED_MODULE_NAMES = {
         "EARLIER_NIGHTS_VARIANT",
         "AstrometryPipelineQualityMetrics",
         "AstrometryQualitySummary",
-        "CaptureSetting",
         "ExposureGroupSummary",
         "InputQualityReport",
         "LimitTier",

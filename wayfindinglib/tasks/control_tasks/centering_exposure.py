@@ -38,6 +38,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib import CaptureSetting
 from astrometricslib.exceptions import AstrometricsError, ConfigurationError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -46,7 +47,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, QualityMeasurement
+from astrometricslib.reports import QualityMeasurement
 from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import equipment_spellings, normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, baseline_key

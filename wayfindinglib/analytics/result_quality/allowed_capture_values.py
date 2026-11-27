@@ -33,9 +33,8 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import FilterType
+from astrometricslib import CaptureSetting, FilterType
 from astrometricslib.exceptions import ConfigurationError
-from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import normalize_name
 

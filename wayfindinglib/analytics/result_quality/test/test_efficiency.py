@@ -10,12 +10,13 @@ from datetime import UTC, datetime
 
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import (
     PIXEL_BLUR_FWHM_SQUARED_FACTOR,
     MeasurementOrigin,
     QualitySubject,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 from wayfindinglib.analytics.result_quality import efficiency as eff
 from wayfindinglib.models.quality.efficiency import EfficiencyReference, NoiseRegime, ScienceGoal
 

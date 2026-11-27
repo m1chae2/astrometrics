@@ -43,7 +43,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
@@ -54,7 +54,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementReference, QualityMeasurement
+from astrometricslib.reports import MeasurementReference, QualityMeasurement
 from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.data_versions import report_data_version
 from wayfindinglib.analytics.result_quality.aggregates import (

@@ -117,6 +117,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib import CaptureSetting
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -127,7 +128,6 @@ from astrometricslib.parameters import (
 )
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,

@@ -28,8 +28,8 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from astrometricslib import CaptureSetting
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityLimit,

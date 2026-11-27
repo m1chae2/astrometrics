@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, CaptureSetting
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.tasks.planning_tasks import target_report_inputs, target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import read_noise_history
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import _read_ekos_contexts

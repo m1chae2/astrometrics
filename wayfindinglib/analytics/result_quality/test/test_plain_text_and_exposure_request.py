@@ -8,8 +8,7 @@ free-text filter is normalized, and where each field of the row comes from.
 
 import pytest
 
-from astrometricslib import FilterType
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import CaptureSetting, FilterType
 from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.analytics.result_quality.exposure_request import (
     exposure_request_from_statement,

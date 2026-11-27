@@ -45,10 +45,9 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FilterType, Target
+from astrometricslib import CaptureSetting, FilterType, Target
 from astrometricslib.exceptions import NotFoundError
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,

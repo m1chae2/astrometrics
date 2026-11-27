@@ -305,8 +305,7 @@ def test_a_night_without_rotation_or_focus_rows_says_so() -> None:
 
 def test_a_target_with_two_goals_states_each_setting_goal() -> None:
     """Decision U2: a grating and an imaging setting are judged apart."""
-    from astrometricslib import Target
-    from astrometricslib.reports import CaptureSetting
+    from astrometricslib import CaptureSetting, Target
     from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
     from wayfindinglib.models.quality.efficiency import ScienceGoal
 

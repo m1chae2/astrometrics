@@ -16,11 +16,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import AppConfiguration, FilterType
+from astrometricslib import AppConfiguration, CaptureSetting, FilterType
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,

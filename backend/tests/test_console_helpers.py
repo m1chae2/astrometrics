@@ -3,7 +3,8 @@
 They cover Ctrl+C stopping a running script or line (the workspace stays
 usable), the read-only ``selection`` object that follows Image Processing,
 ``show(...)`` turning its arguments into a request to the app, and
-``doc(...)`` finding one reference entry, several, or none.
+``doc(...)`` finding one reference entry, several, or none, and a saved
+script that uses a moved library name being told where it moved.
 """
 
 import threading
@@ -13,9 +14,15 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import Target
 from backend.services.infrastructure import api_doc_generator
 from backend.services.infrastructure.app_selection_service import AppSelection, AppSelectionService
-from backend.services.infrastructure.console_helpers import ConsoleSelection, make_show_request
+from backend.services.infrastructure.console_helpers import (
+    ConsoleSelection,
+    ConsoleStar,
+    make_show_request,
+    show_argument_text,
+)
 from backend.services.infrastructure.scripting_runs import STOPPED_MESSAGE
 from backend.services.infrastructure.scripting_service import ScriptingService
 
@@ -90,10 +97,35 @@ def test_stop_with_nothing_running_stops_nothing() -> None:
     assert service.execute_structured("value = 1")["status"] == "success"
 
 
+def _fake_library(offset_px: tuple[int, int]) -> SimpleNamespace:
+    """Make a stand-in ``astrometrics`` object with one target, M 31.
+
+    Parameters
+    ----------
+    offset_px : `tuple` [`int`, `int`]
+        Where the processed copy of every stack starts in the stack.
+
+    Returns
+    -------
+    astrometrics : `SimpleNamespace`
+        ``targets.get`` finds M 31 only, and
+        ``processing.astrometry.get_identification`` gives the offset.
+    """
+    m31 = Target(id="M_31", common_name="Andromeda Galaxy")
+    identification = SimpleNamespace(viewer_offset_x=offset_px[0], viewer_offset_y=offset_px[1])
+    return SimpleNamespace(
+        targets=SimpleNamespace(get=lambda name: m31 if name.replace(" ", "_") == "M_31" else None),
+        processing=SimpleNamespace(
+            astrometry=SimpleNamespace(get_identification=lambda _path: identification)
+        ),
+    )
+
+
 def test_selection_follows_image_processing_and_is_read_only() -> None:
     """``selection`` reads the latest pick each time and cannot be set."""
     selection_service = AppSelectionService()
-    service = ScriptingService(SimpleNamespace(app_selection_service=selection_service))
+    container = SimpleNamespace(app_selection_service=selection_service, astrometrics=_fake_library((0, 0)))
+    service = ScriptingService(container)
     selection = service.console.locals["selection"]
     assert selection.target is None and selection.star is None
     assert "Nothing is selected" in repr(selection)
@@ -104,8 +136,10 @@ def test_selection_follows_image_processing_and_is_read_only() -> None:
         kind="stack",
         star={"id": "HD 3651", "name": "Vega", "ra": 279.23, "dec": 38.78, "x": 10.5, "y": 20.25},
     )
-    assert selection.target == "M 31" and selection.kind == "stack"
-    assert selection.star.name == "Vega" and selection.star.x == pytest.approx(10.5)
+    assert isinstance(selection.target, Target) and selection.target.id == "M_31"
+    assert selection.kind == "stack"
+    assert selection.star.name == "Vega" and selection.star.ra_deg == pytest.approx(279.23)
+    assert selection.star.x_px == pytest.approx(10.5) and selection.star.y_px == pytest.approx(20.25)
     assert selection.set_at is not None
     summary = service.execute_structured("selection", source="repl")["stdout"]
     assert "M 31" in summary and "/library/M_31/stack.fits" in summary and "Vega" in summary
@@ -113,7 +147,60 @@ def test_selection_follows_image_processing_and_is_read_only() -> None:
     with pytest.raises(AttributeError):
         selection.target = "M 33"
     selection_service.set_selection(target="M 33", kind="unknown")
-    assert selection.target == "M 33" and selection.kind is None and selection.star is None
+    assert selection.target is None and selection.kind is None and selection.star is None
+
+
+def test_selection_star_is_in_one_based_pixels_of_the_shown_file() -> None:
+    """A stack's star moves by the processed copy's crop; a frame's does not.
+
+    The app sends 1-based pixels of the picture it shows. On a stack that
+    picture is the processed copy, cropped here at (100, 40), so the star
+    at (5, 7) on it is at (105, 47) in the stack file.
+    """
+    selection_service = AppSelectionService()
+    container = SimpleNamespace(
+        app_selection_service=selection_service, astrometrics=_fake_library((100, 40))
+    )
+    selection = ScriptingService(container).console.locals["selection"]
+    star = {"id": "Vega", "name": "Vega", "x": 5.0, "y": 7.0}
+
+    selection_service.set_selection(target="M 31", path="/library/M_31/stack.fits", kind="stack", star=star)
+    assert (selection.star.x_px, selection.star.y_px) == (105.0, 47.0)
+    assert "x_px 105.0  y_px 47.0" in repr(selection)
+
+    selection_service.set_selection(target="M 31", path="/library/M_31/frame.fits", kind="frame", star=star)
+    assert (selection.star.x_px, selection.star.y_px) == (5.0, 7.0)
+
+
+def test_show_takes_the_selected_objects() -> None:
+    """``show`` opens ``selection.target`` and ``selection.star`` as given."""
+    assert show_argument_text(Target(id="M_31")) == "M_31"
+    assert show_argument_text(ConsoleStar(id="HD 3651", name="Vega", library_id=None)) == "Vega"
+    assert show_argument_text(ConsoleStar(id="HD 3651", name="Vega", library_id="star_7")) == "star_7"
+    assert show_argument_text("M 13") == "M 13" and show_argument_text(None) is None
+    with pytest.raises(TypeError):
+        show_argument_text(3.5)
+
+
+def test_a_saved_script_with_a_moved_name_says_where_it_moved() -> None:
+    """A script that calls a renamed name prints "moved to" and the new call.
+
+    The rename table keeps an old name for one release; a saved console
+    script that still uses it fails with a message that names the new call.
+    """
+    from astrometricslib import TargetCatalog
+    from astrometricslib._internal.renames import RENAMES
+
+    catalog = object.__new__(TargetCatalog)
+    service = ScriptingService(SimpleNamespace(astrometrics=SimpleNamespace(targets=catalog)))
+    envelope = service.execute_structured(
+        "target = 'M 31'\nframes = astrometrics.targets.select_frames(target)\n",
+        source="editor",
+        label="old_script.py",
+    )
+    assert envelope["status"] == "error"
+    new_call = RENAMES["astrometricslib.TargetCatalog.select_frames"]
+    assert f"astrometricslib.TargetCatalog.select_frames moved to {new_call}." in envelope["stderr"]
 
 
 def test_set_selection_returns_plain_data() -> None:

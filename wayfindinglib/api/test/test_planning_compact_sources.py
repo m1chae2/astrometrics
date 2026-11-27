@@ -1,52 +1,31 @@
-"""Tests for the one source query and the short coordinate lookup.
+"""Tests for the one source query of ``wayfinder.planning.catalogs``.
 
 These tests use a fake sky engine and check that `query_sources` sorts, cuts
 and reports the total, takes sources from the places asked for, and refuses
-arguments that do not go together, and that `lookup_coordinates` answers
-with a position.
+arguments that do not go together.
 """
 
 import pytest
 
-from astrometricslib import StellarObject, Target
 from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.planning.catalogs import PlanningCatalogs
 from wayfindinglib.models.planning.sky_source import SkySource
 from wayfindinglib.tasks.planning_tasks import sky_sources
+from wayfindinglib.tasks.planning_tasks.planning_context import PlanningContext
 
 
-def make_planning(resolved: object | None = None) -> ObservationPlanning:
-    """Build a planning object over a fake sky engine.
+def make_catalogs() -> PlanningCatalogs:
+    """Build the catalogs object over a fake sky engine.
 
     Returns
     -------
-    planning : `ObservationPlanning`
-        An object whose engine answers name lookups from ``resolved``.
+    catalogs : `PlanningCatalogs`
+        An object whose sky engine is a stand-in; the tests replace the
+        source readers it would call.
     """
-
-    class FakeSkyEngine:
-        """A sky engine that only resolves names."""
-
-        def resolve_target_coordinates(self, name: str) -> object:
-            """Answer a name lookup.
-
-            Returns
-            -------
-            found : `object`
-                The prepared answer.
-
-            Raises
-            ------
-            ValueError
-                If nothing was prepared.
-            """
-            if resolved is None:
-                raise ValueError(f"cannot resolve {name}")
-            return resolved
-
-    planning = ObservationPlanning.__new__(ObservationPlanning)
-    planning._ObservationPlanning__sky_engine = FakeSkyEngine()  # the lazily built engine
-    return planning
+    context = PlanningContext.__new__(PlanningContext)
+    context._sky_engine = object()
+    return PlanningCatalogs(context)
 
 
 def sky_source(source_id: str, kind: str = "star", magnitude: float | None = None) -> SkySource:
@@ -95,7 +74,7 @@ def library_sources(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 def test_stars_come_brightest_first_and_are_cut_with_the_total_reported(library_sources: list[dict]) -> None:
     """Five stars, limit two: the two brightest, and the cut is stated."""
-    answer = make_planning().query_sources(284.0, 32.6, 1.0, limit=2)
+    answer = make_catalogs().query_sources(284.0, 32.6, 1.0, limit=2)
     assert [item.id for item in answer.sources] == ["M 57", "S4", "S2"]
     assert answer.total_stars == 5
     assert answer.stars_truncated is True
@@ -103,14 +82,14 @@ def test_stars_come_brightest_first_and_are_cut_with_the_total_reported(library_
 
 def test_no_limit_keeps_every_star_in_the_order_found(library_sources: list[dict]) -> None:
     """limit=None does not sort or cut."""
-    answer = make_planning().query_sources(284.0, 32.6, 1.0, limit=None)
+    answer = make_catalogs().query_sources(284.0, 32.6, 1.0, limit=None)
     assert [item.id for item in answer.sources] == ["M 57", "S0", "S1", "S2", "S3", "S4"]
     assert answer.stars_truncated is False
 
 
 def test_the_places_asked_for_reach_the_library_read(library_sources: list[dict]) -> None:
     """The places and magnitude limits reach the library read."""
-    make_planning().query_sources(
+    make_catalogs().query_sources(
         284.0, 32.6, 1.0, source=["stars", "simbad"], magnitude_max=8.0, magnitude_min=2.0
     )
     assert library_sources == [
@@ -150,7 +129,7 @@ def test_catalogs_are_asked_without_reading_the_library(
 
     monkeypatch.setattr(sky_sources, "online_catalog_sources", fake_online)
 
-    answer = make_planning().query_sources(
+    answer = make_catalogs().query_sources(
         1.0, 2.0, 0.5, source=["catalogs"], catalog_drivers=["deep_stars"], magnitude_max=14.0
     )
 
@@ -173,34 +152,17 @@ def test_catalogs_are_asked_without_reading_the_library(
 def test_arguments_that_do_not_go_together_are_refused(arguments: dict) -> None:
     """Bad combinations of arguments raise `InvalidArgumentError`."""
     with pytest.raises(InvalidArgumentError):
-        make_planning().query_sources(1.0, 2.0, 0.5, **arguments)
+        make_catalogs().query_sources(1.0, 2.0, 0.5, **arguments)
 
 
-def test_a_target_is_looked_up_as_a_short_position() -> None:
-    """The reply is a position, not the target record."""
-    target = Target(id="M 57", ra="18 55 54.17", dec="32 37 45.85")
-    answer = make_planning(target).lookup_coordinates("M 57")
-    assert answer.kind == "target"
-    assert abs(answer.ra_deg - 283.9757) < 0.001
-    assert not hasattr(answer, "frames")
-
-
-def test_a_star_is_looked_up_with_its_magnitude() -> None:
-    """A star answers with its position in degrees and its type."""
-    star = StellarObject(id="* alf Lyr", name="Vega", right_ascension=279.2, declination=38.8, magnitude=0.03)
-    answer = make_planning(star).lookup_coordinates("Vega")
-    assert answer.kind == "star"
-    assert answer.dec_deg == pytest.approx(38.8)
-
-
-def test_an_unknown_name_raises_the_lookup_error() -> None:
-    """A failed lookup raises; it is not turned into an error reply."""
-    with pytest.raises(ValueError, match="cannot resolve"):
-        make_planning().lookup_coordinates("Nowhere")
-
-
-@pytest.mark.parametrize("limit", [0, 301])
-def test_a_star_limit_outside_its_range_is_refused(limit: int) -> None:
-    """A star limit below 1 or above 300 raises; it is never clamped."""
+def test_a_star_limit_below_one_is_refused() -> None:
+    """A star limit below 1 raises; it is never clamped. No upper bound."""
     with pytest.raises(InvalidArgumentError, match="limit"):
-        make_planning().query_sources(284.0, 32.6, 1.0, limit=limit)
+        make_catalogs().query_sources(284.0, 32.6, 1.0, limit=0)
+
+
+def test_every_star_comes_back_by_default(library_sources: list[dict]) -> None:
+    """With no limit the query returns every match, as every query does."""
+    answer = make_catalogs().query_sources(284.0, 32.6)
+    assert answer.total_stars == 5
+    assert len(answer.sources) == 6

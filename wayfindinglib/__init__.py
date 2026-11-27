@@ -18,8 +18,9 @@ settings by itself::
 - `control` (`ObservatoryControl`): operate the observatory through six
   children named by topic: `mount`, `imaging`, `guiding`, `safety`,
   `equipment` and `remote`.
-- `planning` (`ObservationPlanning`): decide what to observe, from target
-  visibility to observation packages, sequences and mosaic grids.
+- `planning` (`ObservationPlanning`): decide what to observe, through four
+  objects: `sessions` (the night plans), `packages` (the imaging requests),
+  `sky` (visibility, tonight's ranking, mosaic panels) and `catalogs`.
 - `execution` (`ObservationExecution`): run and recover an observing
   session, and record its telemetry.
 - `review` (`ObservationReview`): how past and current nights went, and
@@ -27,11 +28,13 @@ settings by itself::
 
 What to import from where
 -------------------------
-The package root holds 10 names: `Wayfinder`, the four sub-API classes
+The package root holds `Wayfinder`, the four sub-API classes
 (`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
 `ObservationReview`), the two records a script builds or reads most
-(`ObservationSession` and `ObservationPackage`), and the input models the
-control calls take (`DitherConfig`, `FocusModel` and `GuiderCalibration`).
+(`ObservationSession` and `ObservationPackage`), and the models the public
+methods take as input: for planning `ExposureRequest`, `DitherConfig`,
+`Framing`, `ChecklistItem`, `QueueRequest`, `MosaicPanel` and `HorizonZone`,
+and for control `FocusModel` and `GuiderCalibration`.
 Four public modules hold the rest:
 
 - `wayfindinglib.exceptions`: the errors that belong to this library. The
@@ -90,8 +93,19 @@ if TYPE_CHECKING:
     from wayfindinglib.api.review import ObservationReview
     from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
     from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
-    from wayfindinglib.models.planning.observation_package import DitherConfig, ObservationPackage
-    from wayfindinglib.models.session.observation_session import ObservationSession
+    from wayfindinglib.models.planning.framing import Framing
+    from wayfindinglib.models.planning.mosaic import MosaicPanel
+    from wayfindinglib.models.planning.observation_package import (
+        DitherConfig,
+        ExposureRequest,
+        ObservationPackage,
+    )
+    from wayfindinglib.models.planning.visibility import HorizonZone
+    from wayfindinglib.models.session.observation_session import (
+        ChecklistItem,
+        ObservationSession,
+        QueueRequest,
+    )
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -107,9 +121,16 @@ _LAZY_EXPORTS = {
     "ObservationReview": "wayfindinglib.api.review",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
+    # The input models of the planning and control methods.
+    "ChecklistItem": "wayfindinglib.models.session.observation_session",
     "DitherConfig": "wayfindinglib.models.planning.observation_package",
+    "ExposureRequest": "wayfindinglib.models.planning.observation_package",
     "FocusModel": "wayfindinglib.models.equipment_and_site.focus_model",
+    "Framing": "wayfindinglib.models.planning.framing",
     "GuiderCalibration": "wayfindinglib.models.equipment_and_site.guider_calibration",
+    "HorizonZone": "wayfindinglib.models.planning.visibility",
+    "MosaicPanel": "wayfindinglib.models.planning.mosaic",
+    "QueueRequest": "wayfindinglib.models.session.observation_session",
 }
 """Export name -> the module that defines it."""
 
@@ -205,8 +226,8 @@ class Wayfinder(MovedNames):
             Direct hardware commanding across mount, imaging, guiding,
             remote, safety, and equipment.
         planning : `ObservationPlanning`
-            Target visibility, sky catalogs, mosaic calculation, and queue
-            sequence planning.
+            The night plans, observation packages, sky answers and sky
+            catalogs.
         execution : `ObservationExecution`
             Session queue advancement, meridian flip automation, and fault
             recovery.

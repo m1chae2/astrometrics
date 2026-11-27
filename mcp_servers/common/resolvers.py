@@ -7,8 +7,8 @@ job by its id. The library's public methods work on the objects themselves
 `ObservatoryConfiguration`, `JobSummary`). This module is the one place that
 turns an id into its object for the MCP tools. It looks the id up through the
 libraries' public API (``targets.get``, ``stars.get``,
-``observatories.configurations.get``, ``jobs.get``, ``planning.get_plan``,
-``planning.query_plans``).
+``observatories.configurations.get``, ``jobs.get``,
+``planning.sessions.query``, ``planning.packages.get``).
 
 `SUBJECT_KINDS` is the table: one row per object type, keyed by the type's
 library and class name, so no private class is imported. A new subject type
@@ -18,7 +18,11 @@ name, by alias and by the names their noise profiles list.
 
 `subject_kind_of` tells whether a parameter's type hint names a subject (the
 object alone, or with `str` and `None` beside it, or a list of them), and
-`resolve_subject` does the lookup. An id that names nothing raises
+`resolve_subject` does the lookup. A *sky object* (a parameter typed
+``Target | StellarObject``, such as the objects of
+``planning.sky.get_visibility``) is named by any name the library or SIMBAD
+knows (``targets.resolve``), or sent as ``{"id", "ra_deg", "dec_deg"}`` for a
+point with a known position. An id that names nothing raises
 `NotFoundError` with ``report="error"``, because the client asked for it.
 """
 
@@ -127,24 +131,28 @@ def _find_job(api_root: Any, job_id: str) -> Any:
 
 
 def _find_session(api_root: Any, session_id: str) -> Any:
-    """Look up a recorded observing session by id.
+    """Look up a recorded observing session by id or by its night.
 
     Parameters
     ----------
     api_root : `Wayfinder`
         The server's API object.
     session_id : `str`
-        The session's id.
+        The session's id, or its observing night such as ``"2026-09-24"``.
 
     Returns
     -------
     session : `ObservationSession` or `None`
         The session, or `None`.
     """
-    try:
-        return api_root.planning.get_plan(session_id=session_id)
-    except NotFoundError:
-        return None
+    return next(
+        (
+            session
+            for session in api_root.planning.sessions.query()
+            if session_id in (session.id, session.night_date.isoformat())
+        ),
+        None,
+    )
 
 
 def _find_package(api_root: Any, package_id: str) -> Any:
@@ -162,8 +170,69 @@ def _find_package(api_root: Any, package_id: str) -> Any:
     package : `ObservationPackage` or `None`
         The package, dismissed ones included, or `None`.
     """
-    packages = api_root.planning.query_plans("packages", include_dismissed=True)
-    return next((package for package in packages if package.id == package_id), None)
+    return api_root.planning.packages.get(package_id)
+
+
+def _find_sky_object(api_root: Any, name: str) -> Any:
+    """Look up a named object: a library target, a library star or SIMBAD's.
+
+    Parameters
+    ----------
+    api_root : `Astrometrics` or `Wayfinder`
+        The server's API object.
+    name : `str`
+        A target id or common name, a star name, or a catalog name.
+
+    Returns
+    -------
+    sky_object : `Target`, `StellarObject` or `None`
+        The library target or star; for a name only SIMBAD knows, a point
+        with that name at SIMBAD's position; `None` when nobody knows it.
+    """
+    from astrometricslib import StellarObject
+
+    resolution = _astrometrics(api_root).targets.resolve(name)
+    if resolution is None:
+        return None
+    if resolution.target is not None:
+        return resolution.target
+    if resolution.star is not None:
+        return resolution.star
+    return StellarObject(id=name, name=resolution.name, ra=resolution.ra_deg, dec=resolution.dec_deg)
+
+
+def _sky_point(value: dict[str, Any]) -> Any:
+    """Build a point on the sky from ``{"id", "ra_deg", "dec_deg"}``.
+
+    Parameters
+    ----------
+    value : `dict` [`str`, `Any`]
+        The point the client sent; ``name`` is optional.
+
+    Returns
+    -------
+    point : `StellarObject`
+        A star-shaped point at that position.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a key is missing or a position is not a number.
+    """
+    from astrometricslib import StellarObject
+    from astrometricslib.exceptions import InvalidArgumentError
+
+    try:
+        return StellarObject(
+            id=str(value["id"]),
+            name=str(value.get("name", value["id"])),
+            ra=float(value["ra_deg"]),
+            dec=float(value["dec_deg"]),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise InvalidArgumentError(
+            'A point on the sky needs {"id": ..., "ra_deg": ..., "dec_deg": ...}.', details={"point": value}
+        ) from error
 
 
 def _spelling(name: str | None) -> str:
@@ -230,12 +299,16 @@ class SubjectKind:
         What a person calls it, for the tool description and the messages.
     lookup : `Callable` [[`Any`, `str`], `Any`]
         Called as ``lookup(api_root, id)``; returns the object or `None`.
+    from_mapping : `Callable` [[`dict`], `Any`] or `None`
+        For a kind a client may also send as a JSON object, builds the
+        object from it.
     """
 
     library: str
     class_name: str
     noun: str
     lookup: Callable[[Any, str], Any]
+    from_mapping: Callable[[dict[str, Any]], Any] | None = None
 
 
 SUBJECT_KINDS: dict[tuple[str, str], SubjectKind] = {
@@ -253,6 +326,11 @@ SUBJECT_KINDS: dict[tuple[str, str], SubjectKind] = {
     )
 }
 """(library, class name) -> how to find that object from its id."""
+
+SKY_OBJECT = SubjectKind(
+    "astrometricslib", "Target | StellarObject", "sky object", _find_sky_object, _sky_point
+)
+"""A target or a star, named by any name, or a point sent with its position."""
 
 
 @dataclass(frozen=True)
@@ -330,7 +408,16 @@ def subject_kind_of(hint: Any) -> SubjectParameter | None:
     if len(members) == 1 and typing.get_origin(members[0]) is list:
         inner = subject_kind_of(typing.get_args(members[0])[0]) if typing.get_args(members[0]) else None
         return SubjectParameter(inner.kind, many=True) if inner is not None and not inner.many else None
-    kinds = [_kind_of_type(member) for member in members if member is not str]
+    # A `SkyPosition` beside a target and a star is what a sent point becomes.
+    kinds = [
+        _kind_of_type(member)
+        for member in members
+        if member is not str and getattr(member, "__name__", "") != "SkyPosition"
+    ]
+    if {kind.class_name for kind in kinds if kind is not None} == {"Target", "StellarObject"} and len(
+        kinds
+    ) == 2:
+        return SubjectParameter(SKY_OBJECT)
     if len(kinds) != 1 or kinds[0] is None:
         return None
     return SubjectParameter(kinds[0])
@@ -363,6 +450,8 @@ def resolve_subject(api_root: Any, parameter: SubjectParameter, name: str, value
     """
     if parameter.many and isinstance(value, list):
         return [resolve_subject(api_root, SubjectParameter(parameter.kind), name, item) for item in value]
+    if isinstance(value, dict) and parameter.kind.from_mapping is not None:
+        return parameter.kind.from_mapping(value)
     if not isinstance(value, str):
         return value
     found = parameter.kind.lookup(api_root, value)
@@ -390,6 +479,12 @@ def subject_schema(parameter: SubjectParameter, description: str) -> dict[str, A
     schema : `dict` [`str`, `Any`]
         A string id, or an array of them.
     """
+    if parameter.kind is SKY_OBJECT:
+        text = f'{description} Give a name, or {{"id", "ra_deg", "dec_deg"}} for a point (ICRS degrees).'
+        item: dict[str, Any] = {"anyOf": [{"type": "string"}, {"type": "object"}]}
+        if parameter.many:
+            return {"type": "array", "items": item, "description": text}
+        return {**item, "description": text}
     text = f"{description} Give the {parameter.kind.noun}'s id."
     if parameter.many:
         return {"type": "array", "items": {"type": "string"}, "description": text}

@@ -17,7 +17,7 @@ from backend.services.observatory.mosaic_service import MosaicService
 from wayfindinglib._internal.control import EquipmentStatus
 from wayfindinglib._internal.planning import MosaicPanel
 from wayfindinglib.api.control.equipment import EquipmentControl
-from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.planning.sky import PlanningSky
 
 
 def test_list_cameras_reads_the_camera_profiles_section_and_keeps_the_noise() -> None:
@@ -44,11 +44,11 @@ def test_mosaic_preview_returns_the_panels_with_their_corners() -> None:
         panel_id="P1_1",
         corners=corners,
     )
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.calculate_panels.return_value = [panel]
+    planning = SimpleNamespace(sky=create_autospec(PlanningSky, instance=True))
+    planning.sky.get_panels.return_value = [panel]
     result = MosaicService(SimpleNamespace(planning=planning)).preview_mosaic(
         10.0, 20.0, {"rows": 1, "cols": 1, "overlap": 0}, rotation_deg=15.0
     )
     assert [c.model_dump() for c in result[0].corners] == corners
     assert result[0].rotation_convention.startswith("Degrees east of north")
-    assert planning.calculate_panels.call_args.kwargs["rotation_deg"] == pytest.approx(15.0)
+    assert planning.sky.get_panels.call_args.kwargs["rotation_deg"] == pytest.approx(15.0)

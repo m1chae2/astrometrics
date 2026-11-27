@@ -55,7 +55,7 @@ The checks treat the first two positional arguments as subject and operands. The
 | `query`, `query_<noun>` | Read every stored item that matches the filters (Section 5). `query_<noun>` names the kind when an object holds more than one. |
 | `count_by_<field>` | Count the matching items by the values of one field. |
 | `resolve` | Turn a name into one `Resolution`. |
-| `create`, `create_<noun>` | Make and store a new item; the noun names the kind when an object holds several. |
+| `create`, `create_<noun>` | Make and store a new item; `create_<noun>` names the kind when an object holds several, or makes a related item, such as `packages.create_mosaic`. |
 | `update` | Change a stored item and return the new object. |
 | `delete` | Remove a stored item and what was derived from it. |
 | `add`, `remove` | Put an item into a collection, or take it out. |
@@ -212,8 +212,10 @@ def measure_night(target, night):
 
 
 levels = measure_night(selection.target, "2026-11-20")
-show(levels)
+print(levels)
 ```
+
+The console's `selection` gives library types: `selection.target` is a `Target`, and `selection.star` gives `x_px` and `y_px` in the file `selection.path`, counted from 1. A function fed from it therefore takes the same inputs inside the library.
 
 **Promotion.** A function that proves useful moves into the library almost unchanged:
 

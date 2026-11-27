@@ -22,6 +22,7 @@ from astrometricslib.exceptions import ConfigurationError
 from backend.services.observatory.plan_service import PlanService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
 from wayfindinglib import ObservationPackage, ObservationPlanning
+from wayfindinglib.api.planning.sessions import PlanningSessions
 
 
 def _no_camera_profile(camera: object = None) -> None:
@@ -95,7 +96,11 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
         runs.append(session.id)
 
     service = TargetImagingExecutor(
-        wayfinder=SimpleNamespace(planning=planning, execution=SimpleNamespace(run=run))
+        wayfinder=SimpleNamespace(
+            planning=planning,
+            execution=SimpleNamespace(run=run),
+            astrometrics=astrometrics,
+        )
     )
     service.runs = runs
     return service
@@ -238,7 +243,7 @@ def test_adding_a_sequence_announces_the_package(executor: TargetImagingExecutor
     assert len(package_events) == 1
     assert package_events[0]["kind"] == "created"
     assert package_events[0]["targetId"] == "M 81"
-    stored = executor._wayfinder.planning.query_plans(kind="packages")
+    stored = list(executor._wayfinder.planning.packages.query())
     assert [package.id for package in stored] == [package_events[0]["packageId"]]
     assert isinstance(stored[0], ObservationPackage)
 
@@ -256,51 +261,49 @@ def test_the_sequencer_uses_tonights_one_session_and_follows_the_night(
 
     executor.enqueue_sequence(_sequence(1), {"mode": "soonest"})
     executor.enqueue_sequence(_sequence(2), {"mode": "soonest"})
-    assert len(planning.query_plans()) == 1
+    assert planning.sessions.query().total == 1
     assert len(executor.get_queue()) == 2
 
     # A restart (a fresh executor over the same library) adds no session.
     restarted = TargetImagingExecutor(wayfinder=executor._wayfinder)
     assert len(restarted.get_queue()) == 2
-    assert len(planning.query_plans()) == 1
+    assert planning.sessions.query().total == 1
 
     night["id"] = "2026-10-25"
     assert executor.get_queue() == []
     executor.enqueue_sequence(_sequence(3), {"mode": "soonest"})
-    assert len(planning.query_plans()) == 2
+    assert planning.sessions.query().total == 2
     assert [item["items"][0]["count"] for item in executor.get_queue()] == [3]
 
 
 def test_reading_the_queue_never_creates_a_session(tmp_path: Path) -> None:
     """With no session tonight, the queue is empty and nothing is created."""
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.get_plan.return_value = None
+    planning = SimpleNamespace(sessions=create_autospec(PlanningSessions, instance=True))
+    planning.sessions.get.return_value = None
     service = TargetImagingExecutor(wayfinder=SimpleNamespace(planning=planning, execution=None))
 
     assert service.get_queue() == []
     assert service.remove_from_queue("entry") is False
     assert service.reorder(["entry"]) is False
     assert service.modify_queue_item("entry", _sequence()) is False
-    planning.create_session.assert_not_called()
-    assert planning.get_plan.call_args.kwargs["observing_night_id"]
+    planning.sessions.create.assert_not_called()
+    assert planning.sessions.get.call_args.args[0]
 
 
 def test_the_session_is_asked_for_by_night_each_time(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every call asks the library for the night's session."""
-    planning = create_autospec(ObservationPlanning, instance=True)
+    planning = SimpleNamespace(sessions=create_autospec(PlanningSessions, instance=True))
     nights = iter(["2026-10-24", "2026-10-25"])
     monkeypatch.setattr(
         "backend.services.observatory.target_imaging_executor.observing_night_id",
         lambda timestamp: next(nights),
     )
     service = TargetImagingExecutor(wayfinder=SimpleNamespace(planning=planning, execution=None))
-    planning.create_session.side_effect = lambda **arguments: SimpleNamespace(
-        id=arguments["observing_night_id"]
-    )
+    planning.sessions.create.side_effect = lambda night: SimpleNamespace(id=night)
 
     assert service._session().id == "2026-10-24"
     assert service._session().id == "2026-10-25"
-    assert [call.kwargs["observing_night_id"] for call in planning.create_session.call_args_list] == [
+    assert [call.args[0] for call in planning.sessions.create.call_args_list] == [
         "2026-10-24",
         "2026-10-25",
     ]

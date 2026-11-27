@@ -36,7 +36,7 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 - [Wayfinding library implementation](documentation/library_design/Wayfinding_Library_Implementation.md): the modules, classes and settings behind each section of the architecture paper.
 - [System architecture and delegation](documentation/library_design/Wayfinding_Library_Architecture.md#2-system-architecture): the three functions and how work moves from the incumbent software to this system.
 - [Foundation](documentation/library_design/Wayfinding_Library_Architecture.md#3-foundation-equipment-site-and-session-domain): equipment, site and session records. Code: wayfindinglib/models/.
-- [Observation planning](documentation/library_design/Wayfinding_Library_Architecture.md#4-observation-planning): placing imaging requests in a night. Code: wayfindinglib/api/planning.py, wayfindinglib/tasks/.
+- [Observation planning](documentation/library_design/Wayfinding_Library_Architecture.md#4-observation-planning): placing imaging requests in a night. Code: wayfindinglib/api/planning/, wayfindinglib/tasks/planning_tasks/.
 - [Observation execution](documentation/library_design/Wayfinding_Library_Architecture.md#5-observation-execution): running a planned night and recovering from faults. Code: wayfindinglib/tasks/execution_tasks/.
 - [Observatory control](documentation/library_design/Wayfinding_Library_Architecture.md#6-observatory-control): device control, safety and the safe state. Code: wayfindinglib/tasks/control_tasks/, wayfindinglib/drivers/.
 - [Session analysis](wayfindinglib/session_analysis/README.md): guiding and image-quality analysis of past nights.

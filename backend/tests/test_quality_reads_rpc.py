@@ -26,7 +26,8 @@ from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.observatory.advisory_service import AdvisoryService
 from backend.services.observatory.mosaic_service import MosaicService
 from wayfindinglib.api.control.safety import SafetyControl
-from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.planning.packages import PlanningPackages
+from wayfindinglib.api.planning.sky import PlanningSky
 from wayfindinglib.api.review import ReviewNights, ReviewTargets
 
 
@@ -45,23 +46,45 @@ def _wayfinder() -> SimpleNamespace:
         nights=create_autospec(ReviewNights, instance=True),
         targets=create_autospec(ReviewTargets, instance=True),
     )
+    planning = SimpleNamespace(
+        packages=create_autospec(PlanningPackages, instance=True),
+        sky=create_autospec(PlanningSky, instance=True),
+    )
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda target_id: TARGET if target_id == "M 81" else None),
+        targets=SimpleNamespace(get=lambda target_id: TARGETS.get(target_id), resolve=_resolve),
         stars=SimpleNamespace(get=lambda star_id: STAR if star_id == "star-1" else None),
     )
-    return SimpleNamespace(
-        planning=create_autospec(ObservationPlanning, instance=True),
-        review=review,
-        control=control,
-        astrometrics=astrometrics,
-    )
+    return SimpleNamespace(planning=planning, review=review, control=control, astrometrics=astrometrics)
 
 
 TARGET = Target(id="M 81", name="M 81")
-"""The one target the stand-in library holds."""
+"""The target the stand-in library holds whose reports are read."""
+
+TARGETS = {"M 81": TARGET, "NGC 7331": Target(id="NGC 7331")}
+"""Every target the stand-in library holds."""
 
 STAR = StellarObject(id="star-1")
 """The one star the stand-in library holds."""
+
+
+def _resolve(name: str) -> SimpleNamespace | None:
+    """Stand in for ``targets.resolve``: M 81 is a target, Vega SIMBAD's.
+
+    Parameters
+    ----------
+    name : `str`
+        The name.
+
+    Returns
+    -------
+    resolution : `SimpleNamespace` or `None`
+        Where the name is, or `None` for any other name.
+    """
+    if name == "M 81":
+        return SimpleNamespace(name="M 81", ra_deg=148.9, dec_deg=69.1, target=TARGET, star=None)
+    if name == "Vega":
+        return SimpleNamespace(name="* alf Lyr", ra_deg=279.2, dec_deg=38.8, target=None, star=None)
+    return None
 
 
 NEW_READS = {
@@ -109,7 +132,7 @@ def test_tonight_ranking_passes_the_planning_time() -> None:
     """The ranking passes only the moment."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_tonight_ranking("2026-10-24T22:00:00-06:00")
-    wayfinder.planning.get_tonight_advice.assert_called_once_with(at="2026-10-24T22:00:00-06:00")
+    wayfinder.planning.sky.get_tonight_advice.assert_called_once_with(time="2026-10-24T22:00:00-06:00")
 
 
 def test_result_statements_pass_target_and_object() -> None:
@@ -124,9 +147,10 @@ def test_depth_goal_methods_pass_the_target_and_the_level() -> None:
     wayfinder = _wayfinder()
     service = AdvisoryService(wayfinder)
     service.get_depth_goal("NGC 7331")
-    wayfinder.planning.get_depth_goal.assert_called_once_with("NGC 7331")
+    assert wayfinder.planning.packages.get_depth_goal.call_args.args[0].id == "NGC 7331"
     service.set_depth_goal("NGC 7331", "deep")
-    wayfinder.planning.set_depth_goal.assert_called_once_with("NGC 7331", "deep")
+    target, level = wayfinder.planning.packages.set_depth_goal.call_args.args
+    assert (target.id, level) == ("NGC 7331", "deep")
 
 
 def test_history_reads_pass_their_arguments() -> None:
@@ -171,12 +195,13 @@ def test_mosaic_preview_passes_the_rotation() -> None:
     wayfinder = _wayfinder()
     service = MosaicService(wayfinder)
     service.preview_mosaic(10.0, 20.0, {"rows": 2, "cols": 3, "overlap": 10}, rotation_deg=35.0)
-    arguments = wayfinder.planning.calculate_panels.call_args.kwargs
-    assert arguments["rotation_deg"] == pytest.approx(35.0)
-    assert arguments["rows"] == 2
-    assert (arguments["ra_deg"], arguments["dec_deg"]) == (10.0, 20.0)
+    call = wayfinder.planning.sky.get_panels.call_args
+    center, rows, cols = call.args
+    assert call.kwargs == {"overlap_pct": 10.0, "rotation_deg": pytest.approx(35.0)}
+    assert (rows, cols) == (2, 3)
+    assert (center.ra_deg, center.dec_deg) == (10.0, 20.0)
     service.preview_mosaic(10.0, 20.0, {})
-    assert wayfinder.planning.calculate_panels.call_args.kwargs["rotation_deg"] == pytest.approx(0.0)
+    assert wayfinder.planning.sky.get_panels.call_args.kwargs["rotation_deg"] == pytest.approx(0.0)
 
 
 def _stellar_service(wayfinder: Any) -> StellarService:
@@ -194,33 +219,38 @@ def _stellar_service(wayfinder: Any) -> StellarService:
     """
     service = StellarService.__new__(StellarService)
     service._wayfinder = wayfinder
+    service.astrometrics = wayfinder.astrometrics
     return service
 
 
 def test_visibility_passes_end_and_include() -> None:
     """The visibility read passes ``end`` and ``include``; old calls hold."""
     wayfinder = _wayfinder()
-    wayfinder.planning.get_visibility.return_value = SimpleNamespace(objects=[])
+    wayfinder.planning.sky.get_visibility.return_value = SimpleNamespace(objects=[])
     service = _stellar_service(wayfinder)
     service.get_visibility(
-        [{"id": "M 81", "type": "target"}],
+        [{"id": "M 81", "type": "target"}, {"id": "Vega", "type": "target"}],
         time="2026-10-24T20:00:00+00:00",
         end="2026-10-25T10:00:00+00:00",
         include=["twilight"],
     )
-    arguments = wayfinder.planning.get_visibility.call_args
-    assert arguments.args == (["M 81"],)
+    arguments = wayfinder.planning.sky.get_visibility.call_args
+    [target, vega] = arguments.args[0]
+    assert target.id == "M 81"
+    assert (vega.id, vega.right_ascension) == ("Vega", 279.2)
     assert arguments.kwargs == {
         "time": "2026-10-24T20:00:00+00:00",
-        "end_time": "2026-10-25T10:00:00+00:00",
+        "until": "2026-10-25T10:00:00+00:00",
         "include": ["twilight"],
     }
     service.get_visibility([{"id": "M 81", "type": "target"}])
-    assert wayfinder.planning.get_visibility.call_args.kwargs == {
+    assert wayfinder.planning.sky.get_visibility.call_args.kwargs == {
         "time": None,
-        "end_time": None,
+        "until": None,
         "include": ["meridian"],
     }
+    with pytest.raises(NotFoundError, match="Nowhere"):
+        service.get_visibility([{"id": "Nowhere", "type": "target"}])
 
 
 def test_planning_time_is_set_kept_and_cleared() -> None:
@@ -279,13 +309,12 @@ def test_calibration_query_accepts_the_match_arguments() -> None:
 def test_visibility_places_a_star_the_library_does_not_hold_by_its_position() -> None:
     """A background catalog star is placed by the position it is sent with."""
     wayfinder = _wayfinder()
-    wayfinder.planning.get_visibility.return_value = SimpleNamespace(objects=[])
+    wayfinder.planning.sky.get_visibility.return_value = SimpleNamespace(objects=[])
     service = _stellar_service(wayfinder)
     service.get_object = lambda star_id: None
     service.get_visibility([{"id": "HIP 57477", "type": "star", "ra": 176.7317, "dec": 55.6283}])
-    assert wayfinder.planning.get_visibility.call_args.args == (
-        [{"id": "HIP 57477", "ra_deg": 176.7317, "dec_deg": 55.6283}],
-    )
-    wayfinder.planning.get_visibility.reset_mock()
+    [point] = wayfinder.planning.sky.get_visibility.call_args.args[0]
+    assert (point.id, point.right_ascension, point.declination) == ("HIP 57477", 176.7317, 55.6283)
+    wayfinder.planning.sky.get_visibility.reset_mock()
     assert service.get_visibility([{"id": "HIP 57477", "type": "star"}]) == []
-    wayfinder.planning.get_visibility.assert_not_called()
+    wayfinder.planning.sky.get_visibility.assert_not_called()

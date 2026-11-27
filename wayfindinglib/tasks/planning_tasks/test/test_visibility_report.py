@@ -168,7 +168,7 @@ def test_bad_requests_are_refused() -> None:
         _table(sky, sky_object, end_epoch=START - 10)
     with pytest.raises(InvalidArgumentError, match="objects per time table"):
         _table(sky, sky_object, objects=[sky_object] * 31)
-    with pytest.raises(InvalidArgumentError, match="end_time"):
+    with pytest.raises(InvalidArgumentError, match="until"):
         _table(sky, sky_object, end_epoch=None)
 
 

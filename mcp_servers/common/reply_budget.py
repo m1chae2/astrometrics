@@ -518,12 +518,6 @@ HEAVY_LISTS: tuple[HeavyList, ...] = (
     ),
     HeavyList("ObservationSession", ("guiding_samples",), 0, "guiding samples", _NIGHT_SAMPLES_NOTE),
     HeavyList("ObservationSession", ("weather_samples",), 0, "weather samples", _NIGHT_SAMPLES_NOTE),
-    HeavyList(
-        "ObservationSessionWithProgress", ("guiding_samples",), 0, "guiding samples", _NIGHT_SAMPLES_NOTE
-    ),
-    HeavyList(
-        "ObservationSessionWithProgress", ("weather_samples",), 0, "weather samples", _NIGHT_SAMPLES_NOTE
-    ),
     HeavyList("LiveGuidingStatus", ("history",), 50, "guiding samples", "The newest samples are first."),
     HeavyList("FrameStatusReport", ("frames",), 50, "frames", "Ask about fewer frames."),
 )

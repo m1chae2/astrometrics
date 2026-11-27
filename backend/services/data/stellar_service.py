@@ -27,7 +27,7 @@ from astrometricslib.drivers import (
     is_path_inside,
     resolve_mounted_path,
 )
-from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
+from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError, NotFoundError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
 
@@ -912,14 +912,13 @@ class StellarService:
             One `SkySource` per object, with the Planetarium's camelCase
             keys.
         """
-        result = self.wayfinder.planning.query_sources(
+        result = self.wayfinder.planning.catalogs.query_sources(
             ra,
             dec,
             radius,
             source=["targets", "stars", "simbad"] if include_catalog else ["targets", "stars"],
             magnitude_max=limiting_magnitude,
             include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
-            limit=None,
         )
         return [source.model_dump(by_alias=True) for source in result.sources]
 
@@ -938,8 +937,8 @@ class StellarService:
             keys.
         """
         whole_sky_radius_deg = 180.0
-        result = self.wayfinder.planning.query_sources(
-            0.0, 0.0, whole_sky_radius_deg, source=["targets"], limit=None
+        result = self.wayfinder.planning.catalogs.query_sources(
+            0.0, 0.0, whole_sky_radius_deg, source=["targets"]
         )
         return [source.model_dump(by_alias=True) for source in result.sources]
 
@@ -982,14 +981,13 @@ class StellarService:
             names the drivers that could not answer (empty when all did), so
             an empty ``sources`` list is not mistaken for empty sky.
         """
-        result = self.wayfinder.planning.query_sources(
-            ra_deg=ra,
-            dec_deg=dec,
-            radius_deg=radius,
+        result = self.wayfinder.planning.catalogs.query_sources(
+            ra,
+            dec,
+            radius,
             source=["catalogs"],
             catalog_drivers=enabled_drivers,
             magnitude_max=limiting_magnitude,
-            limit=None,
         )
         return {
             "sources": [source.model_dump(by_alias=True) for source in result.sources],
@@ -1009,10 +1007,10 @@ class StellarService:
         dict
             ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
             ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
-            ``size_megabytes`` (from ``planning.get_deep_catalog_status``),
+            ``size_megabytes`` (from ``planning.catalogs.get_deep_status``),
             plus ``installCommand``: the command that downloads it.
         """
-        status = self.wayfinder.planning.get_deep_catalog_status().model_dump(
+        status = self.wayfinder.planning.catalogs.get_deep_status().model_dump(
             mode="json", exclude={"estimate"}
         )
         status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
@@ -1027,7 +1025,7 @@ class StellarService:
             One entry per driver with keys: driver_name, display_name,
             maximum_query_radius_degrees.
         """
-        return [driver.model_dump() for driver in self.wayfinder.planning.query_catalogs()]
+        return [driver.model_dump() for driver in self.wayfinder.planning.catalogs.query()]
 
     def get_constellation_lines(self) -> list[dict]:
         """Return all bundled constellation stick-figure line segments.
@@ -1043,7 +1041,38 @@ class StellarService:
         result : `list` of `dict`
             Constellation stick-figure line segments.
         """
-        return [segment.model_dump() for segment in self.wayfinder.planning.get_constellation_lines()]
+        return [segment.model_dump() for segment in self.wayfinder.planning.sky.get_constellation_lines()]
+
+    def _sky_object(self, name: str) -> Target | StellarObject:
+        """Turn a name into the object the visibility read takes.
+
+        The library looks among its targets, then its stars, then SIMBAD
+        (``targets.resolve``). A name only SIMBAD knows becomes a point with
+        that name at SIMBAD's position.
+
+        Parameters
+        ----------
+        name : `str`
+            A target id or common name, a star name, or a catalog name.
+
+        Returns
+        -------
+        sky_object : `Target` or `StellarObject`
+            The library target or star, or a point for a SIMBAD name.
+
+        Raises
+        ------
+        NotFoundError
+            If neither the library nor SIMBAD knows the name.
+        """
+        resolution = self.astrometrics.targets.resolve(name)
+        if resolution is None:
+            raise NotFoundError(f"Cannot find {name!r} in the library or SIMBAD.", details={"name": name})
+        if resolution.target is not None:
+            return resolution.target
+        if resolution.star is not None:
+            return resolution.star
+        return StellarObject(id=name, name=resolution.name, ra=resolution.ra_deg, dec=resolution.dec_deg)
 
     def get_visibility(
         self,
@@ -1087,17 +1116,21 @@ class StellarService:
                 elif isinstance(object_entry.get("ra"), int | float) and isinstance(
                     object_entry.get("dec"), int | float
                 ):
-                    resolved.append({
-                        "id": object_entry.get("id"),
-                        "ra_deg": float(object_entry["ra"]),
-                        "dec_deg": float(object_entry["dec"]),
-                    })
+                    point_id = str(object_entry.get("id"))
+                    resolved.append(
+                        StellarObject(
+                            id=point_id,
+                            name=point_id,
+                            ra=float(object_entry["ra"]),
+                            dec=float(object_entry["dec"]),
+                        )
+                    )
             else:
-                resolved.append(object_entry.get("id"))
+                resolved.append(self._sky_object(str(object_entry.get("id"))))
         if not resolved:
             return []
-        report = self.wayfinder.planning.get_visibility(
-            resolved, time=time, end_time=end, include=include if include is not None else ["meridian"]
+        report = self.wayfinder.planning.sky.get_visibility(
+            resolved, time=time, until=end, include=include if include is not None else ["meridian"]
         )
         return [entry.model_dump(mode="json") for entry in report.objects]
 
@@ -1114,7 +1147,7 @@ class StellarService:
         status : `dict`
             The target's `ObjectVisibility`.
         """
-        report = self.wayfinder.planning.get_visibility([target_id])
+        report = self.wayfinder.planning.sky.get_visibility([self._sky_object(target_id)])
         return report.objects[0].model_dump(mode="json")
 
     def list_visible_targets(self) -> list[dict]:
@@ -1125,5 +1158,5 @@ class StellarService:
         targets : `list` [`dict`]
             One `ObjectVisibility` per target that is above the horizon.
         """
-        report = self.wayfinder.planning.get_visibility(clear_only=True)
+        report = self.wayfinder.planning.sky.get_visibility(clear_only=True)
         return [entry.model_dump(mode="json") for entry in report.objects]

@@ -31,6 +31,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from astrometricslib import Target
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import AstrometricsError
 from backend.services.error_logging import log_failure
@@ -131,7 +132,7 @@ class SuggestionRefreshWorker:
                 return
             try:
                 with background_log_context("suggestion-refresh"):
-                    change = self._wayfinder.planning.refresh_suggestions(target_ids)
+                    change = self._wayfinder.planning.packages.record_suggestions(self._targets(target_ids))
             except AstrometricsError as error:
                 log_failure(logger, error, "The suggestion refresh failed")
             except Exception:  # the top of a background thread: log it, keep the worker alive
@@ -141,6 +142,26 @@ class SuggestionRefreshWorker:
                 self._announce(change)
             except Exception:  # an announcement must never stop the worker
                 logger.exception("Could not announce the suggestion refresh")
+
+    def _targets(self, target_ids: list[str] | None) -> list[Target] | None:
+        """Turn the target ids of a batch into the targets the library takes.
+
+        Parameters
+        ----------
+        target_ids : `list` [`str`] or `None`
+            The ids, or `None` for every target.
+
+        Returns
+        -------
+        targets : `list` [`Target`] or `None`
+            The library targets. An id the library no longer holds stays a
+            bare target with that id, so the refresh notes that it has no
+            report instead of failing the whole batch.
+        """
+        if target_ids is None:
+            return None
+        targets = self._wayfinder.astrometrics.targets
+        return [targets.get(target_id) or Target(id=target_id) for target_id in target_ids]
 
     def _announce(self, change: Any) -> None:
         """Send the events for one finished refresh.
@@ -174,7 +195,7 @@ class SuggestionRefreshWorker:
             },
         )
         if change.checklist_item_ids:
-            session = self._wayfinder.planning.get_plan(observing_night_id=observing_night_id(time.time()))
+            session = self._wayfinder.planning.sessions.get(observing_night_id(time.time()))
             if session is not None:
                 self._socket_manager.broadcast_ui_event_sync(
                     "plan:changed",

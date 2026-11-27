@@ -122,12 +122,12 @@ def test_capture_focus_and_filter_commands_pass_the_safety_check(
     context = wayfinder.control._context
     wayfinder.control.safety.set_mode("controller", note="before", shadow_first=True)
     with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
-        wayfinder.control.imaging.focus_move(10)
+        wayfinder.control.imaging.move_focuser(10)
 
     _take_command(wayfinder, tmp_path)
 
     hardware_operations.require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
-    wayfinder.control.imaging.focus_move(10)
+    wayfinder.control.imaging.move_focuser(10)
     wayfinder.control.imaging.set_filter("L")
     assert wayfinder.recording.commands_sent() != []
 

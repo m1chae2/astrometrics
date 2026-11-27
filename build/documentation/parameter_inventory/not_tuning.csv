@@ -605,11 +605,17 @@ wayfindinglib/api/control/imaging.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
 wayfindinglib/api/control/imaging.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
 wayfindinglib/api/control/imaging.py,MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C,Input sanity limit
 wayfindinglib/api/execution.py,ObservationExecution.create_recorder.snapshot_interval_seconds,Recording cadence; plumbing
-wayfindinglib/api/planning.py,MAXIMUM_SOURCES,Reply size cap
-wayfindinglib/api/planning.py,ObservationPlanning.calculate_panels.rotation_deg,0 means no rotation; the caller passes the angle
-wayfindinglib/api/planning.py,ObservationPlanning.get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
-wayfindinglib/api/planning.py,ObservationPlanning.get_visibility.timezone_offset_hours,0 means UTC; the caller passes the offset
-wayfindinglib/api/planning.py,ObservationPlanning.query_sources.limit,Row or item cap that callers pass; plumbing
+wayfindinglib/api/planning/catalogs.py,PlanningCatalogs.query.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/catalogs.py,PlanningCatalogs.query_sources.radius_deg,Search radius a caller passes; 1 degree is only a starting view
+wayfindinglib/api/planning/packages.py,PlanningPackages.create.priority,0 is the neutral priority; the caller sets the order
+wayfindinglib/api/planning/packages.py,PlanningPackages.query.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/packages.py,PlanningPackages.query_suggestion_log.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/sessions.py,PlanningSessions.query.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.cols,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.overlap_pct,0 means no overlap; the caller passes the overlap
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.rotation_deg,0 means no rotation; the caller passes the angle
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.rows,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/api/planning/sky.py,PlanningSky.get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
 wayfindinglib/api/review/alignment.py,ReviewAlignment.query_nights.offset,Pagination start; 0 means from the first row
 wayfindinglib/api/review/guiding.py,ReviewGuiding.query_runs.offset,Pagination start; 0 means from the first row
 wayfindinglib/api/review/nights.py,ReviewNights.query.offset,Pagination start; 0 means from the first row
@@ -755,9 +761,20 @@ wayfindinglib/tasks/control_tasks/target_changes.py,POSITION_WINDOW_SECONDS,Poll
 wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentinel for unsolved position
 wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
 wayfindinglib/tasks/execution_tasks/session_recorder.py,ObservationSessionRecorder.__init__.snapshot_interval_seconds,Recording cadence; plumbing
+wayfindinglib/tasks/planning_tasks/catalog_answers.py,query_catalogs.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/tasks/planning_tasks/catalog_answers.py,query_sources.radius_deg,Search radius a caller passes; 1 degree is only a starting view
 wayfindinglib/tasks/planning_tasks/depth_goal_tasks.py,DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
 wayfindinglib/tasks/planning_tasks/mosaic_tasks.py,calculate_panels.rotation_deg,0 means no rotation; the caller passes the angle
+wayfindinglib/tasks/planning_tasks/package_records.py,create_package.priority,0 is the neutral priority; the caller sets the order
+wayfindinglib/tasks/planning_tasks/package_records.py,query_packages.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/tasks/planning_tasks/package_records.py,query_suggestion_log.offset,Paging start that callers pass; 0 is the first match
 wayfindinglib/tasks/planning_tasks/scheduling.py,_DEFAULT_STEP_MINUTES,Unused in file; step default dead
+wayfindinglib/tasks/planning_tasks/session_records.py,query_sessions.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.cols,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.overlap_pct,0 means no overlap; the caller passes the overlap
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.rotation_deg,0 means no rotation; the caller passes the angle
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.rows,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
 wayfindinglib/tasks/planning_tasks/target_report_inputs.py,NOISE_HISTORY_CACHE_MAXIMUM_ENTRIES,software plumbing
 wayfindinglib/tasks/planning_tasks/target_report_tasks.py,EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES,software plumbing
 wayfindinglib/tasks/planning_tasks/target_report_tasks.py,GUIDE_SAMPLE_READ_LIMIT,Read limit; plumbing

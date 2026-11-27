@@ -41,11 +41,10 @@ import logging
 import sys
 import time
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import Astrometrics, configure_logging, get_configuration
 from astrometricslib.drivers import pixels_near_circles
 from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
 from astrometricslib.parameters import resolve_parameter
-from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     DEFAULT_HEALPIX_LEVEL,
@@ -53,7 +52,10 @@ from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_QUERY_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_DELAY_SECONDS,
+    build_deep_star_catalog,
+    estimate_catalog_size,
 )
+from wayfindinglib.models.planning.deep_catalog import DeepCatalogBuildReport, DeepCatalogEstimate
 
 # Radius, in degrees, of the circle drawn around each imaged field by
 # --near-targets.
@@ -247,13 +249,11 @@ def _print_status(config: object) -> None:
     print(f"  chunk level {status['healpix_level']}, stars brighter than G = {status['magnitude_limit']}")
 
 
-def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
+def _run_estimate(arguments: argparse.Namespace) -> int:
     """Count a sample of chunks and print a size guess.
 
     Parameters
     ----------
-    planning : `wayfindinglib.ObservationPlanning`
-        Used to run the size estimate.
     arguments : `argparse.Namespace`
         The parsed command-line arguments.
 
@@ -264,13 +264,14 @@ def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
     """
     print("Counting a sample of chunks (this asks ESA for a few dozen small answers)...")
     try:
-        estimate = planning.get_deep_catalog_status(
-            include=["estimate"],
-            healpix_level=arguments.healpix_level,
-            magnitude_max=arguments.magnitude_limit,
-            query_timeout_seconds=arguments.timeout_seconds,
-            request_delay_seconds=arguments.request_delay_seconds,
-        ).estimate
+        estimate = DeepCatalogEstimate.model_validate(
+            estimate_catalog_size(
+                healpix_level=arguments.healpix_level,
+                magnitude_limit=arguments.magnitude_limit,
+                query_timeout_seconds=arguments.timeout_seconds,
+                request_delay_seconds=arguments.request_delay_seconds,
+            )
+        )
     except ExternalServiceError as estimate_error:
         print(f"Could not estimate: {estimate_error}")
         return 1
@@ -306,9 +307,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
     arguments = _build_argument_parser().parse_args(argv)
     configure_logging("build_deep_star_catalog", level=logging.WARNING, log_dir="")
 
-    wayfinder = Wayfinder()
-    planning = wayfinder.planning
-    config = wayfinder.config
+    config = get_configuration()
 
     _print_status(config)
 
@@ -342,7 +341,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
         return 0
 
     if arguments.estimate:
-        return _run_estimate(planning, arguments)
+        return _run_estimate(arguments)
 
     started_at = time.monotonic()
     downloaded_this_run = 0
@@ -376,15 +375,18 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
 
     print("\nDownloading. Requests are made one at a time. Press Ctrl-C to stop; run again to resume.")
     try:
-        report = planning.build_deep_star_catalog(
-            healpix_level=arguments.healpix_level,
-            magnitude_limit=arguments.magnitude_limit,
-            request_delay_seconds=arguments.request_delay_seconds,
-            max_attempts=arguments.max_attempts,
-            query_timeout_seconds=arguments.timeout_seconds,
-            maximum_pixels=arguments.max_pixels,
-            progress_callback=report_pixel,
-            pixels=chosen_pixels,
+        report = DeepCatalogBuildReport.model_validate(
+            build_deep_star_catalog(
+                config,
+                healpix_level=arguments.healpix_level,
+                magnitude_limit=arguments.magnitude_limit,
+                request_delay_seconds=arguments.request_delay_seconds,
+                max_attempts=arguments.max_attempts,
+                query_timeout_seconds=arguments.timeout_seconds,
+                maximum_pixels=arguments.max_pixels,
+                progress_callback=report_pixel,
+                pixels=chosen_pixels,
+            )
         )
     except (InvalidArgumentError, ConflictError) as settings_error:
         print(f"\n{settings_error}")

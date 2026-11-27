@@ -82,6 +82,96 @@ RENAMES: dict[str, str] = {
     "wayfindinglib.ObservationExecution.build_divergence_record": (
         "wayfindinglib's internals (record_divergence); it is no longer public"
     ),
+    # Step 5a of #206: planning has sessions, packages, sky and catalogs.
+    "wayfindinglib.ObservationPlanning.lookup_coordinates": ("astrometrics.targets.resolve(name)"),
+    "wayfindinglib.ObservationPlanning.query_sources": (
+        "wayfinder.planning.catalogs.query_sources(ra_deg, dec_deg, radius_deg)"
+    ),
+    "wayfindinglib.ObservationPlanning.query_catalogs": ("wayfinder.planning.catalogs.query()"),
+    "wayfindinglib.ObservationPlanning.get_constellation_lines": (
+        "wayfinder.planning.sky.get_constellation_lines()"
+    ),
+    "wayfindinglib.ObservationPlanning.get_visibility": (
+        "wayfinder.planning.sky.get_visibility(objects, time=..., until=...)"
+    ),
+    "wayfindinglib.ObservationPlanning.get_tonight_advice": (
+        "wayfinder.planning.sky.get_tonight_advice(time=...)"
+    ),
+    "wayfindinglib.ObservationPlanning.get_calibration_advice": (
+        "astrometrics.calibration.query(kind, setting=CaptureSetting(...)) or "
+        "astrometrics.calibration.match(frames)"
+    ),
+    "wayfindinglib.ObservationPlanning.calculate_panels": (
+        "wayfinder.planning.sky.get_panels(center, rows, cols, overlap_pct=...)"
+    ),
+    "wayfindinglib.ObservationPlanning.create_mosaic": (
+        "wayfinder.planning.packages.create_mosaic(target, panels, exposures)"
+    ),
+    "wayfindinglib.ObservationPlanning.create_sequence": (
+        "wayfinder.planning.packages.create(target, exposures), with ExposureRequest rows "
+        "(the sequence plan itself is built by the backend's sequencer adapter)"
+    ),
+    "wayfindinglib.ObservationPlanning.create_package": (
+        "wayfinder.planning.packages.create(target, exposures)"
+    ),
+    "wayfindinglib.ObservationPlanning.create_session": (
+        "wayfinder.planning.sessions.create(night, configuration=None, packages=None)"
+    ),
+    "wayfindinglib.ObservationPlanning.add_to_queue": ("wayfinder.planning.sessions.add(session, packages)"),
+    "wayfindinglib.ObservationPlanning.reorder_queue": (
+        "wayfinder.planning.sessions.update(session, order=entries)"
+    ),
+    "wayfindinglib.ObservationPlanning.remove_from_queue": (
+        "wayfinder.planning.sessions.remove(session, entries)"
+    ),
+    "wayfindinglib.ObservationPlanning.set_entry_exposures": (
+        "wayfinder.planning.sessions.update(session, exposures={entry_id: [...]})"
+    ),
+    "wayfindinglib.ObservationPlanning.add_checklist_items": (
+        "wayfinder.planning.sessions.update(session, checklist=[*session.checklist, *items])"
+    ),
+    "wayfindinglib.ObservationPlanning.set_framing": (
+        "wayfinder.planning.sessions.update(session, framing=framing)"
+    ),
+    "wayfindinglib.ObservationPlanning.tick_checklist_item": (
+        "wayfinder.planning.sessions.update(session, checklist=...) with the item's ticked_at set"
+    ),
+    "wayfindinglib.ObservationPlanning.update_package": (
+        "wayfinder.planning.packages.update(package, **changes)"
+    ),
+    "wayfindinglib.ObservationPlanning.reopen_package": (
+        'wayfinder.planning.packages.update(package, status="PLANNED")'
+    ),
+    "wayfindinglib.ObservationPlanning.dismiss_package": (
+        "wayfinder.planning.packages.update(package, dismissed=True), or "
+        "update(package, dismissed_rows=[source_key]) for one row"
+    ),
+    "wayfindinglib.ObservationPlanning.undismiss_package": (
+        "wayfinder.planning.packages.restore(package, source_keys=None)"
+    ),
+    "wayfindinglib.ObservationPlanning.delete_package": ("wayfinder.planning.packages.delete(package)"),
+    "wayfindinglib.ObservationPlanning.refresh_suggestions": (
+        "wayfinder.planning.packages.record_suggestions(targets=None)"
+    ),
+    "wayfindinglib.ObservationPlanning.get_plan": ("wayfinder.planning.sessions.get(night, include=...)"),
+    "wayfindinglib.ObservationPlanning.query_plans": (
+        "wayfinder.planning.sessions.query(), packages.query() or packages.query_suggestion_log()"
+    ),
+    "wayfindinglib.ObservationPlanning.get_package_for_target": (
+        "wayfinder.planning.packages.get_for_target(target)"
+    ),
+    "wayfindinglib.ObservationPlanning.get_depth_goal": (
+        "wayfinder.planning.packages.get_depth_goal(target)"
+    ),
+    "wayfindinglib.ObservationPlanning.set_depth_goal": (
+        "wayfinder.planning.packages.set_depth_goal(target, level)"
+    ),
+    "wayfindinglib.ObservationPlanning.get_deep_catalog_status": (
+        "wayfinder.planning.catalogs.get_deep_status(), and predict_deep_catalog() for the estimate"
+    ),
+    "wayfindinglib.ObservationPlanning.build_deep_star_catalog": (
+        "wayfinder.planning.catalogs.record_deep_catalog(...)"
+    ),
     # Step 5c of #206: control and execution.
     "wayfindinglib.EquipmentControl.status": "wayfinder.control.equipment.get_status(include=None)",
     "wayfindinglib.EquipmentControl.disconnect": (
@@ -131,7 +221,7 @@ RENAMES: dict[str, str] = {
         'wayfinder.control.safety.set_mode("controller", note="", shadow_first=False)'
     ),
     "wayfindinglib.SafetyControl.apply_promotion_decision": (
-        'wayfinder.control.safety.update(policy, capability, state, note="")'
+        'wayfinder.control.safety.update(policy, {capability: state}, note="")'
     ),
     "wayfindinglib.ObservationExecution.advance_session": "wayfinder.execution.run(session, stop=None)",
     "wayfindinglib.ObservationExecution.abort_session": 'wayfinder.execution.abort(session, reason="")',

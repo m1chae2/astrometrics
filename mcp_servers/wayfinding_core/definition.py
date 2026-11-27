@@ -5,15 +5,16 @@ tools turn the client's ids into library objects (a target, a star) and its
 frame filters into a frame choice before the call.
 ``control`` itself holds only the driver properties, which are not tools. Its
 operations live on six children, so each child gets its own prefix, such
-as ``observatory_mount_park``. ``review`` holds five objects, each with a
-prefix of its own, such as ``review_nights_query``. The server's manifest,
+as ``observatory_mount_park``. ``planning`` holds four objects and
+``review`` five, each with a prefix of its own, such as
+``planning_sessions_get`` and ``review_nights_query``. The server's manifest,
 ``tool_manifest.json`` in this folder, decides which tools a profile may use.
 """
 
 from pathlib import Path
 
 from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
-from mcp_servers.common.reflection import register_reflected_tools
+from mcp_servers.common.reflection import ClientLimits, register_reflected_tools
 from mcp_servers.common.tool_registry import ToolRegistry
 from wayfindinglib import Wayfinder
 
@@ -31,11 +32,29 @@ REVIEW_CHILDREN = ("nights", "targets", "guiding", "performance", "alignment")
 
 BRANCH_PREFIXES = {
     **{f"control.{child}": f"observatory_{child}" for child in CONTROL_CHILDREN},
-    "planning": "planning",
+    "planning.sessions": "planning_sessions",
+    "planning.packages": "planning_packages",
+    "planning.sky": "planning_sky",
+    "planning.catalogs": "planning_catalogs",
     "execution": "execution",
     **{f"review.{child}": f"review_{child}" for child in REVIEW_CHILDREN},
 }
 """Sub-API of `Wayfinder` -> the prefix of its tools' names."""
+
+SOURCES_DEFAULT_STARS = 100
+"""How many stars one ``planning_catalogs_query_sources`` call lists when the
+client gives no limit. The library lists every match by default."""
+
+SOURCES_MAXIMUM_STARS = 300
+"""Most stars one ``planning_catalogs_query_sources`` call lists for an AI
+client."""
+
+CLIENT_LIMITS = {
+    "planning_catalogs_query_sources": ClientLimits(
+        maximums={"limit": SOURCES_MAXIMUM_STARS}, defaults={"limit": SOURCES_DEFAULT_STARS}
+    ),
+}
+"""By tool name, the reply caps an AI client gets."""
 
 
 def build_registry() -> ToolRegistry:
@@ -50,5 +69,5 @@ def build_registry() -> ToolRegistry:
         their work as its own job.
     """
     registry = ToolRegistry(sandbox_paths=True)
-    register_reflected_tools(registry, Wayfinder(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS)
+    register_reflected_tools(registry, Wayfinder(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS, limits=CLIENT_LIMITS)
     return registry

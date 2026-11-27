@@ -72,7 +72,7 @@ SAMPLE_ARGUMENTS = {
     "observatory_mount_park": {},
     "observatory_mount_set_slew_rate": {"rate": 1},
     "observatory_mount_set_tracking": {"on": True},
-    "observatory_mount_slew": {"destination": "M 81"},
+    "observatory_mount_slew": {"destination": {"id": "point", "ra_deg": 10.0, "dec_deg": 20.0}},
     "observatory_mount_unpark": {},
     "execution_run": {},
 }

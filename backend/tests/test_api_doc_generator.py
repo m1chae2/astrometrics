@@ -136,8 +136,8 @@ def test_find_doc_entries_by_console_path() -> None:
 
     assert [entry["anchor_id"] for entry in by_method] == ["api-TargetFrames-get_rotation"]
     assert [entry["anchor_id"] for entry in by_object] == ["api-TargetCatalog"]
-    assert find_doc_entries("wayfinder.planning.get_visibility")[0]["qualified_name"] == (
-        "ObservationPlanning.get_visibility"
+    assert find_doc_entries("wayfinder.planning.sky.get_visibility")[0]["qualified_name"] == (
+        "PlanningSky.get_visibility"
     )
 
 

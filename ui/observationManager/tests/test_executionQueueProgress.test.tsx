@@ -13,7 +13,7 @@ import { ExecutionQueue } from '../ExecutionQueue';
 import { formatTotalTime } from '../ImagingCard';
 import { beginImagingSession } from '../../common/services/sequencerService';
 import { SequenceObject } from '../hooks/useExecutionQueue';
-import { ObservationSessionWithProgress, RunState } from '../../common/types/backendTypes';
+import { ObservationSession, RunState } from '../../common/types/backendTypes';
 
 vi.mock('../../common/services/sequencerService', () => ({ beginImagingSession: vi.fn() }));
 
@@ -34,7 +34,7 @@ const entry = (entryId: string, targetId: string, requested: number, captured: n
     { entryId, targetId, requested, captured, flagged: 0, notJudged: 0, state, imagingNow }
 );
 
-const session: ObservationSessionWithProgress = {
+const session: ObservationSession = {
     id: 's1', nightDate: '2026-10-25', siteProfileId: 'site', telescopeId: 't', cameraId: 'c', revision: 3,
     checklist: [
         { itemId: 'c1', rule: 'flat_residual', label: 'Take new flats', createdAt: '2026-10-25T01:00:00Z' },

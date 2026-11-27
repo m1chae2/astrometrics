@@ -10,7 +10,7 @@ The library has a small public surface. Everything else is private.
 
 | Import from | What it holds |
 | :--- | :--- |
-| `wayfindinglib` (the root, 8 names) | `Wayfinder`, the four sub-API classes `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and `ObservationReview`, the two records `ObservationSession` and `ObservationPackage`, and `FrameEndDetector` (says when a camera frame has ended, from the camera status text). |
+| `wayfindinglib` (the root) | `Wayfinder`, the four sub-API classes `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and `ObservationReview`, the two records `ObservationSession` and `ObservationPackage`, `FrameEndDetector` (says when a camera frame has ended, from the camera status text), and the models the planning calls take as input: `ExposureRequest`, `DitherConfig`, `Framing`, `ChecklistItem`, `QueueRequest`, `MosaicPanel` and `HorizonZone`. |
 | `wayfindinglib.drivers` | The PHD2 client: `PHD2Client` (reads PHD2's guide steps, or opens a session) and `PHD2Session` (one connection that sends PHD2 commands such as connect, loop, guide and stop, and waits for events). Both refuse a host beyond this computer when the launch is offline. |
 | `wayfindinglib.exceptions` | `DelegationPolicyValidationError` and `PlanRevisionConflictError`. The shared categories (`NotFoundError`, `InvalidArgumentError` and the rest) come from `astrometricslib.exceptions`. |
 | `wayfindinglib.reports` | The states and levels that results report: `RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`. |
@@ -22,16 +22,23 @@ The rules:
 - **Only `wayfindinglib` may import `_internal`.** The backend, the MCP servers and the simulator use the root and the public modules only. Tests of the libraries are the one exception.
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields). A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **The library uses only public `astrometricslib` names.** It reaches the science library through the `Astrometrics` handle that `Wayfinder` holds.
-- **Calls take plain values.** A simple value is an argument. A group of options or a list of items is a dictionary, and the library checks it.
+- **Calls take objects.** A call takes the library's objects (a `Target`, a session, a package) and typed input models (an `ExposureRequest`, a `Framing`), all importable from the root. The adapters, the backend services and the MCP tools, turn ids and JSON into these.
 - **Old names have no alias.** A renamed call or field keeps no copy under its old name.
 
 ## The sub-APIs
 
 `Wayfinder` builds four sub-APIs over one configuration, one data store and one `Astrometrics` handle, so all four see the same records. It has no methods of its own.
 
-### `planning.py`
+### `planning/`
 
-`ObservationPlanning` (`wayfinder.planning`) decides what to observe and when. It looks up coordinates, lists sources and catalogs, works out visibility and mosaic panels, gives advice for tonight and for calibration frames, and builds and edits observation packages (a package is a target with its planned exposures) and session queues. A name lookup, a magnitude lookup and the online region search ask SIMBAD through `astrometricslib.drivers.get_simbad_driver`, the same driver the image pipelines use. A fresh stored answer is used with no network call, and when SIMBAD cannot be reached, or the outside-service gateway has paused it after repeated trouble or a 429 or 503 reply, the last stored answer is used with a warning that gives its age. The gateway also limits SIMBAD to 4 requests per second per server. The deep star catalog builder asks the ESA Gaia archive through `astrometricslib.drivers.get_gaia_archive`, under the same rules. Every edit is its own call with its own revision, and `expected_revision` on each call makes the library refuse an edit made from an old copy.
+`ObservationPlanning` (`wayfinder.planning`) decides what to observe and when, through four objects, one module each. Every method is a thin wrapper of one owner function under `tasks/planning_tasks/`, which its docstring names; `PlanningContext` there holds the settings, storage and sky engine they share.
+
+- `sessions` (`sessions.py`): the night plans, one per observing night. `get(night)` and `query()` read them; the heavy lists (guiding and weather samples, divergence records) and the counted `progress` come only with `include=`. `create(night)` records one, empty or with `packages` placed automatically. `add` and `remove` change the queue, and `update` changes the order, an entry's exposures, the framing and the checklist (a tick is a new `ticked_at` on an item).
+- `packages` (`packages.py`): the observation packages (a package is a target with its planned exposures). `get`, `get_for_target`, `query`, `create`, `update` (plain changes, `status="PLANNED"` to reopen, `dismissed=True` to dismiss a suggestion), `restore` and `delete`. `record_suggestions` refreshes the library's suggested packages and `query_suggestion_log` reads what it did. A target's depth goal (`get_depth_goal`, `set_depth_goal`) and `create_mosaic` live here too.
+- `sky` (`sky.py`): `get_visibility` of targets and stars, `get_tonight_advice`, `get_constellation_lines` and `get_panels`, the panel centers of a mosaic grid.
+- `catalogs` (`catalogs.py`): the online catalog drivers (`query`), the sources around a point (`query_sources`) and the deep-star catalog (`get_deep_status`, `predict_deep_catalog`, `record_deep_catalog`).
+
+A name lookup goes through the core's `astrometrics.targets.resolve`, and calibration advice through `astrometrics.calibration.query`. A name lookup, a magnitude lookup and the online region search ask SIMBAD through `astrometricslib.drivers.get_simbad_driver`, the same driver the image pipelines use. A fresh stored answer is used with no network call, and when SIMBAD cannot be reached, or the outside-service gateway has paused it after repeated trouble or a 429 or 503 reply, the last stored answer is used with a warning that gives its age. The gateway also limits SIMBAD to 4 requests per second per server. The deep star catalog builder asks the ESA Gaia archive through `astrometricslib.drivers.get_gaia_archive`, under the same rules. A session or package carries its revision, and the library refuses an edit made from an old copy.
 
 ### `execution.py`
 

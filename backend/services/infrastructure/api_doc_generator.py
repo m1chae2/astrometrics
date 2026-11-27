@@ -693,7 +693,7 @@ def generate_api_index() -> str:
         ")",
         "",
         "# Check visibility from your observatory location",
-        'report = wayfinder.planning.get_visibility(["M 13"])',
+        "report = wayfinder.planning.sky.get_visibility([target])",
         'print(f"Altitude now: {report.objects[0].altitude_deg:.1f} degrees")',
         "```",
         "",
@@ -1000,6 +1000,17 @@ def generate_wayfindinglib_docs() -> str:
             )
         )
         sections.append("\n---\n")
+        # The methods live on the four objects, such as `planning.sky`; the
+        # class annotations name each object's class.
+        for child_name, child_class in _class_hints(plan_cls).items():
+            sections.append(
+                format_class_markdown(
+                    child_class,
+                    display_title=f"planning.{child_name}",
+                    console_alias=f"planner.{child_name}",
+                )
+            )
+            sections.append("\n---\n")
 
     # 4. ObservationExecution
     sections.append('<a id="class-observationexecution"></a>')

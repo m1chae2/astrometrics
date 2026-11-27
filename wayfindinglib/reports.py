@@ -10,7 +10,7 @@ today.
 from wayfindinglib.models.planning.depth_goal import DepthGoalState, DepthLevel
 from wayfindinglib.models.planning.observation_package import PackageStatus
 from wayfindinglib.models.policy.delegation import DelegationState, ObservatoryCapability
-from wayfindinglib.models.session.observation_session import RunState
+from wayfindinglib.models.session.session_progress import RunState
 
 __all__ = [
     "DelegationState",

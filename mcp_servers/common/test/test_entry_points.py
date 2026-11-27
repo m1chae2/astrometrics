@@ -15,7 +15,7 @@ import pytest
 
 SERVERS = [
     ("mcp_servers.astrometrics_core.__main__", "astrometrics-core", "quality_frames_measure", 10),
-    ("mcp_servers.wayfinding_core.__main__", "wayfindinglib-core", "planning_get_visibility", 10),
+    ("mcp_servers.wayfinding_core.__main__", "wayfindinglib-core", "planning_sky_get_visibility", 10),
     ("mcp_servers.backend.__main__", "astrometrics-backend", "app_status", 2),
 ]
 """Entry module, server name it announces, one tool it must offer, and the

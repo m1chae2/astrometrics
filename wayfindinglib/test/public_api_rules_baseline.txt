@@ -17,10 +17,6 @@ wayfinder.control.equipment.connect: owner
 wayfinder.control.equipment.disconnect: bool-return
 wayfinder.control.equipment.disconnect: owner
 wayfinder.control.equipment.disconnect: verb
-wayfinder.control.equipment.set_active_camera: bool-return
-wayfinder.control.equipment.set_active_camera: owner
-wayfinder.control.equipment.set_active_telescope: bool-return
-wayfinder.control.equipment.set_active_telescope: owner
 wayfinder.control.equipment.set_device_property: bool-return
 wayfinder.control.equipment.set_device_property: no-default(value)
 wayfinder.control.equipment.set_device_property: owner

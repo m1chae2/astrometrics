@@ -93,7 +93,7 @@ def dither_pulses_ms(context: ControlContext, config: DitherConfig) -> float:
         If no telescope and camera are active, so pixels cannot be turned
         into arcseconds.
     """
-    from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
+    from astrometricslib import ObservatoryConfiguration
 
     telescope = context.active_telescope()
     camera = context.active_camera()
@@ -101,7 +101,7 @@ def dither_pulses_ms(context: ControlContext, config: DitherConfig) -> float:
         raise ConfigurationError(
             "Dithering needs an active telescope and camera to turn pixels into a pulse length."
         )
-    plate_scale = EquipmentConfiguration(telescope=telescope, camera=camera).plate_scale_arcsec_per_px()
+    plate_scale = ObservatoryConfiguration(telescope=telescope, camera=camera).plate_scale_arcsec_per_px
     return arcsec_to_pulse_ms(config.pixels * plate_scale)
 
 

@@ -37,8 +37,10 @@ from astrometricslib import (
     AppConfiguration,
     Astrometrics,
     FilterType,
+    ObservatoryConfiguration,
     StellarObject,
     Target,
+    Telescope,
 )
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
@@ -58,7 +60,6 @@ from wayfindinglib.analytics.frame_counting import (
 )
 from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
-from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.coordinate_lookup import CoordinateLookup
 from wayfindinglib.models.planning.deep_catalog import (
@@ -860,7 +861,7 @@ class ObservationPlanning:
         rows: int,
         cols: int,
         overlap_percent: float,
-        equipment: EquipmentConfiguration | None = None,
+        equipment: ObservatoryConfiguration | None = None,
         rotation_deg: float = 0.0,
     ) -> list[MosaicPanel]:
         """Work out the center of each panel of a mosaic grid.
@@ -881,7 +882,7 @@ class ObservationPlanning:
             Number of panel columns.
         overlap_percent : `float`
             How much neighbouring panels overlap, from 0 to under 100.
-        equipment : `EquipmentConfiguration`, optional
+        equipment : `ObservatoryConfiguration`, optional
             The telescope and camera whose field of view sets the spacing.
             The configured sensor and focal length are used when omitted.
         rotation_deg : `float`, optional

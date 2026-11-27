@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import Camera, GuideScope, ObservatoryConfiguration, Telescope
 from astrometricslib.reports import LimitTier
 from wayfindinglib.analytics.performance_envelope import (
     DEFAULT_BLUR_TOLERANCE_FRACTION,
@@ -21,23 +22,17 @@ from wayfindinglib.analytics.performance_envelope import (
     derive_performance_envelope,
     robust_median_and_spread,
 )
-from wayfindinglib.models.equipment_and_site.equipment import (
-    Camera,
-    EquipmentConfiguration,
-    GuideScope,
-    Telescope,
-)
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
 )
 
 
-def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> EquipmentConfiguration:
+def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> ObservatoryConfiguration:
     """Build an imaging telescope and camera.
 
     Returns
     -------
-    equipment : `EquipmentConfiguration`
+    equipment : `ObservatoryConfiguration`
         The defaults are this observatory's telescope and camera.
     """
     telescope = Telescope(id="t", name="Apertura 75Q", focal_length_mm=focal_length_mm)
@@ -48,7 +43,7 @@ def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> E
         sensor_width_px=3008,
         sensor_height_px=3008,
     )
-    return EquipmentConfiguration(telescope=telescope, camera=camera)
+    return ObservatoryConfiguration(telescope=telescope, camera=camera)
 
 
 def _guide_scope(focal_length_mm: float = 121.05) -> GuideScope:

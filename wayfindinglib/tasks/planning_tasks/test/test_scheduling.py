@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
+from astrometricslib import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType, ObservationPackage
 from wayfindinglib.models.planning.planning_config import PlanningConfig

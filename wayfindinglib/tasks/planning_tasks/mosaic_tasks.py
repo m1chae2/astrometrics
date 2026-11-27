@@ -12,7 +12,7 @@ camera, telescope and field of view, and can record one
 `ObservationPackage` per panel with a shared exposure recipe. From then on
 each panel is an ordinary target with an ordinary package.
 
-The field of view comes from the active `EquipmentConfiguration` when the
+The field of view comes from the active `ObservatoryConfiguration` when the
 caller gives one. Otherwise it comes from the configuration's camera
 sensor size and telescope focal length, with a 23.5 x 15.6 mm sensor and a
 400 mm focal length used for any value that is missing.
@@ -25,7 +25,7 @@ from typing import Any
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib import Target
+from astrometricslib import ObservatoryConfiguration, Target
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -34,7 +34,6 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
 from wayfindinglib.models.planning.observation_package import (
@@ -180,7 +179,7 @@ def calculate_panels(
     rows: int,
     cols: int,
     overlap_percent: float,
-    equipment: EquipmentConfiguration | None = None,
+    equipment: ObservatoryConfiguration | None = None,
     rotation_deg: float = 0.0,
 ) -> list[MosaicPanel]:
     """Work out the center of every panel in a mosaic grid.
@@ -206,7 +205,7 @@ def calculate_panels(
         Number of panel columns.
     overlap_percent : `float`
         How much neighbouring panels overlap, from 0 to just under 100.
-    equipment : `EquipmentConfiguration`, optional
+    equipment : `ObservatoryConfiguration`, optional
         The telescope and camera; their field of view sets the spacing.
     rotation_deg : `float`, optional
         How far the camera is turned, in degrees east of north, the way

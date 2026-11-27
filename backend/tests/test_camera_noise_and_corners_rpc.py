@@ -26,7 +26,7 @@ def test_list_cameras_reads_the_camera_profiles_section_and_keeps_the_noise() ->
     profiles = [{"name": "ASI533", "pixelSizeUm": 3.76, "sensorNoise": [noise_entry]}]
     equipment = create_autospec(EquipmentControl, instance=True)
     equipment.status.return_value = EquipmentStatus(camera_profiles=profiles)
-    service = EquipmentService(SimpleNamespace(equipment=equipment))
+    service = EquipmentService(SimpleNamespace(equipment=equipment), configurations=None)
     assert service.list_camera_profiles() == profiles
     equipment.status.assert_called_once_with(include=["camera_profiles"])
 

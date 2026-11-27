@@ -16,7 +16,8 @@ intermediate setpoint is a thin orchestration step layered on top, not
 part of this module.
 """
 
-from wayfindinglib.models.equipment_and_site.equipment import Camera, CoolingPolicy
+from astrometricslib import Camera
+from wayfindinglib.models.equipment_and_site.equipment import CoolingPolicy
 
 
 def effective_ramp_rate_c_per_min(policy: CoolingPolicy, camera: Camera | None) -> float:

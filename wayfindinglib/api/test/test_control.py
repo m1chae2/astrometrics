@@ -113,15 +113,33 @@ def _configure_active_rig(app_config: AppConfiguration) -> None:
     })
 
 
-def test_set_active_telescope_and_camera_round_trip(
-    control: ObservatoryControl, app_config: AppConfiguration
+def test_the_active_configuration_round_trips(
+    control: ObservatoryControl, app_config: AppConfiguration, tmp_path: Path
 ) -> None:
-    """Verify equipment activation records and resolves via active_*()."""
+    """The active configuration is stored; making another active switches."""
     _configure_active_rig(app_config)
-    assert control.equipment.set_active_telescope("Rig A") is True
-    assert control.equipment.set_active_camera("CamA") is True
-    assert control.equipment.status(include=["telescope"]).telescope.id == "Rig A"
-    assert control.equipment.status(include=["camera"]).camera.id == "CamA"
+    app_config.update_config({
+        "Image Library": {"path": str(tmp_path / "library")},
+        "Observatory.Telescope": {"models": "Rig A, Rig B"},
+        "Observatory.Telescope.Rig B": {"focal_length_mm": "135.0"},
+    })
+    (tmp_path / "library").mkdir()
+    active = control.equipment.get_active()
+    assert active is not None and active.id and active.telescope.id == "Rig A" and active.camera.id == "CamA"
+    assert control.equipment.get_active() == active
+    configurations = control._context.astrometrics.observatories.configurations
+    from astrometricslib import Telescope
+
+    rig_b = configurations.create(
+        active.model_copy(
+            update={"id": "", "name": "", "telescope": Telescope(id="Rig B", name="Rig B", focal_length_mm=135.0)}
+        )
+    )
+    control.equipment.set_active(rig_b)
+    assert control.equipment.get_active() == rig_b
+    assert control.equipment.status(include=["telescope"]).telescope.id == "Rig B"
+    control.equipment.set_pointing_limits(min_altitude_deg=25.0)
+    assert control.equipment.status(include=["telescope"]).telescope.min_altitude_deg == pytest.approx(25.0)
 
 
 def test_guider_plate_scale_falls_back_to_main_telescope_with_no_active_rig(
@@ -136,8 +154,6 @@ def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(
 ) -> None:
     """Verify the guide-aware plate scale matches the main one, by default."""
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     assert control.equipment.status(include=["guide_scope"]).guide_scope is None
     plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
@@ -154,8 +170,6 @@ def test_guider_plate_scale_uses_active_guide_scope_focal_length(
         "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
         "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
     })
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     assert control.equipment.status(include=["guide_scope"]).guide_scope.id == "Orion 50mm"
     plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
@@ -180,8 +194,6 @@ def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(
             "sensor_height_px": "960",
         },
     })
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     assert control.equipment.status(include=["guide_camera"]).guide_camera.id == "GuideCam"
     assert control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px == pytest.approx(
@@ -363,8 +375,6 @@ def test_compute_guiding_correction_raises_without_calibration(
 ) -> None:
     """Verify guiding correction raises with no calibration for the pairing."""
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     with pytest.raises(ConfigurationError, match="No GuiderCalibration"):
         control.guiding._compute_correction("frame-1", 5.0, 0.0)
@@ -375,8 +385,6 @@ def test_compute_guiding_correction_succeeds_with_saved_calibration(
 ) -> None:
     """Verify guiding correction resolves a saved calibration."""
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -407,8 +415,6 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -468,7 +474,6 @@ def test_save_and_active_guiding_spectrum_analysis_round_trip(
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
 
     assert control.guiding.status(include=["spectrum_analysis"]).spectrum_analysis is None
 
@@ -570,8 +575,6 @@ def test_run_guider_calibration_persists_the_derived_calibration(
     from wayfindinglib.tasks.control_tasks.calibration_routines import GuiderCalibrationSteps
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0), (10.0, 8.0)])
     steps = GuiderCalibrationSteps(
@@ -788,8 +791,6 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(
     from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -1061,8 +1062,8 @@ def test_non_hardware_methods_do_not_reference_indi_driver() -> None:
     import inspect
 
     non_hardware_methods = [
-        equipment.EquipmentControl.set_active_telescope,
-        equipment.EquipmentControl.set_active_camera,
+        equipment.EquipmentControl.set_active,
+        equipment.EquipmentControl.set_pointing_limits,
         mount.MountControl._compute_pointing_correction,
         guiding.GuidingControl._compute_correction,
         guiding.GuidingControl.status,

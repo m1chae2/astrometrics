@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib import Camera, GuideScope, ObservatoryConfiguration
 from astrometricslib.parameters import (
     EquipmentKind,
     HardcodedKind,
@@ -36,7 +37,6 @@ from astrometricslib.parameters import (
     resolve_parameter,
 )
 from astrometricslib.reports import LimitTier, QualityLimit
-from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, GuideScope
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 
 REGISTER_ENTRY_BY_LIMIT = {
@@ -406,7 +406,7 @@ def _insufficient(
 
 
 def _geometry_thresholds(
-    equipment: EquipmentConfiguration, guide_scope: GuideScope | None, guide_camera: Camera | None
+    equipment: ObservatoryConfiguration, guide_scope: GuideScope | None, guide_camera: Camera | None
 ) -> list[_DerivedLimit]:
     """Derive the limits that follow from dimensions and physics alone.
 
@@ -804,7 +804,7 @@ def _percentile_baseline_thresholds(
 
 
 def derive_performance_envelope(
-    equipment: EquipmentConfiguration,
+    equipment: ObservatoryConfiguration,
     guide_scope: GuideScope | None,
     guide_camera: Camera | None,
     equipment_fingerprint: str,
@@ -820,7 +820,7 @@ def derive_performance_envelope(
 
     Parameters
     ----------
-    equipment : `EquipmentConfiguration`
+    equipment : `ObservatoryConfiguration`
         The active imaging telescope and camera.
     guide_scope : `GuideScope` or `None`
         The guide scope, or `None` if the main telescope guides.

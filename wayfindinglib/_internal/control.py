@@ -10,7 +10,6 @@ from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.drivers.indi_interface import IndiInterface
 from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 from wayfindinglib.models.control_status import EquipmentStatus, GuidingStatus, ImagingStatus, SafetyStatus
-from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.session.capture_result import CaptureResult
@@ -20,7 +19,6 @@ from wayfindinglib.models.sky_position import SkyPosition
 __all__ = [
     "CaptureResult",
     "ControlRecordStore",
-    "EquipmentConfiguration",
     "EquipmentStatus",
     "GuidingStatus",
     "ImagingStatus",
@@ -33,5 +31,4 @@ __all__ = [
     "SimulatorIndiInterface",
     "SiteProfile",
     "SkyPosition",
-    "Telescope",
 ]

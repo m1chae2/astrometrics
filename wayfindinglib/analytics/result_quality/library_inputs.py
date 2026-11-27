@@ -46,7 +46,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib import Target
+from astrometricslib import Target, Telescope
 from astrometricslib.drivers import VersionedCache, get_camera_data_versions
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from astrometricslib.parameters import (
@@ -80,7 +80,6 @@ from wayfindinglib.analytics.result_quality.sky_model import (
 )
 from wayfindinglib.data_access.equipment_catalog_reader import list_telescopes
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location, resolve_site_location
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import EfficiencyReference
 

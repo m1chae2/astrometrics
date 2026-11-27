@@ -221,6 +221,7 @@ class Container:
         self.settings_service = SettingsService(
             self.config_service,
             equipment=self.wayfinder.control.equipment,
+            configurations=self.astrometrics.observatories.configurations,
         )
 
         # 4. Initialize Infrastructure Services
@@ -270,7 +271,10 @@ class Container:
 
         from backend.services.observatory.equipment_service import EquipmentService
 
-        self.equipment_service = EquipmentService(observatory_api=self.wayfinder.control)
+        self.equipment_service = EquipmentService(
+            observatory_api=self.wayfinder.control,
+            configurations=self.astrometrics.observatories.configurations,
+        )
 
         self.image_processing_service = ImageProcessingService(
             processing_api=self.astrometrics.processing,

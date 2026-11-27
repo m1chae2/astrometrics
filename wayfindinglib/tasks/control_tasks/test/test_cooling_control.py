@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.models.equipment_and_site.equipment import Camera, CoolingPolicy
+from astrometricslib import Camera
+from wayfindinglib.models.equipment_and_site.equipment import CoolingPolicy
 from wayfindinglib.tasks.control_tasks.cooling_control import (
     compute_ramped_setpoint,
     effective_ramp_rate_c_per_min,

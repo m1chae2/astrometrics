@@ -2,14 +2,16 @@
 
 Description: Reads the active telescope, cameras and guide scope, the
 camera profiles, the site location and the commissioning records;
-connects and disconnects the devices; chooses the active telescope and
-camera; and gives raw access to INDI device properties for diagnosis.
+connects and disconnects the devices; reads and chooses the active
+observatory configuration and saves the telescope's safety limits; and gives
+raw access to INDI device properties for diagnosis.
 It also holds two small calculations about the equipment: the camera
 cooling ramp rate and a device's state from its raw signals.
 """
 
 from typing import Any
 
+from astrometricslib import ObservatoryConfiguration
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import EquipmentStatus
 from wayfindinglib.models.policy.commissioning import CommissioningRun
@@ -140,56 +142,110 @@ class EquipmentControl(ControlChild):
         """
         self._context.driver.sync_configuration()
 
-    def set_active_telescope(self, telescope_id: str, limits: dict[str, float | bool] | None = None) -> bool:
-        """Choose the active telescope, and optionally save its safety limits.
+    def get_active(self) -> ObservatoryConfiguration | None:
+        """Read the observatory configuration that is active now.
 
-        The current limits are read back with `status` (the ``telescope``
-        section).
+        One configuration is active at a time. The core library keeps every
+        past configuration (``astrometrics.observatories.configurations``);
+        when the active equipment has no stored configuration yet, one is
+        created from the settings.
 
-        Parameters
-        ----------
-        telescope_id : `str`
-            The telescope's id in the configuration.
-        limits : `dict`, optional
-            New safety limits: any of ``altitude_limits_enabled``,
-            ``min_altitude_deg``, ``max_altitude_deg``,
-            ``hour_angle_limits_enabled``, ``max_hour_angle_hours`` and
-            ``flip_hour_angle_deg``. They are checked, then written only
-            to the config section that already holds this telescope's
-            settings (a section is never created). A per-telescope
-            minimum or maximum altitude overrides the global
-            ``[Observatory.Constraints]`` section.
+        Owner:
+            wayfindinglib.tasks.control_tasks.equipment_activation.get_active_configuration
 
         Returns
         -------
-        success : `bool`
-            Whether the choice was saved.
+        configuration : `ObservatoryConfiguration` or `None`
+            The active configuration, or `None` when the settings make no
+            telescope or no camera active. Its telescope's pointing limits
+            are those saved with the configuration; `status` gives the
+            current ones.
+        """
+        from wayfindinglib.tasks.control_tasks.equipment_activation import get_active_configuration
+
+        return get_active_configuration(self._context.config, self._context.astrometrics)
+
+    def set_active(self, configuration: ObservatoryConfiguration) -> None:
+        """Make an observatory configuration the active one, and save it.
+
+        Its telescope, camera, guide scope and guide camera become the active
+        ones; with setups in the settings, the setup that pairs the camera
+        with the telescope becomes active.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.equipment_activation.set_active_configuration
+
+        Parameters
+        ----------
+        configuration : `ObservatoryConfiguration`
+            A stored configuration, from
+            ``astrometrics.observatories.configurations``.
 
         Notes
         -----
-        Invalid `limits`, or a telescope with no config section to write
-        to, raise `ValueError` and save nothing.
+        Raises `InvalidArgumentError` and saves nothing when the
+        configuration is not stored or the settings do not list its
+        equipment.
         """
-        from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_telescope
+        from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_configuration
 
-        return set_active_telescope(self._context.config, telescope_id, limits)
+        set_active_configuration(self._context.config, configuration)
 
-    def set_active_camera(self, camera_id: str) -> bool:
-        """Choose the active main camera and save the choice.
+    def set_pointing_limits(
+        self,
+        *,
+        altitude_limits_enabled: bool | None = None,
+        min_altitude_deg: float | None = None,
+        max_altitude_deg: float | None = None,
+        hour_angle_limits_enabled: bool | None = None,
+        max_hour_angle_hours: float | None = None,
+        flip_hour_angle_deg: float | None = None,
+    ) -> None:
+        """Save new safety limits for the active telescope.
+
+        Each limit left as `None` keeps its value. The limits are checked,
+        then written only to the settings section that already holds the
+        telescope's settings (a section is never created). A per-telescope
+        minimum or maximum altitude overrides the global
+        ``[Observatory.Constraints]`` section. The current limits are read
+        back with `status` (the ``telescope`` section).
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.equipment_activation.set_pointing_limits
 
         Parameters
         ----------
-        camera_id : `str`
-            The camera's id in the configuration.
+        altitude_limits_enabled : `bool`, optional
+            Whether the altitude limits apply.
+        min_altitude_deg, max_altitude_deg : `float`, optional
+            The lowest and highest altitude to point at, in degrees.
+        hour_angle_limits_enabled : `bool`, optional
+            Whether the hour angle limit applies.
+        max_hour_angle_hours : `float`, optional
+            The largest hour angle to point at, in hours.
+        flip_hour_angle_deg : `float`, optional
+            The hour angle past the meridian at which the mount flips, in
+            degrees.
 
-        Returns
-        -------
-        success : `bool`
-            Whether the choice was saved.
+        Notes
+        -----
+        Raises `InvalidArgumentError` and saves nothing when no telescope is
+        active, the values fail the checks (such as a minimum above the
+        maximum), or the telescope has no settings section.
         """
-        from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_camera
+        from wayfindinglib.tasks.control_tasks.equipment_activation import set_pointing_limits
 
-        return set_active_camera(self._context.config, camera_id)
+        limits = {
+            "altitude_limits_enabled": altitude_limits_enabled,
+            "min_altitude_deg": min_altitude_deg,
+            "max_altitude_deg": max_altitude_deg,
+            "hour_angle_limits_enabled": hour_angle_limits_enabled,
+            "max_hour_angle_hours": max_hour_angle_hours,
+            "flip_hour_angle_deg": flip_hour_angle_deg,
+        }
+        set_pointing_limits(
+            self._context.config, {key: value for key, value in limits.items() if value is not None}
+        )
 
     def set_device_property(
         self, device_name: str, property_name: str, value: Any, element: str | None = None

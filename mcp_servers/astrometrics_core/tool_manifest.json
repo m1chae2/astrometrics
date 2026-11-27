@@ -65,6 +65,41 @@
       "interim_block": "",
       "note": "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at 'started' after the app stopped still shows as active. The AI gets at most 50 jobs and 200 log lines, and not detail=full."
     },
+    "observatory_configuration_create": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the database. The AI is read-only."
+    },
+    "observatory_configuration_get": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Reads one stored observatory configuration. Reads only."
+    },
+    "observatory_configuration_query": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Lists the stored observatory configurations, past and present. Reads only."
+    },
+    "observatory_configuration_scan": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the database and the frame records. The AI is read-only."
+    },
+    "observatory_configuration_update": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the database. The AI is read-only."
+    },
     "processing_acquire_job_slot": {
       "tool_class": "change-data",
       "category": "image-processing",

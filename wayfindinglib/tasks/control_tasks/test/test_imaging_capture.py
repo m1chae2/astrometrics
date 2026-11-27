@@ -82,11 +82,12 @@ def plate_scale(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every equipment pairing report 2 arcseconds per pixel."""
 
     class _Equipment:
-        """Stands in for `EquipmentConfiguration`."""
+        """Stands in for `ObservatoryConfiguration`."""
 
         def __init__(self, telescope: Any, camera: Any) -> None:
             """Ignore the equipment."""
 
+        @property
         def plate_scale_arcsec_per_px(self) -> float:
             """Return a fixed plate scale.
 
@@ -97,9 +98,7 @@ def plate_scale(monkeypatch: pytest.MonkeyPatch) -> None:
             """
             return 2.0
 
-    monkeypatch.setattr(
-        "wayfindinglib.models.equipment_and_site.equipment.EquipmentConfiguration", _Equipment
-    )
+    monkeypatch.setattr("astrometricslib.ObservatoryConfiguration", _Equipment)
 
 
 def test_the_filter_is_set_once_before_the_frames(commands: list) -> None:

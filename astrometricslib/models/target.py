@@ -142,6 +142,11 @@ class FrameRecord(BaseModel):
     # same target with two different telescopes over time, and those pictures
     # cannot be stacked together directly.
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
+    # The id of the observatory configuration (the set of equipment) the
+    # frame was taken with, matched by camera, focal length and night. None
+    # until the library's configurations were seeded, or when no stored
+    # configuration has this camera and focal length.
+    configuration_id: str | None = Field(default=None, alias="configurationId")
     binning: int | None = Field(default=None, alias="binning")
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
     focuser_position: int | None = Field(default=None, alias="focuserPosition")

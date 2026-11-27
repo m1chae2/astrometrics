@@ -133,11 +133,16 @@ DECISIONS = {
         "no monitoring use.",
     ),
     # ---- Withheld: the user decided an AI may not change configuration ----
-    "observatory_equipment_set_active_camera": ToolDecision(
-        "withhold", "Writes the active camera into the configuration file."
+    "observatory_equipment_set_active": ToolDecision(
+        "withhold", "Writes the active telescope and camera into the configuration file."
     ),
-    "observatory_equipment_set_active_telescope": ToolDecision(
-        "withhold", "Writes the active telescope into the configuration file."
+    "observatory_equipment_set_pointing_limits": ToolDecision(
+        "withhold", "Writes the telescope's safety limits into the configuration file."
+    ),
+    "observatory_configuration_create": ToolDecision("withhold", "Writes the database. The AI is read-only."),
+    "observatory_configuration_update": ToolDecision("withhold", "Writes the database. The AI is read-only."),
+    "observatory_configuration_scan": ToolDecision(
+        "withhold", "Writes the database and the frame records. The AI is read-only."
     ),
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
@@ -704,6 +709,17 @@ DECISIONS = {
         "agreement evidence for one capability. The delegation policy's live row was once written by a UI "
         "test; clean it before relying on it.",
         "observe",
+    ),
+    "observatory_equipment_get_active": ToolDecision(
+        "keep",
+        "Reads the active observatory configuration: the telescope, cameras and other equipment in use.",
+        "observe",
+    ),
+    "observatory_configuration_get": ToolDecision(
+        "keep", "Reads one stored observatory configuration. Reads only.", "observe"
+    ),
+    "observatory_configuration_query": ToolDecision(
+        "keep", "Lists the stored observatory configurations, past and present. Reads only.", "observe"
     ),
     "observatory_equipment_status": ToolDecision(
         "keep",

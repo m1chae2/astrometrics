@@ -226,12 +226,13 @@ def test_the_telescope_methods_pass_limits_through_an_autospec() -> None:
     from wayfindinglib.api.control.equipment import EquipmentControl
 
     equipment = create_autospec(EquipmentControl, instance=True)
-    equipment.set_active_telescope.return_value = True
+    equipment.get_active.return_value = SimpleNamespace(telescope=SimpleNamespace(id="scope-1"))
     equipment.status.return_value = SimpleNamespace(telescope="scope")
-    service = EquipmentService(SimpleNamespace(equipment=equipment))
+    service = EquipmentService(SimpleNamespace(equipment=equipment), configurations=None)
 
     assert service.set_active_telescope("scope-1", {"min_altitude_deg": 25.0}) is True
-    equipment.set_active_telescope.assert_called_once_with("scope-1", limits={"min_altitude_deg": 25.0})
+    equipment.set_pointing_limits.assert_called_once_with(min_altitude_deg=25.0)
+    equipment.set_active.assert_not_called()
     assert service.get_active_telescope() == "scope"
     equipment.status.assert_called_once_with(include=["telescope"])
     for method in ("observatory:get_active_telescope", "observatory:set_active_telescope"):

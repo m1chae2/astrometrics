@@ -17,7 +17,7 @@ import pytest
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
+from astrometricslib import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 from wayfindinglib.tasks.planning_tasks import visibility_tasks
 

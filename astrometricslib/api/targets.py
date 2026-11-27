@@ -8,6 +8,7 @@ arguments and hand off.
 """
 
 import builtins
+import logging
 from collections.abc import Callable, Sequence
 from datetime import date
 from typing import TYPE_CHECKING, Literal
@@ -22,6 +23,7 @@ from astrometricslib.foundation.jobs.runner import background_job, registered_jo
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
+from astrometricslib.models.observatory_configuration import ObservatoryConfiguration
 from astrometricslib.models.target import FrameRecord, Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
     TimeInput,
@@ -36,6 +38,8 @@ from astrometricslib.pipelines.shared.target_sessions import TargetSession, deri
 
 if TYPE_CHECKING:
     from astrometricslib.api.quality import QualityRecords
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "TargetCatalog",
@@ -384,6 +388,7 @@ class TargetCatalog:
                 catalog_access=self._catalog_access,
                 refresh_headers=refresh_headers,
             )
+        self._assign_configurations(resolved)
         self._touched_target_ids.add(resolved.id)
         self.save()
         return ReindexReport(
@@ -436,6 +441,7 @@ class TargetCatalog:
                 catalog_access=self._catalog_access,
                 refresh_headers=refresh_headers,
             )
+            self._assign_configurations(resolved)
             self._touched_target_ids.add(resolved.id)
             # Saved one target at a time, so an interrupted run keeps the
             # targets it already finished.
@@ -449,6 +455,32 @@ class TargetCatalog:
                 )
             )
         return ReindexReport(targets=changes)
+
+    def _assign_configurations(self, target: Target) -> None:
+        """Point each of a target's frames at its observatory configuration.
+
+        Creates the configurations the frames imply when none covers them
+        (see `astrometricslib.pipelines.shared.equipment`).
+        A store that cannot be reached leaves the frames as they are, with
+        one warning: the frames are still indexed.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target just reindexed. Its frames are changed in place.
+        """
+        import sqlite3
+
+        from astrometricslib._internal.drivers.observatory_configuration_store import (
+            ObservatoryConfigurationStore,
+        )
+        from astrometricslib.foundation.errors import AstrometricsError
+        from astrometricslib.pipelines.shared.equipment import seed_configurations
+
+        try:
+            seed_configurations(ObservatoryConfigurationStore(self._config), self._config, [target])
+        except (sqlite3.Error, OSError, AstrometricsError) as problem:
+            logger.warning("Could not match the frames of %r to their configurations: %s", target.id, problem)
 
     @staticmethod
     def _check_belongs(path: str, target: Target) -> None:
@@ -569,6 +601,7 @@ class TargetCatalog:
     def select_frames(
         self,
         target: str | Target,
+        configuration: ObservatoryConfiguration | None = None,
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
@@ -585,6 +618,9 @@ class TargetCatalog:
         ----------
         target : `str` or `Target`
             The target to search.
+        configuration : `ObservatoryConfiguration`, optional
+            Keep frames taken with this set of equipment (from
+            ``astrometrics.observatories.configurations``).
         filter_name : `str`, optional
             Keep frames whose filter matches this text, ignoring case.
         first_file, last_file : `str`, optional
@@ -611,11 +647,15 @@ class TargetCatalog:
         `InvalidArgumentError` if ``since`` or ``until`` cannot be read as a
         time or ``limit`` is less than 1.
         """
+        from astrometricslib.pipelines.shared.equipment import frame_matches
         from astrometricslib.pipelines.shared.quality import frame_selection
 
         resolved = resolve_target(self, target)
+        frames = resolved.frames
+        if configuration is not None:
+            frames = [frame for frame in frames if frame_matches(frame, configuration, self._config)]
         return frame_selection.select_target_light_frames(
-            resolved.frames,
+            frames,
             filter_name=filter_name,
             first_file=first_file,
             last_file=last_file,

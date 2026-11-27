@@ -188,8 +188,8 @@ $$
 
 The field of view follows from the pixel scale and the sensor size. A guide telescope has its own focal length, which sets its camera's pixel scale.
 
-<!-- impl: wayfindinglib.models.equipment_and_site.equipment.EquipmentConfiguration -->
-<!-- impl: wayfindinglib.models.equipment_and_site.equipment.GuideScope -->
+<!-- impl: astrometricslib.models.observatory_configuration.ObservatoryConfiguration -->
+<!-- impl: astrometricslib.models.observatory_configuration.GuideScope -->
 
 The enclosure is specified beside the equipment because its constraint is mutual: a roof can close only when the mount clears it, and the mount can leave park only when the roof is open. The permitted closing position is configuration, a park position with a tolerance, so the interlock can be checked without commanding anything.
 

@@ -89,7 +89,7 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 | Architecture record | Classes | Module (under `models/`) |
 | --- | --- | --- |
-| Telescope, camera, guide optics, catalog | `Telescope`, `Camera`, `GuideScope`, `EquipmentCatalog` | `equipment_and_site/equipment.py` |
+| Telescope, camera, guide optics, catalog | `EquipmentCatalog` (of the core's `Telescope`, `Camera`, `GuideScope`) | `equipment_and_site/equipment.py` |
 | Site profile | `SiteProfile`, `AvoidanceZone` | `equipment_and_site/site_profile.py` |
 | Enclosure specification | `Enclosure`, `EnclosureState` | `equipment_and_site/enclosure.py` |
 | Guider calibration; focus model | `GuiderCalibration`; `FocusModel` | `equipment_and_site/guider_calibration.py`, `focus_model.py` |
@@ -110,19 +110,19 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 `ObservatoryControl` (Section 6.1), `ObservationPlanning` (Section 4) and `ObservationExecution` (Section 5) expose the operations of the architecture's Table 3.
 
-<!-- impl: wayfindinglib.models.equipment_and_site.equipment.Camera -->
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment.EquipmentCatalog -->
 <!-- impl: wayfindinglib.models.session.divergence.DivergenceRecord -->
 <!-- impl: wayfindinglib.models.session.ekos_session.EkosSessionContext -->
 <!-- impl: wayfindinglib.models.policy.device_state.DeviceState -->
 
 ## 3. Foundation (Architecture Section 3)
 
-- **Equipment catalog.** `equipment_catalog_reader.py` builds the `EquipmentCatalog` from the setups: one `Telescope` per optic. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Equation (1)).
+- **Equipment catalog.** `equipment_catalog_reader.py` builds the `EquipmentCatalog` from `AppConfiguration.get_telescopes`: one `Telescope` per optic. `control.equipment.get_active` and `set_active` read and choose the `ObservatoryConfiguration`.
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the rule holds for planning only.
-- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
+- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt names its frame in `source_frame`, so a frame solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
 
 <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_equipment_catalog -->
-<!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_telescope -->
+<!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_configuration -->
 <!-- impl: wayfindinglib.data_access.site_profile_reader.get_or_seed_default_site_profile -->
 <!-- impl: wayfindinglib.data_access.safety_policy_reader.get_safety_rule_set -->
 <!-- impl: wayfindinglib.drivers.butler.DiskButler -->
@@ -206,7 +206,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 | `control.guiding` | `run_loop`, `stop_loop`, `refit_spectrum` |
 | `control.remote` | `list`, `sync_frames`, `sync_logs` |
 | `control.safety` | `apply_promotion_decision`, `enter_monitoring_mode` |
-| `control.equipment` | `connect`, `set_active_telescope` |
+| `control.equipment` | `connect`, `get_active`, `set_active` |
 
 `Wayfinder.review` (`api/review.py`) holds the night reads.
 

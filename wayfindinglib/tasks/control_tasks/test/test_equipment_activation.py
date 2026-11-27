@@ -1,31 +1,39 @@
 """Purpose: Unit tests for equipment_activation.
 
-Description: Verifies activation validates against the resolved
-catalog before recording, against a real `AppConfiguration` backed by
-a temporary config file (real parsing, not a mock), mirroring
-`data_access/test/test_equipment_catalog_reader.py`'s isolation
-pattern.
+Description: Verifies that making an observatory configuration active
+checks it against the resolved catalog before recording, that the active
+configuration is found or created, and that the active telescope's safety
+limits are saved where the reader looks. It uses a real `AppConfiguration`
+backed by a temporary config file (real parsing, not a mock), mirroring
+`data_access/test/test_equipment_catalog_reader.py`'s isolation pattern.
 """
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, Camera, ObservatoryConfiguration, Telescope
 from astrometricslib._internal.frames import resolve_camera_profile
-from wayfindinglib.data_access import equipment_catalog_writer
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
     get_active_telescope_id,
+    get_equipment_catalog,
     list_telescopes,
 )
 from wayfindinglib.data_access.equipment_catalog_writer import build_telescope_limits_update
 from wayfindinglib.tasks.control_tasks.equipment_activation import (
+    ACTIVE_CONFIGURATION_KEY,
+    CONFIGURATION_SECTION,
+    get_active_configuration,
     get_equipment_configuration,
     list_camera_noise,
     list_camera_profiles,
-    set_active_camera,
-    set_active_telescope,
+    live_configuration,
+    set_active_configuration,
+    set_pointing_limits,
 )
 from wayfindinglib.test.camera_profile_support import library_with_camera_profiles
 
@@ -44,45 +52,112 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfigurat
     return AppConfiguration()
 
 
-def test_set_active_telescope_persists_known_id(app_config: AppConfiguration) -> None:
-    """Verify a recognized telescope id is recorded as active."""
-    app_config.update_config({
-        "Observatory.Telescope": {"models": "Rig A"},
-        "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
-    })
-    assert set_active_telescope(app_config, "Rig A") is True
-    assert get_active_telescope_id(app_config) == "Rig A"
+RIG_SETTINGS = {
+    "Observatory.Telescope": {"models": "Rig A, Rig B"},
+    "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
+    "Observatory.Telescope.Rig B": {"focal_length_mm": "135.0"},
+    "Observatory.Camera": {"models": "ASI2600MM, Guide Cam"},
+    "Observatory.Camera.ASI2600MM": {
+        "pixel_size_μm": "3.76",
+        "sensor_width_px": "6248",
+        "sensor_height_px": "4176",
+    },
+    "Observatory.Camera.Guide Cam": {
+        "pixel_size_um": "2.9",
+        "sensor_width_px": "1936",
+        "sensor_height_px": "1096",
+    },
+}
+"""Two telescopes and two cameras, with no setups."""
 
 
-def test_set_active_telescope_rejects_unknown_id(app_config: AppConfiguration) -> None:
-    """Verify an unrecognized telescope id is rejected without recording."""
-    app_config.update_config({
-        "Observatory.Telescope": {"models": "Rig A"},
-        "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
-    })
-    assert set_active_telescope(app_config, "does-not-exist") is False
+def _configuration(
+    telescope: str = "Rig B", camera: str = "ASI2600MM", **fields: Any
+) -> ObservatoryConfiguration:
+    """Build a stored-looking configuration of the rig's equipment.
+
+    Parameters
+    ----------
+    telescope : `str`, optional
+        The telescope's name.
+    camera : `str`, optional
+        The camera's name.
+    **fields
+        Other fields of the configuration.
+
+    Returns
+    -------
+    configuration : `ObservatoryConfiguration`
+        A configuration with id ``rig-1`` unless `fields` say otherwise.
+    """
+    return ObservatoryConfiguration(
+        id=fields.pop("id", "rig-1"),
+        telescope=Telescope(id=telescope, name=telescope, focal_length_mm=135.0),
+        camera=Camera(id=camera, name=camera, pixel_size_um=3.76, sensor_width_px=10, sensor_height_px=10),
+        **fields,
+    )
+
+
+def test_set_active_configuration_saves_its_equipment(app_config: AppConfiguration) -> None:
+    """Its telescope, camera and guide camera become active, with its id."""
+    app_config.update_config(RIG_SETTINGS)
+    guide = Camera(
+        id="Guide Cam", name="Guide Cam", pixel_size_um=2.9, sensor_width_px=10, sensor_height_px=10
+    )
+    set_active_configuration(app_config, _configuration(guide_camera=guide))
+    assert get_active_telescope_id(app_config) == "Rig B"
+    assert get_active_camera_id(app_config) == "ASI2600MM"
+    assert get_equipment_catalog(app_config).active_guide_camera().name == "Guide Cam"
+    assert app_config.get_value(CONFIGURATION_SECTION, ACTIVE_CONFIGURATION_KEY) == "rig-1"
+    live = live_configuration(app_config)
+    assert live is not None and live.telescope.id == "Rig B" and live.guide_camera.name == "Guide Cam"
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    [
+        _configuration(telescope="No Such Rig"),
+        _configuration(camera="No Such Camera"),
+        _configuration(id=""),
+    ],
+)
+def test_set_active_configuration_refuses_what_the_settings_lack(
+    app_config: AppConfiguration, configuration: ObservatoryConfiguration
+) -> None:
+    """Unlisted equipment, or an unstored configuration, saves nothing."""
+    app_config.update_config(RIG_SETTINGS)
+    with pytest.raises(InvalidArgumentError):
+        set_active_configuration(app_config, configuration)
     assert get_active_telescope_id(app_config) is None
 
 
-def test_set_active_camera_persists_known_id(app_config: AppConfiguration) -> None:
-    """Verify a recognized camera id is recorded as active."""
-    app_config.update_config({
-        "Observatory.Camera": {"models": "ASI2600MM"},
-        "Observatory.Camera.ASI2600MM": {
-            "pixel_size_μm": "3.76",
-            "sensor_width_px": "6248",
-            "sensor_height_px": "4176",
-        },
-    })
-    assert set_active_camera(app_config, "ASI2600MM") is True
-    assert get_active_camera_id(app_config) == "ASI2600MM"
+def test_get_active_configuration_returns_or_creates_the_stored_one(app_config: AppConfiguration) -> None:
+    """The stored one with the live equipment is returned, or created once."""
+    app_config.update_config(RIG_SETTINGS)
+    stored: list[ObservatoryConfiguration] = []
+    configurations = MagicMock()
+    configurations.get.return_value = None
+    configurations.query.side_effect = lambda **arguments: list(stored)
 
+    def _create(configuration: ObservatoryConfiguration) -> ObservatoryConfiguration:
+        """Store a configuration in the stand-in list.
 
-def test_set_active_camera_rejects_unknown_id(app_config: AppConfiguration) -> None:
-    """Verify an unrecognized camera id is rejected without recording."""
-    before = get_active_camera_id(app_config)
-    assert set_active_camera(app_config, "does-not-exist") is False
-    assert get_active_camera_id(app_config) == before
+        Returns
+        -------
+        created : `ObservatoryConfiguration`
+            The configuration with an id and revision 1.
+        """
+        created = configuration.model_copy(update={"id": "new-1", "revision": 1})
+        stored.append(created)
+        return created
+
+    configurations.create.side_effect = _create
+    astrometrics = MagicMock()
+    astrometrics.observatories.configurations = configurations
+    first = get_active_configuration(app_config, astrometrics)
+    assert first is not None and first.id == "new-1" and first.telescope.id == "Rig A"
+    assert get_active_configuration(app_config, astrometrics) == first
+    assert configurations.create.call_count == 1
 
 
 def test_list_camera_profiles_returns_configured_cameras_as_dicts(app_config: AppConfiguration) -> None:
@@ -201,20 +276,19 @@ def test_limits_written_only_to_the_resolved_section(limits_config: AppConfigura
     _seed_rig(limits_config)
     path = _config_path(limits_config)
     before = path.read_text()
-    assert set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 30.0, "max_altitude_deg": 80.0})
+    set_pointing_limits(limits_config, {"min_altitude_deg": 30.0, "max_altitude_deg": 80.0})
     assert path.read_text() != before
     saved = _reloaded().app_config
     assert saved["Observatory.Telescope.Rig A"]["min_altitude_deg"] == "30.0"
     assert saved["Observatory.Telescope.Rig A"]["max_altitude_deg"] == "80.0"
     assert "min_altitude_deg" not in saved["Observatory.Telescope"]
-    assert saved["Observatory.Telescope"]["active_telescope"] == "Rig A"
 
 
 def test_limits_never_create_a_section(limits_config: AppConfiguration) -> None:
     """No new section appears when limits are saved."""
     _seed_rig(limits_config)
     sections_before = set(_reloaded().app_config.sections())
-    set_active_telescope(limits_config, "Rig A", {"hour_angle_limits_enabled": True})
+    set_pointing_limits(limits_config, {"hour_angle_limits_enabled": True})
     assert set(_reloaded().app_config.sections()) == sections_before
 
 
@@ -222,7 +296,7 @@ def test_limits_fall_back_to_base_section_when_named_one_is_absent(limits_config
     """With no per-name section, the base section receives the limits."""
     _seed_rig(limits_config, own_section=False)
     sections_before = set(limits_config.app_config.sections())
-    assert set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 25.0})
+    set_pointing_limits(limits_config, {"min_altitude_deg": 25.0})
     assert _reloaded().app_config["Observatory.Telescope"]["min_altitude_deg"] == "25.0"
     assert set(_reloaded().app_config.sections()) == sections_before
 
@@ -232,29 +306,29 @@ def test_limits_refused_when_no_section_resolves(
 ) -> None:
     """When no section resolves, the writer refuses and saves nothing."""
     _seed_rig(limits_config)
-    monkeypatch.setattr(equipment_catalog_writer, "telescope_section_name_for", lambda config, name: None)
+    monkeypatch.setattr(limits_config, "get_telescope_limits_section", lambda name: None)
     path = _config_path(limits_config)
     before = path.read_text()
     sections_before = set(limits_config.app_config.sections())
-    with pytest.raises(ValueError, match="never created"):
-        set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 25.0})
+    with pytest.raises(InvalidArgumentError, match="never created"):
+        set_pointing_limits(limits_config, {"min_altitude_deg": 25.0})
     assert path.read_text() == before
     assert set(limits_config.app_config.sections()) == sections_before
 
 
 def test_limits_for_an_unknown_telescope_are_refused(limits_config: AppConfiguration) -> None:
-    """An unknown telescope id is refused, and the choice returns `False`."""
+    """An unknown telescope is refused; with none active, nothing is set."""
     with pytest.raises(ValueError, match="not a known telescope"):
         build_telescope_limits_update(limits_config, "Rig A", {"min_altitude_deg": 25.0})
-    assert set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 25.0}) is False
+    with pytest.raises(InvalidArgumentError, match="No telescope is active"):
+        set_pointing_limits(limits_config, {"min_altitude_deg": 25.0})
 
 
 def test_list_telescopes_still_returns_the_telescope_with_new_limits(limits_config: AppConfiguration) -> None:
     """After saving, the catalog still lists the rig with the new limits."""
     _seed_rig(limits_config)
-    set_active_telescope(
+    set_pointing_limits(
         limits_config,
-        "Rig A",
         {"altitude_limits_enabled": False, "min_altitude_deg": 35.0, "max_hour_angle_hours": 3.5},
     )
     telescopes = list_telescopes(_reloaded())
@@ -277,12 +351,12 @@ def test_list_telescopes_still_returns_the_telescope_with_new_limits(limits_conf
 def test_invalid_limits_are_refused_and_nothing_is_saved(
     limits_config: AppConfiguration, limits: dict[str, float]
 ) -> None:
-    """Bad limits raise `ValueError` and leave the file untouched."""
+    """Bad limits raise `InvalidArgumentError` and leave the file untouched."""
     _seed_rig(limits_config)
     path = _config_path(limits_config)
     before = path.read_text()
-    with pytest.raises(ValueError):
-        set_active_telescope(limits_config, "Rig A", limits)
+    with pytest.raises(InvalidArgumentError):
+        set_pointing_limits(limits_config, limits)
     assert path.read_text() == before
 
 

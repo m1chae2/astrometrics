@@ -52,7 +52,7 @@ from typing import Any
 import numpy as np
 from astropy.time import Time
 
-from astrometricslib import Target
+from astrometricslib import Target, Telescope
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -109,7 +109,6 @@ from wayfindinglib.analytics.result_quality.science_goal import (
 )
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_sky_rate_at
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (

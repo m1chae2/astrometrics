@@ -45,6 +45,7 @@ class SettingsService:
         config: Any,
         equipment: Any = None,
         launch_reader: Callable[[], LaunchIdentity | None] | None = None,
+        configurations: Any = None,
     ) -> None:
         """Keep the configuration and the equipment control.
 
@@ -58,11 +59,15 @@ class SettingsService:
         launch_reader : `~collections.abc.Callable`, optional
             Gives the launch identity. Default: the configuration's own
             ``get_launch_identity``, or no identity if it has none.
+        configurations : `ObservatoryConfigurations`, optional
+            ``astrometrics.observatories.configurations``. A save scans it,
+            so new equipment in the settings gets a stored configuration.
         """
         reader = launch_reader or getattr(config, "get_launch_identity", None)
         self._launch_reader: Callable[[], LaunchIdentity | None] = reader or (lambda: None)
         self._config = config
         self._equipment = equipment
+        self._configurations = configurations
 
     def save_config(self, config: dict[str, Any]) -> bool:
         """Save new settings and pass the hostname on to the hardware.
@@ -81,6 +86,10 @@ class SettingsService:
         self._config.update_config(config)
         if self._equipment is not None:
             self._equipment.apply_configuration()
+        if self._configurations is not None:
+            # New equipment in the settings gets its stored configuration
+            # now, so the screens can choose it at once.
+            self._configurations.scan()
         return True
 
     def _refuse_locked_changes(self, update: dict[str, Any]) -> None:

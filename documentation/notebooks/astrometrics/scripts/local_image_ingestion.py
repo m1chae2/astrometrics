@@ -82,7 +82,7 @@ def run_ingestion() -> None:
         print("Success! Registered Frame:")
         print(f"  Path: {frame_record.path}")
         print(f"  Filter: {frame_record.filter.name if frame_record.filter else 'None'}")
-        print(f"  Exposure: {frame_record.exposure}s")
+        print(f"  Exposure: {frame_record.exposure_s}s")
         print(f"  Camera: {frame_record.camera or 'Unknown'}")
         print("Target metadata updated successfully.")
     except Exception as error:

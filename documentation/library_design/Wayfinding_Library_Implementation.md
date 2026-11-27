@@ -153,7 +153,7 @@ Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` (`api/planning/`:
 | Boost for a flagged target | 2 | `PlanningConfig.flagged_quality_priority_boost` |
 | Boost for an asteroid or variable-star candidate | 1 | `PlanningConfig.science_outcome_priority_boost` |
 | Default dither | every 3 frames, 3 pixels | `PlanningConfig.dither_every_n_frames_default`, `DitherConfig` |
-| Mosaic overlap | 10% | `PlanningConfig.mosaic_panel_overlap_percent` |
+| Mosaic overlap | 10% | `PlanningConfig.mosaic_panel_overlap_pct` |
 | Default mosaic field of view | 23.5 by 15.6 mm, 400 mm | `DEFAULT_SENSOR_WIDTH_MM`, `DEFAULT_SENSOR_HEIGHT_MM`, `DEFAULT_FOCAL_LENGTH_MM` |
 | Telescope altitude range | 0° to 90°, on by default | `Telescope.min_altitude_deg`, `max_altitude_deg`, `altitude_limits_enabled` |
 | Hour-angle bound | 2 h, off by default; checked at slew time | `Telescope.max_hour_angle_hours`, `hour_angle_limits_enabled` |
@@ -183,7 +183,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 | Setting | Value | Where |
 | --- | --- | --- |
 | Recovery attempts | 3 | `RecoveryPolicy.max_attempts` |
-| First wait before a retry | 30 s | `RecoveryPolicy.initial_interval_sec` |
+| First wait before a retry | 30 s | `RecoveryPolicy.initial_interval_s` |
 | Growth factor of the wait | 2.0 (waits 0, 30, 60 s; Architecture Equation (4)) | `RecoveryPolicy.backoff_multiplier` |
 | Alignment rounds after a flip and in centering | 3 | `CorrectionConfig.alignment_iteration_limit` |
 | Guide-star re-acquisition attempts | 3 | `CorrectionConfig.guide_reacquire_attempts` |
@@ -275,16 +275,16 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.5 Safety
 
-`safety_monitor.py` holds `SafetyMonitor`: `_evaluate_rule` gives `UNKNOWN` for a stale reading, `_evaluate_rules` takes the most severe result, and `evaluate` publishes a safe result only after `settling_period_sec`. `hardware_operations.refresh_safety_assessment` reads the weather driver.
+`safety_monitor.py` holds `SafetyMonitor`: `_evaluate_rule` gives `UNKNOWN` for a stale reading, `_evaluate_rules` takes the most severe result, and `evaluate` publishes a safe result only after `settling_period_s`. `hardware_operations.refresh_safety_assessment` reads the weather driver.
 
 **Table 8.** Safety and enclosure settings.
 
 | Setting | Value | Where |
 | --- | --- | --- |
-| Age bound of a reading | 120 s | `SafetyRule.staleness_bound_sec` |
-| Settling period before reopening | 900 s | `SafetyRuleSet.settling_period_sec` |
+| Age bound of a reading | 120 s | `SafetyRule.staleness_bound_s` |
+| Settling period before reopening | 900 s | `SafetyRuleSet.settling_period_s` |
 | Mount clearance about the park position | 2° per axis | `Enclosure.clearance_tolerance_deg` |
-| Enclosure motion timeout | 180 s | `Enclosure.motion_timeout_sec` |
+| Enclosure motion timeout | 180 s | `Enclosure.motion_timeout_s` |
 
 <!-- impl: wayfindinglib.tasks.control_tasks.safety_monitor.SafetyMonitor.evaluate -->
 <!-- impl: wayfindinglib.drivers.indi.weather_controller.WeatherController -->
@@ -302,7 +302,7 @@ All in `tasks/control_tasks/` unless noted.
 | --- | --- | --- |
 | Target temperature | -10 °C | `CoolingPolicy.target_temp_c` |
 | Ramp rate | 2 °C/min (the camera's limit applies if lower) | `CoolingPolicy.ramp_c_per_min` |
-| Settled tolerance; timeout | 0.5 °C; 900 s | `CoolingPolicy.settle_tolerance_c`, `settle_timeout_sec` |
+| Settled tolerance; timeout | 0.5 °C; 900 s | `CoolingPolicy.settle_tolerance_c`, `settle_timeout_s` |
 | Camera cooling floor and ramp limit | -30 °C; 2 °C/min | `Camera.min_cooling_temp_c`, `max_cooling_ramp_c_per_min` |
 
 <!-- impl: wayfindinglib.tasks.control_tasks.enclosure_control.mount_within_clearance -->

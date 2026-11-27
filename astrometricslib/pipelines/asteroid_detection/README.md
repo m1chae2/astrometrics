@@ -114,7 +114,7 @@ A passing track also stores `residual_rms_right_ascension_arcsec`, `residual_rms
 - an optional magnitude (brightness on the astronomer's scale, where larger is fainter) and band (the filter's color range the magnitude was measured in);
 - the MPC observatory code.
 
-**Observation time.** The date is the middle of the exposure: `DATE-OBS` (the moment the shutter opened, stored as the detection's `timestamp`) plus half of `EXPTIME` (stored as `exposure_seconds`). `mpc_lines_for_candidate` writes one line per detection. It also returns how many lines used the exposure start because the frame had no `EXPTIME`. Those times are early by half an exposure.
+**Observation time.** The date is the middle of the exposure: `DATE-OBS` (the moment the shutter opened, stored as the detection's `timestamp`) plus half of `EXPTIME` (stored as `exposure_s`). `mpc_lines_for_candidate` writes one line per detection. It also returns how many lines used the exposure start because the frame had no `EXPTIME`. Those times are early by half an exposure.
 
 **Limits of the writer.**
 

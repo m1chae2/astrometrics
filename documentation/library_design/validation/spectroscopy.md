@@ -1094,7 +1094,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
       line_spread=load_line_spread_profile("ZWO ASI 533MM Pro"),
   )
   print(
-      comparison.slope_percent_per_1000_angstrom,
+      comparison.slope_pct_per_1000_angstrom,
       comparison.residual_rms_fraction,
       comparison.wavelength_shift_angstrom,
   )

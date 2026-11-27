@@ -231,12 +231,12 @@ Every Python example assumes the library is installed and configured with your o
   spectra = astro.targets.frames.query(arcturus, filter_name="SPEC")
   result = astro.processing.stacking.run(arcturus, frames=spectra, force=True)
   metrics = result.quality_summary.stacking_metrics
-  print(metrics.negative_pixel_max_percent, metrics.calibration_mismatch_flags)
+  print(metrics.negative_pixel_max_pct, metrics.calibration_mismatch_flags)
   ```
 
   `CalibrationCatalog.match` <!-- impl: astrometricslib.api.calibration.CalibrationCatalog.match --> and `processing.stacking.run` <!-- impl: astrometricslib.pipelines.stacking.stack_request.stack_target -->.
-- **Acceptance criterion:** `negative_pixel_max_percent` is 0 or empty.
-- **What to look at:** `negative_pixel_max_percent` (the worst "many negative pixels" warning Siril printed, in percent; 0 or empty is good). The dark-current difference between neighboring slots, measured as the mean of a master dark minus the mean of a bias, in ADU.
+- **Acceptance criterion:** `negative_pixel_max_pct` is 0 or empty.
+- **What to look at:** `negative_pixel_max_pct` (the worst "many negative pixels" warning Siril printed, in percent; 0 or empty is good). The dark-current difference between neighboring slots, measured as the mean of a master dark minus the mean of a bias, in ADU.
 - **Our result:** Arcturus's 0.5 s, gain-0 darks clustered near 0 °C and -10 °C, while its lights drifted from -2.9 °C to -10.7 °C; Siril reported 57% to 64% negative pixels with the mixed master. A library file of 2026-10-03 had no temperature in its keys; without the slotting rule, -12 °C lights received a master of 61 darks at 0 °C and 30 at -10 °C, with no flag.
 - **Verdict:** Not judged.
 - **Limits:** Two incidents; no dark-current curve measured.
@@ -266,12 +266,12 @@ Every Python example assumes the library is installed and configured with your o
 
   from astrometricslib import Astrometrics
   from astrometricslib.pipelines.stacking.pre_processing import exposure_weighting  # internal
-  from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds  # internal
+  from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_s  # internal
 
   astro = Astrometrics()
   target = astro.targets.get("M 27")
   frames = [frame for frame in target.frames if frame.filter.name in ("L", "NONE")]
-  print(exposure_weighting.equal_weight_noise_penalty([frame_exposure_seconds(frame) for frame in frames]))
+  print(exposure_weighting.equal_weight_noise_penalty([frame_exposure_s(frame) for frame in frames]))
   weighted = astro.processing.stacking.run(target, frames=frames, force=True)
   shutil.copy2(weighted.stacked_path, "/tmp/m27_weighted.fits")  # each run replaces the target's stack
   exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT = 100.0  # equal weights for this run only
@@ -280,7 +280,7 @@ Every Python example assumes the library is installed and configured with your o
   print(report.comparison.changes["noise_fraction"])
   ```
 
-  `equal_weight_noise_penalty` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.equal_weight_noise_penalty --> `frame_exposure_seconds` (internal function, not part of the public API; may change) reads each frame's exposure the way the stacker does. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.frame_exposure_seconds -->
+  `equal_weight_noise_penalty` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.equal_weight_noise_penalty --> `frame_exposure_s` (internal function, not part of the public API; may change) reads each frame's exposure the way the stacker does. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.frame_exposure_s -->
 - **Acceptance criterion:** The measured gain approaches 1 − 1/P.
 - **What to look at:** P (no units; 1.17 means 17% more noise with equal weights) and the relative change in `noise_fraction` between the two stacks (a negative change means the weighted stack is quieter). The measured gain should approach 1 − 1/P.
 - **Our result:** M 27, 26 frames of 30 s, 33 of 60 s, 22 of 120 s and 1 of 300 s: P = 1.17. Noise weighting (`-weight=noise`) lowered the measured pixel noise by 13% (date not recorded).
@@ -447,7 +447,7 @@ Every Python example assumes the library is installed and configured with your o
       star, frames=astro.targets.frames.query(star, filter_name="SPEC"), force=True
   )
   for group in result.quality_summary.stacking_metrics.exposure_groups:
-      print(group.exposure_seconds, group.frames_stacked, group.gain_mid_range, group.left_out_reason)
+      print(group.exposure_s, group.frames_stacked, group.gain_mid_range, group.left_out_reason)
   ```
 
 - **Acceptance criterion:** Not recorded (set after the result).
@@ -482,7 +482,7 @@ Every Python example assumes the library is installed and configured with your o
       star, frames=astro.targets.frames.query(star, filter_name="SPEC"), force=True
   )
   for group in result.quality_summary.stacking_metrics.exposure_groups:
-      print(group.exposure_seconds, group.frames_submitted, group.frames_stacked)
+      print(group.exposure_s, group.frames_submitted, group.frames_stacked)
   alcor = astro.targets.get("Alcor", required=True)
   report = astro.quality.stacks.measure(
       alcor, stack=alcor.spectral_stacking.stacked_image, include=["registration"]
@@ -735,7 +735,7 @@ Every Python example assumes the library is installed and configured with your o
   astro = Astrometrics()
   result = astro.processing.stacking.run(astro.targets.get("NGC 6888"), force=True)
   for group in result.quality_summary.stacking_metrics.exposure_groups:
-      print(group.exposure_seconds, group.gain_mid_range, group.gain_bright_end_ratio, group.gain_disagreement)
+      print(group.exposure_s, group.gain_mid_range, group.gain_bright_end_ratio, group.gain_disagreement)
   ```
 
   The two methods are `measure_group_gains_with_stars` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.measure_group_gains_with_stars --> and `measure_group_gains` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.measure_group_gains -->, both internal functions, not part of the public API; may change. `measure_star_flux_ratios` gives the per-quarter ratios. <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.measure_star_flux_ratios -->
@@ -794,7 +794,7 @@ Every Python example assumes the library is installed and configured with your o
   astro = Astrometrics()
   summary = astro.processing.stacking.get_summary(astro.targets.get("M 51"))
   for group in summary.exposure_groups:
-      print(group.get("exposureSeconds"), group.get("gainMidRange"), group.get("leftOutReason"))
+      print(group.get("exposureS"), group.get("gainMidRange"), group.get("leftOutReason"))
   ```
 
   `processing.stacking.get_summary` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality_report.summarize_stack --> reads what the stage saved. The sky ratio itself is on the internal `GroupGainMeasurement.sky_ratio` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GroupGainMeasurement --> (not part of the public API; may change) and is quoted in the left-out reason.

@@ -12,8 +12,8 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
-from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservationReview, ObservatoryControl
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.analytics.capture_history import normalize_name

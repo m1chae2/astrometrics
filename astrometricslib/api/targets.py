@@ -17,6 +17,8 @@ from astropy.io import fits
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.foundation.arguments import TimeInput, check_choice, check_limit, reject_unused_arguments
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -25,13 +27,7 @@ from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
 from astrometricslib.models.observatory_configuration import ObservatoryConfiguration
 from astrometricslib.models.target import FrameRecord, Target, TargetObjectType
-from astrometricslib.pipelines.shared.api_arguments import (
-    TimeInput,
-    check_choice,
-    check_limit,
-    reject_unused_arguments,
-    resolve_target,
-)
+from astrometricslib.pipelines.shared.api_arguments import resolve_target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.pipelines.shared.target_sessions import TargetSession, derive_target_sessions
@@ -73,7 +69,7 @@ _QUERY_ARGUMENTS = {
 }
 
 
-class TargetCatalog:
+class TargetCatalog(MovedNames):
     """Create, read, save and delete targets, and keep their frames current.
 
     A target is a place on the sky that the observatory images. It anchors
@@ -605,8 +601,8 @@ class TargetCatalog:
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: TimeInput = None,
-        until: TimeInput = None,
+        since: TimeInput | None = None,
+        until: TimeInput | None = None,
         limit: int | None = None,
     ) -> builtins.list[FrameRecord]:
         """Pick a target's light frames by filter, file name range and time.

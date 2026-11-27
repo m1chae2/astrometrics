@@ -89,6 +89,7 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
+from astrometricslib._internal.renames import MovedNames
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -172,7 +173,7 @@ def __getattr__(name: str) -> Any:
     return getattr(importlib.import_module(module_name), name)
 
 
-class Astrometrics:
+class Astrometrics(MovedNames):
     """The main control panel for the library.
 
     This class only builds the sub-APIs and holds them. It has no methods

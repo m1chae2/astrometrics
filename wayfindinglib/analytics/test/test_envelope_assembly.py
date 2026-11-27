@@ -14,7 +14,7 @@ import pytest
 
 from astrometricslib import AppConfiguration
 from astrometricslib._internal.frames import frame_is_spectral
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib.analytics.capture_history import STAR_WIDTH_METRIC
 from wayfindinglib.analytics.envelope_assembly import (
     collect_baseline_values,

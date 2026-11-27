@@ -34,8 +34,8 @@ from astropy.coordinates import AltAz, SkyCoord, get_body, get_sun
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
+from astrometricslib.arguments import to_epoch_seconds
 from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib._internal.arguments import to_epoch_seconds
 from wayfindinglib.models.planning.visibility import (
     HorizonZone,
     MeridianCrossing,

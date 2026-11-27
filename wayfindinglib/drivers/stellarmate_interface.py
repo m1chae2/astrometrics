@@ -310,7 +310,11 @@ class StellarMateInterface(RemoteTransferDriver):
         if self._last_connection_status is False:
             if (time.time() - self._last_probe_time) >= _OFFLINE_REPROBE_SECONDS:
                 self._start_background_probe()
-            raise ExternalServiceError("SSH/Command Failed: Remote host is known offline (cooldown active).")
+            raise ExternalServiceError(
+                "SSH/Command Failed: Remote host is known offline (cooldown active).",
+                report="status",
+                log_level="INFO",
+            )
 
         return self._execute_command(cmd_list)
 

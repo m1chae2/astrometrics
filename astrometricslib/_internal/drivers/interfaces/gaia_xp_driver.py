@@ -14,8 +14,10 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+from astrometricslib.foundation.errors import ExternalServiceError
 
-class GaiaXpDownloadError(Exception):
+
+class GaiaXpDownloadError(ExternalServiceError):
     """A Gaia XP spectrum could not be fetched.
 
     This is different from a source that has no XP spectrum. A missing

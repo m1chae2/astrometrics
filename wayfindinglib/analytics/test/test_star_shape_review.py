@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
-from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.star_shape_review import (
     PINNED_FRAME_SHAPE_METRICS,
     STACK_ELONGATION_METRIC,

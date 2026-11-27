@@ -648,7 +648,7 @@ def test_a_same_camera_frame_tonight_keeps_the_camera_part(
     """The camera-wide estimate counts finished nights only (WAY-D107)."""
     import time
 
-    from astrometricslib.reports import observing_night_id
+    from astrometricslib.arguments import observing_night_id
 
     tonight = observing_night_id(time.time())
     _write_camera_frame(cached.config, "NGC 7331", "CamA", "own", night="2020-01-01")
@@ -678,7 +678,7 @@ def test_the_depth_goal_version_changes_once_when_the_night_rolls_over(
     """Tonight's frames join the camera part after the night ends."""
     import time
 
-    from astrometricslib.reports import observing_night_id
+    from astrometricslib.arguments import observing_night_id
     from wayfindinglib.analytics.data_versions import depth_goal_data_version
 
     now = time.time()

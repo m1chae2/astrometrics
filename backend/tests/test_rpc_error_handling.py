@@ -21,6 +21,7 @@ import pytest
 from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
+    ExternalServiceError,
     HardwareError,
     InvalidArgumentError,
     NotFoundError,
@@ -309,5 +310,60 @@ async def test_an_unexpected_error_is_logged_as_error_with_traceback(
     registered_methods["test:boom"] = handler
     with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
         await rpc_router.handle_rpc(RPCRequest(method="test:boom", id=6))
+    assert caplog.records[0].levelname == "ERROR"
+    assert caplog.records[0].exc_info is not None
+
+
+@pytest.mark.anyio
+async def test_a_status_error_is_logged_at_info_and_says_status_in_the_reply(
+    registered_methods: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An offline computer is a status: an INFO line and ``report: status``.
+
+    The reply carries the error's ``report`` and ``logLevel``, so the UI shows
+    it in a status chip and not as an error message.
+    """
+
+    def handler() -> None:
+        """Raise an error that is a status.
+
+        Raises
+        ------
+        ExternalServiceError
+            Always.
+        """
+        raise ExternalServiceError(
+            "The observatory computer is not reachable.", report="status", log_level="INFO"
+        )
+
+    registered_methods["test:offline"] = handler
+    with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
+        response = await rpc_router.handle_rpc(RPCRequest(method="test:offline", id=8))
+    data = _body(response)["error"]["data"]
+    assert (data["report"], data["logLevel"]) == ("status", "INFO")
+    assert [record.levelname for record in caplog.records] == ["INFO"]
+    assert caplog.records[0].exc_info is None
+
+
+@pytest.mark.anyio
+async def test_a_failed_device_is_logged_at_error_with_its_traceback(
+    registered_methods: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A category at ERROR keeps its traceback; the reply says ``error``."""
+
+    def handler() -> None:
+        """Raise a device failure.
+
+        Raises
+        ------
+        HardwareError
+            Always.
+        """
+        raise HardwareError("The mount did not answer.")
+
+    registered_methods["test:device"] = handler
+    with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
+        response = await rpc_router.handle_rpc(RPCRequest(method="test:device", id=9))
+    assert _body(response)["error"]["data"]["report"] == "error"
     assert caplog.records[0].levelname == "ERROR"
     assert caplog.records[0].exc_info is not None

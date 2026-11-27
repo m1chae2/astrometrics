@@ -16,6 +16,12 @@ from typing import Literal
 # module and `processing.py` import each other. An annotation is read
 # only when asked for, after both modules have loaded.
 from astrometricslib.api import processing as _processing
+from astrometricslib.foundation.arguments import (
+    TimeInput,
+    check_choice,
+    check_include,
+    reject_unused_arguments,
+)
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
 from astrometricslib.models.processing_results import (
@@ -36,18 +42,10 @@ from astrometricslib.models.target import FrameRecord, StackConfigurationResult,
 from astrometricslib.pipelines.shared.analysis_configuration import (
     choose_stack_configuration,
 )
-from astrometricslib.pipelines.shared.api_arguments import (
-    STACK_KINDS,
-    StackKind,
-    TimeInput,
-    check_choice,
-    check_include,
-    make_frame_selection,
-    reject_unused_arguments,
-)
+from astrometricslib.pipelines.shared.api_arguments import STACK_KINDS, StackKind, make_frame_selection
+from astrometricslib.pipelines.shared.frame_choice import FrameChoice, check_frame_list, frames_from_choice
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.target_records import save_quality_stamps
-from astrometricslib.utilities.frame_identity import frame_is_spectral
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +67,12 @@ _NOISE_ARGUMENTS = {
 def stack(
     self: _processing.ProcessingPipelines,
     target: str | Target,
-    frames: list[FrameRecord] | None = None,
+    frames: FrameChoice | None = None,
     filter_name: str | None = None,
     first_file: str | None = None,
     last_file: str | None = None,
-    since: TimeInput = None,
-    until: TimeInput = None,
+    since: TimeInput | None = None,
+    until: TimeInput | None = None,
     kind: StackKind = "imaging",
     camera_id: str | None = None,
     focal_length_mm: float | None = None,
@@ -107,8 +105,11 @@ def stack(
     ----------
     target : `str` or `Target`
         The target to stack.
-    frames : `list` [`FrameRecord`], optional
-        The exact frames to stack. Cannot be combined with the frame
+    frames : `FrameChoice`, optional
+        The exact frames to stack: the `Page` a frame query
+        returns, a list of frame records, or a list of the
+        target's frame paths. A page cut short (one with a
+        ``next_offset``) is refused. Cannot be combined with the frame
         choices below.
     filter_name : `str`, optional
         Only frames of this filter, such as ``"L"`` or ``"Luminance"``.
@@ -235,13 +236,13 @@ def stack(
 def _choose_frames(
     self: _processing.ProcessingPipelines,
     target: Target,
-    frames: list[FrameRecord] | None,
+    frames: FrameChoice | None,
     kind: StackKind,
     filter_name: str | None,
     first_file: str | None,
     last_file: str | None,
-    since: TimeInput,
-    until: TimeInput,
+    since: TimeInput | None,
+    until: TimeInput | None,
     camera_id: str | None,
     focal_length_mm: float | None,
 ) -> list[FrameRecord]:
@@ -254,8 +255,9 @@ def _choose_frames(
     ----------
     target : `Target`
         The target.
-    frames : `list` [`FrameRecord`] or `None`
-        The exact frames, or `None` to choose them with the rest.
+    frames : `FrameChoice` or `None`
+        The exact frames (a page, records or paths; see
+        `frames_from_choice`), or `None` to choose them with the rest.
     kind : `str`
         ``"imaging"`` or ``"spectral"``.
     filter_name : `str` or `None`
@@ -285,8 +287,6 @@ def _choose_frames(
         frames come from more than one camera or optic, or they mix
         imaging and spectral frames. The message gives the counts.
     """
-    from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
-    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
     from astrometricslib.pipelines.stacking.stack_request import choose_frames_to_stack
 
     if frames is not None:
@@ -296,24 +296,9 @@ def _choose_frames(
                 "Pass frames, or choose them with filter_name, first_file, last_file, since, until, "
                 "camera_id and focal_length_mm, not both."
             )
-        if not frames:
-            raise InvalidArgumentError("frames is empty: there is nothing to stack.")
-        ensure_single_camera(frames, target_id=target.id)
-        ensure_single_optic(frames, target_id=target.id)
-        spectral_count = sum(1 for frame in frames if frame_is_spectral(frame))
-        if 0 < spectral_count < len(frames):
-            # The request itself is wrong (the caller can fix it by
-            # picking one kind), so this is a refusal of the argument,
-            # not a conflict with the library's state.
-            raise InvalidArgumentError(
-                f"These frames mix imaging and spectral frames ({len(frames) - spectral_count} imaging, "
-                f"{spectral_count} spectral). Select only one kind and stack again.",
-                details={
-                    "imaging_frames": len(frames) - spectral_count,
-                    "spectral_frames": spectral_count,
-                },
-            )
-        return list(frames)
+        chosen = frames_from_choice(frames, target)
+        check_frame_list(chosen, target_id=target.id)
+        return chosen
     selection = make_frame_selection(filter_name, first_file, last_file, since, until, kind == "spectral")
     return choose_frames_to_stack(target, kind, selection, camera_id, focal_length_mm)
 
@@ -321,12 +306,12 @@ def _choose_frames(
 def predict_stack(
     self: _processing.ProcessingPipelines,
     target: str | Target,
-    frames: list[FrameRecord] | None = None,
+    frames: FrameChoice | None = None,
     filter_name: str | None = None,
     first_file: str | None = None,
     last_file: str | None = None,
-    since: TimeInput = None,
-    until: TimeInput = None,
+    since: TimeInput | None = None,
+    until: TimeInput | None = None,
     kind: StackKind = "imaging",
     camera_id: str | None = None,
     focal_length_mm: float | None = None,
@@ -354,9 +339,9 @@ def predict_stack(
     ----------
     target : `str` or `Target`
         The target to check.
-    frames : `list` [`FrameRecord`], optional
-        The exact frames to check. Cannot be combined with the frame
-        choices below.
+    frames : `FrameChoice`, optional
+        The exact frames to check, in any form `stack` takes. Cannot be
+        combined with the frame choices below.
     filter_name : `str`, optional
         Only frames of this filter.
     first_file : `str`, optional

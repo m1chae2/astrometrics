@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import TimeInput
 from astrometricslib.exceptions import NotFoundError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -27,7 +28,6 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from wayfindinglib._internal.arguments import TimeInput
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
     guiding_read_range,
@@ -57,8 +57,8 @@ class FrameRange:
     filter_name: str | None = None
     first_file: str | None = None
     last_file: str | None = None
-    since: TimeInput = None
-    until: TimeInput = None
+    since: TimeInput | None = None
+    until: TimeInput | None = None
 
     @property
     def has_bounds(self) -> bool:

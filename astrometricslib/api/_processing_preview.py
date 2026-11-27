@@ -12,6 +12,7 @@ from typing import Any, Literal
 # module and `processing.py` import each other. An annotation is read
 # only when asked for, after both modules have loaded.
 from astrometricslib.api import processing as _processing
+from astrometricslib.foundation.arguments import check_choice
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
 from astrometricslib.models.processing_results import (
@@ -19,11 +20,7 @@ from astrometricslib.models.processing_results import (
     PreviewRemakeResult,
 )
 from astrometricslib.models.target import PreviewBrightObject, Target
-from astrometricslib.pipelines.shared.api_arguments import (
-    STACK_KINDS,
-    StackKind,
-    check_choice,
-)
+from astrometricslib.pipelines.shared.api_arguments import STACK_KINDS, StackKind
 
 
 @background_job("preview", grace_period_seconds=20.0)

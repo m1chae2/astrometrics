@@ -522,19 +522,15 @@ def _text_param(params: dict[str, Any], name: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
-#: Error codes that mean the caller or the current state is at fault. They are
-#: logged without a traceback, because the cause is already in the message.
-_EXPECTED_CODES = frozenset({
-    "invalid_argument",
-    "not_found",
-    "conflict",
-    "permission_denied",
-    "configuration",
-})
-
-
 def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
-    """Log a failed RPC call once, with a traceback if it is unexpected.
+    """Log a failed RPC call once, at the level the error asks for.
+
+    Each error says its own log level (``log_level``): a missing item is an
+    answer (``INFO``), a bad argument or a conflict is a ``WARNING``, an
+    offline device is a status (``INFO``), and a failed device, disk, service
+    or pipeline is an ``ERROR``. A line at ``ERROR`` or above carries the
+    traceback. An unexpected exception (code ``internal``) is always an
+    ``ERROR`` with its traceback.
 
     Parameters
     ----------
@@ -545,16 +541,18 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
     info : `ErrorInfo`
         The error as reported to the caller.
     """
-    if info.code == "not_found":
-        # Asking for something that is not there is an answer, not a
-        # problem: the caller gets the code and decides what to show.
-        logger.info("RPC %s failed (%s): %s", method, info.code, info.message)
-    elif info.code in _EXPECTED_CODES:
-        logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
-    elif info.code == "internal":
+    if info.code == "internal":
         logger.error("RPC %s raised an unexpected error", method, exc_info=exc)
-    else:
-        logger.error("RPC %s failed (%s): %s", method, info.code, info.message, exc_info=exc)
+        return
+    level = info.log_level_number
+    logger.log(
+        level,
+        "RPC %s failed (%s): %s",
+        method,
+        info.code,
+        info.message,
+        exc_info=exc if level >= logging.ERROR else None,
+    )
 
 
 @router.post("/rpc")

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib.analytics.guiding_spectrum import analyze_guiding_telemetry
 from wayfindinglib.analytics.unguided_mount_error import GuideRunSeries, measure_run, summarize_runs
 from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURCES, GuidingSpectrumAnalysis

@@ -29,18 +29,18 @@ from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.logging import get_log_context
 from astrometricslib.models.processing_results import StackResult
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection, select_library_frames
-from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
-from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
+from astrometricslib.pipelines.shared.camera_selection import (
     choose_camera_frames,
     ensure_single_camera,
     split_frames_by_camera,
 )
-from astrometricslib.pipelines.stacking.pre_processing.optic_selection import (
+from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+from astrometricslib.pipelines.shared.optic_selection import (
     choose_optic_frames,
     ensure_single_optic,
 )
+from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection, select_library_frames
+from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
 
 if TYPE_CHECKING:
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording

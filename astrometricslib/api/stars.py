@@ -15,18 +15,19 @@ import logging
 from typing import Any, Literal
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.foundation.arguments import check_choice, check_limit
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
-from astrometricslib.pipelines.shared.api_arguments import check_choice, check_limit
 
 __all__ = ["StellarCatalog"]
 
 logger = logging.getLogger(__name__)
 
 
-class StellarCatalog:
+class StellarCatalog(MovedNames):
     """The library's catalog of stars and what the analyses found about them.
 
     While the target catalog deals with whole pictures, this catalog tracks

@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from astrometricslib.drivers import VersionedCache
+from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.analytics.night_index import TargetFrameMemo
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -936,7 +937,7 @@ def require_text(**texts: str) -> None:
             raise InvalidArgumentError(f"{name} must not be empty.")
 
 
-class ControlChild:
+class ControlChild(MovedNames):
     """Base of the `control` children: each holds the shared context.
 
     Parameters

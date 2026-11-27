@@ -289,8 +289,8 @@ def _choose_frames(run: StackRun) -> None:
     # had more frames. One camera through two optics is refused too: its
     # frames have two image scales, and the exposure grouping would otherwise
     # stack each optic as a group and combine them.
-    from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
-    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
+    from astrometricslib.pipelines.shared.camera_selection import ensure_single_camera
+    from astrometricslib.pipelines.shared.optic_selection import ensure_single_optic
 
     ensure_single_camera(run.target_frames)
     ensure_single_optic(run.target_frames)

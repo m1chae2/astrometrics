@@ -739,7 +739,9 @@ def sync_remote_logs(
     destination_dir = destination_dir or context.ekos_log_directory()
     if not check_remote_connection(context):
         raise ExternalServiceError(
-            "The telescope computer cannot be reached, so no logs can be listed or fetched."
+            "The telescope computer cannot be reached, so no logs can be listed or fetched.",
+            report="status",
+            log_level="INFO",
         )
     result: dict[str, Any] = {"dry_run": dry_run, **plan_log_sync(context, destination_dir)}
     if dry_run:

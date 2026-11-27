@@ -39,6 +39,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -47,7 +48,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import MeasurementStatus, observing_night_id
+from astrometricslib.reports import MeasurementStatus
 from wayfindinglib.analytics.performance_envelope import (
     BASELINE_SPREAD_MULTIPLIER,
     MINIMUM_BASELINE_SESSIONS,

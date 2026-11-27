@@ -58,6 +58,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import (
     get_camera_data_versions,
     get_frame_metric_signs,
@@ -65,7 +66,6 @@ from astrometricslib.drivers import (
     get_target_camera_names,
     get_target_data_version,
 )
-from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import BACKGROUND_METRIC
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location

@@ -11,13 +11,13 @@ import pytest
 
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
-from astrometricslib.pipelines.stacking import stage as stacking_tasks
-from astrometricslib.pipelines.stacking.pre_processing.optic_selection import (
+from astrometricslib.pipelines.shared.optic_selection import (
     choose_optic_frames,
     ensure_single_optic,
     split_frames_by_optic,
 )
+from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
+from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.stack_request import choose_frames_to_stack
 
 NIKON = "Nikon DSLR DSC D5300"

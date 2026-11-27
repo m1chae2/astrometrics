@@ -27,9 +27,11 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.renames import MovedNames
 from astrometricslib.api import _processing_preview as _preview
 from astrometricslib.api import _processing_stacking as _stacking
 from astrometricslib.api.calibration import CalibrationCatalog
+from astrometricslib.foundation.arguments import check_choice, check_limit, reject_unused_arguments
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job
@@ -47,12 +49,7 @@ from astrometricslib.pipelines.analysis_stage_names import (
 from astrometricslib.pipelines.shared.analysis_configuration import (
     configuration_stack_path,
 )
-from astrometricslib.pipelines.shared.api_arguments import (
-    check_choice,
-    check_limit,
-    reject_unused_arguments,
-    resolve_target,
-)
+from astrometricslib.pipelines.shared.api_arguments import resolve_target
 from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
@@ -93,7 +90,7 @@ class _TargetsOnDemand:
         return self._pipelines._targets.get(target_id, refresh=refresh)
 
 
-class ProcessingPipelines:
+class ProcessingPipelines(MovedNames):
     """Stack targets, run the analysis stages and measure noise.
 
     It also remakes the preview pictures of stacks.

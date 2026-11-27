@@ -37,6 +37,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import bump_data_version, connect_db, read_data_versions
 from astrometricslib.exceptions import InvalidArgumentError, StorageError
 from astrometricslib.parameters import (
@@ -48,7 +49,6 @@ from astrometricslib.parameters import (
     factor_for,
     resolve_parameter,
 )
-from astrometricslib.reports import observing_night_id
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Target

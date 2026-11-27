@@ -35,7 +35,7 @@ from astrometricslib.exceptions import ErrorInfo, to_error_info
 from astrometricslib.jobs import log_context, new_request_id
 from mcp_servers.common.profile import find_withheld_tools, load_manifest, refusal_message
 from mcp_servers.common.reply_budget import fit_reply_to_budget
-from mcp_servers.common.tool_errors import ToolErrorContent, error_content
+from mcp_servers.common.tool_errors import ToolErrorContent, error_content, log_tool_failure
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +51,6 @@ FIGURE_DOTS_PER_INCH = 100
 """Resolution of a plot sent to a client. A 16 x 9 inch figure becomes a
 1600 x 900 picture, large enough to read axis labels and small enough (a few
 hundred kilobytes) for the MCP transport."""
-
-EXPECTED_ERROR_CODES = frozenset({"invalid_argument", "not_found", "conflict", "permission_denied"})
-"""Error codes caused by the call itself. They are logged as warnings, without
-a traceback; any other failure is logged with its traceback."""
 
 Remediation = Callable[[str, str], dict[str, Any]]
 """A function that takes a tool name and an error message and returns a hint
@@ -266,12 +262,9 @@ class ToolRegistry:
         try:
             result = await func(**arguments) if inspect.iscoroutinefunction(func) else func(**arguments)
             return result_content(result)
-        except Exception as exc:  # every failure becomes an error reply, never a crash
+        except Exception as exc:  # ruff: ignore[blind-except] -- MCP boundary: every failure becomes an error reply
             info = to_error_info(exc, request_id)
-            if info.code in EXPECTED_ERROR_CODES:
-                logger.warning("Tool %s failed (%s): %s", name, info.code, info.message)
-            else:
-                logger.exception("Tool %s failed (%s)", name, info.code)
+            log_tool_failure(name, exc, info)
             if self.remediation is not None:
                 info.details["tool"] = name
                 info.details["remediation"] = self.remediation(name, info.message)

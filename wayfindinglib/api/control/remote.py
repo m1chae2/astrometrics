@@ -115,7 +115,9 @@ class RemoteControl(ControlChild):
             )
             if folder is None:
                 if not tasks.check_remote_connection(self._context):
-                    raise ExternalServiceError("The observatory computer is not reachable.")
+                    raise ExternalServiceError(
+                        "The observatory computer is not reachable.", report="status", log_level="INFO"
+                    )
                 raise NotFoundError(f"No folder named {folder_name!r} on the observatory computer.")
             if sizes:
                 return tasks.list_remote_files_with_sizes(self._context, folder)

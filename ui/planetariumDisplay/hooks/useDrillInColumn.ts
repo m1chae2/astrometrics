@@ -108,6 +108,9 @@ export const useDrillInColumn = (navigationMode: BrowseMode): DrillInColumn => {
    */
   const isArrowKeyPick = useCallback(() => isArrowKeyPickRef.current, []);
 
+  /** Stops the work `runAfterSlide` is waiting to run, if any. */
+  const cancelPendingSlideWorkRef = useRef<() => void>(() => undefined);
+
   /**
    * Runs `work` once the column's slide has ended, so the slide gets the main
    * thread to itself; heavy work (centering the sky map) waits for it. With
@@ -116,6 +119,7 @@ export const useDrillInColumn = (navigationMode: BrowseMode): DrillInColumn => {
    * @param work The work to run.
    */
   const runAfterSlide = useCallback((work: () => void) => {
+    cancelPendingSlideWorkRef.current();
     const pane = levelTwoPaneRef.current;
     if (!pane || prefersReducedMotion()) {
       window.requestAnimationFrame(() => work());
@@ -136,7 +140,16 @@ export const useDrillInColumn = (navigationMode: BrowseMode): DrillInColumn => {
     };
     const fallbackTimer = window.setTimeout(runOnce, SLIDE_END_FALLBACK_MS);
     pane.addEventListener('transitionend', handleTransitionEnd);
+    cancelPendingSlideWorkRef.current = () => {
+      hasRun = true;
+      pane.removeEventListener('transitionend', handleTransitionEnd);
+      window.clearTimeout(fallbackTimer);
+    };
   }, []);
+
+  // A column that goes away mid-slide must not run its waiting work later,
+  // after the page (or a test's window) is gone.
+  useEffect(() => () => cancelPendingSlideWorkRef.current(), []);
 
   // The panes get `will-change: transform` only while they slide, so the
   // browser keeps them on their own layer for the slide and frees it after.

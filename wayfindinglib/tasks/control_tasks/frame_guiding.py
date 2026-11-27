@@ -160,7 +160,6 @@ def _add_image_quality(
             first_file=wanted[0],
             last_file=wanted[-1],
             limit=len(wanted),
-            register_job=False,
         )
     except (InvalidArgumentError, NotFoundError) as error:
         return f"Image quality could not be measured: {error}"

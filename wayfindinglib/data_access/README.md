@@ -6,7 +6,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 
 ## What each file is for
 
-- `equipment_catalog_reader.py` reads the configured telescopes and cameras, says which one is active, and says which section of the configuration holds each telescope.
+- `equipment_catalog_reader.py` builds the equipment catalog: the telescopes, cameras and guide scopes the core library reads from the configuration (`AppConfiguration.get_telescopes` and the like), which of each is active, and a check that each device protocol has a driver. The section that holds a telescope's limits comes from `AppConfiguration.get_telescope_limits_section`.
 - `equipment_catalog_writer.py` builds the configuration change that stores a telescope's safety limits. It is the write side of the reader. It targets exactly the section the reader resolves for that telescope, so what it writes is what the reader reads back.
   - It checks the limits through the `Telescope` model first. For example, the minimum altitude cannot exceed the maximum.
   - It never creates a section. If the telescope has no section to write to, it refuses.

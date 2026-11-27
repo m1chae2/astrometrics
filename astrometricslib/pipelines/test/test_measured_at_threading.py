@@ -182,7 +182,7 @@ def test_the_api_supplies_the_time_for_a_batch_of_targets(monkeypatch: pytest.Mo
         MagicMock(), MagicMock(), targets=SimpleNamespace(get=lambda name, refresh=False: Target(id=name))
     )
 
-    pipelines.process_target(["M 99"], camera_id="Cam", register_job=False)
+    pipelines.process_target(["M 99"], camera_id="Cam")
 
     measured_at = batch.call_args.kwargs["measured_at"]
     assert measured_at.tzinfo is not None

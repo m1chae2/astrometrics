@@ -93,21 +93,11 @@ def _our_handlers(logger_name: str) -> list:
     ]
 
 
-def test_a_disabled_job_does_nothing_at_all() -> None:
-    """Verify switching recording off leaves no trace and still works.
+def test_registered_job_has_no_switch_to_skip_recording() -> None:
+    """Every run records a job: the recording switch is gone."""
+    import inspect
 
-    The handle must still be usable so the wrapped work never has to ask
-    whether recording happened.
-    """
-    handlers_before = list(logging.getLogger(PACKAGE_LOGGER_NAME).handlers)
-
-    with registered_job(enabled=False, job_type="analysis", target_id="Vega") as job:
-        job.info("this goes nowhere")
-        job.mark("completed", 100)
-        assert job.job_id is None
-        assert job.log_file_path is None
-
-    assert logging.getLogger(PACKAGE_LOGGER_NAME).handlers == handlers_before
+    assert "enabled" not in inspect.signature(registered_job).parameters
 
 
 def test_no_handler_is_ever_attached_to_the_shared_logger(isolated_logs: str) -> None:
@@ -119,7 +109,7 @@ def test_no_handler_is_ever_attached_to_the_shared_logger(isolated_logs: str) ->
     assert _our_handlers(PACKAGE_LOGGER_NAME) == []
     level_before = logging.getLogger(PACKAGE_LOGGER_NAME).level
 
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         assert job.job_id is not None
         assert _our_handlers(PACKAGE_LOGGER_NAME) == []
         assert len(_job_sinks(job.job_id)) == 2
@@ -131,7 +121,7 @@ def test_no_handler_is_ever_attached_to_the_shared_logger(isolated_logs: str) ->
 
 def test_messages_from_deeper_modules_reach_the_jobs_log_file(isolated_logs: str) -> None:
     """Verify a message from any module of either library is in the job log."""
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         logging.getLogger("astrometricslib.pipelines.example").info("deep in the pipeline")
         logging.getLogger("wayfindinglib.tasks.example").info("deep in a control task")
         job.info("a milestone")
@@ -149,7 +139,7 @@ def test_a_nested_capture_of_the_same_job_writes_each_line_once(isolated_logs: s
     from astrometricslib.foundation.jobs.runner import capture_job_logs
 
     inner_file = tmp_path / "inner.log"
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         with capture_job_logs(job_id=job.job_id, log_file_path=str(inner_file)):
             logging.getLogger("astrometricslib.pipelines.example").info("one line")
         for handler in _job_sinks(job.job_id):
@@ -165,7 +155,7 @@ def test_a_nested_capture_on_the_same_file_writes_each_line_once(isolated_logs: 
     from astrometricslib.foundation.jobs.runner import capture_job_logs
 
     siril_logger = logging.getLogger("astrometricslib._internal.drivers.siril_interface.imaging_stacker")
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         with capture_job_logs(job_id=job.job_id, log_file_path=job.log_file_path):
             siril_logger.info("log: Conversion succeeded")
         siril_logger.info("log: after the run")
@@ -187,7 +177,7 @@ def test_the_log_files_are_closed_not_just_detached(isolated_logs: str) -> None:
     """
     captured: list[logging.Handler] = []
 
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         captured.extend(
             handler for handler in _job_sinks(job.job_id) if isinstance(handler, logging.FileHandler)
         )
@@ -207,7 +197,7 @@ def test_work_that_raises_marks_the_job_failed_and_reraises(isolated_logs: str) 
     from astrometricslib.foundation.jobs.store import JobStore
 
     with pytest.raises(RuntimeError, match="work blew up"):
-        with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+        with registered_job(job_type="analysis", target_id="Vega") as job:
             captured_job_id = job.job_id
             raise RuntimeError("work blew up")
 
@@ -222,7 +212,7 @@ def test_work_that_finishes_quietly_is_marked_completed(isolated_logs: str) -> N
     """Verify no news is good news when the work does not say otherwise."""
     from astrometricslib.foundation.jobs.store import JobStore
 
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         captured_job_id = job.job_id
 
     stored = JobStore(isolated_logs).get_job(captured_job_id)
@@ -238,7 +228,7 @@ def test_work_that_decides_its_own_outcome_is_believed(isolated_logs: str) -> No
     """
     from astrometricslib.foundation.jobs.store import JobStore
 
-    with registered_job(enabled=True, job_type="stacking", target_id="Vega") as job:
+    with registered_job(job_type="stacking", target_id="Vega") as job:
         captured_job_id = job.job_id
         job.mark("failed", 100)
 
@@ -256,7 +246,7 @@ def test_a_broken_logs_database_degrades_instead_of_raising(monkeypatch: pytest.
     monkeypatch.setattr(runner, "JobStore", _unopenable)
     did_the_work = False
 
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         did_the_work = True
         job.info("still fine")
         assert job.job_id is None
@@ -273,13 +263,13 @@ def test_an_explicit_log_file_is_used_as_given(isolated_logs: str, tmp_path: Pat
     """
     chosen = str(tmp_path / "chosen.log")
 
-    with registered_job(enabled=True, job_type="stacking", target_id="Vega", log_file=chosen) as job:
+    with registered_job(job_type="stacking", target_id="Vega", log_file=chosen) as job:
         assert job.log_file_path == chosen
 
 
 def test_a_generated_log_name_says_what_kind_of_job_it_was(isolated_logs: str) -> None:
     """Verify generated names keep the job type and a safe target name."""
-    with registered_job(enabled=True, job_type="analysis", target_id="NGC 7000") as job:
+    with registered_job(job_type="analysis", target_id="NGC 7000") as job:
         assert "analysis_NGC_7000_" in job.log_file_path
         assert job.log_file_path.endswith(".log")
 
@@ -301,7 +291,7 @@ def test_mark_can_also_set_message_and_output_metrics(isolated_logs: str) -> Non
     """
     from astrometricslib.foundation.jobs.store import JobStore
 
-    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+    with registered_job(job_type="analysis", target_id="Vega") as job:
         captured_job_id = job.job_id
         job.mark("completed", 100, message="3 of 3 succeeded", output_metrics={"result": {"path": "x.fits"}})
 
@@ -327,7 +317,7 @@ def _stack_vega(result: dict, delay_seconds: float = 0.0) -> Callable[[], dict]:
         result : `dict`
             The prepared result.
         """
-        with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+        with registered_job(job_type="stacking", target_id="Vega"):
             time.sleep(delay_seconds)
             return result
 
@@ -396,7 +386,7 @@ class TestRunAsBackgroundJob:
                 A small result.
             """
             time.sleep(0.4)
-            with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+            with registered_job(job_type="stacking", target_id="Vega"):
                 time.sleep(0.2)
                 return {"ok": True}
 
@@ -418,7 +408,7 @@ class TestRunAsBackgroundJob:
             RuntimeError
                 Always.
             """
-            with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+            with registered_job(job_type="stacking", target_id="Vega"):
                 raise RuntimeError("stacking blew up")
 
         with pytest.raises(RuntimeError, match="stacking blew up"):
@@ -441,8 +431,8 @@ def test_a_nested_job_of_the_same_kind_joins_the_running_one(isolated_logs: str)
     """
     from astrometricslib.foundation.jobs.store import JobStore
 
-    with registered_job(enabled=True, job_type="stacking", target_id="Vega") as outer:
-        with registered_job(enabled=True, job_type="stacking", target_id="Vega") as inner:
+    with registered_job(job_type="stacking", target_id="Vega") as outer:
+        with registered_job(job_type="stacking", target_id="Vega") as inner:
             assert inner is outer
             inner.mark("failed", 100)
 
@@ -451,11 +441,35 @@ def test_a_nested_job_of_the_same_kind_joins_the_running_one(isolated_logs: str)
     assert outer.terminal_status == "failed"
 
 
-def test_a_nested_job_of_another_kind_gets_its_own_row(isolated_logs: str) -> None:
-    """Verify a stacking job inside a batch job is still listed separately."""
-    with registered_job(enabled=True, job_type="batch_processing", target_id="Vega") as batch:
-        with registered_job(enabled=True, job_type="stacking", target_id="Vega") as stacking:
-            assert stacking.job_id != batch.job_id
+def test_a_nested_job_of_another_kind_joins_the_running_one(isolated_logs: str) -> None:
+    """Verify work inside a job of another kind is part of that job."""
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    with registered_job(job_type="remote_sync", target_id="Vega") as outer:
+        with registered_job(job_type="quality", target_id="Vega") as inner:
+            assert inner is outer
+    assert len(JobStore(isolated_logs).get_jobs_by_target("Vega")) == 1
+
+
+def test_background_work_with_a_job_type_records_one_job(isolated_logs: str) -> None:
+    """The MCP wrapper records the call as a job; the work inside joins it."""
+    from astrometricslib.foundation.jobs.runner import run_as_background_job
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    def work() -> dict:
+        """Run a pipeline that records its own job.
+
+        Returns
+        -------
+        result : `dict`
+            A fixed answer.
+        """
+        with registered_job(job_type="stacking", target_id="Vega"):
+            return {"done": True}
+
+    outcome = run_as_background_job(work, grace_period_seconds=5.0, job_type="stacking", target_id="Vega")
+    assert outcome["result"] == {"done": True} and outcome["jobId"]
+    assert [job.id for job in JobStore(isolated_logs).get_jobs_by_target("Vega")] == [outcome["jobId"]]
 
 
 def test_each_job_log_holds_only_its_own_work(isolated_logs: str) -> None:
@@ -468,7 +482,7 @@ def test_each_job_log_holds_only_its_own_work(isolated_logs: str) -> None:
 
     def run_job(target_id: str) -> None:
         """Log one line as a job, once both jobs are registered."""
-        with registered_job(enabled=True, job_type="stacking", target_id=target_id) as job:
+        with registered_job(job_type="stacking", target_id=target_id) as job:
             log_paths[target_id] = job.log_file_path
             both_registered.wait(timeout=10)
             package_logger.info("line from %s", target_id)
@@ -492,7 +506,7 @@ def test_stage_moves_progress_and_keeps_a_finished_status(isolated_logs: str) ->
     """Verify stage reports a running step and never undoes a finished job."""
     from astrometricslib.foundation.jobs.store import JobStore
 
-    with registered_job(enabled=True, job_type="stacking", target_id="Vega") as job:
+    with registered_job(job_type="stacking", target_id="Vega") as job:
         job.stage(40, "Stacking")
         stored = JobStore(isolated_logs).get_job(job.job_id)
         assert (stored.status, stored.progress_current, stored.message) == ("running", 40, "Stacking")
@@ -543,7 +557,7 @@ def test_report_count_stores_the_counts_and_keeps_a_finished_status(isolated_log
     """Verify report_count stores the counts and keeps a finished status."""
     from astrometricslib.foundation.jobs.store import JobStore
 
-    with registered_job(enabled=True, job_type="quality", target_id="Vega") as job:
+    with registered_job(job_type="quality", target_id="Vega") as job:
         job.report_count(24, 40, "Measured 24 of 40 frames")
         stored = JobStore(isolated_logs).get_job(job.job_id)
         assert (stored.status, stored.progress_current, stored.progress_total) == ("running", 24, 40)
@@ -615,7 +629,7 @@ def test_a_job_of_any_new_kind_stores_its_log_rows_under_its_id(isolated_logs: s
     from astrometricslib.foundation.jobs.store import JobStore
 
     package_logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.test_new_kind")
-    with registered_job(enabled=True, job_type="brand_new_kind", target_id="M 31") as job:
+    with registered_job(job_type="brand_new_kind", target_id="M 31") as job:
         package_logger.info("first step of a new kind of job")
         package_logger.info("second step of a new kind of job")
         job_id = job.job_id
@@ -644,7 +658,7 @@ def test_a_job_waiting_for_a_slot_is_listed_with_a_waiting_message(isolated_logs
 
     def run_job() -> None:
         """Record a job and wait for the busy slot inside it."""
-        with registered_job(enabled=True, job_type="preview", target_id="NGC 2244") as job:
+        with registered_job(job_type="preview", target_id="NGC 2244") as job:
             seen["job_id"] = job.job_id
             with job.holding_slot(busy_slot(), working_message="Making the preview"):
                 seen["working_status"] = JobStore(isolated_logs).get_job(job.job_id).message
@@ -701,7 +715,7 @@ def test_a_job_records_its_defaulted_parameters_and_logs_one_summary(
     second = _defaulted_parameter("stacking.second_value")
     stored_by_job = []
     for _ in range(2):
-        with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+        with registered_job(job_type="analysis", target_id="Vega") as job:
             with parameter_context():
                 resolve(first)
                 resolve(second)
@@ -719,3 +733,19 @@ def test_a_job_records_its_defaulted_parameters_and_logs_one_summary(
             ("INFO", "2 parameters used their defaults (no tuned or equipment value)")
         ]
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_work_inside_a_borrowed_row_cannot_finish_it(isolated_logs: str) -> None:
+    """A run that joins a caller's row reports progress but not the ending."""
+    from astrometricslib.foundation.jobs.models import ProcessingJob
+    from astrometricslib.foundation.jobs.runner import running_as_job
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    store = JobStore(isolated_logs)
+    store.upsert_job(ProcessingJob(id="row-1", target_id="Vega", job_type="stacking", status="running"))
+    with running_as_job("row-1", store, job_type="stacking", target_id="Vega"):
+        with registered_job(job_type="stacking", target_id="Vega") as job:
+            job.stage(30, "Stage 2 of 7")
+            job.mark("completed", 100)
+    stored = store.get_job("row-1")
+    assert (stored.status, stored.progress_current) == ("running", 30)

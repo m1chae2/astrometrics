@@ -19,8 +19,8 @@ from datetime import datetime, timedelta
 
 from astropy.time import Time
 
+from astrometricslib import Telescope
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 
 

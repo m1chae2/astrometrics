@@ -442,7 +442,7 @@ class TestChosenStages:
         assert keywords["astrometry"] is None
         assert keywords["spectroscopy"] == {"path": str(spectral_stack), "limit": 10}
         assert keywords["run_prerequisites"] is True
-        assert keywords["register_job"] is False
+        assert "register_job" not in keywords
         assert result["prerequisitesRun"] == ["astrometry"]
         assert result["message"] == ("Astrometry \u2192 Spectroscopy")
         orchestrator._job_service.update_job.assert_any_call("job1", status_message=result["message"])

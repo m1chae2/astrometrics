@@ -244,10 +244,10 @@ def record_pipeline_run(
     """Record one pipeline run's IVOA provenance, and stamp it onto `summary`.
 
     Does nothing at all when `job_id` is `None` -- the same situation
-    that already means no job row exists (a caller passed
-    `register_job=False`), so no `Activity` is a consistent, not a new,
-    gap. Never raises: a storage problem here must not turn an
-    otherwise-successful pipeline run into a failure.
+    that already means no job row exists (the job store could not be
+    written), so no `Activity` is a consistent, not a new, gap. Never
+    raises: a storage problem here must not turn an otherwise-successful
+    pipeline run into a failure.
 
     Parameters
     ----------

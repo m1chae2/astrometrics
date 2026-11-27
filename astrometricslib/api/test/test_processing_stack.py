@@ -88,9 +88,7 @@ def make_target() -> Target:
 def test_imaging_stack_uses_only_imaging_frames_in_range(library: tuple) -> None:
     """The spectrum and the frames outside the range are left out."""
     pipelines, record = library
-    result = pipelines.stack(
-        make_target(), filter_name="L", first_file="002", last_file="003", register_job=False
-    )
+    result = pipelines.stack(make_target(), filter_name="L", first_file="002", last_file="003")
     assert record.stacked_with == ["/lights/T_Light_Luminance_002.fits", "/lights/T_Light_Luminance_003.fits"]
     assert result.stacked_path == "/stacks/T.fits"
     assert record.saved == 1
@@ -99,7 +97,7 @@ def test_imaging_stack_uses_only_imaging_frames_in_range(library: tuple) -> None
 def test_spectral_stack_uses_only_spectra(library: tuple) -> None:
     """Asking for spectral frames picks the spectrum and nothing else."""
     pipelines, record = library
-    pipelines.stack(make_target(), kind="spectral", register_job=False)
+    pipelines.stack(make_target(), kind="spectral")
     assert record.stacked_with == ["/lights/T_Light_Spectroscopy_001.fits"]
 
 
@@ -118,7 +116,7 @@ def test_no_matching_frames_is_an_error_not_a_stack(library: tuple) -> None:
     """A selection that matches nothing raises and does not stack."""
     pipelines, record = library
     with pytest.raises(NotFoundError, match="No imaging light frames"):
-        pipelines.stack(make_target(), filter_name="Ha", register_job=False)
+        pipelines.stack(make_target(), filter_name="Ha")
     assert record.stacked_with is None
 
 
@@ -126,7 +124,7 @@ def test_a_wrong_frame_type_is_refused(library: tuple) -> None:
     """Only imaging and spectral are accepted."""
     pipelines, _ = library
     with pytest.raises(InvalidArgumentError, match="kind"):
-        pipelines.stack(make_target(), kind="all", register_job=False)
+        pipelines.stack(make_target(), kind="all")
 
 
 def make_two_camera_target() -> Target:
@@ -148,7 +146,7 @@ def test_frames_from_two_cameras_are_never_stacked_together(library: tuple) -> N
     """Without a camera named, a mixed target is refused and says why."""
     pipelines, record = library
     with pytest.raises(InvalidArgumentError, match="more than one camera") as raised:
-        pipelines.stack(make_two_camera_target(), kind="spectral", register_job=False)
+        pipelines.stack(make_two_camera_target(), kind="spectral")
     assert "Nikon DSLR DSC D5300" in str(raised.value)
     assert "ZWO ASI 533MM Pro" in str(raised.value)
     assert record.stacked_with is None
@@ -157,9 +155,7 @@ def test_frames_from_two_cameras_are_never_stacked_together(library: tuple) -> N
 def test_naming_the_camera_stacks_only_its_frames_even_when_it_has_fewer(library: tuple) -> None:
     """The two ASI frames are stacked, though the Nikon has more."""
     pipelines, record = library
-    result = pipelines.stack(
-        make_two_camera_target(), kind="spectral", camera_id="ASI 533MM", register_job=False
-    )
+    result = pipelines.stack(make_two_camera_target(), kind="spectral", camera_id="ASI 533MM")
     assert record.stacked_with == ["/lights/T_Asi_1.fits", "/lights/T_Asi_2.fits"]
     assert result.camera == "ZWO ASI 533MM Pro"
 
@@ -168,7 +164,7 @@ def test_a_camera_that_took_none_of_the_frames_is_an_error(library: tuple) -> No
     """Naming a camera that is not there lists the cameras that are."""
     pipelines, record = library
     with pytest.raises(NotFoundError, match="No frames from a camera matching") as raised:
-        pipelines.stack(make_two_camera_target(), kind="spectral", camera_id="QHY", register_job=False)
+        pipelines.stack(make_two_camera_target(), kind="spectral", camera_id="QHY")
     assert "Nikon DSLR DSC D5300" in str(raised.value)
     assert record.stacked_with is None
 
@@ -178,7 +174,7 @@ def test_exact_frames_cannot_be_combined_with_a_frame_choice(library: tuple) -> 
     pipelines, record = library
     target = make_target()
     with pytest.raises(InvalidArgumentError, match="not both"):
-        pipelines.stack(target, frames=target.frames[:2], filter_name="L", register_job=False)
+        pipelines.stack(target, frames=target.frames[:2], filter_name="L")
     assert record.stacked_with is None
 
 
@@ -186,7 +182,7 @@ def test_exact_frames_are_stacked_as_given(library: tuple) -> None:
     """Passing ``frames`` stacks exactly those frames."""
     pipelines, record = library
     target = make_target()
-    pipelines.stack(target, frames=target.frames[:2], register_job=False)
+    pipelines.stack(target, frames=target.frames[:2])
     assert record.stacked_with == [frame.path for frame in target.frames[:2]]
 
 
@@ -196,7 +192,7 @@ def test_a_frame_list_that_mixes_imaging_and_spectral_frames_is_refused_with_cou
     target = make_target()
     mixed = [*target.frames[:3], target.frames[4]]
     with pytest.raises(InvalidArgumentError, match=r"3 imaging, 1 spectral") as raised:
-        pipelines.stack(target, frames=mixed, register_job=False)
+        pipelines.stack(target, frames=mixed)
     assert raised.value.details == {"imaging_frames": 3, "spectral_frames": 1}
     assert record.stacked_with is None
     assert record.saved == 0
@@ -206,7 +202,7 @@ def test_a_frame_list_of_one_kind_is_not_refused(library: tuple) -> None:
     """An all-imaging list and an all-spectral list both pass."""
     pipelines, record = library
     target = make_target()
-    pipelines.stack(target, frames=target.frames[:3], register_job=False)
+    pipelines.stack(target, frames=target.frames[:3])
     assert record.stacked_with == [frame.path for frame in target.frames[:3]]
-    pipelines.stack(target, frames=[target.frames[4]], kind="spectral", register_job=False)
+    pipelines.stack(target, frames=[target.frames[4]], kind="spectral")
     assert record.stacked_with == [target.frames[4].path]

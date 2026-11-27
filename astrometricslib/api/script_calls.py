@@ -87,7 +87,6 @@ def stack_subset(
     label: str,
     output_folder: str | None = None,
     record_forecast_rows: bool = False,
-    register_job: bool = True,
 ) -> SubsetStackResult:
     """Stack exactly the given frames into a scratch folder.
 
@@ -140,8 +139,6 @@ def stack_subset(
         the rows every subset stores. The restack script uses
         ``label=EARLIER_NIGHTS_VARIANT`` with the frames of all nights
         but the last.
-    register_job : `bool`, optional
-        Record the run in the job list. Defaults to `True`.
 
     Returns
     -------
@@ -153,7 +150,7 @@ def stack_subset(
     from astrometricslib.pipelines.stacking.subset_noise_run import stack_chosen_subset
 
     resolved = pipelines._resolve(target)
-    with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+    with registered_job(job_type="stacking", target_id=resolved.id) as job:
         context = pipelines._subset_context(resolved, job.job_id)
         return stack_chosen_subset(
             resolved,

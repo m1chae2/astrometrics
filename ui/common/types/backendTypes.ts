@@ -132,6 +132,7 @@ export interface FrameRecord {
   azimuthDegrees?: number | null;
   pixelScaleArcsec?: number | null;
   focalLengthMm?: number | null;
+  configurationId?: string | null;
   binning?: number | null;
   sensorTemperatureC?: number | null;
   focuserPosition?: number | null;
@@ -3593,12 +3594,14 @@ export interface SuggestionLogEntry {
 }
 
 /**
- * A physical imaging rig's optics and safe pointing envelope.
+ * A telescope or camera lens, with the safe pointing limits of its mount.
  *
- * More than one may be configured in an `EquipmentCatalog`; exactly
- * one is active. `flip_hour_angle_deg` is the single stored
- * meridian-flip threshold; `meridian_flip_delay_min` is derived from
- * it (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
+ * The focal length and focal ratio describe the optic. The altitude and
+ * hour angle limits, the meridian-flip point and the device protocols
+ * describe the mount that carries it and the devices on it.
+ * `flip_hour_angle_deg` is the one stored meridian-flip threshold;
+ * `meridian_flip_delay_min` is worked out from it
+ * (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
  */
 export interface Telescope {
   id: string;

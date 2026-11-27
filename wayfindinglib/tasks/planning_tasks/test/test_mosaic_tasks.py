@@ -9,9 +9,8 @@ library's target catalog.
 
 import pytest
 
-from astrometricslib import Target
+from astrometricslib import Camera, ObservatoryConfiguration, Target, Telescope
 from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, Telescope
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels, create_mosaic
 
@@ -47,17 +46,17 @@ class _FakeAstrometrics:
         self.targets = _FakeTargetCatalog()
 
 
-def _equipment() -> EquipmentConfiguration:
+def _equipment() -> ObservatoryConfiguration:
     """Build a small refractor and camera pair.
 
     Returns
     -------
-    equipment : `EquipmentConfiguration`
+    equipment : `ObservatoryConfiguration`
         A 450 mm telescope with a square sensor.
     """
     telescope = Telescope(id="t1", name="Test Scope", focal_length_mm=450.0, focal_ratio=6.0)
     camera = Camera(id="c1", name="Test Cam", pixel_size_um=3.76, sensor_width_px=3008, sensor_height_px=3008)
-    return EquipmentConfiguration(telescope=telescope, camera=camera)
+    return ObservatoryConfiguration(telescope=telescope, camera=camera)
 
 
 def _parent() -> Target:

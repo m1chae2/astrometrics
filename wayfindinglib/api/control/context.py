@@ -37,7 +37,7 @@ from wayfindinglib.tasks.control_tasks.live_guiding import LiveGuidingMonitor
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 
 if TYPE_CHECKING:
-    from astrometricslib import AppConfiguration, Astrometrics
+    from astrometricslib import AppConfiguration, Astrometrics, Camera, GuideScope, Telescope
     from wayfindinglib.drivers.control_record_store import ControlRecordStore
     from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
     from wayfindinglib.drivers.indi_worker import IndiWorkerClient
@@ -54,7 +54,6 @@ if TYPE_CHECKING:
     from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
     from wayfindinglib.drivers.ssh_port_forward import SshPortForward
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
-    from wayfindinglib.models.equipment_and_site.equipment import Camera, GuideScope, Telescope
     from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
     from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
     from wayfindinglib.models.policy.delegation import DelegationPolicy
@@ -772,9 +771,9 @@ class ControlContext:
         camera = self.active_camera()
         if telescope is None or camera is None:
             return None
-        from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
+        from astrometricslib import ObservatoryConfiguration
 
-        configuration = EquipmentConfiguration(telescope=telescope, camera=camera)
+        configuration = ObservatoryConfiguration(telescope=telescope, camera=camera)
         return configuration.guider_plate_scale_arcsec_per_px(
             self.active_guide_scope(), self.active_guide_camera()
         )

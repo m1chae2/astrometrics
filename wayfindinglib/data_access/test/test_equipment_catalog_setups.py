@@ -3,8 +3,9 @@
 Description: When the config lists setups (issue #175), the catalog has one
 telescope per optic, takes the active telescope and camera from the active
 setup, and reads each telescope's safety limits from the mount section of
-its setup. Choosing a telescope or camera makes the matching setup active,
-and saved limits go to the mount section. Checked against a real
+its setup. Making an observatory configuration active makes the setup that
+pairs its camera and optic active, and saved limits go to the mount section.
+Checked against a real
 `AppConfiguration` backed by a temporary config file.
 """
 
@@ -12,14 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, Camera, ObservatoryConfiguration, Telescope
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_equipment_catalog,
     list_telescopes,
-    mount_section_name_for,
 )
 from wayfindinglib.data_access.equipment_catalog_writer import build_telescope_limits_update
-from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_camera, set_active_telescope
+from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_configuration
 
 SETUPS = {
     "Observatory.Optics": {"available": "Refractor, Camera Lens"},
@@ -84,8 +85,8 @@ def test_limits_come_from_the_mount_of_the_setup(app_config: AppConfiguration) -
     telescopes = {telescope.id: telescope for telescope in list_telescopes(app_config)}
     assert telescopes["Refractor"].min_altitude_deg == pytest.approx(25.0)
     assert telescopes["Refractor"].flip_hour_angle_deg == pytest.approx(3.0)
-    assert mount_section_name_for(app_config, "Refractor") == "Observatory.Mount.Mount A"
-    assert mount_section_name_for(app_config, "Camera Lens") is None
+    assert app_config.get_telescope_limits_section("Refractor") == "Observatory.Mount.Mount A"
+    assert app_config.get_telescope_limits_section("Camera Lens") != "Observatory.Mount.Mount A"
 
 
 def test_the_active_setup_gives_the_active_telescope_and_camera(app_config: AppConfiguration) -> None:
@@ -94,18 +95,46 @@ def test_the_active_setup_gives_the_active_telescope_and_camera(app_config: AppC
     assert (catalog.active_telescope_id, catalog.active_camera_id) == ("Refractor", "Mono Camera")
 
 
-def test_choosing_a_camera_keeps_the_optic_in_use(app_config: AppConfiguration) -> None:
-    """The color camera stays on the refractor, not the lens."""
-    assert set_active_camera(app_config, "Color Camera")
+def _configuration(camera_name: str, optic_name: str, focal_length_mm: float) -> ObservatoryConfiguration:
+    """Build a stored-looking configuration of one camera on one optic.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera.
+    optic_name : `str`
+        The optic.
+    focal_length_mm : `float`
+        The optic's focal length.
+
+    Returns
+    -------
+    configuration : `ObservatoryConfiguration`
+        The configuration, with an id.
+    """
+    return ObservatoryConfiguration(
+        id=f"{camera_name} on {optic_name}",
+        telescope=Telescope(id=optic_name, name=optic_name, focal_length_mm=focal_length_mm),
+        camera=Camera(
+            id=camera_name, name=camera_name, pixel_size_um=3.9, sensor_width_px=10, sensor_height_px=10
+        ),
+    )
+
+
+def test_a_configuration_makes_its_setup_active(app_config: AppConfiguration) -> None:
+    """The setup pairing its camera and optic becomes the active setup."""
+    set_active_configuration(app_config, _configuration("Color Camera", "Refractor", 400.0))
     assert app_config.get_observatory_setups().active_setup_name == "Color on Refractor"
     assert app_config.get_value("Observatory.Camera", "default_primary_camera") == "Color Camera"
-
-
-def test_choosing_a_telescope_may_bring_another_camera(app_config: AppConfiguration) -> None:
-    """Only the color camera uses the lens, so the camera switches too."""
-    assert set_active_telescope(app_config, "Camera Lens")
+    set_active_configuration(app_config, _configuration("Color Camera", "Camera Lens", 300.0))
     assert app_config.get_observatory_setups().active_setup_name == "Color on Lens"
-    assert app_config.get_value("Observatory.Camera", "default_primary_camera") == "Color Camera"
+
+
+def test_a_pairing_no_setup_lists_is_refused(app_config: AppConfiguration) -> None:
+    """The mono camera is never used on the lens, so that is refused."""
+    with pytest.raises(InvalidArgumentError, match="No setup"):
+        set_active_configuration(app_config, _configuration("Mono Camera", "Camera Lens", 300.0))
+    assert app_config.get_observatory_setups().active_setup_name == "Mono on Refractor"
 
 
 def test_saved_limits_go_to_the_mount_section(app_config: AppConfiguration) -> None:

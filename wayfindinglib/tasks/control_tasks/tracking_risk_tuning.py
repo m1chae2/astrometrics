@@ -177,8 +177,8 @@ def _plate_scale(inputs: TuningInputs, config: object) -> float | None:
         Arcseconds per pixel, or `None` when the catalog lacks the camera or
         the optic.
     """
+    from astrometricslib import ObservatoryConfiguration
     from wayfindinglib.data_access.equipment_catalog_reader import camera_key, get_equipment_catalog
-    from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 
     catalog = get_equipment_catalog(config)  # type: ignore[arg-type]
     camera = next(
@@ -187,7 +187,7 @@ def _plate_scale(inputs: TuningInputs, config: object) -> float | None:
     telescope = next((t for t in catalog.telescopes if t.name == inputs.setup.optic_name), None)
     if camera is None or telescope is None:
         return None
-    return EquipmentConfiguration(telescope=telescope, camera=camera).plate_scale_arcsec_per_px
+    return ObservatoryConfiguration(telescope=telescope, camera=camera).plate_scale_arcsec_per_px
 
 
 def tune_tracking_blend(inputs: TuningInputs) -> TuningResult:

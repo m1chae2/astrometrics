@@ -94,7 +94,7 @@ def test_list_sessions_reads_the_alignment_history() -> None:
     service = AlignmentService(observatory_api=_autospec_control(), review=review)
 
     assert service.list_sessions() == [{"sessionId": "2026-09-25"}]
-    review.query.assert_called_once_with(kind="alignment", limit=50, register_job=False)
+    review.query.assert_called_once_with(kind="alignment", limit=50)
 
 
 def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:

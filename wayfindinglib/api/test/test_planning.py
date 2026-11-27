@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import AppConfiguration, Target
+from astrometricslib import AppConfiguration, Target, Telescope
 from astrometricslib._internal.quality import QualityQueryResult
 from astrometricslib._internal.results import RestoreReport
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
@@ -23,7 +23,6 @@ from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.observation_package import (
     DitherConfig,

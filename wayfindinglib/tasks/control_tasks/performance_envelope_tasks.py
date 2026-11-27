@@ -82,14 +82,14 @@ def tracking_risk_map(
         when the location is unknown). Without an active telescope and
         camera, the jitter limits are 1.2 and 2.0 arcseconds.
     """
+    from astrometricslib import ObservatoryConfiguration
     from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
-    from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
     from wayfindinglib.tasks.control_tasks.alignment_history import attempt_models
 
     catalog = get_equipment_catalog(context.config)
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     plate_scale = (
-        EquipmentConfiguration(telescope=telescope, camera=camera).plate_scale_arcsec_per_px
+        ObservatoryConfiguration(telescope=telescope, camera=camera).plate_scale_arcsec_per_px
         if telescope is not None and camera is not None
         else None
     )

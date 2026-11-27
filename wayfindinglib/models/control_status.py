@@ -11,8 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib import Camera, GuideScope, Telescope
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState
-from wayfindinglib.models.equipment_and_site.equipment import Camera, GuideScope, Telescope
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.policy.commissioning import CommissioningRun

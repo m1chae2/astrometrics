@@ -598,7 +598,6 @@ class QualityRecords(MovedNames):
         trend_threshold_percent: float | None = None,
         exposure_seconds: float | None = None,
         predict_exposure_seconds: float | None = None,
-        register_job: bool = True,
     ) -> InputQualityReport | RawFrameCheckReport | SpectralFrameCheckReport:
         """Measure a target's raw light or spectrum frames.
 
@@ -686,8 +685,6 @@ class QualityRecords(MovedNames):
             at, in seconds. The measured peaks are scaled to it and the
             report says whether the spectrum would clip there (a clipped
             peak is a lower bound, and the report says so).
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -746,7 +743,7 @@ class QualityRecords(MovedNames):
         selection = make_frame_selection(
             filter_name, first_file, last_file, since, until, kind == "spectral" or "spectra" in sections
         )
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id=resolved.id):
+        with registered_job(job_type="diagnostics", target_id=resolved.id):
             if kind == "spectral":
                 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
                     check_spectral_frames,
@@ -790,7 +787,6 @@ class QualityRecords(MovedNames):
         until: TimeInput | None = None,
         camera_id: str | None = None,
         bias_level_adu: float | None = None,
-        register_job: bool = True,
     ) -> FolderMeasurementReport:
         """Measure a folder of frames with the frame metrics, storing nothing.
 
@@ -834,8 +830,6 @@ class QualityRecords(MovedNames):
             camera its header names. No frame is left out for it.
         bias_level_adu : `float`, optional
             The bias level in ADU to use for the sky metrics of every frame.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -869,7 +863,7 @@ class QualityRecords(MovedNames):
         bias_finder = None
         if bias_level_adu is None and self._calibration_library_provider is not None:
             bias_finder = BiasLevelFinder(self._calibration_library())
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id=folder_path):
+        with registered_job(job_type="diagnostics", target_id=folder_path):
             return measure_folder_frames(
                 folder_path,
                 selection,
@@ -1394,7 +1388,6 @@ class QualityRecords(MovedNames):
         kind: StackKind = "imaging",
         include: list[str] | None = None,
         compare_to: str | None = None,
-        register_job: bool = True,
     ) -> StackQualityReport:
         """Measure a stack, and optionally compare it with another stack.
 
@@ -1432,8 +1425,6 @@ class QualityRecords(MovedNames):
             the ``_previous`` folder. Any other text is the path of a stack
             to compare with. The other stack is ``before``; this one is
             ``after``.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -1467,7 +1458,7 @@ class QualityRecords(MovedNames):
         else:
             resolved = resolve_target(self._targets, path_or_target)
             stack_path, target_id = stack_path_of(resolved, kind), resolved.id
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id=target_id or stack_path):
+        with registered_job(job_type="diagnostics", target_id=target_id or stack_path):
             return stack_quality_report(
                 stack_path, target_id, sections, compare_to, kind == "spectral", self._drivers
             )
@@ -1503,7 +1494,6 @@ class QualityRecords(MovedNames):
         target: str | Target,
         frames: list[FrameRecord] | None = None,
         limit: int | None = None,
-        register_job: bool = True,
     ) -> FrameMeasurementSummary:
         """Measure a target's light frames once and store the numbers.
 
@@ -1551,8 +1541,6 @@ class QualityRecords(MovedNames):
         limit : `int`, optional
             Measure at most this many frames, newest first. The rest wait for
             the next call.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
@@ -1575,7 +1563,7 @@ class QualityRecords(MovedNames):
         if limit is not None and limit < 1:
             raise InvalidArgumentError("limit must be at least 1.")
         resolved = resolve_target(self._targets, target)
-        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id) as job:
+        with registered_job(job_type="quality", target_id=resolved.id) as job:
             # The run gets its own run id and reports progress only when it
             # registered (or joined) a job of its own. Called from inside
             # another job (stacking, ingestion), it leaves that job's

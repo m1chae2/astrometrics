@@ -257,7 +257,7 @@ def test_frame_quality_has_no_set_aside_preview(quality: QualityRecords, tmp_pat
     target = make_target(folder, 12)
 
     with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        quality.measure_frames(target, kind="quarantine_preview", register_job=False)
+        quality.measure_frames(target, kind="quarantine_preview")
 
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:

@@ -9,7 +9,8 @@ angle of the RA-only move's pixel-space vector -- the mount's RA axis
 is the reference direction the sensor's rotation is measured against,
 the same convention PHD2 and similar guiders use. `arcsec_per_pixel`
 is supplied rather than derived from the run itself, since it is
-already exactly known from `EquipmentConfiguration.plate_scale_arcsec_per_px`.
+already exactly known from
+`ObservatoryConfiguration.plate_scale_arcsec_per_px`.
 """
 
 import math

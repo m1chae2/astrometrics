@@ -194,7 +194,7 @@ def test_the_diagnostics_api_runs_the_check_on_a_targets_frames(tmp_path: Path) 
     ]
 
     diagnostics = QualityRecords(AppConfiguration(), MagicMock())
-    report = diagnostics.measure_frames(Target(id="T", frames=frames), kind="raw_check", register_job=False)
+    report = diagnostics.measure_frames(Target(id="T", frames=frames), kind="raw_check")
 
     assert report.batch["frame_count"] == 3
     assert report.frames_checked == 3

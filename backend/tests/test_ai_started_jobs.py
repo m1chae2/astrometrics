@@ -166,7 +166,7 @@ def test_the_worker_lets_the_library_choose_the_frames() -> None:
     assert call.kwargs["kind"] == "spectral"
     assert call.kwargs["since"] == "2026-11-20T00:00:00"
     assert call.kwargs["denoise"] is False
-    assert call.kwargs["register_job"] is False
+    assert "register_job" not in call.kwargs
     assert "frames" not in call.kwargs
 
 
@@ -206,14 +206,14 @@ class _Remote:
 
 
 def test_a_frame_sync_records_a_remote_sync_job() -> None:
-    """The app's sync asks the library to record the copy as a job."""
+    """The app's sync leaves the job to the library, which records one."""
     remote = _Remote()
     service = SyncService(observatory_api=SimpleNamespace(remote=remote))
 
     assert service.start_sync("M 13") == {"started": True, "target_id": "M 13"}
     thread_management._syncing["M 13"].join(timeout=5.0)
 
-    assert remote.frame_calls[0]["register_job"] is True
+    assert remote.frame_calls[0] == {"target": "M 13", "on_copied": remote.frame_calls[0]["on_copied"]}
 
 
 def test_a_frame_sync_dry_run_gives_the_plan_and_starts_nothing() -> None:
@@ -238,7 +238,7 @@ def test_a_log_sync_records_a_job_and_its_dry_run_does_not() -> None:
 
     assert plan == {"status": "plan", "plan": {"guide_logs": {"to_download": 1}}}
     assert summary["status"] == "success"
-    assert remote.log_calls == [{"dry_run": True, "register_job": False}, {"register_job": True}]
+    assert remote.log_calls == [{"dry_run": True}, {}]
 
 
 def test_the_app_hears_about_a_job_another_program_recorded(

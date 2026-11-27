@@ -11,7 +11,7 @@ focuser move needs `AUTOFOCUS`.
 
 from datetime import datetime
 
-from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.jobs import background_job, registered_job
 from wayfindinglib.api.control.context import ControlChild, require_text
 from wayfindinglib.models.control_status import ImagingStatus
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
@@ -84,7 +84,6 @@ class ImagingControl(ControlChild):
         filter_name: str | None = None,
         dither: bool | DitherConfig = False,
         delay_seconds: float = 0.0,
-        register_job: bool = True,
     ) -> CaptureResult:
         """Take one or more exposures with the main camera.
 
@@ -109,9 +108,6 @@ class ImagingControl(ControlChild):
             camera, and `AUTOGUIDING` to be `AUTHORITATIVE`.
         delay_seconds : `float`, optional
             Pause between exposures, for example to let the mount settle.
-        register_job : `bool`, optional
-            Record the run as a ``capture`` job with its progress. A call
-            made inside a running job reports to that job instead.
 
         Returns
         -------
@@ -130,7 +126,6 @@ class ImagingControl(ControlChild):
         from wayfindinglib.tasks.control_tasks.imaging_capture import capture_frames
 
         with registered_job(
-            enabled=register_job and get_current_job() is None,
             job_type="capture",
             target_id=filter_name or "capture",
         ):

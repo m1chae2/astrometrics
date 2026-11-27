@@ -11,18 +11,13 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import Camera, GuideScope, ObservatoryConfiguration, Telescope
 from astrometricslib._internal.stacking import (
     DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
 )
 from wayfindinglib.analytics.performance_envelope import MeasuredImageQuality, derive_performance_envelope
-from wayfindinglib.models.equipment_and_site.equipment import (
-    Camera,
-    EquipmentConfiguration,
-    GuideScope,
-    Telescope,
-)
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import CaptureLimits
 from wayfindinglib.models.session.ekos_session import EkosCapture
@@ -76,7 +71,7 @@ def make_envelope() -> Any:
             id="g", name="ZWO ASI120MC-S", pixel_size_um=3.75, sensor_width_px=1280, sensor_height_px=960
         )
         return derive_performance_envelope(
-            EquipmentConfiguration(telescope=telescope, camera=camera),
+            ObservatoryConfiguration(telescope=telescope, camera=camera),
             GuideScope(id="gs", name="Apertura 32mm", focal_length_mm=121.05, aperture_mm=32.0),
             guide_camera,
             "fingerprint-a",

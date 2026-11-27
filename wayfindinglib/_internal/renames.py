@@ -22,7 +22,16 @@ __all__ = ["RENAMES", "MovedNames"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
-RENAMES: dict[str, str] = {}
+RENAMES: dict[str, str] = {
+    "wayfindinglib.EquipmentControl.set_active_camera": (
+        "wayfinder.control.equipment.set_active(configuration), with a configuration from "
+        "astrometrics.observatories.configurations.query(camera=...)"
+    ),
+    "wayfindinglib.EquipmentControl.set_active_telescope": (
+        "wayfinder.control.equipment.set_active(configuration), and "
+        "wayfinder.control.equipment.set_pointing_limits(...) for the limits"
+    ),
+}
 
 
 class MovedNames:

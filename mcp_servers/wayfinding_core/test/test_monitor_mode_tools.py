@@ -67,7 +67,7 @@ SAMPLE_ARGUMENTS = {
     "observatory_guiding_expose": {"exposure_seconds": 1.0},
     "observatory_guiding_run_loop": {},
     "observatory_guiding_stop_loop": {},
-    "observatory_imaging_capture_image": {"exposure_seconds": 1.0, "register_job": False},
+    "observatory_imaging_capture_image": {"exposure_seconds": 1.0},
     "observatory_imaging_focus_move": {"steps": 10},
     "observatory_imaging_set_filter": {"filter_name": "L"},
     "observatory_imaging_stop_capture": {},

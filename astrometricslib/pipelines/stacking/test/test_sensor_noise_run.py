@@ -137,7 +137,7 @@ def catalog(frames_folder: Path, monkeypatch: pytest.MonkeyPatch) -> Calibration
 
 def test_the_catalog_measures_a_setting_from_its_frames(catalog: CalibrationCatalog) -> None:
     """Frames at gain 0 and offset 10 give the made-up values."""
-    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10.0, register_job=False)
+    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10.0)
 
     assert result.status == MeasurementStatus.MEASURED, result.reason
     assert result.gain_e_per_adu == pytest.approx(TRUE_GAIN, rel=0.03)
@@ -150,7 +150,7 @@ def test_the_catalog_measures_a_setting_from_its_frames(catalog: CalibrationCata
 
 def test_a_setting_with_no_frames_is_not_measured(catalog: CalibrationCatalog) -> None:
     """A setting with no flats is not measured or borrowed."""
-    result = catalog.measure_sensor_noise(CAMERA, gain=100, offset=10, register_job=False)
+    result = catalog.measure_sensor_noise(CAMERA, gain=100, offset=10)
 
     assert result.status == MeasurementStatus.NOT_MEASURED
     assert "no flats" in result.reason
@@ -166,7 +166,7 @@ def test_a_setting_with_flats_but_no_biases_is_not_measured(
         write_frame(flat_path, generator, True, gain=100, taken_after_seconds=10.0 * index)
     catalog.reindex_frames("flat")
 
-    result = catalog.measure_sensor_noise(CAMERA, gain=100, offset=10, register_job=False)
+    result = catalog.measure_sensor_noise(CAMERA, gain=100, offset=10)
 
     assert result.status == MeasurementStatus.NOT_MEASURED
     assert "bias" in result.reason
@@ -182,8 +182,8 @@ def test_mixed_flat_exposures_need_an_exposure_to_choose(
         write_frame(flat_path, generator, True, exposure=1.0, taken_after_seconds=20000.0 + 10.0 * index)
     catalog.reindex_frames("flat")
 
-    mixed = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
-    chosen = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, exposure_seconds=1.0, register_job=False)
+    mixed = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10)
+    chosen = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, exposure_seconds=1.0)
 
     assert mixed.status == MeasurementStatus.NOT_MEASURED
     assert "exposure" in mixed.reason
@@ -246,7 +246,7 @@ def test_flats_without_a_time_cannot_be_paired_and_say_so(
             del hdul[0].header["DATE-OBS"]
     catalog.reindex_frames("flat")
 
-    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
+    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10)
 
     assert result.status == MeasurementStatus.NOT_MEASURED
     assert any("no readable DATE-OBS" in note for note in result.notes)
@@ -266,7 +266,7 @@ def test_flats_above_the_profile_linearity_limit_are_refused(
     )
     monkeypatch.setattr(sensor_noise_run, "resolve_camera_profile", lambda name, config=None: limited)
 
-    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
+    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10)
 
     assert result.status == MeasurementStatus.NOT_MEASURED
     assert "photometric linearity limit of 3000 ADU" in result.reason

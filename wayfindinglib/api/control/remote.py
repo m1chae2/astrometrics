@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from astrometricslib import Target
 from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.jobs import background_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.session.control_results import FrameLocationReport, FrameSyncResult, LogSyncResult
 
@@ -182,7 +182,6 @@ class RemoteControl(ControlChild):
         local_path: str | None = None,
         incremental: bool | None = None,
         log_callback: Callable[[str], None] | None = None,
-        register_job: bool | None = None,
         on_copied: Callable[[int], None] | None = None,
     ) -> FrameSyncResult:
         """Bring new frames from the observatory computer into the library.
@@ -218,11 +217,6 @@ class RemoteControl(ControlChild):
             `False` copies every file, even those already held.
         log_callback : `Callable` [[`str`], `None`], optional
             Receives progress messages.
-        register_job : `bool`, optional
-            Record the copy as a job in the logs database. Defaults to
-            `True` for a copy of every folder and `False` for one target,
-            whose caller usually tracks the work itself. A dry run, or a
-            call made while a job already runs, records none.
         on_copied : `Callable` [[`int`], `None`], optional
             Called once with the number of frames added to the library,
             right after the copy and re-index and before the new frames are
@@ -255,14 +249,9 @@ class RemoteControl(ControlChild):
         if target is None:
             _refuse("Copying every folder", files=files, local_path=local_path, incremental=incremental)
             _refuse("Copying every folder", dry_run=dry_run or None, on_copied=on_copied)
-            return FrameSyncResult.model_validate(
-                tasks.sync_all_remote_folders(
-                    context, log_callback, True if register_job is None else register_job
-                )
-            )
+            return FrameSyncResult.model_validate(tasks.sync_all_remote_folders(context, log_callback))
         target_id = _target_id(target)
         with registered_job(
-            enabled=bool(register_job) and not dry_run and get_current_job() is None,
             job_type="remote_sync",
             target_id=target_id,
         ):
@@ -332,7 +321,6 @@ class RemoteControl(ControlChild):
         dry_run: bool = False,
         download: bool = True,
         destination_dir: str | None = None,
-        register_job: bool = True,
     ) -> LogSyncResult:
         """Bring the guide and Ekos logs into the library's database.
 
@@ -352,9 +340,6 @@ class RemoteControl(ControlChild):
         destination_dir : `str`, optional
             Local folder for the logs. ``ekos_logs`` in the wayfinding
             library's data folder when omitted.
-        register_job : `bool`, optional
-            Record a real run as a job in the job history, with its log.
-            Defaults to `True`.
 
         Returns
         -------
@@ -378,7 +363,6 @@ class RemoteControl(ControlChild):
                 "dry_run compares with the observatory computer, so it needs download."
             )
         with registered_job(
-            enabled=register_job and not dry_run and get_current_job() is None,
             job_type="remote_sync",
             target_id="logs",
         ):

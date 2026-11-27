@@ -1,55 +1,12 @@
 """Pydantic models for validated application configuration.
 
-Defines the structure and defaults for astrometrics.config.
+Defines the structure and defaults of the processing and parallelism
+sections of astrometrics.config. The equipment the file lists is read into
+the core equipment models instead (`Telescope`, `Camera`, `GuideScope`; see
+`astrometricslib.foundation.equipment_settings`).
 """
 
 from pydantic import BaseModel, Field
-
-
-class CameraConfig(BaseModel):
-    """Configuration entry for a named camera and its known models.
-
-    Attributes
-    ----------
-    name : `str`
-        Identifying name for this camera configuration entry.
-    models : `list` of `str`
-        Known model identifiers associated with this camera, by
-        default an empty list.
-    default_primary_camera : `str` or `None`
-        Name of the model to use as the default primary camera, by
-        default `None`.
-    """
-
-    name: str
-    models: list[str] = Field(default_factory=list)
-    default_primary_camera: str | None = None
-
-    # Nested parameters for specific cameras are handled dynamically
-    # but we can define common fields if needed.
-
-
-class TelescopeConfig(BaseModel):
-    """Connection and geometry settings for the telescope mount.
-
-    Attributes
-    ----------
-    hostname : `str`
-        Hostname or address of the telescope control host, by default
-        ``"localhost"``.
-    focal_length_mm : `float`
-        Telescope focal length in millimeters, by default 0.0.
-    focal_ratio : `float`
-        Telescope focal ratio (f-number), by default 0.0.
-    remote_pictures_path : `str`
-        Remote filesystem path where captured pictures are stored, by
-        default ``"/home/stellarmate/Pictures"``.
-    """
-
-    hostname: str = "localhost"
-    focal_length_mm: float = 0.0
-    focal_ratio: float = 0.0
-    remote_pictures_path: str = "/home/stellarmate/Pictures"
 
 
 class ProcessingConfig(BaseModel):
@@ -186,17 +143,11 @@ class AppConfigSchema(BaseModel):
 
     Attributes
     ----------
-    telescope : `TelescopeConfig`
-        Telescope connection and geometry settings.
     processing : `ProcessingConfig`
         Stacking and frame-rejection processing settings.
-    cameras : `list` of `CameraConfig`
-        Configured camera entries, by default an empty list.
     parallelism : `ParallelismConfig`
         Worker-count and priority settings for concurrent processing.
     """
 
-    telescope: TelescopeConfig = Field(default_factory=TelescopeConfig)
     processing: ProcessingConfig = Field(default_factory=ProcessingConfig)
-    cameras: list[CameraConfig] = Field(default_factory=list)
     parallelism: ParallelismConfig = Field(default_factory=ParallelismConfig)

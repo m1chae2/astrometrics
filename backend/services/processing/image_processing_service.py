@@ -137,9 +137,7 @@ class ImageProcessingService(BaseBackgroundService):
             background and records its progress in the job list.
         """
         return run_as_background_job(
-            lambda: self._calibration.measure_frames(
-                kind=kind, camera_id=camera_id, force=force, register_job=True
-            ),
+            lambda: self._calibration.measure_frames(kind=kind, camera_id=camera_id, force=force),
             grace_period_seconds=CALIBRATION_MEASUREMENT_GRACE_SECONDS,
         )
 
@@ -197,7 +195,7 @@ class ImageProcessingService(BaseBackgroundService):
             """
             try:
                 only_kind = next(iter(kinds)) if len(kinds) == 1 else None
-                return self._calibration.measure_frames(kind=only_kind, force=False, register_job=True)
+                return self._calibration.measure_frames(kind=only_kind, force=False)
             finally:
                 self._finish_calibration_pass()
 
@@ -720,7 +718,6 @@ def start_siril_processing_task(
                     target,
                     kind=kind,
                     log_file=log_file_path,
-                    register_job=False,
                     **frame_choice,
                     **(stack_options or {}),
                 )

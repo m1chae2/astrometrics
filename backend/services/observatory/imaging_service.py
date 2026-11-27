@@ -87,7 +87,7 @@ class ImagingService:
         def run() -> None:
             """Run the capture as a ``capture`` job on this thread."""
             try:
-                with registered_job(enabled=True, job_type="capture", target_id=target_id) as job:
+                with registered_job(job_type="capture", target_id=target_id) as job:
                     state["job_id"] = job.job_id
                     started.set()
                     job.info(f"Capturing {count} x {exposure_seconds} s {image_type} frames")

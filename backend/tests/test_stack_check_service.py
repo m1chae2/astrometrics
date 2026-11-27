@@ -91,7 +91,7 @@ def test_ticked_frames_reach_the_library_as_the_targets_records() -> None:
     assert reply.result is not None
     assert reply.result["frames_selected"] == 3
     assert [frame.path for frame in calls[0]["frames"]] == ["/lights/L_3.fits", "/lights/L_1.fits"]
-    assert calls[0]["register_job"] is True
+    assert "register_job" not in calls[0]
     assert calls[0]["kind"] == "imaging"
 
 

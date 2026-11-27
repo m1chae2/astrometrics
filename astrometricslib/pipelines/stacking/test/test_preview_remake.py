@@ -290,7 +290,7 @@ def test_the_method_passes_the_stack_and_does_not_save_an_unshown_picture(
     target = make_target(stacked)
     other = add_configuration_stack(target, stacked.parent)
 
-    result = pipelines.remake_preview(target, stack_path=str(other), register_job=False)
+    result = pipelines.remake_preview(target, stack_path=str(other))
 
     assert result.stack_path == str(other)
     assert result.shown_in_viewer is False
@@ -325,15 +325,13 @@ def test_the_method_checks_its_inputs_and_saves_the_target(
     pipelines = make_pipelines(saved)
     target = make_target(stacked)
     with pytest.raises(InvalidArgumentError, match="kind"):
-        pipelines.remake_preview(target, kind="all", register_job=False)
+        pipelines.remake_preview(target, kind="all")
     with pytest.raises(InvalidArgumentError, match="between 0 and 1"):
-        pipelines.remake_preview(target, denoise_strength=1.5, register_job=False)
+        pipelines.remake_preview(target, denoise_strength=1.5)
     assert saved == []
 
     seen = fake_preview(monkeypatch)
-    result = pipelines.remake_preview(
-        target, denoise=False, denoise_strength=0.4, star_toning=True, register_job=False
-    )
+    result = pipelines.remake_preview(target, denoise=False, denoise_strength=0.4, star_toning=True)
 
     assert seen == [PreviewSettings(denoise=False, denoise_strength=0.4, star_toning=True)]
     assert result.shown_in_viewer is True

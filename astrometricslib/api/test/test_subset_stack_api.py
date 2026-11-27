@@ -212,7 +212,7 @@ def test_the_growth_job_runs_the_odd_even_difference_unless_turned_off(
     assert any("odd–even difference noise was not measured" in note for note in result.notes)
 
 
-def test_the_odd_even_difference_job_runs_with_and_without_a_job_record(
+def test_each_odd_even_difference_run_records_its_job(
     isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The standalone job passes the library stack, a context and keep flag."""
@@ -239,9 +239,10 @@ def test_the_odd_even_difference_job_runs_with_and_without_a_job_record(
     assert [job.status for job in jobs] == ["completed"]
     assert seen[0]["context"].job_id == jobs[0].id
 
-    pipelines.measure_noise(_target(), kind="odd_even_difference", register_job=False)
+    pipelines.measure_noise(_target(), kind="odd_even_difference")
     assert seen[1]["keep_halves"] is False
-    assert len(_read_jobs(isolated_job_logging, "SubsetTarget")) == 1
+    # Every run records a job, whoever starts it.
+    assert len(_read_jobs(isolated_job_logging, "SubsetTarget")) == 2
     with pytest.raises(NotFoundError):
         pipelines.measure_noise(Target(id="BareTarget", frames=[]), kind="odd_even_difference")
 

@@ -56,7 +56,7 @@ def test_many_triggers_run_one_refresh_and_one_more() -> None:
     running = []
     peak = []
 
-    def refresh(target_ids: list[str] | None = None, register_job: bool = True) -> PackageChange:
+    def refresh(target_ids: list[str] | None = None) -> PackageChange:
         """Block the first run so more triggers can pile up.
 
         Returns
@@ -198,7 +198,7 @@ def test_a_failing_trigger_never_breaks_the_announcement() -> None:
 def test_a_finished_target_sync_asks_for_a_refresh_and_a_calibration_sync_does_not() -> None:
     """A target sync triggers a refresh for it; a Flat folder sync does not."""
     triggers: list[list[str]] = []
-    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None, register_job=None: {})
+    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None: {})
     service = SyncService(SimpleNamespace(remote=remote), suggestion_trigger=triggers.append)
 
     service._trigger_suggestions("M 81")
@@ -212,7 +212,7 @@ def test_the_sync_thread_triggers_after_the_library_sync() -> None:
     from backend.services.infrastructure import thread_management
 
     triggers: list[list[str]] = []
-    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None, register_job=None: {})
+    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None: {})
     service = SyncService(SimpleNamespace(remote=remote), suggestion_trigger=triggers.append)
 
     service.start_sync("M 42")
@@ -226,12 +226,13 @@ def test_the_telescope_methods_pass_limits_through_an_autospec() -> None:
     from wayfindinglib.api.control.equipment import EquipmentControl
 
     equipment = create_autospec(EquipmentControl, instance=True)
-    equipment.set_active_telescope.return_value = True
+    equipment.get_active.return_value = SimpleNamespace(telescope=SimpleNamespace(id="scope-1"))
     equipment.status.return_value = SimpleNamespace(telescope="scope")
-    service = EquipmentService(SimpleNamespace(equipment=equipment))
+    service = EquipmentService(SimpleNamespace(equipment=equipment), configurations=None)
 
     assert service.set_active_telescope("scope-1", {"min_altitude_deg": 25.0}) is True
-    equipment.set_active_telescope.assert_called_once_with("scope-1", limits={"min_altitude_deg": 25.0})
+    equipment.set_pointing_limits.assert_called_once_with(min_altitude_deg=25.0)
+    equipment.set_active.assert_not_called()
     assert service.get_active_telescope() == "scope"
     equipment.status.assert_called_once_with(include=["telescope"])
     for method in ("observatory:get_active_telescope", "observatory:set_active_telescope"):

@@ -32,11 +32,7 @@ def test_the_history_query_serves_the_night_review(control: ObservatoryControl) 
     target = make_target(STAR, 5)
     control._context._astrometrics = FakeLibrary([target], make_rows(target, REVIEWED))
 
-    quality = (
-        ObservationReview(control)
-        .query(kind="night_quality", session_id=REVIEWED, register_job=False)
-        .night_quality
-    )
+    quality = ObservationReview(control).query(kind="night_quality", session_id=REVIEWED).night_quality
 
     assert isinstance(quality, NightQuality)
     assert quality.night_id == REVIEWED
@@ -46,12 +42,10 @@ def test_the_history_query_serves_the_night_review(control: ObservatoryControl) 
 def test_the_history_query_needs_a_night(control: ObservatoryControl) -> None:
     """A night review without a night is refused."""
     with pytest.raises(InvalidArgumentError):
-        ObservationReview(control).query(kind="night_quality", register_job=False)
+        ObservationReview(control).query(kind="night_quality")
 
 
 def test_the_history_query_refuses_arguments_it_does_not_use(control: ObservatoryControl) -> None:
     """An Ekos file id means nothing to a night review, so it is refused."""
     with pytest.raises(InvalidArgumentError):
-        ObservationReview(control).query(
-            kind="night_quality", session_id=REVIEWED, ekos_file_id="x", register_job=False
-        )
+        ObservationReview(control).query(kind="night_quality", session_id=REVIEWED, ekos_file_id="x")

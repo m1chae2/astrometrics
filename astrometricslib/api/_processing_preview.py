@@ -35,7 +35,6 @@ def remake_preview(
     star_strength: float | None = None,
     star_stretch: float | None = None,
     keep_previous: bool = True,
-    register_job: bool = True,
     stack_path: str | None = None,
 ) -> PreviewRemakeResult:
     """Make a target's preview picture again from its existing stack.
@@ -79,8 +78,6 @@ def remake_preview(
         1000.
     keep_previous : `bool`, optional
         Copy the current pictures aside first. On by default.
-    register_job : `bool`, optional
-        Record the run in the job list. Defaults to `True`.
     stack_path : `str`, optional
         Make the picture of this stack: the main stack or one of the
         target's stacks by camera and optic
@@ -125,7 +122,7 @@ def remake_preview(
     # The job is recorded first, so a remake waiting for a slot shows in
     # the job list and returns its job id.
     with (
-        registered_job(enabled=register_job, job_type="preview", target_id=resolved.id) as job,
+        registered_job(job_type="preview", target_id=resolved.id) as job,
         job.holding_slot(self.acquire_job_slot(), working_message="Making the preview"),
     ):
         result = remake_stack_preview(

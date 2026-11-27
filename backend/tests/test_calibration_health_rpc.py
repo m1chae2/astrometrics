@@ -82,6 +82,6 @@ def test_measure_frames_starts_the_job_and_answers_with_its_id(monkeypatch: pyte
 
     result = serialize_rpc_result(asyncio.run(rpc_registry.execute(MEASURE, {"kind": "bias", "force": True})))
 
-    assert asked == {"kind": "bias", "camera_id": None, "force": True, "register_job": True}
+    assert asked == {"kind": "bias", "camera_id": None, "force": True}
     assert result["result"]["frameCount"] == 3
     json.dumps(result)

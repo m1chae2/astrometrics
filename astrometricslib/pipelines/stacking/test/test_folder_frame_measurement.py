@@ -122,7 +122,7 @@ def test_star_width_and_sky_rate_are_recovered_and_nothing_is_stored(tmp_path: P
     _write_star_field(tmp_path / "frame_001.fits")
     quality, storage = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU, register_job=False)
+    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
 
     assert report.frames_matching == 1
     assert report.frames_measured == 1
@@ -139,7 +139,7 @@ def test_each_star_width_names_its_estimator_and_its_value_on_the_scale(tmp_path
     _write_star_field(tmp_path / "frame_001.fits")
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU, register_job=False)
+    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
 
     moffat = "frame.star_width_moffat_px"
     assert report.star_width_estimators[moffat] == "frame Moffat"
@@ -166,7 +166,7 @@ def test_the_bias_level_comes_from_the_calibration_library_when_none_is_given(
     _write_star_field(folder / "frame_001.fits")
     quality, _ = _quality(tmp_path, biases)
 
-    report = quality.measure_folder(str(folder), register_job=False)
+    report = quality.measure_folder(str(folder))
 
     # The library's bias frames give a level, so the sky rate is measured.
     assert report.medians["frame.sky_rate_e_per_s_per_px"] > 0.0
@@ -178,7 +178,7 @@ def test_without_a_bias_level_the_sky_metrics_say_why_they_are_missing(tmp_path:
     _write_star_field(tmp_path / "frame_001.fits")
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), register_job=False)
+    report = quality.measure_folder(str(tmp_path))
 
     assert "frame.sky_rate_e_per_s_per_px" not in report.frames[0].values
     assert "frame.sky_rate_e_per_s_per_px" in report.frames[0].not_measured
@@ -191,7 +191,7 @@ def test_a_frame_drawn_by_a_simulator_raises_a_notice(tmp_path: Path) -> None:
     _write_star_field(tmp_path / "frame_001.fits", synthetic=True)
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU, register_job=False)
+    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
 
     assert report.notices
     assert "frame.notice_synthetic" not in report.frames[0].values
@@ -203,10 +203,8 @@ def test_the_limit_and_the_file_range_choose_the_frames(tmp_path: Path) -> None:
         _write_star_field(tmp_path / f"frame_{index:03d}.fits", seed=index + 1)
     quality, _ = _quality(tmp_path)
 
-    limited = quality.measure_folder(str(tmp_path), limit=2, bias_level_adu=BIAS_ADU, register_job=False)
-    ranged = quality.measure_folder(
-        str(tmp_path), first_file="002", limit=5, bias_level_adu=BIAS_ADU, register_job=False
-    )
+    limited = quality.measure_folder(str(tmp_path), limit=2, bias_level_adu=BIAS_ADU)
+    ranged = quality.measure_folder(str(tmp_path), first_file="002", limit=5, bias_level_adu=BIAS_ADU)
 
     assert [frame.file_name for frame in limited.frames] == ["frame_000.fits", "frame_001.fits"]
     assert limited.frames_matching == 4
@@ -219,7 +217,7 @@ def test_one_unreadable_file_does_not_stop_the_others(tmp_path: Path) -> None:
     _write_star_field(tmp_path / "frame_001.fits")
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU, register_job=False)
+    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
 
     assert [frame.file_name for frame in report.frames][-1] == "frame_001.fits"
     assert report.frames[-1].values["frame.star_width_moffat_px"] > 0.0
@@ -229,13 +227,13 @@ def test_a_missing_folder_is_refused(tmp_path: Path) -> None:
     """A path that is not a folder raises `InvalidArgumentError`."""
     quality, _ = _quality(tmp_path)
     with pytest.raises(InvalidArgumentError, match="not a folder"):
-        quality.measure_folder(str(tmp_path / "nowhere"), register_job=False)
+        quality.measure_folder(str(tmp_path / "nowhere"))
 
 
 def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
     """With no FITS files nothing is measured and no median exists."""
     quality, _ = _quality(tmp_path)
-    report = quality.measure_folder(str(tmp_path), register_job=False)
+    report = quality.measure_folder(str(tmp_path))
     assert report.frames_matching == 0
     assert report.frames == []
     assert report.medians == {}

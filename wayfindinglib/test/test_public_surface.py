@@ -198,8 +198,9 @@ CHILDREN = {
         "connect",
         "disconnect",
         "apply_configuration",
-        "set_active_telescope",
-        "set_active_camera",
+        "get_active",
+        "set_active",
+        "set_pointing_limits",
         "set_device_property",
     },
 }
@@ -272,14 +273,17 @@ def test_review_shares_the_context_of_control(control: ObservatoryControl) -> No
     assert control not in vars(review).values()
 
 
-def test_background_jobs_can_skip_registering_a_job() -> None:
-    """Every `@background_job` method of planning takes `register_job`."""
+def test_no_background_job_can_skip_registering_a_job() -> None:
+    """No `@background_job` method of planning takes a `register_job` switch.
+
+    Every pipeline run records a job, whoever starts it.
+    """
     import inspect
 
     for name in PLANNING_MEMBERS:
         method = getattr(ObservationPlanning, name)
         if getattr(method, "__background_job_type__", None) is not None:
-            assert inspect.signature(method).parameters["register_job"].default is True, name
+            assert "register_job" not in inspect.signature(method).parameters, name
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:

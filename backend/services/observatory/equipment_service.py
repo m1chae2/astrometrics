@@ -1,29 +1,119 @@
 """Purpose: Serve the equipment set-up and the control-mode calls over RPC.
 
 Description: The wayfinding library's `control.equipment` knows the camera
-profiles and the active telescope and camera. Its `control.safety` moves
-every observatory capability between "monitoring" (the app only watches)
-and "controller" (the app drives the hardware). This service passes the
-RPC calls on to those two and turns their replies into plain data.
+profiles and the active observatory configuration (the stored record of the
+telescope, camera and other equipment used together). Its `control.safety`
+moves every observatory capability between "monitoring" (the app only
+watches) and "controller" (the app drives the hardware). This service passes
+the RPC calls on to those two and turns their replies into plain data.
+
+The screens still choose a camera or a telescope on its own
+(``observatory:set_active_camera``, ``observatory:set_active_telescope``).
+The library chooses a whole configuration, so this service finds the stored
+configuration that pairs the chosen camera or telescope with the other half
+of the active one, and makes it active.
 """
 
+from datetime import date
 from typing import Any
 
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from wayfindinglib import ObservatoryControl
+
+
+def _name_key(name: str) -> str:
+    """Reduce an equipment name to lowercase letters and digits.
+
+    Parameters
+    ----------
+    name : `str`
+        A camera or telescope name in any spelling.
+
+    Returns
+    -------
+    key : `str`
+        The name without spaces, punctuation or case.
+    """
+    return "".join(character for character in name.lower() if character.isalnum())
+
+
+def _has_camera(configuration: Any, camera_name: str) -> bool:
+    """Say whether a configuration's main camera has a name.
+
+    Parameters
+    ----------
+    configuration : `ObservatoryConfiguration`
+        A stored configuration.
+    camera_name : `str`
+        The camera's name in any spelling.
+
+    Returns
+    -------
+    has_camera : `bool`
+        `True` when the camera's name or an alias matches.
+    """
+    wanted = _name_key(camera_name)
+    return any(
+        _name_key(name) == wanted for name in (configuration.camera.name, *configuration.camera.aliases)
+    )
 
 
 class EquipmentService:
     """Pass equipment and control-mode calls to the observatory control."""
 
-    def __init__(self, observatory_api: ObservatoryControl) -> None:
-        """Keep the observatory control.
+    def __init__(self, observatory_api: ObservatoryControl, configurations: Any) -> None:
+        """Keep the observatory control and the stored configurations.
 
         Parameters
         ----------
         observatory_api : `ObservatoryControl`
             The Wayfinder's `control`.
+        configurations : `ObservatoryConfigurations`
+            ``astrometrics.observatories.configurations``, every stored set
+            of equipment.
         """
         self._observatory = observatory_api
+        self._configurations = configurations
+
+    def _choose(self, *, camera_name: str | None = None, telescope_id: str | None = None) -> Any:
+        """Find the stored configuration for a new camera or telescope choice.
+
+        Exactly one of the two is given. A configuration in use today that
+        pairs it with the other half of the active configuration wins;
+        otherwise the newest one in use today that has it.
+
+        Parameters
+        ----------
+        camera_name : `str`, optional
+            The chosen camera.
+        telescope_id : `str`, optional
+            The chosen telescope.
+
+        Returns
+        -------
+        configuration : `ObservatoryConfiguration` or `None`
+            The configuration, or `None` when no stored one has the choice.
+        """
+        active = self._observatory.equipment.get_active()
+        candidates = [
+            configuration
+            for configuration in self._configurations.query(time=date.today())
+            if (camera_name is not None and _has_camera(configuration, camera_name))
+            or (telescope_id is not None and configuration.telescope.id == telescope_id)
+        ]
+        if active is not None:
+            keep = [
+                configuration
+                for configuration in candidates
+                if (camera_name is not None and configuration.telescope.id == active.telescope.id)
+                or (telescope_id is not None and _has_camera(configuration, active.camera.name))
+            ]
+            candidates = keep or candidates
+        if not candidates:
+            return None
+        return max(
+            candidates, key=lambda configuration: (configuration.valid_from or date.min, configuration.id)
+        )
 
     def list_camera_profiles(self) -> Any:
         """List the camera profiles the configuration knows.
@@ -57,9 +147,17 @@ class EquipmentService:
         Returns
         -------
         changed : `bool`
-            `True` if the camera is now active.
+            `True` if the camera is now active; `False` when no stored
+            configuration has it or the settings do not list it.
         """
-        return self._observatory.equipment.set_active_camera(camera_name)
+        configuration = self._choose(camera_name=camera_name)
+        if configuration is None:
+            return False
+        try:
+            self._observatory.equipment.set_active(configuration)
+        except InvalidArgumentError:
+            return False
+        return True
 
     def get_active_telescope(self) -> Any:
         """Read the active telescope with its safety limits.
@@ -88,9 +186,30 @@ class EquipmentService:
         Returns
         -------
         saved : `bool`
-            Whether the choice was saved.
+            Whether the choice was saved; `False` when no stored
+            configuration has the telescope.
+
+        Raises
+        ------
+        ValueError
+            If the limits are not valid (not a limit, a minimum above the
+            maximum, a value out of range) or have no section to go to.
         """
-        return self._observatory.equipment.set_active_telescope(telescope_id, limits=limits)
+        active = self._observatory.equipment.get_active()
+        if active is None or active.telescope.id != telescope_id:
+            configuration = self._choose(telescope_id=telescope_id)
+            if configuration is None:
+                return False
+            try:
+                self._observatory.equipment.set_active(configuration)
+            except InvalidArgumentError:
+                return False
+        if limits:
+            try:
+                self._observatory.equipment.set_pointing_limits(**limits)
+            except (InvalidArgumentError, NotFoundError, TypeError) as problem:
+                raise ValueError(str(problem)) from None
+        return True
 
     def enter_monitoring_mode(self, evidence_note: str = "") -> dict[str, dict[str, str]]:
         """Hand every capability back to the outside software, to watch only.

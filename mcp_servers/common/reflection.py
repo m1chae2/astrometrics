@@ -4,9 +4,9 @@ Description: Reads each public method's signature, type hints and numpydoc
 docstring to build a JSON schema, and registers the method as a tool. A tool
 only passes the client's arguments to the method: the library methods accept
 what a client can send (a target id, an ISO time, a position dictionary) and
-convert it themselves. A method marked with `background_job` is called with
-``register_job=True`` in a background thread, so a slow call answers with
-the id of the job it recorded instead of blocking the server. A server can
+convert it themselves. A method marked with `background_job` is run as a
+recorded job in a background thread, so a slow call answers with the id of
+its job instead of blocking the server. A server can
 also narrow what a client may send to one tool with `ClientLimits`: hide
 arguments a client cannot send (an array of pixels), withhold choices of
 no use to it (a Matplotlib figure) and lower a count's maximum so that the
@@ -199,33 +199,31 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
 # the app's own UI, which asks the person directly.
 WITHHELD_METHOD_PREFIXES = ("delete",)
 
-# Parameters the server decides, never the client: whether a call shows up
-# in the job list (the server already runs each slow call as a job), and
-# progress callbacks, which a client cannot send. They are left out of every
+# Parameters the server decides, never the client: progress callbacks,
+# which a client cannot send. They are left out of every
 # tool's schema.
-SERVER_ONLY_PARAMETERS = ("register_job", "on_item_complete", "on_progress", "on_copied")
+SERVER_ONLY_PARAMETERS = ("on_item_complete", "on_progress", "on_copied")
 
 
-def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[str, Any]:
-    """Add the server's own arguments to a client's call of a slow method.
+def _job_target(kwargs: dict[str, Any]) -> str | None:
+    """Name the target a slow call works on, for its job record.
 
     Parameters
     ----------
     kwargs : `dict` [`str`, `Any`]
         The arguments the client sent.
-    parameter_names : `set` [`str`]
-        The method's parameter names.
 
     Returns
     -------
-    arguments : `dict` [`str`, `Any`]
-        The client's arguments, plus ``register_job=True`` when the method
-        takes it, so the method records its own job for the client to poll.
+    target_id : `str` or `None`
+        The ``target`` or ``target_id`` argument when it is text, else
+        `None` (the job is then named after its type).
     """
-    arguments = dict(kwargs)
-    if "register_job" in parameter_names:
-        arguments["register_job"] = True
-    return arguments
+    for name in ("target", "target_id"):
+        value = kwargs.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _apply_client_limits(schema: dict[str, Any], method: Callable[..., Any], limits: ClientLimits) -> None:
@@ -404,8 +402,8 @@ def _make_executor(
         A coroutine function that runs the method off the server's event
         loop with the client's arguments.
     """
-    parameter_names = set(inspect.signature(target_callable).parameters)
     grace_period = getattr(target_callable, "__background_job_grace_period__", None)
+    job_type = getattr(target_callable, "__background_job_type__", None)
 
     async def execute_reflected(**kwargs: Any) -> Any:
         """Run the method with the client's arguments.
@@ -421,17 +419,18 @@ def _make_executor(
         if grace_period is not None:
             # A method marked with `@background_job` runs slowly enough that
             # calling it directly would block this server's single
-            # connection for its whole duration. It records its own job
-            # (``register_job=True``) and runs in a background thread; the
-            # client gets its real result if it finishes quickly, or the
+            # connection for its whole duration. It runs as a recorded job
+            # in a background thread (a pipeline it calls joins that job);
+            # the client gets its real result if it finishes quickly, or the
             # job id to poll.
             from astrometricslib.jobs import run_as_background_job
 
-            arguments = _call_arguments(kwargs, parameter_names)
             return await asyncio.to_thread(
                 run_as_background_job,
-                lambda: target_callable(**arguments),
+                lambda: target_callable(**kwargs),
                 grace_period_seconds=grace_period,
+                job_type=job_type,
+                target_id=_job_target(kwargs),
             )
 
         if inspect.iscoroutinefunction(target_callable):

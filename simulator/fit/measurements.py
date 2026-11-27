@@ -6,7 +6,7 @@ equipment, and returns plain `Candidate` records. Every candidate names the
 public call and parameters that produced it, the nights it rests on, a source
 kind from the fallback order (newest real record, history fit, envelope,
 default), and a date. Nothing is stored and the library is not written
-(the calls pass ``register_job=False`` where they could record a job).
+(the calls are reads, which record no job).
 
 The fallback order is, from best to worst: the newest real record, a fit to
 the recorded history, the performance envelope, then the simulator's own
@@ -244,7 +244,7 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
     for limit in GUIDING_RUN_LIMITS:
         # A reply too large to send is cut short; ask again for fewer runs
         # rather than use a cut one (the newest runs are the ones used).
-        reply = wayfinder.review.query(kind="guiding_runs", limit=limit, register_job=False)
+        reply = wayfinder.review.query(kind="guiding_runs", limit=limit)
         if not getattr(reply, "truncated", False):
             break
     _refuse_truncated(reply, "wayfinder.review.query(kind='guiding_runs')")

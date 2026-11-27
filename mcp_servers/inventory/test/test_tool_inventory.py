@@ -242,7 +242,7 @@ def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:
 
 def test_config_writers_are_withheld() -> None:
     """The tools that change configuration are withheld from AI clients."""
-    for name in ("observatory_equipment_set_active_camera", "observatory_equipment_set_active_telescope"):
+    for name in ("observatory_equipment_set_active", "observatory_equipment_set_pointing_limits"):
         assert DECISIONS[name].disposition == "withhold"
 
 

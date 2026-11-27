@@ -113,15 +113,37 @@ def _configure_active_rig(app_config: AppConfiguration) -> None:
     })
 
 
-def test_set_active_telescope_and_camera_round_trip(
-    control: ObservatoryControl, app_config: AppConfiguration
+def test_the_active_configuration_round_trips(
+    control: ObservatoryControl, app_config: AppConfiguration, tmp_path: Path
 ) -> None:
-    """Verify equipment activation records and resolves via active_*()."""
+    """The active configuration is stored; making another active switches."""
     _configure_active_rig(app_config)
-    assert control.equipment.set_active_telescope("Rig A") is True
-    assert control.equipment.set_active_camera("CamA") is True
-    assert control.equipment.status(include=["telescope"]).telescope.id == "Rig A"
-    assert control.equipment.status(include=["camera"]).camera.id == "CamA"
+    app_config.update_config({
+        "Image Library": {"path": str(tmp_path / "library")},
+        "Observatory.Telescope": {"models": "Rig A, Rig B"},
+        "Observatory.Telescope.Rig B": {"focal_length_mm": "135.0"},
+    })
+    (tmp_path / "library").mkdir()
+    active = control.equipment.get_active()
+    assert active is not None and active.id and active.telescope.id == "Rig A" and active.camera.id == "CamA"
+    assert control.equipment.get_active() == active
+    configurations = control._context.astrometrics.observatories.configurations
+    from astrometricslib import Telescope
+
+    rig_b = configurations.create(
+        active.model_copy(
+            update={
+                "id": "",
+                "name": "",
+                "telescope": Telescope(id="Rig B", name="Rig B", focal_length_mm=135.0),
+            }
+        )
+    )
+    control.equipment.set_active(rig_b)
+    assert control.equipment.get_active() == rig_b
+    assert control.equipment.status(include=["telescope"]).telescope.id == "Rig B"
+    control.equipment.set_pointing_limits(min_altitude_deg=25.0)
+    assert control.equipment.status(include=["telescope"]).telescope.min_altitude_deg == pytest.approx(25.0)
 
 
 def test_guider_plate_scale_falls_back_to_main_telescope_with_no_active_rig(
@@ -136,8 +158,6 @@ def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(
 ) -> None:
     """Verify the guide-aware plate scale matches the main one, by default."""
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     assert control.equipment.status(include=["guide_scope"]).guide_scope is None
     plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
@@ -154,8 +174,6 @@ def test_guider_plate_scale_uses_active_guide_scope_focal_length(
         "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
         "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
     })
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     assert control.equipment.status(include=["guide_scope"]).guide_scope.id == "Orion 50mm"
     plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
@@ -180,8 +198,6 @@ def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(
             "sensor_height_px": "960",
         },
     })
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     assert control.equipment.status(include=["guide_camera"]).guide_camera.id == "GuideCam"
     assert control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px == pytest.approx(
@@ -363,8 +379,6 @@ def test_compute_guiding_correction_raises_without_calibration(
 ) -> None:
     """Verify guiding correction raises with no calibration for the pairing."""
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     with pytest.raises(ConfigurationError, match="No GuiderCalibration"):
         control.guiding._compute_correction("frame-1", 5.0, 0.0)
@@ -375,8 +389,6 @@ def test_compute_guiding_correction_succeeds_with_saved_calibration(
 ) -> None:
     """Verify guiding correction resolves a saved calibration."""
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -407,8 +419,6 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -468,7 +478,6 @@ def test_save_and_active_guiding_spectrum_analysis_round_trip(
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
 
     assert control.guiding.status(include=["spectrum_analysis"]).spectrum_analysis is None
 
@@ -570,8 +579,6 @@ def test_run_guider_calibration_persists_the_derived_calibration(
     from wayfindinglib.tasks.control_tasks.calibration_routines import GuiderCalibrationSteps
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0), (10.0, 8.0)])
     steps = GuiderCalibrationSteps(
@@ -788,8 +795,6 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(
     from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
 
     _configure_active_rig(app_config)
-    control.equipment.set_active_telescope("Rig A")
-    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -879,8 +884,8 @@ def test_remote_methods_delegate_to_the_task_module(
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
     assert control.remote.sync_frames("M 81", dry_run=True).model_dump() == {"dry_run": True}
     remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True, None)
-    assert control.remote.sync_frames(register_job=False).model_dump() == {"succeeded": []}
-    remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None, False)
+    assert control.remote.sync_frames().model_dump() == {"succeeded": []}
+    remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None)
 
 
 def test_remote_list_refuses_a_folder_that_is_not_listed(
@@ -909,10 +914,10 @@ def test_sync_frames_refuses_arguments_its_case_does_not_use(control: Observator
         control.remote.sync_frames("M 81", local_path="/tmp/frames", files=["a.fits"])
 
 
-def test_sync_frames_of_one_target_records_a_job_only_when_asked(
+def test_sync_frames_of_one_target_always_records_a_job(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
-    """Verify one target's copy records a job with register_job=True only."""
+    """Verify every copy of one target records a job."""
     from wayfindinglib.api.control import remote
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
@@ -924,10 +929,9 @@ def test_sync_frames_of_one_target_records_a_job_only_when_asked(
         "target": "M 81",
         "measurements": [],
     }
-    control.remote.sync_frames("M 81", local_path="/tmp/frames", register_job=True)
+    control.remote.sync_frames("M 81", local_path="/tmp/frames")
 
-    assert [call.kwargs["enabled"] for call in recorded.call_args_list] == [False, True]
-    assert recorded.call_args_list[1].kwargs["target_id"] == "M 81"
+    assert [call.kwargs["target_id"] for call in recorded.call_args_list] == ["M 81", "M 81"]
 
 
 def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control: ObservatoryControl) -> None:
@@ -1061,8 +1065,8 @@ def test_non_hardware_methods_do_not_reference_indi_driver() -> None:
     import inspect
 
     non_hardware_methods = [
-        equipment.EquipmentControl.set_active_telescope,
-        equipment.EquipmentControl.set_active_camera,
+        equipment.EquipmentControl.set_active,
+        equipment.EquipmentControl.set_pointing_limits,
         mount.MountControl._compute_pointing_correction,
         guiding.GuidingControl._compute_correction,
         guiding.GuidingControl.status,
@@ -1188,9 +1192,7 @@ def test_stop_capture_ends_a_running_capture_against_simulator(control: Observat
     )
     assert control.imaging.stop_capture() is False
     results: list = []
-    thread = threading.Thread(
-        target=lambda: results.append(control.imaging.capture_image(30.0, count=5, register_job=False))
-    )
+    thread = threading.Thread(target=lambda: results.append(control.imaging.capture_image(30.0, count=5)))
     thread.start()
     deadline = time.monotonic() + 5.0
     while not control._context.capture_runs.is_running() and time.monotonic() < deadline:
@@ -1280,7 +1282,7 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: Ob
         {"id": "default"},
     )
 
-    assert control.imaging.capture_image(0.01, register_job=False).frames_captured == 1
+    assert control.imaging.capture_image(0.01).frames_captured == 1
     assert control.guiding.expose(1.0).started is True
     assert control.guiding._get_image() is None
     assert control.mount._sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
@@ -1293,7 +1295,7 @@ def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: Ob
     control._driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
-        control.imaging.capture_image(1.0, register_job=False)
+        control.imaging.capture_image(1.0)
     with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
         control.guiding.expose(1.0)
     with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
@@ -1668,3 +1670,12 @@ def test_library_path_is_the_configured_wayfinding_folder(control: ObservatoryCo
     """`library_path` names the folder that holds `wayfinding.db`."""
     assert control.library_path == control._context.butler.library_path
     assert control.library_path.is_dir()
+
+
+def test_the_old_equipment_choices_say_where_they_moved(control: ObservatoryControl) -> None:
+    """The old camera and telescope choices raise "moved to set_active"."""
+    from astrometricslib.exceptions import MovedError
+
+    for name in ("set_active_camera", "set_active_telescope"):
+        with pytest.raises(MovedError, match="set_active"):
+            getattr(control.equipment, name)

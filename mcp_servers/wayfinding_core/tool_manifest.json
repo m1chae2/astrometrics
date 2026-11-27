@@ -58,19 +58,19 @@
       "interim_block": "",
       "note": "Closes the INDI session. Not a device command, but it would cut off monitoring and has no monitoring use."
     },
-    "observatory_equipment_set_active_camera": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "withhold",
+    "observatory_equipment_get_active": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Writes the active camera into the configuration file."
+      "note": "Reads the active observatory configuration: the telescope, cameras and other equipment in use."
     },
-    "observatory_equipment_set_active_telescope": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
+    "observatory_equipment_set_active": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Writes the active telescope into the configuration file."
+      "note": "Writes the active telescope and camera into the configuration file."
     },
     "observatory_equipment_set_device_property": {
       "tool_class": "actuate",
@@ -78,6 +78,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Sets a raw INDI property, which commands a device. Belongs to the dropped control side."
+    },
+    "observatory_equipment_set_pointing_limits": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the telescope's safety limits into the configuration file."
     },
     "observatory_equipment_status": {
       "tool_class": "observe",

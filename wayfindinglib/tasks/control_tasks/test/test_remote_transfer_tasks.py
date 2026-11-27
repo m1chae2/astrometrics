@@ -287,7 +287,7 @@ def test_a_sync_that_adds_frames_measures_only_those_frames_after_saving_the_tar
     assert [frame.path for frame in measure.call_args.kwargs["frames"]] == [
         "/library/lights/M 81/frame_001.fits"
     ]
-    assert measure.call_args.kwargs["register_job"] is True
+    assert "register_job" not in measure.call_args.kwargs
     # The run's own summary is handed back for the one announcement.
     assert summaries == [measure.return_value]
 
@@ -701,7 +701,7 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     handlers_before = len(_our_log_handlers("wayfindinglib"))
 
     result = remote_operations.sync_all_remote_folders(
-        context=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=True
+        context=SimpleNamespace(astrometrics=_EmptyAstrometrics())
     )
 
     assert result["succeeded"] == []
@@ -720,10 +720,10 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     assert _our_log_handlers(f"job_{result['job_id']}") == []
 
 
-def test_sync_all_remote_folders_without_job_registration_records_nothing(
+def test_sync_all_remote_folders_inside_a_job_records_no_second_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the opt-out skips the job row and attaches no handlers."""
+    """Inside a caller's job the copy joins it: no new row, no handlers."""
     import astrometricslib
     from astrometricslib import AppConfiguration
 
@@ -737,9 +737,14 @@ def test_sync_all_remote_folders_without_job_registration_records_nothing(
 
     handlers_before = len(_our_log_handlers("wayfindinglib"))
 
-    result = remote_operations.sync_all_remote_folders(
-        context=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=False
-    )
+    from unittest.mock import MagicMock
+
+    from astrometricslib.jobs import running_as_job
+
+    with running_as_job("caller-job", MagicMock(), job_type="remote_sync", target_id="all"):
+        result = remote_operations.sync_all_remote_folders(
+            context=SimpleNamespace(astrometrics=_EmptyAstrometrics())
+        )
 
     assert result["job_id"] is None
     assert len(_our_log_handlers("wayfindinglib")) == handlers_before

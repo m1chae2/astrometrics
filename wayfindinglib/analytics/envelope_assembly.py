@@ -23,6 +23,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
+from astrometricslib import ObservatoryConfiguration
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
 from astrometricslib.parameters import (
     ParameterRole,
@@ -48,7 +49,6 @@ from wayfindinglib.analytics.performance_envelope import (
     robust_median_and_spread,
 )
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
-from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.capture_frame import CaptureFrame
@@ -551,7 +551,7 @@ def assemble_performance_envelope(
         if capture_frames is not None:
             capture_frames = [frame for frame in capture_frames if night_of(frame) not in excluded]
     guide_scope, guide_camera = catalog.active_guide_scope(), catalog.active_guide_camera()
-    equipment = EquipmentConfiguration(telescope=telescope, camera=camera)
+    equipment = ObservatoryConfiguration(telescope=telescope, camera=camera)
     guide_scale = equipment.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
     guide_focal_length = guide_scope.focal_length_mm if guide_scope else telescope.focal_length_mm
     fingerprint = build_equipment_fingerprint(telescope.name, camera.name, guide_focal_length, guide_scale)

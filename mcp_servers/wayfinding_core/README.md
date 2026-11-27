@@ -24,7 +24,7 @@ A client sends JSON, and the tools pass it to the Wayfinder methods unchanged. T
 - `position` and `destination` (a sky position): a dictionary `{"ra_deg", "dec_deg"}`. A dictionary that is not a position raises `InvalidArgumentError` that names the expected keys.
 - `get_visibility` takes `objects` as names or ids (looked up in the library and then in SIMBAD, an online star database) or `{"id", "ra_deg", "dec_deg"}` dictionaries, and `time` and `end_time` as `"now"` or ISO 8601 strings. An offset such as `-06:00` is honored, and a string with no offset means UTC.
 
-A slow method (marked `@background_job`) is called with `register_job=True` and records its own job; see `mcp_servers/README.md`.
+A slow method (marked `@background_job`) runs as a recorded job; see `mcp_servers/README.md`.
 
 For exact behavior, read the code. The code is the source of truth.
 

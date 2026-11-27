@@ -177,10 +177,10 @@ def warm_night_reviews(night_count: int = NIGHT_REVIEW_WARMUP_COUNT) -> None:
         started_at = time.monotonic()
         try:
             review = container.wayfinder.review
-            nights = review.query(kind="nights", limit=night_count, register_job=False).night_list or []
+            nights = review.query(kind="nights", limit=night_count).night_list or []
             for night in reversed(list(nights)[-night_count:]):
                 try:
-                    review.query(kind="night_quality", session_id=night.night_id, register_job=False)
+                    review.query(kind="night_quality", session_id=night.night_id)
                 except Exception:
                     # A failed night only means a slower first open.
                     logger.warning("Night review warm-up failed for %s", night.night_id, exc_info=True)

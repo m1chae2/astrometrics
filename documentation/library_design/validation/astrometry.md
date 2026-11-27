@@ -1033,7 +1033,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-astrometrics.processing.process_target("M 57", stages=["astrometry"], register_job=False)
+astrometrics.processing.process_target("M 57", stages=["astrometry"])
 for metric in (
     "astrometry.gaia_fit_rms_arcsec",
     "astrometry.expected_centroid_noise_rms_arcsec",

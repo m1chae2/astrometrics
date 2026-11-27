@@ -158,7 +158,7 @@ class AdvisoryService:
         nights : `list` [`NightListEntry`]
             One entry per night, in the order the library gives them.
         """
-        return self.wayfinder.review.query(kind="nights", limit=limit, register_job=False).night_list
+        return self.wayfinder.review.query(kind="nights", limit=limit).night_list
 
     def get_night_quality(self, session_id: str) -> Any:
         """Read the quality review of one night.
@@ -173,9 +173,7 @@ class AdvisoryService:
         review : `NightQuality`
             The night's targets, warnings and guiding summary.
         """
-        return self.wayfinder.review.query(
-            kind="night_quality", session_id=session_id, register_job=False
-        ).night_quality
+        return self.wayfinder.review.query(kind="night_quality", session_id=session_id).night_quality
 
     def list_target_changes(self, session_id: str | None = None, limit: int = 10) -> Any:
         """List the slews that moved the mount to a new target.
@@ -193,7 +191,7 @@ class AdvisoryService:
             The target changes, in the order the library gives them.
         """
         return self.wayfinder.review.query(
-            kind="target_changes", session_id=session_id, limit=limit, register_job=False
+            kind="target_changes", session_id=session_id, limit=limit
         ).target_changes
 
     def get_live_session_status(

@@ -146,9 +146,7 @@ class SyncService:
                     """Tell the app the new frames are in the library."""
                     self._announce_frames_updated(object_id, frames_added)
 
-                result = self._observatory.remote.sync_frames(
-                    object_id, on_copied=announce_copied, register_job=True
-                )
+                result = self._observatory.remote.sync_frames(object_id, on_copied=announce_copied)
                 self._announce_measurements(object_id, result)
                 self._trigger_calibration_measurement(object_id, result)
                 self._trigger_suggestions(object_id)
@@ -394,9 +392,9 @@ class SyncService:
             plain data.
         """
         if dry_run:
-            plan = self._observatory.remote.sync_logs(dry_run=True, register_job=False)
+            plan = self._observatory.remote.sync_logs(dry_run=True)
             return {"status": "plan", "plan": _plain(plan)}
-        result = self._observatory.remote.sync_logs(register_job=True)
+        result = self._observatory.remote.sync_logs()
         guide_logs = result.guide_logs
         downloaded = (guide_logs.to_download or 0) if guide_logs and guide_logs.supported else 0
         ingested = result.ingested if isinstance(result.ingested, dict) else {}

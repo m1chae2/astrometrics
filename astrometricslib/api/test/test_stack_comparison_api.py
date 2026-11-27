@@ -73,7 +73,7 @@ def _flatness(stack: Path) -> float:
     flatness : `float`
         The flatness number of the stack compared with itself.
     """
-    report = _diagnostics().measure_stack(str(stack), compare_to=str(stack), register_job=False)
+    report = _diagnostics().measure_stack(str(stack), compare_to=str(stack))
     return report.comparison.before.flatness_rms
 
 
@@ -106,7 +106,7 @@ def test_stack_quality_compares_two_stack_files() -> None:
         write_fits(Path(folder) / "b.fits", 0.01, 2)
 
         report = _diagnostics().measure_stack(
-            str(Path(folder) / "b.fits"), compare_to=str(Path(folder) / "a.fits"), register_job=False
+            str(Path(folder) / "b.fits"), compare_to=str(Path(folder) / "a.fits")
         )
         comparison = report.comparison
 
@@ -122,11 +122,7 @@ def test_comparing_with_the_previous_stack_uses_the_kept_stack(
     stack = tmp_path / "M_27_L_Stacked.fits"
     keep_old_stack(stack)
 
-    comparison = (
-        _diagnostics()
-        .measure_stack(target_with_stack(stack), compare_to="previous", register_job=False)
-        .comparison
-    )
+    comparison = _diagnostics().measure_stack(target_with_stack(stack), compare_to="previous").comparison
 
     assert comparison is not None
     assert Path(comparison.before.path).as_posix().endswith("_previous/M_27_L_Stacked.fits")
@@ -141,7 +137,7 @@ def test_comparing_with_the_previous_stack_notes_when_nothing_is_kept(
     stack = tmp_path / "M_27_L_Stacked.fits"
     write_fits(stack, 0.01, 2)
 
-    report = _diagnostics().measure_stack(target_with_stack(stack), compare_to="previous", register_job=False)
+    report = _diagnostics().measure_stack(target_with_stack(stack), compare_to="previous")
     assert report.comparison is None
     assert "No previous stack" in report.notes[0]
 
@@ -149,7 +145,7 @@ def test_comparing_with_the_previous_stack_notes_when_nothing_is_kept(
 def test_a_target_without_a_stack_raises_a_clear_error(pipelines: ProcessingPipelines) -> None:
     """Asking about a missing stack is an error, not a silent no-op."""
     with pytest.raises(NotFoundError, match="has no stack"):
-        _diagnostics().measure_stack(Target(id="M 27"), compare_to="previous", register_job=False)
+        _diagnostics().measure_stack(Target(id="M 27"), compare_to="previous")
 
 
 def test_a_kind_is_refused_with_a_stack_path(tmp_path: Path) -> None:
@@ -157,18 +153,16 @@ def test_a_kind_is_refused_with_a_stack_path(tmp_path: Path) -> None:
     stack = tmp_path / "M_27_L_Stacked.fits"
     write_fits(stack, 0.01, 2)
     with pytest.raises(InvalidArgumentError):
-        _diagnostics().measure_stack(str(stack), kind="spectral", register_job=False)
+        _diagnostics().measure_stack(str(stack), kind="spectral")
     with pytest.raises(InvalidArgumentError):
-        _diagnostics().measure_stack(str(stack), include=["colour"], register_job=False)
+        _diagnostics().measure_stack(str(stack), include=["colour"])
 
 
 def test_the_registration_section_reports_a_missing_seq_file(tmp_path: Path) -> None:
     """A section that cannot be measured is `None`, with a note saying why."""
     stack = tmp_path / "M_27_L_Stacked.fits"
     write_fits(stack, 0.01, 2)
-    report = _diagnostics().measure_stack(
-        str(stack), include=["registration", "rejected_fraction"], register_job=False
-    )
+    report = _diagnostics().measure_stack(str(stack), include=["registration", "rejected_fraction"])
     assert report.registration is None
     assert report.rejected_fraction is None
     assert report.included == ["registration", "rejected_fraction"]
@@ -185,7 +179,7 @@ def test_the_registration_section_returns_typed_rows_from_a_real_format_seq_file
         "R1 2.83064 3.27475 0.886847 0 0.0238392 1163 H 1 -1.53863e-05 6.3825 1.73631e-05 "
         "1.00003 -29.2903 -2.69105e-09 4.67203e-09 1\n"
     )
-    report = _diagnostics().measure_stack(str(stack), include=["registration"], register_job=False)
+    report = _diagnostics().measure_stack(str(stack), include=["registration"])
     assert report.registration is not None
     (row,) = report.registration
     assert row.star_count == 1163

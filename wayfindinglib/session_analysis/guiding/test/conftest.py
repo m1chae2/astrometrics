@@ -13,13 +13,8 @@ from typing import Any
 import numpy as np
 import pytest
 
+from astrometricslib import Camera, GuideScope, ObservatoryConfiguration, Telescope
 from wayfindinglib.analytics.performance_envelope import MeasuredImageQuality, derive_performance_envelope
-from wayfindinglib.models.equipment_and_site.equipment import (
-    Camera,
-    EquipmentConfiguration,
-    GuideScope,
-    Telescope,
-)
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 
@@ -75,7 +70,7 @@ def make_envelope() -> Callable[..., Any]:
             id="g", name="ZWO ASI120MC-S", pixel_size_um=3.75, sensor_width_px=1280, sensor_height_px=960
         )
         return derive_performance_envelope(
-            EquipmentConfiguration(telescope=telescope, camera=camera),
+            ObservatoryConfiguration(telescope=telescope, camera=camera),
             GuideScope(id="gs", name="Apertura 32mm", focal_length_mm=121.05, aperture_mm=32.0),
             guide_camera,
             "fingerprint-a",

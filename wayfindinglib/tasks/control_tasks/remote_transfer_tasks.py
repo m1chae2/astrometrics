@@ -381,14 +381,10 @@ def record_new_frame_measurements(
     summary : `FrameMeasurementSummary` or `None`
         What the measurement run did, or `None` if it failed.
     """
-    from astrometricslib.jobs import get_current_job
-
     added = {os.path.normpath(path) for path in added_paths}
     added_frames = [frame for frame in target.frames if os.path.normpath(frame.path) in added]
     try:
-        summary = context.astrometrics.quality.record_frame_measurements(
-            target, frames=added_frames, register_job=get_current_job() is None
-        )
+        summary = context.astrometrics.quality.record_frame_measurements(target, frames=added_frames)
     except Exception:  # a measurement failure must never fail the sync: log it
         logger.exception("Could not measure the new frames of %s", getattr(target, "id", "?"))
         return None
@@ -1015,7 +1011,6 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
 def sync_all_remote_folders(
     context: ControlContext,
     log_callback: Any | None = None,
-    register_job: bool = True,
 ) -> dict[str, Any]:
     """Download every remote folder: calibration frames and all targets.
 
@@ -1034,15 +1029,6 @@ def sync_all_remote_folders(
         Provides the remote listing and download operations.
     log_callback : callable, optional
         Callable receiver for progress messages.
-    register_job : `bool`, optional
-        Whether to auto-register a `ProcessingJob` in
-        astrometrics_log.db for this run (default `True`), so a
-        script/notebook/CLI call shows up in the UI's job manager
-        without the caller doing anything extra -- mirrors
-        `astrometricslib.pipelines.tasks.analyze_target`'s
-        `register_job` parameter and its job-registration shape.
-        Registration failures are logged and swallowed rather than
-        raised, so a database issue never blocks the actual sync.
 
     Returns
     -------
@@ -1051,8 +1037,8 @@ def sync_all_remote_folders(
         keys. ``"succeeded"`` is a `list` of every folder name that
         downloaded successfully. ``"failed"`` is a `list` of
         ``(folder_name, error_message)`` tuples. ``"job_id"`` is the
-        registered `ProcessingJob` id, or `None` if `register_job` was
-        `False` or registration failed. ``"measurements"`` is a `list` of
+        registered `ProcessingJob` id, or `None` when the copy ran inside
+        another job or registration failed. ``"measurements"`` is a `list` of
         the frame measurement run summaries (plain dicts), one per target
         that gained frames; the backend announces the quality event from
         them.
@@ -1082,7 +1068,11 @@ def sync_all_remote_folders(
     # existing `finally` below is still the single place cleanup happens.
     log_capture = ExitStack()
 
-    if register_job:
+    from astrometricslib.jobs import get_current_job
+
+    # The copy records its own job, unless it already runs inside one,
+    # which then holds its log.
+    if get_current_job() is None:
         try:
             from astrometricslib.jobs import JobStore, ProcessingJob, capture_job_logs
 

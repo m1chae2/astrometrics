@@ -17,10 +17,6 @@ wayfinder.control.equipment.connect: owner
 wayfinder.control.equipment.disconnect: bool-return
 wayfinder.control.equipment.disconnect: owner
 wayfinder.control.equipment.disconnect: verb
-wayfinder.control.equipment.set_active_camera: bool-return
-wayfinder.control.equipment.set_active_camera: owner
-wayfinder.control.equipment.set_active_telescope: bool-return
-wayfinder.control.equipment.set_active_telescope: owner
 wayfinder.control.equipment.set_device_property: bool-return
 wayfinder.control.equipment.set_device_property: no-default(value)
 wayfinder.control.equipment.set_device_property: owner
@@ -48,7 +44,6 @@ wayfinder.control.guiding.status: owner
 wayfinder.control.guiding.status: verb
 wayfinder.control.guiding.stop_loop: owner
 wayfinder.control.guiding.stop_loop: verb
-wayfinder.control.imaging.capture_image: banned-argument(register_job)
 wayfinder.control.imaging.capture_image: owner
 wayfinder.control.imaging.capture_image: unit-suffix(delay_seconds)
 wayfinder.control.imaging.capture_image: unit-suffix(exposure_seconds)
@@ -108,10 +103,8 @@ wayfinder.control.remote.list: return-union
 wayfinder.control.remote.list: verb
 wayfinder.control.remote.sync_frames: banned-argument(log_callback)
 wayfinder.control.remote.sync_frames: banned-argument(on_copied)
-wayfinder.control.remote.sync_frames: banned-argument(register_job)
 wayfinder.control.remote.sync_frames: owner
 wayfinder.control.remote.sync_frames: verb
-wayfinder.control.remote.sync_logs: banned-argument(register_job)
 wayfinder.control.remote.sync_logs: owner
 wayfinder.control.remote.sync_logs: verb
 wayfinder.control.safety.apply_promotion_decision: owner
@@ -172,7 +165,6 @@ wayfinder.planning.dismiss_package: verb
 wayfinder.planning.get_calibration_advice: owner
 wayfinder.planning.get_calibration_advice: unit-suffix(exposure_seconds)
 wayfinder.planning.get_constellation_lines: owner
-wayfinder.planning.get_deep_catalog_status: banned-argument(register_job)
 wayfinder.planning.get_deep_catalog_status: owner
 wayfinder.planning.get_deep_catalog_status: unit-suffix(query_timeout_seconds)
 wayfinder.planning.get_deep_catalog_status: unit-suffix(request_delay_seconds)
@@ -193,7 +185,6 @@ wayfinder.planning.query_plans: verb
 wayfinder.planning.query_sources: no-default(radius_deg)
 wayfinder.planning.query_sources: owner
 wayfinder.planning.query_sources: verb
-wayfinder.planning.refresh_suggestions: banned-argument(register_job)
 wayfinder.planning.refresh_suggestions: owner
 wayfinder.planning.refresh_suggestions: verb
 wayfinder.planning.remove_from_queue: banned-argument(expected_revision)
@@ -234,7 +225,6 @@ wayfinder.review.measure_focus_temperature_coefficient: owner
 wayfinder.review.measure_guiding_spectrum: owner
 wayfinder.review.measure_tuned_parameters: owner
 wayfinder.review.measure_unguided_mount_error: owner
-wayfinder.review.query: banned-argument(register_job)
 wayfinder.review.query: owner
 wayfinder.review.query_alignment_records: owner
 wayfinder.review.query_alignment_records: verb

@@ -80,6 +80,7 @@ astrometricslib/api/jobs.py,MAXIMUM_RESULT_LENGTH,Reply size cap; plumbing
 astrometricslib/api/jobs.py,MAXIMUM_TEXT_LENGTH,Reply size cap; plumbing
 astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
 astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
+astrometricslib/api/observatories.py,ObservatoryConfigurations.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
@@ -140,6 +141,8 @@ astrometricslib/foundation/storage/process_locks.py,acquire_resource_slot.poll_i
 astrometricslib/foundation/storage/process_locks.py,describe_slot_holders.max_slots,Slot count of the shared work lock; plumbing
 astrometricslib/foundation/storage/process_locks.py,list_slot_holders.max_slots,Slot count of the shared work lock; plumbing
 astrometricslib/foundation/versioned_cache.py,VERSIONED_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
+astrometricslib/models/observatory_configuration.py,ARCSEC_PER_DEGREE,Unit conversion constant
+astrometricslib/models/observatory_configuration.py,SIDEREAL_DEGREES_PER_HOUR,unit or physical constant
 astrometricslib/models/page.py,Page.of.offset,Default start of a page: the first match
 astrometricslib/models/stellar_source.py,BRIGHTEST_CATALOG_MAGNITUDE,Physical limit of apparent magnitudes (Sirius)
 astrometricslib/pipelines/asteroid_detection/detection.py,_LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON,Division-by-zero guard
@@ -239,6 +242,7 @@ astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTO
 astrometricslib/pipelines/shared/binned_sky_plane.py,block_medians.minimum_valid_fraction,Default that keeps every block: callers pass their own share
 astrometricslib/pipelines/shared/catalog_star_identity.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
 astrometricslib/pipelines/shared/catalog_star_identity.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
+astrometricslib/pipelines/shared/equipment.py,query_configurations.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record format version: which header fields a frame record holds; not a measurement
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_LIFETIME_DAYS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_TILE_LEVEL,"Sampling, numerics, plumbing or math constant."
@@ -706,8 +710,6 @@ wayfindinglib/drivers/stellarmate_interface.py,_OFFLINE_REPROBE_SECONDS,Offline 
 wayfindinglib/drivers/stellarmate_interface.py,_RSYNC_OVERALL_LIMIT_SECONDS,Transfer safety limit
 wayfindinglib/drivers/stellarmate_interface.py,_RSYNC_STALL_TIMEOUT_SECONDS,Transfer stall timeout; failure reporting
 wayfindinglib/drivers/stellarmate_interface.py,_SSH_PORT,software plumbing
-wayfindinglib/models/equipment_and_site/equipment.py,PLATE_SCALE_CONSTANT,Unit conversion constant
-wayfindinglib/models/equipment_and_site/equipment.py,SIDEREAL_DEGREES_PER_HOUR,unit or physical constant
 wayfindinglib/models/equipment_and_site/equipment_fingerprint.py,_FOCAL_LENGTH_DECIMALS,software plumbing
 wayfindinglib/models/equipment_and_site/equipment_fingerprint.py,_PIXEL_SCALE_DECIMALS,software plumbing
 wayfindinglib/models/planning/sky_source.py,BRIGHTEST_CATALOG_MAGNITUDE,"validity limit copied from astrometricslib, held equal by a test"

@@ -247,3 +247,81 @@ def test_stars_read_without_light_curves_keep_their_lengths(tmp_path: Path) -> N
     with pytest.raises(InvalidArgumentError, match="unsafe"):
         storage._generic.get_by_ids_leaving_out("stellar_catalog", ["Vega"], ("photometry'); --",))
     assert len(storage.get_by_ids("stellar_catalog", ["Vega"])[0].photometry.timestamps) == 6
+
+
+def test_a_light_read_counts_only_the_lengths_it_keeps(tmp_path: Path) -> None:
+    """The database counts only the lists a star remembers the length of.
+
+    Every light-curve list is taken out, but only ``timestamps``,
+    ``magnitudes`` and ``fluxes`` are counted, since a star keeps only
+    those lengths. A path that is not counted is refused the same way.
+    """
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+    from astrometricslib.foundation.errors import InvalidArgumentError
+    from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+
+    storage = CatalogAccess(_make_isolated_config(tmp_path))
+    star = StellarObject(
+        id="Vega",
+        photometry=PhotometryResult(
+            timestamps=["2026-01-01T00:00:00Z"] * 4, magnitudes=[1.0] * 4, airmasses=[1.1] * 4
+        ),
+    )
+    storage.put([star], "stellar_catalog", {})
+
+    ((record, lengths),) = storage._generic.get_by_ids_leaving_out(
+        "stellar_catalog",
+        ["Vega"],
+        ("photometry.timestamps", "photometry.airmasses"),
+        ("photometry.timestamps",),
+    )
+
+    assert lengths == {"photometry.timestamps": 4}
+    assert record.photometry.timestamps == []
+    assert record.photometry.airmasses == []
+    with pytest.raises(InvalidArgumentError, match="unsafe"):
+        storage._generic.get_by_ids_leaving_out("stellar_catalog", ["Vega"], (), ("photometry'); --",))
+
+
+def test_query_lists_real_star_records_without_their_points(tmp_path: Path) -> None:
+    """`StellarCatalog.query` returns star records with real nested models.
+
+    Without ``include`` the light-curve points are left out, but each star
+    is a `StellarObject` whose nested results are model objects, not dicts,
+    and whose computed properties still describe the stored star. With
+    ``include=["light_curves"]`` the star equals the one that was saved.
+    """
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import (
+        PhotometryResult,
+        SpectroscopyResult,
+        StellarObject,
+        StellarSessionMatch,
+    )
+
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config, CatalogAccess(config))
+    saved = StellarObject(
+        id="Vega",
+        name="Vega",
+        target_ids=["Lyra Field"],
+        photometry=PhotometryResult(timestamps=["2026-01-01T00:00:00Z"] * 3, fluxes=[1.0, 2.0, 3.0]),
+        session_matches=[
+            StellarSessionMatch(session_id="Lyra Field:2026-01-01", angular_separation_arcsec=0.4)
+        ],
+    )
+    catalog._catalog_access.put([saved], "stellar_catalog", {})
+
+    (light,) = catalog.query().items
+    (full,) = catalog.query(include=["light_curves"]).items
+
+    assert isinstance(light, StellarObject)
+    assert isinstance(light.photometry, PhotometryResult)
+    assert isinstance(light.spectroscopy, SpectroscopyResult)
+    assert isinstance(light.session_matches[0], StellarSessionMatch)
+    assert light.photometry.fluxes == []
+    assert light.has_photometry
+    assert not light.light_curves_included
+    assert full.light_curves_included
+    assert full == saved

@@ -5,6 +5,7 @@ following a standard pattern so different parts of the code don't have to
 worry about where the data actually lives.
 """
 
+import functools
 import json
 import logging
 import math
@@ -760,6 +761,24 @@ _LIGHT_CURVE_KEY_FIELDS = (("timestamps", "timestamps"), ("magnitudes", "magnitu
 are left out, with the `PhotometryResult` field of each."""
 
 
+@functools.cache
+def _light_curve_field_names() -> tuple[str, ...]:
+    """Name the `PhotometryResult` fields of `LIGHT_CURVE_RECORD_KEYS`.
+
+    Returns
+    -------
+    field_names : `tuple` [`str`, ...]
+        The field names, worked out once.
+    """
+    from astrometricslib.models.stellar_source import PhotometryResult
+
+    return tuple(
+        field_name
+        for field_name, field_info in PhotometryResult.model_fields.items()
+        if field_info.alias in LIGHT_CURVE_RECORD_KEYS
+    )
+
+
 def _left_out_light_curve(star: Any, lengths: dict[str, int]) -> Any:
     """Empty a star's light-curve lists and remember their stored lengths.
 
@@ -776,15 +795,12 @@ def _left_out_light_curve(star: Any, lengths: dict[str, int]) -> Any:
         The same star, now with `StellarObject.light_curves_included`
         `False`.
     """
-    if star.photometry is not None:
-        from astrometricslib.models.stellar_source import PhotometryResult
-
-        emptied = {
-            field_name: []
-            for field_name, field_info in PhotometryResult.model_fields.items()
-            if field_info.alias in LIGHT_CURVE_RECORD_KEYS
-        }
-        star.photometry = star.photometry.model_copy(update=emptied)
+    photometry = star.photometry
+    field_names = _light_curve_field_names()
+    # A record read with its lists already taken out (see
+    # `CatalogAccess.get_stars_without_light_curves`) needs no copy.
+    if photometry is not None and any(getattr(photometry, name) for name in field_names):
+        star.photometry = photometry.model_copy(update={name: [] for name in field_names})
     star._left_out_light_curve_lengths = dict(lengths)
     return star
 
@@ -1299,11 +1315,13 @@ class CatalogAccess(AbstractCatalogAccess):
             describes.
         """
         paths = tuple(f"photometry.{key}" for key in LIGHT_CURVE_RECORD_KEYS)
+        counted = {f"photometry.{key}": key for key, _ in _LIGHT_CURVE_KEY_FIELDS}
         stars = []
-        for star, lengths in self._generic.get_by_ids_leaving_out("stellar_catalog", ids, paths):
-            by_key = {path.rsplit(".", 1)[1]: length for path, length in lengths.items()}
+        for star, lengths in self._generic.get_by_ids_leaving_out(
+            "stellar_catalog", ids, paths, tuple(counted)
+        ):
             stars.append(
-                _left_out_light_curve(star, {key: by_key.get(key, 0) for key, _ in _LIGHT_CURVE_KEY_FIELDS})
+                _left_out_light_curve(star, {counted[path]: length for path, length in lengths.items()})
             )
         return stars
 

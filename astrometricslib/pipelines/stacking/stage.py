@@ -1568,8 +1568,12 @@ def _record_configuration_stack(target: Target, target_frames: list[Any], stacke
     camera_matches = bool(primary_camera and camera and _camera_names_match(camera, primary_camera))
     is_preferred = optic_matches and camera_matches
 
+    # The stack points at the observatory configuration its frames share.
+    configuration_ids = {getattr(frame, "configuration_id", None) for frame in target_frames}
+    configuration_id = next(iter(configuration_ids)) if len(configuration_ids) == 1 else None
     target.stacking.stacks_by_configuration[configuration_key] = StackConfigurationResult(
         configuration_key=configuration_key,
+        configuration_id=configuration_id,
         camera=camera,
         focal_length_mm=focal_length,
         frames_stacked=len(target_frames),

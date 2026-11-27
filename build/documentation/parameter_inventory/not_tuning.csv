@@ -70,6 +70,7 @@ astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID forma
 astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
 astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
+astrometricslib/api/_target_frames.py,TargetFrames.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.offset,Pagination start; 0 means from the first row
@@ -87,10 +88,7 @@ astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_deg
 astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/stars.py,StellarCatalog.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/targets.py,TargetCatalog.get_frame.index,Index of the frame or layer; 0 means the first
-astrometricslib/api/targets.py,TargetCatalog.imaged_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
-astrometricslib/api/targets.py,TargetCatalog.query.include_frames,Count of frames to list; 0 means none
-astrometricslib/api/targets.py,TargetCatalog.query.limit,Row or item cap that callers pass; plumbing
+astrometricslib/api/targets.py,TargetCatalog.measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/visualization.py,DEFAULT_IMAGE_FIGURE_SIZE,Figure size of a render_fits figure; display only
 astrometricslib/api/visualization.py,Visualization.plot.limit,Row or item cap that callers pass; plumbing
@@ -195,6 +193,7 @@ astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_AT
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,derive_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
+astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/pipelines/photometry/post_processing/known_variability_labels.py,split_scores_by_catalog_status.chunk_size,Query batch size; plumbing
 astrometricslib/pipelines/photometry/post_processing/record_noise_budget.py,[Observatory.Location] elevation,Site setting; the default of zero stands for sea level
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_TIMESTAMP_REASONS_SHOWN,Display cap on quoted reasons
@@ -297,9 +296,7 @@ astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,R
 astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_LIMITS,Reply size limits
 astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_MAXIMUM_RADIUS_DEGREES,Reply size cap on query radius
 astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
-astrometricslib/pipelines/shared/target_overview.py,MAXIMUM_FRAME_ROWS,Reply row cap
-astrometricslib/pipelines/shared/target_overview.py,QUALITY_LIST_LENGTH,Reply list length
-astrometricslib/pipelines/shared/target_overview.py,describe_target.include_frames,Count of frames to list; 0 means none
+astrometricslib/pipelines/shared/target_overview.py,query_targets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/target_sessions.py,SESSION_NIGHT_BOUNDARY_HOUR,Noon night boundary convention; duplicates item 193
 astrometricslib/pipelines/shared/variable_star_catalogs.py,FIELD_QUERY_TIMEOUT_SECONDS,Network deadline for one VizieR request; does not change any result
 astrometricslib/pipelines/shared/variable_star_catalogs.py,FIELD_RADIUS_DEGREES,Request size only; stars are matched the same way whatever the grouping
@@ -390,6 +387,7 @@ astrometricslib/pipelines/stacking/frame_measurement_run.py,FAILURE_NOTES_LIMIT,
 astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_COUNT,Plumbing: worker count
 astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_NICENESS,"Process niceness; courtesy value, no effect on results."
 astrometricslib/pipelines/stacking/frame_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/frame_queries.py,query_frames.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/frame_screening.py,BACKGROUND_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUALITY_ROWS_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUARANTINE_WINDOW,Progress-bar windows; display only.

@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_FIELD_RADIUS_DEGREES",
     "derive_field_centers",
+    "measure_field_centers",
     "seed_field_tiles",
     "seed_local_gaia_catalog",
 ]
@@ -169,6 +170,42 @@ def _angular_separation_degrees(
     first = SkyCoord(ra=first_right_ascension * u.deg, dec=first_declination * u.deg)
     second = SkyCoord(ra=second_right_ascension * u.deg, dec=second_declination * u.deg)
     return float(first.separation(second).degree)
+
+
+def measure_field_centers(targets: list[Any], max_frames_per_target: int = 12) -> Any:
+    """List the distinct sky positions the library has imaged.
+
+    Reads the position from the FITS header of the first few frames of every
+    target (`derive_field_centers`). On a large library kept on a slow drive
+    this takes about half a minute.
+
+    Parameters
+    ----------
+    targets : `list` [`Target`]
+        Every target.
+    max_frames_per_target : `int`, optional
+        How many frames of each target to read. Defaults to 12.
+
+    Returns
+    -------
+    centers : `ImagedFieldCenters`
+        One entry per distinct position, with its coordinates and the
+        targets that share it.
+    """
+    from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
+
+    found = derive_field_centers(targets, max_frames_per_target=max_frames_per_target)
+    return ImagedFieldCenters(
+        centers=[
+            FieldCenter(
+                ra_deg=float(center["right_ascension_deg"]),
+                dec_deg=float(center["declination_deg"]),
+                target_ids=[str(target_id) for target_id in center["target_ids"]],
+                frames_examined=int(center["frames_examined"]),
+            )
+            for center in found
+        ]
+    )
 
 
 def derive_field_centers(

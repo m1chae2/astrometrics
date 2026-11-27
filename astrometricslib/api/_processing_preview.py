@@ -140,7 +140,7 @@ def remake_preview(
         # "Making the preview" for a job that is over.
         job.mark("running", 100, message="Preview made")
     if result.shown_in_viewer:
-        self._targets.save()
+        self._targets._save()
     return result
 
 

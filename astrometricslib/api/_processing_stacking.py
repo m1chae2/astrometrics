@@ -215,7 +215,7 @@ def stack(
             log_file=log_file,
         ),
         stacking_slot=self.acquire_job_slot,
-        save_targets=self._targets.save,
+        save_targets=self._targets._save,
         drivers=self._drivers,
         measured_at=datetime.now(UTC),
         quality_recording=FrameQualityRecording(

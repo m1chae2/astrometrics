@@ -72,22 +72,20 @@ class _TargetsOnDemand:
     def __init__(self, pipelines: ProcessingPipelines) -> None:
         self._pipelines = pipelines
 
-    def get(self, target_id: str, refresh: bool = False) -> Target | None:
+    def get(self, target_id: str) -> Target | None:
         """Find one target by its id.
 
         Parameters
         ----------
         target_id : `str`
             The target's id, matched loosely.
-        refresh : `bool`, optional
-            Read the stored targets first.
 
         Returns
         -------
         target : `Target` or `None`
             The target, or `None` when no target has that id.
         """
-        return self._pipelines._targets.get(target_id, refresh=refresh)
+        return self._pipelines._targets.get(target_id)
 
 
 class ProcessingPipelines(MovedNames):
@@ -259,7 +257,7 @@ class ProcessingPipelines(MovedNames):
         entry, not an error) when the target has no spectral data. Each
         stage's own options are a separate dictionary, so an option meant
         for one stage never reaches another. Nothing is saved; save the
-        target afterwards.
+        target afterwards with ``targets.update(target)``.
 
         Photometry and spectroscopy need astrometry. With
         ``run_prerequisites`` (the default), astrometry is added to the run
@@ -395,7 +393,7 @@ class ProcessingPipelines(MovedNames):
             from astrometricslib.pipelines.target_batch import process_targets_in_parallel
 
             if target is None:
-                target_ids = [item.id for item in self._targets.query(detail="objects", limit=None).objects]
+                target_ids = [item.id for item in self._targets.query(include_empty=True).items]
             else:
                 target_ids = [self._resolve(item).id for item in target]
             return process_targets_in_parallel(

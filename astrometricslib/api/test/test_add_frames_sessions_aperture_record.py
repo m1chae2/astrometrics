@@ -9,9 +9,11 @@ reads the per-aperture noise file beside a stack.
 import json
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from astrometricslib.api.calibration import CalibrationCatalog
@@ -69,22 +71,25 @@ def _write_frame(path: Path, frame_type: str) -> str:
     return str(path)
 
 
-def test_target_add_frames_moves_lights_under_the_target(tmp_path: Path) -> None:
-    """A light file named on its own is moved and its new path returned."""
+def test_target_frames_add_moves_lights_under_the_target(tmp_path: Path) -> None:
+    """A light file from outside the library is moved, indexed and returned."""
     incoming = tmp_path / "incoming"
     incoming.mkdir()
     light = _write_frame(incoming / "light.fits", "Light")
     storage = MagicMock()
-    storage.get.return_value = [Target(id="M31")]
+    target = Target(id="M31")
+    storage.get.return_value = [target]
+    del storage.merge_and_record
     catalog = TargetCatalog(_library_config(tmp_path / "library"), storage)
 
-    added = catalog.add_frames([light], "M31", telescope="Scope")
+    added = catalog.frames.add(target, [light])
 
     assert len(added) == 1
-    assert Path(added[0]).exists()
+    assert Path(added[0].path).exists()
     assert not Path(light).exists()
-    assert "lights" in Path(added[0]).parts
-    assert "M31" in Path(added[0]).parts
+    assert "lights" in Path(added[0].path).parts
+    assert "M31" in Path(added[0].path).parts
+    assert [frame.path for frame in target.frames] == [added[0].path]
 
 
 def test_calibration_add_frames_leaves_lights_and_moves_darks(tmp_path: Path) -> None:
@@ -103,7 +108,7 @@ def test_calibration_add_frames_leaves_lights_and_moves_darks(tmp_path: Path) ->
 
 
 def test_sessions_groups_by_night_and_can_pick_one() -> None:
-    """Frames on two nights give two sessions, and `night_date` picks one."""
+    """Frames on two nights give two sessions, and `night` picks one."""
     first_night = 1_760_000_000.0
     second_night = first_night + 2 * 86_400.0
     target = Target(
@@ -119,13 +124,13 @@ def test_sessions_groups_by_night_and_can_pick_one() -> None:
     storage.get.return_value = [target]
     catalog = TargetCatalog(AppConfiguration(), storage)
 
-    sessions = catalog.sessions("M13")
+    sessions = catalog.frames.get_nights(target)
 
     assert [len(session.frame_paths) for session in sessions] == [2, 1]
     assert sessions[0].night_date == compute_session_night(first_night)
-    only_second = catalog.sessions("M13", night_date=compute_session_night(second_night))
+    only_second = catalog.frames.get_nights(target, night=compute_session_night(second_night))
     assert [session.id for session in only_second] == [sessions[1].id]
-    assert catalog.sessions("M13", night_date=date(2000, 1, 1)) == []
+    assert len(catalog.frames.get_nights(target, night=date(2000, 1, 1))) == 0
 
 
 def test_get_aperture_record_reads_the_file_or_gives_none(tmp_path: Path) -> None:
@@ -144,3 +149,43 @@ def test_get_aperture_record_reads_the_file_or_gives_none(tmp_path: Path) -> Non
     assert record.apertures == []
     assert records.get_aperture_record(str(other)) is None
     assert records.get_aperture_record(str(tmp_path / "missing.json")) is None
+
+
+def test_target_frames_add_indexes_a_sorted_frame_where_it_is(tmp_path: Path) -> None:
+    """A light frame already in its camera folder is indexed, not moved."""
+    folder = tmp_path / "library" / "frames" / "lights" / "M31" / "Scope" / "Camera"
+    folder.mkdir(parents=True)
+    light = _write_frame(folder / "light.fits", "Light")
+    target = Target(id="M31")
+    storage = MagicMock()
+    storage.get.return_value = [target]
+    del storage.merge_and_record
+    config = _library_config(tmp_path / "library")
+    config.get_frames_path = lambda: tmp_path / "library" / "frames"
+    catalog = TargetCatalog(config, storage)
+
+    added = catalog.frames.add(target, [light])
+
+    assert [frame.path for frame in added] == [light]
+    assert Path(light).exists()
+
+
+def test_target_frames_scan_counts_folders_as_the_jobs_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A library scan inside a job reports each target folder as progress."""
+    from astrometricslib.pipelines.shared import target_frames, target_records
+
+    lights = tmp_path / "frames" / "lights"
+    (lights / "M31").mkdir(parents=True)
+    (lights / "M33").mkdir()
+    job = MagicMock()
+    monkeypatch.setattr("astrometricslib.foundation.jobs.runner.get_current_job", lambda: job)
+    monkeypatch.setattr(target_frames, "_scan_one", lambda catalog, target, prune: None)
+    monkeypatch.setattr(target_records, "get_target", lambda api, target_id: Target(id=target_id))
+    catalog = SimpleNamespace(_config=SimpleNamespace(get_frames_path=lambda: tmp_path / "frames"))
+
+    report = target_frames.scan_frames(catalog)
+
+    assert [change.target_id for change in report.targets] == ["M31", "M33"]
+    assert [call.args[:2] for call in job.report_count.call_args_list] == [(0, 2), (1, 2)]

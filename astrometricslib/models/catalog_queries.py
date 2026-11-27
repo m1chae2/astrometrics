@@ -3,21 +3,22 @@
 The three catalogs each have one general lookup, `query`, that reads and
 never changes anything. These structures are what those lookups return:
 
-- `TargetQueryResult` from `TargetCatalog.query`: target rows, full `Target`
-  records, one target's full record, the cameras used, the observing
-  nights, or each target's frames per camera.
+- `TargetCameraCounts` from `TargetCatalog.count_by_camera`: the frames each
+  camera took, and each target's frames per configured camera.
+- `TargetNightCounts` from `TargetCatalog.count_by_night`: how many targets
+  have frames from each observing night.
 - `StarQueryResult` from `StellarCatalog.query`: star ids, summary rows,
   analysis records, full star records, class counts, per-target star
   counts (`TargetStarCount`), the stars drawn over a target's image
   (`OverlayStar`), or library statistics.
 - `CalibrationQueryResult` from `CalibrationCatalog.query`: how many dark,
   bias and flat frames the library holds, or how a target's frames match it.
-- `ReindexReport` from `TargetCatalog.reindex_frames`, which does change
-  data: how many frames each target gained or lost.
+- `ReindexReport` from `TargetFrames.scan`, which does change data: how many
+  frames each target gained or lost.
 
-Only the fields that belong to the chosen ``detail`` are filled; the rest
-stay `None`. Rows are plain dictionaries, so a caller can pass them on as
-JSON unchanged.
+For the star and calibration answers, only the fields that belong to the
+chosen ``detail`` are filled; the rest stay `None`. Rows are plain
+dictionaries, so a caller can pass them on as JSON unchanged.
 """
 
 from typing import Any
@@ -25,42 +26,53 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.models.target import Target
 
 __all__ = [
     "CalibrationQueryResult",
     "OverlayStar",
     "ReindexReport",
     "StarQueryResult",
-    "TargetQueryResult",
+    "TargetCameraCounts",
+    "TargetNightCounts",
     "TargetReindexChange",
     "TargetStarCount",
 ]
 
 
-class TargetQueryResult(BaseModel):
-    """The answer of `TargetCatalog.query`."""
+class TargetCameraCounts(BaseModel):
+    """The answer of `TargetCatalog.count_by_camera`.
 
-    detail: str
-    # For lists: how many targets matched, the rows skipped, and whether the
-    # list was cut by the limit.
-    total_matching: int | None = None
-    offset: int | None = None
-    truncated: bool | None = None
-    # detail="summary": one short row per target.
-    targets: list[dict[str, Any]] | None = None
-    # detail="objects": the full `Target` records, in stored order.
-    objects: list[Target] | None = None
-    # detail="full": one target's record, with its frames grouped.
-    target: dict[str, Any] | None = None
-    # detail="cameras": each camera name and how many frames it took.
-    cameras: dict[str, int] | None = None
-    # detail="nights": each observing night and how many targets have frames
-    # from it.
-    nights: dict[str, int] | None = None
-    # detail="camera_index": each target's light frames per configured
-    # camera, for the app's target list.
-    camera_index: dict[str, Any] | None = None
+    Parameters
+    ----------
+    frames_by_camera : `dict` [`str`, `int`]
+        Each camera name, as the frame headers spell it, and how many light
+        frames it took.
+    camera_index : `dict` [`str`, `Any`]
+        Each configured camera with how many targets it imaged, and per
+        target the newest light-frame time and the light frames of each
+        configured camera (see
+        `astrometricslib.pipelines.shared.target_camera_index`).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    frames_by_camera: dict[str, int] = Field(default_factory=dict)
+    camera_index: dict[str, Any] = Field(default_factory=dict)
+
+
+class TargetNightCounts(BaseModel):
+    """The answer of `TargetCatalog.count_by_night`.
+
+    Parameters
+    ----------
+    targets_by_night : `dict` [`str`, `int`]
+        Each observing night (``YYYY-MM-DD``) and how many targets have
+        frames from it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    targets_by_night: dict[str, int] = Field(default_factory=dict)
 
 
 class OverlayStar(BaseModel):
@@ -162,7 +174,9 @@ class CalibrationQueryResult(BaseModel):
 
 
 class TargetReindexChange(BaseModel):
-    """How one target's frame list changed in a reindex."""
+    """How one target's frame list changed in a scan."""
+
+    model_config = ConfigDict(frozen=True)
 
     target_id: str
     frames_before: int
@@ -172,11 +186,8 @@ class TargetReindexChange(BaseModel):
 
 
 class ReindexReport(BaseModel):
-    """What `TargetCatalog.reindex_frames` changed."""
+    """What `TargetFrames.scan` changed."""
+
+    model_config = ConfigDict(frozen=True)
 
     targets: list[TargetReindexChange] = Field(default_factory=list)
-    # Paths that were asked for and are now frame records.
-    added_paths: list[str] = Field(default_factory=list)
-    # The path, among those asked for, that became the target's processed
-    # image (a .jpg, .png or .tiff picture rather than a FITS frame).
-    processed_image: str | None = None

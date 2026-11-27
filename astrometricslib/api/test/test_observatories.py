@@ -5,7 +5,7 @@ settings file with one setup, then checks that the first call seeds the
 setup's configuration and matches the stored frames to it, that `scan`
 adds a configuration for new settings, that `create`, `get`, `query` and
 `update` work through the public object, that each method names its owner,
-and that `targets.select_frames(configuration=...)` keeps only that
+and that `targets.frames.query(target, configuration=...)` keeps only that
 configuration's frames.
 """
 
@@ -64,7 +64,6 @@ def astrometrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Astrometric
         frame.focal_length_mm = 400.0
         target.frames.append(frame)
     library.targets.add(target)
-    library.targets.save()
     return library
 
 
@@ -84,10 +83,10 @@ def test_the_first_call_seeds_and_matches_the_frames(astrometrics: Astrometrics)
     assert configurations.scan().total == 0
 
 
-def test_select_frames_keeps_one_configurations_frames(astrometrics: Astrometrics) -> None:
+def test_frame_query_keeps_one_configurations_frames(astrometrics: Astrometrics) -> None:
     """Choosing by configuration keeps only the frames of that equipment."""
     mono = next(item for item in astrometrics.observatories.configurations.query(text="mono on"))
-    chosen = astrometrics.targets.select_frames("M13", configuration=mono)
+    chosen = astrometrics.targets.frames.query(astrometrics.targets.get("M13"), configuration=mono)
     assert [frame.camera for frame in chosen] == ["Mono Camera"]
 
 

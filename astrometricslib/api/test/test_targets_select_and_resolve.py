@@ -1,4 +1,4 @@
-"""Purpose: Test `TargetCatalog.select_frames` and `TargetCatalog.get`.
+"""Purpose: Test `TargetFrames.query` and `TargetCatalog.get`.
 
 Description: Builds a catalog holding one target with a few timed light
 frames, a dark and a spectroscopy frame, then checks that the frame choice
@@ -87,68 +87,68 @@ def _names(frames: list[FrameRecord]) -> list[str]:
     return [frame.path[-8:-5] for frame in frames]
 
 
-def test_select_frames_keeps_timed_lights_oldest_first() -> None:
+def test_frame_query_keeps_timed_lights_oldest_first() -> None:
     """Darks and frames with no time are left out."""
-    catalog, _ = _catalog()
-    assert _names(catalog.select_frames("M13")) == ["001", "002", "003", "005", "007"]
+    catalog, target = _catalog()
+    assert _names(catalog.frames.query(target)) == ["001", "002", "003", "005", "007"]
 
 
-def test_select_frames_filter_and_file_range() -> None:
+def test_frame_query_filter_and_file_range() -> None:
     """The filter and the file range both narrow the choice."""
-    catalog, _ = _catalog()
-    assert _names(catalog.select_frames("M13", filter_name="r")) == ["002"]
-    assert _names(catalog.select_frames("M13", first_file="003", last_file="005")) == ["003", "005"]
+    catalog, target = _catalog()
+    assert _names(catalog.frames.query(target, filter_name="r")) == ["002"]
+    assert _names(catalog.frames.query(target, first_file="003", last_file="005")) == ["003", "005"]
 
 
-def test_select_frames_time_range_with_offset_and_utc() -> None:
+def test_frame_query_time_range_with_offset_and_utc() -> None:
     """ISO times with an offset or none bound the start time."""
-    catalog, _ = _catalog()
+    catalog, target = _catalog()
     start = datetime.fromtimestamp(_START + 120.0, tz=UTC)
     until_without_offset = (start + timedelta(seconds=180)).replace(tzinfo=None).isoformat()
-    chosen = catalog.select_frames("M13", since=start.isoformat(), until=until_without_offset)
+    chosen = catalog.frames.query(target, since=start.isoformat(), until=until_without_offset)
     assert _names(chosen) == ["002", "003", "005"]
     offset_text = start.astimezone(timezone(timedelta(hours=-6))).isoformat()
-    assert _names(catalog.select_frames("M13", since=offset_text, until=offset_text)) == ["002"]
+    assert _names(catalog.frames.query(target, since=offset_text, until=offset_text)) == ["002"]
 
 
-def test_select_frames_takes_a_datetime_and_an_astropy_time() -> None:
+def test_frame_query_takes_a_datetime_and_an_astropy_time() -> None:
     """A `datetime` and an astropy `Time` bound the start time as text does."""
     from astropy.time import Time
 
-    catalog, _ = _catalog()
+    catalog, target = _catalog()
     start = datetime.fromtimestamp(_START + 120.0, tz=UTC)
-    chosen = catalog.select_frames("M13", since=start, until=Time(start + timedelta(seconds=180)))
+    chosen = catalog.frames.query(target, since=start, until=Time(start + timedelta(seconds=180)))
     assert _names(chosen) == ["002", "003", "005"]
 
 
-def test_select_frames_limit_takes_newest_without_bounds_and_first_with() -> None:
-    """Without a bound the newest frames are kept; with one, the first."""
-    catalog, _ = _catalog()
-    assert _names(catalog.select_frames("M13", limit=2)) == ["005", "007"]
-    assert _names(catalog.select_frames("M13", first_file="002", limit=2)) == ["002", "003"]
-
-
-def test_select_frames_accepts_target_object_and_checks_arguments() -> None:
-    """A `Target` works; bad times, bad limits and unknown ids raise."""
+def test_frame_query_limit_pages_the_frames_in_order() -> None:
+    """A limit cuts the page; ``order_by="newest"`` puts the newest first."""
     catalog, target = _catalog()
-    assert len(catalog.select_frames(target)) == 5
-    with pytest.raises(InvalidArgumentError):
-        catalog.select_frames("M13", since="yesterday-ish")
-    with pytest.raises(InvalidArgumentError):
-        catalog.select_frames("M13", limit=0)
-    with pytest.raises(NotFoundError):
-        catalog.select_frames("nope")
+    assert _names(catalog.frames.query(target, limit=2)) == ["001", "002"]
+    assert _names(catalog.frames.query(target, order_by="newest", limit=2)) == ["007", "005"]
+    assert _names(catalog.frames.query(target, first_file="002", limit=2)) == ["002", "003"]
+    assert catalog.frames.query(target, limit=2).next_offset == 2
 
 
-def test_get_returns_target_for_id_and_object_and_can_require_one() -> None:
-    """An id and a `Target` are found; ``required`` refuses an unknown id."""
+def test_frame_query_checks_arguments() -> None:
+    """Bad times, bad limits and an id in place of a `Target` raise."""
+    catalog, target = _catalog()
+    assert len(catalog.frames.query(target)) == 5
+    with pytest.raises(InvalidArgumentError):
+        catalog.frames.query(target, since="yesterday-ish")
+    with pytest.raises(InvalidArgumentError):
+        catalog.frames.query(target, limit=0)
+    with pytest.raises(InvalidArgumentError):
+        catalog.frames.query("M13")  # type: ignore[arg-type]
+
+
+def test_get_returns_target_for_id_and_can_require_one() -> None:
+    """An id is found; ``required`` refuses an unknown id."""
     catalog, target = _catalog()
     assert catalog.get("M13", required=True) is target
-    assert catalog.get(target) is target
+    assert catalog.get("m13") is target
     assert catalog.get("M99") is None
     with pytest.raises(NotFoundError):
         catalog.get("M99", required=True)
     with pytest.raises(InvalidArgumentError):
         catalog.get("  ")
-    with pytest.raises(InvalidArgumentError):
-        catalog.get("M13", refresh="disk")

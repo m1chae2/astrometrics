@@ -1,4 +1,4 @@
-"""What `TargetCatalog.imaged_field_centers` returns: the places imaged.
+"""What `TargetCatalog.measure_field_centers` returns: the places imaged.
 
 - `FieldCenter` is one distinct sky position and the targets that share it.
 - `ImagedFieldCenters` is the whole list.

@@ -11,13 +11,15 @@ from astrometricslib.models.catalog_queries import (
     OverlayStar,
     ReindexReport,
     StarQueryResult,
-    TargetQueryResult,
+    TargetCameraCounts,
+    TargetNightCounts,
     TargetReindexChange,
     TargetStarCount,
 )
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
 from astrometricslib.models.quality.quality_summary import TargetSessionContribution
+from astrometricslib.models.resolution import Resolution
 from astrometricslib.models.stellar_source import FileItem, GroupedFrameStat, TargetFilesResponse
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
 
@@ -33,9 +35,11 @@ __all__ = [
     "OverlayStar",
     "ReindexReport",
     "RenderedImage",
+    "Resolution",
     "StarQueryResult",
+    "TargetCameraCounts",
     "TargetFilesResponse",
-    "TargetQueryResult",
+    "TargetNightCounts",
     "TargetReindexChange",
     "TargetSessionContribution",
     "TargetStarCount",

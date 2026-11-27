@@ -45,7 +45,7 @@ def restore_excluded_frames(
     saves it. The next stack may set the same frames aside again. To
     keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
     the configuration first. To only read the list, use
-    ``Astrometrics.quality.set_aside_frames``.
+    ``Astrometrics.targets.frames.get_set_aside``.
 
     Parameters
     ----------
@@ -75,7 +75,9 @@ def restore_excluded_frames(
         for folder in find_quarantine_folders(frames_path, resolved.id):
             restored_count += len(restore_quarantined_frames(folder))
         if restored_count:
-            pipelines._targets.reindex_frames(resolved)
+            from astrometricslib.pipelines.shared.target_frames import scan_frames
+
+            scan_frames(pipelines._targets, resolved)
     return RestoreReport(target_id=resolved.id, applied=apply, frames=frames, restored_count=restored_count)
 
 

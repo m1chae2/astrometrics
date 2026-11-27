@@ -25,9 +25,9 @@ class _Catalog:
             The stored targets.
         """
         self.by_id = {target.id: target for target in targets}
-        self.lookups: list[tuple[str, bool]] = []
+        self.lookups: list[str] = []
 
-    def get(self, target_id: str, refresh: bool = False) -> Target | None:
+    def get(self, target_id: str) -> Target | None:
         """Record the lookup and answer it.
 
         Returns
@@ -35,16 +35,16 @@ class _Catalog:
         target : `Target` or `None`
             The target with that id, if any.
         """
-        self.lookups.append((target_id, refresh))
+        self.lookups.append(target_id)
         return self.by_id.get(target_id)
 
 
-def test_a_name_is_looked_up_after_a_fresh_read() -> None:
-    """A target id asks the catalog to re-read its stored targets."""
+def test_a_name_is_looked_up_in_the_catalog() -> None:
+    """A target id is looked up once (the catalog reads what changed)."""
     catalog = _Catalog([Target(id="M 13")])
 
     assert resolve_target(catalog, "M 13").id == "M 13"
-    assert catalog.lookups == [("M 13", True)]
+    assert catalog.lookups == ["M 13"]
 
 
 def test_a_target_object_is_returned_without_a_lookup() -> None:

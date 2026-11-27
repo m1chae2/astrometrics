@@ -43,7 +43,7 @@ def run_script(arguments: list[str], applied_count: int) -> tuple[MagicMock, Mag
     """
     astrometrics = MagicMock()
     target = SimpleNamespace(id="M 1")
-    astrometrics.targets.query.return_value.objects = [target]
+    astrometrics.targets.query.return_value.items = (target,)
     astrometrics.targets.get.return_value = target
     restore = MagicMock()
     restore.side_effect = lambda pipelines, target, apply: RestoreReport(
@@ -66,7 +66,7 @@ def test_without_apply_the_script_only_lists_and_never_saves() -> None:
 
     call = restore.call_args
     assert call.kwargs["apply"] is False
-    astrometrics.targets.save.assert_not_called()
+    astrometrics.targets._save.assert_not_called()
 
 
 def test_with_apply_the_script_restores_and_saves() -> None:
@@ -75,11 +75,11 @@ def test_with_apply_the_script_restores_and_saves() -> None:
 
     call = restore.call_args
     assert call.kwargs["apply"] is True
-    astrometrics.targets.save.assert_called_once()
+    astrometrics.targets._save.assert_called_once()
 
 
 def test_with_apply_and_nothing_restored_the_script_does_not_save() -> None:
     """A target with nothing to restore leaves the catalog alone."""
     astrometrics, _ = run_script(["--apply"], applied_count=0)
 
-    astrometrics.targets.save.assert_not_called()
+    astrometrics.targets._save.assert_not_called()

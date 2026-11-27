@@ -161,7 +161,7 @@ class TestProcessTargetsInParallel:
         config.get_photometry_workers.return_value = "auto"
         config.get_worker_niceness.return_value = 5
         targets = MagicMock()
-        targets.query.return_value.objects = [Target(id=target_id) for target_id in target_ids]
+        targets.query.return_value.items = tuple(Target(id=target_id) for target_id in target_ids)
         targets.get.side_effect = lambda target_id, refresh=False: Target(id=target_id)
         return ProcessingPipelines(config, MagicMock(), targets=targets)
 

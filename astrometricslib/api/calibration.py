@@ -436,7 +436,7 @@ class CalibrationCatalog(MovedNames):
 
         Each path is a folder to search or a single FITS file. A file is
         sorted by its header into the calibration folders. A light frame is
-        left where it is: `TargetCatalog.add_frames` moves those. Files are
+        left where it is: `TargetFrames.add` moves those. Files are
         moved, not copied, and a file that cannot be read stays where it is.
         The call does not update the index: call `reindex_frames` and `save`
         for that.

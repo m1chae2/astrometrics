@@ -37,7 +37,7 @@ def _library(*frames: SimpleNamespace) -> SimpleNamespace:
         An object whose ``targets.query`` gives that one target.
     """
     target = SimpleNamespace(frames=list(frames))
-    return SimpleNamespace(targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[target])))
+    return SimpleNamespace(targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(items=(target,))))
 
 
 def _frame(camera: str, path: str, role: str = "LIGHT") -> SimpleNamespace:

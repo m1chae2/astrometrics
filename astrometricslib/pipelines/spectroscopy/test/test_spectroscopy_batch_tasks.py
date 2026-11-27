@@ -240,7 +240,6 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
 
         astrometrics = Astrometrics()
         astrometrics.targets.create("WorkerFallbackTestTarget")
-        astrometrics.targets.save()
 
         result = batch._process_single_spectroscopy_frame_worker_v2(
             str(frame_path), "WorkerFallbackTestTarget", [], None
@@ -260,7 +259,6 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
 
         astrometrics = Astrometrics()
         astrometrics.targets.create("WorkerNoWcsFallbackTarget")
-        astrometrics.targets.save()
 
         seed_star = _make_seed_star()
 

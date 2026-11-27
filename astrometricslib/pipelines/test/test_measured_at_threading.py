@@ -120,7 +120,7 @@ def test_the_rebuild_script_path_stores_frame_quality(
     received, store = _stack_that_records_quality(tmp_path, monkeypatch)
     target = _target(tmp_path)
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda name: target, save=MagicMock()),
+        targets=SimpleNamespace(get=lambda name: target, _save=MagicMock()),
         config=SimpleNamespace(get_frames_path=lambda: tmp_path, get_library_path=lambda: tmp_path),
     )
     library = _recording(tmp_path).calibration_library

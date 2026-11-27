@@ -1134,7 +1134,7 @@ def test_stamps_reach_storage_when_the_targets_are_listed_during_measurement(
             selection : `CalibrationSelection`
                 The bias frames.
             """
-            astrometrics.targets.query(detail="objects", limit=None)
+            astrometrics.targets.query(include_empty=True)
             return super().select_bias_frames(camera, **settings)
 
     recording = FrameQualityRecording(

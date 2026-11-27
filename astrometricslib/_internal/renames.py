@@ -26,7 +26,29 @@ __all__ = ["RENAMES", "MovedNames"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
-RENAMES: dict[str, str] = {}
+RENAMES: dict[str, str] = {
+    # Step 4a: targets and their frames.
+    "astrometricslib.TargetCatalog.select_frames": "astrometrics.targets.frames.query(target, ...)",
+    "astrometricslib.TargetCatalog.get_frame": (
+        "astrometrics.targets.frames.query(target, gain=..., exposure_s=...)[index].path"
+    ),
+    "astrometricslib.TargetCatalog.reindex_frames": (
+        "astrometrics.targets.frames.add(target, paths) or astrometrics.targets.frames.scan(target)"
+    ),
+    "astrometricslib.TargetCatalog.add_frames": "astrometrics.targets.frames.add(target, paths)",
+    "astrometricslib.TargetCatalog.delete_images": "astrometrics.targets.frames.delete(target, frames)",
+    "astrometricslib.TargetCatalog.display_turn": "astrometrics.targets.frames.get_rotation(target, frame)",
+    "astrometricslib.TargetCatalog.read_frame_header": "astrometrics.targets.frames.get_header(path)",
+    "astrometricslib.TargetCatalog.sessions": "astrometrics.targets.frames.get_nights(target, night=...)",
+    "astrometricslib.TargetCatalog.save": "astrometrics.targets.update(target, **changes)",
+    "astrometricslib.TargetCatalog.imaged_field_centers": "astrometrics.targets.measure_field_centers()",
+    "astrometricslib.QualityRecords.frame_statuses": "astrometrics.targets.frames.get_statuses(target)",
+    "astrometricslib.QualityRecords.set_aside_frames": "astrometrics.targets.frames.get_set_aside(target)",
+    "astrometricslib.QualityRecords.put_back_set_aside_frames": (
+        "astrometrics.targets.frames.restore(target, frames)"
+    ),
+    "astrometricslib.QualityRecords.forget": "astrometrics.targets.frames.delete(target, frames)",
+}
 
 
 class MovedNames:

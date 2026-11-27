@@ -37,7 +37,7 @@ class ObservatoryConfigurations(MovedNames):
     Any change of equipment is a new configuration (`create`); only the
     name, notes and dates of a stored one change (`update`). Frames are
     chosen by configuration with
-    ``astrometrics.targets.select_frames(target, configuration=...)``.
+    ``astrometrics.targets.frames.query(target, configuration=...)``.
 
     Parameters
     ----------

@@ -274,6 +274,11 @@ class StackConfigurationResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     configuration_key: str = Field(alias="configurationKey")
+    # The observatory configuration the stacked frames point at (their
+    # ``configuration_id``), or `None` for a stack recorded before frames
+    # had one, or made from frames of several configurations. Such a stack
+    # is matched to a configuration by ``configuration_key`` instead.
+    configuration_id: str | None = Field(default=None, alias="configurationId")
     camera: str = Field(default="", alias="camera")
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
     frames_stacked: int = Field(default=0, alias="framesStacked")

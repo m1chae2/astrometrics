@@ -1,6 +1,6 @@
 """Purpose: The status of each frame of a target in its stack.
 
-Description: The models `QualityRecords.frame_statuses` returns, one entry
+Description: The models `TargetFrames.get_statuses` returns, one entry
 per frame, for the File Browser's Status column.
 """
 

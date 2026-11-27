@@ -218,7 +218,7 @@ def test_hand_entered_position_clears_the_unverified_flag(monkeypatch: pytest.Mo
     target = Target(id="M 57", ra="18 55 54.17", dec="+32 37 45.85", position_unverified=True)
     monkeypatch.setattr(target_records, "get_target", lambda _api, _target_id: target)
     monkeypatch.setattr(target_records, "save_targets", lambda _api: None)
-    target_records.update_target(SimpleNamespace(), "M 57", {"ra": "18 53 35.08"})
+    target_records.update_target(SimpleNamespace(), target, {"ra": "18 53 35.08"})
     assert not target.position_unverified
 
 

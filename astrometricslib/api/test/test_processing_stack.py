@@ -65,7 +65,7 @@ def library(monkeypatch: pytest.MonkeyPatch) -> tuple[ProcessingPipelines, Simpl
 
     monkeypatch.setattr(stacking_stage, "stack_frames", stack_frames)
     pipelines = ProcessingPipelines(
-        AppConfiguration(), None, targets=SimpleNamespace(save=save, get=lambda *_: None)
+        AppConfiguration(), None, targets=SimpleNamespace(_save=save, get=lambda *_: None)
     )
     monkeypatch.setattr(pipelines, "acquire_job_slot", nullcontext)
     return pipelines, record

@@ -1,10 +1,10 @@
-"""What `TargetCatalog.delete_images` returns: files removed and not.
+"""What `TargetFrames.delete` returns: files removed and not.
 
 - `FailedDeletion` is one file that could not be removed, with the reason.
 - `ImageDeletionResult` is the whole answer.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["FailedDeletion", "ImageDeletionResult"]
 
@@ -20,6 +20,8 @@ class FailedDeletion(BaseModel):
         Why the file could not be removed.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     path: str
     reason: str
 
@@ -34,6 +36,8 @@ class ImageDeletionResult(BaseModel):
     failed : `list` [`FailedDeletion`]
         Each path that could not be removed, with the reason.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     deleted: list[str] = Field(default_factory=list)
     failed: list[FailedDeletion] = Field(default_factory=list)

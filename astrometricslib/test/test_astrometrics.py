@@ -32,11 +32,11 @@ def test_astrometrics_target_access(tmp_path: Path) -> None:
         astrometrics = Astrometrics(config=config)
 
         # Verify initial state
-        assert len(astrometrics.targets.query(detail="objects", limit=None).objects) == 0
+        assert len(astrometrics.targets.query(include_empty=True).items) == 0
 
         astrometrics.targets.create("Vega")
 
-        targets = astrometrics.targets.query(detail="objects", limit=None).objects
+        targets = astrometrics.targets.query(include_empty=True).items
         assert len(targets) == 1
         assert targets[0].id == "Vega"
     finally:

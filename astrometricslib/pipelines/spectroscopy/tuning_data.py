@@ -114,7 +114,7 @@ def spectral_target_stars(
     """
     wanted_camera = camera_identity(camera_name, configuration)
     found: list[SpectralTargetStars] = []
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in astrometrics.targets.query(include_empty=True).items:
         stack_path = target.spectral_stacking.stacked_image
         if not stack_path:
             continue

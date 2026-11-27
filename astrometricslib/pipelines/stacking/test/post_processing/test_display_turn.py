@@ -15,12 +15,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking.post_processing.display_turn import (
     display_turn_degrees,
     frame_north_angle_degrees,
+    frame_rotation,
     nearest_quarter_turn,
 )
 
@@ -107,8 +107,8 @@ def test_no_turn_without_a_solved_stack_for_a_solved_frame_or_a_turned_frame() -
     assert display_turn_degrees({**FRAME_001, "QTURN": 180}, stack_header()) == 0
 
 
-def test_the_target_api_reads_the_frame_and_the_stack(tmp_path: Path) -> None:
-    """The catalog reads both headers; a file of another target is refused."""
+def test_the_rotation_owner_reads_the_frame_and_the_stack(tmp_path: Path) -> None:
+    """`frame_rotation` reads both headers; a stranger's file is refused."""
     stack = tmp_path / "NGC_7331_Stacked.fits"
     fits.PrimaryHDU(np.zeros((80, 100), dtype=np.float32), header=stack_header()).writeto(stack)
     frame = tmp_path / "NGC_7331_001.fits"
@@ -120,10 +120,10 @@ def test_the_target_api_reads_the_frame_and_the_stack(tmp_path: Path) -> None:
         id="NGC 7331", frames=[FrameRecord(path=str(frame)), FrameRecord(path=str(tmp_path / "gone.fits"))]
     )
     target.stacking.stacked_image = str(stack)
-    catalog = TargetCatalog.__new__(TargetCatalog)
 
-    assert catalog.display_turn(str(frame), target) == 180
-    assert catalog.display_turn(str(stack), target) == 0
-    assert catalog.display_turn(str(tmp_path / "gone.fits"), target) == 0
+    assert frame_rotation(target, str(frame)) == 180
+    assert frame_rotation(target, target.frames[0]) == 180
+    assert frame_rotation(target, str(stack)) == 0
+    assert frame_rotation(target, str(tmp_path / "gone.fits")) == 0
     with pytest.raises(InvalidArgumentError):
-        catalog.display_turn("/elsewhere.fits", target)
+        frame_rotation(target, "/elsewhere.fits")

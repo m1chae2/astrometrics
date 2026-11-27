@@ -1,6 +1,6 @@
 """Tests for refreshing the target catalog only when storage changed.
 
-`TargetCatalog.list` and `TargetCatalog.get(refresh=True)` read what other
+`TargetCatalog.list` and `TargetCatalog.get` read what other
 programs saved. They skip the read when the library's write counter shows
 nothing was written, and read only one row when the caller wants one target.
 These tests check that the answers are the same as a full read would give,
@@ -99,8 +99,8 @@ def test_a_second_list_with_nothing_written_does_not_read(config: AppConfigurati
     catalog, access, _other = _library(config)
     reads_at_start = access.full_reads
 
-    first = catalog.query(detail="objects", limit=None).objects
-    second = catalog.query(detail="objects", limit=None).objects
+    first = catalog.query(include_empty=True).items
+    second = catalog.query(include_empty=True).items
 
     assert access.full_reads == reads_at_start
     assert [target.id for target in first] == ["M 1", "M 2"]
@@ -118,14 +118,14 @@ def test_a_write_by_another_program_is_seen_by_list(config: AppConfiguration) ->
     )
     reads_before = access.full_reads
 
-    listed = catalog.query(detail="objects", limit=None).objects
+    listed = catalog.query(include_empty=True).items
 
     assert access.full_reads == reads_before + 1
     assert sorted(target.id for target in listed) == ["M 1", "M 2", "M 3"]
     assert next(target for target in listed if target.id == "M 1") is held
     assert held.common_name == "Changed"
     # The next call has nothing new to read.
-    catalog.query(detail="objects", limit=None)
+    catalog.query(include_empty=True)
     assert access.full_reads == reads_before + 1
 
 
@@ -141,35 +141,35 @@ def test_unsaved_edits_survive_a_refresh(config: AppConfiguration) -> None:
         lambda _old, new: new,
     )
 
-    catalog.query(detail="objects", limit=None)
+    catalog.query(include_empty=True)
     assert edited.common_name == "My edit"
     assert untouched.common_name == "Elsewhere"
 
     # The same holds when one target is refreshed on its own.
     other.merge_and_record("target_catalog", [Target(id="M 1", common_name="Again")], lambda _o, new: new)
-    assert catalog.get("M 1", refresh=True).common_name == "My edit"
+    assert catalog.get("M 1").common_name == "My edit"
 
 
 def test_refreshing_one_target_reads_one_row(config: AppConfiguration) -> None:
-    """`get(refresh=True)` reads one row after a write, else none."""
+    """`get` reads one row after a write, else none."""
     catalog, access, other = _library(config)
     held = catalog.get("M 2")
     reads_at_start = access.full_reads
 
-    assert catalog.get("M 2", refresh=True) is held
+    assert catalog.get("M 2") is held
     assert (access.full_reads, access.row_reads) == (reads_at_start, 0)
 
     other.merge_and_record(
         "target_catalog", [Target(id="M 2", common_name="New name", frames=[])], lambda _old, new: new
     )
-    refreshed = catalog.get("m2", refresh=True)
+    refreshed = catalog.get("m2")
 
     assert refreshed is held
     assert held.common_name == "New name"
     assert held.frames == []
     assert access.full_reads == reads_at_start
     assert access.row_reads == 1
-    catalog.get("M 2", refresh=True)
+    catalog.get("M 2")
     assert access.row_reads == 1
 
 
@@ -179,7 +179,7 @@ def test_refreshing_a_target_the_catalog_does_not_hold_reads_all(config: AppConf
     other.merge_and_record("target_catalog", [Target(id="M 9")], lambda _old, new: new)
     reads_before = access.full_reads
 
-    found = catalog.get("M 9", refresh=True)
+    found = catalog.get("M 9")
 
     assert found is not None
     assert found.id == "M 9"
@@ -192,8 +192,8 @@ def test_a_target_deleted_elsewhere_is_dropped_by_refresh(config: AppConfigurati
     catalog.get("M 2")
     other.delete_by_ids("target_catalog", ["M 2"])
 
-    assert catalog.get("M 2", refresh=True) is None
-    assert [target.id for target in catalog.query(detail="objects", limit=None).objects] == ["M 1"]
+    assert catalog.get("M 2") is None
+    assert [target.id for target in catalog.query(include_empty=True).items] == ["M 1"]
 
 
 def test_refreshed_targets_equal_a_full_read(config: AppConfiguration) -> None:
@@ -211,8 +211,8 @@ def test_refreshed_targets_equal_a_full_read(config: AppConfiguration) -> None:
         ],
         lambda _old, new: new,
     )
-    catalog.get("M 1", refresh=True)
-    listed = catalog.query(detail="objects", limit=None).objects
+    catalog.get("M 1")
+    listed = catalog.query(include_empty=True).items
 
     stored = {target.id: target for target in other.get("target_catalog", {})}
     assert {target.id for target in listed} == set(stored)
@@ -224,11 +224,10 @@ def test_a_save_by_this_catalog_is_seen_by_the_next_list(config: AppConfiguratio
     """The catalog's own save is a write; the next list reads again."""
     catalog, access, _other = _library(config)
     target = catalog.get("M 1")
-    target.common_name = "Saved"
-    catalog.save()
+    catalog.update(target, common_name="Saved")
     reads_before = access.full_reads
 
-    listed = catalog.query(detail="objects", limit=None).objects
+    listed = catalog.query(include_empty=True).items
 
     assert access.full_reads == reads_before + 1
     assert next(item for item in listed if item.id == "M 1").common_name == "Saved"
@@ -243,9 +242,9 @@ def test_several_threads_can_refresh_together(config: AppConfiguration) -> None:
         """Refresh the catalog many times, recording any error."""
         try:
             for _ in range(20):
-                catalog.query(detail="objects", limit=None)
-                catalog.get("M 1", refresh=True)
-                catalog.get("M 2", refresh=True)
+                catalog.query(include_empty=True)
+                catalog.get("M 1")
+                catalog.get("M 2")
         except BaseException as error:  # ruff: ignore[blind-except]
             failures.append(error)
 
@@ -266,6 +265,6 @@ def test_several_threads_can_refresh_together(config: AppConfiguration) -> None:
         thread.join(timeout=60)
 
     assert failures == []
-    ids = [target.id for target in catalog.query(detail="objects", limit=None).objects]
+    ids = [target.id for target in catalog.query(include_empty=True).items]
     assert sorted(ids) == ["M 1", "M 2"]
-    assert catalog.get("M 2", refresh=True).common_name == "v9"
+    assert catalog.get("M 2").common_name == "v9"

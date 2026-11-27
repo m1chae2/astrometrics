@@ -19,8 +19,8 @@ settings by itself::
 
 `Astrometrics` has one attribute for each sub-API:
 
-- `targets` (`TargetCatalog`): create, read and save targets, and keep their
-  frame lists current.
+- `targets` (`TargetCatalog`): create, read, change and delete targets; its
+  `frames` (`TargetFrames`) chooses, adds, scans and deletes their frames.
 - `stars` (`StellarCatalog`): the library's star records, catalog queries
   and light-curve (brightness over time) analysis.
 - `processing` (`ProcessingPipelines`): stack a target, remake its preview
@@ -41,15 +41,15 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 24 names:
+The package root holds 25 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
   `warm_earth_orientation_data`;
 - the sub-API classes, which you normally reach as attributes of
-  `Astrometrics` (`TargetCatalog`, `StellarCatalog`, `ProcessingPipelines`,
-  `CalibrationCatalog`, `QualityRecords`, `Visualization` and
-  `Observatories`);
+  `Astrometrics` (`TargetCatalog`, with its `TargetFrames`,
+  `StellarCatalog`, `ProcessingPipelines`, `CalibrationCatalog`,
+  `QualityRecords`, `Visualization` and `Observatories`);
 - the core records: `Target`, `FrameRecord`, `StellarObject` and
   `FilterType`;
 - the equipment: `ObservatoryConfiguration` and the models it is built
@@ -111,6 +111,7 @@ from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import 
 
 if TYPE_CHECKING:
     from astrometricslib._internal.drivers.driver_set import Drivers
+    from astrometricslib.api._target_frames import TargetFrames
     from astrometricslib.api.calibration import CalibrationCatalog
     from astrometricslib.api.jobs import Jobs
     from astrometricslib.api.observatories import Observatories
@@ -140,6 +141,7 @@ _DEFERRED_EXPORTS = {
     "QualityRecords": "astrometricslib.api.quality",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
+    "TargetFrames": "astrometricslib.api._target_frames",
     "Visualization": "astrometricslib.api.visualization",
 }
 
@@ -255,9 +257,7 @@ class Astrometrics(MovedNames):
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
-        self.targets = TargetCatalog(
-            self.config, self._catalog_access, drivers=drivers, quality=lambda: self.quality
-        )
+        self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
         self.stars = StellarCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
             self.config, self._catalog_access, targets=self.targets, drivers=drivers
@@ -296,6 +296,7 @@ __all__ = [
     "StellarObject",
     "Target",
     "TargetCatalog",
+    "TargetFrames",
     "Telescope",
     "Visualization",
     "configure_logging",

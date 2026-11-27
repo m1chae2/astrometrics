@@ -7,7 +7,7 @@ frames back:
 
 - `SetAsideFrame` describes one frame, moved or about to be moved.
 - `RestoreReport` says what a restore listed or moved back.
-- `SetAsideFrameRecord` is one line of `QualityRecords.set_aside_frames`: a
+- `SetAsideFrameRecord` is one line of `TargetFrames.get_set_aside`: a
   frame lying in an `_excluded` folder, with the reason and where the reason
   came from.
 """

@@ -43,15 +43,13 @@ STACK_KINDS = ("imaging", "spectral")
 class TargetLookup(Protocol):
     """Anything that can find a target by its id, such as `TargetCatalog`."""
 
-    def get(self, target_id: str, refresh: bool = False) -> Target | None:
-        """Find one target by its id.
+    def get(self, target_id: str) -> Target | None:
+        """Find one target by its id, up to date with storage.
 
         Parameters
         ----------
         target_id : `str`
             The target's id, matched loosely.
-        refresh : `bool`, optional
-            Read the stored targets first.
 
         Returns
         -------
@@ -98,7 +96,7 @@ def resolve_target(targets: TargetLookup | None, target: str | Target) -> Target
         raise InvalidArgumentError(
             f"Pass the Target itself: there is no target catalog to look up {target!r}."
         )
-    found = targets.get(target, refresh=True)
+    found = targets.get(target)
     if found is None:
         raise NotFoundError(f"No target with id {target!r} in the library.", details={"target": target})
     return found

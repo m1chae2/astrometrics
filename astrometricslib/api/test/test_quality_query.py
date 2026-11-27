@@ -356,8 +356,10 @@ def _frame_measurement(
     )
 
 
-def test_forget_removes_only_the_given_frames(quality: QualityRecords, tmp_path: Path) -> None:
-    """A forgotten frame loses its rows and subset weights; the rest stay."""
+def test_deleting_frame_measurements_removes_only_the_given_frames(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """A deleted frame loses its rows and subset weights; the rest stay."""
     store = QualityStore(str(tmp_path / "astrometrics.db"))
     store.write_measurements([
         _frame_measurement("M31/a.fits"),
@@ -372,7 +374,7 @@ def test_forget_removes_only_the_given_frames(quality: QualityRecords, tmp_path:
         ),
     ])
 
-    assert quality.forget(["M31/a.fits", "M31/missing.fits", ""]) == 3
+    assert store.delete_frame_measurements(["M31/a.fits", "M31/missing.fits", ""]) == 3
 
     remaining = {
         (row.subject.level.value, row.subject.subject_id) for row in quality.query(latest_only=False).rows
@@ -380,12 +382,11 @@ def test_forget_removes_only_the_given_frames(quality: QualityRecords, tmp_path:
     assert remaining == {("frame", "M31/ab.fits"), ("frame", "M31/b.fits"), ("stack", "M31/a.fits")}
 
 
-def test_forget_on_a_library_with_no_database_creates_nothing(
-    quality: QualityRecords, tmp_path: Path
-) -> None:
-    """Forgetting where nothing is stored is a no-op that creates no file."""
-    assert quality.forget(["M31/a.fits"]) == 0
-    assert quality.forget([]) == 0
+def test_deleting_measurements_with_no_database_creates_nothing(tmp_path: Path) -> None:
+    """Deleting where nothing is stored is a no-op that creates no file."""
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    assert store.delete_frame_measurements(["M31/a.fits"]) == 0
+    assert store.delete_frame_measurements([]) == 0
     assert list(tmp_path.iterdir()) == []
 
 
@@ -404,6 +405,7 @@ def test_deleting_a_targets_frames_forgets_their_measurements(tmp_path: Path) ->
     target = Target(id="M31", frames=[FrameRecord(path=str(gone)), FrameRecord(path=str(kept))])
     storage = MagicMock()
     storage.get.return_value = [target]
+    del storage.merge_and_record
     configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
     catalog = TargetCatalog(configuration, storage)
     store = QualityStore(str(tmp_path / "astrometrics.db"))
@@ -412,7 +414,7 @@ def test_deleting_a_targets_frames_forgets_their_measurements(tmp_path: Path) ->
         _frame_measurement(target.frame_subject_id(str(kept))),
     ])
 
-    result = catalog.delete_images([str(gone)], target="M31")
+    result = catalog.frames.delete(target, [str(gone)])
 
     assert result.deleted == [str(gone)]
     assert not gone.exists()

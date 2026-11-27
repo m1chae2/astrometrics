@@ -311,7 +311,7 @@ def make_pipelines(saved: list[int]) -> ProcessingPipelines:
         The object under test.
     """
     pipelines = ProcessingPipelines(
-        SimpleNamespace(), SimpleNamespace(), targets=SimpleNamespace(save=lambda: saved.append(1))
+        SimpleNamespace(), SimpleNamespace(), targets=SimpleNamespace(_save=lambda: saved.append(1))
     )
     pipelines.acquire_job_slot = nullcontext
     return pipelines

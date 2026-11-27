@@ -116,8 +116,9 @@ Detections: the Detections button in the viewer header (here and in the Image Pr
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may
   update the processed image when complete. The Stack action runs the full
-  stacking stage (`processing.stack`), the same one the batch script runs, so it
-  also saves the quality summary and the processed image.
+  stacking stage (`processing.stacking.run`), the same one the batch script
+  runs, so it also saves the quality summary, and then makes the processed
+  image (`processing.enhancement.run`).
 
 Data flow summary
 

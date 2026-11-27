@@ -40,7 +40,7 @@ from astrometricslib.pipelines.astrometry.processing.gaia_field_matching import 
 
 astrometrics = Astrometrics()
 target = astrometrics.targets.get("NGC 2403")
-answer = astrometrics.processing.process_target(target, stages=["astrometry"])
+answer = astrometrics.processing.astrometry.run(target)
 metrics = answer.quality.astrometry.astrometry_metrics
 print(
     "solver fit residual",
@@ -127,7 +127,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 for name in ["M 13", "NGC 2403", "Alnath"]:
-    answer = astrometrics.processing.process_target(name, stages=["astrometry"])
+    answer = astrometrics.processing.astrometry.run(astrometrics.targets.get(name))
     metrics = answer.quality.astrometry.astrometry_metrics
     print(name, metrics.astrometry_flags)
     print("  Gaia RMS before and after:", metrics.gaia_fit_rms_before_arcsec, metrics.gaia_fit_rms_arcsec)
@@ -516,7 +516,7 @@ for star in stars:
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-answer = astrometrics.processing.process_target("Albireo", stages=["astrometry"])
+answer = astrometrics.processing.astrometry.run(astrometrics.targets.get("Albireo"))
 for star in answer.results["astrometry"]["stellar_objects"][:5]:
     print(star.id, star.name, star.spectral_type)
 ```
@@ -654,7 +654,7 @@ for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
     count = detect_point_sources(astrometrics.processing, data).star_count
     start = time.monotonic()
     try:
-        solved = astrometrics.processing.plate_solve(path) is not None
+        solved = astrometrics.processing.astrometry.solve(path) is not None
     except PlateSolveFailedError:
         solved = False
     print(path, count, "stars,", "solved" if solved else "not solved", round(time.monotonic() - start), "s")
@@ -675,7 +675,7 @@ for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
 **Library-wide plate-solve run**
 
 - **Claim:** The plate solve succeeded on the stacks tried and named stars from SIMBAD.
-- **Settings it supports:** None directly; it is a check that the whole stage runs. The entry point is `ProcessingPipelines.process_target`. <!-- impl: astrometricslib.ProcessingPipelines.process_target -->
+- **Settings it supports:** None directly; it is a check that the whole stage runs. The entry point is `processing.astrometry.run`. <!-- impl: astrometricslib.pipelines.pipeline_runs.run_astrometry -->
 - **Status:** Partly measured. It records only success and a SIMBAD match count, and it predates the current gates (`catalog_matches`, `astrometric_residual`) and the Gaia refit.
 - **Data you need:** Stacked images of a few targets, including an open cluster and a bright cluster.
 - **Procedure:**
@@ -689,7 +689,7 @@ astrometrics = Astrometrics()
 for name in ["NGC 1893", "M 45", "NGC 2403", "M 81"]:
     target = astrometrics.targets.get(name)
     if target and target.stacking.stacked_image:
-        answer = astrometrics.processing.process_target(target, stages=["astrometry"])
+        answer = astrometrics.processing.astrometry.run(target)
         result = answer.results["astrometry"]
         print(name, result.get("wcs") is not None, len(result.get("stellar_objects", [])))
         astrometrics.targets.update(target)
@@ -1033,7 +1033,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-astrometrics.processing.process_target("M 57", stages=["astrometry"])
+astrometrics.processing.astrometry.run(astrometrics.targets.get("M 57"))
 for metric in (
     "astrometry.gaia_fit_rms_arcsec",
     "astrometry.expected_centroid_noise_rms_arcsec",

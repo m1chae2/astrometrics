@@ -31,7 +31,7 @@ Each layer imports only from layers below (Appendix A ratchet).
 
 Outside services: Siril (stacking), Astrometry.net [3], Gaia through VizieR [4] or the ESA archive via astroquery [5], and SIMBAD [6] (plate solving, star identification), Gaia XP and DR3 (spectroscopy), and IMCCE SkyBoT (asteroid detection).
 
-`process_target` (`api/processing.py`) runs chosen stages through `pipelines.tasks.run_target_stages`, adding prerequisites per `STAGE_PREREQUISITES` (`spectral_variation` follows spectra across frames); a list runs one process each (`pipelines.target_batch.process_targets_in_parallel`).
+Each `processing.<pipeline>.run` (`pipelines/pipeline_runs.py`) runs its stage through `pipelines.tasks.run_target_stages`, adding prerequisites per `STAGE_PREREQUISITES`; scripts batch targets with `pipelines.target_batch.process_targets_in_parallel`.
 
 ## 3. Data models
 
@@ -63,7 +63,7 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 - **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` calls `sensor_noise_run.py` and `pre_processing/sensor_noise.py`. `CameraProfile.sensor_noise_for` matches gain, offset and binning exactly; with `clipped_at_zero=False` (`CLIPPED_FRAME_ZERO_FRACTION` in `shared/quality/clipped_frames.py`, shared with photometry and spectroscopy) it uses the nearest offset at that gain and binning, ties higher. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for --> [STK-35](validation/stacking.md#stk-35); the fallback is a design estimate ([table](validation/stacking.md#design-estimates)).
 - **Flat bias.** `staging._select_flat_bias_frames` ([STK-57](validation/stacking.md#stk-57)).
 - **Flat clipping (§3.4.1).** `assess_flats` leaves out flats clipped in any channel (`find_clipped_channels`; `stacking.flat_clipped_share_limit` 0.001, STK-D18); master recipe 7. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.find_clipped_channels --> <!-- impl: astrometricslib._internal.drivers.siril_interface.staging.FLAT_MASTER_RECIPE -->
-- **Stack prediction (§3.3).** `predict_stack` runs `screen_frames` (`dry_run=True`), splits with `split_into_stack_batches`, picks calibration with `choose_batch_calibration` and `choose_flat_bias`.
+- **Stack prediction (§3.3).** `stacking.predict` runs `screen_frames` (`dry_run=True`), splits with `split_into_stack_batches`, picks calibration with `choose_batch_calibration` and `choose_flat_bias`.
 - **Master darks.** Median-combined (`stack dark med -nonorm`); bias and flat masters keep sigma rejection (STK-D02, STK-D76).
 - **Dark defects (§3.4.1).** `dark_defect_run.py`, `pre_processing/dark_defect_judgement.py`; `choose_batch_calibration` skips them (STK-D77). <!-- impl: astrometricslib.pipelines.stacking.dark_defect_run.measure_dark_defects_in_library --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.dark_defect_judgement.judge_dark_defects --> <!-- impl: astrometricslib.pipelines.shared.quality.dark_defect_measurement.measure_dark_defects -->
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `stack_filter_floor.py`.

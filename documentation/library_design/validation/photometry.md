@@ -4,7 +4,7 @@
 
 This file holds the evidence behind the photometry pipeline's tuned values: what was measured, on what data, with which library calls, and what came out. It is written for a reviewer who wants to repeat a measurement on their own camera and sky and tune the pipeline to match. The method itself (what each step does and why) is in the photometry READMEs under `astrometricslib/pipelines/photometry/`. Terms such as light curve, comparison ensemble, CV, MAD and AUC are defined in the [glossary](../../Glossary.md). The status labels (Measured, Partly measured, Design estimate) are defined in [index.md](index.md).
 
-Every procedure below reads a target that the library already holds. A run of the photometry stage goes through the public entry point `Astrometrics().processing.process_target` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.process_target -->, and its run-level checks (gates) are read back with `PhotometryQualitySummary.gate` <!-- impl: astrometricslib.models.quality.quality_summary.PipelineQualitySummaryBase.gate -->. Steps that need a lower-level function say so.
+Every procedure below reads a target that the library already holds. A run of the photometry stage goes through the public entry point `Astrometrics().processing.photometry.run` <!-- impl: astrometricslib.pipelines.pipeline_runs.run_photometry -->, and its run-level checks (gates) are read back with `PhotometryQualitySummary.gate` <!-- impl: astrometricslib.models.quality.quality_summary.PipelineQualitySummaryBase.gate -->. Steps that need a lower-level function say so.
 
 ## Measured and partly measured values
 
@@ -82,7 +82,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 for target_id in ("M 13", "M 81", "NGC 2403"):
-    result = astrometrics.processing.process_target(target_id, stages=["photometry"])
+    result = astrometrics.processing.photometry.run(astrometrics.targets.get(target_id))
     summary = result.quality.photometry
     ensemble = summary.gate("comparison_ensemble")
     errors = summary.gate("flux_uncertainty")
@@ -178,7 +178,7 @@ for a, b in flat_pairs:
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-result = astrometrics.processing.process_target("NGC 2403", stages=["photometry"])
+result = astrometrics.processing.photometry.run(astrometrics.targets.get("NGC 2403"))
 drift = result.quality.photometry.gate("registration_drift")
 print(drift.status, drift.measured_value, drift.limit, drift.detail)
 ```
@@ -370,7 +370,7 @@ from astrometricslib.pipelines.photometry.post_processing.variability_skill impo
 )
 
 astrometrics = Astrometrics()
-result = astrometrics.processing.process_target("M 13", stages=["photometry"])
+result = astrometrics.processing.photometry.run(astrometrics.targets.get("M 13"))
 astrometrics.targets.update(astrometrics.targets.get("M 13", required=True))
 print(result.quality.photometry.gate("variability_discrimination"))
 stars = astrometrics.stars.query(target=astrometrics.targets.get("M 13"), has_photometry=True)
@@ -616,9 +616,9 @@ passed = validate_period_searches(25)
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-result = astrometrics.processing.process_target(
-    "NGC 2244", stages=["photometry"], photometry={"filter_name": "Luminance"}
-)
+target = astrometrics.targets.get("NGC 2244")
+frames = astrometrics.targets.frames.query(target, filter_name="Luminance")
+result = astrometrics.processing.photometry.run(target, frames=frames)
 print(result.quality.photometry.gate("comparison_ensemble").detail)
 ```
 
@@ -653,7 +653,7 @@ from astrometricslib import Astrometrics
 astrometrics = Astrometrics()
 counts = []
 for _ in range(2):
-    result = astrometrics.processing.process_target("M 81", stages=["photometry"])
+    result = astrometrics.processing.photometry.run(astrometrics.targets.get("M 81"))
     astrometrics.targets.update(astrometrics.targets.get("M 81", required=True))
     counts.append(result.quality.photometry.photometry_metrics.cross_session_match_count)
 print(counts, result.results["photometry"]["crossSessionMatchCount"])
@@ -705,7 +705,7 @@ frames = [
     and "533" in frame.camera
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == night
 ]
-astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
+astrometrics.processing.photometry.run(astrometrics.targets.get("M 57"), frames=frames)
 rows = QualityStore.from_configuration(astrometrics.config).query(
     metric="photometry.catalog_zero_point_gaia_g_mag", target_id="M 57"
 )
@@ -793,7 +793,7 @@ frames = [
     and "533" in frame.camera
     and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == "2026-10-03"
 ]
-astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
+astrometrics.processing.photometry.run(astrometrics.targets.get("M 57"), frames=frames)
 for part in ("photon", "sky", "read"):
     for row in astrometrics.quality.query(
         metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"

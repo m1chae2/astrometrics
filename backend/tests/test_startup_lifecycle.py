@@ -247,7 +247,7 @@ def test_the_cache_warm_ups_log_a_failure_as_a_warning(
 ) -> None:
     """A failed background warm-up is a warning, not an error."""
     fake_container = MagicMock()
-    fake_container.wayfinder.planning.query_sources.side_effect = RuntimeError("no catalog")
+    fake_container.wayfinder.planning.catalogs.query_sources.side_effect = RuntimeError("no catalog")
     fake_container.wayfinder.review.query.side_effect = RuntimeError("no nights")
     monkeypatch.setattr(startup, "container", fake_container)
     monkeypatch.setattr(startup, "warm_earth_orientation_data", MagicMock(side_effect=RuntimeError("iers")))

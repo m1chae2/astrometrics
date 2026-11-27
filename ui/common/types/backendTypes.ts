@@ -3477,36 +3477,7 @@ export interface ObservationSession {
   framing?: Framing | null;
   /** Counts the plan writes. Starts at 0. */
   revision?: number;
-}
-
-/**
- * A stored session plus its progress, as `get_plan` returns it.
- *
- * The progress is worked out on each read and is not part of the stored
- * session. Do not write this object back.
- */
-export interface ObservationSessionWithProgress {
-  id: string;
-  nightDate: string;
-  status?: SessionStatus;
-  statusDetail?: string;
-  siteProfileId: string;
-  telescopeId: string;
-  cameraId: string;
-  queue?: QueuedObservationPackage[];
-  unplacedPackageDiagnostics?: InfeasibilityReason[];
-  divergenceRecords?: DivergenceRecord[];
-  faultRecords?: FaultRecord[];
-  meridianFlips?: MeridianFlipOutcome[];
-  targetSessionIds?: string[];
-  guidingSamples?: GuidingSample[];
-  weatherSamples?: WeatherSample[];
-  createdAt?: string;
-  closedAt?: string | null;
-  checklist?: ChecklistItem[];
-  framing?: Framing | null;
-  /** Counts the plan writes. Starts at 0. */
-  revision?: number;
+  /** The frames captured so far. Worked out on a read with include=["progress"], never stored; left out of the dump when not asked for. */
   progress?: SessionProgress | null;
 }
 

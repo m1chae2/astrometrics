@@ -1,16 +1,17 @@
 """Purpose: Serve the night plan and package read and write methods.
 
 Description: The night plan is an observing session stored by the planning
-library. The app reads it with `Wayfinder.planning.get_plan`, edits it with
-the queue calls (`add_to_queue`, `reorder_queue` and the others) and ticks
-checklist items with `tick_checklist_item`. `query_plans` lists the
-observation package library, `create_package` and `create_session` record a
-package or the night's session, and `update_package`, `reopen_package`,
-`dismiss_package` and `delete_package` change a package. This service wraps
-those calls for the RPC route and does one more thing: after each write that
-succeeds, it sends the ``plan:changed``
-event (session writes) or the ``packages:changed`` event (package writes) to
-every connected app window, so any open screen can read again.
+library, one per night. The app reads it with
+``Wayfinder.planning.sessions.get`` and edits it with ``sessions.add``,
+``remove`` and ``update`` (a checklist tick is an ``update`` of the
+checklist). ``planning.packages`` lists, records and changes the observation
+packages. This service is the adapter between the RPC route and those
+objects: it turns the ids and JSON the app sends into the library's objects
+and input models (the revision the app last read goes onto the object),
+shapes each reply as the app has always received it, and after each write
+that succeeds sends the ``plan:changed`` event (session writes) or the
+``packages:changed`` event (package writes) to every connected app window,
+so any open screen can read again.
 
 The event payload is ``{sessionId, revision, changed}``. ``revision`` is the
 plan revision now stored. ``changed`` lists the kind of each change the write
@@ -30,20 +31,134 @@ sends ``refreshed`` instead (see `suggestion_refresh_worker`).
 The current session is tonight's: the night comes from the library's
 `observing_night_id`, never from the app.
 
-The event comes from the change record or the package the library returns,
-never from a second look at the database.
+The event comes from the session or the package the library returns, never
+from a second look at the database.
 """
 
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError
+
+from astrometricslib import FilterType, Target
 from astrometricslib.arguments import observing_night_id
-from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib import ObservationPackage
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
+from backend.services.subject_resolver import SubjectResolver
+from wayfindinglib import (
+    ChecklistItem,
+    DitherConfig,
+    ExposureRequest,
+    Framing,
+    ObservationPackage,
+    ObservationSession,
+    QueueRequest,
+)
 
 logger = logging.getLogger(__name__)
+
+
+SESSION_PARTS = ["progress", "guiding_samples", "weather_samples", "divergence_records"]
+"""Everything a session read can add: the current-session reply has always
+carried the counted progress and the stored sample lists."""
+
+
+def _model_list(model: type, items: list[Any] | None, message: str) -> list[Any]:
+    """Build input models from the JSON the app sent.
+
+    Parameters
+    ----------
+    model : `type`
+        The pydantic model class.
+    items : `list` or `None`
+        The JSON objects (or models).
+    message : `str`
+        The error message for a value that does not fit.
+
+    Returns
+    -------
+    models : `list`
+        One model per item; empty for `None`.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If an item does not fit the model.
+    """
+    try:
+        return [model.model_validate(item) for item in items or []]
+    except ValidationError as error:
+        raise InvalidArgumentError(message, details={"error": str(error)}) from error
+
+
+def _filter_type(name: str) -> FilterType:
+    """Read a filter name, such as ``"L"`` or ``"Ha"``, as a `FilterType`.
+
+    Parameters
+    ----------
+    name : `str`
+        A filter's value or short name, in any case.
+
+    Returns
+    -------
+    filter_type : `FilterType`
+        The filter.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the name matches no filter.
+    """
+    wanted = name.strip().lower()
+    for member_name, member in FilterType.__members__.items():
+        if wanted in (member_name.lower(), member.value.lower()):
+            return member
+    raise InvalidArgumentError(
+        f"Unknown filter {name!r}. Choose from: {', '.join(FilterType.__members__)}.",
+        details={"filter": name},
+    )
+
+
+def exposures_from_plan_items(plan_items: list[dict[str, Any]]) -> list[ExposureRequest]:
+    """Turn the sequencer's items into the exposure rows of a package.
+
+    Parameters
+    ----------
+    plan_items : `list` [`dict`]
+        Each item's ``count``, ``exposure`` (seconds), ``filter`` (``"L"``
+        when missing) and optional frame ``type`` (``"LIGHT"`` when missing).
+
+    Returns
+    -------
+    rows : `list` [`ExposureRequest`]
+        One row per item.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If an item names an unknown filter or frame type, or has no exposure
+        or count above zero.
+    """
+    rows = []
+    for item in plan_items:
+        frame_type = str(item.get("type") or "LIGHT").upper()
+        if frame_type not in ("LIGHT", "DARK", "FLAT", "BIAS"):
+            raise InvalidArgumentError(f"Unknown frame type {frame_type!r}.", details={"type": frame_type})
+        try:
+            rows.append(
+                ExposureRequest(
+                    frame_type=frame_type,
+                    filter=_filter_type(str(item.get("filter") or "L")),
+                    exposure_sec=float(item.get("exposure", 0.0)),
+                    count=int(item.get("count", 0)),
+                )
+            )
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                "Each item needs an exposure and a count above zero.", details={"item": dict(item)}
+            ) from error
+    return rows
 
 
 class PlanService:
@@ -66,6 +181,107 @@ class PlanService:
         self._socket_manager = socket_manager
         self._refresh_worker = refresh_worker
 
+    def _target(self, target: str, *, from_catalog: bool = False) -> Target:
+        """Turn the target name the app sent into the library target.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's id.
+        from_catalog : `bool`, optional
+            Add a target the library does not hold yet from the catalog, with
+            its position.
+
+        Returns
+        -------
+        target : `Target`
+            The library target.
+
+        Raises
+        ------
+        NotFoundError
+            If the target is neither in the library nor (with
+            ``from_catalog``) known to the catalog.
+        """
+        astrometrics = self.wayfinder.astrometrics
+        found = astrometrics.targets.get(target)
+        if found is not None:
+            return found
+        if not from_catalog:
+            return SubjectResolver(astrometrics).target(target)
+        try:
+            return astrometrics.targets.create(target, from_catalog=True)
+        except NotFoundError as error:
+            raise NotFoundError(f"No target '{target}' in the library or the catalog: {error}") from error
+
+    def _filter_target(self, target: str | None) -> Target | None:
+        """Turn a target filter into a target, known to the library or not.
+
+        Parameters
+        ----------
+        target : `str` or `None`
+            The target id the app filters by.
+
+        Returns
+        -------
+        target : `Target` or `None`
+            The library target, or a bare one with that id (packages may name
+            a target the library no longer holds).
+        """
+        if target is None:
+            return None
+        return self.wayfinder.astrometrics.targets.get(target) or Target(id=target)
+
+    def _session(self, session_id: str, expected_revision: int | None = None) -> ObservationSession:
+        """Find a stored session by id, with the revision the app last read.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session id.
+        expected_revision : `int`, optional
+            The revision the app last read. The library refuses the write
+            when it is not the stored one. Left out, the stored revision.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The session.
+
+        Raises
+        ------
+        NotFoundError
+            If no session has that id.
+        """
+        session = next(
+            (stored for stored in self.wayfinder.planning.sessions.query() if stored.id == session_id), None
+        )
+        if session is None:
+            raise NotFoundError(f"No observing session {session_id!r}.", details={"session_id": session_id})
+        if expected_revision is not None:
+            session = session.model_copy(update={"revision": expected_revision})
+        return session
+
+    def _package(self, package_id: str, expected_revision: int | None = None) -> ObservationPackage:
+        """Find a stored package by id, with the revision the app last read.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package id.
+        expected_revision : `int`, optional
+            The revision the app last read. Left out, the stored revision.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The package.
+        """
+        package = self.wayfinder.planning.packages.get(package_id, required=True)
+        if expected_revision is not None:
+            package = package.model_copy(update={"revision": expected_revision})
+        return package
+
     def list_packages(
         self, status: str | None = None, target: str | None = None, include_dismissed: bool = False
     ) -> list[ObservationPackage]:
@@ -86,9 +302,10 @@ class PlanService:
         packages : `list` [`ObservationPackage`]
             The matching packages.
         """
-        return self.wayfinder.planning.query_plans(
-            kind="packages", status=status, target=target, include_dismissed=include_dismissed
+        page = self.wayfinder.planning.packages.query(
+            status=status, target=self._filter_target(target), dismissed=None if include_dismissed else False
         )
+        return list(page)
 
     def package_for_target(self, target: str) -> ObservationPackage | None:
         """Read the one package that stands for a target.
@@ -105,21 +322,19 @@ class PlanService:
             The target's planned package, else its suggested package that is
             not dismissed, else `None`. The library does the choosing.
         """
-        return self.wayfinder.planning.get_package_for_target(target)
+        return self.wayfinder.planning.packages.get_for_target(self._filter_target(target))
 
-    def current_session(self) -> Any:
+    def current_session(self) -> ObservationSession | None:
         """Read tonight's session, the one session the app works with.
 
         Returns
         -------
-        session : `ObservationSessionWithProgress` or `None`
+        session : `ObservationSession` or `None`
             Tonight's session with its progress (the frames requested and
-            captured for each entry), or `None` if none was created yet.
-            Reading never creates one.
+            captured for each entry) and its stored sample lists, or `None` if
+            none was created yet. Reading never creates one.
         """
-        return self.wayfinder.planning.get_plan(
-            observing_night_id=observing_night_id(time.time()), include=["progress"]
-        )
+        return self.wayfinder.planning.sessions.get(observing_night_id(time.time()), include=SESSION_PARTS)
 
     def refresh_suggestions(self, target_ids: list[str] | None = None) -> dict[str, Any]:
         """Start a refresh of the suggested packages and the checklist.
@@ -155,6 +370,9 @@ class PlanService:
     ) -> ObservationPackage:
         """Record an observation package and announce it.
 
+        A target the library does not hold yet is added from the catalog,
+        with its position, first.
+
         Parameters
         ----------
         target : `str`
@@ -176,15 +394,31 @@ class PlanService:
         -------
         package : `ObservationPackage`
             The stored package.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If both `exposure_requests` and `plan_items` are given, or a value
+            is malformed.
         """
-        package = self.wayfinder.planning.create_package(
-            target=target,
-            plan_items=plan_items,
-            exposure_requests=exposure_requests,
-            dither_config=dither_config,
+        if exposure_requests is not None and plan_items is not None:
+            raise InvalidArgumentError("Give exposure_requests or plan_items, not both.")
+        if plan_items is not None:
+            rows = exposures_from_plan_items(plan_items)
+        else:
+            rows = _model_list(ExposureRequest, exposure_requests, "A package value is not valid.")
+        dither = (
+            None
+            if dither_config is None
+            else _model_list(DitherConfig, [dither_config], "A package value is not valid.")[0]
+        )
+        package = self.wayfinder.planning.packages.create(
+            self._target(target, from_catalog=True),
+            rows,
+            dither_config=dither,
             minimum_altitude_deg=minimum_altitude_deg,
-            priority=priority,
-            notes=notes,
+            priority=priority or 0,
+            notes=notes or "",
         )
         self._announce_package(package, "created")
         return package
@@ -209,7 +443,7 @@ class PlanService:
         """Change, reopen, dismiss or delete a package and announce it.
 
         One call makes one kind of write. Delete, dismiss and undismiss stand
-        alone. A reopen may come with changes; the reopen is written first.
+        alone. A reopen may come with changes; both go in one write.
 
         Parameters
         ----------
@@ -256,8 +490,8 @@ class PlanService:
             If nothing is asked for, or delete, dismiss or undismiss is
             mixed with another change.
         """
-        planning = self.wayfinder.planning
-        changes = {
+        packages = self.wayfinder.planning.packages
+        changes: dict[str, Any] = {
             "exposure_requests": exposure_requests,
             "dither_config": dither_config,
             "minimum_altitude_deg": minimum_altitude_deg,
@@ -266,41 +500,41 @@ class PlanService:
             "name": name,
             "framing": framing,
         }
-        has_change = any(value is not None for value in changes.values())
+        changes = {key: value for key, value in changes.items() if value is not None}
         flags = [
             label
             for label, wanted in (("delete", delete), ("dismiss", dismiss), ("undismiss", undismiss))
             if wanted
         ]
-        if flags and (has_change or reopen or len(flags) > 1):
+        if flags and (changes or reopen or len(flags) > 1):
             raise InvalidArgumentError(
                 f"{flags[0]} cannot be combined with a change or with delete, dismiss or undismiss."
             )
         if source_key is not None and not (dismiss or undismiss):
             raise InvalidArgumentError("source_key is used only with dismiss or undismiss.")
-        if not (flags or has_change or reopen):
+        if not (flags or changes or reopen):
             raise InvalidArgumentError(
                 "Give exposure_requests, dither_config, minimum_altitude_deg, priority, notes, name, "
                 "framing, reopen, delete, dismiss or undismiss."
             )
+        package = self._package(package_id, expected_revision)
         if delete:
-            package = planning.delete_package(package_id, expected_revision=expected_revision)
+            packages.delete(package)
         elif dismiss:
-            package = planning.dismiss_package(
-                package_id, source_key=source_key, expected_revision=expected_revision
-            )
+            if source_key is None:
+                package = packages.update(package, dismissed=True)
+            else:
+                package = packages.update(package, dismissed_rows=[source_key])
         elif undismiss:
-            package = planning.undismiss_package(
-                package_id, source_key=source_key, expected_revision=expected_revision
-            )
+            package = packages.restore(package, None if source_key is None else [source_key])
         else:
-            package = None
+            if "exposure_requests" in changes:
+                changes["exposure_requests"] = _model_list(
+                    ExposureRequest, changes["exposure_requests"], "A package value is not valid."
+                )
             if reopen:
-                package = planning.reopen_package(package_id, expected_revision=expected_revision)
-                # The reopen moved the revision; a following change names it.
-                expected_revision = package.revision
-            if has_change:
-                package = planning.update_package(package_id, expected_revision=expected_revision, **changes)
+                changes["status"] = "PLANNED"
+            package = packages.update(package, **changes)
         if delete:
             kind = "deleted"
         elif reopen:
@@ -328,7 +562,7 @@ class PlanService:
         add_checklist: list[dict[str, Any]] | None = None,
         framing: dict[str, Any] | None = None,
         expected_revision: int | None = None,
-    ) -> Any:
+    ) -> ObservationSession:
         """Change the night plan by hand and announce the change.
 
         One call makes one kind of change: give exactly one of `add`,
@@ -342,7 +576,7 @@ class PlanService:
             Packages to append to the queue. Each is a dictionary with a
             ``package_id`` and a start mode.
         order : `list` [`str`], optional
-            Every entry id left after `remove`, in the new order.
+            Every entry id, in the new order.
         remove : `list` [`str`], optional
             Entry ids to take out of the queue.
         set_exposures : `dict` [`str`, `list` [`dict`]], optional
@@ -359,15 +593,18 @@ class PlanService:
 
         Returns
         -------
-        change : `PlanChange`
-            The new revision, what changed and the stored session.
+        session : `ObservationSession`
+            The stored session.
 
         Raises
         ------
         InvalidArgumentError
-            If not exactly one kind of change is given.
+            If not exactly one kind of change is given, or ``order`` does not
+            name exactly the entries.
+        NotFoundError
+            If ``remove`` names an entry that is not in the queue.
         """
-        planning = self.wayfinder.planning
+        sessions = self.wayfinder.planning.sessions
         given = {
             name_: value
             for name_, value in (
@@ -385,24 +622,50 @@ class PlanService:
                 "Give exactly one of add, order, remove, set_exposures, add_checklist or framing.",
                 details={"given": sorted(given)},
             )
+        session = self._session(session_id, expected_revision)
+        entries = {entry.id: entry for entry in session.queue}
+        promoted: list[str] = []
         if add is not None:
-            change = planning.add_to_queue(session_id, add, expected_revision=expected_revision)
+            requests = _model_list(QueueRequest, add, "Each entry to add needs a package_id.")
+            for request in requests:
+                package = self.wayfinder.planning.packages.get(request.package_id)
+                if package is not None and package.status == "SUGGESTED" and package.id not in promoted:
+                    promoted.append(package.id)
+            changed = sessions.add(session, requests)
+            kinds = ["queue_added"] * len(requests) + ["package_promoted"] * len(promoted)
         elif order is not None:
-            change = planning.reorder_queue(session_id, order, expected_revision=expected_revision)
+            if sorted(order) != sorted(entries):
+                raise InvalidArgumentError(
+                    "order must name exactly the entries currently in the queue.",
+                    details={"order": list(order), "entries": sorted(entries)},
+                )
+            changed = sessions.update(session, order=[entries[entry_id] for entry_id in order])
+            kinds = ["queue_reordered"]
         elif remove is not None:
-            change = planning.remove_from_queue(session_id, remove, expected_revision=expected_revision)
+            missing = [entry_id for entry_id in remove if entry_id not in entries]
+            if missing:
+                raise NotFoundError("Those entries are not in the queue.", details={"remove": missing})
+            changed = sessions.remove(session, [entries[entry_id] for entry_id in remove])
+            kinds = ["queue_removed"] * len(remove)
         elif set_exposures is not None:
-            change = planning.set_entry_exposures(
-                session_id, set_exposures, expected_revision=expected_revision
-            )
+            exposures = {
+                entry_id: _model_list(
+                    ExposureRequest, rows, "Each exposure request needs frame_type, exposure_sec and count."
+                )
+                for entry_id, rows in set_exposures.items()
+            }
+            changed = sessions.update(session, exposures=exposures)
+            kinds = ["exposures_set"] * len(exposures)
         elif add_checklist is not None:
-            change = planning.add_checklist_items(
-                session_id, add_checklist, expected_revision=expected_revision
-            )
+            items = _model_list(ChecklistItem, add_checklist, "Each checklist item needs a rule.")
+            changed = sessions.update(session, checklist=[*session.checklist, *items])
+            kinds = ["checklist_added"]
         else:
-            change = planning.set_framing(session_id, framing, expected_revision=expected_revision)
-        self._announce(change)
-        return change
+            framed = _model_list(Framing, [framing], "Framing needs center_ra_deg and center_dec_deg.")[0]
+            changed = sessions.update(session, framing=framed)
+            kinds = ["framing_set"]
+        self._announce(session.revision, changed, kinds, promoted)
+        return changed
 
     def tick_checklist_item(
         self,
@@ -411,8 +674,11 @@ class PlanService:
         expected_revision: int | None = None,
         note: str | None = None,
         ticked_at: str | None = None,
-    ) -> Any:
+    ) -> dict[str, Any]:
         """Record that the user did one checklist item, and announce it.
+
+        The library ticks an item when its ``ticked_at`` changes in the
+        checklist the session is updated with.
 
         Parameters
         ----------
@@ -430,71 +696,73 @@ class PlanService:
 
         Returns
         -------
-        change : `PlanChange`
-            The new revision and the tick.
+        change : `dict`
+            The change record the app has always received: ``sessionId``,
+            ``previousRevision``, ``revision``, ``changes`` (the tick),
+            ``settingNotes`` and the stored ``session``.
 
         Raises
         ------
         InvalidArgumentError
             If `ticked_at` is not an ISO 8601 time.
+        NotFoundError
+            If the session has no such item.
         """
         try:
-            moment = datetime.fromisoformat(ticked_at) if ticked_at else None
+            moment = datetime.fromisoformat(ticked_at) if ticked_at else datetime.now(UTC)
         except ValueError as error:
             raise InvalidArgumentError(
                 f"ticked_at must be an ISO 8601 time, such as 2026-10-24T22:30:00+00:00; got {ticked_at!r}.",
                 details={"ticked_at": ticked_at},
             ) from error
-        change = self.wayfinder.planning.tick_checklist_item(
-            session_id,
-            item_id,
-            expected_revision=expected_revision,
-            note=note,
-            ticked_at=moment,
-        )
-        self._announce(change)
-        return change
+        session = self._session(session_id, expected_revision)
+        item = next((candidate for candidate in session.checklist if candidate.item_id == item_id), None)
+        if item is None:
+            raise NotFoundError(
+                f"No checklist item {item_id!r} in session {session_id!r}.",
+                details={"item_id": item_id, "session_id": session_id},
+            )
+        ticked = item.model_copy(update={"ticked_at": moment, **({} if note is None else {"note": note})})
+        checklist = [ticked if candidate.item_id == item_id else candidate for candidate in session.checklist]
+        changed = self.wayfinder.planning.sessions.update(session, checklist=checklist)
+        self._announce(session.revision, changed, ["checklist_ticked"], [])
+        return {
+            "sessionId": changed.id,
+            "previousRevision": session.revision,
+            "revision": changed.revision,
+            "changes": [{"kind": "checklist_ticked", "detail": item.rule, "entryId": item_id}],
+            "settingNotes": [],
+            "session": changed,
+        }
 
-    def _announce(self, change: Any) -> None:
+    def _announce(
+        self, previous_revision: int, session: ObservationSession, kinds: list[str], promoted: list[str]
+    ) -> None:
         """Send the ``plan:changed`` event for one successful write.
 
         Parameters
         ----------
-        change : `PlanChange`
-            What the library returned for the write.
+        previous_revision : `int`
+            The revision the write started from.
+        session : `ObservationSession`
+            The session the library returned.
+        kinds : `list` [`str`]
+            The kind of each change, such as ``queue_added``.
+        promoted : `list` [`str`]
+            The suggested packages the write promoted.
         """
         if self._socket_manager is None:
             return
-        if change.revision == change.previous_revision:
+        if session.revision == previous_revision:
             # Nothing was stored, so there is nothing to announce.
             return
-        self._announce_promotions(change)
-        self._socket_manager.broadcast_ui_event_sync(
-            "plan:changed",
-            {
-                "sessionId": change.session_id,
-                "revision": change.revision,
-                "changed": [item.kind for item in change.changes],
-            },
-        )
-
-    def _announce_promotions(self, change: Any) -> None:
-        """Announce each suggested package a write promoted.
-
-        Parameters
-        ----------
-        change : `PlanChange`
-            What the library returned for the write. A ``package_promoted``
-            item carries the package id in its detail.
-        """
-        if self._socket_manager is None:
-            return
-        for item in change.changes:
-            if item.kind != "package_promoted":
-                continue
+        for package_id in promoted:
             self._socket_manager.broadcast_ui_event_sync(
-                "packages:changed", {"packageId": item.detail, "targetId": None, "kind": "promoted"}
+                "packages:changed", {"packageId": package_id, "targetId": None, "kind": "promoted"}
             )
+        self._socket_manager.broadcast_ui_event_sync(
+            "plan:changed", {"sessionId": session.id, "revision": session.revision, "changed": kinds}
+        )
 
     def _announce_package(self, package: ObservationPackage, kind: str) -> None:
         """Announce one successful package write.

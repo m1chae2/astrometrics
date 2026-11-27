@@ -6,13 +6,15 @@ RPC reply has one fixed type.
 
 * Review advice, from `Wayfinder.review.get_advisory` (the target
   dataset report and the statements about one star's result, chosen by a
-  ``kind``), `get_star_shape_review` (how round a target's stars are) and
-  `get_tonight_advice` (the ranking of targets for tonight).
+  ``kind``), `get_star_shape_review` (how round a target's stars are), and
+  `Wayfinder.planning.sky.get_tonight_advice` (the ranking of targets for
+  tonight).
   The RPC route cannot fix an argument, so each read has its own method
   here.
-* The depth goal of a target, from `Wayfinder.planning.get_depth_goal` and
-  `set_depth_goal`: the plain level a person chose (Quick look, Good or
-  Deep), how deep the image is, and the time to reach the level.
+* The depth goal of a target, from ``Wayfinder.planning.packages``
+  (`get_depth_goal` and `set_depth_goal`): the plain level a person chose
+  (Quick look, Good or Deep), how deep the image is, and the time to reach
+  the level.
 * Night history, from `Wayfinder.review`: the list of nights, one
   night's quality review, and the slews that changed target. These reads
   never register a background job.
@@ -27,6 +29,8 @@ is passed up as it is.
 
 from datetime import datetime
 from typing import Any
+
+from backend.services.subject_resolver import SubjectResolver
 
 
 class AdvisoryService:
@@ -93,7 +97,7 @@ class AdvisoryService:
         ranking : `TonightRanking`
             The targets ranked for each use.
         """
-        return self.wayfinder.planning.get_tonight_advice(at=at)
+        return self.wayfinder.planning.sky.get_tonight_advice(time=at)
 
     def get_result_statements(self, target: str, object_id: str) -> Any:
         """Read the statements about one star's science result.
@@ -126,7 +130,8 @@ class AdvisoryService:
             The chosen level, the image's depth and level, the time to the
             chosen level, and a sentence for the user.
         """
-        return self.wayfinder.planning.get_depth_goal(target)
+        target_object = SubjectResolver(self.wayfinder.astrometrics).target(target)
+        return self.wayfinder.planning.packages.get_depth_goal(target_object)
 
     def set_depth_goal(self, target: str, level: str) -> Any:
         """Choose the depth level of one target.
@@ -143,7 +148,8 @@ class AdvisoryService:
         status : `DepthGoalStatus`
             The status for the new level.
         """
-        return self.wayfinder.planning.set_depth_goal(target, level)
+        target_object = SubjectResolver(self.wayfinder.astrometrics).target(target)
+        return self.wayfinder.planning.packages.set_depth_goal(target_object, level)
 
     def list_nights(self, limit: int = 10) -> Any:
         """List the recorded observing nights.

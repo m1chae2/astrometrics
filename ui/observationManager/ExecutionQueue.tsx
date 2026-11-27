@@ -3,7 +3,7 @@ import { useExecutionQueue, SequenceObject } from './hooks/useExecutionQueue';
 import { ImagingCard } from './ImagingCard';
 import { ChecklistDialog } from './ChecklistDialog';
 import { formatAsOfTime } from './packageModel';
-import { ObservationSessionWithProgress } from '../common/types/backendTypes';
+import { ObservationSession } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { InfoButton } from '../common/components/InfoButton';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
@@ -23,7 +23,7 @@ interface Props {
     selectedId?: string | null;
     reorderQueue: (queue: SequenceObject[]) => void;
     /** Tonight's session with its progress, or null when none exists yet. */
-    session?: ObservationSessionWithProgress | null;
+    session?: ObservationSession | null;
     isSessionLoading?: boolean;
     /** Text of a failed session read, or null. */
     sessionError?: string | null;

@@ -42,7 +42,7 @@ The app learns about running jobs from the `processing` part of the `system_stat
 
 ## Suggestion refresh worker
 
-The planning library keeps a set of suggested observation packages. It creates, updates and deletes them, adds calibration items to tonight's checklist and marks finished packages complete. That work (`refresh_suggestions`) reads the quality numbers, so it must run when they change. `SuggestionRefreshWorker` runs it in the background.
+The planning library keeps a set of suggested observation packages. It creates, updates and deletes them, adds calibration items to tonight's checklist and marks finished packages complete. That work (`planning.packages.record_suggestions`) reads the quality numbers, so it must run when they change. `SuggestionRefreshWorker` runs it in the background.
 
 1. A trigger calls `request`. Triggers come after a frame quality measurement run, after a frame sync and from the Refresh suggestions button. A trigger names the targets whose data changed, or none, which means refresh everything.
 2. `request` records the targets and starts one background thread if none is running. It never waits and never raises, so it cannot break the announcement that called it.

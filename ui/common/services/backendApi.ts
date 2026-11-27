@@ -325,7 +325,7 @@ export interface ActionRegistry {
     // (`plan:edit_package`, `plan:create_package`) send `packages:changed`.
     // A write answers with the `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
-    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSessionWithProgress | null };
+    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSession | null };
     "plan:list_packages": { payload: { status?: string; target?: string; include_dismissed?: boolean }; response: import('../types/backendTypes').ObservationPackage[] };
     "plan:package_for_target": { payload: { target: string }; response: import('../types/backendTypes').ObservationPackage | null };
     "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };

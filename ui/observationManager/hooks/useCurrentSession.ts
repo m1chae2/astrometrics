@@ -12,7 +12,7 @@ import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { callBackend } from '../../common/services/backendApi';
 import { CURRENT_SESSION_QUERY_KEY } from '../../common/queries/packageLibraryQueryKeys';
-import { ObservationSessionWithProgress } from '../../common/types/backendTypes';
+import { ObservationSession } from '../../common/types/backendTypes';
 
 /** How often the progress is read again while the display is open, in milliseconds. */
 const PROGRESS_REFRESH_MS = 60_000;
@@ -33,7 +33,7 @@ export const useCurrentSession = () => {
 
     /** Ticks one checklist item with the revision last read. Resolves to true when it was saved. */
     const tickChecklistItem = useCallback(async (
-        session: ObservationSessionWithProgress,
+        session: ObservationSession,
         itemId: string
     ): Promise<boolean> => {
         setTickError(null);

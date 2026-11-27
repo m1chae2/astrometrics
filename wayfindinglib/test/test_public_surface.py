@@ -10,6 +10,12 @@ moving code. The tests also check that every export resolves, that
 `control` stays under its size limit, and that the argument guards work:
 `SkyPosition` checks its ranges, and `control.remote.list` refuses
 arguments its `kind` does not use.
+
+The last test checks every public method of `Wayfinder` against the public
+API design rules (`documentation/library_design/Public_API_Design_Guide.md`),
+with the rule code shared from `astrometricslib._internal.public_api_rules`.
+Known departures are listed in `public_api_rules_baseline.txt` next to this
+file; a new departure fails, and so does a listed one that no longer occurs.
 """
 
 import importlib
@@ -20,10 +26,14 @@ from pydantic import ValidationError
 
 import wayfindinglib
 from astrometricslib import AppConfiguration
+from astrometricslib._internal.public_api_rules import baseline_problems, find_violations, walk_public_api
 from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
 from wayfindinglib import ObservationExecution, ObservationPlanning, ObservationReview, ObservatoryControl
 from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
+
+BASELINE = Path(__file__).with_name("public_api_rules_baseline.txt")
+"""Known departures from the public API design rules, emptied by issue #206."""
 
 EXPECTED_EXPORTS = frozenset({
     "FrameEndDetector",
@@ -367,3 +377,25 @@ def test_each_public_module_offers_exactly_its_pinned_names() -> None:
         assert not actual - expected, f"{module_name} offers new name(s): {sorted(actual - expected)}"
         assert not expected - actual, f"{module_name} lost name(s): {sorted(expected - actual)}"
         assert all(hasattr(module, name) for name in actual), module_name
+
+
+def test_public_methods_follow_the_design_rules_or_are_in_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every departure from the rules is listed; every listed one occurs."""
+    from unittest.mock import MagicMock
+
+    config_path = tmp_path / "astrometrics.config.toml"
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    config = AppConfiguration()
+    config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
+    wayfinder = wayfindinglib.Wayfinder(config, astrometrics=MagicMock(), simulated=True)
+    try:
+        methods, objects = walk_public_api(
+            wayfinder, "wayfinder", lambda value: type(value).__module__.startswith("wayfindinglib.api.")
+        )
+    finally:
+        wayfinder.control.close()
+    assert len(methods) > 50, "the walk from the root object found too few public methods"
+    problems = baseline_problems(find_violations(methods, objects), BASELINE)
+    assert not problems, "\n\n".join(problems)

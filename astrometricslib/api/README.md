@@ -22,6 +22,7 @@ The rules:
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields) such as `TargetQueryResult` or `StackResult`. A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **A caller reaches a sub-API through `Astrometrics`.** Build one `Astrometrics` and use `astrometrics.targets`, `astrometrics.processing` and the rest, so all of them read and write the same storage.
 - **Old names have no alias.**
+- **Every public method follows the design rules.** The [public API design guide](../../documentation/library_design/Public_API_Design_Guide.md) sets the verbs, argument names, defaults, return types and depth of a public method, for both libraries. `test/test_public_surface.py` checks each method against them, with the rule code in `_internal/public_api_rules.py`. Known departures are listed in `test/public_api_rules_baseline.txt`; a change that fixes one deletes its line.
 
 Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 

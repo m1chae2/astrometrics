@@ -159,6 +159,7 @@ def _documentation_files() -> list[Path]:
     files.update((docs / "how_to").glob("*.md"))
     files.update(DESIGN_DIR.glob("Astrometrics_Library_*.md"))
     files.add(WAYFINDING_QUALITY_JUDGMENT)
+    files.add(DESIGN_DIR / "Public_API_Design_Guide.md")
     files.update((DESIGN_DIR / "pipelines").glob("*.md"))
     files.update(REGISTER_DIR.glob("*.md"))
     return sorted(files)

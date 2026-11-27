@@ -9,6 +9,7 @@ Reference pages describe the software exactly and completely, in a fixed layout,
 - [Glossary](Glossary.md): the terms used across the documentation, with their definitions.
 - [Astrometrics library implementation](library_design/Astrometrics_Library_Implementation.md): the code names and tuned values behind the Astrometrics library architecture.
 - [Wayfinding library implementation](library_design/Wayfinding_Library_Implementation.md): the code names and settings behind the Wayfinding library architecture.
+- [Public API design guide](library_design/Public_API_Design_Guide.md): the rules every public method of the two libraries follows, with call examples.
 
 ```{toctree}
 :hidden:
@@ -18,4 +19,5 @@ user_interface/user_guides/User_Manual
 Glossary
 library_design/Astrometrics_Library_Implementation
 library_design/Wayfinding_Library_Implementation
+library_design/Public_API_Design_Guide
 ```

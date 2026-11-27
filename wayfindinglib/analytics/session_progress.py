@@ -29,9 +29,13 @@ from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     QueuedObservationPackage,
     QueueEntryStatus,
-    RunState,
 )
-from wayfindinglib.models.session.session_progress import EntryProgress, RowProgress, SessionProgress
+from wayfindinglib.models.session.session_progress import (
+    EntryProgress,
+    RowProgress,
+    RunState,
+    SessionProgress,
+)
 
 IMAGING_NOW_WINDOW_SECONDS = 600.0
 """An entry is being imaged now when its newest frame arrived this recently.

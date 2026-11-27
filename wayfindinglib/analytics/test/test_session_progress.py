@@ -27,10 +27,9 @@ from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     QueuedObservationPackage,
     QueueEntryStatus,
-    RunState,
     StartTimeMode,
 )
-from wayfindinglib.models.session.session_progress import SessionProgress
+from wayfindinglib.models.session.session_progress import RunState, SessionProgress
 
 NOW = datetime(2026, 10, 25, 3, 0, tzinfo=UTC)
 START = NOW - timedelta(hours=6)

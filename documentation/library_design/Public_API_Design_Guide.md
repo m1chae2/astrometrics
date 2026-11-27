@@ -52,10 +52,10 @@ The checks treat the first two positional arguments as subject and operands. The
 | --- | --- |
 | `get` | Read one stored item by its id. Returns `None` when absent; `required=True` raises instead. |
 | `get_<noun>` | Read a cheap derived fact about a subject. Writes nothing. |
-| `query` | Read every stored item that matches the filters (Section 5). |
+| `query`, `query_<noun>` | Read every stored item that matches the filters (Section 5); `query_<noun>` reads a second kind of item of the same object, such as `packages.query_suggestion_log`. |
 | `count_by_<field>` | Count the matching items by the values of one field. |
 | `resolve` | Turn a name into one `Resolution`. |
-| `create` | Make and store a new item. |
+| `create`, `create_<noun>` | Make and store a new item; `create_<noun>` makes a related item, such as `packages.create_mosaic`. |
 | `update` | Change a stored item and return the new object. |
 | `delete` | Remove a stored item and what was derived from it. |
 | `add`, `remove` | Put an item into a collection, or take it out. |

@@ -406,15 +406,15 @@ def _check_span_arguments(
         backwards, or it has too many rows or objects.
     """
     if end_epoch is None:
-        unused = ["step_minutes"] if step_minutes is not None else []
+        unused = ["step_min"] if step_minutes is not None else []
         unused += ['include=["samples"]'] if "samples" in sections else []
         if unused:
             raise InvalidArgumentError(
-                f"{' and '.join(unused)} need an end_time: they describe a span, not one moment."
+                f"{' and '.join(unused)} need an until time: they describe a span, not one moment."
             )
         return None
     if end_epoch < start_epoch:
-        raise InvalidArgumentError("end_time must not be before time.")
+        raise InvalidArgumentError("until must not be before time.")
     if object_count > MAXIMUM_SPAN_OBJECTS:
         raise InvalidArgumentError(
             f"At most {MAXIMUM_SPAN_OBJECTS} objects per time table; got {object_count}."
@@ -423,8 +423,7 @@ def _check_span_arguments(
     count = int((end_epoch - start_epoch) // step_seconds) + 1
     if count > MAXIMUM_TIME_STEPS:
         raise InvalidArgumentError(
-            f"{count} time steps is more than {MAXIMUM_TIME_STEPS}. "
-            "Use a larger step_minutes or a shorter span."
+            f"{count} time steps is more than {MAXIMUM_TIME_STEPS}. Use a larger step_min or a shorter span."
         )
     return step_seconds
 

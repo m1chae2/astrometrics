@@ -1,11 +1,11 @@
 """Purpose: Unit tests for the observation package library calls.
 
 Description: Verifies the package status and its old-data default, the
-package list filters, `update_package` (revision conflicts),
-`reopen_package`, `delete_package`, the one-session-per-night rule
-(including the pick among old duplicates), packages with no exposures, and
-the promotion of a suggested package when it is added to a queue. Uses a
-temporary database and stand-in targets, never real data.
+`packages.query` filters, `packages.update` (revision conflicts and the
+reopen), `packages.delete`, the one-session-per-night rule (including the
+pick among old duplicates), packages with no exposures, and the promotion of
+a suggested package when it is added to a queue. Uses a temporary database
+and stand-in targets, never real data.
 """
 
 import pytest
@@ -13,11 +13,9 @@ import pytest
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.api.planning import ObservationPlanning
-from wayfindinglib.api.test.test_planning import _package, _planning, _site, _target, _telescope
+from wayfindinglib.api.test.test_planning import _configuration, _package, _planning, _rows, _target
 from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night
 from wayfindinglib.models.planning.observation_package import (
-    ExposureRequest,
-    FrameType,
     ObservationPackage,
     PackageStatus,
     PackageSuggestion,
@@ -76,9 +74,7 @@ def _night_session(planning: ObservationPlanning, night: str = "2026-08-10") -> 
     session : `ObservationSession`
         The night's session.
     """
-    return planning.create_session(
-        site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id=night
-    )
+    return planning.sessions.create(night, _configuration())
 
 
 def test_a_new_package_is_planned_at_revision_zero(isolated_butler: DiskButler) -> None:
@@ -111,37 +107,30 @@ def test_a_suggestion_keeps_its_source_fields() -> None:
     assert suggestion.created_at.tzinfo is not None
 
 
+def _library_target(planning: ObservationPlanning, target_id: str = "M 81") -> object:
+    """Read a library target from the stand-in catalog.
+
+    Parameters
+    ----------
+    planning : `ObservationPlanning`
+        The API under test.
+    target_id : `str`, optional
+        The target.
+
+    Returns
+    -------
+    target : `Target`
+        The target.
+    """
+    return planning._context.astrometrics.targets.get(target_id, required=True)
+
+
 def test_a_package_can_have_no_exposures(isolated_butler: DiskButler) -> None:
     """An empty package is recorded for a library target."""
     planning = _planning_with_targets(isolated_butler)
-    package = planning.create_package(target="M 81")
+    package = planning.packages.create(_library_target(planning))
     assert package.exposure_requests == []
     assert isolated_butler.get("observation_package", {"id": package.id}) is not None
-
-
-def test_a_package_for_a_catalog_target_creates_the_target(isolated_butler: DiskButler) -> None:
-    """A target missing from the library is created from the catalog first."""
-    planning = _planning_with_targets(isolated_butler)
-    package = planning.create_package(target="NGC 7331")
-    assert package.target_id == "NGC 7331"
-    assert planning._astrometrics.targets.created == ["NGC 7331"]
-    assert planning._astrometrics.targets.get("NGC 7331").ra == "01h 02m 03s"
-    assert isolated_butler.get("observation_package", {"id": package.id}) is not None
-
-
-def test_a_package_for_a_library_target_creates_nothing(isolated_butler: DiskButler) -> None:
-    """A target already in the library is reused, with no catalog lookup."""
-    planning = _planning_with_targets(isolated_butler)
-    planning.create_package(target="M 81")
-    assert planning._astrometrics.targets.created == []
-
-
-def test_a_package_for_a_name_the_catalog_does_not_know_is_refused(isolated_butler: DiskButler) -> None:
-    """A name that is in neither the library nor the catalog is refused."""
-    planning = _planning_with_targets(isolated_butler)
-    with pytest.raises(NotFoundError, match="does not know"):
-        planning.create_package(target="NGC 9999")
-    assert planning._astrometrics.targets.get("NGC 9999") is None
 
 
 def test_packages_list_newest_first_and_filters(isolated_butler: DiskButler) -> None:
@@ -153,80 +142,77 @@ def test_packages_list_newest_first_and_filters(isolated_butler: DiskButler) -> 
     third.status = PackageStatus.COMPLETE
     isolated_butler.put(third, "observation_package", {"id": third.id})
 
-    everything = planning.query_plans(kind="packages")
+    everything = planning.packages.query()
     assert {package.id for package in everything} == {first.id, second.id, third.id}
     assert [package.created_at for package in everything] == sorted(
         (package.created_at for package in everything), reverse=True
     )
-    assert [package.id for package in planning.query_plans(kind="packages", status="COMPLETE")] == [third.id]
-    assert {package.id for package in planning.query_plans(kind="packages", target="m_81")} == {
-        first.id,
-        third.id,
-    }
+    assert [package.id for package in planning.packages.query(status="COMPLETE")] == [third.id]
+    m_81 = _target("m_81")
+    assert {package.id for package in planning.packages.query(target=m_81)} == {first.id, third.id}
+    assert planning.packages.query(limit=1).next_offset == 1
+    assert planning.packages.query(dismissed=True).total == 0
     with pytest.raises(InvalidArgumentError):
-        planning.query_plans(kind="packages", status="bogus")
-    with pytest.raises(InvalidArgumentError):
-        planning.query_plans(kind="packages", include=["progress"])
-    with pytest.raises(InvalidArgumentError):
-        planning.query_plans(status="PLANNED")
+        planning.packages.query(status="bogus")
 
 
-def test_edit_package_changes_values_and_bumps_the_revision(isolated_butler: DiskButler) -> None:
+def test_update_changes_values_and_bumps_the_revision(isolated_butler: DiskButler) -> None:
     """An edit stores new values and adds one to the revision."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
-    edited = planning.update_package(
-        package.id,
-        exposure_requests=[{"frame_type": "LIGHT", "exposure_sec": 30.0, "count": 5}],
-        priority=2,
-        name="Wide M 81",
-        expected_revision=0,
+    edited = planning.packages.update(
+        package, exposure_requests=_rows(exposure_sec=30.0, count=5), priority=2, name="Wide M 81"
     )
     assert edited.revision == 1
     assert edited.priority == 2
-    stored = planning.query_plans(kind="packages")[0]
+    stored = planning.packages.get(package.id)
     assert stored.name == "Wide M 81"
     assert stored.exposure_requests[0].count == 5
     with pytest.raises(InvalidArgumentError):
-        planning.update_package(package.id, minimum_altitude_deg=200.0)
+        planning.packages.update(edited, minimum_altitude_deg=200.0)
     with pytest.raises(InvalidArgumentError):
-        planning.update_package(package.id)
+        planning.packages.update(edited)
+    with pytest.raises(InvalidArgumentError, match="Give one or more"):
+        planning.packages.update(edited, colour="red")
+    with pytest.raises(InvalidArgumentError, match="PLANNED"):
+        planning.packages.update(edited, status="COMPLETE")
 
 
-def test_edit_package_refuses_a_stale_revision(isolated_butler: DiskButler) -> None:
+def test_update_refuses_a_stale_revision(isolated_butler: DiskButler) -> None:
     """A stale revision is refused and names the current one."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
-    planning.update_package(package.id, notes="first", expected_revision=0)
+    planning.packages.update(package, notes="first")
     with pytest.raises(PlanRevisionConflictError) as caught:
-        planning.update_package(package.id, notes="second", expected_revision=0)
+        planning.packages.update(package, notes="second")
     assert caught.value.details["current_revision"] == 1
-    assert planning.query_plans(kind="packages")[0].notes == "first"
+    assert planning.packages.get(package.id).notes == "first"
 
 
 def test_reopen_sets_a_complete_package_back_to_planned(isolated_butler: DiskButler) -> None:
-    """Reopen works on COMPLETE only."""
+    """A reopen works on COMPLETE only, and may come with other changes."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
     with pytest.raises(ConflictError):
-        planning.reopen_package(package.id)
+        planning.packages.update(package, status="PLANNED")
     package.status = PackageStatus.COMPLETE
     isolated_butler.put(package, "observation_package", {"id": package.id})
-    reopened = planning.reopen_package(package.id)
+    reopened = planning.packages.update(package, status=PackageStatus.PLANNED, notes="again")
     assert reopened.status == PackageStatus.PLANNED
+    assert reopened.notes == "again"
     assert reopened.revision == 1
 
 
-def test_delete_removes_the_package_and_refuses_mixed_arguments(isolated_butler: DiskButler) -> None:
+def test_delete_removes_the_package_and_refuses_a_stale_one(isolated_butler: DiskButler) -> None:
     """Delete removes a package; a stale or missing one is refused."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
     with pytest.raises(PlanRevisionConflictError):
-        planning.delete_package(package.id, expected_revision=5)
-    planning.delete_package(package.id)
-    assert planning.query_plans(kind="packages") == []
+        planning.packages.delete(package.model_copy(update={"revision": 5}))
+    assert planning.packages.delete(package) is None
+    assert planning.packages.query().total == 0
     with pytest.raises(NotFoundError):
-        planning.delete_package(package.id)
+        planning.packages.delete(package)
 
 
 def test_one_session_per_night(isolated_butler: DiskButler) -> None:
@@ -237,13 +223,9 @@ def test_one_session_per_night(isolated_butler: DiskButler) -> None:
     other_night = _night_session(planning, "2026-08-11")
     assert again.id == first.id
     assert other_night.id != first.id
-    assert len(planning.query_plans()) == 2
-    assert planning.get_plan(observing_night_id="2026-08-10").id == first.id
-    assert planning.get_plan(observing_night_id="2026-01-01") is None
-    with pytest.raises(InvalidArgumentError):
-        planning.get_plan(session_id=first.id, observing_night_id="2026-08-10")
-    with pytest.raises(InvalidArgumentError):
-        planning.get_plan()
+    assert planning.sessions.query().total == 2
+    assert planning.sessions.get("2026-08-10").id == first.id
+    assert planning.sessions.get("2026-01-01") is None
 
 
 def test_the_insert_check_and_write_are_one_step(isolated_butler: DiskButler) -> None:
@@ -263,13 +245,13 @@ def test_old_duplicates_pick_the_most_entries_then_the_newest(isolated_butler: D
     older = base.model_copy(update={"id": "older"})
     newer = base.model_copy(update={"id": "newer", "created_at": base.created_at.replace(year=2099)})
     fuller = base.model_copy(update={"id": "fuller", "created_at": base.created_at.replace(year=2001)})
-    planning.add_to_queue(base.id, requests=[{"package_id": package.id}])
-    planning.remove_from_queue(base.id, entry_ids=[planning.get_plan(base.id).queue[0].id])
+    filled = planning.sessions.add(base, [package])
+    planning.sessions.remove(filled, [filled.queue[0]])
     for extra in (older, newer, fuller):
         isolated_butler.put(extra, "observation_session", {"session_id": extra.id})
-    fuller_stored = planning.add_to_queue("fuller", requests=[{"package_id": package.id}]).session
+    fuller_stored = planning.sessions.add(fuller, [package])
     assert fuller_stored.id == "fuller"
-    assert planning.get_plan(observing_night_id="2026-08-10").id == "fuller"
+    assert planning.sessions.get("2026-08-10").id == "fuller"
     assert _night_session(planning).id == "fuller"
     assert pick_session_for_night([older, newer]).id == "newer"
     assert pick_session_for_night([]) is None
@@ -282,33 +264,25 @@ def test_a_scheduled_session_replaces_the_placement_in_the_nights_session(
     planning = _planning_with_targets(isolated_butler)
     existing = _night_session(planning)
     package = _package(planning)
-    scheduled = planning.create_session(
-        requests=[QueueRequest(package_id=package.id)],
-        site_profile=_site(),
-        telescope=_telescope(),
-        camera_id="c1",
-        observing_night_id="2026-08-10",
+    scheduled = planning.sessions.create(
+        "2026-08-10", _configuration(), packages=[QueueRequest(package_id=package.id)]
     )
     assert scheduled.id == existing.id
     assert scheduled.revision == existing.revision + 1
-    assert len(planning.query_plans()) == 1
-    assert len(planning.get_plan(existing.id).queue) == 1
+    assert planning.sessions.query().total == 1
+    assert len(planning.sessions.get("2026-08-10").queue) == 1
 
 
 def test_adding_a_suggested_package_to_a_queue_promotes_it(isolated_butler: DiskButler) -> None:
     """A suggested package becomes planned when queued."""
     planning = _planning_with_targets(isolated_butler)
     session = _night_session(planning)
-    package = planning.create_package(
-        target="M 81",
-        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=60.0, count=2)],
-    )
+    package = planning.packages.create(_library_target(planning), _rows(count=2))
     package.status = PackageStatus.SUGGESTED
     isolated_butler.put(package, "observation_package", {"id": package.id})
 
-    change = planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
+    planning.sessions.add(session, [package])
 
-    assert any(item.kind == "package_promoted" for item in change.changes)
-    stored = planning.query_plans(kind="packages")[0]
+    stored = planning.packages.get(package.id)
     assert stored.status == PackageStatus.PLANNED
     assert stored.revision == 1

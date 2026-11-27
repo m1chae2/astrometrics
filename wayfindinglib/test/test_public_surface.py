@@ -2,9 +2,10 @@
 
 Description: `wayfindinglib/__init__.py` is the only door into this library
 that code outside it should use. `Wayfinder.control` is split into a root
-and six children named by topic, and `planning` and `execution` are
-single classes. Renaming, adding or removing a public name is a change to
-the library's contract with the backend, the MCP servers and the UI, so it
+and six children named by topic, `planning` holds four objects, and
+`execution` is a single class. Renaming, adding or removing a public name
+is a change to the library's contract with the backend, the MCP servers and
+the UI, so it
 must be a deliberate edit to the lists below rather than a side effect of
 moving code. The tests also check that every export resolves, that
 `control` stays under its size limit, and that the argument guards work:
@@ -36,7 +37,14 @@ BASELINE = Path(__file__).with_name("public_api_rules_baseline.txt")
 """Known departures from the public API design rules, emptied by issue #206."""
 
 EXPECTED_EXPORTS = frozenset({
+    "ChecklistItem",
+    "DitherConfig",
+    "ExposureRequest",
     "FrameEndDetector",
+    "Framing",
+    "HorizonZone",
+    "MosaicPanel",
+    "QueueRequest",
     "ObservationExecution",
     "ObservationPackage",
     "ObservationPlanning",
@@ -70,42 +78,35 @@ EXPECTED_MODULE_NAMES = {
 }
 """Names each public module of wayfindinglib offers (its `__all__`)."""
 
-PLANNING_MEMBERS = frozenset({
-    "get_visibility",
-    "get_tonight_advice",
-    "get_calibration_advice",
-    "get_depth_goal",
-    "set_depth_goal",
-    "calculate_panels",
-    "tick_checklist_item",
-    "create_mosaic",
-    "create_sequence",
-    "create_package",
-    "create_session",
-    "add_to_queue",
-    "reorder_queue",
-    "remove_from_queue",
-    "set_entry_exposures",
-    "add_checklist_items",
-    "set_framing",
-    "update_package",
-    "reopen_package",
-    "dismiss_package",
-    "undismiss_package",
-    "delete_package",
-    "refresh_suggestions",
-    "get_plan",
-    "query_plans",
-    "get_package_for_target",
-    "get_deep_catalog_status",
-    "build_deep_star_catalog",
-    # Sky browsing around a point, and name lookups.
-    "query_sources",
-    "query_catalogs",
-    "get_constellation_lines",
-    "lookup_coordinates",
-})
-"""The public members of `ObservationPlanning`."""
+PLANNING_MEMBERS = frozenset({"sessions", "packages", "sky", "catalogs"})
+"""The four objects of `ObservationPlanning`; it has no methods of its own."""
+
+PLANNING_OBJECTS = {
+    "sessions": frozenset({"get", "query", "create", "add", "remove", "update"}),
+    "packages": frozenset({
+        "get",
+        "get_for_target",
+        "query",
+        "query_suggestion_log",
+        "create",
+        "update",
+        "restore",
+        "delete",
+        "record_suggestions",
+        "get_depth_goal",
+        "set_depth_goal",
+        "create_mosaic",
+    }),
+    "sky": frozenset({"get_visibility", "get_tonight_advice", "get_constellation_lines", "get_panels"}),
+    "catalogs": frozenset({
+        "query",
+        "query_sources",
+        "get_deep_status",
+        "predict_deep_catalog",
+        "record_deep_catalog",
+    }),
+}
+"""Each object of `ObservationPlanning` and its public members."""
 
 EXECUTION_MEMBERS = frozenset({
     "advance_session",
@@ -250,9 +251,12 @@ def test_the_package_exports_exactly_the_expected_names() -> None:
         assert getattr(wayfindinglib, name) is not None, name
 
 
-def test_planning_offers_exactly_its_pinned_members() -> None:
-    """`ObservationPlanning` offers exactly the pinned methods."""
-    assert _public_names(ObservationPlanning) == PLANNING_MEMBERS
+def test_planning_offers_exactly_its_pinned_members(control: ObservatoryControl) -> None:
+    """`ObservationPlanning` holds four objects with their pinned methods."""
+    planning = ObservationPlanning(control._context.config, control._context.butler)
+    assert _public_names(planning) == PLANNING_MEMBERS
+    for name, members in PLANNING_OBJECTS.items():
+        assert _public_names(getattr(planning, name)) == members, name
 
 
 def test_execution_offers_exactly_its_pinned_members() -> None:
@@ -279,10 +283,14 @@ def test_no_background_job_can_skip_registering_a_job() -> None:
     """
     import inspect
 
-    for name in PLANNING_MEMBERS:
-        method = getattr(ObservationPlanning, name)
-        if getattr(method, "__background_job_type__", None) is not None:
-            assert "register_job" not in inspect.signature(method).parameters, name
+    from wayfindinglib.api.planning.catalogs import PlanningCatalogs
+    from wayfindinglib.api.planning.packages import PlanningPackages
+
+    for owner in (PlanningCatalogs, PlanningPackages):
+        for name in dir(owner):
+            method = getattr(owner, name)
+            if getattr(method, "__background_job_type__", None) is not None:
+                assert "register_job" not in inspect.signature(method).parameters, name
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:

@@ -230,7 +230,7 @@ def calculate_panels(
     if rows < 1 or cols < 1:
         raise InvalidArgumentError("rows and cols must each be at least 1.")
     if not 0.0 <= overlap_percent < 100.0:
-        raise InvalidArgumentError("overlap_percent must be from 0 to under 100.")
+        raise InvalidArgumentError("overlap_pct must be from 0 to under 100.")
     if equipment is not None:
         fov_width_deg, fov_height_deg = equipment.fov_width_deg, equipment.fov_height_deg
     else:

@@ -6,16 +6,9 @@ import this module. Each name is imported from the module where its code lives
 today, so moving the code later changes this file only.
 """
 
-from wayfindinglib.models.session.observation_session import ObservationSessionSummary
-from wayfindinglib.models.session.session_progress import (
-    EntryProgress,
-    ObservationSessionWithProgress,
-    SessionProgress,
-)
+from wayfindinglib.models.session.session_progress import EntryProgress, SessionProgress
 
 __all__ = [
     "EntryProgress",
-    "ObservationSessionSummary",
-    "ObservationSessionWithProgress",
     "SessionProgress",
 ]

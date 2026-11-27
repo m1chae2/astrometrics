@@ -653,5 +653,5 @@ class QualityStacks(MovedNames):
         from astrometricslib.pipelines.stacking.noise_records import record_odd_even_noise
 
         return record_odd_even_noise(
-            _check_target(target), self._config, self._drivers, keep_halves=keep_halves
+            _check_target(target), self._config, datetime.now(UTC), self._drivers, keep_halves=keep_halves
         )

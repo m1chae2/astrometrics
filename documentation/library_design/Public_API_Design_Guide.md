@@ -210,8 +210,10 @@ def measure_night(target, night):
 
 
 levels = measure_night(selection.target, "2026-11-20")
-show(levels)
+print(levels)
 ```
+
+The console's `selection` gives library types: `selection.target` is a `Target`, and `selection.star` gives `x_px` and `y_px` in the file `selection.path`, counted from 1. A function fed from it therefore takes the same inputs inside the library.
 
 **Promotion.** A function that proves useful moves into the library almost unchanged:
 

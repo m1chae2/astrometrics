@@ -58,12 +58,19 @@
       "interim_block": "",
       "note": "Built 2026-10-03. The AI may ingest the guide and Ekos logs: adds or updates records, never deletes. Since 2026-11-21 the astrometrics-backend server serves it through telescope:sync_logs, the app's own log sync, recorded as a remote_sync job named logs."
     },
-    "processing_analyze": {
+    "processing_astrometry_identify": {
       "tool_class": "process",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-11-22 from gap report #5. Starts the Analyze Target button's own analysis job through analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the raw spectrum frames). Writes the analysis results; raw frames are never written. Since 2026-11-25 camera_id and focal_length_mm analyze the target's stack of that camera and optic (stacks_by_configuration) instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and another configuration gets only astrometry and photometry."
+      "note": "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected stars, as a background job. Writes the solution into the stack and its viewer copy and saves the identification; raw frames are never written. Since 2026-11-21 the astrometrics-backend server serves it through analysis:identify_stack, the Astrometry button's own analysis job, so it shows in the job list and the app's Cancel stops it."
+    },
+    "processing_astrometry_run": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 one tool per analysis pipeline, replacing processing_analyze (built 2026-11-22 from gap report #5) and its stages argument. Each starts the Analyze Target button's own analysis job through analysis:analyze_image with its one stage, so it shows in the job list and the app's Cancel reaches it; the library runs astrometry (or spectroscopy, before the spectral variation) first when its result is missing or out of date. Writes the analysis results; raw frames are never written. camera_id and focal_length_mm analyze the target's stack of that camera and optic instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and another configuration gets only astrometry and photometry."
     },
     "processing_cancel": {
       "tool_class": "process",
@@ -79,26 +86,40 @@
       "interim_block": "",
       "note": "Built 2026-11-22. Reads or saves the Final Stack's Enhance choice (target, nothing, or an object in the frame) through processing:list_bright_objects and processing:set_bright_object, as the app's menu does. Without a choice it lists the saved choice and the objects in the frame, or why there are none. The choice is used at the next stack or Post Process Target; no picture is made. Writes only the target's saved choice."
     },
-    "processing_identify_stack": {
-      "tool_class": "process",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-20. Plate-solves a target's stack if it has no solution, then names its detected stars, as a background job. Writes the solution into the stack and its viewer copy and saves the identification; raw frames are never written. Since 2026-11-21 the astrometrics-backend server serves it through analysis:identify_stack, the Astrometry button's own analysis job, so it shows in the job list and the app's Cancel stops it."
-    },
-    "processing_remake_preview": {
+    "processing_enhancement_run": {
       "tool_class": "process",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer. Since 2026-11-21 the astrometrics-backend server serves it through processing:remake_preview, so the app runs the job. Since 2026-11-25 camera_id and focal_length_mm remake the target's stack of that camera and optic (stacks_by_configuration, sent as stack_path) instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and the main stack and processed-image pointer stay as they were."
     },
-    "processing_stack": {
+    "processing_photometry_run": {
       "tool_class": "process",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. A choice that matches no frame is refused before a job starts. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the Stack button's own job, so it shows in the job list and the app's Cancel reaches it."
+      "note": "Since #206 one tool per analysis pipeline, replacing processing_analyze (built 2026-11-22 from gap report #5) and its stages argument. Each starts the Analyze Target button's own analysis job through analysis:analyze_image with its one stage, so it shows in the job list and the app's Cancel reaches it; the library runs astrometry (or spectroscopy, before the spectral variation) first when its result is missing or out of date. Writes the analysis results; raw frames are never written. camera_id and focal_length_mm analyze the target's stack of that camera and optic instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and another configuration gets only astrometry and photometry."
+    },
+    "processing_spectroscopy_record_variation": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 one tool per analysis pipeline, replacing processing_analyze (built 2026-11-22 from gap report #5) and its stages argument. Each starts the Analyze Target button's own analysis job through analysis:analyze_image with its one stage, so it shows in the job list and the app's Cancel reaches it; the library runs astrometry (or spectroscopy, before the spectral variation) first when its result is missing or out of date. Writes the analysis results; raw frames are never written. camera_id and focal_length_mm analyze the target's stack of that camera and optic instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and another configuration gets only astrometry and photometry."
+    },
+    "processing_spectroscopy_run": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 one tool per analysis pipeline, replacing processing_analyze (built 2026-11-22 from gap report #5) and its stages argument. Each starts the Analyze Target button's own analysis job through analysis:analyze_image with its one stage, so it shows in the job list and the app's Cancel reaches it; the library runs astrometry (or spectroscopy, before the spectral variation) first when its result is missing or out of date. Writes the analysis results; raw frames are never written. camera_id and focal_length_mm analyze the target's stack of that camera and optic instead of the main stack; an unknown or ambiguous one is refused with the target's configurations, and another configuration gets only astrometry and photometry."
+    },
+    "processing_stacking_run": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. A choice that matches no frame is refused before a job starts. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the Stack button's own job, so it shows in the job list and the app's Cancel reaches it. Since #206 it is processing_stacking_run, and the job stacks, then makes the picture (processing.enhancement.run)."
     },
     "terminal_add_script": {
       "tool_class": "author",

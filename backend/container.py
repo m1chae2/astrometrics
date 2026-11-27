@@ -156,7 +156,9 @@ class Container:
             self.auto_download_service.stop()
         if self.astrometrics is not None:
             try:
-                self.astrometrics.processing.stop_stacking_programs()
+                from astrometricslib.drivers import get_stacking_driver
+
+                get_stacking_driver().stop_running_programs()
             except Exception:  # shutdown must go on to stop the rest
                 logger.exception("Could not stop the stacking programs at shutdown")
         if self.wayfinder is not None:

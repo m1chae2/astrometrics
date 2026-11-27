@@ -179,6 +179,7 @@ DECISIONS = {
         "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves "
         "the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, "
         "which the astrometrics-backend server serves; this library tool stays withheld.",
+        tool_class="observe",
     ),
     "processing_find_stack_configuration": ToolDecision(
         "keep",
@@ -186,20 +187,7 @@ DECISIONS = {
         "none or several match and lists the target's configurations. Reads the target record only.",
         tool_class="observe",
     ),
-    "processing_set_preview_bright_object": ToolDecision(
-        "withhold",
-        "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. "
-        "The AI reaches it through processing_enhance, which the astrometrics-backend server serves; "
-        "this library tool stays withheld.",
-    ),
     # ---- Drop ----
-    "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
-    "processing_stop_stacking_programs": ToolDecision(
-        "drop", "Stops every Siril the library started. The backend calls it when it stops."
-    ),
-    "processing_open_in_siril": ToolDecision(
-        "drop", "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
-    ),
     "planning_get_constellation_lines": ToolDecision(
         "drop",
         "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",
@@ -311,17 +299,25 @@ DECISIONS = {
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
     ),
-    "processing_analyze": ToolDecision(
-        "keep",
-        "Built 2026-11-22 from gap report #5. Starts the Analyze Target button's own analysis job through "
-        "analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no "
-        "stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's "
-        "stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the "
-        "raw spectrum frames). Writes the analysis results; raw frames are never written. Since 2026-11-25 "
-        "camera_id and focal_length_mm analyze the target's stack of that camera and optic "
-        "(stacks_by_configuration) instead of the main stack; an unknown or ambiguous one is refused with "
-        "the target's configurations, and another configuration gets only astrometry and photometry.",
-        "process",
+    **dict.fromkeys(
+        (
+            "processing_astrometry_run",
+            "processing_photometry_run",
+            "processing_spectroscopy_run",
+            "processing_spectroscopy_record_variation",
+        ),
+        ToolDecision(
+            "keep",
+            "Since #206 one tool per analysis pipeline, replacing processing_analyze (built 2026-11-22 from "
+            "gap report #5) and its stages argument. Each starts the Analyze Target button's own analysis "
+            "job through analysis:analyze_image with its one stage, so it shows in the job list and the "
+            "app's Cancel reaches it; the library runs astrometry (or spectroscopy, before the spectral "
+            "variation) first when its result is missing or out of date. Writes the analysis results; raw "
+            "frames are never written. camera_id and focal_length_mm analyze the target's stack of that "
+            "camera and optic instead of the main stack; an unknown or ambiguous one is refused with the "
+            "target's configurations, and another configuration gets only astrometry and photometry.",
+            "process",
+        ),
     ),
     "processing_cancel": ToolDecision(
         "keep",
@@ -363,7 +359,9 @@ DECISIONS = {
         "sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the "
         "target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to "
         "stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the "
-        "Stack button's own job, so it shows in the job list and the app's Cancel reaches it.",
+        "Stack button's own job, so it shows in the job list and the app's Cancel reaches it. Since #206 "
+        "it is processing_stacking_run, and the job stacks, then makes the picture "
+        "(processing.enhancement.run).",
         "process",
     ),
     "target_imaged_field_centers": ToolDecision(
@@ -409,6 +407,7 @@ DECISIONS = {
         "keep",
         "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution "
         "it came from. Writes nothing.",
+        tool_class="observe",
     ),
     "processing_identify_stack": ToolDecision(
         "keep",
@@ -423,6 +422,7 @@ DECISIONS = {
         "keep",
         "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "
         "fraction, star width against the inputs and each exposure group. Reads the saved summary.",
+        tool_class="observe",
     ),
     "star_query": ToolDecision(
         "keep",
@@ -915,7 +915,6 @@ DECISIONS = {
     **dict.fromkeys(
         (
             "calibration_reindex_frames",
-            "processing_process_target",
             "star_create",
             "star_update",
             "target_add",
@@ -939,6 +938,11 @@ DECISIONS = {
             "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
+    ),
+    "processing_asteroids_run": ToolDecision(
+        "withhold",
+        "Since #206 the asteroid search of processing_process_target, which was withheld: " + READ_ONLY_NOTE,
+        "change-data",
     ),
     "quality_record_frame_measurements": ToolDecision(
         "withhold",
@@ -1005,6 +1009,18 @@ TOOL_RENAMES: dict[str, str] = {
     "calibration_reindex_frames": "calibration_frames_scan",
     "calibration_measure_frames": "calibration_frames_record",
     "calibration_camera_profile": "calibration_get_profile",
+    # Step 4d of #206: one object per pipeline under `processing`.
+    "processing_stack": "processing_stacking_run",
+    "processing_predict_stack": "processing_stacking_predict",
+    "processing_predict_stack_weights": "processing_stacking_predict_weights",
+    "processing_stack_summary": "processing_stacking_get_summary",
+    "processing_find_stack_configuration": "processing_stacking_get_stack",
+    "processing_remake_preview": "processing_enhancement_run",
+    "processing_list_preview_bright_objects": "processing_enhancement_get_bright_objects",
+    "processing_plate_solve": "processing_astrometry_solve",
+    "processing_identify_stack": "processing_astrometry_identify",
+    "processing_get_stack_identification": "processing_astrometry_get_identification",
+    "quality_blocks_solved_stars": "processing_astrometry_get_named_stars",
 }
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies

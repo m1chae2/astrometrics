@@ -107,28 +107,35 @@
       "interim_block": "",
       "note": "Writes the database. The AI is read-only."
     },
-    "processing_acquire_job_slot": {
+    "processing_asteroids_run": {
       "tool_class": "change-data",
       "category": "image-processing",
-      "disposition": "drop",
+      "disposition": "withhold",
       "interim_block": "",
-      "note": "Internal concurrency lock exposed by reflection."
+      "note": "Since #206 the asteroid search of processing_process_target, which was withheld: The AI is read-only, so a tool that writes is not offered."
     },
-    "processing_find_stack_configuration": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why none or several match and lists the target's configurations. Reads the target record only."
-    },
-    "processing_get_stack_identification": {
+    "processing_astrometry_get_identification": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution it came from. Writes nothing."
     },
-    "processing_list_preview_bright_objects": {
+    "processing_astrometry_get_named_stars": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "A Command Console building block, uncapped. The AI reads a target's named stars through star_query."
+    },
+    "processing_astrometry_solve": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since 2026-11-26 (#199) returns a PlateSolution: the image center, pixel scale, rotation and the sky map's header cards. Solves one image in memory and writes nothing."
+    },
+    "processing_enhancement_get_bright_objects": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "withhold",
@@ -142,61 +149,33 @@
       "interim_block": "",
       "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference stacks two halves, about one library stack's time in all). The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
-    "processing_open_in_siril": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
-    },
-    "processing_plate_solve": {
-      "tool_class": "compute",
+    "processing_stacking_get_stack": {
+      "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Since 2026-11-26 (#199) returns a PlateSolution: the image center, pixel scale, rotation and the sky map's header cards. Solves one image in memory and writes nothing."
+      "note": "Built 2026-11-26. Names the one stack of a target taken with a camera and optic, or says why none or several match and lists the target's configurations. Reads the target record only."
     },
-    "processing_predict_stack": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app runs it as the background job processing:check_stack for its Check Frames button. A library call would hold the tool open. An AI lists the frames already set aside with quality_set_aside_frames."
-    },
-    "processing_predict_stack_weights": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them."
-    },
-    "processing_process_target": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
-    },
-    "processing_set_preview_bright_object": {
-      "tool_class": "unclassified",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. The AI reaches it through processing_enhance, which the astrometrics-backend server serves; this library tool stays withheld."
-    },
-    "processing_stack_summary": {
+    "processing_stacking_get_summary": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs and each exposure group. Reads the saved summary."
     },
-    "processing_stop_stacking_programs": {
+    "processing_stacking_predict": {
       "tool_class": "unclassified",
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Stops every Siril the library started. The backend calls it when it stops."
+      "note": "Reads every frame of the target (the cloud and trailing check), which takes minutes, so the app runs it as the background job processing:check_stack for its Check Frames button. A library call would hold the tool open. An AI lists the frames already set aside with quality_set_aside_frames."
+    },
+    "processing_stacking_predict_weights": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them."
     },
     "quality_blocks_find_stars": {
       "tool_class": "compute",

@@ -2,9 +2,11 @@
 
 Description: The Astrometry button on a stack starts
 `AnalysisOrchestrator.identify_stack`. The job has the analysis type, so the
-Analyze Target button shows it as running; it reports progress, can be
-stopped, and its result is read with `get_stack_identification`. It must not
-be taken for an analysis result. The library call is a stand-in here.
+Analyze Target button shows it as running; the library's
+``processing.astrometry.identify`` reports its progress to the job (the job is
+the library's current job), a cancel stops it through the run's abandonment,
+and its result is read with `get_stack_identification`. It must not be taken
+for an analysis result. The library call is a stand-in here.
 """
 
 import threading
@@ -17,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.exceptions import InvalidArgumentError
-from astrometricslib.jobs import JobStore
+from astrometricslib.jobs import JobStore, get_current_job, raise_if_abandoned
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.processing.job_service import JobService
 
@@ -48,7 +50,7 @@ def _orchestrator(tmp_path: Path, identify: Any, frames: int = 30) -> AnalysisOr
     tmp_path : `pathlib.Path`
         The test folder.
     identify : `Callable`
-        Stands in for ``processing.identify_stack``.
+        Stands in for ``processing.astrometry.identify``.
     frames : `int`, optional
         The ``STACKCNT`` the stand-in header gives.
 
@@ -63,7 +65,7 @@ def _orchestrator(tmp_path: Path, identify: Any, frames: int = 30) -> AnalysisOr
     stellar._checked_image_path.side_effect = lambda path: path
     astrometrics = SimpleNamespace(
         processing=SimpleNamespace(
-            identify_stack=identify, get_stack_identification=lambda _p: _identification()
+            astrometry=SimpleNamespace(identify=identify, get_identification=lambda _p: _identification())
         ),
         targets=SimpleNamespace(frames=SimpleNamespace(get_header=lambda _p: {"STACKCNT": frames})),
     )
@@ -95,15 +97,15 @@ def test_the_job_is_an_analysis_job_with_progress_and_a_result(tmp_path: Path) -
     """The job runs as type analysis, reports progress and gives its stars."""
     release = threading.Event()
 
-    def identify(path: str, *, progress: Any, should_stop: Any) -> SimpleNamespace:
-        """Report half way, wait, then finish.
+    def identify(path: str) -> SimpleNamespace:
+        """Report half way to the current job, wait, then finish.
 
         Returns
         -------
         identification : `SimpleNamespace`
             The result.
         """
-        progress(0.5, "Downloading Gaia sky tiles")
+        get_current_job().mark("running", 50, message="Downloading Gaia sky tiles")
         release.wait(5)
         return _identification()
 
@@ -137,20 +139,26 @@ def test_the_job_is_an_analysis_job_with_progress_and_a_result(tmp_path: Path) -
 
 
 def test_the_analysis_cancel_stops_the_identification(tmp_path: Path) -> None:
-    """Cancel on the Analyze panel sets the stop switch the library checks."""
+    """Cancel on the Analyze panel gives up on the run the library checks."""
     stopped = threading.Event()
 
-    def identify(path: str, *, progress: Any, should_stop: Any) -> SimpleNamespace:
-        """Wait for the stop switch, then stop as the library does.
+    def identify(path: str) -> SimpleNamespace:
+        """Check for a cancel, then stop as the library does.
+
+        A run given up on stops with `RunAbandonedError`.
 
         Raises
         ------
-        RuntimeError
-            When stopped.
+        AssertionError
+            If the run is never given up on.
         """
-        _wait_until(should_stop)
-        stopped.set()
-        raise RuntimeError("The star identification was stopped.")
+        try:
+            for _ in range(250):
+                raise_if_abandoned()
+                time.sleep(0.02)
+        finally:
+            stopped.set()
+        raise AssertionError("the run was never given up on")
 
     orchestrator = _orchestrator(tmp_path, identify)
     job_id = orchestrator.identify_stack("M 99", "/lib/M99_Stacked.fits")["jobId"]
@@ -158,7 +166,7 @@ def test_the_analysis_cancel_stops_the_identification(tmp_path: Path) -> None:
 
     assert orchestrator.cancel_analysis("M 99")["cancelled"] is True
     _wait_until(stopped.is_set)
-    _wait_until(lambda: orchestrator._job_service.get_job(job_id).status == "failed")
+    _wait_until(lambda: orchestrator._job_service.get_job(job_id).status in ("failed", "cancelled"))
 
 
 def test_a_single_frame_is_refused(tmp_path: Path) -> None:

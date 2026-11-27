@@ -78,15 +78,15 @@ def _with_hint(reply: Any, hint: str) -> Any:
 
 
 @tool(
-    "processing_stack",
+    "processing_stacking_run",
     (
         "Stack a target's frames in the app, as its Stack button does. The app runs it as a stacking job: "
         "it shows in the job list with its progress and log, and the person can cancel it there. Choose "
         "kind (imaging or spectral, never mixed), and optionally a filter, a file range, a time range, a "
-        "camera and a focal length, or give the exact frames. A choice that matches no frame is refused "
-        "before a job starts. It sets bad frames aside (never deletes them), keeps one previous "
-        "stack, and saves the target. Read the result with processing_stack_summary. Needs the app's "
-        "backend to be running."
+        "camera and a focal length, or give the exact frames. A choice that matches no frame, or frames "
+        "from two cameras or optics, is refused before a job starts. It sets bad frames aside (never "
+        "deletes them), keeps one previous stack, saves the target, then makes the stack's picture. Read "
+        "the result with processing_stacking_get_summary. Needs the app's backend to be running."
     ),
     {
         "type": "object",
@@ -122,7 +122,7 @@ def _with_hint(reply: Any, hint: str) -> Any:
     },
     specs=JOB_TOOL_SPECS,
 )
-async def tool_processing_stack(
+async def tool_processing_stacking_run(
     target: str,
     kind: str | None = None,
     filter_name: str | None = None,
@@ -147,9 +147,9 @@ async def tool_processing_stack(
     kind : `str`, optional
         ``"imaging"`` (default) or ``"spectral"``.
     filter_name, first_file, last_file : `str`, optional
-        The filter and file range, as in the library's ``processing.stack``.
+        The filter and file range, as in ``targets.frames.query``.
     since, until, camera_id : `str`, optional
-        The time range and camera, as in the library's ``processing.stack``.
+        The time range, and the camera (a full name or part of one).
     focal_length_mm : `float`, optional
         Only frames taken at this focal length.
     frames : `list` [`str`], optional
@@ -185,16 +185,16 @@ async def tool_processing_stack(
         "star_toning": star_toning,
     })
     reply = await execute_rpc("processing:stack", parameters)
-    return _with_hint(reply, FOLLOW_A_JOB + " The result is in processing_stack_summary once it ends.")
+    return _with_hint(reply, FOLLOW_A_JOB + " The result is in processing_stacking_get_summary once it ends.")
 
 
 @tool(
-    "processing_identify_stack",
+    "processing_astrometry_identify",
     (
         "Name every star the stack's star finder detected, in the app, as its Astrometry button does. The "
         "app runs it as an analysis job: it shows in the job list with its progress and log, and the "
         "person can cancel it there. The stack is plate-solved first if it has no solution. Read the "
-        "names with processing_get_stack_identification when it ends. Needs the app's backend to be "
+        "names with processing_astrometry_get_identification when it ends. Needs the app's backend to be "
         "running."
     ),
     {
@@ -210,7 +210,7 @@ async def tool_processing_stack(
     },
     specs=JOB_TOOL_SPECS,
 )
-async def tool_processing_identify_stack(target: str, stack_path: str | None = None) -> Any:
+async def tool_processing_astrometry_identify(target: str, stack_path: str | None = None) -> Any:
     """Start the job that names a stack's stars.
 
     Parameters
@@ -243,7 +243,7 @@ async def tool_processing_identify_stack(target: str, stack_path: str | None = N
                 details={"target": target},
             )
     reply = await execute_rpc("analysis:identify_stack", {"target_id": target, "stack_path": stack_path})
-    return _with_hint(reply, FOLLOW_A_JOB + " The names are in processing_get_stack_identification.")
+    return _with_hint(reply, FOLLOW_A_JOB + " The names are in processing_astrometry_get_identification.")
 
 
 def _first_text(*values: Any) -> str | None:
@@ -262,69 +262,87 @@ def _first_text(*values: Any) -> str | None:
     return next((value for value in values if isinstance(value, str) and value), None)
 
 
-@tool(
-    "processing_analyze",
-    (
-        "Analyze a target in the app, as its Analyze Target button does. The app runs it as an analysis "
-        "job: it shows in the target's job list with its progress and log, and the person can cancel it "
-        "there. Leave stages out to do what the button does: photometry on the imaging stack and "
-        "spectroscopy on the spectral stack when the target has both, or the one stack's own stage. Or "
-        "choose stages from astrometry, photometry, spectroscopy and spectral_variation; astrometry runs "
-        "first when a stage needs it. A target stacked with several cameras or optics has one stack for "
-        "each: give camera_id and focal_length_mm to analyze that configuration's stack and frames instead "
-        "of the main stack (an unknown one is refused with the target's list). Spectral stacks are kept "
-        "only for the main configuration, so another configuration gets astrometry and photometry; its "
-        "results replace the target's saved astrometry and photometry results. "
-        "Stack the target first: a stage with no stack to work on is refused. "
-        "If an analysis of the target is already running, no second one starts. Read the results with "
-        "star_query and processing_get_stack_identification. Needs the app's backend to be running."
+ANALYSIS_TOOLS = {
+    "processing_astrometry_run": (
+        "astrometry",
+        "Plate solve a target's stack and record the stars it names",
     ),
-    {
-        "type": "object",
-        "properties": {
-            "target": {"type": "string", "description": 'The target id, such as "M 13".'},
-            "stages": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "The stages to run: astrometry, photometry, spectroscopy or spectral_variation. "
-                    "Default: the Analyze Target button's choice."
-                ),
-            },
-            "camera_id": {
-                "type": "string",
-                "description": "Analyze the stack of this camera (or part of its name). Default: main stack.",
-            },
-            "focal_length_mm": {
-                "type": "number",
-                "description": "Analyze the stack taken at this focal length. Default: the main stack.",
-            },
-        },
-        "required": ["target"],
-    },
-    specs=JOB_TOOL_SPECS,
-)
-async def tool_processing_analyze(
-    target: str,
-    stages: list[str] | None = None,
-    camera_id: str | None = None,
-    focal_length_mm: float | None = None,
-) -> Any:
-    """Start the job the Analyze Target button starts.
+    "processing_photometry_run": (
+        "photometry",
+        "Measure the brightness of a target's stars across its frames (astrometry runs first when needed)",
+    ),
+    "processing_spectroscopy_run": (
+        "spectroscopy",
+        "Extract and classify the spectra of a target's spectral stack (astrometry runs first when needed)",
+    ),
+    "processing_spectroscopy_record_variation": (
+        "spectral_variation",
+        "Follow each star's spectrum across a target's raw spectral frames, night by night (spectroscopy "
+        "runs first when needed)",
+    ),
+}
+"""Tool name -> (the ``analysis:analyze_image`` stage it runs, what it does).
+One tool per library pipeline method: ``processing.astrometry.run``,
+``processing.photometry.run``, ``processing.spectroscopy.run`` and
+``processing.spectroscopy.record_variation``."""
 
-    The backend checks the stages, chooses them when none are given, and
-    finds the stack of the camera and optic.
+_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string", "description": 'The target id, such as "M 13".'},
+        "camera_id": {
+            "type": "string",
+            "description": "Analyze the stack of this camera (or part of its name). Default: main stack.",
+        },
+        "focal_length_mm": {
+            "type": "number",
+            "description": "Analyze the stack taken at this focal length. Default: the main stack.",
+        },
+    },
+    "required": ["target"],
+}
+"""The arguments of each analysis tool."""
+
+
+def _analysis_description(summary: str) -> str:
+    """Write an analysis tool's description around what it does.
 
     Parameters
     ----------
+    summary : `str`
+        What the pipeline does, as one sentence without its full stop.
+
+    Returns
+    -------
+    description : `str`
+        The tool's description.
+    """
+    return (
+        f"{summary}, in the app, as its Analyze Target menu does. The app runs it as an analysis job: it "
+        "shows in the target's job list with its progress and log, and the person can cancel it there. A "
+        "target stacked with several cameras or optics has one stack for each: give camera_id and "
+        "focal_length_mm to analyze that configuration's stack and frames instead of the main stack (an "
+        "unknown one is refused with the target's list). Spectral stacks are kept only for the main "
+        "configuration. Stack the target first: a pipeline with nothing to work on is refused. If an "
+        "analysis of the target is already running, no second one starts. Read the results with "
+        "star_query and processing_astrometry_get_identification. Needs the app's backend to be running."
+    )
+
+
+async def _start_analysis(
+    stage: str, target: str, camera_id: str | None = None, focal_length_mm: float | None = None
+) -> Any:
+    """Start the Analyze Target job for one pipeline.
+
+    Parameters
+    ----------
+    stage : `str`
+        The pipeline's stage name for ``analysis:analyze_image``.
     target : `str`
         The target id.
-    stages : `list` [`str`], optional
-        The stages to run. When omitted, the backend chooses as the button
-        does.
     camera_id : `str`, optional
-        Analyze the target's stack of this camera (``processing_stack``'s
-        meaning: the full name or part of it). The main stack by default.
+        Analyze the target's stack of this camera (the full name or part of
+        it). The main stack by default.
     focal_length_mm : `float`, optional
         Analyze the target's stack taken at this focal length.
 
@@ -340,14 +358,127 @@ async def tool_processing_analyze(
         "analysis:analyze_image",
         _without_empty({
             "target_id": target,
-            "stages": stages,
+            "stages": [stage],
             "camera_id": camera_id,
             "focal_length_mm": focal_length_mm,
         }),
     )
     return _with_hint(
-        reply, FOLLOW_A_JOB + " Read the results with star_query and processing_get_stack_identification."
+        reply,
+        FOLLOW_A_JOB + " Read the results with star_query and processing_astrometry_get_identification.",
     )
+
+
+@tool(
+    "processing_astrometry_run",
+    _analysis_description(ANALYSIS_TOOLS["processing_astrometry_run"][1]),
+    _ANALYSIS_SCHEMA,
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_astrometry_run(
+    target: str, camera_id: str | None = None, focal_length_mm: float | None = None
+) -> Any:
+    """Start the astrometry pipeline as the app's analysis job.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    camera_id : `str`, optional
+        Analyze the target's stack of this camera.
+    focal_length_mm : `float`, optional
+        Analyze the target's stack taken at this focal length.
+
+    Returns
+    -------
+    reply : `Any`
+        The backend's ``analysis:analyze_image`` answer.
+    """
+    return await _start_analysis("astrometry", target, camera_id, focal_length_mm)
+
+
+@tool(
+    "processing_photometry_run",
+    _analysis_description(ANALYSIS_TOOLS["processing_photometry_run"][1]),
+    _ANALYSIS_SCHEMA,
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_photometry_run(
+    target: str, camera_id: str | None = None, focal_length_mm: float | None = None
+) -> Any:
+    """Start the photometry pipeline as the app's analysis job.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    camera_id : `str`, optional
+        Analyze the target's stack of this camera.
+    focal_length_mm : `float`, optional
+        Analyze the target's stack taken at this focal length.
+
+    Returns
+    -------
+    reply : `Any`
+        The backend's ``analysis:analyze_image`` answer.
+    """
+    return await _start_analysis("photometry", target, camera_id, focal_length_mm)
+
+
+@tool(
+    "processing_spectroscopy_run",
+    _analysis_description(ANALYSIS_TOOLS["processing_spectroscopy_run"][1]),
+    _ANALYSIS_SCHEMA,
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_spectroscopy_run(
+    target: str, camera_id: str | None = None, focal_length_mm: float | None = None
+) -> Any:
+    """Start the spectroscopy pipeline as the app's analysis job.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    camera_id : `str`, optional
+        The camera of the stack; only the main configuration has spectra.
+    focal_length_mm : `float`, optional
+        The optic of the stack.
+
+    Returns
+    -------
+    reply : `Any`
+        The backend's ``analysis:analyze_image`` answer.
+    """
+    return await _start_analysis("spectroscopy", target, camera_id, focal_length_mm)
+
+
+@tool(
+    "processing_spectroscopy_record_variation",
+    _analysis_description(ANALYSIS_TOOLS["processing_spectroscopy_record_variation"][1]),
+    _ANALYSIS_SCHEMA,
+    specs=JOB_TOOL_SPECS,
+)
+async def tool_processing_spectroscopy_record_variation(
+    target: str, camera_id: str | None = None, focal_length_mm: float | None = None
+) -> Any:
+    """Start the spectral variation pipeline as the app's analysis job.
+
+    Parameters
+    ----------
+    target : `str`
+        The target id.
+    camera_id : `str`, optional
+        The camera of the stack; only the main configuration has spectra.
+    focal_length_mm : `float`, optional
+        The optic of the stack.
+
+    Returns
+    -------
+    reply : `Any`
+        The backend's ``analysis:analyze_image`` answer.
+    """
+    return await _start_analysis("spectral_variation", target, camera_id, focal_length_mm)
 
 
 @tool(
@@ -575,7 +706,7 @@ async def tool_processing_enhance(target: str, choice: str | None = None) -> Any
 
 
 @tool(
-    "processing_remake_preview",
+    "processing_enhancement_run",
     (
         "Make a target's preview picture again from its existing stack, in the app, without restacking. "
         "The app runs it as a preview job that shows in the job list. denoise, denoise_strength, "
@@ -628,7 +759,7 @@ async def tool_processing_enhance(target: str, choice: str | None = None) -> Any
     },
     specs=JOB_TOOL_SPECS,
 )
-async def tool_processing_remake_preview(
+async def tool_processing_enhancement_run(
     target: str,
     kind: str | None = None,
     denoise: bool | None = None,
@@ -653,7 +784,7 @@ async def tool_processing_remake_preview(
     denoise_strength, star_strength, star_stretch : `float`, optional
         Strengths for this run.
     camera_id : `str`, optional
-        Remake the target's stack of this camera (``processing_stack``'s
+        Remake the target's stack of this camera (``processing_stacking_run``'s
         meaning: the full name or part of it). The main stack by default.
     focal_length_mm : `float`, optional
         Remake the target's stack taken at this focal length.

@@ -383,7 +383,7 @@ CLASSIFICATION_RULES = (
         "Reads targets or stars in short, capped records.",
     ),
     _rule(
-        r"^processing_stack_summary$",
+        r"^processing_stacking_get_summary$",
         "observe",
         "high",
         "Reads the summary saved with a target's stack. Measures and saves nothing.",

@@ -4669,7 +4669,7 @@ export interface StackSummary {
 }
 
 /**
- * What one call of `ProcessingPipelines.remake_preview` made.
+ * What one enhancement run (`processing.enhancement.run`) made.
  */
 export interface PreviewRemakeResult {
   target_id: string;
@@ -4683,6 +4683,7 @@ export interface PreviewRemakeResult {
   preview_settings?: PreviewSettingsRecord | null;
   color_preview_path?: string | null;
   color_preview_note?: string | null;
+  kept_unchanged?: boolean;
 }
 
 /**

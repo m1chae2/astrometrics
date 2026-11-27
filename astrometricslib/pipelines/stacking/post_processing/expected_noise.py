@@ -223,7 +223,7 @@ class ExposureGroupNoiseFacts:
     ----------
     combine_weight : `float`
         The group's weight in the combine, ``W_g = N_g t_g^2 / s_g^2``.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The group's exposure length, ``t_g``, in seconds.
     frame_count : `int`
         The number of frames stacked in the group, ``N_g``.
@@ -241,7 +241,7 @@ class ExposureGroupNoiseFacts:
     """
 
     combine_weight: float
-    exposure_seconds: float
+    exposure_s: float
     frame_count: int
     gain: float
     gain_measured: bool
@@ -622,7 +622,7 @@ def expected_exposure_group_noise(
         return ExpectedNoiseOutcome(None, "the stack has no member frames")
     if any(
         group.combine_weight <= 0
-        or group.exposure_seconds <= 0
+        or group.exposure_s <= 0
         or group.frame_count <= 0
         or group.gain <= 0
         or not math.isfinite(group.sky_level_per_second)
@@ -651,7 +651,7 @@ def expected_exposure_group_noise(
     if any(total <= 0 for total in raw_totals):
         return ExpectedNoiseOutcome(None, "a combined exposure group has no member frame with a weight")
     weight_total = math.fsum(group.combine_weight for group in groups)
-    mean_exposure = math.fsum(group.frame_count * group.exposure_seconds for group in groups) / math.fsum(
+    mean_exposure = math.fsum(group.frame_count * group.exposure_s for group in groups) / math.fsum(
         group.frame_count for group in groups
     )
     sky_variance = 0.0
@@ -659,9 +659,7 @@ def expected_exposure_group_noise(
     for frame, index in zip(frames, frame_group_indices, strict=True):
         group = groups[index]
         coefficient = group.combine_weight * frame.weight / raw_totals[index] / (weight_total * group.gain)
-        scale_to_rate = (
-            coefficient * frame.exposure_scale / (frame.gain_electrons_per_adu * group.exposure_seconds)
-        )
+        scale_to_rate = coefficient * frame.exposure_scale / (frame.gain_electrons_per_adu * group.exposure_s)
         sky_variance += scale_to_rate**2 * frame.sky_electrons
         read_variance += scale_to_rate**2 * frame.read_noise_electrons**2
     area = effective_aperture_area_px()
@@ -673,7 +671,7 @@ def expected_exposure_group_noise(
     for group in groups:
         if not group.gain_measured:
             reasons.add(
-                f"the combine could not measure the gain of the {group.exposure_seconds:g} s group and used 1"
+                f"the combine could not measure the gain of the {group.exposure_s:g} s group and used 1"
             )
     return ExpectedNoiseOutcome(
         ExpectedNoise(
@@ -703,7 +701,7 @@ def gather_frame_noise_inputs(
     Parameters
     ----------
     members : `Sequence`
-        The stack's member frames (they have ``exposure``).
+        The stack's member frames (they have ``exposure_s``).
     weights : `Sequence` [`float` or `None`]
         Each member's weight, in the order of `members`. `None` means unknown.
     sky_rate_rows : `dict` [`str`, `QualityMeasurement`]
@@ -742,10 +740,10 @@ def gather_frame_noise_inputs(
         if row.value is None:
             return ExpectedNoiseOutcome(None, f"a frame's sky rate was not measured: {row.reason}")
         try:
-            exposure_seconds = float(member.exposure)
+            exposure_s = float(member.exposure_s)
         except TypeError, ValueError:
-            exposure_seconds = 0.0
-        if not exposure_seconds > 0:
+            exposure_s = 0.0
+        if not exposure_s > 0:
             return ExpectedNoiseOutcome(None, "a member frame has no usable exposure time")
         gain, read_noise, gap = noise_setting_of(member)
         if gain is None or read_noise is None:
@@ -761,7 +759,7 @@ def gather_frame_noise_inputs(
         inputs.append(
             FrameNoiseInput(
                 weight=float(weight),
-                sky_electrons=float(row.value) * exposure_seconds,
+                sky_electrons=float(row.value) * exposure_s,
                 read_noise_electrons=read_noise.value,
                 gain_electrons_per_adu=gain.value,
                 assumed_reason="; ".join(reasons),

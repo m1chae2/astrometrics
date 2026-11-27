@@ -190,10 +190,20 @@ def fitted_controller_settings(path: Path) -> dict[str, float] | None:
     Returns
     -------
     settings : `dict` [`str`, `float`] or `None`
-        The settings, or `None` for PHD2's own.
+        The settings, or `None` for PHD2's own. A file written before the
+        unit-suffix rename names the guide exposure ``exposure_seconds``; it
+        is given as ``exposure_s``.
     """
     document = read_results(path)
-    return None if document is None else document.get("controller_settings")
+    settings = None if document is None else document.get("controller_settings")
+    if not settings:
+        return settings
+    return {_OLDER_SETTING_NAMES.get(name, name): value for name, value in settings.items()}
+
+
+# The name a controller setting had in a results file written before the
+# unit-suffix rename (issue #206), by its old name.
+_OLDER_SETTING_NAMES = {"exposure_seconds": "exposure_s"}
 
 
 def fitted_guide_rate_fraction(path: Path) -> dict[str, float] | None:

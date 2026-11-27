@@ -133,7 +133,7 @@ def measure_image_quality(
     astrometrics: Any,
     telescope_name: str,
     camera_name: str,
-    minimum_exposure_seconds: float,
+    minimum_exposure_s: float,
 ) -> MeasuredImageQuality | None:
     """Measure how sharp this equipment's own star images are.
 
@@ -150,7 +150,7 @@ def measure_image_quality(
     camera_name : `str`
         Name of the imaging camera. Every spelling the camera's profile
         knows (its aliases and the library's record name) is accepted.
-    minimum_exposure_seconds : `float`
+    minimum_exposure_s : `float`
         Shortest exposure to include.
 
     Returns
@@ -160,11 +160,11 @@ def measure_image_quality(
         if no frame of this equipment has a measured width.
     """
     frames = collect_capture_frames(astrometrics, telescope_name, camera_name)
-    return image_quality_from_frames(frames, minimum_exposure_seconds)
+    return image_quality_from_frames(frames, minimum_exposure_s)
 
 
 def image_quality_from_frames(
-    frames: Iterable[CaptureFrame], minimum_exposure_seconds: float
+    frames: Iterable[CaptureFrame], minimum_exposure_s: float
 ) -> MeasuredImageQuality | None:
     """Take the median star width of the frames that can show guiding error.
 
@@ -172,7 +172,7 @@ def image_quality_from_frames(
     ``frame.star_width_moffat_arcsec``, already in arcseconds. Frames taken
     through a spectroscopy filter are
     left out, since a dispersed star has no meaningful width. So are frames
-    shorter than `minimum_exposure_seconds`: in a short exposure guiding error
+    shorter than `minimum_exposure_s`: in a short exposure guiding error
     has no time to widen the star, and the bright single stars usually shot
     that briefly are saturated, which inflates their measured width.
 
@@ -180,7 +180,7 @@ def image_quality_from_frames(
     ----------
     frames : `Iterable` [`CaptureFrame`]
         The equipment's light frames.
-    minimum_exposure_seconds : `float`
+    minimum_exposure_s : `float`
         Shortest exposure to include.
 
     Returns
@@ -191,7 +191,7 @@ def image_quality_from_frames(
     """
     widths_arcsec = [
         frame.star_width_arcsec
-        for frame in usable_star_frames(frames, minimum_exposure_seconds)
+        for frame in usable_star_frames(frames, minimum_exposure_s)
         if frame.star_width_arcsec is not None
     ]
     if not widths_arcsec:
@@ -199,7 +199,7 @@ def image_quality_from_frames(
     return MeasuredImageQuality(
         fwhm_arcsec=statistics.median(widths_arcsec),
         sample_count=len(widths_arcsec),
-        minimum_exposure_seconds=minimum_exposure_seconds,
+        minimum_exposure_s=minimum_exposure_s,
     )
 
 
@@ -256,7 +256,7 @@ class NightGuidingBaseline(NamedTuple):
         Median guide-star brightness in camera counts, if any sample has one.
     rms : `float`
         Robust guiding error per axis, in arcseconds.
-    cadence_seconds : `float`
+    cadence_s : `float`
         Median time between guide samples.
     lost_fraction : `float` or `None`
         Share of guide frames lost, if the night has guiding runs.
@@ -270,7 +270,7 @@ class NightGuidingBaseline(NamedTuple):
     snr: float | None
     star_mass: float | None
     rms: float
-    cadence_seconds: float
+    cadence_s: float
     lost_fraction: float | None
     total_errors: np.ndarray
 
@@ -336,7 +336,7 @@ def collect_night_baselines(
                 star_mass=float(np.median(star_mass)) if star_mass else None,
                 rms=float(np.sqrt((ra_spread**2 + dec_spread**2) / 2.0)),
                 # A gap over a minute is a break between runs, not the cadence.
-                cadence_seconds=float(
+                cadence_s=float(
                     np.median(gaps[gaps < resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value])
                 ),
                 lost_fraction=(sum(run.frames_lost for run in night_runs) / frames_total)
@@ -399,7 +399,7 @@ def collect_baseline_values(
         "guide_snr": [night.snr for night in kept if night.snr is not None],
         "guide_star_mass": [night.star_mass for night in kept if night.star_mass is not None],
         "guiding_rms": [night.rms for night in kept],
-        "guide_cadence_seconds": [night.cadence_seconds for night in kept],
+        "guide_cadence_seconds": [night.cadence_s for night in kept],
         "guide_lost_fraction": [night.lost_fraction for night in kept if night.lost_fraction is not None],
     }
 
@@ -590,16 +590,16 @@ def assemble_performance_envelope(
         capture_frames = read_capture_frames(astrometrics, telescope.name, camera.name)
         if excluded:
             capture_frames = [frame for frame in capture_frames if night_of(frame) not in excluded]
-    minimum_exposure_seconds = (
+    minimum_exposure_s = (
         None
         if guide_cadence is None
         else resolve_parameter(MINIMUM_GUIDE_CYCLES_PER_EXPOSURE).value * guide_cadence
     )
-    if minimum_exposure_seconds is not None:
-        measured_image_quality = image_quality_from_frames(capture_frames, minimum_exposure_seconds)
+    if minimum_exposure_s is not None:
+        measured_image_quality = image_quality_from_frames(capture_frames, minimum_exposure_s)
     baseline_values = {
         **baseline_values,
-        **collect_capture_baseline_values(capture_frames, contexts, minimum_exposure_seconds, before_night),
+        **collect_capture_baseline_values(capture_frames, contexts, minimum_exposure_s, before_night),
     }
 
     try:

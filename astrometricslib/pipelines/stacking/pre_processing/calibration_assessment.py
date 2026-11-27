@@ -790,7 +790,7 @@ def _median_value_step(frames: Sequence[FrameFacts], reference: BiasReference | 
 
 def _dark_checks(
     measured: Sequence[FrameFacts],
-    exposure_seconds: float | None,
+    exposure_s: float | None,
     reference: BiasReference | None,
     profile: CameraProfile | None,
     setting: tuple[object, object, object],
@@ -803,7 +803,7 @@ def _dark_checks(
     ----------
     measured : `Sequence` [`FrameFacts`]
         The dark frames with stored numbers.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The set's exposure, for the dark current allowance.
     reference : `BiasReference` or `None`
         The bias frames of the same setting.
@@ -922,7 +922,7 @@ def _dark_checks(
             )
         )
     else:
-        allowance = resolve(DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND).value * (exposure_seconds or 0.0)
+        allowance = resolve(DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND).value * (exposure_s or 0.0)
         excesses = [
             (max(abs(level - reference.level_adu) - allowance, 0.0) / step, path, level)
             for level, path in levels
@@ -1049,7 +1049,7 @@ def assess_dark_or_bias_frames(
     minimum_frames: int,
     profile: CameraProfile | None,
     setting: tuple[object, object, object],
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
     reference: BiasReference | None = None,
 ) -> SetJudgement:
     """Judge a set of dark or bias frames from their stored numbers.
@@ -1068,7 +1068,7 @@ def assess_dark_or_bias_frames(
         The camera's profile.
     setting : `tuple`
         The gain, offset and binning of the set.
-    exposure_seconds : `float` or `None`, optional
+    exposure_s : `float` or `None`, optional
         A dark's exposure.
     reference : `BiasReference` or `None`, optional
         For a dark, the bias frames of the same setting. Without it the light
@@ -1104,7 +1104,7 @@ def assess_dark_or_bias_frames(
     elif kind == "dark":
         checks = [
             count_check,
-            *_dark_checks(measured, exposure_seconds, reference, profile, setting, concerns, measurements),
+            *_dark_checks(measured, exposure_s, reference, profile, setting, concerns, measurements),
         ]
     else:
         checks = [count_check, *_bias_checks(measured, profile, setting, concerns, measurements)]
@@ -1134,7 +1134,7 @@ def health_of_judgement(
     offset: float,
     binning: str | None,
     temperature_slot_c: float | None = None,
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
 ) -> CalibrationSetHealth:
     """Put a judgement and the set's identity into the common result model.
 
@@ -1145,7 +1145,7 @@ def health_of_judgement(
     kind, row_key, camera, gain, offset, binning
         The set's identity. `row_key` is the one `CalibrationCatalog.query`
         gives it.
-    temperature_slot_c, exposure_seconds : `float` or `None`, optional
+    temperature_slot_c, exposure_s : `float` or `None`, optional
         A dark's temperature slot and exposure.
 
     Returns
@@ -1163,7 +1163,7 @@ def health_of_judgement(
         offset=offset,
         binning=binning,
         temperatureSlotC=temperature_slot_c,
-        exposureSeconds=exposure_seconds,
+        exposureS=exposure_s,
         frameCount=judgement.frame_count,
         uniqueFrameCount=judgement.unique_frame_count,
         measuredFrameCount=judgement.measured_frame_count,

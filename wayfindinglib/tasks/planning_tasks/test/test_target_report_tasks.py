@@ -82,11 +82,11 @@ def _count_row(row: dict[str, Any]) -> SimpleNamespace:
     """
     return SimpleNamespace(
         camera=row.get("camera"),
-        gain=row.get("iso"),
+        gain=row.get("gain"),
         offset=row.get("offset"),
         binning=row.get("binning"),
         temperature_c=row.get("temperature_c"),
-        exposure_s=row.get("exposure"),
+        exposure_s=row.get("exposure_s"),
         filter_name=row.get("filter"),
         count=row.get("count", 0),
     )
@@ -325,11 +325,11 @@ class _Library:
             frames.append(
                 FrameRecord(
                     path=self._path(index),
-                    exposure="60",
+                    exposure_s=60,
                     timestamp=start.timestamp(),
                     camera="ASI533MM Pro",
                     telescope="RC8",
-                    altitudeDegrees=25.0 if night_index == 0 else 55.0,
+                    altitudeDeg=25.0 if night_index == 0 else 55.0,
                     sensorTemperatureC=-10.0,
                     binning=1,
                 )
@@ -601,8 +601,8 @@ def test_the_report_summarizes_the_one_capture_setting(isolated_butler: DiskButl
     assert summary.frames_taken == 32
     assert summary.frames_set_aside == 2
     assert summary.nights == 3
-    assert summary.captured_seconds == pytest.approx(32 * 60.0)
-    assert summary.weight_effective_seconds == pytest.approx(1800.0)
+    assert summary.captured_s == pytest.approx(32 * 60.0)
+    assert summary.weight_effective_s == pytest.approx(1800.0)
     assert summary.loss_account is not None
     assert summary.loss_account.reference_name.startswith("baseline:")
     assert report.starting_point is None
@@ -662,17 +662,17 @@ def test_a_matching_calibration_library_gives_no_gap(isolated_butler: DiskButler
     """A dark and a flat that match leave no calibration statement."""
     dark = {
         "camera": "ASI533MM Pro",
-        "iso": "100",
+        "gain": "100",
         "offset": 50.0,
         "binning": "1x1",
         "temperature_c": -10.0,
-        "exposure": 60.0,
+        "exposure_s": 60.0,
         "count": 20,
     }
     flat = {
         "camera": "ASI533MM Pro",
         "filter": "L",
-        "iso": "100",
+        "gain": "100",
         "offset": 50.0,
         "binning": "1x1",
         "count": 30,
@@ -695,9 +695,9 @@ def test_more_frames_proposes_a_count_and_says_it_is_tentative(
     assert more[0].proposed_action.frame_count > 0
     assert "which cuts the noise by about 31%" in more[0].message
     assert more[0].expected_effect.noise_change_fraction == pytest.approx(-0.29, abs=0.02)
-    assert more[0].proposed_action.exposure_seconds > 60.0
+    assert more[0].proposed_action.exposure_s > 60.0
     assert "limited by read noise" in more[0].reason
-    assert more[0].expected_effect.wall_clock_seconds > 0.0
+    assert more[0].expected_effect.wall_clock_s > 0.0
     # A new exposure length makes a new group: at least 5 frames are asked for.
     assert more[0].proposed_action.frame_count >= 5
     assert "new exposure group" in more[0].reason
@@ -734,7 +734,7 @@ def test_a_lower_target_noise_ratio_asks_for_more_frames(
     )
     (more,) = _of_rule(deeper, "more_frames")
     assert more.proposed_action.frame_count > default.proposed_action.frame_count
-    assert more.expected_effect.wall_clock_seconds > default.expected_effect.wall_clock_seconds
+    assert more.expected_effect.wall_clock_s > default.expected_effect.wall_clock_s
 
 
 @pytest.mark.parametrize(
@@ -1000,7 +1000,7 @@ def test_a_target_with_no_frames_gets_a_starting_point_that_says_why_it_is_empty
     report = _report(library, isolated_butler)
     assert report.capture_settings == []
     assert report.starting_point is not None
-    assert report.starting_point.exposure_seconds is None
+    assert report.starting_point.exposure_s is None
     assert "camera" in report.starting_point.exposure_reason
     assert report.starting_point.confidence == Confidence.DESIGN_ESTIMATE
 
@@ -1075,9 +1075,9 @@ def test_the_starting_point_follows_the_equipments_own_sky_and_read_noise(
     )
     point = report.starting_point
     assert point is not None
-    assert point.exposure_seconds == pytest.approx(162.0)
+    assert point.exposure_s == pytest.approx(162.0)
     assert point.capture_setting == SETTING
-    assert point.clipping_cap_seconds is None
+    assert point.clipping_cap_s is None
     assert "zero point" in point.clipping_cap_reason
     assert "Moon included" in point.exposure_reason
     assert point.confidence == Confidence.DESIGN_ESTIMATE
@@ -1099,7 +1099,7 @@ def _framed_target(target_id: str, filters: list[str]) -> Target:
         The target.
     """
     frames = [
-        FrameRecord(path=f"/data/lights/{target_id}/RC8/Cam/f{index}.fits", filter=name, exposure="30")
+        FrameRecord(path=f"/data/lights/{target_id}/RC8/Cam/f{index}.fits", filter=name, exposure_s=30)
         for index, name in enumerate(filters)
     ]
     return Target(id=target_id, frames=frames)
@@ -1163,11 +1163,11 @@ def _busy_library() -> _Library:
         frames.append(
             FrameRecord(
                 path=path,
-                exposure=str(int(settings[setting_id].exposure_s)),
+                exposure_s=str(int(settings[setting_id].exposure_s)),
                 timestamp=start.timestamp(),
                 camera="ASI533MM Pro",
                 telescope="RC8",
-                altitudeDegrees=45.0,
+                altitudeDeg=45.0,
                 sensorTemperatureC=-10.0,
                 binning=1,
             )
@@ -1235,16 +1235,16 @@ def test_take_more_prices_dithers_and_refocusing_like_the_ranking(
     )
     (more,) = _of_rule(report, "more_frames")
     action, effect = more.proposed_action, more.expected_effect
-    overheads = estimate_capture_overheads([], action.exposure_seconds, SETTING.filter_name)
-    downloads_only = wall_clock_estimate(action.frame_count, action.exposure_seconds, overheads)
-    assert effect.wall_clock_seconds > downloads_only.total_seconds
+    overheads = estimate_capture_overheads([], action.exposure_s, SETTING.filter_name)
+    downloads_only = wall_clock_estimate(action.frame_count, action.exposure_s, overheads)
+    assert effect.wall_clock_s > downloads_only.total_seconds
     without_focus = wall_clock_estimate(
         action.frame_count,
-        action.exposure_seconds,
+        action.exposure_s,
         overheads,
         dither_every_frames=DITHER_EVERY_FRAMES.default,
     )
-    assert effect.wall_clock_seconds >= without_focus.total_seconds
+    assert effect.wall_clock_s >= without_focus.total_seconds
     assert AUTOFOCUS_RUNS_PER_HOUR.default >= 1
     assert "dithers and refocusing" in more.message
 

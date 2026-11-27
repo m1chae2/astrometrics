@@ -669,9 +669,7 @@ class SirilImagingStacker(SirilSpectralStacker):
         target_folder = staged.target_folder
         job_logger = run.job_logger
         sequence_name = script.sequence_name
-        self.last_run_diagnostics["stacking_duration_seconds"] = round(
-            time.monotonic() - launch.started_at, 1
-        )
+        self.last_run_diagnostics["stacking_duration_s"] = round(time.monotonic() - launch.started_at, 1)
 
         # Cached here rather than in the finally block: the masters
         # live inside target_folder, which the finally block deletes
@@ -715,7 +713,7 @@ class SirilImagingStacker(SirilSpectralStacker):
             The stacked file.
         image_files : `Any`
             The input frames; a list of records or dictionaries with an
-            ``exposure`` value. Anything else adds up to nothing.
+            ``exposure_s`` value. Anything else adds up to nothing.
         job_logger : `logging.Logger`
             Logger for the outcome.
         """
@@ -725,7 +723,7 @@ class SirilImagingStacker(SirilSpectralStacker):
             total_exp = 0.0
             if isinstance(image_files, list):
                 for f in image_files:
-                    exp = f.get("exposure") if isinstance(f, dict) else getattr(f, "exposure", "0")
+                    exp = f.get("exposure_s") if isinstance(f, dict) else getattr(f, "exposure_s", 0.0)
                     try:
                         total_exp += float(exp)
                     except (ValueError, TypeError) as exc:

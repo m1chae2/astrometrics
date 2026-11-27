@@ -943,7 +943,7 @@ class VariabilityAnalyzer:
         self.detector_noise = DetectorNoise()
         # The exposure time of each frame, in seconds, keyed by the frame's
         # UTC exposure start. Filled during `process()`.
-        self.frame_exposure_seconds: dict[datetime, float] = {}
+        self.frame_exposure_s: dict[datetime, float] = {}
         # The uncertainty of each frame's comparison-ensemble level, keyed
         # by timestamp, in the same units as `frame_reference_flux` (ADU per
         # second). Filled by `normalize_light_curves()`. Empty when the
@@ -1094,7 +1094,7 @@ class VariabilityAnalyzer:
             self.frames_without_usable_date_obs.append(ExcludedFrame(path=reference_path, reason=str(error)))
             return
         reference_exposure_seconds = _read_exposure_seconds(reference_header)
-        self.frame_exposure_seconds[reference_timestamp] = reference_exposure_seconds
+        self.frame_exposure_s[reference_timestamp] = reference_exposure_seconds
         # Seeded below alongside the reference frame's flux. Leaving
         # it out started every light curve with one fewer airmass
         # than flux, and since the per-frame worker appends to both
@@ -1326,7 +1326,7 @@ class VariabilityAnalyzer:
                     _bg,
                     airmass,
                     star_positions,
-                    exposure_seconds,
+                    exposure_s,
                     frame_alignment,
                     *extra_items,
                 ) = data
@@ -1346,7 +1346,7 @@ class VariabilityAnalyzer:
                 self.timestamp_to_path[timestamp] = path
                 self.frame_paths_in_order.append(path)
                 self.frame_registration_drift[timestamp] = (float(delta_x), float(delta_y))
-                self.frame_exposure_seconds[timestamp] = float(exposure_seconds)
+                self.frame_exposure_s[timestamp] = float(exposure_s)
 
                 # Update each StellarObject's light curve with the new
                 # data point
@@ -1435,13 +1435,13 @@ class VariabilityAnalyzer:
         """
         if target_position_deg is None:
             return
-        frame_starts = sorted(self.frame_exposure_seconds)
+        frame_starts = sorted(self.frame_exposure_s)
         if not frame_starts:
             return
         try:
             bjd_values = barycentric_julian_dates(
                 frame_starts,
-                [self.frame_exposure_seconds[start] for start in frame_starts],
+                [self.frame_exposure_s[start] for start in frame_starts],
                 target_position_deg[0],
                 target_position_deg[1],
                 observer_site,
@@ -1622,7 +1622,7 @@ class VariabilityAnalyzer:
             return
         term = build_scintillation_term(
             self.stellar_objects,
-            self.frame_exposure_seconds,
+            self.frame_exposure_s,
             self.aperture_diameter_mm,
             self.aperture_reason,
             self.site_elevation_m,

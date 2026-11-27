@@ -26,8 +26,8 @@ def test_recovers_known_calibration_from_axis_aligned_moves() -> None:
         dec_end_xy=(100.0, 110.0),  # 10px in +y, duration 2s
     )
     assert calibration.camera_angle_deg == pytest.approx(0.0, abs=1e-6)
-    assert calibration.ra_rate_arcsec_per_sec == pytest.approx(20.0)  # 10px * 2 arcsec/px / 1s
-    assert calibration.dec_rate_arcsec_per_sec == pytest.approx(10.0)  # 10px * 2 arcsec/px / 2s
+    assert calibration.ra_rate_arcsec_per_s == pytest.approx(20.0)  # 10px * 2 arcsec/px / 1s
+    assert calibration.dec_rate_arcsec_per_s == pytest.approx(10.0)  # 10px * 2 arcsec/px / 2s
     assert calibration.arcsec_per_pixel == pytest.approx(2.0)
 
 

@@ -139,14 +139,14 @@ def test_stacking_notice_rows_follow_the_summary() -> None:
     summary.quality_processing_applied = False
     summary.stacking_metrics.exposure_groups = [
         ExposureGroupSummary(
-            exposureSeconds=30.0,
+            exposureS=30.0,
             framesSubmitted=6,
             framesStacked=0,
             darkApplied=True,
             leftOutReason="was left out because it has no dark frames",
         ),
         ExposureGroupSummary(
-            exposureSeconds=60.0,
+            exposureS=60.0,
             framesSubmitted=6,
             framesStacked=0,
             darkApplied=True,

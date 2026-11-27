@@ -42,7 +42,7 @@ def _target_with_frames(paths, camera="ZWO ASI 533MM Pro") -> Target:  # ruff: i
         Target carrying one LIGHT FrameRecord per path.
     """
     frames = [
-        FrameRecord(path=path, filter="Luminance", role="LIGHT", camera=camera, exposure="30.0")
+        FrameRecord(path=path, filter="Luminance", role="LIGHT", camera=camera, exposure_s=30.0)
         for path in paths
     ]
     return Target(id="InputQualityTestTarget", frames=frames)
@@ -153,8 +153,8 @@ def test_camera_filter_restricts_measurement(tmp_path: Path) -> None:
     target = Target(
         id="MixedCameraTarget",
         frames=[
-            FrameRecord(path=mono, role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="30.0"),
-            FrameRecord(path=dslr, role="LIGHT", camera="Nikon DSLR DSC D5300", exposure="30.0"),
+            FrameRecord(path=mono, role="LIGHT", camera="ZWO ASI 533MM Pro", exposure_s=30.0),
+            FrameRecord(path=dslr, role="LIGHT", camera="Nikon DSLR DSC D5300", exposure_s=30.0),
         ],
     )
 
@@ -216,8 +216,8 @@ def test_each_frames_saturation_uses_its_own_cameras_threshold(
     target = Target(
         id="TwoCameras",
         frames=[
-            FrameRecord(path=frame_path, role="LIGHT", camera="Fourteen Bit Camera", exposure="30.0"),
-            FrameRecord(path=frame_path, role="LIGHT", camera="Unlisted Camera", exposure="30.0"),
+            FrameRecord(path=frame_path, role="LIGHT", camera="Fourteen Bit Camera", exposure_s=30.0),
+            FrameRecord(path=frame_path, role="LIGHT", camera="Unlisted Camera", exposure_s=30.0),
         ],
     )
 

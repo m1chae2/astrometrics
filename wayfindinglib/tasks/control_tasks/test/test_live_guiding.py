@@ -202,13 +202,13 @@ def test_the_simulator_loop_guides_until_stopped(mount: dict) -> None:
         if cycles["count"] >= 5:
             stop.set()
 
-    live_guiding.run_loop(context, stop, exposure_seconds=2.0, gain=10.0, sleep=sleep)
+    live_guiding.run_loop(context, stop, exposure_s=2.0, gain=10.0, sleep=sleep)
 
     status = context.live_guiding.status()
     assert len(status.history) == 5
     assert mount["exposures"] == [(2.0, 10.0)] * 5
     assert all(direction in ("north", "south", "east", "west") for direction, _ in mount["pulses"])
-    assert status.exposure == pytest.approx(2.0)
+    assert status.exposure_s == pytest.approx(2.0)
     assert status.stats.rms_total > 0
     context.records.record_guiding_samples.assert_not_called()
 

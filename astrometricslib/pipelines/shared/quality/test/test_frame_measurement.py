@@ -80,7 +80,7 @@ from astrometricslib.test.golden import measurements as golden_measurements
 
 # The camera setting of the synthetic frames, and the numbers the profile holds
 # for it. The sky is 400 ADU above a bias level of 100 ADU.
-GAIN_SETTING = "100"
+GAIN_SETTING = 100
 GAIN_E_PER_ADU = 0.5
 READ_NOISE_E = 2.0
 BIAS_LEVEL_ADU = 100.0
@@ -120,7 +120,7 @@ def _profile(
     entries = (
         (
             SensorSettingNoise(
-                gain_setting=GAIN_SETTING,
+                gain=GAIN_SETTING,
                 offset="0",
                 binning="1x1",
                 gain_e_per_adu=ProvenancedValue(value=GAIN_E_PER_ADU, provenance=provenance),
@@ -156,9 +156,9 @@ def _frame_record(path: str, **overrides: object) -> FrameRecord:
     """
     fields: dict = {
         "path": path,
-        "iso": GAIN_SETTING,
+        "gain": GAIN_SETTING,
         "offset": "0",
-        "exposure": str(EXPOSURE_SECONDS),
+        "exposure_s": str(EXPOSURE_SECONDS),
         "binning": 1,
         "timestamp": 1_792_000_000.0,
         "pixelScaleArcsec": PIXEL_SCALE_ARCSEC,
@@ -520,7 +520,7 @@ def test_a_setting_missing_from_the_profile_gives_not_measured_sky_and_read_nois
 
 def test_a_nearby_setting_is_not_borrowed(round_frame_path: str) -> None:
     """A frame at gain 101 does not use the entry for gain 100."""
-    frame = _frame_record(round_frame_path, iso="101")
+    frame = _frame_record(round_frame_path, gain=101)
     rows = _by_metric(_run(round_frame_path, frame=frame))
     assert rows[FRAME_SKY_RATE_E_PER_S_PER_PX][0].status == MeasurementStatus.NOT_MEASURED
 
@@ -856,7 +856,7 @@ def test_lookup_reports_a_profile_entry_that_holds_only_a_gain() -> None:
         saturation_threshold_adu=ProvenancedValue(value=60000.0, provenance=provenance),
         sensor_noise=(
             SensorSettingNoise(
-                gain_setting=GAIN_SETTING,
+                gain=GAIN_SETTING,
                 gain_e_per_adu=ProvenancedValue(value=0.5, provenance=provenance),
             ),
         ),
@@ -910,9 +910,9 @@ def test_a_real_golden_frame_runs_and_returns_finite_values() -> None:
         header = hdul[0].header
     record = FrameRecord(
         path=str(GOLDEN_FRAME),
-        iso="0",
-        offset="0",
-        exposure=str(header["EXPTIME"]),
+        gain=0,
+        offset=0,
+        exposure_s=str(header["EXPTIME"]),
         binning=1,
         pixelScaleArcsec=float(header["SCALE"]),
         sensorTemperatureC=float(header["CCD-TEMP"]),
@@ -927,7 +927,7 @@ def test_a_real_golden_frame_runs_and_returns_finite_values() -> None:
         saturation_threshold_adu=ProvenancedValue(value=65000.0, provenance=datasheet),
         sensor_noise=(
             SensorSettingNoise(
-                gain_setting="0",
+                gain="0",
                 offset="0",
                 binning="1x1",
                 gain_e_per_adu=ProvenancedValue(value=0.9, provenance=provenance),

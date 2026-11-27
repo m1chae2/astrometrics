@@ -104,7 +104,7 @@ def _table(sky: SimpleNamespace, sky_object: Target, **overrides: object) -> Vis
         "objects": [sky_object],
         "start": Time(START, format="unix"),
         "end": Time(START + 12 * 3600.0, format="unix"),
-        "step_minutes": 30.0,
+        "step_min": 30.0,
         "sections": frozenset({"samples", "meridian"}),
         "minimum_altitude_deg": 0.0,
         "horizon_zones": [],
@@ -163,7 +163,7 @@ def test_bad_requests_are_refused() -> None:
     sky = _sky()
     sky_object = _object_crossing_after(sky, 1.0)
     with pytest.raises(InvalidArgumentError, match="time steps"):
-        _table(sky, sky_object, step_minutes=1.0)
+        _table(sky, sky_object, step_min=1.0)
     with pytest.raises(InvalidArgumentError, match="before"):
         _table(sky, sky_object, end_epoch=START - 10)
     with pytest.raises(InvalidArgumentError, match="objects per time table"):
@@ -180,7 +180,7 @@ def test_no_objects_gives_an_empty_report() -> None:
         _object_crossing_after(sky, 1.0),
         objects=[],
         end_epoch=None,
-        step_minutes=None,
+        step_min=None,
         sections=frozenset(),
     )
     assert report.objects == []
@@ -199,13 +199,13 @@ def test_one_moment_gives_position_and_meridian_status() -> None:
     """With no end time each object has its start values and no span."""
     sky = _sky()
     sky_object = _object_crossing_after(sky, 2.0)
-    report = _table(sky, sky_object, end_epoch=None, step_minutes=None, sections=frozenset({"meridian"}))
+    report = _table(sky, sky_object, end_epoch=None, step_min=None, sections=frozenset({"meridian"}))
     entry = report.objects[0]
     assert report.night is None
     assert entry.span is None
     assert entry.meridian.hour_angle_hours == pytest.approx(-2.0, abs=0.01)
     assert entry.meridian.flip_required is False
-    assert entry.meridian.time_to_flip_seconds == pytest.approx(7200.0, abs=60.0)
+    assert entry.meridian.time_to_flip_s == pytest.approx(7200.0, abs=60.0)
 
 
 def test_the_meridian_section_is_left_out_unless_asked_for() -> None:

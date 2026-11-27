@@ -517,7 +517,7 @@ def _judge_overexposed_setting(case: _Case) -> list[TargetStatement]:
     if exposure is not None and reading.value > 0:
         proposed_seconds = exposure * target_fraction / reading.value
         advice = f"Use {proposed_seconds:.3g} s or less."
-        action = ProposedAction(exposure_seconds=proposed_seconds)
+        action = ProposedAction(exposure_s=proposed_seconds)
         effect = ExpectedEffect(
             description=f"The brightest star would reach {target_fraction:.0%} of the room below the ceiling."
         )
@@ -593,7 +593,7 @@ def _judge_underexposed_setting(case: _Case) -> list[TargetStatement]:
     if exposure is not None:
         needed_seconds = exposure * (least_ratio / max(ratio, 1e-9)) ** 2
         advice = f"Use {needed_seconds:.3g} s or longer, if the brightest star stays below the ceiling."
-        action = ProposedAction(exposure_seconds=needed_seconds)
+        action = ProposedAction(exposure_s=needed_seconds)
     else:
         advice = "Use a longer exposure, if the brightest star stays below the ceiling."
         action = ProposedAction(note="Lengthen the exposure until the sky noise is 3 times the read noise.")

@@ -274,7 +274,7 @@ def describe_plan(target: str, camera: str, files: list[dict], listing: dict) ->
     exposures = []
     for frame in files:
         try:
-            exposures.append(float(frame.get("exposure") or 0.0))
+            exposures.append(float(frame.get("exposureS") or 0.0))
         except TypeError, ValueError:
             exposures.append(0.0)
     dates = sorted(str(frame.get("date")) for frame in files if frame.get("date"))

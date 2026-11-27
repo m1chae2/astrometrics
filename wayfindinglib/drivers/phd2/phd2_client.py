@@ -98,15 +98,15 @@ _SESSION_EVENT_LIMIT = 20000
 
 
 def _settle_limits(
-    settle_pixels: float | None, settle_seconds: float | None, settle_timeout_seconds: float
+    settle_pixels: float | None, settle_s: float | None, settle_timeout_s: float
 ) -> dict[str, float]:
     """Build PHD2's settle limits, filling a missing one from the setting.
 
     Parameters
     ----------
-    settle_pixels, settle_seconds : `float` or `None`
+    settle_pixels, settle_s : `float` or `None`
         The caller's limits. `None` takes the configured value.
-    settle_timeout_seconds : `float`
+    settle_timeout_s : `float`
         PHD2 gives up settling after this long.
 
     Returns
@@ -116,9 +116,9 @@ def _settle_limits(
     """
     if settle_pixels is None:
         settle_pixels = resolve_parameter(PHD2_SETTLE_PIXELS).value
-    if settle_seconds is None:
-        settle_seconds = resolve_parameter(PHD2_SETTLE_SECONDS).value
-    return {"pixels": settle_pixels, "time": settle_seconds, "timeout": settle_timeout_seconds}
+    if settle_s is None:
+        settle_s = resolve_parameter(PHD2_SETTLE_SECONDS).value
+    return {"pixels": settle_pixels, "time": settle_s, "timeout": settle_timeout_s}
 
 
 class PHD2Client:
@@ -684,8 +684,8 @@ class PHD2Session:
     def guide(
         self,
         settle_pixels: float | None = None,
-        settle_seconds: float | None = None,
-        settle_timeout_seconds: float = 120.0,
+        settle_s: float | None = None,
+        settle_timeout_s: float = 120.0,
         recalibrate: bool = False,
     ) -> None:
         """Start guiding: choose a star, calibrate when needed, then guide.
@@ -700,15 +700,15 @@ class PHD2Session:
         settle_pixels : `float`, optional
             The star must stay within this many pixels of the lock position.
             `None` uses the configured limit (`PHD2_SETTLE_PIXELS`).
-        settle_seconds : `float`, optional
+        settle_s : `float`, optional
             It must stay there this long to count as settled. `None` uses
             the configured limit (`PHD2_SETTLE_SECONDS`).
-        settle_timeout_seconds : `float`, optional
+        settle_timeout_s : `float`, optional
             PHD2 gives up settling after this long.
         recalibrate : `bool`, optional
             `True` forces a new calibration.
         """
-        settle = _settle_limits(settle_pixels, settle_seconds, settle_timeout_seconds)
+        settle = _settle_limits(settle_pixels, settle_s, settle_timeout_s)
         self.call("guide", [settle, bool(recalibrate)])
 
     def dither(
@@ -716,8 +716,8 @@ class PHD2Session:
         amount_pixels: float,
         right_ascension_only: bool = False,
         settle_pixels: float | None = None,
-        settle_seconds: float | None = None,
-        settle_timeout_seconds: float = 60.0,
+        settle_s: float | None = None,
+        settle_timeout_s: float = 60.0,
     ) -> None:
         """Move the lock position at random and settle again.
 
@@ -727,13 +727,13 @@ class PHD2Session:
             The size of the dither.
         right_ascension_only : `bool`, optional
             `True` dithers along right ascension only.
-        settle_pixels, settle_seconds : `float`, optional
+        settle_pixels, settle_s : `float`, optional
             The settle limits, as for `guide`. `None` uses the configured
             limits.
-        settle_timeout_seconds : `float`, optional
+        settle_timeout_s : `float`, optional
             PHD2 gives up settling after this long.
         """
-        settle = _settle_limits(settle_pixels, settle_seconds, settle_timeout_seconds)
+        settle = _settle_limits(settle_pixels, settle_s, settle_timeout_s)
         self.call("dither", [amount_pixels, bool(right_ascension_only), settle])
 
     def stop_capture(self, timeout_seconds: float = 30.0) -> None:

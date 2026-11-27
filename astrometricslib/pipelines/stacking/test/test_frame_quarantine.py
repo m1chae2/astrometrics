@@ -40,7 +40,7 @@ def make_frame(
     timestamp: float = 0.0,
     camera: str = "Camera A",
     filter_name: str = "Luminance",
-    exposure: str = "120.0",
+    exposure: float = 120.0,
     role: str = "LIGHT",
 ) -> SimpleNamespace:
     """Build a stand-in frame record with the fields the step reads.
@@ -49,16 +49,16 @@ def make_frame(
     -------
     frame : `SimpleNamespace`
         A frame with ``path``, ``timestamp``, ``camera``, ``filter``,
-        ``exposure``, ``role``, ``iso`` (gain 100) and ``focal_length_mm``.
+        ``exposure_s``, ``role``, ``gain`` (100) and ``focal_length_mm``.
     """
     return SimpleNamespace(
         path=str(path),
         timestamp=timestamp,
         camera=camera,
         filter=SimpleNamespace(value=filter_name),
-        exposure=exposure,
+        exposure_s=exposure,
         role=role,
-        iso="100",
+        gain=100,
         focal_length_mm=405.0,
     )
 
@@ -90,15 +90,15 @@ def clean_batch(count: int = 12) -> list[dict[str, Any]]:
 def test_split_into_batches_separates_setups_and_sessions() -> None:
     """Frames split by capture setting (gain too) and by gaps over 4 hours."""
     other_gain = make_frame("e1", 0.0)
-    other_gain.iso = "200"
+    other_gain.gain = 200
     same_gain_written_otherwise = make_frame("a4", 60.0)
-    same_gain_written_otherwise.iso = "100.0"
+    same_gain_written_otherwise.gain = 100.0
     other_optic = make_frame("f1", 0.0)
     other_optic.focal_length_mm = 300.0
     frames = [
         make_frame("a1", 0.0),
         make_frame("a2", 120.0),
-        make_frame("b1", 0.0, exposure="30.0"),
+        make_frame("b1", 0.0, exposure=30.0),
         make_frame("c1", 0.0, filter_name="Red"),
         make_frame("d1", 0.0, camera="Camera B"),
         make_frame("a3", 120.0 + frame_quarantine.SESSION_GAP_SECONDS.default + 1),
@@ -246,7 +246,7 @@ def test_find_frames_does_not_warn_at_a_quarter_or_less(tmp_path: Path) -> None:
 
 def test_find_frames_notes_small_batches_and_reports_unreadable_frames(tmp_path: Path) -> None:
     """Small batches are left alone, and an unreadable frame is reported."""
-    small = [make_frame(tmp_path / f"s{index}.fits", float(index), exposure="30.0") for index in range(3)]
+    small = [make_frame(tmp_path / f"s{index}.fits", float(index), exposure=30.0) for index in range(3)]
     big = [make_frame(tmp_path / f"b{index}.fits", float(index)) for index in range(10)]
 
     def measure(path: str) -> dict[str, Any]:

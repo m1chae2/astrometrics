@@ -271,12 +271,12 @@ CALIBRATION_DARK_FRAME_TYPE = "dark"
 # -----------------------------------------------------------------------------
 
 
-def exposure_text(exposure_seconds: float | None) -> str:
+def exposure_text(exposure_s: float | None) -> str:
     """Write an exposure for a message.
 
     Parameters
     ----------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure, in seconds.
 
     Returns
@@ -284,7 +284,7 @@ def exposure_text(exposure_seconds: float | None) -> str:
     text : `str`
         For example ``"90 s"``, or ``"These"`` when the exposure is unknown.
     """
-    return "These" if exposure_seconds is None else f"{exposure_seconds:g} s"
+    return "These" if exposure_s is None else f"{exposure_s:g} s"
 
 
 def duration_text(seconds: float) -> str:
@@ -570,16 +570,13 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
     statements: list[TargetStatement] = []
     for summary in summaries:
         account = summary.loss_account
-        if (
-            account is None
-            or summary.captured_seconds < resolve_parameter(SKY_COST_MINIMUM_CAPTURED_SECONDS).value
-        ):
+        if account is None or summary.captured_s < resolve_parameter(SKY_COST_MINIMUM_CAPTURED_SECONDS).value:
             continue
         moon_seconds = sum(s.seconds for s in account.kept_frame_deficit if s.cause == CAUSE_SKY_MOON)
         sky_seconds = sum(s.seconds for s in account.kept_frame_deficit if s.cause == CAUSE_SKY)
         has_split = any(s.cause == CAUSE_SKY_MOON for s in account.kept_frame_deficit)
         lost_seconds = moon_seconds if has_split else sky_seconds
-        share = lost_seconds / summary.captured_seconds
+        share = lost_seconds / summary.captured_s
         if share < resolve_parameter(SKY_COST_MINIMUM_SHARE).value:
             continue
         condition = "Moon" if has_split else "Moon, twilight or light pollution"
@@ -592,7 +589,7 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
                 (
                     f"The loss account against the {account.reference_name} reference puts "
                     f"{_short_duration_text(lost_seconds)} of "
-                    f"{_short_duration_text(summary.captured_seconds)} of captured time into the sky. "
+                    f"{_short_duration_text(summary.captured_s)} of captured time into the sky. "
                     + (
                         "The Moon's part comes from the sky model fitted to your own frames."
                         if has_split
@@ -778,7 +775,7 @@ def guiding_limits_statements(
     rule = rule_by_name("guiding_limits_exposure")
     supported = result.supported_exposure_seconds
     supported_fraction = next(
-        (item.sharp_fraction for item in result.ladder if item.exposure_seconds == supported), None
+        (item.sharp_fraction for item in result.ladder if item.exposure_s == supported), None
     )
     clause = (
         f"; at {supported:g} s, {supported_fraction * 100:.0f}%"
@@ -794,9 +791,9 @@ def guiding_limits_statements(
     }
     for item in result.ladder:
         if item.sharp_fraction is not None:
-            values[f"sharp_fraction_at_{item.exposure_seconds:g}s"] = round(item.sharp_fraction, 3)
+            values[f"sharp_fraction_at_{item.exposure_s:g}s"] = round(item.sharp_fraction, 3)
     if supported is not None:
-        action = ProposedAction(exposure_seconds=supported)
+        action = ProposedAction(exposure_s=supported)
         reason_tail = (
             f" The longest exposure that reaches {resolve_parameter(TARGET_SHARP_FRACTION).value * 100:.0f}% "
             f"is {supported:g} s."
@@ -854,13 +851,13 @@ class AltitudeSample:
         The altitude of the pointing, in degrees.
     eta : `float`
         The frame's efficiency, above 0 and at most 1.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The frame's exposure, in seconds.
     """
 
     altitude_deg: float
     eta: float
-    exposure_seconds: float
+    exposure_s: float
 
 
 @dataclass(frozen=True)
@@ -911,8 +908,8 @@ def find_altitude_cost(samples: Sequence[AltitudeSample]) -> AltitudeCost | None
             or len(high) < resolve_parameter(ALTITUDE_MINIMUM_FRAMES_PER_SIDE).value
         ):
             continue
-        low_eta = sum(s.eta * s.exposure_seconds for s in low) / sum(s.exposure_seconds for s in low)
-        high_eta = sum(s.eta * s.exposure_seconds for s in high) / sum(s.exposure_seconds for s in high)
+        low_eta = sum(s.eta * s.exposure_s for s in low) / sum(s.exposure_s for s in low)
+        high_eta = sum(s.eta * s.exposure_s for s in high) / sum(s.exposure_s for s in high)
         if high_eta <= 0.0:
             continue
         loss = 1.0 - low_eta / high_eta
@@ -944,7 +941,7 @@ def altitude_cost_statement(
     """
     rule = rule_by_name("altitude_cost")
     fields = {
-        "altitude_degrees": cost.cut_deg,
+        "altitude_deg": cost.cut_deg,
         "loss_percent": cost.relative_loss * 100.0,
         "advice_altitude_degrees": cost.cut_deg,
     }
@@ -1273,11 +1270,11 @@ def _row_text(kind: str, row: Mapping[str, object]) -> str:
     parts = [str(row.get("camera", "?"))]
     if kind == "flat":
         parts.append(f"filter {row.get('filter', '?')}")
-    parts.append(f"gain {row.get('iso', '?')}")
+    parts.append(f"gain {row.get('gain', '?')}")
     parts.append(f"offset {row.get('offset', '?')}")
     parts.append(f"bin {row.get('binning', '?')}")
     if kind == "dark":
-        exposure = _as_float(row.get("exposure"))
+        exposure = _as_float(row.get("exposure_s"))
         parts.append("exposure unknown" if exposure is None else f"{exposure:g} s")
         temperature = _as_float(row.get("temperature_c"))
         if temperature is not None:
@@ -1322,7 +1319,7 @@ def _shared_setting_matches(setting: CaptureSetting, row: Mapping[str, object]) 
         Names of the settings that differ; empty when the row matches.
     """
     differences: list[str] = []
-    gain = _as_float(row.get("iso"))
+    gain = _as_float(row.get("gain"))
     if setting.gain is not None and (gain is None or abs(gain - setting.gain) > 1e-6):
         differences.append("gain")
     offset = _as_float(row.get("offset"))
@@ -1410,7 +1407,7 @@ def find_calibration_gaps(
         for row in camera_darks:
             if _shared_setting_matches(setting, row):
                 continue
-            exposure = _as_float(row.get("exposure"))
+            exposure = _as_float(row.get("exposure_s"))
             if setting.exposure_s is not None and (
                 exposure is None
                 or abs(exposure - setting.exposure_s) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
@@ -1509,7 +1506,7 @@ def _nearest_text(
         """
         found = _shared_setting_matches(setting, row)
         if kind == "dark":
-            exposure = _as_float(row.get("exposure"))
+            exposure = _as_float(row.get("exposure_s"))
             if setting.exposure_s is not None and (
                 exposure is None
                 or abs(exposure - setting.exposure_s) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
@@ -1752,12 +1749,12 @@ def _diminishing_returns_statement(
         plain_message=plain,
         evidence=evidence,
         proposed_action=ProposedAction(
-            exposure_seconds=result.new_exposure_seconds, frame_count=result.doubling_frames
+            exposure_s=result.new_exposure_seconds, frame_count=result.doubling_frames
         ),
         expected_effect=ExpectedEffect(
             noise_change_fraction=-result.doubling_noise_cut,
-            effective_time_added_seconds=result.added_exposure_seconds,
-            wall_clock_seconds=clock.total_seconds,
+            effective_time_added_s=result.added_exposure_seconds,
+            wall_clock_s=clock.total_seconds,
             description=f"Noise down about {cut:.0f}%.",
         ),
     )
@@ -1837,12 +1834,12 @@ def more_frames_statement(
         plain_message=plain,
         evidence=evidence,
         proposed_action=ProposedAction(
-            exposure_seconds=result.new_exposure_seconds, frame_count=result.frames_needed
+            exposure_s=result.new_exposure_seconds, frame_count=result.frames_needed
         ),
         expected_effect=ExpectedEffect(
             noise_change_fraction=change,
-            effective_time_added_seconds=result.added_exposure_seconds,
-            wall_clock_seconds=clock.total_seconds,
+            effective_time_added_s=result.added_exposure_seconds,
+            wall_clock_s=clock.total_seconds,
             description=description,
         ),
     )

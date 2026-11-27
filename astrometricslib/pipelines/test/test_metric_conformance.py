@@ -226,7 +226,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
             framesStacked=1,
             exposureGroups=[
                 ExposureGroupSummary(
-                    exposureSeconds=30.0,
+                    exposureS=30.0,
                     framesSubmitted=3,
                     framesStacked=0,
                     darkApplied=False,
@@ -235,7 +235,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
                 # A second group that was stacked but whose brightness scale
                 # could not be checked: raises the "not judged" notice.
                 ExposureGroupSummary(
-                    exposureSeconds=60.0,
+                    exposureS=60.0,
                     framesSubmitted=2,
                     framesStacked=1,
                     darkApplied=True,

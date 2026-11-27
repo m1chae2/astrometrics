@@ -127,7 +127,7 @@ def _predicted_group(group: Any, library: CalibrationLibrary) -> PredictedGroup:
         if not part.frames and not part.blocking_flags:
             warnings.append(f"{name}: no {name} frames fit these lights.")
     return PredictedGroup(
-        exposure_seconds=float(group.exposure_seconds),
+        exposure_s=float(group.exposure_s),
         night=group.night,
         frames_kept=len(group.frames),
         first_file=os.path.basename(paths[0]) if paths else "",

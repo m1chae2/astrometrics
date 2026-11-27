@@ -79,7 +79,7 @@ NEGLIGIBLE_ROTATION_DEGREES = TunedParameter(
 
 
 def rotate_about_point(
-    image: np.ndarray, center_row: float, center_column: float, angle_degrees: float, order: int | None = None
+    image: np.ndarray, center_row: float, center_column: float, angle_deg: float, order: int | None = None
 ) -> np.ndarray:
     """Rotate a 2-D image about a chosen point, not the array's own centre.
 
@@ -96,7 +96,7 @@ def rotate_about_point(
         The row of the point to rotate about.
     center_column : `float`
         The column of the point to rotate about.
-    angle_degrees : `float`
+    angle_deg : `float`
         How far to turn the image, in degrees, in the same sense
         `SpectroscopyPipeline.measure_dispersion_trail` reports a trail's
         tilt: rotating an image by its own measured angle brings that trail
@@ -111,7 +111,7 @@ def rotate_about_point(
         The rotated image, as `float32`, the same shape as `image`. Pixels
         the turn brings in from outside the original frame are zero.
     """
-    if abs(angle_degrees) < resolve(NEGLIGIBLE_ROTATION_DEGREES).value:
+    if abs(angle_deg) < resolve(NEGLIGIBLE_ROTATION_DEGREES).value:
         return np.asarray(image, dtype=np.float32).copy()
     if order is None:
         order = int(resolve(GROUP_RESAMPLE_SPLINE_ORDER).value)
@@ -125,7 +125,7 @@ def rotate_about_point(
         mode="constant",
         cval=0.0,
     )
-    spun = rotate_image(centred, angle_degrees, reshape=False, order=order, mode="constant", cval=0.0)
+    spun = rotate_image(centred, angle_deg, reshape=False, order=order, mode="constant", cval=0.0)
     restored = shift_image(
         spun,
         (center_row - array_center_row, center_column - array_center_column),
@@ -167,7 +167,7 @@ def measure_trail_angle_degrees(
 
     Returns
     -------
-    angle_degrees : `float`
+    angle_deg : `float`
         The trail's tilt, in degrees (0.0 when it could not be measured).
     contrast_sigma : `float`
         How clearly the trail stood out above the background noise.

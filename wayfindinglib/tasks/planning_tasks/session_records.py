@@ -786,7 +786,7 @@ def edit_session(
             rows = [ExposureRequest.model_validate(row) for row in requests]
         except ValidationError as error:
             raise InvalidArgumentError(
-                "Each exposure request needs frame_type, exposure_sec and count.",
+                "Each exposure request needs frame_type, exposure_s and count.",
                 details={"error": str(error)},
             ) from error
         entry.exposure_requests = checked(rows)

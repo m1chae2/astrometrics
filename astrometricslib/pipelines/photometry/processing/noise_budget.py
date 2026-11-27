@@ -157,7 +157,7 @@ def aperture_geometry_factor() -> float:
 def scintillation_relative_noise(
     aperture_diameter_mm: float,
     airmass: float,
-    exposure_seconds: float,
+    exposure_s: float,
     site_elevation_m: float = 0.0,
 ) -> float:
     """Find the fractional noise from scintillation (Young's formula).
@@ -168,7 +168,7 @@ def scintillation_relative_noise(
         The diameter of the telescope's aperture, in millimeters.
     airmass : `float`
         The airmass of the observation, 1.0 at the zenith.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure time, in seconds.
     site_elevation_m : `float`, optional
         The site height above sea level, in meters. The default is sea
@@ -188,7 +188,7 @@ def scintillation_relative_noise(
     young_coefficient = resolve(YOUNG_COEFFICIENT).value
     young_airmass_power = resolve(YOUNG_AIRMASS_POWER).value
     scintillation_scale_height_m = resolve(SCINTILLATION_SCALE_HEIGHT_M).value
-    if aperture_diameter_mm <= 0 or airmass <= 0 or exposure_seconds <= 0:
+    if aperture_diameter_mm <= 0 or airmass <= 0 or exposure_s <= 0:
         raise ValueError("The aperture, the airmass and the exposure must all be above zero.")
     diameter_cm = aperture_diameter_mm / 10.0
     return (
@@ -196,14 +196,14 @@ def scintillation_relative_noise(
         * diameter_cm ** (-2.0 / 3.0)
         * airmass**young_airmass_power
         * math.exp(-site_elevation_m / scintillation_scale_height_m)
-        / math.sqrt(2.0 * exposure_seconds)
+        / math.sqrt(2.0 * exposure_s)
     )
 
 
 def background_variance_e2(
     fluxes_adu_per_second: np.ndarray,
     errors_adu_per_second: np.ndarray,
-    exposure_seconds: np.ndarray,
+    exposure_s: np.ndarray,
     gain_e_per_adu: float,
 ) -> tuple[float | None, int]:
     """Work the background term out of the saved flux errors.
@@ -217,7 +217,7 @@ def background_variance_e2(
     fluxes_adu_per_second, errors_adu_per_second : `numpy.ndarray`
         The saved fluxes and their 1-sigma errors, in ADU per second. The
         two arrays have the same length.
-    exposure_seconds : `numpy.ndarray`
+    exposure_s : `numpy.ndarray`
         The exposure time of each point, in seconds.
     gain_e_per_adu : `float`
         The camera gain the errors were made with, in electrons per ADU.
@@ -232,7 +232,7 @@ def background_variance_e2(
     """
     fluxes = np.asarray(fluxes_adu_per_second, dtype=float)
     errors = np.asarray(errors_adu_per_second, dtype=float)
-    exposures = np.asarray(exposure_seconds, dtype=float)
+    exposures = np.asarray(exposure_s, dtype=float)
     usable = (
         np.isfinite(fluxes) & np.isfinite(errors) & np.isfinite(exposures) & (errors > 0) & (exposures > 0)
     )
@@ -279,7 +279,7 @@ class SessionNoiseInputs:
     ----------
     session_id : `str`
         The session's id.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The median exposure of the session's frames, in seconds.
     gain_e_per_adu : `float`
         The gain the flux errors were made with.
@@ -297,7 +297,7 @@ class SessionNoiseInputs:
     """
 
     session_id: str
-    exposure_seconds: float | None
+    exposure_s: float | None
     gain_e_per_adu: float
     gain_is_assumed: bool
     read_noise_e: float
@@ -310,7 +310,7 @@ class SessionNoiseInputs:
         cls,
         session_id: str,
         stellar_objects: Sequence[Any],
-        frame_exposure_seconds: dict[datetime, float],
+        frame_exposure_s: dict[datetime, float],
         detector_noise: Any,
         scintillation_fraction_by_frame: dict[datetime, float] | None = None,
     ) -> SessionNoiseInputs:
@@ -322,7 +322,7 @@ class SessionNoiseInputs:
             The session's id.
         stellar_objects : `Sequence` [`StellarObject`]
             The session's stars, with their raw light curves.
-        frame_exposure_seconds : `dict` [`datetime`, `float`]
+        frame_exposure_s : `dict` [`datetime`, `float`]
             The exposure of each frame, keyed by its exposure start.
         detector_noise : `DetectorNoise`
             The gain and read noise the errors were made with.
@@ -347,9 +347,7 @@ class SessionNoiseInputs:
                 continue
             if not (len(photometry.fluxes) == len(photometry.flux_errors) == len(photometry.timestamps)):
                 continue
-            exposures = [
-                frame_exposure_seconds.get(timestamp, math.nan) for timestamp in photometry.timestamps
-            ]
+            exposures = [frame_exposure_s.get(timestamp, math.nan) for timestamp in photometry.timestamps]
             fluxes = np.asarray(photometry.fluxes, dtype=float)
             errors = np.asarray(photometry.flux_errors, dtype=float)
             if scintillation_fraction_by_frame:
@@ -368,10 +366,10 @@ class SessionNoiseInputs:
                 np.concatenate(exposure_parts),
                 detector_noise.gain_e_per_adu,
             )
-        exposure_values = [value for value in frame_exposure_seconds.values() if value > 0]
+        exposure_values = [value for value in frame_exposure_s.values() if value > 0]
         return cls(
             session_id=session_id,
-            exposure_seconds=float(np.median(exposure_values)) if exposure_values else None,
+            exposure_s=float(np.median(exposure_values)) if exposure_values else None,
             gain_e_per_adu=float(detector_noise.gain_e_per_adu),
             gain_is_assumed=bool(detector_noise.gain_is_assumed),
             read_noise_e=float(detector_noise.read_noise_e),
@@ -489,12 +487,12 @@ def noise_variances_at_magnitude(magnitude: float, inputs: NoiseBudgetInputs) ->
     if (
         session is None
         or inputs.zero_point_mag is None
-        or session.exposure_seconds is None
+        or session.exposure_s is None
         or session.background_variance_e2 is None
     ):
         return None
     flux_adu_per_second = 10.0 ** (0.4 * (inputs.zero_point_mag - magnitude))
-    star_electrons = flux_adu_per_second * session.exposure_seconds * session.gain_e_per_adu
+    star_electrons = flux_adu_per_second * session.exposure_s * session.gain_e_per_adu
     sky_e2: float | None = None
     read_e2: float | None = None
     if not session.read_noise_is_assumed:
@@ -506,15 +504,11 @@ def noise_variances_at_magnitude(magnitude: float, inputs: NoiseBudgetInputs) ->
             # or the geometry does not match the errors; report neither.
             sky_e2, read_e2 = None, None
     scintillation: float | None = None
-    if (
-        inputs.aperture_diameter_mm is not None
-        and inputs.airmass is not None
-        and session.exposure_seconds > 0
-    ):
+    if inputs.aperture_diameter_mm is not None and inputs.airmass is not None and session.exposure_s > 0:
         scintillation = scintillation_relative_noise(
             inputs.aperture_diameter_mm,
             inputs.airmass,
-            session.exposure_seconds,
+            session.exposure_s,
             inputs.site_elevation_m if inputs.site_elevation_m is not None else 0.0,
         )
     return NoiseVariances(

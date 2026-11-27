@@ -38,7 +38,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.differential_refracti
     local_dispersion_angstrom_per_px,
     measure_refraction_geometry,
     mid_exposure_time,
-    parallactic_angle_degrees,
+    parallactic_angle_deg,
     shift_wavelengths,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import (
@@ -87,14 +87,14 @@ def _dispersion(wavelength_angstrom: np.ndarray) -> np.ndarray:
     )
 
 
-def _target(hour_angle_hours: float, declination_degrees: float) -> SkyCoord:
+def _target(hour_angle_hours: float, declination_deg: float) -> SkyCoord:
     """Place a star at an hour angle on the fixed night.
 
     Parameters
     ----------
     hour_angle_hours : `float`
         The hour angle in hours. Positive is west of the meridian.
-    declination_degrees : `float`
+    declination_deg : `float`
         The declination, in degrees.
 
     Returns
@@ -110,7 +110,7 @@ def _target(hour_angle_hours: float, declination_degrees: float) -> SkyCoord:
     sidereal = MID_EXPOSURE.sidereal_time("apparent", longitude=location.lon).deg
     return SkyCoord(
         ra=((sidereal - 15.0 * hour_angle_hours) % 360.0) * astropy_units.deg,
-        dec=declination_degrees * astropy_units.deg,
+        dec=declination_deg * astropy_units.deg,
     )
 
 
@@ -166,7 +166,7 @@ def _geometry(
         The geometry.
     """
     target = _target(hour_angle_hours, 10.0)
-    _, zenith_angle = parallactic_angle_degrees(target, MID_EXPOSURE, SITE)
+    _, zenith_angle = parallactic_angle_deg(target, MID_EXPOSURE, SITE)
     wcs = _wcs_with_x_axis_at(target, zenith_angle + angle_from_zenith_degrees - image_angle_degrees)
     geometry, reason = measure_refraction_geometry(
         header=HEADER,
@@ -191,7 +191,7 @@ def test_the_parallactic_angle_matches_the_textbook_formula() -> None:
         SITE.elevation_m * astropy_units.m,
     )
     frame = AltAz(obstime=MID_EXPOSURE, location=location)
-    for altitude_degrees, azimuth_degrees in (
+    for altitude_deg, azimuth_deg in (
         (40.0, 250.0),
         (40.0, 110.0),
         (60.0, 180.0),
@@ -199,11 +199,11 @@ def test_the_parallactic_angle_matches_the_textbook_formula() -> None:
         (35.0, 300.0),
     ):
         target = SkyCoord(
-            alt=altitude_degrees * astropy_units.deg, az=azimuth_degrees * astropy_units.deg, frame=frame
+            alt=altitude_deg * astropy_units.deg, az=azimuth_deg * astropy_units.deg, frame=frame
         ).icrs
-        altitude, angle = parallactic_angle_degrees(SkyCoord(target.ra, target.dec), MID_EXPOSURE, SITE)
-        alt = math.radians(altitude_degrees)
-        azimuth = math.radians(azimuth_degrees)
+        altitude, angle = parallactic_angle_deg(SkyCoord(target.ra, target.dec), MID_EXPOSURE, SITE)
+        alt = math.radians(altitude_deg)
+        azimuth = math.radians(azimuth_deg)
         sin_dec = math.sin(latitude) * math.sin(alt) + math.cos(latitude) * math.cos(alt) * math.cos(azimuth)
         cos_dec = math.sqrt(1.0 - sin_dec**2)
         # The sides of the parallactic triangle give sin(q) and cos(q). The
@@ -215,14 +215,14 @@ def test_the_parallactic_angle_matches_the_textbook_formula() -> None:
                 (math.sin(latitude) - sin_dec * math.sin(alt)) / (cos_dec * math.cos(alt)),
             )
         )
-        assert altitude == pytest.approx(altitude_degrees, abs=0.05)
+        assert altitude == pytest.approx(altitude_deg, abs=0.05)
         # The ICRS north differs from the north of date by a small angle.
         assert _wrap_degrees(angle - expected) == pytest.approx(0.0, abs=0.2)
 
 
 def test_the_altitude_of_the_fixed_target_is_about_forty_degrees() -> None:
     """The fixed test target is at airmass about 1.5."""
-    altitude, _ = parallactic_angle_degrees(_target(3.0, 10.0), MID_EXPOSURE, SITE)
+    altitude, _ = parallactic_angle_deg(_target(3.0, 10.0), MID_EXPOSURE, SITE)
 
     assert altitude == pytest.approx(40.3, abs=0.1)
 
@@ -237,7 +237,7 @@ def test_dispersion_along_the_vertical_gives_the_full_shift_along_and_none_acros
     full = differential_refraction_arcsec(
         wavelengths, EFFECTIVE_WAVELENGTH, geometry.zenith_distance_degrees, CONDITIONS
     )
-    assert geometry.parallactic_to_dispersion_angle_degrees == pytest.approx(0.0, abs=0.01)
+    assert geometry.parallactic_to_dispersion_angle_deg == pytest.approx(0.0, abs=0.01)
     np.testing.assert_allclose(along, full, atol=2e-3)
     np.testing.assert_allclose(across, 0.0, atol=2e-3)
     assert along[0] > 0.5
@@ -255,7 +255,7 @@ def test_dispersion_at_ninety_degrees_to_the_vertical_gives_the_reverse() -> Non
         full = differential_refraction_arcsec(
             wavelengths, EFFECTIVE_WAVELENGTH, geometry.zenith_distance_degrees, CONDITIONS
         )
-        assert abs(geometry.parallactic_to_dispersion_angle_degrees) == pytest.approx(90.0, abs=0.01)
+        assert abs(geometry.parallactic_to_dispersion_angle_deg) == pytest.approx(90.0, abs=0.01)
         np.testing.assert_allclose(along, 0.0, atol=2e-3)
         # The across axis points at theta + 90 degrees. The zenith lies at
         # theta - 90 degrees when the angle is +90, so the sign is negative.
@@ -353,7 +353,7 @@ def test_shifting_a_line_displaced_by_a_known_amount_puts_it_back_within_one_ang
 def test_the_pipeline_entry_point_corrects_a_displaced_line_and_records_it() -> None:
     """The whole correction, from header to record, fixes a line."""
     target = _target(3.0, 10.0)
-    _, zenith_angle = parallactic_angle_degrees(target, MID_EXPOSURE, SITE)
+    _, zenith_angle = parallactic_angle_deg(target, MID_EXPOSURE, SITE)
     wcs = _wcs_with_x_axis_at(target, zenith_angle)
     labels = np.arange(4000.0, 8000.0, 11.2)
     continuum = np.ones_like(labels)
@@ -397,7 +397,7 @@ def test_the_pipeline_entry_point_corrects_a_displaced_line_and_records_it() -> 
     assert record.is_computed is True
     assert record.is_applied is True
     assert record.reason is None
-    assert record.altitude_degrees == pytest.approx(40.3, abs=0.1)
+    assert record.altitude_deg == pytest.approx(40.3, abs=0.1)
     assert record.effective_wavelength_angstrom == pytest.approx(effective)
     assert record.atmosphere_source == "test"
     assert record.along_dispersion_arcsec_at_4200 is not None
@@ -415,7 +415,7 @@ def test_the_pipeline_entry_point_corrects_a_displaced_line_and_records_it() -> 
 def test_switching_the_correction_off_keeps_the_wavelengths_but_records_the_numbers() -> None:
     """With `apply_correction=False` the record is made and nothing moves."""
     target = _target(3.0, 10.0)
-    _, zenith_angle = parallactic_angle_degrees(target, MID_EXPOSURE, SITE)
+    _, zenith_angle = parallactic_angle_deg(target, MID_EXPOSURE, SITE)
     labels = np.arange(4000.0, 8000.0, 11.2)
 
     corrected, record = correct_differential_refraction(
@@ -440,7 +440,7 @@ def test_switching_the_correction_off_keeps_the_wavelengths_but_records_the_numb
 def test_a_target_below_twenty_degrees_is_not_corrected() -> None:
     """At 18 degrees the record keeps the altitude and skips the rest."""
     target = _target(5.0, 10.0)
-    _, zenith_angle = parallactic_angle_degrees(target, MID_EXPOSURE, SITE)
+    _, zenith_angle = parallactic_angle_deg(target, MID_EXPOSURE, SITE)
     labels = np.arange(4000.0, 8000.0, 11.2)
 
     corrected, record = correct_differential_refraction(
@@ -458,7 +458,7 @@ def test_a_target_below_twenty_degrees_is_not_corrected() -> None:
     np.testing.assert_array_equal(corrected, labels)
     assert record.is_computed is False
     assert record.is_applied is False
-    assert record.altitude_degrees == pytest.approx(18.1, abs=0.2)
+    assert record.altitude_deg == pytest.approx(18.1, abs=0.2)
     assert record.reason is not None
     assert "minimum altitude" in record.reason
     assert record.along_dispersion_span_angstrom is None

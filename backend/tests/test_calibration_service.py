@@ -24,17 +24,17 @@ STATS = {
     "darks": [
         {
             "camera": "ASI533",
-            "iso": "100",
+            "gain": "100",
             "offset": 10.0,
             "binning": "1x1",
             "temperature_c": -9.0,
-            "exposure": 60.0,
+            "exposure_s": 60.0,
             "count": 20,
         },
     ],
-    "biases": [{"camera": "ASI533", "iso": "100", "offset": 10.0, "binning": "2x2", "count": 30}],
+    "biases": [{"camera": "ASI533", "gain": "100", "offset": 10.0, "binning": "2x2", "count": 30}],
     "flats": [
-        {"camera": "ASI533", "filter": "L", "iso": "100", "offset": 10.0, "binning": "2x2", "count": 25}
+        {"camera": "ASI533", "filter": "L", "gain": "100", "offset": 10.0, "binning": "2x2", "count": 25}
     ],
 }
 """The fixed counts of the stand-in index."""
@@ -63,12 +63,8 @@ def service(tmp_path: Path) -> CalibrationService:
     target = Target(
         id="M 81",
         frames=[
-            FrameRecord(
-                path="a.fits", exposure="60.0", role="LIGHT", camera="ASI533", iso="100", offset="10"
-            ),
-            FrameRecord(
-                path="b.fits", exposure="60.0", role="LIGHT", camera="ASI533", iso="100", offset="10"
-            ),
+            FrameRecord(path="a.fits", exposure_s=60.0, role="LIGHT", camera="ASI533", gain=100, offset=10),
+            FrameRecord(path="b.fits", exposure_s=60.0, role="LIGHT", camera="ASI533", gain=100, offset=10),
         ],
     )
     astrometrics: Any = SimpleNamespace(
@@ -77,23 +73,24 @@ def service(tmp_path: Path) -> CalibrationService:
     return CalibrationService(astrometrics)
 
 
-def test_counts_rows_keep_their_old_keys(service: CalibrationService) -> None:
-    """Each kind's rows keep the keys the counts table reads; totals add up."""
+def test_counts_rows_carry_the_keys_the_counts_table_reads(service: CalibrationService) -> None:
+    """Each kind's rows carry the keys the counts table reads; totals agree."""
     answer = service.query()
 
     assert answer.detail == "counts"
     assert answer.dark_temperature_tolerance_c == pytest.approx(3.0)
     assert list(answer.darks[0]) == [
         "camera",
-        "iso",
+        "gain",
         "offset",
         "binning",
         "temperature_c",
-        "exposure",
+        "exposure_s",
         "count",
         "row_key",
     ]
-    assert list(answer.biases[0]) == ["camera", "iso", "offset", "binning", "count", "row_key"]
+    assert list(answer.biases[0]) == ["camera", "gain", "offset", "binning", "count", "row_key"]
+    assert answer.biases[0]["gain"] == 100
     assert answer.flats[0]["filter"] == "L"
     assert answer.camera_totals == [
         {"camera": "ASI533", "dark_count": 20, "bias_count": 30, "flat_count": 25}
@@ -103,7 +100,7 @@ def test_counts_rows_keep_their_old_keys(service: CalibrationService) -> None:
 
 def test_match_gives_the_keys_of_the_rows_with_the_setting(service: CalibrationService) -> None:
     """Binning "2" and a whole-number gain find the 2x2 bias row."""
-    answer = service.query(detail="match", kind="bias", camera_id="asi533", gain="100", binning="2")
+    answer = service.query(detail="match", kind="bias", camera_id="asi533", gain=100, binning="2")
 
     assert answer.matched_row_keys == [service.query().biases[0]["row_key"]]
     with pytest.raises(InvalidArgumentError):
@@ -119,9 +116,9 @@ def test_target_details_keep_their_shapes(service: CalibrationService) -> None:
 
     assert set(groups[0]) == {
         "filter",
-        "iso",
+        "gain",
         "offset",
-        "exposure",
+        "exposureS",
         "count",
         "darks",
         "camera",
@@ -131,7 +128,7 @@ def test_target_details_keep_their_shapes(service: CalibrationService) -> None:
         "biasMatch",
         "binning",
     }
-    assert (groups[0]["exposure"], groups[0]["count"]) == ("60", 2)
+    assert (groups[0]["exposureS"], groups[0]["count"]) == (60.0, 2)
     assert set(groups[0]["darkMatch"]) == {"count", "fallbacks", "problem"}
     assert lights[0]["count"] == 2
-    assert set(lights[0]) == {"telescope", "camera", "iso", "exposure", "filter", "count"}
+    assert set(lights[0]) == {"telescope", "camera", "gain", "exposure_s", "filter", "count"}

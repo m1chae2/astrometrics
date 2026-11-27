@@ -99,8 +99,8 @@ def test_the_stacking_stage_refuses_mixed_cameras() -> None:
     target = Target(
         id="T 1",
         frames=[
-            FrameRecord(path="/f/a.fits", role="LIGHT", camera=NIKON, exposure="60", timestamp=1.0),
-            FrameRecord(path="/f/b.fits", role="LIGHT", camera=ASI, exposure="60", timestamp=2.0),
+            FrameRecord(path="/f/a.fits", role="LIGHT", camera=NIKON, exposure_s=60, timestamp=1.0),
+            FrameRecord(path="/f/b.fits", role="LIGHT", camera=ASI, exposure_s=60, timestamp=2.0),
         ],
     )
 

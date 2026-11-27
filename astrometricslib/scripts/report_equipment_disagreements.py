@@ -116,8 +116,8 @@ def find_iso_disagreements(targets: list[Any]) -> collections.Counter[tuple[str,
             header_value = iso_or_gain_text(header)
             if header_value is None:
                 continue
-            if not iso_or_gain_values_match(header_value, frame.iso):
-                disagreements[str(frame.camera), str(frame.iso), header_value] += 1
+            if not iso_or_gain_values_match(header_value, frame.gain):
+                disagreements[str(frame.camera), str(frame.gain), header_value] += 1
     return disagreements
 
 

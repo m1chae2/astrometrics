@@ -24,8 +24,8 @@ def test_guider_calibration_round_trips() -> None:
         telescope_id="t1",
         arcsec_per_pixel=1.2,
         camera_angle_deg=15.0,
-        ra_rate_arcsec_per_sec=10.0,
-        dec_rate_arcsec_per_sec=10.0,
+        ra_rate_arcsec_per_s=10.0,
+        dec_rate_arcsec_per_s=10.0,
     )
     assert calibration.arcsec_per_pixel == pytest.approx(1.2)
     assert calibration.calibrated_at is not None

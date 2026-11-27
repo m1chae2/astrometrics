@@ -250,7 +250,7 @@ def _profile_with_noise_at_gain_zero(**changes: object) -> CameraProfile:
         A profile whose only noise entry is for gain 0, offset 10, 1x1.
     """
     entry = SensorSettingNoise(
-        gain_setting="0",
+        gain="0",
         offset="10",
         binning="1x1",
         gain_e_per_adu=_measured(1.1),

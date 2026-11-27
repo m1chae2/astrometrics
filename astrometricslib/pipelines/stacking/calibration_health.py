@@ -56,6 +56,6 @@ def measure_calibration_health(
         metrics.zero_pixel_fraction = max(
             float(np.count_nonzero(plane == 0) / plane.size) for plane in planes
         )
-    negative_percent = diagnostics.get("negative_pixel_max_percent")
+    negative_percent = diagnostics.get("negative_pixel_max_pct")
     if negative_percent is not None:
-        metrics.negative_pixel_max_percent = int(negative_percent)
+        metrics.negative_pixel_max_pct = int(negative_percent)

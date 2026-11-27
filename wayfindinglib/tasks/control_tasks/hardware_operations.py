@@ -705,7 +705,7 @@ def pulse(context: ControlContext, direction: str, duration_ms: float) -> bool:
     return _run_sync(context.mount_driver.pulse_guide(axis, duration_ms))
 
 
-def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
+def capture_image(context: ControlContext, exposure_s: float) -> Any:
     """Take one exposure with the main camera.
 
     Requires `CAPTURE_ORCHESTRATION`.
@@ -714,7 +714,7 @@ def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
     ----------
     context : `ControlContext`
         Supplies the camera driver and the policy.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length in seconds.
 
     Returns
@@ -723,7 +723,7 @@ def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
         The camera driver's exposure result.
     """
     require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
-    return _run_sync(context.camera_driver.expose(exposure_seconds))
+    return _run_sync(context.camera_driver.expose(exposure_s))
 
 
 def abort_exposure(context: ControlContext) -> bool:

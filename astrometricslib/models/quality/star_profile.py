@@ -7,7 +7,7 @@ is a plain Python float, int, bool, string or list, so it can be sent to the
 app as it is.
 """
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 __all__ = ["ProfileFit", "RingHarmonic", "RingNeighbor", "StarProfileMeasurement"]
 
@@ -111,7 +111,7 @@ class RingHarmonic(BaseModel):
         ``amplitude`` divided by ``amplitude_error``.
     significant : `bool`
         `True` when ``significance`` reaches the declared threshold.
-    direction_degrees : `float`
+    direction_deg : `float`
         The direction of the pattern's brightest lobe, from +y toward +x,
         from 0 up to ``360 / order``. The other lobes follow at steps of
         ``360 / order``.
@@ -123,7 +123,7 @@ class RingHarmonic(BaseModel):
     amplitude_debiased: float
     significance: float
     significant: bool
-    direction_degrees: float
+    direction_deg: float = Field(validation_alias=AliasChoices("direction_deg", "direction_degrees"))
 
 
 class StarProfileMeasurement(BaseModel):
@@ -192,7 +192,7 @@ class StarProfileMeasurement(BaseModel):
         A plain sentence about the clipped check.
     moffat, gaussian : `ProfileFit`
         The two fits.
-    cut_angle_degrees : `float`
+    cut_angle_deg : `float`
         The angle of the cut, measured from +y toward +x.
     cut_half_length_px : `float`
         How far the cut reaches each way from the center.
@@ -230,7 +230,7 @@ class StarProfileMeasurement(BaseModel):
         measured above. It comes from a tilted plane fitted far outside the
         star's glow, so it can be lower than ``sky``, and a smooth gradient
         of the sky is removed from the ring.
-    ring_bin_angle_degrees, ring_bin_values, ring_bin_counts : `list`
+    ring_bin_angle_deg, ring_bin_values, ring_bin_counts : `list`
         The ring's brightness by direction: for each 5 degree bin that holds
         a pixel, the middle angle (from +y toward +x), the mean value above
         the sky of its unmasked pixels, and how many pixels that is.
@@ -320,7 +320,7 @@ class StarProfileMeasurement(BaseModel):
     clipped_reason: str
     moffat: ProfileFit
     gaussian: ProfileFit
-    cut_angle_degrees: float
+    cut_angle_deg: float = Field(validation_alias=AliasChoices("cut_angle_deg", "cut_angle_degrees"))
     cut_half_length_px: float
     cut_distance_px: list[float]
     cut_values: list[float]
@@ -335,7 +335,9 @@ class StarProfileMeasurement(BaseModel):
     ring_inner_px: float
     ring_outer_px: float
     ring_sky: float
-    ring_bin_angle_degrees: list[float]
+    ring_bin_angle_deg: list[float] = Field(
+        validation_alias=AliasChoices("ring_bin_angle_deg", "ring_bin_angle_degrees")
+    )
     ring_bin_values: list[float]
     ring_bin_counts: list[int]
     ring_harmonics: list[RingHarmonic]

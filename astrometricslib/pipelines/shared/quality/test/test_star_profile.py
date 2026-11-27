@@ -108,7 +108,7 @@ def test_pair_shows_two_peaks_along_its_line(tmp_path: Path) -> None:
     """Two stars 5 px apart in rows appear as two peaks in a cut at angle 0."""
     path = _write(tmp_path, [(50.0, 48.0, 3000.0, 1.2), (50.0, 53.0, 3000.0, 1.2)])
     result = measure_star_profile_in_file(
-        path, 51.0, 49.0, radius_px=10.0, cut_angle_degrees=0.0, cut_half_length_px=10.0
+        path, 51.0, 49.0, radius_px=10.0, cut_angle_deg=0.0, cut_half_length_px=10.0
     )
     values = np.array(result.cut_values)
     peaks = [
@@ -125,7 +125,7 @@ def test_cut_angle_runs_from_y_toward_x(tmp_path: Path) -> None:
     """Angle 90 runs along a row: a star offset in columns shows up there."""
     path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.2), (56.0, 50.0, 1500.0, 1.2)])
     result = measure_star_profile_in_file(
-        path, 51.0, 51.0, radius_px=4.0, cut_angle_degrees=90.0, cut_half_length_px=10.0
+        path, 51.0, 51.0, radius_px=4.0, cut_angle_deg=90.0, cut_half_length_px=10.0
     )
     distances = np.array(result.cut_distance_px)
     values = np.array(result.cut_values)
@@ -222,7 +222,7 @@ def test_broad_blob_is_too_wide(tmp_path: Path) -> None:
 
 
 def _cut_from_cutout(
-    result: object, width: int, height: int, angle_degrees: float
+    result: object, width: int, height: int, angle_deg: float
 ) -> tuple[list[float], list[float]]:
     """Rebuild a cut from the cutout with the recipe in the model docstring.
 
@@ -239,7 +239,7 @@ def _cut_from_cutout(
     )
     step = result.cut_step_px  # type: ignore[attr-defined]
     count = math.floor(result.cut_half_length_px / step)  # type: ignore[attr-defined]
-    angle = math.radians(angle_degrees)
+    angle = math.radians(angle_deg)
     distances, values = [], []
     for k in range(-count, count + 1):
         t = k * step
@@ -260,7 +260,7 @@ def test_cut_rebuilds_from_the_cutout(tmp_path: Path, angle: float) -> None:
     """The documented recipe on the cutout gives the same cut as the result."""
     path = _write(tmp_path, [(50.0, 50.0, 3000.0, 1.8), (55.0, 52.0, 1500.0, 1.4)])
     result = measure_star_profile_in_file(
-        path, 51.0, 51.0, radius_px=10.0, cut_angle_degrees=angle, cut_half_length_px=12.0
+        path, 51.0, 51.0, radius_px=10.0, cut_angle_deg=angle, cut_half_length_px=12.0
     )
     distances, values = _cut_from_cutout(result, SIZE, SIZE, angle)
     assert distances == pytest.approx(result.cut_distance_px)

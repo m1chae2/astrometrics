@@ -40,7 +40,7 @@ def _frames(exposures: list[float]) -> list[FrameRecord]:
             path=f"/lights/f{number}.fits",
             role="LIGHT",
             camera="cam",
-            exposure=str(exposure),
+            exposure_s=str(exposure),
             timestamp=float(number),
         )
         for number, exposure in enumerate(exposures)

@@ -15,9 +15,10 @@ biases and flats the stacker would use for them.
 import logging
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.models.stellar_source import CalibrationGroupMatch
+from astrometricslib.utilities.iso_text import SettingNumber
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ class CalibrationEntry(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
     camera: str = Field(..., alias="camera")
-    iso: str = Field(..., alias="iso")
+    # The gain setting (or ISO), or None when the library files the frames
+    # under a gain that is not a number.
+    gain: SettingNumber = Field(..., alias="gain", validation_alias=AliasChoices("gain", "iso"))
     # The camera's offset setting (a constant added to every pixel). Frames
     # taken at different offsets are never mixed, so each offset is its own
     # row. `None` when the frame's header does not record it.
@@ -42,7 +45,9 @@ class CalibrationEntry(BaseModel):
     # filed by temperature, so this is `None` for biases and flats and for
     # darks whose header records no temperature.
     temperature_c: float | None = Field(default=None, alias="temperatureC")
-    exposure: float | None = Field(default=None, alias="exposure")
+    exposure_s: float | None = Field(
+        default=None, alias="exposureS", validation_alias=AliasChoices("exposureS", "exposure_s", "exposure")
+    )
     filter: str | None = Field(default=None, alias="filter")
     count: int = Field(..., alias="count")
 
@@ -59,8 +64,8 @@ class CalibrationStats(BaseModel):
 class CalibrationSetCount(BaseModel):
     """How many frames the library holds of one kind at one setting.
 
-    The settings are written as the library files them: the gain as text
-    (a gain setting or an ISO), the binning as ``"<x>x<y>"``.
+    The gain is a number; the binning is written as the library files it,
+    ``"<x>x<y>"``.
 
     Attributes
     ----------
@@ -68,8 +73,8 @@ class CalibrationSetCount(BaseModel):
         The kind of frame.
     camera : `str`
         The camera name the frames are filed under.
-    gain : `str` or `None`
-        The gain setting (or ISO), as text.
+    gain : `int` or `None`
+        The gain setting (or ISO), or `None` when it is not a number.
     offset : `float` or `None`
         The camera offset.
     binning : `str` or `None`
@@ -92,7 +97,7 @@ class CalibrationSetCount(BaseModel):
 
     kind: Literal["dark", "bias", "flat"]
     camera: str
-    gain: str | None = None
+    gain: SettingNumber = None
     offset: float | None = None
     binning: str | None = None
     temperature_c: float | None = None
@@ -118,10 +123,11 @@ class CalibrationMatch(BaseModel):
         frames do not record it.
     filter_name : `str`
         The filter, such as ``"L"``; ``"None"`` when the frames have none.
-    gain : `str`
-        The gain setting (or ISO) the frames record, as text.
-    offset : `str`
-        The camera offset the frames record, as text.
+    gain : `int` or `None`
+        The gain setting (or ISO) the frames record, or `None` when it is
+        not known.
+    offset : `int` or `None`
+        The camera offset the frames record.
     binning : `str` or `None`
         The binning the stacker matches the calibration with.
     exposure_s : `float`
@@ -138,8 +144,8 @@ class CalibrationMatch(BaseModel):
     camera: str
     focal_length_mm: int | None = None
     filter_name: str
-    gain: str
-    offset: str
+    gain: SettingNumber
+    offset: SettingNumber
     binning: str | None = None
     exposure_s: float
     frame_count: int = Field(ge=0)

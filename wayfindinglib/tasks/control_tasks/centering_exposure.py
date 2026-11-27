@@ -18,7 +18,7 @@ The steps are:
 4. Take the shortest exposure whose count reaches the target. If the longest
    one still falls short, use it and say so.
 
-If any input is missing, the fixed ``alignment_exposure_seconds`` setting is
+If any input is missing, the fixed ``alignment_exposure_s`` setting is
 used, and the result says which input was missing. Nothing here writes or
 moves anything.
 
@@ -212,14 +212,14 @@ class SensorAndSky:
         return 4.0 * math.pi * sigma * sigma
 
 
-def star_electrons(magnitude: float, exposure_seconds: float, sensor: SensorAndSky) -> float:
+def star_electrons(magnitude: float, exposure_s: float, sensor: SensorAndSky) -> float:
     """Give the electrons a star of a magnitude collects in an exposure.
 
     Parameters
     ----------
     magnitude : `float`
         Gaia G magnitude.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure, in seconds.
     sensor : `SensorAndSky`
         The zero point and the gain.
@@ -229,10 +229,10 @@ def star_electrons(magnitude: float, exposure_seconds: float, sensor: SensorAndS
     electrons : `float`
         ``gain * 10**(0.4 (zero_point - m)) * t``.
     """
-    return sensor.gain_e_per_adu * 10.0 ** (0.4 * (sensor.zero_point_mag - magnitude)) * exposure_seconds
+    return sensor.gain_e_per_adu * 10.0 ** (0.4 * (sensor.zero_point_mag - magnitude)) * exposure_s
 
 
-def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sensor: SensorAndSky) -> float:
+def point_source_signal_to_noise(magnitude: float, exposure_s: float, sensor: SensorAndSky) -> float:
     """Give the signal-to-noise ratio of a star in one exposure.
 
     ``S / sqrt(S + n (B t + R**2))``: the star's electrons ``S``, its own shot
@@ -244,7 +244,7 @@ def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sens
     ----------
     magnitude : `float`
         Gaia G magnitude.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure, in seconds.
     sensor : `SensorAndSky`
         The camera, sky and star-width numbers.
@@ -254,13 +254,13 @@ def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sens
     ratio : `float`
         The signal-to-noise ratio. It rises with exposure time.
     """
-    signal = star_electrons(magnitude, exposure_seconds, sensor)
-    background = sensor.sky_rate_e_per_s_per_px * exposure_seconds + sensor.read_noise_e**2
+    signal = star_electrons(magnitude, exposure_s, sensor)
+    background = sensor.sky_rate_e_per_s_per_px * exposure_s + sensor.read_noise_e**2
     return signal / math.sqrt(signal + sensor.noise_pixels * background)
 
 
 def limiting_magnitude(
-    exposure_seconds: float, sensor: SensorAndSky, signal_to_noise: float | None = None
+    exposure_s: float, sensor: SensorAndSky, signal_to_noise: float | None = None
 ) -> float:
     """Give the faintest magnitude that reaches a signal-to-noise ratio.
 
@@ -270,7 +270,7 @@ def limiting_magnitude(
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure, in seconds.
     sensor : `SensorAndSky`
         The camera, sky and star-width numbers.
@@ -284,10 +284,10 @@ def limiting_magnitude(
     """
     if signal_to_noise is None:
         signal_to_noise = resolve_parameter(DETECTION_SIGNAL_TO_NOISE).value
-    background = sensor.sky_rate_e_per_s_per_px * exposure_seconds + sensor.read_noise_e**2
+    background = sensor.sky_rate_e_per_s_per_px * exposure_s + sensor.read_noise_e**2
     square = signal_to_noise**2
     electrons = (square + math.sqrt(square * square + 4.0 * square * sensor.noise_pixels * background)) / 2.0
-    adu_per_second = electrons / sensor.gain_e_per_adu / exposure_seconds
+    adu_per_second = electrons / sensor.gain_e_per_adu / exposure_s
     return sensor.zero_point_mag - 2.5 * math.log10(adu_per_second)
 
 
@@ -319,7 +319,7 @@ def choose_exposure(
 
     Returns
     -------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The shortest ladder step that reaches the target, else the longest.
     trials : `list` [`CenteringExposureTrial`]
         Every ladder step up to the chosen one, with its limit and count.
@@ -340,9 +340,7 @@ def choose_exposure(
         limit = limiting_magnitude(exposure, sensor)
         count = sum(1 for magnitude in ordered if magnitude <= limit)
         trials.append(
-            CenteringExposureTrial(
-                exposure_seconds=exposure, limiting_magnitude=limit, expected_star_count=count
-            )
+            CenteringExposureTrial(exposure_s=exposure, limiting_magnitude=limit, expected_star_count=count)
         )
         lower_bound = not catalog_complete or (
             catalog_limit_magnitude is not None and limit > catalog_limit_magnitude
@@ -601,7 +599,7 @@ def _fallback(context: ControlContext, reason: str) -> CenteringExposure:
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the ``alignment_exposure_seconds`` setting.
+        Supplies the ``alignment_exposure_s`` setting.
     reason : `str`
         Which input was missing.
 
@@ -610,11 +608,11 @@ def _fallback(context: ControlContext, reason: str) -> CenteringExposure:
     result : `CenteringExposure`
         The fixed exposure, marked as the fallback.
     """
-    exposure = context.correction_config.alignment_exposure_seconds
+    exposure = context.correction_config.alignment_exposure_s
     return CenteringExposure(
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         source="fallback",
-        reason=f"Used the fixed {exposure:g} s setting (alignment_exposure_seconds) because {reason}.",
+        reason=f"Used the fixed {exposure:g} s setting (alignment_exposure_s) because {reason}.",
         target_star_count=resolve_parameter(TARGET_STAR_COUNT).value,
     )
 
@@ -740,9 +738,7 @@ def predict_star_counts(
         limit = limiting_magnitude(exposure, sensor)
         count = sum(1 for magnitude in magnitudes if magnitude <= limit)
         trials.append(
-            CenteringExposureTrial(
-                exposure_seconds=exposure, limiting_magnitude=limit, expected_star_count=count
-            )
+            CenteringExposureTrial(exposure_s=exposure, limiting_magnitude=limit, expected_star_count=count)
         )
     return trials, facts, None
 
@@ -820,7 +816,7 @@ def choose_centering_exposure(
             "at least that."
         )
     return CenteringExposure(
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         source="computed",
         reason=reason,
         target_star_count=target_star_count,

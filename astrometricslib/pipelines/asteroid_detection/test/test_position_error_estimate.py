@@ -130,7 +130,7 @@ def test_the_pipeline_carries_exposure_time_and_an_assumed_error_onto_the_track(
 
     assert len(candidates) == 1
     assert candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
-    assert {detection.exposure_seconds for detection in candidates[0].frame_detections} == {30.0}
+    assert {detection.exposure_s for detection in candidates[0].frame_detections} == {30.0}
     assert {detection.astrometric_error_arcsec for detection in candidates[0].frame_detections} == {None}
     track = candidates[0].track
     assert track is not None

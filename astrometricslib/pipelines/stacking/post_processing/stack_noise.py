@@ -1573,7 +1573,7 @@ def _reference_exposure_seconds(
 
     Returns
     -------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The ``EXPTIME`` (or ``EXPOSURE``) of the reference frame, or of the
         first readable member frame, or `None` when none is known.
     """

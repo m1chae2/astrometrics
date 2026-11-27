@@ -165,9 +165,7 @@ def _expected_ratio_without_scaling(
     """
     if not groups:
         return STACK_UNITS_PER_ADU, ""
-    if any(
-        group.combine_weight <= 0 or group.exposure_seconds <= 0 or group.frame_count <= 0 for group in groups
-    ):
+    if any(group.combine_weight <= 0 or group.exposure_s <= 0 or group.frame_count <= 0 for group in groups):
         return None, "an exposure group has a weight, exposure or frame count that is not usable"
     reference = max(groups, key=lambda group: group.combine_weight)
     reference_path = flux_ratio.reference_frame_path
@@ -177,23 +175,23 @@ def _expected_ratio_without_scaling(
         if str(reference_path) not in reference.member_paths:
             return None, (
                 f"the registration reference frame ({reference_path}) is not one of the frames of the "
-                f"reference exposure group ({reference.exposure_seconds:g} s)"
+                f"reference exposure group ({reference.exposure_s:g} s)"
             )
     else:
         reference_exposure_seconds = flux_ratio.reference_exposure_seconds
         if reference_exposure_seconds is None:
             return None, "the registration reference frame has no exposure length in its header"
-        if abs(reference_exposure_seconds - reference.exposure_seconds) > EXPOSURE_MATCH_FRACTION * (
-            reference.exposure_seconds
+        if abs(reference_exposure_seconds - reference.exposure_s) > EXPOSURE_MATCH_FRACTION * (
+            reference.exposure_s
         ):
             return None, (
                 f"the registration reference frame ({reference_exposure_seconds:g} s) is not in the "
-                f"reference exposure group ({reference.exposure_seconds:g} s)"
+                f"reference exposure group ({reference.exposure_s:g} s)"
             )
-    mean_exposure = math.fsum(group.frame_count * group.exposure_seconds for group in groups) / math.fsum(
+    mean_exposure = math.fsum(group.frame_count * group.exposure_s for group in groups) / math.fsum(
         group.frame_count for group in groups
     )
-    return STACK_UNITS_PER_ADU * mean_exposure / reference.exposure_seconds, ""
+    return STACK_UNITS_PER_ADU * mean_exposure / reference.exposure_s, ""
 
 
 def measure_normalization_scale(

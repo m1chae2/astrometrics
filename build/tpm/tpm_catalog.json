@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "about": "Definitions only. Measured values live in each run's tpm.json; baselines live in tpm_baseline.json. threshold_status: TBD (no limit yet), TBR (proposed limit, shown with margin, never pass or fail), Confirmed (a limit that fails a run when breached). A threshold is in the TPM's unit, or {factor, of} for a limit relative to a run fact (exposure_seconds, frame_interval_seconds). cold_only: true marks a limit that applies only to a --cold run (the file cache was dropped before it); a warm run still measures the value but gets no limit for it.",
+  "about": "Definitions only. Measured values live in each run's tpm.json; baselines live in tpm_baseline.json. threshold_status: TBD (no limit yet), TBR (proposed limit, shown with margin, never pass or fail), Confirmed (a limit that fails a run when breached). A threshold is in the TPM's unit, or {factor, of} for a limit relative to a run fact (exposure_s, frame_interval_seconds). cold_only: true marks a limit that applies only to a --cold run (the file cache was dropped before it); a warm run still measures the value but gets no limit for it.",
   "displays": [
     {
       "name": "Image Viewer",
@@ -1378,11 +1378,11 @@
       "statistic": "median",
       "threshold": {
         "factor": 1.0,
-        "of": "exposure_seconds"
+        "of": "exposure_s"
       },
       "objective": {
         "factor": 0.25,
-        "of": "exposure_seconds"
+        "of": "exposure_s"
       },
       "threshold_status": "TBR",
       "source": "Threshold is the shortest exposure; objective is 25% of it. The app must keep up with capture.",

@@ -127,7 +127,7 @@ class LiveGuidingMonitor:
         self._history: deque[GuidingSample] = deque(maxlen=HISTORY_LIMIT)
         self._stats = GuidingStats()
         self.running = False
-        self.exposure_seconds = 1.0
+        self.exposure_s = 1.0
         self.gain = 0.0
 
     def add(self, samples: list[GuidingSample]) -> None:
@@ -156,19 +156,19 @@ class LiveGuidingMonitor:
                 if sample.star_mass is not None:
                     self._stats.star_mass = sample.star_mass
 
-    def start(self, exposure_seconds: float | None, gain: float | None) -> None:
+    def start(self, exposure_s: float | None, gain: float | None) -> None:
         """Mark the loop as running, keep its settings and clear the samples.
 
         Parameters
         ----------
-        exposure_seconds : `float` or `None`
+        exposure_s : `float` or `None`
             Guide exposure length. `None` keeps the last one.
         gain : `float` or `None`
             Guide camera gain. `None` keeps the last one.
         """
         with self._lock:
-            if exposure_seconds is not None:
-                self.exposure_seconds = exposure_seconds
+            if exposure_s is not None:
+                self.exposure_s = exposure_s
             if gain is not None:
                 self.gain = gain
             self._history.clear()
@@ -202,7 +202,7 @@ class LiveGuidingMonitor:
             is_guiding=self.running or recent,
             stats=stats,
             history=history,
-            exposure=self.exposure_seconds,
+            exposure_s=self.exposure_s,
             gain=self.gain,
         )
 
@@ -283,7 +283,7 @@ def _wait_for_tracking(context: ControlContext, sleep: Callable[[float], None]) 
 def run_loop(
     context: ControlContext,
     stop: threading.Event,
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
     gain: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     check_tracking: bool = True,
@@ -296,7 +296,7 @@ def run_loop(
         Supplies the drivers, the policy and the monitor.
     stop : `threading.Event`
         Set it to end the loop after the current cycle.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         Guide exposure length. The last one used when omitted.
     gain : `float`, optional
         Guide camera gain. The last one used when omitted.
@@ -315,7 +315,7 @@ def run_loop(
     if check_tracking:
         _wait_for_tracking(context, sleep)
     monitor = context.live_guiding
-    monitor.start(exposure_seconds, gain)
+    monitor.start(exposure_s, gain)
     commands = GuideCommands(
         expose=lambda seconds, camera_gain: hardware_operations.guide_expose(context, seconds, camera_gain),
         pulse=lambda direction, duration_ms: hardware_operations.pulse(context, direction, duration_ms),
@@ -323,7 +323,7 @@ def run_loop(
     )
     lost_tracking = 0
     lost_tracking_limit = resolve_parameter(LOST_TRACKING_LIMIT).value
-    logger.info("Guide loop started: %s s exposures, gain %s", monitor.exposure_seconds, monitor.gain)
+    logger.info("Guide loop started: %s s exposures, gain %s", monitor.exposure_s, monitor.gain)
     try:
         while not stop.is_set():
             status = _tracking_status(context)
@@ -337,7 +337,7 @@ def run_loop(
             lost_tracking = 0
             try:
                 sample = hardware_operations._run_sync(
-                    context.guiding_driver.run_cycle(monitor.exposure_seconds, monitor.gain, commands)
+                    context.guiding_driver.run_cycle(monitor.exposure_s, monitor.gain, commands)
                 )
             except (HardwareError, ExternalServiceError) as error:
                 logger.warning("Guide cycle failed, retrying: %s", error)

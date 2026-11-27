@@ -111,9 +111,9 @@ def arcsec_to_pulse_ms(motion_arcsec: float, guide_rate_arcsec_per_s: float | No
 
 
 def merge_close_pulses(
-    pulses: Iterable[dict[str, Any]], window_seconds: float | None = None
+    pulses: Iterable[dict[str, Any]], window_s: float | None = None
 ) -> list[dict[str, Any]]:
-    """Join pulses sent within `window_seconds` of each other into one.
+    """Join pulses sent within `window_s` of each other into one.
 
     A guider sends its right ascension and declination corrections as two
     separate pulses. Seen from outside, they arrive as two records a few
@@ -125,7 +125,7 @@ def merge_close_pulses(
     ----------
     pulses : `Iterable` [`dict` [`str`, `Any`]]
         Pulse records in time order.
-    window_seconds : `float`, optional
+    window_s : `float`, optional
         How close two records must be to join.
         When omitted, `PULSE_MERGE_WINDOW_SECONDS` is used.
 
@@ -135,11 +135,11 @@ def merge_close_pulses(
         One record per correction. A later pulse on the same direction
         replaces the earlier length.
     """
-    if window_seconds is None:
-        window_seconds = resolve_parameter(PULSE_MERGE_WINDOW_SECONDS).value
+    if window_s is None:
+        window_s = resolve_parameter(PULSE_MERGE_WINDOW_SECONDS).value
     merged: list[dict[str, Any]] = []
     for pulse in pulses:
-        if merged and abs(pulse.get("time", 0.0) - merged[-1].get("time", 0.0)) < window_seconds:
+        if merged and abs(pulse.get("time", 0.0) - merged[-1].get("time", 0.0)) < window_s:
             for key in _DIRECTION_KEYS:
                 if pulse.get(key, 0) > 0:
                     merged[-1][key] = pulse[key]

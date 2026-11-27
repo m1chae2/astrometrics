@@ -28,7 +28,7 @@ EKOS_GUIDE_OPTIONS_SCREEN = "Ekos Guide module, Options, Dither"
 EKOS_CAPTURE_DITHER_SCREEN = "Ekos Capture module, sequence queue, job settings, Dither"
 """The Ekos screen where a job's dither frequency (every N frames) goes."""
 
-CAPTURE_FIELD_ORDER = ("filter", "exposure_seconds", "count", "binning", "gain_setting", "offset")
+CAPTURE_FIELD_ORDER = ("filter", "exposure_s", "count", "binning", "gain", "offset")
 """The order of the fields in a capture row, as Ekos Capture lists them."""
 
 
@@ -98,10 +98,10 @@ class SequenceSummary(BaseModel):
             for request in entry.exposure_requests:
                 values = {
                     "filter": request.filter.value,
-                    "exposure_seconds": request.exposure_sec,
+                    "exposure_s": request.exposure_s,
                     "count": request.count,
                     "binning": request.binning,
-                    "gain_setting": request.gain_setting,
+                    "gain": request.gain,
                     "offset": request.offset,
                 }
                 rows.append(

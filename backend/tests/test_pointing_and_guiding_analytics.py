@@ -17,7 +17,7 @@ def test_fit_pointing_model_insufficient_points() -> None:
     model = fit_pointing_model(attempts, latitude_deg=45.0)
     assert model.confidence == "insufficient_data"
     assert model.sample_count == 2
-    assert model.improvement_percent == pytest.approx(0.0)
+    assert model.improvement_pct == pytest.approx(0.0)
 
 
 def test_fit_pointing_model_decomposes_known_coefficients() -> None:
@@ -75,7 +75,7 @@ def test_fit_pointing_model_decomposes_known_coefficients() -> None:
     assert model.confidence == "high"
     assert model.sample_count == len(attempts)
     assert model.residual_rms_arcsec < 0.1
-    assert model.improvement_percent > 99.0
+    assert model.improvement_pct > 99.0
 
     # Verify parameters match synthetic truth within 0.1 arcsec
     assert model.ih_arcsec == pytest.approx(true_ih, abs=0.1)
@@ -117,9 +117,9 @@ def test_analyze_guiding_telemetry_detects_worm_period_and_backlash() -> None:
 
     analysis = analyze_guiding_telemetry(samples)
     assert analysis.sample_count == len(samples)
-    assert analysis.duration_seconds == pytest.approx(total_duration, abs=5.0)
+    assert analysis.duration_s == pytest.approx(total_duration, abs=5.0)
     assert analysis.periodic_error_peak_to_peak_arcsec == pytest.approx(7.0, abs=1.0)
-    assert analysis.dominant_period_seconds == pytest.approx(worm_period, abs=25.0)
+    assert analysis.dominant_period_s == pytest.approx(worm_period, abs=25.0)
     assert len(analysis.peaks) > 0
     assert analysis.peaks[0].probable_source == "Worm Fundamental Period"
     assert analysis.dec_backlash_estimate_ms is not None

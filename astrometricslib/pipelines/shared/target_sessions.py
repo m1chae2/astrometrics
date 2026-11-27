@@ -26,8 +26,8 @@ class TargetSession(BaseModel):
     id: str
     target_id: str
     night_date: date
-    gain: str
-    offset: str
+    gain: int | None
+    offset: int
     frame_paths: list[str]
 
 
@@ -75,20 +75,22 @@ def derive_target_sessions(target_id: str, frames: list[FrameRecord]) -> list[Ta
         A list of grouped sessions, ordered by date.
     """
     frame_paths_by_bucket: dict = {}
-    bucket_order: list[tuple[date, str, str]] = []
+    bucket_order: list[tuple[date, int | None, int]] = []
 
     for frame in frames:
         if frame.timestamp is None:
             continue
         night_date = compute_session_night(frame.timestamp)
-        bucket_key = (night_date, frame.iso, frame.offset)
+        bucket_key = (night_date, frame.gain, frame.offset)
         if bucket_key not in frame_paths_by_bucket:
             frame_paths_by_bucket[bucket_key] = []
             bucket_order.append(bucket_key)
         frame_paths_by_bucket[bucket_key].append(frame.path)
 
     sessions = []
-    for night_date, gain, offset in sorted(bucket_order):
+    for night_date, gain, offset in sorted(
+        bucket_order, key=lambda key: (key[0], key[1] is None, key[1] or 0, key[2])
+    ):
         session_id = f"{target_id}:{night_date.isoformat()}:{gain}:{offset}"
         sessions.append(
             TargetSession(

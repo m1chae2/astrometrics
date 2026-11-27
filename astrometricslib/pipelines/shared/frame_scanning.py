@@ -27,7 +27,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
 from astrometricslib.pipelines.shared.previous_stack_path import PREVIOUS_STACK_FOLDER_NAME
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
-from astrometricslib.utilities.iso_text import iso_or_gain_text
+from astrometricslib.utilities.iso_text import iso_or_gain_text, setting_number
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +92,8 @@ def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
         record.pier_side = str(pier_side).strip().upper()
 
     record.airmass = _coerce_header_number(header.get("AIRMASS"), float)
-    record.altitude_degrees = _coerce_header_number(header.get("OBJCTALT"), float)
-    record.azimuth_degrees = _coerce_header_number(header.get("OBJCTAZ"), float)
+    record.altitude_deg = _coerce_header_number(header.get("OBJCTALT"), float)
+    record.azimuth_deg = _coerce_header_number(header.get("OBJCTAZ"), float)
 
     # SECPIX1 is arcsec/pixel directly; SCALE is the same quantity under
     # a different writer's spelling. Recorded so a FWHM in pixels can be
@@ -277,9 +277,9 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
         path=path,
         filter=FilterType.NONE,
         role="LIGHT",
-        iso="800",
-        offset="0",
-        exposure="1.0",
+        gain=int(PLACEHOLDER_RECORD_ISO),
+        offset=0,
+        exposure_s=1.0,
         camera=camera or "Unknown",
         telescope="Unknown",
     )
@@ -288,8 +288,9 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
         image = AstrometricsImage(path)
         header = image.header
         record.filter = image.filter_type
-        record.offset = str(header.get("OFFSET", header.get("BLKLEVEL", "0")))
-        record.exposure = str(header.get("EXPTIME", "1.0"))
+        record.offset = setting_number(header.get("OFFSET", header.get("BLKLEVEL"))) or 0
+        exposure_s = _coerce_header_number(header.get("EXPTIME"), float)
+        record.exposure_s = 1.0 if exposure_s is None else exposure_s
         record.timestamp = image.timestamp
 
         if image.timestamp:
@@ -303,7 +304,8 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
                 str(header.get("INSTRUME", header.get("CAMERA", "Unknown"))), config
             )
 
-        record.iso = read_iso_or_gain(header, record.camera, config, PLACEHOLDER_RECORD_ISO)
+        gain = setting_number(read_iso_or_gain(header, record.camera, config, PLACEHOLDER_RECORD_ISO))
+        record.gain = int(PLACEHOLDER_RECORD_ISO) if gain is None else gain
         record.header_fields_version = HEADER_FIELDS_VERSION
 
         # The focal length is read here, before the optic is chosen, because
@@ -352,9 +354,9 @@ def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
     _populate_acquisition_conditions(frame, header)
     # Only a value the header itself gives replaces the stored ISO; the
     # camera's configured default and the stand-in are for new records only.
-    header_iso = iso_or_gain_text(header)
-    if header_iso is not None:
-        frame.iso = header_iso
+    header_gain = setting_number(iso_or_gain_text(header))
+    if header_gain is not None:
+        frame.gain = header_gain
     frame.header_fields_version = HEADER_FIELDS_VERSION
     return True
 

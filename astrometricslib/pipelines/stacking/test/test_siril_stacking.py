@@ -90,7 +90,7 @@ class FakeSirilDriver:
             "symlinked_light_paths": [f"{kwargs['output_file']}:{index}" for index in range(registered)],
             "zero_order_stars": [{"star": index} for index in range(registered)],
             "corrupt_frames_skipped": [],
-            "stacking_duration_seconds": 2.0,
+            "stacking_duration_s": 2.0,
         }
         if not outcome.get("ok", True):
             return None
@@ -99,7 +99,7 @@ class FakeSirilDriver:
         # exposure length (by its square root, to stay inside the believable
         # gain range); with equal stars the groups differ by an implausible
         # gain and the stacker leaves one out.
-        exposures = [float(frame["exposure"]) for frame in kwargs["image_files"] if frame.get("exposure")]
+        exposures = [float(frame["exposure_s"]) for frame in kwargs["image_files"] if frame.get("exposure_s")]
         star_scale = max(0.3, min(1.0, float(np.mean(exposures)) / 300.0) ** 0.5) if exposures else 1.0
         image = (
             outcome.get("fill", 0.2)
@@ -126,8 +126,8 @@ def _frame(exposure: object = None, name: str = "frame") -> SimpleNamespace:
     """
     return SimpleNamespace(
         name=name,
-        exposure=exposure,
-        model_dump=lambda name=name, exposure=exposure: {"path": name, "exposure": exposure},
+        exposure_s=exposure,
+        model_dump=lambda name=name, exposure=exposure: {"path": name, "exposure_s": exposure},
     )
 
 
@@ -264,7 +264,7 @@ def test_a_missing_output_name_uses_the_targets_default_name(tmp_path: Path) -> 
 def test_frames_may_be_plain_dictionaries(tmp_path: Path) -> None:
     """The backend passes frame dictionaries, which must work as they are."""
     driver = FakeSirilDriver(tmp_path, [{"fill": 0.3}])
-    frames = [{"path": "a.fits", "exposure": "30"}, {"path": "b.fits", "exposure": "30"}]
+    frames = [{"path": "a.fits", "exposure_s": "30"}, {"path": "b.fits", "exposure_s": "30"}]
 
     run_siril_stack(driver, frames, "Arcturus", "Arcturus_SPEC.fits", None, True)
 
@@ -330,13 +330,13 @@ def test_group_diagnostics_are_joined_in_group_order(tmp_path: Path) -> None:
     assert len(diagnostics["zero_order_stars"]) == 12
     assert diagnostics["symlinked_light_paths"][0].startswith("Vega_SPEC_exp0p5s")
     assert diagnostics["symlinked_light_paths"][-1].startswith("Vega_SPEC_exp5s")
-    assert diagnostics["stacking_duration_seconds"] == pytest.approx(4.0)
+    assert diagnostics["stacking_duration_s"] == pytest.approx(4.0)
     assert diagnostics["images_stacked"] == 12
     assert diagnostics["registered_frames"] == 12
     assert diagnostics["registration_failed_frames"] == 0
     assert diagnostics["registered_fraction"] == pytest.approx(1.0)
     assert [group["frames"] for group in diagnostics["exposure_groups"]] == [5, 7]
-    assert [group["exposure_seconds"] for group in diagnostics["exposure_groups"]] == pytest.approx([
+    assert [group["exposure_s"] for group in diagnostics["exposure_groups"]] == pytest.approx([
         0.5,
         5.0,
     ])
@@ -408,8 +408,8 @@ def _raw_frame(folder: Path, exposure: str, name: str, mean: float) -> SimpleNam
     return SimpleNamespace(
         path=str(path),
         name=name,
-        exposure=exposure,
-        model_dump=lambda path=str(path), exposure=exposure: {"path": path, "exposure": exposure},
+        exposure_s=exposure,
+        model_dump=lambda path=str(path), exposure=exposure: {"path": path, "exposure_s": exposure},
     )
 
 
@@ -425,7 +425,7 @@ def test_clipped_groups_are_reported_and_flagged_in_the_diagnostics(
         _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 
     clipped = diagnostics["clipped_exposure_groups"]
-    assert [entry["exposure_seconds"] for entry in clipped] == [0.5]
+    assert [entry["exposure_s"] for entry in clipped] == [0.5]
     assert clipped[0]["frame_zero_fraction"] > 0.4
     assert "The 0.5 s frames of 'Vega' are clipped at zero" in caplog.text
     assert "Every exposure group" not in caplog.text
@@ -475,7 +475,7 @@ def test_imaging_frames_of_different_lengths_are_also_stacked_per_exposure(
     assert [call["is_spectral"] for call in driver.calls] == [False, False]
     assert driver.calls[0]["spectral_star_detection"] == "standard"  # the request default
     assert path == str(tmp_path / "NGC_2403_L_Stacked.fits")
-    assert [entry["exposure_seconds"] for entry in diagnostics["exposure_group_summaries"]] == [60.0, 300.0]
+    assert [entry["exposure_s"] for entry in diagnostics["exposure_group_summaries"]] == [60.0, 300.0]
 
 
 def test_each_group_reports_its_frames_dark_and_where_its_stack_is_kept(
@@ -495,7 +495,7 @@ def test_each_group_reports_its_frames_dark_and_where_its_stack_is_kept(
     assert entries[0]["left_out_reason"] is None
     manifest = json.loads((tmp_path / "groups" / "Vega_SPEC_manifest.json").read_text())
     assert manifest["combined_stack"] == "Vega_SPEC.fits"
-    assert [group["exposure_seconds"] for group in manifest["groups"]] == [0.5, 5.0]
+    assert [group["exposure_s"] for group in manifest["groups"]] == [0.5, 5.0]
     assert "weight" in manifest["groups"][0]
 
 
@@ -564,7 +564,7 @@ def test_a_group_whose_every_attempt_is_blank_is_left_out_as_not_stacked(tmp_pat
     path, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 
     assert path is not None
-    entries = {entry["exposure_seconds"]: entry for entry in diagnostics["exposure_group_summaries"]}
+    entries = {entry["exposure_s"]: entry for entry in diagnostics["exposure_group_summaries"]}
     assert entries[5.0]["left_out_reason"] == "could not be stacked"
     assert entries[0.5]["left_out_reason"] is None
     assert fits.getheader(path)["STACKCNT"] == 6
@@ -618,9 +618,9 @@ def test_a_spectral_session_from_two_nights_is_stacked_one_night_at_a_time(tmp_p
         """
         taken = datetime(2026, 1, day, 22, 0, 0).timestamp()
         return SimpleNamespace(
-            exposure="0.5",
+            exposure_s=0.5,
             timestamp=str(taken),
-            model_dump=lambda: {"path": name, "exposure": "0.5", "timestamp": str(taken)},
+            model_dump=lambda: {"path": name, "exposure_s": "0.5", "timestamp": str(taken)},
         )
 
     frames = [night_frame(10, f"may_{i}") for i in range(6)] + [night_frame(20, f"sep_{i}") for i in range(6)]
@@ -641,9 +641,9 @@ def test_imaging_frames_from_two_nights_are_not_split_by_night(tmp_path: Path) -
     """Only spectral stacks are split by night; imaging stays one batch."""
     frames = [
         SimpleNamespace(
-            exposure="0.5",
+            exposure_s=0.5,
             timestamp=str(datetime(2026, 1, day, 22, 0, 0).timestamp()),
-            model_dump=lambda: {"exposure": "0.5"},
+            model_dump=lambda: {"exposure_s": "0.5"},
         )
         for day in (10, 20)
         for _ in range(6)
@@ -666,7 +666,7 @@ def test_a_group_that_cannot_be_stacked_still_appears_in_the_summaries(tmp_path:
     _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 
     entries = diagnostics["exposure_group_summaries"]
-    assert [(entry["exposure_seconds"], entry["left_out_reason"]) for entry in entries] == [
+    assert [(entry["exposure_s"], entry["left_out_reason"]) for entry in entries] == [
         (5.0, None),
         (0.5, "could not be stacked"),
     ]
@@ -681,9 +681,9 @@ def test_a_stack_of_one_length_still_describes_its_single_group(tmp_path: Path) 
 
     entries = diagnostics["exposure_group_summaries"]
     assert len(entries) == 1
-    assert entries[0]["exposure_seconds"] == pytest.approx(30.0)
+    assert entries[0]["exposure_s"] == pytest.approx(30.0)
     assert entries[0]["frames_stacked"] == 6
-    assert "recommended_exposure_seconds" not in diagnostics
+    assert "recommended_exposure_s" not in diagnostics
     assert not (tmp_path / "groups").exists()
 
 
@@ -703,7 +703,7 @@ def test_a_one_length_stack_measures_its_raw_clipping_and_is_labelled_by_its_mai
         _, diagnostics = run_siril_stack(driver, frames, "Arcturus", "Arcturus_SPEC.fits", None, True)
 
     (entry,) = diagnostics["exposure_group_summaries"]
-    assert entry["exposure_seconds"] == pytest.approx(0.5)
+    assert entry["exposure_s"] == pytest.approx(0.5)
     assert entry["clipped_at_zero"] is True
     (measured,) = diagnostics["exposure_group_frame_zero_fractions"]
     # The stray 5 s frame is not sampled, so it cannot dilute the share.
@@ -750,5 +750,5 @@ def test_the_multi_group_path_lists_every_groups_zero_fraction(tmp_path: Path) -
     _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 
     measured = diagnostics["exposure_group_frame_zero_fractions"]
-    assert [entry["exposure_seconds"] for entry in measured] == [0.5, 5.0]
+    assert [entry["exposure_s"] for entry in measured] == [0.5, 5.0]
     assert measured[0]["frame_zero_fraction"] > 0.4 > measured[1]["frame_zero_fraction"]

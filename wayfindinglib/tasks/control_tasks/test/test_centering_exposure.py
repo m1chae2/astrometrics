@@ -118,7 +118,7 @@ def test_the_shortest_step_that_reaches_the_target_is_picked() -> None:
     deep_enough = [s for s in EXPOSURE_LADDER_SECONDS.default if limiting_magnitude(s, sensor) >= 16.5]
     assert exposure == deep_enough[0]
     assert reaches is True
-    assert trials[-1].exposure_seconds == exposure
+    assert trials[-1].exposure_s == exposure
     assert trials[-1].expected_star_count == 20
     assert all(trial.expected_star_count == 0 for trial in trials[:-1])
 
@@ -243,7 +243,7 @@ def _context(quality: _Quality, profile: SimpleNamespace | None = None) -> Simpl
     calibration = SimpleNamespace(get_profile=lambda camera=None: profile or _profile())
     return SimpleNamespace(
         config=object(),
-        correction_config=CorrectionConfig(alignment_exposure_seconds=5.0),
+        correction_config=CorrectionConfig(alignment_exposure_s=5.0),
         astrometrics=SimpleNamespace(quality=quality, calibration=calibration, config=NO_CAMERAS),
     )
 
@@ -296,13 +296,13 @@ def test_the_inputs_give_a_computed_exposure(stand_ins: dict[str, Any]) -> None:
     """With every input, the result is computed and carries its numbers."""
     result = _choose(_context(GOOD), [16.5] * 30)
     assert result.source == "computed"
-    assert result.exposure_seconds in EXPOSURE_LADDER_SECONDS.default
+    assert result.exposure_s in EXPOSURE_LADDER_SECONDS.default
     assert result.reaches_target is True
     assert result.zero_point_mag == pytest.approx(20.0)
     assert result.pixel_scale_arcsec == pytest.approx(1.9144, abs=1e-3)
     assert result.field_radius_deg == pytest.approx(3008 * 1.9144 / 2 / 3600, abs=1e-3)
     assert result.star_width_arcsec == pytest.approx(3.6)
-    assert result.trials[-1].exposure_seconds == result.exposure_seconds
+    assert result.trials[-1].exposure_s == result.exposure_s
 
 
 def test_zero_points_without_a_setting_take_their_frames_setting(stand_ins: dict[str, Any]) -> None:
@@ -316,7 +316,7 @@ def test_the_star_width_in_pixels_sets_the_noise_area(stand_ins: dict[str, Any])
     """A wider star needs a longer exposure for the same field."""
     narrow = _choose(_context(_Quality([20.0] * 10, [2.0] * 10)), [16.5] * 30)
     wide = _choose(_context(_Quality([20.0] * 10, [8.0] * 10)), [16.5] * 30)
-    assert wide.exposure_seconds >= narrow.exposure_seconds
+    assert wide.exposure_s >= narrow.exposure_s
 
 
 @pytest.mark.parametrize(
@@ -360,16 +360,16 @@ def test_each_missing_input_gives_the_fixed_setting_and_says_why(
     result = _choose(_context(quality, profile), stars, status)
 
     assert result.source == "fallback"
-    assert result.exposure_seconds == pytest.approx(5.0)
+    assert result.exposure_s == pytest.approx(5.0)
     assert expected in result.reason
     assert result.reaches_target is False
 
 
 def test_a_changed_fallback_setting_is_used(stand_ins: dict[str, Any]) -> None:
-    """The fallback follows `alignment_exposure_seconds`."""
+    """The fallback follows `alignment_exposure_s`."""
     context = _context(_Quality([], []))
-    context.correction_config = CorrectionConfig(alignment_exposure_seconds=8.0)
-    assert _choose(context, [16.5] * 30).exposure_seconds == pytest.approx(8.0)
+    context.correction_config = CorrectionConfig(alignment_exposure_s=8.0)
+    assert _choose(context, [16.5] * 30).exposure_s == pytest.approx(8.0)
 
 
 def test_a_partial_catalog_is_flagged_in_the_result(stand_ins: dict[str, Any]) -> None:
@@ -392,7 +392,7 @@ def test_a_field_too_empty_for_the_target_uses_the_longest_exposure(stand_ins: d
     """Too few stars at any depth: 30 s is used and the reason warns."""
     result = _choose(_context(GOOD), [12.0] * 3)
     assert result.source == "computed"
-    assert result.exposure_seconds == EXPOSURE_LADDER_SECONDS.default[-1]
+    assert result.exposure_s == EXPOSURE_LADDER_SECONDS.default[-1]
     assert result.reaches_target is False
     assert "may fail" in result.reason
 
@@ -426,7 +426,7 @@ def test_predict_star_counts_gives_the_limit_and_count_per_exposure(
     )
 
     assert missing is None
-    assert [trial.exposure_seconds for trial in trials] == [2.0, 10.0]
+    assert [trial.exposure_s for trial in trials] == [2.0, 10.0]
     assert trials[0].limiting_magnitude < trials[1].limiting_magnitude
     assert trials[0].expected_star_count <= trials[1].expected_star_count
     assert facts["field_radius_deg"] > 0.0

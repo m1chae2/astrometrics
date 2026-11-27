@@ -36,8 +36,7 @@ def _profile(*settings: tuple[str, str, str], generic: bool = False) -> SimpleNa
         camera_name="Test Cam",
         is_generic_fallback=generic,
         sensor_noise=[
-            SimpleNamespace(gain_setting=gain, offset=offset, binning=binning)
-            for gain, offset, binning in settings
+            SimpleNamespace(gain=gain, offset=offset, binning=binning) for gain, offset, binning in settings
         ],
     )
 
@@ -53,7 +52,7 @@ def test_a_measured_setting_is_accepted_and_text_becomes_numbers() -> None:
 def test_an_unmeasured_setting_is_refused_with_the_measured_list() -> None:
     """An unmeasured combination is refused; the reason lists measured ones."""
     allowed = allowed_capture_values(_profile(("100", "10", "1x1")))
-    verdict = allowed.check(gain_setting=300, offset=10, binning=1)
+    verdict = allowed.check(gain=300, offset=10, binning=1)
     assert not verdict.accepted
     assert verdict.setting_measured is False
     assert "gain setting 100, offset 10, binning 1" in verdict.reasons[0]
@@ -62,7 +61,7 @@ def test_an_unmeasured_setting_is_refused_with_the_measured_list() -> None:
 def test_an_unprofiled_camera_accepts_and_marks_the_request() -> None:
     """The generic profile and an empty profile never reject a setting."""
     for profile in (_profile(generic=True), _profile(("100", "10", "1x1"), generic=True), _profile()):
-        verdict = allowed_capture_values(profile).check(gain_setting=999, offset=5, binning=3)
+        verdict = allowed_capture_values(profile).check(gain=999, offset=5, binning=3)
         assert verdict.accepted
         assert verdict.setting_measured is False
         assert NOT_MEASURED_NOTE in verdict.notes

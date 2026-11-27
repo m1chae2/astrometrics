@@ -22,7 +22,7 @@ from wayfindinglib.api.planning.sky import PlanningSky
 
 def test_list_cameras_reads_the_camera_profiles_section_and_keeps_the_noise() -> None:
     """The camera list reads `camera_profiles` and keeps the noise."""
-    noise_entry = {"gainSetting": "0", "gain": {"value": 0.78, "status": "measured"}}
+    noise_entry = {"gain": 0, "gainEPerAdu": {"value": 0.78, "status": "measured"}}
     profiles = [{"name": "ASI533", "pixelSizeUm": 3.76, "sensorNoise": [noise_entry]}]
     equipment = create_autospec(EquipmentControl, instance=True)
     equipment.get_status.return_value = EquipmentStatus(camera_profiles=profiles)

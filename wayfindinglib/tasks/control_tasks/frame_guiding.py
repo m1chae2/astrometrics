@@ -232,17 +232,17 @@ def link_frames_to_guiding(
     windows = []
     for frame in chosen:
         try:
-            exposure_seconds = float(frame.exposure)
+            exposure_s = float(frame.exposure_s)
         except ValueError:
-            exposure_seconds = 0.0
-        windows.append((frame, frame.timestamp, frame.timestamp + exposure_seconds, exposure_seconds))
+            exposure_s = 0.0
+        windows.append((frame, frame.timestamp, frame.timestamp + exposure_s, exposure_s))
     frame_windows = [
         FrameWindow(
             frame_id=os.path.basename(frame.path),
             start_epoch_seconds=start,
-            exposure_seconds=exposure_seconds,
+            exposure_s=exposure_s,
         )
-        for frame, start, _end, exposure_seconds in windows
+        for frame, start, _end, exposure_s in windows
     ]
     read_start, read_end = guiding_read_range(frame_windows) or (0.0, 0.0)
     rows = context.records.get_guiding_samples(
@@ -252,11 +252,11 @@ def link_frames_to_guiding(
     joined = join_frames_to_guiding(frame_windows, rows)
 
     frames = []
-    for (frame, start, end, exposure_seconds), statistics_for_frame in zip(windows, joined, strict=True):
+    for (frame, start, end, exposure_s), statistics_for_frame in zip(windows, joined, strict=True):
         frames.append({
             "file": os.path.basename(frame.path),
             "filter": str(getattr(frame.filter, "value", frame.filter)),
-            "exposure_seconds": exposure_seconds,
+            "exposure_s": exposure_s,
             "starts_at": _iso(start),
             "ends_at": _iso(end),
             "pier_side": frame.pier_side,

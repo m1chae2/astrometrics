@@ -109,12 +109,12 @@ DEFAULT_GUIDE_RATE_ARCSEC_PER_SEC = 7.5
 DEFAULT_EXPOSURE_MS = 1000
 #: The keys of the guide controller settings, with the range each accepts.
 #: ``aggressiveness`` and ``hysteresis`` are fractions (PHD2 shows them as
-#: percent), ``minimum_move`` is in pixels and ``exposure_seconds`` in seconds.
+#: percent), ``minimum_move`` is in pixels and ``exposure_s`` in seconds.
 CONTROLLER_SETTING_RANGES = {
     "aggressiveness": (0.0, 2.0),
     "minimum_move": (0.0, 5.0),
     "hysteresis": (0.0, 0.99),
-    "exposure_seconds": (0.05, 30.0),
+    "exposure_s": (0.05, 30.0),
 }
 CONTROLLER_SETTING_KEYS = tuple(CONTROLLER_SETTING_RANGES)
 #: The note the launcher reports when the real PHD2 cannot be used.
@@ -155,7 +155,7 @@ class Phd2Instance:
 def calibration_step_milliseconds(
     guide_rate_arcsec_per_sec: float,
     pixel_scale_arcsec_per_pixel: float,
-    declination_degrees: float,
+    declination_deg: float,
     distance_pixels: float = CALIBRATION_DISTANCE_PIXELS,
     target_steps: int = CALIBRATION_TARGET_STEPS,
 ) -> int:
@@ -187,7 +187,7 @@ def calibration_step_milliseconds(
         The mount's guide rate in arcseconds per second.
     pixel_scale_arcsec_per_pixel : `float`
         The guide camera's pixel scale.
-    declination_degrees : `float`
+    declination_deg : `float`
         The declination calibration happens at. Limited to plus or minus 60
         degrees, as in PHD2's calculator.
     distance_pixels : `float`, optional
@@ -209,7 +209,7 @@ def calibration_step_milliseconds(
         raise ValueError("The guide rate and the pixel scale must be positive.")
     steps = min(max(int(target_steps), CALIBRATION_MIN_STEPS), CALIBRATION_MAX_STEPS)
     declination = min(
-        max(declination_degrees, -CALIBRATION_MAX_DECLINATION_DEGREES), CALIBRATION_MAX_DECLINATION_DEGREES
+        max(declination_deg, -CALIBRATION_MAX_DECLINATION_DEGREES), CALIBRATION_MAX_DECLINATION_DEGREES
     )
     total_seconds = distance_pixels * pixel_scale_arcsec_per_pixel / guide_rate_arcsec_per_sec
     pulse = total_seconds / steps * 1000.0 / math.cos(math.radians(declination))
@@ -502,7 +502,7 @@ def controller_settings_text(controller_settings: Mapping[str, float] | None) ->
         text += "[profile/1/scope/GuideAlgorithm/X/Hysteresis]\n" + "\n".join(right_ascension) + "\n"
     if shared:
         text += "[profile/1/scope/GuideAlgorithm/Y/ResistSwitch]\n" + "\n".join(shared) + "\n"
-    exposure = settings.get("exposure_seconds")
+    exposure = settings.get("exposure_s")
     milliseconds = DEFAULT_EXPOSURE_MS if exposure is None else round(float(exposure) * 1000)
     return text, milliseconds
 
@@ -514,7 +514,7 @@ def profile_text(
     guide_focal_length_mm: float = DEFAULT_GUIDE_FOCAL_LENGTH_MM,
     guide_pixel_size_um: float = DEFAULT_GUIDE_PIXEL_SIZE_UM,
     guide_rate_arcsec_per_sec: float | None = None,
-    declination_degrees: float = 0.0,
+    declination_deg: float = 0.0,
 ) -> tuple[str, int]:
     """Write PHD2's settings file for the simulated observatory.
 
@@ -540,7 +540,7 @@ def profile_text(
         (``/profile/1/scope/CalibrationDuration``) is computed from it with
         `calibration_step_milliseconds`, so calibration can reach its distance
         in about 12 steps. When `None`, PHD2's default step (750 ms) stays.
-    declination_degrees : `float`, optional
+    declination_deg : `float`, optional
         The declination the world points at, for the calibration step.
 
     Returns
@@ -554,7 +554,7 @@ def profile_text(
     calibration_line = ""
     if guide_rate_arcsec_per_sec is not None:
         pixel_scale = 206.265 * guide_pixel_size_um / round(guide_focal_length_mm)
-        step = calibration_step_milliseconds(guide_rate_arcsec_per_sec, pixel_scale, declination_degrees)
+        step = calibration_step_milliseconds(guide_rate_arcsec_per_sec, pixel_scale, declination_deg)
         calibration_line = f"CalibrationDuration={step}\n"
     text = f"""ConfigVersion=2001
 LoggingMode=1
@@ -595,7 +595,7 @@ def write_profile(
     guide_focal_length_mm: float = DEFAULT_GUIDE_FOCAL_LENGTH_MM,
     guide_pixel_size_um: float = DEFAULT_GUIDE_PIXEL_SIZE_UM,
     guide_rate_arcsec_per_sec: float | None = None,
-    declination_degrees: float = 0.0,
+    declination_deg: float = 0.0,
 ) -> Phd2Instance:
     """Write PHD2's settings file in the stand-in home, before PHD2 starts.
 
@@ -615,7 +615,7 @@ def write_profile(
         The guide scope and the guide camera's pixel size.
     guide_rate_arcsec_per_sec : `float`, optional
         The mount's guide rate, for the calibration step (see `profile_text`).
-    declination_degrees : `float`, optional
+    declination_deg : `float`, optional
         The declination the world points at.
 
     Returns
@@ -634,7 +634,7 @@ def write_profile(
         guide_focal_length_mm,
         guide_pixel_size_um,
         guide_rate_arcsec_per_sec,
-        declination_degrees,
+        declination_deg,
     )
     home.mkdir(parents=True, exist_ok=True)
     (home / config_file_name(instance)).write_text(text, encoding="utf-8")

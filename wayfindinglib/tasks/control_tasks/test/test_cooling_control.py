@@ -81,10 +81,10 @@ def test_is_settled_outside_tolerance() -> None:
 
 
 def test_settle_timeout_flagged_after_bound_exceeded() -> None:
-    """Verify elapsed time past settle_timeout_sec is flagged as timed out."""
-    assert has_settle_timed_out(elapsed_sec=901.0, settle_timeout_sec=900) is True
+    """Verify elapsed time past settle_timeout_s is flagged as timed out."""
+    assert has_settle_timed_out(elapsed_sec=901.0, settle_timeout_s=900) is True
 
 
 def test_settle_timeout_not_flagged_within_bound() -> None:
-    """Verify elapsed time within settle_timeout_sec is not flagged."""
-    assert has_settle_timed_out(elapsed_sec=899.0, settle_timeout_sec=900) is False
+    """Verify elapsed time within settle_timeout_s is not flagged."""
+    assert has_settle_timed_out(elapsed_sec=899.0, settle_timeout_s=900) is False

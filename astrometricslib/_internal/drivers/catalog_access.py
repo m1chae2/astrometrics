@@ -77,10 +77,10 @@ class FrameSelector(BaseModel):
         Telescope optics identifier. Default `None`.
     filter : `FilterType`, optional
         Filter type enum. Default `None`.
-    exposure : `float`, optional
+    exposure_s : `float`, optional
         Exposure duration in seconds. Default `None`.
-    iso : `str`, optional
-        ISO or gain setting. Default `None`.
+    gain : `int`, optional
+        Gain setting, or the ISO of a DSLR. Default `None`.
     sequence_id : `int`, optional
         Frame sequence index. Default `None`.
     path : `str`, optional
@@ -92,8 +92,8 @@ class FrameSelector(BaseModel):
     camera: str | None = Field(default=None, description="Camera sensor identifier")
     telescope: str | None = Field(default=None, description="Telescope optics identifier")
     filter: FilterType | None = Field(default=None, description="Filter type enum")
-    exposure: float | None = Field(default=None, description="Exposure duration in seconds")
-    iso: str | None = Field(default=None, description="ISO or Gain setting")
+    exposure_s: float | None = Field(default=None, description="Exposure duration in seconds")
+    gain: int | None = Field(default=None, description="Gain setting, or the ISO of a DSLR")
     sequence_id: int | None = Field(default=None, description="Frame sequence index")
     path: str | None = Field(default=None, description="Optional physical path override")
 

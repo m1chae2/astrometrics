@@ -36,12 +36,12 @@ class SavedCapture:
 
     ``file_path`` is where Ekos saved the frame on the telescope computer,
     ``completed_at`` is when the exposure finished, in seconds since the Unix
-    epoch (UTC), and ``exposure_seconds`` is the exposure length in seconds.
+    epoch (UTC), and ``exposure_s`` is the exposure length in seconds.
     """
 
     file_path: str
     completed_at: float
-    exposure_seconds: float
+    exposure_s: float
 
 
 def read_ekos_captures(file_path: str | Path) -> list[SavedCapture] | None:
@@ -66,7 +66,7 @@ def read_ekos_captures(file_path: str | Path) -> list[SavedCapture] | None:
         SavedCapture(
             file_path=capture.file_path,
             completed_at=capture.completed_at,
-            exposure_seconds=capture.exposure_seconds,
+            exposure_s=capture.exposure_s,
         )
         for capture in parsed[0].captures
     ]

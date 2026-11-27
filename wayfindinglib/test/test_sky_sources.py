@@ -200,9 +200,9 @@ def test_a_target_without_a_stack_shows_its_longest_light_frame(
         ra="18h 53m 35s",
         dec="33° 1′ 45″",
         frames=[
-            FrameRecord(path="/short.fits", exposure="30", role="LIGHT"),
-            FrameRecord(path="/long.fits", exposure="120", role="LIGHT"),
-            FrameRecord(path="/dark.fits", exposure="600", role="DARK"),
+            FrameRecord(path="/short.fits", exposure_s=30, role="LIGHT"),
+            FrameRecord(path="/long.fits", exposure_s=120, role="LIGHT"),
+            FrameRecord(path="/dark.fits", exposure_s=600, role="DARK"),
         ],
     )
     sky = _sky(tmp_path, [], [target])

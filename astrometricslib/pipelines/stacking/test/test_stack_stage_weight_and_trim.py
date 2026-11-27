@@ -39,7 +39,7 @@ def make_target(exposures: list[float]) -> Target:
                 path=f"/fake/l_{index}.fits",
                 filter=FilterType.L,
                 camera="ZWO ASI 533MM Pro",
-                exposure=str(exposure),
+                exposure_s=str(exposure),
                 timestamp=float(index) * 200.0,
             )
             for index, exposure in enumerate(exposures)

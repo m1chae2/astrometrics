@@ -11,7 +11,7 @@ The session-quality analysis reads these records to judge whether a night's
 guiding data can be trusted before it analyses the guiding itself.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 GUIDING_RUN_SCHEMA_VERSION = 1
 """Bumped whenever the shape of `GuidingRunSummary` changes meaningfully."""
@@ -42,9 +42,9 @@ class GuidingRunSummary(BaseModel):
         Guide camera plate scale the guider used, in arcseconds per pixel.
     focal_length_mm : `float` or `None`
         Guide scope focal length the guider used, in millimetres.
-    ra_rate_arcsec_per_second : `float` or `None`
+    ra_rate_arcsec_per_s : `float` or `None`
         Calibrated mount speed along RA, in arcseconds per second.
-    dec_rate_arcsec_per_second : `float` or `None`
+    dec_rate_arcsec_per_s : `float` or `None`
         Calibrated mount speed along Dec, in arcseconds per second.
     frames_total : `int`
         Frames the guider took in this run.
@@ -55,15 +55,15 @@ class GuidingRunSummary(BaseModel):
         known.
     samples_stored : `int`
         Frames that became guiding samples.
-    declination_degrees : `float` or `None`
+    declination_deg : `float` or `None`
         Mount declination when guiding began, in degrees.
-    altitude_degrees : `float` or `None`
+    altitude_deg : `float` or `None`
         Altitude when guiding began, in degrees.
-    azimuth_degrees : `float` or `None`
+    azimuth_deg : `float` or `None`
         Azimuth when guiding began, in degrees.
     pier_side : `str` or `None`
         ``"East"`` or ``"West"``, the side of the pier the telescope was on.
-    guide_exposure_seconds : `float` or `None`
+    guide_exposure_s : `float` or `None`
         The guide exposure length the PHD2 log header states, in seconds.
         `None` for a log that states none (the Ekos guider's).
     ra_algorithm, dec_algorithm : `str` or `None`
@@ -92,17 +92,52 @@ class GuidingRunSummary(BaseModel):
     ended_at: float | None = Field(default=None, alias="endedAt")
     pixel_scale_arcsec_per_px: float | None = Field(default=None, alias="pixelScaleArcsecPerPx")
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
-    ra_rate_arcsec_per_second: float | None = Field(default=None, alias="raRateArcsecPerSecond")
-    dec_rate_arcsec_per_second: float | None = Field(default=None, alias="decRateArcsecPerSecond")
+    ra_rate_arcsec_per_s: float | None = Field(
+        default=None,
+        alias="raRateArcsecPerS",
+        validation_alias=AliasChoices(
+            "raRateArcsecPerS", "ra_rate_arcsec_per_s", "raRateArcsecPerSecond", "ra_rate_arcsec_per_second"
+        ),
+    )
+    dec_rate_arcsec_per_s: float | None = Field(
+        default=None,
+        alias="decRateArcsecPerS",
+        validation_alias=AliasChoices(
+            "decRateArcsecPerS",
+            "dec_rate_arcsec_per_s",
+            "decRateArcsecPerSecond",
+            "dec_rate_arcsec_per_second",
+        ),
+    )
     frames_total: int = Field(default=0, alias="framesTotal")
     frames_lost: int = Field(default=0, alias="framesLost")
     frames_without_pixel_scale: int = Field(default=0, alias="framesWithoutPixelScale")
     samples_stored: int = Field(default=0, alias="samplesStored")
-    declination_degrees: float | None = Field(default=None, alias="declinationDegrees")
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
-    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    declination_deg: float | None = Field(
+        default=None,
+        alias="declinationDeg",
+        validation_alias=AliasChoices(
+            "declinationDeg", "declination_deg", "declinationDegrees", "declination_degrees"
+        ),
+    )
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float | None = Field(
+        default=None,
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     pier_side: str | None = Field(default=None, alias="pierSide")
-    guide_exposure_seconds: float | None = Field(default=None, alias="guideExposureSeconds")
+    guide_exposure_s: float | None = Field(
+        default=None,
+        alias="guideExposureS",
+        validation_alias=AliasChoices(
+            "guideExposureS", "guide_exposure_s", "guideExposureSeconds", "guide_exposure_seconds"
+        ),
+    )
     ra_algorithm: str | None = Field(default=None, alias="raAlgorithm")
     dec_algorithm: str | None = Field(default=None, alias="decAlgorithm")
     ra_aggressiveness: float | None = Field(default=None, alias="raAggressiveness")
@@ -115,7 +150,7 @@ class GuidingRunSummary(BaseModel):
     maximum_dec_duration_ms: float | None = Field(default=None, alias="maximumDecDurationMs")
 
     @property
-    def duration_seconds(self) -> float | None:
+    def duration_s(self) -> float | None:
         """Length of the run, in seconds.
 
         Returns

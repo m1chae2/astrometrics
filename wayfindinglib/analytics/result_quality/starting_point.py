@@ -57,7 +57,7 @@ def sky_dominated_exposure_seconds(
 
     Returns
     -------
-    exposure_seconds : `float`
+    exposure_s : `float`
         ``variance_ratio * read_noise_e**2 / sky_rate_e_per_s_per_px``.
 
     Raises
@@ -74,7 +74,7 @@ def sky_dominated_exposure_seconds(
     return variance_ratio * read_noise_e**2 / sky_rate_e_per_s_per_px
 
 
-def clipping_cap_seconds(peak_rate_adu_per_s: float, room_adu: float) -> float:
+def clipping_cap_s(peak_rate_adu_per_s: float, room_adu: float) -> float:
     """Find the longest exposure that keeps the brightest star from clipping.
 
     The star's peak grows in proportion to the exposure. The cap aims the peak
@@ -92,7 +92,7 @@ def clipping_cap_seconds(peak_rate_adu_per_s: float, room_adu: float) -> float:
 
     Returns
     -------
-    exposure_seconds : `float`
+    exposure_s : `float`
         ``TARGET_PEAK_FRACTION * room_adu / peak_rate_adu_per_s``.
 
     Raises
@@ -160,7 +160,7 @@ def build_starting_point(inputs: StartingPointInputs) -> StartingPoint:
     cap: float | None = None
     cap_reason = inputs.clipping_note or "No peak rate for the brightest star is available."
     if inputs.peak_rate_adu_per_s is not None and inputs.room_adu is not None:
-        cap = clipping_cap_seconds(inputs.peak_rate_adu_per_s, inputs.room_adu)
+        cap = clipping_cap_s(inputs.peak_rate_adu_per_s, inputs.room_adu)
         cap_reason = (
             f"{resolve_parameter(TARGET_PEAK_FRACTION).value:g} of the room ({inputs.room_adu:.0f} ADU) "
             f"over the star's peak rate "
@@ -197,9 +197,9 @@ def build_starting_point(inputs: StartingPointInputs) -> StartingPoint:
             exposure = max(1.0, math.floor(cap))
     return StartingPoint(
         capture_setting=inputs.capture_setting,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         exposure_reason=exposure_reason,
-        clipping_cap_seconds=cap,
+        clipping_cap_s=cap,
         clipping_cap_reason=cap_reason,
         confidence=Confidence.DESIGN_ESTIMATE,
     )

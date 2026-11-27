@@ -12,7 +12,7 @@ measurements instead of a rule of thumb: the answer is the shortest exposure
 whose position noise is small enough and whose star does not saturate.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class GuideExposureResult(BaseModel):
@@ -20,7 +20,7 @@ class GuideExposureResult(BaseModel):
 
     Attributes
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length.
     frames_measured : `int`
         Frames in which the star was found.
@@ -29,7 +29,7 @@ class GuideExposureResult(BaseModel):
     flux_adu : `float` or `None`
         Total light of the star above the background, in camera counts. The
         guide log calls this the star mass.
-    flux_per_second : `float` or `None`
+    flux_per_s : `float` or `None`
         `flux_adu` divided by the exposure, for comparing different lengths.
     background_adu : `float` or `None`
         Median pixel value of the frame.
@@ -57,11 +57,18 @@ class GuideExposureResult(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     frames_measured: int = Field(default=0, alias="framesMeasured")
     peak_adu: float | None = Field(default=None, alias="peakAdu")
     flux_adu: float | None = Field(default=None, alias="fluxAdu")
-    flux_per_second: float | None = Field(default=None, alias="fluxPerSecond")
+    flux_per_s: float | None = Field(
+        default=None,
+        alias="fluxPerS",
+        validation_alias=AliasChoices("fluxPerS", "flux_per_s", "fluxPerSecond", "flux_per_second"),
+    )
     background_adu: float | None = Field(default=None, alias="backgroundAdu")
     noise_adu: float | None = Field(default=None, alias="noiseAdu")
     jitter_arcsec: float | None = Field(default=None, alias="jitterArcsec")
@@ -78,7 +85,7 @@ class GuideExposureLadder(BaseModel):
     ----------
     results : `list` [`GuideExposureResult`]
         One per exposure length, shortest first.
-    recommended_exposure_seconds : `float` or `None`
+    recommended_exposure_s : `float` or `None`
         The shortest acceptable exposure, or `None` if none was.
     guiding_rms_limit_arcsec : `float` or `None`
         The acceptable guiding error per axis for this equipment.
@@ -97,7 +104,16 @@ class GuideExposureLadder(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     results: list[GuideExposureResult] = Field(default_factory=list)
-    recommended_exposure_seconds: float | None = Field(default=None, alias="recommendedExposureSeconds")
+    recommended_exposure_s: float | None = Field(
+        default=None,
+        alias="recommendedExposureS",
+        validation_alias=AliasChoices(
+            "recommendedExposureS",
+            "recommended_exposure_s",
+            "recommendedExposureSeconds",
+            "recommended_exposure_seconds",
+        ),
+    )
     guiding_rms_limit_arcsec: float | None = Field(default=None, alias="guidingRmsLimitArcsec")
     jitter_limit_arcsec: float | None = Field(default=None, alias="jitterLimitArcsec")
     plate_scale_arcsec_per_px: float = Field(alias="plateScaleArcsecPerPx")

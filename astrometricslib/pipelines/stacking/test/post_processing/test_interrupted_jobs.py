@@ -26,10 +26,10 @@ def add_job(
     target_id: str = "M 1",
     status: str = "running",
     owner: tuple[int, str] | None = None,
-    idle_minutes: float = 0.0,
+    idle_min: float = 0.0,
 ) -> None:
-    """Record a job that was last updated `idle_minutes` ago."""
-    updated_at = (datetime.now() - timedelta(minutes=idle_minutes)).isoformat()
+    """Record a job that was last updated `idle_min` ago."""
+    updated_at = (datetime.now() - timedelta(minutes=idle_min)).isoformat()
     job_store.upsert_job(
         ProcessingJob(
             id=job_id,
@@ -87,7 +87,7 @@ def test_a_job_whose_owner_ended_is_closed(tmp_path: Path) -> None:
 def test_a_job_owned_by_a_running_program_is_left_alone(tmp_path: Path) -> None:
     """A job another live program runs must not be closed, however old."""
     job_store = JobStore(str(tmp_path / "logs.db"))
-    add_job(job_store, "alive", owner=(222, "2.00"), idle_minutes=500)
+    add_job(job_store, "alive", owner=(222, "2.00"), idle_min=500)
 
     closed = job_store.interrupt_orphaned_jobs(alive_unless({111}))
 
@@ -98,8 +98,8 @@ def test_a_job_owned_by_a_running_program_is_left_alone(tmp_path: Path) -> None:
 def test_a_job_with_no_owner_is_closed_only_when_old(tmp_path: Path) -> None:
     """Jobs recorded before owners were kept can only be judged by age."""
     job_store = JobStore(str(tmp_path / "logs.db"))
-    add_job(job_store, "old", idle_minutes=120)
-    add_job(job_store, "recent", idle_minutes=5)
+    add_job(job_store, "old", idle_min=120)
+    add_job(job_store, "recent", idle_min=5)
 
     closed = job_store.interrupt_orphaned_jobs(alive_unless(set()))
 

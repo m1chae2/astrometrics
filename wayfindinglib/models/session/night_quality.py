@@ -15,7 +15,7 @@ copied, and no job or log copy is started by asking.
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
@@ -47,9 +47,9 @@ class NightTargetQuality(BaseModel):
         Frames of the night, kept and set aside.
     frames_set_aside : `int`
         Frames the stacker set aside.
-    captured_seconds : `float`
+    captured_s : `float`
         Exposure time of all frames taken, in seconds.
-    efficiency_effective_seconds : `float` or `None`
+    efficiency_effective_s : `float` or `None`
         The effective time of the kept frames, in seconds. ``None`` when no
         frame could be assessed.
     capture_settings : `list` [`CaptureSettingSummary`]
@@ -72,9 +72,21 @@ class NightTargetQuality(BaseModel):
     goal: ScienceGoal
     frames_taken: int = Field(ge=0, alias="framesTaken")
     frames_set_aside: int = Field(ge=0, alias="framesSetAside")
-    captured_seconds: float = Field(ge=0.0, alias="capturedSeconds")
-    efficiency_effective_seconds: float | None = Field(
-        default=None, ge=0.0, alias="efficiencyEffectiveSeconds"
+    captured_s: float = Field(
+        ge=0.0,
+        alias="capturedS",
+        validation_alias=AliasChoices("capturedS", "captured_s", "capturedSeconds", "captured_seconds"),
+    )
+    efficiency_effective_s: float | None = Field(
+        default=None,
+        ge=0.0,
+        alias="efficiencyEffectiveS",
+        validation_alias=AliasChoices(
+            "efficiencyEffectiveS",
+            "efficiency_effective_s",
+            "efficiencyEffectiveSeconds",
+            "efficiency_effective_seconds",
+        ),
     )
     capture_settings: list[CaptureSettingSummary] = Field(default_factory=list, alias="captureSettings")
     loss_account: LossAccount | None = Field(default=None, alias="lossAccount")

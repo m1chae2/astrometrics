@@ -118,7 +118,7 @@ class Phd2GuidingDriver(GuidingDriver):
         return fallback_reading
 
     async def run_cycle(
-        self, exposure_seconds: float, gain: float | None, commands: GuideCommands
+        self, exposure_s: float, gain: float | None, commands: GuideCommands
     ) -> GuidingSample | None:
         """Refuse: PHD2 runs its own guiding loop.
 

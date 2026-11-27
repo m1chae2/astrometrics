@@ -99,13 +99,13 @@ def match_captures_to_frames(captures: Sequence[EkosCapture], frames: Sequence[C
     match : `CaptureMatch`
         The pairs and what is left over on each side.
     """
-    match_window_seconds = resolve_parameter(MATCH_WINDOW_SECONDS).value
+    match_window_s = resolve_parameter(MATCH_WINDOW_SECONDS).value
     candidates = []
     for capture_index, capture in enumerate(captures):
-        started_at = capture.completed_at - capture.exposure_seconds
+        started_at = capture.completed_at - capture.exposure_s
         for frame_index, frame in enumerate(frames):
             offset = frame.timestamp - started_at
-            if abs(offset) <= match_window_seconds:
+            if abs(offset) <= match_window_s:
                 candidates.append((abs(offset), offset, capture_index, frame_index))
     candidates.sort()
     used_captures: set[int] = set()
@@ -157,7 +157,7 @@ def _missing_measurements(frames: Sequence[CaptureFrame]) -> dict[str, int]:
         "saturated_pixel_fraction": lambda frame: frame.saturated_pixel_fraction,
         "background_adu": lambda frame: frame.background_adu,
         "pixel_scale_arcsec": lambda frame: frame.pixel_scale_arcsec,
-        "altitude_degrees": lambda frame: frame.altitude_degrees,
+        "altitude_deg": lambda frame: frame.altitude_deg,
         "sensor_temperature_c": lambda frame: frame.sensor_temperature_c,
     }
     counts = {name: sum(1 for frame in frames if read(frame) is None) for name, read in measurements.items()}
@@ -226,7 +226,7 @@ def assess_capture_input_quality(
     quality.ekos_light_captures = len(light_captures)
     quality.ekos_calibration_captures = len(captures) - len(light_captures)
     match = match_captures_to_frames(light_captures, frames)
-    quality.match_window_seconds = resolve_parameter(MATCH_WINDOW_SECONDS).value
+    quality.match_window_s = resolve_parameter(MATCH_WINDOW_SECONDS).value
     quality.captures_without_frame = sum(
         1 for capture in match.unmatched_captures if capture_kind(capture) == "light"
     )

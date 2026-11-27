@@ -250,7 +250,7 @@ def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver() -> N
 
     driver = MagicMock()
     driver.driver_name = "gaia"
-    driver.maximum_query_radius_degrees = 90.0
+    driver.maximum_query_radius_deg = 90.0
     driver.query_region_with_status.return_value = ([], True)
     sky = SimpleNamespace(_catalog_driver_registry={"gaia": driver})
 
@@ -271,7 +271,7 @@ def test_query_online_catalogs_reports_truncated_when_the_radius_is_clamped() ->
 
     driver = MagicMock()
     driver.driver_name = "gaia"
-    driver.maximum_query_radius_degrees = 0.5
+    driver.maximum_query_radius_deg = 0.5
     driver.query_region_with_status.return_value = ([], False)
     sky = SimpleNamespace(_catalog_driver_registry={"gaia": driver})
 
@@ -287,11 +287,11 @@ def test_query_online_catalogs_names_the_drivers_that_failed() -> None:
 
     broken = MagicMock()
     broken.driver_name = "deep_stars"
-    broken.maximum_query_radius_degrees = 90.0
+    broken.maximum_query_radius_deg = 90.0
     broken.query_region_with_status.side_effect = OSError("catalog file unreadable")
     working = MagicMock()
     working.driver_name = "hipparcos"
-    working.maximum_query_radius_degrees = 90.0
+    working.maximum_query_radius_deg = 90.0
     working.query_region_with_status.return_value = ([StellarObject(id="HIP 1", ra=1.0, dec=2.0)], False)
     sky = SimpleNamespace(_catalog_driver_registry={"deep_stars": broken, "hipparcos": working})
 

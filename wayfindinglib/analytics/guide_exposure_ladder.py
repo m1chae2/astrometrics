@@ -236,7 +236,7 @@ def position_noise_pixels(positions: Sequence[tuple[float, float]]) -> float | N
 
 
 def _measure_series(
-    exposure_seconds: float,
+    exposure_s: float,
     frames: Sequence[np.ndarray],
     plate_scale_arcsec_per_px: float,
     ceiling_adu: float,
@@ -251,7 +251,7 @@ def _measure_series(
         other series. A series in which the star is not found reports only
         its length.
     """
-    result = GuideExposureResult(exposure_seconds=exposure_seconds)
+    result = GuideExposureResult(exposure_s=exposure_s)
     first = measure_star(frames[0]) if len(frames) else None
     if first is None:
         return result
@@ -263,7 +263,7 @@ def _measure_series(
     result.frames_measured = len(measurements)
     result.peak_adu = max(m.peak for m in measurements)
     result.flux_adu = float(np.median([m.flux for m in measurements]))
-    result.flux_per_second = result.flux_adu / exposure_seconds
+    result.flux_per_s = result.flux_adu / exposure_s
     result.background_adu = float(np.median([m.background for m in measurements]))
     result.noise_adu = float(np.median([m.noise for m in measurements]))
     result.saturated = result.peak_adu >= resolve_parameter(SATURATION_FRACTION).value * ceiling_adu
@@ -289,7 +289,7 @@ def _summarise(results: Sequence[GuideExposureResult], recommended: float | None
             "check that the cap is off, and try again."
         )
     if recommended is not None:
-        shortest = results[0].exposure_seconds
+        shortest = results[0].exposure_s
         if recommended <= shortest:
             return (
                 f"The shortest exposure tried, {recommended:g} s, already has small enough extra "
@@ -369,11 +369,11 @@ def analyze_guide_exposure_ladder(
             and result.excess_jitter_arcsec <= jitter_limit
             and result.jitter_arcsec <= guiding_rms_limit_arcsec
         )
-    acceptable = [result.exposure_seconds for result in results if result.acceptable]
+    acceptable = [result.exposure_s for result in results if result.acceptable]
     recommended = min(acceptable) if acceptable else None
     return GuideExposureLadder(
         results=results,
-        recommended_exposure_seconds=recommended,
+        recommended_exposure_s=recommended,
         guiding_rms_limit_arcsec=guiding_rms_limit_arcsec,
         jitter_limit_arcsec=jitter_limit,
         plate_scale_arcsec_per_px=plate_scale_arcsec_per_px,

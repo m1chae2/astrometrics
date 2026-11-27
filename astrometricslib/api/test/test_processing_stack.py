@@ -33,7 +33,7 @@ def make_frame(name: str, filter_name: str = "Luminance", camera: str = "Unknown
         path=f"/lights/{name}",
         role="LIGHT",
         filter=filter_name,
-        exposure="60",
+        exposure_s=60,
         timestamp=1000.0,
         camera=camera,
     )

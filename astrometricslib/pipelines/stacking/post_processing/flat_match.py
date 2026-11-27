@@ -2307,7 +2307,7 @@ def sky_requirement_for_frame(frame: Any) -> SkyRequirement:
     Parameters
     ----------
     frame : `Any`
-        A light frame record (``camera``, ``iso``, ``offset`` and ``binning``
+        A light frame record (``camera``, ``gain``, ``offset`` and ``binning``
         are read).
 
     Returns
@@ -2320,7 +2320,7 @@ def sky_requirement_for_frame(frame: Any) -> SkyRequirement:
     camera = str(getattr(frame, "camera", "") or "")
     profile = resolve_camera_profile(camera)
     entry = profile.sensor_noise_for(
-        getattr(frame, "iso", None), getattr(frame, "offset", None), getattr(frame, "binning", None)
+        getattr(frame, "gain", None), getattr(frame, "offset", None), getattr(frame, "binning", None)
     )
     if entry is None or entry.read_noise_e is None or entry.gain_e_per_adu is None:
         return SkyRequirement(

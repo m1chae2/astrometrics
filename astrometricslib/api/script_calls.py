@@ -254,7 +254,7 @@ def tune_spectroscopy_calibration(
         fitted_grating_distance_mm=float(summary["fitted_grating_distance_mm"]),
         fitted_dispersion_start_px=float(summary["fitted_dispersion_start_px"]),
         rms_error_nm=float(summary["rms_error_nm"]),
-        detected_angle_degrees=float(summary["detected_angle_degrees"]),
+        detected_angle_deg=float(summary["detected_angle_deg"]),
         detailed_calibration=[
             CalibrationLineFit(
                 feature=str(line["feature"]),

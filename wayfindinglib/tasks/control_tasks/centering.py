@@ -73,14 +73,14 @@ def _centering_image_path(context: ControlContext) -> Path:
     return folder / "latest.fits"
 
 
-def _capture_frame(context: ControlContext, exposure_seconds: float) -> Path | None:
+def _capture_frame(context: ControlContext, exposure_s: float) -> Path | None:
     """Take one centering frame and write it to disk.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the main camera and the configuration.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length.
 
     Returns
@@ -91,10 +91,10 @@ def _capture_frame(context: ControlContext, exposure_seconds: float) -> Path | N
     camera = context.camera_driver
     hardware_operations._run_sync(camera.set_image_reception(True))
     try:
-        if not hardware_operations.capture_image(context, exposure_seconds):
+        if not hardware_operations.capture_image(context, exposure_s):
             return None
         data = hardware_operations._run_sync(
-            camera.wait_for_new_image(exposure_seconds + READOUT_SECONDS + IMAGE_WAIT_SECONDS)
+            camera.wait_for_new_image(exposure_s + READOUT_SECONDS + IMAGE_WAIT_SECONDS)
         )
     finally:
         hardware_operations._run_sync(camera.set_image_reception(False))
@@ -172,7 +172,7 @@ def center_on(
     tolerance_arcsec: float | None = None,
     max_iterations: int | None = None,
     target_name: str | None = None,
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
 ) -> bool:
     """Slew to `position` and refine the pointing until it is centered.
 
@@ -191,9 +191,9 @@ def center_on(
         ``alignment_iteration_limit`` when omitted.
     target_name : `str`, optional
         Name stored with each recorded attempt.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         Exposure length of each centering frame. When omitted it is the
-        ``alignment_exposure_seconds`` setting. With
+        ``alignment_exposure_s`` setting. With
         ``alignment_exposure_from_equipment`` on, it is chosen once, before
         the first frame, by `choose_centering_exposure`: the shortest
         exposure expected to show enough stars to solve, or the setting when
@@ -210,20 +210,20 @@ def center_on(
         config = config.model_copy(update={"alignment_convergence_tolerance_arcsec": tolerance_arcsec})
     iterations = max_iterations if max_iterations is not None else config.alignment_iteration_limit
     context.motion_stop.clear()
-    if exposure_seconds is None and config.alignment_exposure_from_equipment:
+    if exposure_s is None and config.alignment_exposure_from_equipment:
         choice = choose_centering_exposure(context, position)
-        exposure_seconds = choice.exposure_seconds
-        logger.info("Centering exposure %.1f s (%s): %s", exposure_seconds, choice.source, choice.reason)
-    elif exposure_seconds is None:
-        exposure_seconds = config.alignment_exposure_seconds
-        logger.info("Centering exposure %.1f s (the alignment_exposure_seconds setting)", exposure_seconds)
+        exposure_s = choice.exposure_s
+        logger.info("Centering exposure %.1f s (%s): %s", exposure_s, choice.source, choice.reason)
+    elif exposure_s is None:
+        exposure_s = config.alignment_exposure_s
+        logger.info("Centering exposure %.1f s (the alignment_exposure_s setting)", exposure_s)
     hardware_operations.slew(context, position)
     for iteration in range(1, iterations + 1):
         time.sleep(SETTLE_SECONDS)
         if context.motion_stop.is_set():
             logger.info("Centering stopped before iteration %s", iteration)
             return False
-        path = _capture_frame(context, exposure_seconds)
+        path = _capture_frame(context, exposure_s)
         if path is None:
             logger.warning("Centering iteration %s: the camera sent no frame", iteration)
             _record(context, "failed", None, target_name)

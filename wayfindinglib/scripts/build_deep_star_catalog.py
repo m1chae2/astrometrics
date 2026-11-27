@@ -399,7 +399,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
     print("DEEP-STAR CATALOG DOWNLOAD FINISHED")
     print(f"Chunks downloaded this run: {report.pixels_downloaded:,}")
     print(f"Chunks failed: {len(report.pixels_failed):,}")
-    print(f"Time: {_format_duration(report.elapsed_seconds)}")
+    print(f"Time: {_format_duration(report.elapsed_s)}")
     _print_status(config)
     status = deep_star_store.read_catalog_status(config)
     if chosen_pixels is not None:

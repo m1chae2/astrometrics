@@ -1055,7 +1055,7 @@ def test_member_frames_without_a_solution_leave_the_stack_unmeasured(tmp_path: P
     assert "no member frame" in outcome.reason
 
 
-def _reference_pair(tmp_path: Path, name: str, exposure_seconds: float, seed: int = 1) -> tuple[str, str]:
+def _reference_pair(tmp_path: Path, name: str, exposure_s: float, seed: int = 1) -> tuple[str, str]:
     """Write a stack with no solution and a reference frame.
 
     Parameters
@@ -1064,7 +1064,7 @@ def _reference_pair(tmp_path: Path, name: str, exposure_seconds: float, seed: in
         The folder.
     name : `str`
         A prefix for the two file names.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The ``EXPTIME`` of the reference frame.
     seed : `int`, optional
         Seed of the noise.
@@ -1076,7 +1076,7 @@ def _reference_pair(tmp_path: Path, name: str, exposure_seconds: float, seed: in
     """
     image = _sky_image(2.0, seed=seed)
     header = _sky_header()
-    header["EXPTIME"] = exposure_seconds
+    header["EXPTIME"] = exposure_s
     frame = _write(tmp_path / f"{name}_frame.fits", image, header)
     stack = _write(tmp_path / f"{name}_stack.fits", image, None)
     return stack, frame

@@ -87,7 +87,7 @@ def _setup(**guide: Any) -> WorldSetup:
         guide=_camera(
             width_px=1280, height_px=960, gain=50.0, bias_level_adu=None, read_noise_adu=None, **guide
         ),
-        declination_degrees=DECLINATION,
+        declination_deg=DECLINATION,
     )
 
 
@@ -238,7 +238,7 @@ def test_a_guide_rate_above_the_range_is_clamped_and_says_so() -> None:
 
 def test_periodic_error_is_zero_to_peak_divided_by_cos_dec() -> None:
     """The amplitude is not halved, and cos(dec) is taken out."""
-    candidate = _candidate("history fit", {"amplitude_arcsec": 3.0, "period_seconds": 40.0})
+    candidate = _candidate("history fit", {"amplitude_arcsec": 3.0, "period_s": 40.0})
     result = fit_values(_measurements(periodic_error=candidate), _setup())
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEMAX") == pytest.approx(6.0)
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEPERIOD") == pytest.approx(40.0)
@@ -248,7 +248,7 @@ def test_periodic_error_is_zero_to_peak_divided_by_cos_dec() -> None:
 
 def test_a_period_beyond_the_main_simulators_limit_keeps_the_peak_speed() -> None:
     """A 479 s worm period is clamped to 60 s; the amplitude shrinks too."""
-    candidate = _candidate("history fit", {"amplitude_arcsec": 4.0, "period_seconds": 480.0})
+    candidate = _candidate("history fit", {"amplitude_arcsec": 4.0, "period_s": 480.0})
     result = fit_values(_measurements(periodic_error=candidate), _setup())
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEPERIOD") == pytest.approx(60.0)
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEMAX") == pytest.approx(8.0 * 60.0 / 480.0)
@@ -262,7 +262,7 @@ def test_a_period_beyond_the_main_simulators_limit_keeps_the_peak_speed() -> Non
 
 def test_the_guide_simulators_periodic_amplitude_is_clamped_to_100() -> None:
     """A huge amplitude is written as 100 arcsec and the clamp is recorded."""
-    candidate = _candidate("history fit", {"amplitude_arcsec": 80.0, "period_seconds": 400.0})
+    candidate = _candidate("history fit", {"amplitude_arcsec": 80.0, "period_s": 400.0})
     result = fit_values(_measurements(periodic_error=candidate), _setup())
     entry = next(v for v in result.values if v.element == "SIM_PE_MAX")
     assert entry.value == pytest.approx(100.0)
@@ -319,14 +319,14 @@ def test_the_controller_settings_come_from_the_newest_run_and_are_checked() -> N
     """Aggressiveness, hysteresis, minimum move and exposure go to PHD2."""
     candidate = _candidate(
         "newest real record",
-        {"aggressiveness": 0.45, "hysteresis": 0.25, "minimum_move": 0.277, "exposure_seconds": 2.0},
+        {"aggressiveness": 0.45, "hysteresis": 0.25, "minimum_move": 0.277, "exposure_s": 2.0},
     )
     result = fit_values(_measurements(guide_controller=candidate), _setup())
     assert result.controller_settings == {
         "aggressiveness": 0.45,
         "hysteresis": 0.25,
         "minimum_move": 0.277,
-        "exposure_seconds": 2.0,
+        "exposure_s": 2.0,
     }
     too_much = _candidate("newest real record", {"aggressiveness": 3.0})
     result = fit_values(_measurements(guide_controller=too_much), _setup())
@@ -484,7 +484,7 @@ def _full_result() -> FitResult:
     """
     measurements = _measurements(
         guide_rate=_candidate("newest real record", {"dec_rate_arcsec_per_s": 7.5}),
-        periodic_error=_candidate("history fit", {"amplitude_arcsec": 3.0, "period_seconds": 40.0}),
+        periodic_error=_candidate("history fit", {"amplitude_arcsec": 3.0, "period_s": 40.0}),
         seeing=_candidate("performance envelope", {"fwhm_arcsec": 4.2}),
         sky_glow=_candidate("history fit", {"sky_rate_adu_per_s_per_px": 2.5}),
         guide_controller=_candidate("newest real record", {"aggressiveness": 0.45, "hysteresis": 0.25}),
@@ -533,6 +533,16 @@ def test_the_exposure_driver_reads_the_same_values(tmp_path: Path) -> None:
     assert fitted_guide_rate_fraction(path) == {"GUIDE_RATE_WE": 0.5, "GUIDE_RATE_NS": 0.5}
     glow = next(s for s in settings if s.device == MAIN_CAMERA and ("SIM_SKYGLOW" in dict(s.elements)))
     assert glow.read_back_decimals == 1
+
+
+def test_a_results_file_written_before_the_rename_gives_the_new_setting_name(tmp_path: Path) -> None:
+    """An older file's ``exposure_seconds`` comes back as ``exposure_s``."""
+    path = tmp_path / RESULTS_FILE_NAME
+    write_results(path, _full_result(), fingerprint_library_copy(tmp_path))
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["controller_settings"] = {"aggressiveness": 0.45, "exposure_seconds": 2.0}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert fitted_controller_settings(path) == {"aggressiveness": 0.45, "exposure_s": 2.0}
 
 
 def test_a_missing_or_foreign_results_file_gives_nothing(tmp_path: Path) -> None:
@@ -645,7 +655,7 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
     """
     calibration = SimpleNamespace(
         id="cal-1",
-        dec_rate_arcsec_per_sec=7.1,
+        dec_rate_arcsec_per_s=7.1,
         source_note="Measured by PHD2",
         calibrated_at=SimpleNamespace(timestamp=lambda: 1_790_000_000.0),
     )
@@ -654,15 +664,15 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
             "session_id": "2026-10-03",
             "started_at": 1_790_000_000.0,
             "written_by_ekos": False,
-            "dec_rate_arcsec_per_second": 7.3,
+            "dec_rate_arcsec_per_s": 7.3,
             "ra_aggressiveness": 0.6,
             "ra_hysteresis": 0.1,
             "ra_minimum_move_px": 0.2,
-            "guide_exposure_seconds": 2.0,
+            "guide_exposure_s": 2.0,
         }
     ]
-    periodic = SimpleNamespace(amplitude_arcsec=3.0, period_seconds=479.0, runs_used=4)
-    axis = SimpleNamespace(drift_median_arcsec_per_minute=0.5, random_step_median_arcsec=0.3)
+    periodic = SimpleNamespace(amplitude_arcsec=3.0, period_s=479.0, runs_used=4)
+    axis = SimpleNamespace(drift_median_arcsec_per_min=0.5, random_step_median_arcsec=0.3)
     summary = SimpleNamespace(
         periodic_error=periodic, ra=axis, dec=axis, nights_used=["2026-10-02", "2026-10-03"]
     )
@@ -741,7 +751,7 @@ def test_a_simulator_calibration_is_not_a_real_record() -> None:
     """A simulator calibration is not used as the real guide speed."""
     simulated = SimpleNamespace(
         id="simulator-x",
-        dec_rate_arcsec_per_sec=7.52,
+        dec_rate_arcsec_per_s=7.52,
         source_note="Simulator value, not the real camera's",
         calibrated_at=SimpleNamespace(timestamp=lambda: 1.0),
     )

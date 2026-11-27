@@ -31,7 +31,7 @@ def choose_weight_for_frames(
     Parameters
     ----------
     frames : `Sequence`
-        The frames to stack. Each has an ``exposure`` in seconds, which may
+        The frames to stack. Each has an ``exposure_s`` in seconds, which may
         be empty.
     requested_weight : `str` or `None`
         The mode the caller asked for. `None` means use the configured mode.
@@ -49,7 +49,7 @@ def choose_weight_for_frames(
     from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
 
     return choose_stack_weight(
-        [float(frame.exposure) for frame in frames if frame.exposure],
+        [float(frame.exposure_s) for frame in frames if frame.exposure_s],
         requested_weight if requested_weight is not None else configuration.get_stack_weight(),
         is_spectral=is_spectral,
     )

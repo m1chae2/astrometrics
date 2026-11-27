@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     arguments = build_parser().parse_args(argv)
     setting = MigrationSetting(
-        gain_setting=arguments.gain,
+        gain=arguments.gain,
         offset=arguments.offset,
         binning=arguments.binning,
         temperature_c=arguments.temperature_c,

@@ -79,7 +79,7 @@ def _group(
     return ExposureClipping(
         target_id=target,
         is_spectral=spectral,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         frames=frames,
         clipped_frames=frames if clipped else 0,
         clipped_fraction=1.0 if clipped else 0.0,
@@ -123,7 +123,7 @@ def _performance(clipping: list[ExposureClipping] | None = None, **star: object)
     return CapturePerformance(
         clipping=clipping or [],
         star_quality=StarQuality(**star),
-        efficiency=CaptureEfficiency(light_exposure_seconds=100.0, span_seconds=200.0, duty_cycle=0.5),
+        efficiency=CaptureEfficiency(light_exposure_s=100.0, span_s=200.0, duty_cycle=0.5),
         limits=CAPTURE_LIMITS,
     )
 

@@ -91,8 +91,8 @@ def record_mount_night(control: ObservatoryControl, day: int, **run_options: flo
             ended_at=float(series.times[-1]) + 3.0,
             pixel_scale_arcsec_per_px=6.4,
             focal_length_mm=120.0,
-            ra_rate_arcsec_per_second=RATE,
-            dec_rate_arcsec_per_second=RATE,
+            ra_rate_arcsec_per_s=RATE,
+            dec_rate_arcsec_per_s=RATE,
             frames_total=int(series.times.size),
             samples_stored=int(series.times.size),
         )
@@ -121,10 +121,10 @@ def test_the_review_measures_the_mount_from_the_recorded_nights(
     assert [run.session_id for run in result.runs] == mount_nights
     assert summary.nights_used == mount_nights
     assert summary.periodic_error is not None
-    assert summary.periodic_error.period_seconds == pytest.approx(480.0, rel=0.01)
+    assert summary.periodic_error.period_s == pytest.approx(480.0, rel=0.01)
     assert summary.periodic_error.amplitude_arcsec == pytest.approx(4.0, rel=0.1)
     assert summary.periodic_error.runs_used == 3
-    assert summary.ra.drift_median_arcsec_per_minute == pytest.approx(0.5, abs=0.15)
+    assert summary.ra.drift_median_arcsec_per_min == pytest.approx(0.5, abs=0.15)
     assert "arcsec" in result.message
 
 
@@ -397,10 +397,10 @@ class _Setting:
     camera = "Main A"
     telescope = "Short"
     filter_name = "L"
-    gain_setting = 100
+    gain = 100
     offset = 10
     binning = 1
-    exposure_seconds = 60.0
+    exposure_s = 60.0
 
 
 def _stub_sky_library(

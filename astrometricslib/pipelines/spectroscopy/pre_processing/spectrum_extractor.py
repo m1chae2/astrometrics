@@ -1674,7 +1674,7 @@ class SpectrumExtractor:
         max_offset_pixels: float,
         radius: int,
         orientation: str = "vertical",
-        angle_degrees: float = 0.0,
+        angle_deg: float = 0.0,
     ) -> tuple[np.ndarray, float, float]:
         """Measure a spectrum while ignoring the bright star flare.
 
@@ -1700,7 +1700,7 @@ class SpectrumExtractor:
         orientation : `str`, optional
             Orientation of the dispersion, "horizontal" or "vertical"
             (default "vertical").
-        angle_degrees : `float`, optional
+        angle_deg : `float`, optional
             Rotation/tilt angle of the dispersion streak in degrees
             (default 0.0).
 
@@ -1720,13 +1720,13 @@ class SpectrumExtractor:
         # 1. Centroid Anchor (21x21 subgrid around rough start position)
         trail_side = 1 if flare_offset_pixels + max_offset_pixels >= 0 else -1
         anchor_x, anchor_y = self._compute_centroid_reference_point(
-            data, start_pos, orientation, angle_degrees, trail_side
+            data, start_pos, orientation, angle_deg, trail_side
         )
 
         # 2. Bounding Box & Profile Extraction with Dynamic Tilt Tracking
         profile = []
         variances = []
-        slope = -np.tan(np.radians(angle_degrees))
+        slope = -np.tan(np.radians(angle_deg))
 
         if orientation == "horizontal":
             start_x = round(anchor_x + flare_offset_pixels)
@@ -1763,7 +1763,7 @@ class SpectrumExtractor:
         data: np.ndarray,
         start_pos: tuple[float, float],
         orientation: str | None = None,
-        angle_degrees: float = 0.0,
+        angle_deg: float = 0.0,
         trail_side: int = 1,
     ) -> tuple[float, float]:
         """Find the sub-pixel centroid of a star in a 21x21 pixel box.
@@ -1784,7 +1784,7 @@ class SpectrumExtractor:
         orientation : `str`, optional
             `"horizontal"` or `"vertical"`, the direction the trail runs.
             `None` skips the trail removal and gives the plain centroid.
-        angle_degrees : `float`, optional
+        angle_deg : `float`, optional
             The tilt of the trail, in the same convention as
             `extract_with_flare_mask` (the trail centre moves by
             `-tan(angle)` across for each step along).
@@ -1820,7 +1820,7 @@ class SpectrumExtractor:
             # The cleaning needs the centre and the centre needs the
             # cleaning, so a few rounds settle both.
             is_vertical = orientation == "vertical"
-            slope = -np.tan(np.radians(angle_degrees))
+            slope = -np.tan(np.radians(angle_deg))
             for _ in range(4):
                 if is_vertical:
                     cleaned = self._subtract_trail_from_box(subgrid.T, slope, trail_side, anchor_y).T
@@ -1982,7 +1982,7 @@ class SpectrumExtractor:
         max_offset_pixels: float,
         radius: int,
         orientation: str = "vertical",
-        angle_degrees: float = 0.0,
+        angle_deg: float = 0.0,
         *,
         centerline_polynomial_degree: int,
     ) -> tuple[np.ndarray, float, float, list[float], list[float]]:
@@ -2006,7 +2006,7 @@ class SpectrumExtractor:
             How wide to look for the center.
         orientation : `str`, optional
             "horizontal" or "vertical".
-        angle_degrees : `float`, optional
+        angle_deg : `float`, optional
             Any overall tilt to the picture.
         centerline_polynomial_degree : `int`
             How flexible the curve tracking should be. Keyword only; the
@@ -2029,11 +2029,11 @@ class SpectrumExtractor:
         data = image.data
         trail_side = 1 if flare_offset_pixels + max_offset_pixels >= 0 else -1
         anchor_x, anchor_y = self._compute_centroid_reference_point(
-            data, start_pos, orientation, angle_degrees, trail_side
+            data, start_pos, orientation, angle_deg, trail_side
         )
 
         steps, nominal_centers, perpendicular_vector = self._nominal_trace_centers(
-            anchor_x, anchor_y, flare_offset_pixels, max_offset_pixels, orientation, angle_degrees
+            anchor_x, anchor_y, flare_offset_pixels, max_offset_pixels, orientation, angle_deg
         )
 
         raw_centers, raw_sigmas, smoothed_centerline, fallback_sigma = self._fit_trace_centerline(
@@ -2062,7 +2062,7 @@ class SpectrumExtractor:
         flare_offset_pixels: float,
         max_offset_pixels: float,
         orientation: str,
-        angle_degrees: float,
+        angle_deg: float,
     ) -> tuple[list[int], list[tuple[float, float]], tuple[float, float]]:
         """Compute the straight-line trace steps and their nominal centers.
 
@@ -2077,7 +2077,7 @@ class SpectrumExtractor:
         perpendicular_vector : `tuple` [`float`, `float`]
             The unit vector pointing sideways across the dispersion axis.
         """
-        slope = -np.tan(np.radians(angle_degrees))
+        slope = -np.tan(np.radians(angle_deg))
         is_horizontal = orientation == "horizontal"
 
         if is_horizontal:

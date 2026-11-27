@@ -248,8 +248,8 @@ async function main() {
         await sleep(8000);
 
         // Idle first, so the sampler records what the app costs when nobody is using it.
-        const idleMinutes = Number(options['idle-minutes'] ?? 3);
-        await sleep(idleMinutes * 60 * 1000);
+        const idleMin = Number(options['idle-minutes'] ?? 3);
+        await sleep(idleMin * 60 * 1000);
         const startupToasts = [];
         for (const page of watchedPages) startupToasts.push(...(await readToasts(page, 'electron-startup')));
         fs.writeFileSync(

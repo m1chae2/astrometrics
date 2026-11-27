@@ -353,7 +353,7 @@ def _mean_qe_over_band(camera_profile: CameraProfile) -> float | None:
 def predict_gaia_query_depth(
     camera_profile: CameraProfile | None,
     *,
-    gain_setting: object,
+    gain: object,
     offset: object,
     binning: object,
     aperture_diameter_mm: float | None,
@@ -370,7 +370,7 @@ def predict_gaia_query_depth(
     ----------
     camera_profile : `CameraProfile` or `None`
         The camera's profile (QE curve and read noise).
-    gain_setting : `Any`
+    gain : `Any`
         The frame's gain setting (or ISO), to find its read noise.
     offset : `Any`
         The frame's offset.
@@ -417,7 +417,7 @@ def predict_gaia_query_depth(
         return _fallback("no quantum efficiency curve that covers the Gaia G band")
     # A stack's sky is far above zero, so the read noise of the same gain at
     # another offset may stand in (see `CameraProfile.sensor_noise_for`).
-    noise_entry = camera_profile.sensor_noise_for(gain_setting, offset, binning, clipped_at_zero=False)
+    noise_entry = camera_profile.sensor_noise_for(gain, offset, binning, clipped_at_zero=False)
     if noise_entry is None or noise_entry.read_noise_e is None:
         return _fallback("no read noise for this camera setting")
     read_noise_e = noise_entry.read_noise_e.value
@@ -606,7 +606,7 @@ def predict_gaia_depth_from_header(
     binning_text = f"{int(binning)}x{int(binning)}"
     return predict_gaia_query_depth(
         profile,
-        gain_setting=header.get("GAIN", header.get("ISOSPEED")),
+        gain=header.get("GAIN", header.get("ISOSPEED")),
         offset=header.get("OFFSET"),
         binning=binning_text,
         aperture_diameter_mm=aperture_mm,

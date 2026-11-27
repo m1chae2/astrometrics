@@ -200,7 +200,7 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
             "guide_rate",
             Candidate(
                 "newest real record",
-                {"dec_rate_arcsec_per_s": newest.dec_rate_arcsec_per_sec},
+                {"dec_rate_arcsec_per_s": newest.dec_rate_arcsec_per_s},
                 "wayfinder.control.guiding.query_guider_calibrations",
                 {},
                 [],
@@ -210,7 +210,7 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
         )
     runs = [run.model_dump() for run in wayfinder.review.guiding.query_runs()]
     for run in reversed(runs):
-        rate = _pick(run, "dec_rate_arcsec_per_second")
+        rate = _pick(run, "dec_rate_arcsec_per_s")
         if rate:
             measurements.add(
                 "guide_rate",
@@ -254,7 +254,7 @@ def _controller_candidate(runs: list[dict]) -> Candidate | None:
         for key, name in (
             ("minimum_move", "ra_minimum_move_px"),
             ("hysteresis", "ra_hysteresis"),
-            ("exposure_seconds", "guide_exposure_seconds"),
+            ("exposure_s", "guide_exposure_s"),
         ):
             value = _pick(run, name)
             if value is not None:
@@ -294,7 +294,7 @@ def _mount_error(wayfinder: Wayfinder, measurements: Measurements) -> None:
                 "history fit",
                 {
                     "amplitude_arcsec": periodic.amplitude_arcsec,
-                    "period_seconds": periodic.period_seconds,
+                    "period_s": periodic.period_s,
                 },
                 call,
                 {},
@@ -309,8 +309,8 @@ def _mount_error(wayfinder: Wayfinder, measurements: Measurements) -> None:
             Candidate(
                 "history fit",
                 {
-                    "ra_drift_arcsec_per_min": summary.ra.drift_median_arcsec_per_minute,
-                    "dec_drift_arcsec_per_min": summary.dec.drift_median_arcsec_per_minute,
+                    "ra_drift_arcsec_per_min": summary.ra.drift_median_arcsec_per_min,
+                    "dec_drift_arcsec_per_min": summary.dec.drift_median_arcsec_per_min,
                     "ra_random_rms_arcsec": summary.ra.random_step_median_arcsec / math.sqrt(2.0),
                     "dec_random_rms_arcsec": summary.dec.random_step_median_arcsec / math.sqrt(2.0),
                 },

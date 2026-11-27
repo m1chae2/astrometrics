@@ -806,11 +806,11 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D65",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
-            "Frames below {altitude_degrees:.0f} degrees lost {loss_percent:.0f}%. Image above "
+            "Frames below {altitude_deg:.0f} degrees lost {loss_percent:.0f}%. Image above "
             "{advice_altitude_degrees:.0f} degrees."
         ),
         plain_wording=(
-            "Frames taken below {altitude_degrees:.0f} degrees above the horizon lost roughly "
+            "Frames taken below {altitude_deg:.0f} degrees above the horizon lost roughly "
             "{loss_percent:.0f}%"
             " of their value. "
             "Image above {advice_altitude_degrees:.0f} degrees when you can."

@@ -265,10 +265,10 @@ def test_frame_query_filters_by_gain_exposure_and_order() -> None:
     """The query owner keeps the light frames that match every filter."""
     stamp = 1_791_000_000.0
     frames = [
-        FrameRecord(path="/a_001.fits", iso="100", exposure="300.0", timestamp=stamp),
-        FrameRecord(path="/a_002.fits", iso="200", exposure="300.0", timestamp=stamp + 60),
-        FrameRecord(path="/a_003.fits", iso="100", exposure="60", timestamp=stamp + 120),
-        FrameRecord(path="/a_004.fits", iso="100", exposure="300", timestamp=None),
+        FrameRecord(path="/a_001.fits", gain=100, exposure_s=300.0, timestamp=stamp),
+        FrameRecord(path="/a_002.fits", gain=200, exposure_s=300.0, timestamp=stamp + 60),
+        FrameRecord(path="/a_003.fits", gain=100, exposure_s=60, timestamp=stamp + 120),
+        FrameRecord(path="/a_004.fits", gain=100, exposure_s=300, timestamp=None),
     ]
     target = Target(id="M13", frames=frames)
 

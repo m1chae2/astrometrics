@@ -90,12 +90,12 @@ def make_target(folder: Path, bad_names: tuple[str, ...] = ("cloud_03", "trail_0
             path=write_fits(folder / f"{stem}.fits", exposure=30.0),
             role="LIGHT",
             filter="Luminance",
-            exposure="30.0",
+            exposure_s=30.0,
             timestamp=1000.0 + 30.0 * index,
             camera=CAMERA,
             telescope="T",
-            iso="100",
-            offset="0",
+            gain=100,
+            offset=0,
         )
         for index, stem in enumerate(stems)
     ]
@@ -173,7 +173,7 @@ def test_prediction_moves_nothing_and_writes_nothing(tmp_path: Path) -> None:
     """The set-aside frames stay where they are and the target is unchanged."""
     target = make_target(tmp_path / "lights")
     paths_before = [frame.path for frame in target.frames]
-    total_before = target.exposure_sec
+    total_before = target.exposure_s
     before = snapshot(tmp_path)
 
     prediction = predict_stack(target, list(target.frames), "imaging", make_library(tmp_path / "library"))
@@ -184,7 +184,7 @@ def test_prediction_moves_nothing_and_writes_nothing(tmp_path: Path) -> None:
     }
     assert not list(tmp_path.rglob("_excluded"))
     assert [frame.path for frame in target.frames] == paths_before
-    assert target.exposure_sec == total_before
+    assert target.exposure_s == total_before
     assert all(frame.measurements.background_level is None for frame in target.frames)
     assert prediction.frames_selected == FRAME_COUNT
     assert prediction.frames_kept == FRAME_COUNT - 2
@@ -310,12 +310,12 @@ def test_calibration_choice_is_the_one_siril_staging_makes(tmp_path: Path, bias_
         path=light,
         role="LIGHT",
         filter="Luminance",
-        exposure="30.0",
+        exposure_s=30.0,
         timestamp=1000.0,
         camera=CAMERA,
         telescope="T",
-        iso="100",
-        offset="0",
+        gain=100,
+        offset=0,
     )
     target = Target(id="T 1", frames=[record])
     processor = object.__new__(siril_interface.ImageProcessing)
@@ -371,12 +371,12 @@ def test_a_frame_with_no_exposure_group_to_join_is_set_aside_and_recorded(tmp_pa
             path=short_path,
             role="LIGHT",
             filter="Luminance",
-            exposure="5.0",
+            exposure_s=5.0,
             timestamp=2000.0,
             camera=CAMERA,
             telescope="T",
-            iso="100",
-            offset="0",
+            gain=100,
+            offset=0,
         )
     )
 

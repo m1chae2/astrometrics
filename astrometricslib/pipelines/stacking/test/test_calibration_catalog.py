@@ -65,13 +65,13 @@ def _light_target(offset: str = "30") -> Target:
     target : `Target`
         The target.
     """
-    kwargs = {"filter": "Luminance", "role": "LIGHT", "camera": "Cam", "iso": "100", "offset": offset}
+    kwargs = {"filter": "Luminance", "role": "LIGHT", "camera": "Cam", "gain": "100", "offset": offset}
     return Target(
         id="Grouped",
         frames=[
-            FrameRecord(path="a.fits", exposure="30.0", **kwargs),
-            FrameRecord(path="b.fits", exposure="30.0", **kwargs),
-            FrameRecord(path="c.fits", exposure="10.0", **kwargs),
+            FrameRecord(path="a.fits", exposure_s=30.0, **kwargs),
+            FrameRecord(path="b.fits", exposure_s=30.0, **kwargs),
+            FrameRecord(path="c.fits", exposure_s=10.0, **kwargs),
         ],
     )
 
@@ -144,9 +144,9 @@ def test_match_split_by_optic_and_report_it(tmp_path: Path) -> None:
         "filter": "Luminance",
         "role": "LIGHT",
         "camera": "Cam",
-        "iso": "100",
+        "gain": "100",
         "offset": "10",
-        "exposure": "30.0",
+        "exposure_s": "30.0",
     }
     target = Target(
         id="TwoOptics",
@@ -164,7 +164,7 @@ def test_match_split_by_optic_and_report_it(tmp_path: Path) -> None:
 def test_match_skips_frames_that_are_not_lights(tmp_path: Path) -> None:
     """A dark among the frames is not a group of its own."""
     target = _light_target()
-    frames = [*target.frames, FrameRecord(path="d.fits", exposure="30.0", role="DARK", camera="Cam")]
+    frames = [*target.frames, FrameRecord(path="d.fits", exposure_s=30.0, role="DARK", camera="Cam")]
 
     groups = match_calibration(_library(tmp_path), frames)
 

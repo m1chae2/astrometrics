@@ -96,7 +96,7 @@ def _frame(number: int, start: float) -> FrameRecord:
         path=f"/lights/T_1_{number:03d}.fits",
         role="LIGHT",
         filter="Luminance",
-        exposure="60",
+        exposure_s=60,
         timestamp=start,
     )
 

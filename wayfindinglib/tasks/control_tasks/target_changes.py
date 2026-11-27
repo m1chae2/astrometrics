@@ -231,8 +231,8 @@ def _pointing_at(
     position = min(candidates, key=lambda candidate: abs(candidate.timestamp - tracking_at))
     site = earth_location(location["latitude"], location["longitude"], location.get("elevation", 0.0))
     horizontal = SkyCoord(
-        alt=position.altitude_degrees * u.deg,
-        az=position.azimuth_degrees * u.deg,
+        alt=position.altitude_deg * u.deg,
+        az=position.azimuth_deg * u.deg,
         frame=AltAz(obstime=Time(position.timestamp, format="unix"), location=site),
     )
     sky = horizontal.icrs

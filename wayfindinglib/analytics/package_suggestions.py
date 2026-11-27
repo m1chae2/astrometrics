@@ -245,9 +245,9 @@ def _round_action(action: ProposedAction | None) -> dict[str, Any]:
         return {}
     values: dict[str, Any] = {}
     for name in (
-        "exposure_seconds",
+        "exposure_s",
         "frame_count",
-        "gain_setting",
+        "gain",
         "offset",
         "binning",
         "filter_name",
@@ -258,7 +258,7 @@ def _round_action(action: ProposedAction | None) -> dict[str, Any]:
         value = getattr(action, name)
         if value is None:
             continue
-        if name == "exposure_seconds":
+        if name == "exposure_s":
             value = round(float(value))
         elif name == "frame_count":
             value = int(float(f"{value:.2g}"))

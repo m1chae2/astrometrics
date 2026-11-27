@@ -314,7 +314,7 @@ def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dic
     result = _call_process_target(
         driver,
         id="GoldenTarget",
-        image_files=[{"path": "a.fits", "camera": "Cam", "exposure": "30"}],
+        image_files=[{"path": "a.fits", "camera": "Cam", "exposure_s": "30"}],
         output_file="golden_stack.fits",
         steps=PipelineSteps(
             assess_flats=lambda paths, camera: None,
@@ -327,9 +327,7 @@ def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dic
         "scripts": sent_scripts,
         "read_output_calls": read_calls,
         "diagnostics": {
-            key: value
-            for key, value in driver.last_run_diagnostics.items()
-            if key != "stacking_duration_seconds"
+            key: value for key, value in driver.last_run_diagnostics.items() if key != "stacking_duration_s"
         },
     })
 

@@ -75,7 +75,7 @@ def test_jitter_is_scatter_around_the_settled_offset() -> None:
     assert session.frame_count == 5
     assert session.initial_error_arcsec == pytest.approx(50.0, abs=0.1)
     assert 0.2 < session.rms_total_arcsec < 1.0
-    assert session.elapsed_seconds == pytest.approx(40.0)
+    assert session.elapsed_s == pytest.approx(40.0)
 
 
 def test_runs_split_at_long_gaps_and_their_times_add() -> None:
@@ -90,7 +90,7 @@ def test_runs_split_at_long_gaps_and_their_times_add() -> None:
     (session,) = group_alignment_attempts(attempts)
 
     assert session.frame_count == 6
-    assert session.elapsed_seconds == pytest.approx(120.0)
+    assert session.elapsed_s == pytest.approx(120.0)
     assert 0.2 < session.rms_total_arcsec < 1.0
 
 
@@ -137,7 +137,7 @@ def test_drift_rate_is_the_slope_of_the_offsets() -> None:
 
     assert session.drift_ra_arcsec_per_min == pytest.approx(2.0)
     assert session.drift_dec_arcsec_per_min == pytest.approx(-1.0)
-    assert [p.elapsed_seconds for p in session.time_series] == [0.0, 60.0, 120.0, 180.0, 240.0]
+    assert [p.elapsed_s for p in session.time_series] == [0.0, 60.0, 120.0, 180.0, 240.0]
 
 
 def test_repeats_and_positionless_solves_are_dropped() -> None:

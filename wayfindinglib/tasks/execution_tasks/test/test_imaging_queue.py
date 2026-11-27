@@ -160,8 +160,8 @@ def _entry(target_id: str = "M 81", start: datetime | None = None) -> QueuedObse
         observation_package_id="package",
         target_id=target_id,
         exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter="Luminance", exposure_sec=60.0, count=3),
-            ExposureRequest(frame_type=FrameType.LIGHT, filter="Ha", exposure_sec=120.0, count=2),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter="Luminance", exposure_s=60.0, count=3),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter="Ha", exposure_s=120.0, count=2),
         ],
         dither_config=DitherConfig(enabled=True, every_n_frames=2),
         start_time_mode=StartTimeMode.SOONEST,

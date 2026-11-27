@@ -263,8 +263,8 @@ class EquipmentService:
         telescope_id: str,
         arcsec_per_pixel: float,
         camera_angle_deg: float,
-        ra_rate_arcsec_per_sec: float,
-        dec_rate_arcsec_per_sec: float,
+        ra_rate_arcsec_per_s: float,
+        dec_rate_arcsec_per_s: float,
         source_note: str,
         calibrated_at: datetime | None = None,
         replace: bool = False,
@@ -281,7 +281,7 @@ class EquipmentService:
             Guide camera plate scale.
         camera_angle_deg : `float`
             Angle of the camera against the mount axes.
-        ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec : `float`
+        ra_rate_arcsec_per_s, dec_rate_arcsec_per_s : `float`
             Speed of the mount along each axis for a guide pulse.
         source_note : `str`
             Where the numbers came from.
@@ -306,8 +306,8 @@ class EquipmentService:
             "telescope_id": telescope_id,
             "arcsec_per_pixel": arcsec_per_pixel,
             "camera_angle_deg": camera_angle_deg,
-            "ra_rate_arcsec_per_sec": ra_rate_arcsec_per_sec,
-            "dec_rate_arcsec_per_sec": dec_rate_arcsec_per_sec,
+            "ra_rate_arcsec_per_s": ra_rate_arcsec_per_s,
+            "dec_rate_arcsec_per_s": dec_rate_arcsec_per_s,
             "source_note": source_note,
         }
         if calibrated_at is not None:

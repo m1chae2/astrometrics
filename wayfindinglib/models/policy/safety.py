@@ -25,7 +25,7 @@ from below, rather than a driver importing the Control-layer monitor.
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 SensorReadings = dict[str, tuple[float, datetime]]
 """Measurement name -> ``(value, observed_at)``.
@@ -67,7 +67,9 @@ class SafetyRule(BaseModel):
     comparison: str
     unsafe_threshold: float
     marginal_threshold: float | None = Field(default=None)
-    staleness_bound_sec: int = Field(default=120, gt=0)
+    staleness_bound_s: int = Field(
+        default=120, gt=0, validation_alias=AliasChoices("staleness_bound_s", "staleness_bound_sec")
+    )
 
 
 class SafetyRuleSet(BaseModel):
@@ -77,10 +79,11 @@ class SafetyRuleSet(BaseModel):
 
     id: str
     rules: list[SafetyRule] = Field(default_factory=list)
-    settling_period_sec: int = Field(
+    settling_period_s: int = Field(
         default=900,
         gt=0,
         description="Duration conditions must remain continuously safe before the enclosure may reopen.",
+        validation_alias=AliasChoices("settling_period_s", "settling_period_sec"),
     )
 
 

@@ -28,7 +28,7 @@ def test_the_saved_frames_come_back_with_utc_times(tmp_path: Path) -> None:
         SavedCapture(
             file_path="/home/stellarmate/Pictures/M_27/Light/Luminance/M_27_Light_Luminance_001.fits",
             completed_at=pytest.approx(1790217108.442 + 597.265),
-            exposure_seconds=30.0,
+            exposure_s=30.0,
         )
     ]
 

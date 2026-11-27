@@ -8,7 +8,7 @@ shows them in its catalog settings.
 over the stars. The fields keep the names the app already reads.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class CatalogDriverInfo(BaseModel):
@@ -18,8 +18,10 @@ class CatalogDriverInfo(BaseModel):
         ..., description="The name the driver is registered under, such as 'deep_stars'."
     )
     display_name: str = Field(..., description="The name to show a person.")
-    maximum_query_radius_degrees: float = Field(
-        ..., description="The widest search circle the driver answers, in degrees."
+    maximum_query_radius_deg: float = Field(
+        ...,
+        description="The widest search circle the driver answers, in degrees.",
+        validation_alias=AliasChoices("maximum_query_radius_deg", "maximum_query_radius_degrees"),
     )
 
 

@@ -765,7 +765,7 @@ def measure_star_profile_in_file(
     x: float,
     y: float,
     radius_px: float | None = None,
-    cut_angle_degrees: float = 0.0,
+    cut_angle_deg: float = 0.0,
     cut_half_length_px: float | None = None,
     search_radius_px: float | None = None,
     find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None = None,
@@ -782,7 +782,7 @@ def measure_star_profile_in_file(
         The clicked position, 1-based (column, row).
     radius_px : `float`, optional
         The radius of the profile. Taken from the star width when `None`.
-    cut_angle_degrees : `float`, optional
+    cut_angle_deg : `float`, optional
         The cut direction, measured from +y toward +x.
     cut_half_length_px : `float`, optional
         How far the cut reaches each way. Taken from the star width when
@@ -812,7 +812,7 @@ def measure_star_profile_in_file(
         number is not finite, or the image has no data. A file that does not
         exist raises `NotFoundError`.
     """
-    for name, value in (("x", x), ("y", y), ("cut_angle_degrees", cut_angle_degrees)):
+    for name, value in (("x", x), ("y", y), ("cut_angle_deg", cut_angle_deg)):
         if not math.isfinite(value):
             raise InvalidArgumentError(f"{name} must be a finite number.")
     radius_from_width = radius_px is None or cut_half_length_px is None
@@ -911,7 +911,7 @@ def measure_star_profile_in_file(
     star_found, not_a_star_reason = _judge_star(peak, float(sky_noise), moffat)
 
     # The cut: angle from +y toward +x, so the step is (sin, cos) in (x, y).
-    angle = math.radians(cut_angle_degrees)
+    angle = math.radians(cut_angle_deg)
     step = float(resolve(STAR_CUT_STEP_PX).value)  # type: ignore[arg-type]
     count = math.floor(cut_half / step)
     offsets = np.arange(-count, count + 1) * step
@@ -986,7 +986,7 @@ def measure_star_profile_in_file(
         clipped_reason=reason,
         moffat=moffat,
         gaussian=gaussian,
-        cut_angle_degrees=float(cut_angle_degrees),
+        cut_angle_deg=float(cut_angle_deg),
         cut_half_length_px=cut_half,
         cut_distance_px=[float(v) for v in offsets[inside_image]],
         cut_values=[float(v) - float(sky) for v in sampled],
@@ -1001,7 +1001,7 @@ def measure_star_profile_in_file(
         ring_inner_px=ring.inner_px,
         ring_outer_px=ring.outer_px,
         ring_sky=ring.sky,
-        ring_bin_angle_degrees=ring.bin_angles,
+        ring_bin_angle_deg=ring.bin_angles,
         ring_bin_values=ring.bin_values,
         ring_bin_counts=ring.bin_counts,
         ring_harmonics=ring.harmonics,

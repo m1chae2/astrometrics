@@ -116,7 +116,7 @@ def _sequence(count: int = 3) -> dict[str, Any]:
     """
     return {
         "target_name": "M 81",
-        "items": [{"count": count, "exposure": 60.0, "filter": "Ha", "duration": 60.0 * count}],
+        "items": [{"count": count, "exposure_s": 60.0, "filter": "Ha", "duration": 60.0 * count}],
     }
 
 
@@ -127,7 +127,7 @@ def test_added_sequences_show_as_queued_items(executor: TargetImagingExecutor) -
 
     (item,) = executor.get_queue()
     assert item["target_name"] == "M 81"
-    assert item["items"] == [{"count": 3, "exposure": 60.0, "filter": "Ha", "duration": 180.0}]
+    assert item["items"] == [{"count": 3, "exposure_s": 60.0, "filter": "Ha", "duration": 180.0}]
     assert item["total_duration"] == pytest.approx(180.0)
     assert item["timing"] == {"mode": "soonest"}
     assert item["status"] == "queued"

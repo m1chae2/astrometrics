@@ -82,10 +82,10 @@ _MOUNT_RATES_LINE = re.compile(
 )
 _POINTING_FIELDS = {
     "right_ascension_hours": re.compile(r"\bRA = (-?[\d.]+) hr"),
-    "declination_degrees": re.compile(r"\bDec = (-?[\d.]+) deg"),
+    "declination_deg": re.compile(r"\bDec = (-?[\d.]+) deg"),
     "hour_angle_hours": re.compile(r"Hour angle = (-?[\d.]+) hr"),
-    "altitude_degrees": re.compile(r"\bAlt = (-?[\d.]+) deg"),
-    "azimuth_degrees": re.compile(r"\bAz = (-?[\d.]+) deg"),
+    "altitude_deg": re.compile(r"\bAlt = (-?[\d.]+) deg"),
+    "azimuth_deg": re.compile(r"\bAz = (-?[\d.]+) deg"),
 }
 _PIER_SIDE = re.compile(r"Pier side = (East|West)")
 _EXPOSURE_LINE = re.compile(r"(?:^|, )Exposure = (?P<milliseconds>[\d.]+) ms")
@@ -175,7 +175,7 @@ def _read_controller_line(line: str, section: GuidingSection) -> bool:
         return True
     exposure = _EXPOSURE_LINE.search(line)
     if exposure:
-        controller.exposure_seconds = float(exposure.group("milliseconds")) / 1000.0
+        controller.exposure_s = float(exposure.group("milliseconds")) / 1000.0
         return True
     return False
 
@@ -306,8 +306,8 @@ def parse_guide_log_file(
         if calibration is not None:
             speeds = _CALIBRATION_SPEEDS.match(line) or _CALIBRATION_SPEEDS_PHD2.match(line)
             if speeds:
-                calibration.ra_rate_arcsec_per_second = float(speeds.group(1))
-                calibration.dec_rate_arcsec_per_second = float(speeds.group(2))
+                calibration.ra_rate_arcsec_per_s = float(speeds.group(1))
+                calibration.dec_rate_arcsec_per_s = float(speeds.group(2))
                 continue
             angle = _CALIBRATION_ANGLE.match(line)
             if angle:
@@ -337,8 +337,8 @@ def parse_guide_log_file(
             # pixel scale the unit cannot be fixed, so leave the rates empty.
             unit_scale = 1.0 if parsed_log.written_by_ekos else section.pixel_scale_arcsec_per_px
             if unit_scale is not None:
-                section.ra_rate_arcsec_per_second = float(rates.group("x_rate")) * unit_scale
-                section.dec_rate_arcsec_per_second = float(rates.group("y_rate")) * unit_scale
+                section.ra_rate_arcsec_per_s = float(rates.group("x_rate")) * unit_scale
+                section.dec_rate_arcsec_per_s = float(rates.group("y_rate")) * unit_scale
             continue
 
         if line.startswith("Frame,"):

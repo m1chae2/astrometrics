@@ -8,7 +8,7 @@ estimate rather than a tuned value, with the exception of the twilight
 threshold, which is a standard astronomical definition.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class PlanningConfig(BaseModel):
@@ -24,4 +24,9 @@ class PlanningConfig(BaseModel):
     science_outcome_priority_boost: int = Field(default=1, ge=0)
     dither_every_n_frames_default: int = Field(default=3, gt=0)
     dither_pixels_default: float = Field(default=3.0, gt=0.0)
-    mosaic_panel_overlap_percent: float = Field(default=10.0, ge=0.0, lt=100.0)
+    mosaic_panel_overlap_pct: float = Field(
+        default=10.0,
+        ge=0.0,
+        lt=100.0,
+        validation_alias=AliasChoices("mosaic_panel_overlap_pct", "mosaic_panel_overlap_percent"),
+    )

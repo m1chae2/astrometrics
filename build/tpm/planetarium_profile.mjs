@@ -182,7 +182,7 @@ export function summarizeTrace(events, measures, marks = { start: PAN_START_MARK
     const timed = events.filter((event) => typeof event.ts === 'number' && event.ts > 0);
     const windowStart = startMark?.ts ?? Math.min(...timed.map((event) => event.ts));
     const windowEnd = endMark?.ts ?? Math.max(...timed.map((event) => event.ts));
-    const windowSeconds = (windowEnd - windowStart) / 1e6;
+    const windowS = (windowEnd - windowStart) / 1e6;
 
     // The page's main thread is the one that logged the pan marks.
     const mainKey = startMark ? `${startMark.pid}:${startMark.tid}` : null;
@@ -228,11 +228,11 @@ export function summarizeTrace(events, measures, marks = { start: PAN_START_MARK
     const gpuBusyMs = busyMilliseconds(gpuTasks, windowStart, windowEnd);
 
     return {
-        windowSeconds,
+        windowS,
         frameSource: drawFrames.length > 0 ? 'DrawFrame' : 'FireAnimationFrame',
         drawFrameCount: drawFrames.length,
         animationFrameCount: animationFrames.length,
-        fps: windowSeconds > 0 ? frameCount / windowSeconds : null,
+        fps: windowS > 0 ? frameCount / windowS : null,
         frameMsP50: percentile(intervalsMs, 0.5),
         frameMsP95: percentile(intervalsMs, 0.95),
         active,
@@ -271,14 +271,14 @@ export function summarizeTrace(events, measures, marks = { start: PAN_START_MARK
  *
  * @param {Array<object>} events - The trace's `traceEvents`.
  * @param {{start?: string, end?: string}} [marks] - The names of the marks that bound the idle window.
- * @return {{windowSeconds: number, drawFrameCount: number, drawsPerSecond: number | null}} The window length, the
+ * @return {{windowS: number, drawFrameCount: number, drawsPerSecond: number | null}} The window length, the
  *   `DrawFrame` events inside it and the draws per second (`null` if a mark is missing or the window is empty).
  */
 export function summarizeIdle(events, marks = { start: IDLE_START_MARK, end: IDLE_END_MARK }) {
     const startMark = events.find((event) => event.name === marks.start);
     const endMark = events.find((event) => event.name === marks.end);
-    if (!startMark || !endMark || endMark.ts <= startMark.ts) return { windowSeconds: 0, drawFrameCount: 0, drawsPerSecond: null };
-    const windowSeconds = (endMark.ts - startMark.ts) / 1e6;
+    if (!startMark || !endMark || endMark.ts <= startMark.ts) return { windowS: 0, drawFrameCount: 0, drawsPerSecond: null };
+    const windowS = (endMark.ts - startMark.ts) / 1e6;
     const drawFrameCount = events.filter((event) => event.name === 'DrawFrame' && event.ts >= startMark.ts && event.ts <= endMark.ts).length;
-    return { windowSeconds, drawFrameCount, drawsPerSecond: drawFrameCount / windowSeconds };
+    return { windowS, drawFrameCount, drawsPerSecond: drawFrameCount / windowS };
 }

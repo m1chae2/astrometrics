@@ -144,7 +144,7 @@ def test_the_adapter_leaves_registration_out_when_not_given() -> None:
 def test_the_runner_works_with_an_engine_that_is_not_siril(tmp_path: Path) -> None:
     """The runner needs only the engine contract, and records the engine."""
     engine = OtherEngine(tmp_path)
-    frames = [{"path": "a.fits", "exposure": "30"}, {"path": "b.fits", "exposure": "30"}]
+    frames = [{"path": "a.fits", "exposure_s": "30"}, {"path": "b.fits", "exposure_s": "30"}]
     path, diagnostics = run_stack(engine, frames, "M 42", "M_42_L_Stacked.fits", None, False)
     assert path == str(tmp_path / "M_42_L_Stacked.fits")
     assert engine.batches == [(2, None)]
@@ -162,7 +162,7 @@ def test_the_runner_hands_the_engine_the_pipelines_own_steps(tmp_path: Path) -> 
     )
 
     engine = OtherEngine(tmp_path)
-    run_stack(engine, [{"path": "a.fits", "exposure": "30"}], "M 42", "M_42_L_Stacked.fits", None, False)
+    run_stack(engine, [{"path": "a.fits", "exposure_s": "30"}], "M 42", "M_42_L_Stacked.fits", None, False)
     steps = engine.steps[0]
     assert steps is not None
     assert steps.assess_flats is assess_flats

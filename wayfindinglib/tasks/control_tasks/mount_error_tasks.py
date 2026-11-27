@@ -79,8 +79,8 @@ def _run_series(
         dec_error_arcsec=np.array([s["ddec"] for s in chosen], dtype=float),
         ra_pulse_ms=np.array([s.get("pulse_ra") or 0.0 for s in chosen], dtype=float),
         dec_pulse_ms=np.array([s.get("pulse_dec") or 0.0 for s in chosen], dtype=float),
-        ra_rate_arcsec_per_second=run.ra_rate_arcsec_per_second,
-        dec_rate_arcsec_per_second=run.dec_rate_arcsec_per_second,
+        ra_rate_arcsec_per_s=run.ra_rate_arcsec_per_s,
+        dec_rate_arcsec_per_s=run.dec_rate_arcsec_per_s,
     )
 
 
@@ -129,7 +129,7 @@ def measure_unguided_mount_error(
         message = (
             f"Measured {len(measured)} guiding run(s) on {len(summary.nights_used)} night(s); the repeating "
             f"error is {summary.periodic_error.amplitude_arcsec:.2f} arcsec (zero to peak) every "
-            f"{summary.periodic_error.period_seconds:.0f} s."
+            f"{summary.periodic_error.period_s:.0f} s."
         )
     else:
         message = f"Measured {len(measured)} guiding run(s); no run shows a significant repeating error."

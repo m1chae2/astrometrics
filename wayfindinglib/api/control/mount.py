@@ -118,7 +118,7 @@ class MountControl(ControlChild):
         and the downloaded Gaia star catalog. It finds the shortest exposure
         (from 1 to 30 s) at which enough catalog stars are bright enough to
         be detected for a plate solve. When an input is missing it gives
-        the fixed ``alignment_exposure_seconds`` setting and says which one.
+        the fixed ``alignment_exposure_s`` setting and says which one.
         It moves nothing and stores nothing.
 
         Owner:
@@ -137,7 +137,7 @@ class MountControl(ControlChild):
         Returns
         -------
         choice : `CenteringExposure`
-            ``exposure_seconds``, ``source`` (``"computed"`` or
+            ``exposure_s``, ``source`` (``"computed"`` or
             ``"fallback"``), ``reason``, the limiting magnitude and expected
             star count, ``catalog_is_lower_bound``, every number used, and
             ``trials`` (what each candidate exposure would show).

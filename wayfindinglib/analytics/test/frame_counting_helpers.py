@@ -37,9 +37,9 @@ def make_frame(
     *,
     target_id: str = "M 81",
     filter_value: FilterType | str = FilterType.L,
-    exposure: float = 60.0,
-    iso: str = "120",
-    offset: str = "10",
+    exposure_s: float = 60.0,
+    gain: int = 120,
+    offset: int = 10,
     binning: int | None = 1,
     camera: str = "Test Camera",
     telescope: str = "Test Scope",
@@ -58,12 +58,12 @@ def make_frame(
         The target folder name.
     filter_value : `FilterType` or `str`, optional
         The frame's filter.
-    exposure : `float`, optional
+    exposure_s : `float`, optional
         The exposure in seconds.
-    iso : `str`, optional
-        The gain, as the record keeps it.
-    offset : `str`, optional
-        The offset, as the record keeps it.
+    gain : `int`, optional
+        The gain setting.
+    offset : `int`, optional
+        The offset.
     binning : `int` or `None`, optional
         The binning factor.
     camera, telescope : `str`, optional
@@ -94,9 +94,9 @@ def make_frame(
         path="/".join(parts),
         filter=filter_value,
         role=role,
-        iso=iso,
+        gain=gain,
         offset=offset,
-        exposure=str(exposure),
+        exposure_s=exposure_s,
         timestamp=when.timestamp(),
         camera=camera,
         telescope=telescope,

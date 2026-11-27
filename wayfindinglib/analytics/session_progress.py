@@ -173,7 +173,7 @@ def _entry_progress(
             RowProgress(
                 source_key=row.source_key,
                 filter_name=str(row.filter.value),
-                exposure_sec=row.exposure_sec,
+                exposure_s=row.exposure_s,
                 requested=count.requested,
                 captured=count.captured,
                 judged=count.judged,

@@ -10,7 +10,7 @@ optics, cameras and mounts are configured once each and joined by the
 setups, one of which is active.
 """
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from astrometricslib import Camera, GuideScope, Telescope
 
@@ -23,7 +23,9 @@ class CoolingPolicy(BaseModel):
     target_temp_c: float = Field(default=-10.0)
     ramp_c_per_min: float = Field(default=2.0, gt=0.0)
     settle_tolerance_c: float = Field(default=0.5, gt=0.0)
-    settle_timeout_sec: int = Field(default=900, gt=0)
+    settle_timeout_s: int = Field(
+        default=900, gt=0, validation_alias=AliasChoices("settle_timeout_s", "settle_timeout_sec")
+    )
 
 
 class EquipmentCatalog(BaseModel):

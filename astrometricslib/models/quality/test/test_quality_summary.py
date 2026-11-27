@@ -172,7 +172,7 @@ def test_a_stored_stacking_summary_with_the_removed_yes_no_fields_still_loads() 
         "saturationFlagged": True,
         "zeroPixelFraction": 0.6,
         "zeroFractionFlagged": True,
-        "negativePixelMaxPercent": 70,
+        "negativePixelMaxPct": 70,
         "negativePixelsFlagged": True,
         "fwhmDegraded": True,
         "timedOut": True,
@@ -182,7 +182,7 @@ def test_a_stored_stacking_summary_with_the_removed_yes_no_fields_still_loads() 
 
     assert metrics.rejected_pixel_fraction == pytest.approx(0.2)
     assert metrics.zero_pixel_fraction == pytest.approx(0.6)
-    assert metrics.negative_pixel_max_percent == 70
+    assert metrics.negative_pixel_max_pct == 70
     for removed in ("rejected_fraction_flagged", "saturation_flagged", "fwhm_degraded", "timed_out"):
         assert not hasattr(metrics, removed)
 

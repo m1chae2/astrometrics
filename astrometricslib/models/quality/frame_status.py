@@ -38,8 +38,8 @@ class FrameStatus(BaseModel):
         The camera name from the frame's header (set-aside frames only).
     filter : `str`
         The filter name from the frame's header (set-aside frames only).
-    exposure : `str`
-        The exposure in seconds, for a set-aside frame; empty otherwise.
+    exposure_s : `float` or `None`
+        The exposure in seconds, for a set-aside frame; `None` otherwise.
     elongation : `float` or `None`
         For a flagged frame, the elongation of its stars (long axis over
         short axis); `None` otherwise.
@@ -61,7 +61,7 @@ class FrameStatus(BaseModel):
     date: str = ""
     camera: str = ""
     filter: str = ""
-    exposure: str = ""
+    exposure_s: float | None = Field(default=None, alias="exposureS")
     elongation: float | None = None
     original_path: str | None = Field(default=None, alias="originalPath")
     restorable: bool = False

@@ -55,7 +55,7 @@ def _entry(entry_id: str, target_id: str, count: int, **changes: object) -> Queu
         The entry.
     """
     row = ExposureRequest(
-        frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=count, counted_from=START
+        frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=count, counted_from=START
     )
     return QueuedObservationPackage(
         id=entry_id,

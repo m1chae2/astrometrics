@@ -57,7 +57,7 @@ SERVICE_COMMANDS: dict[str, dict[str, Any]] = {
     "telescope:slew_coordinates": {"ra": 1.0, "dec": 20.0},
     "telescope:slew_target": {"target_name": "M 81"},
     "guiding:capture_frame": {"exposure": 1.0},
-    "imaging:capture": {"target_id": "M 81", "exposure_seconds": 1.0, "count": 1},
+    "imaging:capture": {"target_id": "M 81", "exposure_s": 1.0, "count": 1},
     "guiding:stop": {},
     "imaging:stop_capture": {},
     "telescope:alignment_stop": {},

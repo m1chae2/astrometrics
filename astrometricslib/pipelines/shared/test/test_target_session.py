@@ -40,8 +40,8 @@ def test_compute_session_night_after_noon_belongs_to_same_night() -> None:
 def test_derive_target_sessions_groups_by_night_gain_and_offset() -> None:
     """Verifies frames from one night/config land in a single TargetSession."""
     frames = [
-        FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
-        FrameRecord(path="b.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 16, 1, 0)),
+        FrameRecord(path="a.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 15, 21, 0)),
+        FrameRecord(path="b.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 16, 1, 0)),
     ]
     sessions = derive_target_sessions("M 13", frames)
     assert len(sessions) == 1
@@ -52,14 +52,12 @@ def test_derive_target_sessions_groups_by_night_gain_and_offset() -> None:
 def test_derive_target_sessions_rejoins_non_contiguous_frames_same_night() -> None:
     """Verify same night/config frames merge even if not contiguous."""
     frames = [
-        FrameRecord(path="early.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 20, 0)),
-        FrameRecord(
-            path="other_target.fits", iso="200", offset="10", timestamp=_timestamp(2026, 7, 15, 22, 0)
-        ),
-        FrameRecord(path="late.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 16, 2, 0)),
+        FrameRecord(path="early.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 15, 20, 0)),
+        FrameRecord(path="other_target.fits", gain=200, offset=10, timestamp=_timestamp(2026, 7, 15, 22, 0)),
+        FrameRecord(path="late.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 16, 2, 0)),
     ]
     sessions = derive_target_sessions("M 13", frames)
-    matching_gain_sessions = [session for session in sessions if session.gain == "100"]
+    matching_gain_sessions = [session for session in sessions if session.gain == 100]
     assert len(matching_gain_sessions) == 1
     assert sorted(matching_gain_sessions[0].frame_paths) == ["early.fits", "late.fits"]
 
@@ -67,33 +65,33 @@ def test_derive_target_sessions_rejoins_non_contiguous_frames_same_night() -> No
 def test_derive_target_sessions_splits_on_gain_change() -> None:
     """Verifies a gain change within the same night starts a new session."""
     frames = [
-        FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
-        FrameRecord(path="b.fits", iso="200", offset="10", timestamp=_timestamp(2026, 7, 15, 22, 0)),
+        FrameRecord(path="a.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 15, 21, 0)),
+        FrameRecord(path="b.fits", gain=200, offset=10, timestamp=_timestamp(2026, 7, 15, 22, 0)),
     ]
     sessions = derive_target_sessions("M 13", frames)
     assert len(sessions) == 2
-    assert {session.gain for session in sessions} == {"100", "200"}
+    assert {session.gain for session in sessions} == {100, 200}
 
 
 def test_derive_target_sessions_splits_on_offset_change() -> None:
     """Verifies an offset change within the same night starts a new session."""
     frames = [
-        FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
-        FrameRecord(path="b.fits", iso="100", offset="20", timestamp=_timestamp(2026, 7, 15, 22, 0)),
+        FrameRecord(path="a.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 15, 21, 0)),
+        FrameRecord(path="b.fits", gain=100, offset=20, timestamp=_timestamp(2026, 7, 15, 22, 0)),
     ]
     sessions = derive_target_sessions("M 13", frames)
     assert len(sessions) == 2
-    assert {session.offset for session in sessions} == {"10", "20"}
+    assert {session.offset for session in sessions} == {10, 20}
 
 
 def test_derive_target_sessions_ignores_filter_and_exposure_changes() -> None:
     """Verifies filter/exposure changes do not split a session."""
     frames = [
         FrameRecord(
-            path="a.fits", iso="100", offset="10", exposure="60", timestamp=_timestamp(2026, 7, 15, 21, 0)
+            path="a.fits", gain=100, offset=10, exposure_s=60, timestamp=_timestamp(2026, 7, 15, 21, 0)
         ),
         FrameRecord(
-            path="b.fits", iso="100", offset="10", exposure="120", timestamp=_timestamp(2026, 7, 15, 22, 0)
+            path="b.fits", gain=100, offset=10, exposure_s=120, timestamp=_timestamp(2026, 7, 15, 22, 0)
         ),
     ]
     sessions = derive_target_sessions("M 13", frames)
@@ -103,7 +101,7 @@ def test_derive_target_sessions_ignores_filter_and_exposure_changes() -> None:
 def test_derive_target_sessions_produces_deterministic_ids() -> None:
     """Verify the session id derives from target_id, night, gain, offset."""
     frames = [
-        FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
+        FrameRecord(path="a.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 15, 21, 0)),
     ]
     sessions = derive_target_sessions("M 13", frames)
     assert sessions[0].id == "M 13:2026-07-15:100:10"
@@ -112,8 +110,8 @@ def test_derive_target_sessions_produces_deterministic_ids() -> None:
 def test_derive_target_sessions_skips_frames_without_timestamp() -> None:
     """Verify frames with no capture timestamp are excluded, not crashed on."""
     frames = [
-        FrameRecord(path="a.fits", iso="100", offset="10", timestamp=None),
-        FrameRecord(path="b.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
+        FrameRecord(path="a.fits", gain=100, offset=10, timestamp=None),
+        FrameRecord(path="b.fits", gain=100, offset=10, timestamp=_timestamp(2026, 7, 15, 21, 0)),
     ]
     sessions = derive_target_sessions("M 13", frames)
     assert len(sessions) == 1

@@ -10,7 +10,7 @@ be revised from the first real distribution of Phase 2 divergence data
 design estimates, per `Wayfinding_Library_Architecture.md` Section 7.2).
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class CorrectionConfig(BaseModel):
@@ -35,9 +35,13 @@ class CorrectionConfig(BaseModel):
     # under a dark sky (about 1.9 arcsec per pixel, 1.6 degree field). Design
     # estimate: the model uses a photometric zero point that is still being
     # checked (issue #161); the real-data check is register entry WAY-D122.
-    alignment_exposure_seconds: float = Field(default=5.0, gt=0.0)
+    alignment_exposure_s: float = Field(
+        default=5.0,
+        gt=0.0,
+        validation_alias=AliasChoices("alignment_exposure_s", "alignment_exposure_seconds"),
+    )
     # Off until the exposure model passes its real-data check (WAY-D122,
-    # issue #161). Until then centering uses `alignment_exposure_seconds`.
+    # issue #161). Until then centering uses `alignment_exposure_s`.
     alignment_exposure_from_equipment: bool = False
 
     # Focus

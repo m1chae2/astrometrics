@@ -68,17 +68,17 @@ def test_result_effective_time_follows_eta() -> None:
         "goal": ScienceGoal.FAINT_POINT_SOURCE,
         "regime": NoiseRegime.SKY_LIMITED,
         "reference": _reference(),
-        "captured_seconds": 3600.0,
+        "captured_s": 3600.0,
     }
-    result = EfficiencyResult(eta=0.5, efficiency_effective_seconds=1800.0, **base)
+    result = EfficiencyResult(eta=0.5, efficiency_effective_s=1800.0, **base)
     dumped = result.model_dump(by_alias=True, mode="json")
-    assert dumped["efficiencyEffectiveSeconds"] == pytest.approx(1800.0)
+    assert dumped["efficiencyEffectiveS"] == pytest.approx(1800.0)
     assert EfficiencyResult.model_validate(dumped) == result
     assert EfficiencyResult(**base).eta is None
     with pytest.raises(ValidationError, match="both"):
         EfficiencyResult(eta=0.5, **base)
     with pytest.raises(ValidationError):
-        EfficiencyResult(eta=1.5, efficiency_effective_seconds=1.0, **base)
+        EfficiencyResult(eta=1.5, efficiency_effective_s=1.0, **base)
 
 
 def test_noise_regime_has_the_four_documented_values() -> None:
@@ -96,18 +96,18 @@ def test_loss_account_needs_reasons_and_round_trips() -> None:
     account = LossAccount(
         goal=ScienceGoal.FAINT_POINT_SOURCE,
         reference_name="physical",
-        set_aside_seconds=300.0,
+        set_aside_s=300.0,
         set_aside=[LossShare(cause="cloud", seconds=300.0, recoverable_with_time=True, model_derived=False)],
         kept_frame_deficit=[
             LossShare(cause="seeing", seconds=120.0, recoverable_with_time=True, model_derived=False)
         ],
-        cause_unknown_seconds=None,
+        cause_unknown_s=None,
         cause_unknown_reason="Efficiency is not measured independently of the causes.",
         transparency_included=False,
         transparency_reason="No zero point that is not exploratory exists yet.",
     )
     dumped = account.model_dump(by_alias=True, mode="json")
-    assert dumped["causeUnknownSeconds"] is None
+    assert dumped["causeUnknownS"] is None
     assert LossAccount.model_validate(dumped) == account
     with pytest.raises(ValidationError):
         LossAccount.model_validate({**dumped, "causeUnknownReason": ""})
@@ -120,12 +120,12 @@ def test_capture_setting_summary_round_trips() -> None:
         frames_taken=40,
         nights=2,
         frames_set_aside=3,
-        captured_seconds=2400.0,
-        weight_effective_seconds=2100.0,
+        captured_s=2400.0,
+        weight_effective_s=2100.0,
     )
     dumped = summary.model_dump(by_alias=True, mode="json")
     assert dumped["framesSetAside"] == 3
-    assert dumped["efficiencyEffectiveSeconds"] is None
+    assert dumped["efficiencyEffectiveS"] is None
     assert CaptureSettingSummary.model_validate(dumped) == summary
     with pytest.raises(ValidationError):
         CaptureSettingSummary.model_validate({**dumped, "framesTaken": -1})

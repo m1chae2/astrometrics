@@ -106,7 +106,7 @@ def make_frame() -> Any:
             "path": f"/frames/Target_Light_{index:03d}.fits",
             "target_id": "Target",
             "timestamp": NIGHT_START + 60.0 * index,
-            "exposure_seconds": 30.0,
+            "exposure_s": 30.0,
             "filter_name": "Luminance",
             "is_spectral": False,
             "sensor_temperature_c": -10.0,
@@ -114,8 +114,8 @@ def make_frame() -> Any:
             "background_adu": 100.0,
             "star_width_arcsec": 5.5,
             "roundness": 0.86,
-            "altitude_degrees": 50.0,
-            "azimuth_degrees": 180.0,
+            "altitude_deg": 50.0,
+            "azimuth_deg": 180.0,
             "pier_side": "East",
             "pixel_scale_arcsec": 2.0,
         }
@@ -147,7 +147,7 @@ def make_capture() -> Any:
         """
         fields: dict[str, Any] = {
             "completed_at": NIGHT_START + 60.0 * index + 30.0 + 2.0,
-            "exposure_seconds": 30.0,
+            "exposure_s": 30.0,
             "filter_name": "Luminance",
             "file_path": f"/home/stellarmate/Pictures/Target/Light/Target_Light_{index:03d}.fits",
         }

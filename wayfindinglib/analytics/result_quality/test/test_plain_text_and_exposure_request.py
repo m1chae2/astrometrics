@@ -69,9 +69,7 @@ def _statement(
         action_class=ActionClass.CAPTURE_SETTINGS,
         capture_setting=setting if setting is not None else _setting(),
         message="m",
-        proposed_action=action
-        if action is not None
-        else ProposedAction(frame_count=20, exposure_seconds=90.0),
+        proposed_action=action if action is not None else ProposedAction(frame_count=20, exposure_s=90.0),
         confidence=Confidence.DESIGN_ESTIMATE,
     )
 
@@ -111,7 +109,7 @@ def test_format_plain_fails_loudly_when_a_field_is_missing() -> None:
     with pytest.raises(KeyError):
         format_plain(rule, {})
     assert "30 degrees" in format_plain(
-        rule, {"altitude_degrees": 30.0, "loss_percent": 38.0, "advice_altitude_degrees": 30.0}
+        rule, {"altitude_deg": 30.0, "loss_percent": 38.0, "advice_altitude_degrees": 30.0}
     )
 
 
@@ -139,23 +137,23 @@ def test_more_frames_makes_a_light_row_from_the_proposal_and_the_setting() -> No
     assert request.frame_type == FrameType.LIGHT
     assert request.filter == FilterType.Ha
     assert request.count == 20
-    assert request.exposure_sec == pytest.approx(90.0)
-    assert (request.gain_setting, request.offset, request.binning) == (100, 50, 1)
+    assert request.exposure_s == pytest.approx(90.0)
+    assert (request.gain, request.offset, request.binning) == (100, 50, 1)
 
 
 def test_the_exposure_falls_back_to_the_setting_when_the_proposal_has_none() -> None:
     """A proposal with only a count uses the setting's own exposure."""
     request = exposure_request_from_statement(_statement(action=ProposedAction(frame_count=5)))
     assert request is not None
-    assert request.exposure_sec == pytest.approx(120.0)
+    assert request.exposure_s == pytest.approx(120.0)
 
 
 def test_the_proposal_overrides_the_setting_for_gain_offset_and_binning() -> None:
     """A proposed gain, offset or binning wins over the capture setting's."""
-    action = ProposedAction(frame_count=5, exposure_seconds=60.0, gain_setting=120, offset=30, binning=2)
+    action = ProposedAction(frame_count=5, exposure_s=60.0, gain=120, offset=30, binning=2)
     request = exposure_request_from_statement(_statement(action=action))
     assert request is not None
-    assert (request.gain_setting, request.offset, request.binning) == (120, 30, 2)
+    assert (request.gain, request.offset, request.binning) == (120, 30, 2)
 
 
 @pytest.mark.parametrize(
@@ -200,7 +198,7 @@ def test_calibration_actions_and_other_rules_make_no_row() -> None:
     assert exposure_request_from_statement(_statement(rule="more_frames", action=flats)) is None
     assert exposure_request_from_statement(_statement(rule="master_flat_noisy", action=flats)) is None
     assert exposure_request_from_statement(_statement(rule="underexposed_setting")) is None
-    assert exposure_request_from_statement(_statement(action=ProposedAction(exposure_seconds=60.0))) is None
+    assert exposure_request_from_statement(_statement(action=ProposedAction(exposure_s=60.0))) is None
     assert exposure_request_from_statement(_statement(action=ProposedAction(note="n"))) is None
 
 
@@ -244,4 +242,4 @@ def test_a_diminishing_returns_statement_asks_for_the_doubling_frames() -> None:
     request = exposure_request_from_statement(statement)
     assert request is not None
     assert request.count == 44
-    assert request.exposure_sec == pytest.approx(30.0)
+    assert request.exposure_s == pytest.approx(30.0)

@@ -589,7 +589,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     SessionNoiseInputs.from_analyzer_results(
                         session.id,
                         analyzer.stellar_objects,
-                        analyzer.frame_exposure_seconds,
+                        analyzer.frame_exposure_s,
                         analyzer.detector_noise,
                         analyzer.scintillation_fraction_by_frame,
                     )

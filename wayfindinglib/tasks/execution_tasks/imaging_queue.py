@@ -86,11 +86,11 @@ def capture_entry(context: ControlContext, entry: QueuedObservationPackage) -> t
         try:
             result = capture_frames(
                 context,
-                request.exposure_sec,
+                request.exposure_s,
                 count=request.count,
                 filter_name=filter_name(request.filter),
                 dither=entry.dither_config or False,
-                delay_s=request.delay_sec,
+                delay_s=request.delay_s,
             )
         except AstrometricsError as error:
             logger.warning("Capture for %s stopped: %s", entry.target_id, error.message)

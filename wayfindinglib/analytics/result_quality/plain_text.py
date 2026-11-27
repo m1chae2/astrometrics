@@ -72,12 +72,12 @@ def spectral_type_phrase(spectral_type: str) -> str:
     return f"{article} {color} {letter}-type star"
 
 
-def exposure_phrases(exposure_seconds: float | None) -> dict[str, str]:
+def exposure_phrases(exposure_s: float | None) -> dict[str, str]:
     """Write a capture setting's exposure as phrases for plain templates.
 
     Parameters
     ----------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure of one frame, in seconds, or ``None`` when the setting
         does not say.
 
@@ -88,11 +88,11 @@ def exposure_phrases(exposure_seconds: float | None) -> dict[str, str]:
         ``exposure_clause`` (``"90 s "`` or an empty string, to put before the
         word "frames").
     """
-    if exposure_seconds is None:
+    if exposure_s is None:
         return {"exposure_phrase": "these frames", "exposure_clause": ""}
     return {
-        "exposure_phrase": f"the {exposure_seconds:g} s frames",
-        "exposure_clause": f"{exposure_seconds:g} s ",
+        "exposure_phrase": f"the {exposure_s:g} s frames",
+        "exposure_clause": f"{exposure_s:g} s ",
     }
 
 

@@ -126,7 +126,7 @@ def exposures_from_plan_items(plan_items: list[dict[str, Any]]) -> list[Exposure
     Parameters
     ----------
     plan_items : `list` [`dict`]
-        Each item's ``count``, ``exposure`` (seconds), ``filter`` (``"L"``
+        Each item's ``count``, ``exposure_s`` (seconds), ``filter`` (``"L"``
         when missing) and optional frame ``type`` (``"LIGHT"`` when missing).
 
     Returns
@@ -150,7 +150,7 @@ def exposures_from_plan_items(plan_items: list[dict[str, Any]]) -> list[Exposure
                 ExposureRequest(
                     frame_type=frame_type,
                     filter=_filter_type(str(item.get("filter") or "L")),
-                    exposure_sec=float(item.get("exposure", 0.0)),
+                    exposure_s=float(item.get("exposure_s", 0.0)),
                     count=int(item.get("count", 0)),
                 )
             )
@@ -650,7 +650,7 @@ class PlanService:
         elif set_exposures is not None:
             exposures = {
                 entry_id: _model_list(
-                    ExposureRequest, rows, "Each exposure request needs frame_type, exposure_sec and count."
+                    ExposureRequest, rows, "Each exposure request needs frame_type, exposure_s and count."
                 )
                 for entry_id, rows in set_exposures.items()
             }

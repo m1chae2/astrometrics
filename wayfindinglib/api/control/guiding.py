@@ -396,7 +396,7 @@ class GuidingControl(ControlChild):
 
     def _run_exposure_test(
         self,
-        exposure_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
+        exposure_s: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
         frames_per_exposure: int | None = None,
         gain: float | None = None,
     ) -> GuideExposureLadder:
@@ -412,7 +412,7 @@ class GuidingControl(ControlChild):
 
         Parameters
         ----------
-        exposure_seconds : `tuple` [`float`, ...], optional
+        exposure_s : `tuple` [`float`, ...], optional
             The exposure lengths to try.
         frames_per_exposure : `int`, optional
             Frames at each length. At least 5 are needed. `None` uses
@@ -463,7 +463,7 @@ class GuidingControl(ControlChild):
         frames = guide_exposure_ladder_tasks.capture_guide_ladder(
             lambda seconds, camera_gain: hardware_operations.guide_expose(context, seconds, camera_gain),
             lambda: hardware_operations.guide_image(context),
-            exposure_seconds,
+            exposure_s,
             frames_per_exposure,
             gain,
         )

@@ -1,12 +1,12 @@
 """Purpose: The imaging sequence plan the app's sequencer queue runs.
 
 Description: `ObservationPlanning.create_sequence` turns a
-list of ``{count, exposure, filter}`` items for one target into a
+list of ``{count, exposure_s, filter}`` items for one target into a
 `SequencePlan`, adding each item's duration and the plan's total. The
 plan is not stored; the backend's sequencer keeps it in its own queue.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class SequenceItem(BaseModel):
@@ -14,7 +14,9 @@ class SequenceItem(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
     count: int = Field(..., alias="count")
-    exposure: float = Field(..., alias="exposure")
+    exposure_s: float = Field(
+        ..., alias="exposure_s", validation_alias=AliasChoices("exposure_s", "exposure")
+    )
     filter: str = Field(..., alias="filter")
     duration: float = Field(..., alias="duration")
 

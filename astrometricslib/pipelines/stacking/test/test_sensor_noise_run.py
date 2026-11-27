@@ -148,7 +148,7 @@ def test_the_catalog_measures_a_setting_from_its_frames(catalog: CalibrationCata
     assert result.read_noise_adu == pytest.approx(TRUE_READ_NOISE_ADU, rel=0.03)
     assert result.flat_pair_count == 6
     assert result.bias_pair_count == 4
-    assert (result.gain_setting, result.offset, result.binning) == ("0", "10", "1x1")
+    assert (result.gain, result.offset, result.binning) == (0, 10, "1x1")
     assert result.saved is False
 
 
@@ -283,7 +283,7 @@ def test_a_camera_with_one_library_setting_needs_no_setting(catalog: Calibration
     result = catalog.measure_sensor_noise(TEST_CAMERA)
 
     assert result.status == MeasurementStatus.MEASURED, result.reason
-    assert (result.gain_setting, result.offset, result.binning) == ("0", "10", "1x1")
+    assert (result.gain, result.offset, result.binning) == (0, 10, "1x1")
 
 
 def test_a_left_out_gain_is_refused_when_two_settings_fit(
@@ -303,7 +303,7 @@ def test_a_left_out_gain_is_refused_when_two_settings_fit(
     with pytest.raises(InvalidArgumentError, match="gain 100"):
         catalog.measure_sensor_noise(TEST_CAMERA, CaptureSetting(camera=CAMERA, offset=10))
     chosen = catalog.measure_sensor_noise(TEST_CAMERA, CaptureSetting(camera=CAMERA, gain=0))
-    assert chosen.gain_setting == "0"
+    assert chosen.gain == 0
 
 
 def test_a_setting_of_another_camera_is_refused(

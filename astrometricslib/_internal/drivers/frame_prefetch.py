@@ -52,7 +52,7 @@ class PrefetchSummary:
         Files that could not be read (an error part-way counts as a failure).
     skipped_missing_count : `int`
         Paths skipped because no file exists there.
-    elapsed_seconds : `float`
+    elapsed_s : `float`
         Wall-clock time the pass took.
     """
 
@@ -60,7 +60,7 @@ class PrefetchSummary:
     byte_count: int
     failure_count: int
     skipped_missing_count: int
-    elapsed_seconds: float
+    elapsed_s: float
 
 
 def _read_whole_file(path: str, chunk_bytes: int) -> int:
@@ -137,5 +137,5 @@ def prefetch_frames(
         byte_count=byte_count,
         failure_count=failure_count,
         skipped_missing_count=skipped_missing_count,
-        elapsed_seconds=time.monotonic() - started_at,
+        elapsed_s=time.monotonic() - started_at,
     )

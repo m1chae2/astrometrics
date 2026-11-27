@@ -514,7 +514,7 @@ def test_the_extended_target_never_re_detects_the_tilt_on_the_nebula(monkeypatch
 
         Returns
         -------
-        angle_degrees, contrast_sigma : `tuple` [`float`, `float`]
+        angle_deg, contrast_sigma : `tuple` [`float`, `float`]
             A fixed, confident measurement, so this position always wins.
         """
         measured_positions.append(star_pos)

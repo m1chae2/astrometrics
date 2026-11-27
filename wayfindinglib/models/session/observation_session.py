@@ -35,7 +35,7 @@ from datetime import UTC, date, datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting
 from astrometricslib.exceptions import ConflictError
@@ -119,7 +119,11 @@ class WeatherSample(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     time: float = Field(..., ge=0.0)
     ambient_temperature_c: float | None = Field(None, alias="ambientTemperatureC")
-    humidity_percent: float | None = Field(None, alias="humidityPercent")
+    humidity_pct: float | None = Field(
+        None,
+        alias="humidityPct",
+        validation_alias=AliasChoices("humidityPct", "humidity_pct", "humidityPercent", "humidity_percent"),
+    )
     dew_point_c: float | None = Field(None, alias="dewPointC")
 
 

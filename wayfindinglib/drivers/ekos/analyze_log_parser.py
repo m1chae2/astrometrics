@@ -199,9 +199,9 @@ def parse_ekos_analyze_log(file_path: str) -> tuple[EkosSessionContext, list[Eko
                 mount_positions.append(
                     EkosMountPosition(
                         timestamp=timestamp,
-                        declination_degrees=float(fields[3]),
-                        azimuth_degrees=float(fields[4]),
-                        altitude_degrees=float(fields[5]),
+                        declination_deg=float(fields[3]),
+                        azimuth_deg=float(fields[4]),
+                        altitude_deg=float(fields[5]),
                         pier_side=_PIER_SIDE_BY_CODE.get(int(float(fields[6]))),
                     )
                 )
@@ -213,7 +213,7 @@ def parse_ekos_analyze_log(file_path: str) -> tuple[EkosSessionContext, list[Eko
                 captures.append(
                     EkosCapture(
                         completed_at=timestamp,
-                        exposure_seconds=float(fields[2]),
+                        exposure_s=float(fields[2]),
                         filter_name=fields[3],
                         half_flux_radius_px=_measured_or_none(float(fields[4])),
                         file_path=fields[5],
@@ -223,9 +223,7 @@ def parse_ekos_analyze_log(file_path: str) -> tuple[EkosSessionContext, list[Eko
                     )
                 )
             elif record_type == "CaptureAborted" and len(fields) >= 3:
-                aborted_captures.append(
-                    EkosAbortedCapture(timestamp=timestamp, exposure_seconds=float(fields[2]))
-                )
+                aborted_captures.append(EkosAbortedCapture(timestamp=timestamp, exposure_s=float(fields[2])))
             elif record_type in ("AutofocusComplete", "AutofocusAborted"):
                 autofocus_runs.append(
                     _parse_autofocus_run(fields, timestamp, record_type == "AutofocusComplete")

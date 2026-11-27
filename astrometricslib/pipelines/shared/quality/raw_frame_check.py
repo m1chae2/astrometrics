@@ -751,7 +751,7 @@ def _detect_straight_trail(
     Returns
     -------
     trail : `tuple` [`int`, `float`] or `None`
-        ``(length_px, angle_degrees)`` of the longest trail, or `None` if
+        ``(length_px, angle_deg)`` of the longest trail, or `None` if
         there is none. The angle runs from the +x axis (along the rows)
         towards +y (down the array), in [0, 180).
     """
@@ -804,7 +804,7 @@ def detect_stars(
     longest_blob_pixels : `int`
         The longest extent of any bright region.
     straight_trail : `tuple` [`int`, `float`] or `None`
-        ``(length_px, angle_degrees)`` of the longest faint straight trail
+        ``(length_px, angle_deg)`` of the longest faint straight trail
         (see `_detect_straight_trail`), or `None` if there is none.
     """
     if trail_min_diagonal_fraction is None:

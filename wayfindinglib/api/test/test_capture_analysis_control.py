@@ -129,7 +129,7 @@ def test_a_clipped_spectral_star_is_found_from_the_frames_alone(
         library,
         0,
         is_spectral=True,
-        exposure_seconds=2.0,
+        exposure_s=2.0,
         filter_name="Star Analyzer 200",
         saturated_pixel_fraction=0.01,
     )

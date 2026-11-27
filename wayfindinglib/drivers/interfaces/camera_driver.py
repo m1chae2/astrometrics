@@ -28,7 +28,7 @@ class CameraDriver(ProtocolDriver):
         """Which camera on the rig this driver instance controls."""
 
     @abc.abstractmethod
-    async def expose(self, exposure_seconds: float, gain: float | None = None) -> Any:
+    async def expose(self, exposure_s: float, gain: float | None = None) -> Any:
         """Start an exposure on this camera.
 
         Returns

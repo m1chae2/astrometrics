@@ -253,8 +253,8 @@ def _target_quality(
         goal=goal,
         frames_taken=summary.frames_taken,
         frames_set_aside=summary.frames_set_aside,
-        captured_seconds=summary.captured_seconds,
-        efficiency_effective_seconds=summary.efficiency_effective_seconds,
+        captured_s=summary.captured_s,
+        efficiency_effective_s=summary.efficiency_effective_s,
         capture_settings=summary.setting_summaries,
         loss_account=summary.loss_account,
         statements=statements,
@@ -746,10 +746,8 @@ def _summary_by_goal(
                 moonless_sky_rate_by_frame=moonless_sky_rate_by_frame,
             ),
         ))
-    parts.sort(key=lambda part: (-part[1].captured_seconds, part[0].value))
-    effective = [
-        p.efficiency_effective_seconds for _g, p in parts if p.efficiency_effective_seconds is not None
-    ]
+    parts.sort(key=lambda part: (-part[1].captured_s, part[0].value))
+    effective = [p.efficiency_effective_s for _g, p in parts if p.efficiency_effective_s is not None]
     summaries = [
         item.model_copy(update={"science_goal": group_goal})
         for group_goal, part in parts
@@ -767,8 +765,8 @@ def _summary_by_goal(
         nights=sorted({n for _g, part in parts for n in part.nights}),
         frames_taken=sum(p.frames_taken for _g, p in parts),
         frames_set_aside=sum(p.frames_set_aside for _g, p in parts),
-        captured_seconds=sum(p.captured_seconds for _g, p in parts),
-        efficiency_effective_seconds=sum(effective) if effective else None,
+        captured_s=sum(p.captured_s for _g, p in parts),
+        efficiency_effective_s=sum(effective) if effective else None,
         setting_summaries=summaries,
         loss_account=None,
         notes=notes,
@@ -824,7 +822,7 @@ def _unobserved_set_aside(
         setting = capture_settings[setting_id]
         found[frame_id] = SetAsideInput(
             frame_id=frame_id,
-            exposure_seconds=setting.exposure_s or 0.0,
+            exposure_s=setting.exposure_s or 0.0,
             reason=reasons[frame_id],
             capture_setting=setting,
             night_id=night_id,

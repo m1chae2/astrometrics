@@ -105,7 +105,7 @@ def _fake_analyzer(star_ids: list[str], failure_reason: str | None) -> SimpleNam
         comparison_set=None,
         session_zero_points=None,
         centroid_shift_summary=lambda: None,
-        frame_exposure_seconds={},
+        frame_exposure_s={},
         detector_noise=DetectorNoise(),
         scintillation=None,
         scintillation_fraction_by_frame={},

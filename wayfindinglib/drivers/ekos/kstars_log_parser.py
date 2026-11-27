@@ -104,10 +104,10 @@ def parse_dither_events(file_path: str) -> list[DitherEvent]:
         elif "Dithering failed" in line:
             current.succeeded = False
         elif (settle_match := _SETTLE_PATTERN.search(line)) is not None:
-            current.settle_seconds = float(settle_match.group("seconds"))
+            current.settle_s = float(settle_match.group("seconds"))
         elif "Dithering completed successfully" in line:
             if current.succeeded is None:
                 current.succeeded = True
-            current.duration_seconds = timestamp - current.timestamp
+            current.duration_s = timestamp - current.timestamp
             current = None
     return events

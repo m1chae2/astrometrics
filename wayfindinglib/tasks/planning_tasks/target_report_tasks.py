@@ -663,7 +663,7 @@ def _stack_frames(
         frames.append(
             StackFrame(
                 frame_id=observation.frame_id,
-                exposure_seconds=float(exposure),
+                exposure_s=float(exposure),
                 sky_rate_e_per_s_per_px=float(observation.sky_rate_e_per_s_per_px),
                 read_noise_e=float(observation.read_noise_e),
                 star_width=observation.star_width_effective_arcsec,
@@ -1018,7 +1018,7 @@ def _more_frames_for_setting(
         return [insufficient("more_frames", reason, setting)]
     mode = predict_weighting_mode(
         configured_weight,
-        [frame.exposure_seconds for frame in frames],
+        [frame.exposure_s for frame in frames],
         is_spectral=setting.is_spectral,
     )
     setting_runs, newest_run, run_groups, stack_frames = _stack_of_setting(
@@ -1051,7 +1051,7 @@ def _more_frames_for_setting(
                 setting,
             )
         ]
-    new_exposure = setting.exposure_s or statistics.median(frame.exposure_seconds for frame in frames)
+    new_exposure = setting.exposure_s or statistics.median(frame.exposure_s for frame in frames)
     note = ""
     sky_noise = median_or_none(
         math.sqrt(o.sky_rate_e_per_s_per_px * (o.effective_exposure_seconds or 0.0))
@@ -1081,7 +1081,7 @@ def _more_frames_for_setting(
     # A single-group stack becomes a group stack when the new frames have an
     # exposure length that is not the stack's: the stacker then makes a new
     # group of them, and the flat model no longer describes the stack.
-    stack_lengths = [frame.exposure_seconds for frame in stack_frames]
+    stack_lengths = [frame.exposure_s for frame in stack_frames]
     becomes_group_stack = not stack_is_groups and (
         len(
             set(
@@ -1196,7 +1196,7 @@ def _point_fixed_pattern_at_calibration(statements: Sequence[TargetStatement]) -
 
 
 def _with_full_wall_clock(
-    statement: TargetStatement, frame_count: int, exposure_seconds: float, overheads: Any
+    statement: TargetStatement, frame_count: int, exposure_s: float, overheads: Any
 ) -> TargetStatement:
     """Price the new frames with their dithers and autofocus runs as well.
 
@@ -1212,7 +1212,7 @@ def _with_full_wall_clock(
         The "take N more" recommendation.
     frame_count : `int`
         Frames to take.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure of each.
     overheads : `CaptureOverheads`
         Download, settle and autofocus times.
@@ -1222,10 +1222,10 @@ def _with_full_wall_clock(
     statement : `TargetStatement`
         A copy with the full wall-clock time in its message and effect.
     """
-    downloads_only = wall_clock_estimate(frame_count, exposure_seconds, overheads)
+    downloads_only = wall_clock_estimate(frame_count, exposure_s, overheads)
     without_focus = wall_clock_estimate(
         frame_count,
-        exposure_seconds,
+        exposure_s,
         overheads,
         dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
     )
@@ -1235,7 +1235,7 @@ def _with_full_wall_clock(
     )
     full = wall_clock_estimate(
         frame_count,
-        exposure_seconds,
+        exposure_s,
         overheads,
         dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
         autofocus_runs=focus_runs,
@@ -1245,7 +1245,7 @@ def _with_full_wall_clock(
     update: dict[str, Any] = {"message": statement.message.replace(old_text, new_text)}
     if statement.expected_effect is not None:
         update["expected_effect"] = statement.expected_effect.model_copy(
-            update={"wall_clock_seconds": full.total_seconds}
+            update={"wall_clock_s": full.total_seconds}
         )
     return statement.model_copy(update=update)
 
@@ -1411,7 +1411,7 @@ def _quality_statements_of_settings(
         if frames and all(width is not None for width in widths):
             mode = predict_weighting_mode(
                 configured_weight,
-                [frame.exposure_seconds for frame in frames],
+                [frame.exposure_s for frame in frames],
                 is_spectral=setting.is_spectral,
             )
             width_values = [float(w) for w in widths if w is not None]
@@ -1468,7 +1468,7 @@ def _quality_statements_of_settings(
             for result in efficiency.frame_results:
                 altitude = altitudes.get(result.frame_id)
                 if result.eta is not None and altitude is not None:
-                    samples.append(AltitudeSample(altitude, result.eta, result.exposure_seconds))
+                    samples.append(AltitudeSample(altitude, result.eta, result.exposure_s))
                     observation = by_frame_exposure.get(result.frame_id)
                     if observation is not None:
                         evidence_rows.extend(
@@ -1747,7 +1747,7 @@ def _guiding_exposure_statements(
                 FrameWindow(
                     frame_id=o.frame_id,
                     start_epoch_seconds=o.start_epoch_seconds,
-                    exposure_seconds=float(setting.exposure_s),
+                    exposure_s=float(setting.exposure_s),
                 )
                 for o in kept
             ],

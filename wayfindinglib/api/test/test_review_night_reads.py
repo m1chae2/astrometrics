@@ -47,7 +47,7 @@ def _position(ra_deg: float, dec_deg: float, timestamp: float) -> EkosMountPosit
         Time(timestamp, format="unix"),
     )
     return EkosMountPosition(
-        timestamp=timestamp, declination_degrees=dec_deg, altitude_degrees=altitude, azimuth_degrees=azimuth
+        timestamp=timestamp, declination_deg=dec_deg, altitude_deg=altitude, azimuth_deg=azimuth
     )
 
 

@@ -7,7 +7,7 @@ one such setting and its loss account. It is computed when read and never
 stored.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting
 from wayfindinglib.models.quality.efficiency import LossAccount, ScienceGoal
@@ -26,12 +26,12 @@ class CaptureSettingSummary(BaseModel):
         On how many nights.
     frames_set_aside : `int`
         How many frames were set aside (for example, clouded or trailed).
-    captured_seconds : `float`
+    captured_s : `float`
         Exposure time captured, in seconds.
-    weight_effective_seconds : `float` or `None`
+    weight_effective_s : `float` or `None`
         The weighted effective time the stacker reports, in seconds.
         ``None`` when no stack has been made.
-    efficiency_effective_seconds : `float` or `None`
+    efficiency_effective_s : `float` or `None`
         Efficiency times the captured time, in seconds. ``None`` when
         efficiency cannot be found.
     loss_account : `LossAccount` or `None`
@@ -49,10 +49,29 @@ class CaptureSettingSummary(BaseModel):
     frames_taken: int = Field(ge=0, alias="framesTaken")
     nights: int = Field(ge=0)
     frames_set_aside: int = Field(ge=0, alias="framesSetAside")
-    captured_seconds: float = Field(ge=0.0, alias="capturedSeconds")
-    weight_effective_seconds: float | None = Field(default=None, ge=0.0, alias="weightEffectiveSeconds")
-    efficiency_effective_seconds: float | None = Field(
-        default=None, ge=0.0, alias="efficiencyEffectiveSeconds"
+    captured_s: float = Field(
+        ge=0.0,
+        alias="capturedS",
+        validation_alias=AliasChoices("capturedS", "captured_s", "capturedSeconds", "captured_seconds"),
+    )
+    weight_effective_s: float | None = Field(
+        default=None,
+        ge=0.0,
+        alias="weightEffectiveS",
+        validation_alias=AliasChoices(
+            "weightEffectiveS", "weight_effective_s", "weightEffectiveSeconds", "weight_effective_seconds"
+        ),
+    )
+    efficiency_effective_s: float | None = Field(
+        default=None,
+        ge=0.0,
+        alias="efficiencyEffectiveS",
+        validation_alias=AliasChoices(
+            "efficiencyEffectiveS",
+            "efficiency_effective_s",
+            "efficiencyEffectiveSeconds",
+            "efficiency_effective_seconds",
+        ),
     )
     loss_account: LossAccount | None = Field(default=None, alias="lossAccount")
     science_goal: ScienceGoal | None = Field(default=None, alias="scienceGoal")

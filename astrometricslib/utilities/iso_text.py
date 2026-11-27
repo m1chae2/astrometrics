@@ -5,14 +5,17 @@ or as ``800.0``. Left alone, the two spellings are treated as different
 settings, which splits frames that belong together. The helpers here write an
 ISO the same way every time and compare settings by their number.
 
-Only an ISO (the header's ``ISOSPEED``) is rewritten. A ``GAIN`` is kept
-exactly as the header spells it, because the text of a frame's gain is part of
-its session id (see `astrometricslib.pipelines.shared.target_sessions`), and
-changing ``0.0`` to ``0`` would rename every existing session.
+`iso_or_gain_text` rewrites only an ISO (the header's ``ISOSPEED``) and keeps
+a ``GAIN`` as the header spells it. A frame record keeps its gain as a whole
+number (`setting_number`, `SettingNumber`), so a frame whose header writes
+``GAIN = 0.0`` has gain 0, and its session id (see
+`astrometricslib.pipelines.shared.target_sessions`) names gain 0.
 """
 
 import math
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import BeforeValidator
 
 
 def _as_number(value: Any) -> float | None:
@@ -57,6 +60,27 @@ def canonical_iso_text(value: Any) -> str:
     return text
 
 
+def setting_number(value: Any) -> int | None:
+    """Read a gain, ISO or offset setting as a whole number.
+
+    Parameters
+    ----------
+    value : `Any`
+        The setting as a header or an older record gives it, for example
+        ``800``, ``800.0`` or ``"800"``.
+
+    Returns
+    -------
+    number : `int` or `None`
+        The setting rounded to a whole number, or `None` when `value` holds
+        no finite number (missing, empty, or text such as ``"Auto"``).
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    number = _as_number(value)
+    return None if number is None else round(number)
+
+
 def iso_or_gain_text(header: Any) -> str | None:
     """Read the ISO or gain from an image header, as text.
 
@@ -98,3 +122,11 @@ def iso_or_gain_values_match(first: Any, second: Any) -> bool:
     if first_number is not None and second_number is not None:
         return first_number == second_number
     return str(first).strip() == str(second).strip()
+
+
+SettingNumber = Annotated[int | None, BeforeValidator(setting_number)]
+"""A model field type for a gain, ISO or offset setting.
+
+It holds a whole number, or `None` when the setting is not known. Text such as
+``"800"`` or ``"800.0"``, which older records stored, is read as the number.
+"""

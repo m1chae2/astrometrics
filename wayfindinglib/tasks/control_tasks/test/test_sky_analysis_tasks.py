@@ -49,13 +49,13 @@ def make_frame() -> Any:
             "path": "/f.fits",
             "target_id": "T",
             "timestamp": _NIGHT,
-            "exposure_seconds": 60.0,
+            "exposure_s": 60.0,
             "filter_name": "Luminance",
             "is_spectral": False,
             "star_width_arcsec": 5.0,
             "roundness": 0.9,
-            "altitude_degrees": 50.0,
-            "azimuth_degrees": 180.0,
+            "altitude_deg": 50.0,
+            "azimuth_deg": 180.0,
             "pier_side": "WEST",
         }
         fields.update(overrides)
@@ -69,7 +69,7 @@ def test_each_qualifying_frame_gives_a_width_and_a_roundness_sample(make_frame: 
     samples, without_position = sky_samples_from_frames([make_frame()], 9.6)
 
     assert [s.metric for s in samples] == ["star_width", "star_roundness"]
-    assert {s.altitude_degrees for s in samples} == {50.0}
+    assert {s.altitude_deg for s in samples} == {50.0}
     assert samples[0].night == "2026-09-23"
     assert without_position == 0
 
@@ -77,7 +77,7 @@ def test_each_qualifying_frame_gives_a_width_and_a_roundness_sample(make_frame: 
 def test_short_spectral_and_unmeasured_frames_give_no_sample(make_frame: Any) -> None:
     """Verify only long imaging frames with a star measurement count."""
     frames = [
-        make_frame(exposure_seconds=2.0),
+        make_frame(exposure_s=2.0),
         make_frame(is_spectral=True),
         make_frame(star_width_arcsec=None, roundness=None),
     ]
@@ -87,7 +87,7 @@ def test_short_spectral_and_unmeasured_frames_give_no_sample(make_frame: Any) ->
 
 def test_a_frame_with_no_position_is_counted_not_used(make_frame: Any) -> None:
     """Verify an unpositioned frame is reported as left out."""
-    frame = make_frame(altitude_degrees=None, azimuth_degrees=None, pier_side=None)
+    frame = make_frame(altitude_deg=None, azimuth_deg=None, pier_side=None)
 
     assert sky_samples_from_frames([frame], 9.6) == ([], 1)
 
@@ -108,10 +108,10 @@ def _analysis(night: str, match: str = "exact", **quality: Any) -> GuidingSessio
     """
     runs = [
         GuidingRunPerformance(
-            run_id="a", started_at=0.0, rms_per_axis_arcsec=1.0, altitude_degrees=40.0, pierSide="West"
+            run_id="a", started_at=0.0, rms_per_axis_arcsec=1.0, altitude_deg=40.0, pierSide="West"
         ),
         GuidingRunPerformance(run_id="b", started_at=1.0, rms_per_axis_arcsec=1.2),
-        GuidingRunPerformance(run_id="c", started_at=2.0, altitude_degrees=40.0),
+        GuidingRunPerformance(run_id="c", started_at=2.0, altitude_deg=40.0),
     ]
     return GuidingSessionAnalysis(
         session_id=night,
@@ -150,10 +150,10 @@ def test_a_night_on_other_equipment_is_skipped_quietly() -> None:
 
 def test_exposure_lengths_in_use_need_enough_frames_and_enough_length(make_frame: Any) -> None:
     """Verify tests and too-short exposures are not lengths in use."""
-    frames = [make_frame(exposure_seconds=300.0) for _ in range(12)]
-    frames += [make_frame(exposure_seconds=60.0) for _ in range(15)]
-    frames += [make_frame(exposure_seconds=120.0) for _ in range(3)]
-    frames += [make_frame(exposure_seconds=2.0) for _ in range(40)]
+    frames = [make_frame(exposure_s=300.0) for _ in range(12)]
+    frames += [make_frame(exposure_s=60.0) for _ in range(15)]
+    frames += [make_frame(exposure_s=120.0) for _ in range(3)]
+    frames += [make_frame(exposure_s=2.0) for _ in range(40)]
 
     assert exposure_lengths_in_use(frames, 9.6) == [60.0, 300.0]
 
@@ -162,7 +162,7 @@ def test_only_the_most_used_lengths_are_kept(make_frame: Any) -> None:
     """Verify at most six lengths are reported, the most used ones."""
     frames = []
     for index, length in enumerate([20, 30, 40, 50, 60, 70, 80, 90]):
-        frames += [make_frame(exposure_seconds=float(length)) for _ in range(10 + index)]
+        frames += [make_frame(exposure_s=float(length)) for _ in range(10 + index)]
 
     lengths = exposure_lengths_in_use(frames, 9.6)
 

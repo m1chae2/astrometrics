@@ -296,7 +296,7 @@ class MeasuredImageQuality:
         Median width of a star in the equipment's frames, in arcseconds.
     sample_count : `int`
         How many frames the median rests on.
-    minimum_exposure_seconds : `float` or `None`
+    minimum_exposure_s : `float` or `None`
         Shortest exposure a frame needed to be included, or `None` if no
         cut was made. Short exposures are left out because guiding error
         only widens a star when the exposure spans several guide cycles.
@@ -304,7 +304,7 @@ class MeasuredImageQuality:
 
     fwhm_arcsec: float
     sample_count: int
-    minimum_exposure_seconds: float | None = None
+    minimum_exposure_s: float | None = None
 
 
 def robust_median_and_spread(values: Sequence[float]) -> tuple[float, float]:
@@ -552,7 +552,7 @@ def _budget_thresholds(
     inputs: dict[str, float | str | None] = {
         "fwhm_arcsec": fwhm,
         "blur_tolerance_fraction": blur_tolerance_fraction,
-        "minimum_exposure_seconds": measured_image_quality.minimum_exposure_seconds,
+        "minimum_exposure_s": measured_image_quality.minimum_exposure_s,
     }
     sample_count = measured_image_quality.sample_count
     return [

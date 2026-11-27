@@ -277,7 +277,7 @@ def test_a_group_not_judged_is_reported_in_its_summary_gate_and_notice() -> None
     )
     stack.stacking_metrics.exposure_groups = [
         ExposureGroupSummary(
-            exposureSeconds=30.0,
+            exposureS=30.0,
             framesSubmitted=22,
             framesStacked=22,
             darkApplied=True,
@@ -470,7 +470,7 @@ def test_the_runner_combines_a_linear_pair(tmp_path: Path) -> None:
     """Two groups with a true ratio of 0.5 are both kept, with both ratios."""
     _, diagnostics = run_two_groups(tmp_path, make_linear_group_b(make_group_a()))
 
-    summaries = {entry["exposure_seconds"]: entry for entry in diagnostics["exposure_group_summaries"]}
+    summaries = {entry["exposure_s"]: entry for entry in diagnostics["exposure_group_summaries"]}
     assert summaries[0.9]["left_out_reason"] is None
     assert summaries[0.9]["gain_mid_range"] == pytest.approx(TRUE_GAIN, rel=0.01)
     assert summaries[0.9]["gain_bright_end_ratio"] == pytest.approx(TRUE_GAIN, rel=0.01)
@@ -482,7 +482,7 @@ def test_the_runner_leaves_out_a_nonlinear_group_and_says_why(tmp_path: Path) ->
     path, diagnostics = run_two_groups(tmp_path, make_compressed_group_b(make_group_a()))
 
     assert path is not None
-    summaries = {entry["exposure_seconds"]: entry for entry in diagnostics["exposure_group_summaries"]}
+    summaries = {entry["exposure_s"]: entry for entry in diagnostics["exposure_group_summaries"]}
     nonlinear = summaries[0.9]
     assert nonlinear["gain_nonlinear"] is True
     assert nonlinear["left_out_reason"] is not None

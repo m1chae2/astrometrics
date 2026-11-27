@@ -266,7 +266,7 @@ def _frames(nights: int, per_night: int = 5) -> list[FrameRecord]:
         FrameRecord(
             path=f"/frames/lights/M 99/Scope/Cam/n{night}_{index:02d}.fits",
             camera="Cam",
-            exposure="60",
+            exposure_s=60,
             timestamp=start + night * 86400.0 + index * 120.0,
         )
         for night in range(nights)
@@ -1220,7 +1220,7 @@ def _grouped_stack(
     """
     for frame in library.target.frames:
         night = int(Path(frame.path).name[1])
-        frame.exposure = "120" if night == 1 else ("180" if frame.path.endswith("n0_04.fits") else "60")
+        frame.exposure_s = 120.0 if night == 1 else (180.0 if frame.path.endswith("n0_04.fits") else 60.0)
 
     def stack(
         target_id: str, frames: list[FrameRecord], output_path: str, **_keywords: Any
@@ -1262,7 +1262,7 @@ def _grouped_stack(
                 "registration_included": [True] * len(paths),
                 "weight": len(paths) * exposure**2 / 100.0,
                 "frame_count": len(paths),
-                "exposure_seconds": exposure,
+                "exposure_s": exposure,
                 "frame_noise_counts": 10.0,
                 "gain": 1.0,
                 "gain_measured": True,
@@ -1272,7 +1272,7 @@ def _grouped_stack(
                 "summary_index": index,
             })
             summaries.append({
-                "exposure_seconds": exposure,
+                "exposure_s": exposure,
                 "frames_submitted": len(paths),
                 "frames_stacked": len(paths),
                 "dark_applied": True,

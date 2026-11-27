@@ -247,7 +247,7 @@ def make_noise_entry(**overrides: object) -> dict[str, object]:
         Entry data ready for `SensorSettingNoise.model_validate`.
     """
     data: dict[str, object] = {
-        "gain_setting": "0",
+        "gain": "0",
         "offset": "10",
         "binning": "1x1",
         "gain_e_per_adu": NOISE_VALUE,
@@ -258,7 +258,7 @@ def make_noise_entry(**overrides: object) -> dict[str, object]:
 
 def test_two_noise_entries_for_the_same_setting_are_rejected() -> None:
     """Spellings of one setting count as the same key."""
-    entries = [make_noise_entry(), make_noise_entry(gain_setting="0.0", offset="10.0")]
+    entries = [make_noise_entry(), make_noise_entry(gain="0.0", offset="10.0")]
     with pytest.raises(ValidationError, match="share gain"):
         CameraProfile.model_validate(make_profile_data(sensor_noise=entries))
 
@@ -287,14 +287,14 @@ def test_the_old_schema_version_is_refused() -> None:
         CameraProfile.model_validate(make_profile_data(schema_version=1))
 
 
-def make_offset_profile(*offsets: str, gain_setting: str = "0", binning: str = "1x1") -> CameraProfile:
+def make_offset_profile(*offsets: str, gain: str = "0", binning: str = "1x1") -> CameraProfile:
     """Build a profile with one measured gain and read noise entry per offset.
 
     Parameters
     ----------
     *offsets : `str`
         The offsets that get an entry.
-    gain_setting : `str`, optional
+    gain : `str`, optional
         The gain setting of every entry.
     binning : `str`, optional
         The binning of every entry.
@@ -307,7 +307,7 @@ def make_offset_profile(*offsets: str, gain_setting: str = "0", binning: str = "
     """
     entries = [
         make_noise_entry(
-            gain_setting=gain_setting,
+            gain=gain,
             offset=offset,
             binning=binning,
             read_noise_e={

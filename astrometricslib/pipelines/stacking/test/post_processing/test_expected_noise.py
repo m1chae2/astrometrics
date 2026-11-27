@@ -223,7 +223,7 @@ def _members() -> list[SimpleNamespace]:
     members : `list` [`SimpleNamespace`]
         Frames with a path and an exposure.
     """
-    return [SimpleNamespace(path=f"f{index}", exposure="60") for index in range(2)]
+    return [SimpleNamespace(path=f"f{index}", exposure_s=60.0) for index in range(2)]
 
 
 def _setting(_frame: object) -> tuple[ProvenancedValue, ProvenancedValue, str]:
@@ -287,7 +287,7 @@ def test_gathering_reports_every_missing_input_without_a_default() -> None:
     )
     assert "not measured" in no_rate.reason
     no_exposure = gather_frame_noise_inputs(
-        [SimpleNamespace(path="f0", exposure="")], [1.0], {"f0": rows["f0"]}, lambda f: f.path, _setting
+        [SimpleNamespace(path="f0", exposure_s="")], [1.0], {"f0": rows["f0"]}, lambda f: f.path, _setting
     )
     assert "exposure" in no_exposure.reason
     no_gain = gather_frame_noise_inputs(

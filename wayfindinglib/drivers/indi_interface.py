@@ -2109,7 +2109,7 @@ class IndiInterface(IndiClient):
             self._external_pulses.clear()
         return pulses
 
-    def guide_expose(self, exposure_seconds: float, gain: float | None = None) -> bool:
+    def guide_expose(self, exposure_s: float, gain: float | None = None) -> bool:
         """Take an exposure with the guide camera.
 
         Starts the exposure and returns without waiting for the image.
@@ -2122,7 +2122,7 @@ class IndiInterface(IndiClient):
             exposure state.
         """
         device = self._find_guide_camera_device()
-        return self.camera_controller.expose(device, exposure_seconds, gain=gain)
+        return self.camera_controller.expose(device, exposure_s, gain=gain)
 
     def get_guide_image(self) -> bytes | None:
         """Retrieve the last image frame from the guide camera, as raw bytes.
@@ -2198,7 +2198,7 @@ class IndiInterface(IndiClient):
         discovery = vars(self).get("device_discovery")
         return discovery.find_main_camera() if discovery is not None else None
 
-    def capture_image(self, exposure_seconds: float) -> bool:
+    def capture_image(self, exposure_s: float) -> bool:
         """Take an exposure with the main camera.
 
         Returns
@@ -2207,7 +2207,7 @@ class IndiInterface(IndiClient):
             The exposure result from the camera controller.
         """
         device = self._find_main_camera_device()
-        return self.camera_controller.expose(device, exposure_seconds)
+        return self.camera_controller.expose(device, exposure_s)
 
     def abort_main_exposure(self) -> bool:
         """Cancel the exposure the main camera is taking.

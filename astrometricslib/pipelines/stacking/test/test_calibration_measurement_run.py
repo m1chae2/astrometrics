@@ -111,11 +111,11 @@ def test_sets_are_listed_by_kind_with_their_settings(filled: tuple) -> None:
     (dark_set,) = library.list_calibration_sets("dark")
     (bias_set,) = library.list_calibration_sets("bias")
     assert len(dark_set.paths) == 3
-    assert dark_set.exposure_seconds == pytest.approx(30.0)
+    assert dark_set.exposure_s == pytest.approx(30.0)
     assert dark_set.temperature_c is not None
     assert dark_set.offset == pytest.approx(10.0)
     assert len(bias_set.paths) == 2
-    assert bias_set.exposure_seconds is None
+    assert bias_set.exposure_s is None
     assert bias_set.temperature_c is None
 
 

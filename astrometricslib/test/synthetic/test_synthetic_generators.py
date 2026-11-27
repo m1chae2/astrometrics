@@ -258,8 +258,8 @@ def test_extractor_follows_the_generated_trail() -> None:
         "radius": 8,
         "orientation": "horizontal",
     }
-    right, _, _ = extractor.extract_with_flare_mask(fake_image, (60.0, 128.0), angle_degrees=2.0, **kwargs)
-    wrong, _, _ = extractor.extract_with_flare_mask(fake_image, (60.0, 128.0), angle_degrees=-2.0, **kwargs)
+    right, _, _ = extractor.extract_with_flare_mask(fake_image, (60.0, 128.0), angle_deg=2.0, **kwargs)
+    wrong, _, _ = extractor.extract_with_flare_mask(fake_image, (60.0, 128.0), angle_deg=-2.0, **kwargs)
     assert right.sum() > 0.9 * 560 * 3000.0
     assert wrong.sum() < 0.5 * right.sum()
 

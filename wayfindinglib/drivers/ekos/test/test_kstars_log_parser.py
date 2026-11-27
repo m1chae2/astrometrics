@@ -56,15 +56,15 @@ def test_each_dither_is_read_with_its_outcome_and_settle_time(tmp_path: Path) ->
 
     assert [e.succeeded for e in events] == [False, True, None]
     assert [e.amplitude_px for e in events] == [2.5, 1.5, 2.5]
-    assert [e.settle_seconds for e in events] == [15.0, 30.0, None]
+    assert [e.settle_s for e in events] == [15.0, 30.0, None]
 
 
 def test_dither_duration_runs_from_the_start_to_the_completion_message(tmp_path: Path) -> None:
     """The first dither lasted 43 s of moving plus 15 s of settling."""
     events = parse_dither_events(_write_log(tmp_path, _LOG))
 
-    assert events[0].duration_seconds == pytest.approx(58.636, abs=0.01)
-    assert events[2].duration_seconds is None
+    assert events[0].duration_s == pytest.approx(58.636, abs=0.01)
+    assert events[2].duration_s is None
 
 
 def test_times_are_converted_from_local_time_to_utc(tmp_path: Path) -> None:

@@ -315,11 +315,11 @@ def frame_matches_request(frame: FrameRecord, request: ExposureRequest, equipmen
         return False
     if normalize_filter(frame.filter) != normalize_filter(request.filter):
         return False
-    length = _number(frame.exposure)
-    if length is None or abs(length - request.exposure_sec) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value:
+    length = _number(frame.exposure_s)
+    if length is None or abs(length - request.exposure_s) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value:
         return False
     for wanted, found in (
-        (request.gain_setting, _number(frame.iso)),
+        (request.gain, _number(frame.gain)),
         (request.offset, _number(frame.offset)),
         (request.binning, None if frame.binning is None else float(frame.binning)),
     ):

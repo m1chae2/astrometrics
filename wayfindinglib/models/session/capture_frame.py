@@ -15,7 +15,7 @@ default. `measurement_rows` keeps the id of each stored row, so a statement
 that rests on a frame can cite the exact measurement.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.reports import MeasurementReference
 
@@ -31,7 +31,7 @@ class CaptureFrame(BaseModel):
         The target the frame belongs to.
     timestamp : `float`
         When the exposure began, in seconds since the Unix epoch.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length, in seconds.
     filter_name : `str`
         The filter the frame was taken through.
@@ -54,9 +54,9 @@ class CaptureFrame(BaseModel):
         Star roundness: the narrow axis divided by the wide one, so 1.0 is a
         circle and lower is more elongated. It is the inverse of the stored
         measurement ``frame.star_elongation``.
-    altitude_degrees : `float` or `None`
+    altitude_deg : `float` or `None`
         Altitude of the pointing, in degrees.
-    azimuth_degrees : `float` or `None`
+    azimuth_deg : `float` or `None`
         Azimuth of the pointing, in degrees.
     pier_side : `str` or `None`
         Side of the pier the telescope was on.
@@ -74,7 +74,10 @@ class CaptureFrame(BaseModel):
     path: str
     target_id: str = Field(alias="targetId")
     timestamp: float
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     filter_name: str = Field(alias="filterName")
     is_spectral: bool = Field(alias="isSpectral")
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
@@ -82,8 +85,16 @@ class CaptureFrame(BaseModel):
     background_adu: float | None = Field(default=None, alias="backgroundAdu")
     star_width_arcsec: float | None = Field(default=None, alias="starWidthArcsec")
     roundness: float | None = None
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
-    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float | None = Field(
+        default=None,
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     pier_side: str | None = Field(default=None, alias="pierSide")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
     binning: int = 1

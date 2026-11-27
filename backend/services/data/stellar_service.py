@@ -1023,7 +1023,7 @@ class StellarService:
         -------
         List[dict]
             One entry per driver with keys: driver_name, display_name,
-            maximum_query_radius_degrees.
+            maximum_query_radius_deg.
         """
         return [driver.model_dump() for driver in self.wayfinder.planning.catalogs.query()]
 

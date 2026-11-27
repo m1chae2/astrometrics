@@ -55,8 +55,8 @@ def _calibration(**changes: Any) -> GuiderCalibration:
         "telescope_id": "scope",
         "arcsec_per_pixel": 3.8,
         "camera_angle_deg": 10.0,
-        "ra_rate_arcsec_per_sec": 15.0,
-        "dec_rate_arcsec_per_sec": 15.0,
+        "ra_rate_arcsec_per_s": 15.0,
+        "dec_rate_arcsec_per_s": 15.0,
         "source_note": "PHD2 calibration, copied by hand",
     }
     fields.update(changes)
@@ -138,8 +138,8 @@ def test_a_saved_focus_model_id_is_refused_unless_forced(imaging: ImagingControl
         {"id": "x" * 101},
         {"source_note": "x" * 501},
         {"arcsec_per_pixel": 101.0},
-        {"ra_rate_arcsec_per_sec": 1001.0},
-        {"dec_rate_arcsec_per_sec": 1001.0},
+        {"ra_rate_arcsec_per_s": 1001.0},
+        {"dec_rate_arcsec_per_s": 1001.0},
     ],
 )
 def test_guider_calibration_limits(guiding: GuidingControl, changes: dict[str, Any]) -> None:

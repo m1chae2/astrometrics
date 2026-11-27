@@ -252,7 +252,7 @@ def seed(sandbox: Path) -> dict[str, int]:
                     telescope=TELESCOPE,
                     date=when.strftime("%Y-%m-%d %H:%M:%S"),
                     timestamp=when.timestamp(),
-                    exposure="30.0",
+                    exposure_s=30.0,
                 )
             )
             frame_total += 1
@@ -358,7 +358,7 @@ def seed(sandbox: Path) -> dict[str, int]:
             focal_length_mm=300.0,
             frames_total=sample_count,
             samples_stored=sample_count,
-            declination_degrees=41.0,
+            declination_deg=41.0,
         ),
         "guiding_run",
         {},

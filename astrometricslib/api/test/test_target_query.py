@@ -30,7 +30,7 @@ def make_frame(name: str, taken: float, filter_name: str = "Luminance", camera: 
         path=f"/lights/{name}",
         role="LIGHT",
         filter=filter_name,
-        exposure="60",
+        exposure_s=60,
         timestamp=taken,
         camera=camera,
     )

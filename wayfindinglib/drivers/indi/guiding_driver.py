@@ -135,7 +135,7 @@ class IndiGuidingDriver(GuidingDriver):
         )
 
     async def run_cycle(
-        self, exposure_seconds: float, gain: float | None, commands: GuideCommands
+        self, exposure_s: float, gain: float | None, commands: GuideCommands
     ) -> GuidingSample | None:
         """Refuse: the library cannot measure the guide star yet.
 

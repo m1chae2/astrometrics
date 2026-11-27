@@ -252,7 +252,7 @@ def collect_capture_frames(
                 path=frame.path,
                 target_id=target.id,
                 timestamp=float(frame.timestamp),
-                exposure_seconds=float(frame.exposure or 0.0),
+                exposure_s=float(frame.exposure_s or 0.0),
                 filter_name=str(getattr(frame.filter, "value", frame.filter)),
                 is_spectral=frame.is_spectral,
                 sensor_temperature_c=frame.sensor_temperature_c,
@@ -262,8 +262,8 @@ def collect_capture_frames(
                 # The elongation is long axis over short axis (at least 1),
                 # and roundness is its inverse (at most 1).
                 roundness=1.0 / elongation[0] if elongation is not None and elongation[0] >= 1.0 else None,
-                altitude_degrees=frame.altitude_degrees,
-                azimuth_degrees=frame.azimuth_degrees,
+                altitude_deg=frame.altitude_deg,
+                azimuth_deg=frame.azimuth_deg,
                 pier_side=frame.pier_side,
                 pixel_scale_arcsec=pixel_scale,
                 binning=frame.binning or 1,
@@ -301,11 +301,11 @@ def frames_by_night(frames: Iterable[CaptureFrame]) -> dict[str, list[CaptureFra
     return dict(grouped)
 
 
-def usable_star_frames(frames: Iterable[CaptureFrame], minimum_exposure_seconds: float) -> list[CaptureFrame]:
+def usable_star_frames(frames: Iterable[CaptureFrame], minimum_exposure_s: float) -> list[CaptureFrame]:
     """Pick the frames whose star measurements say something about the sky.
 
     Spectroscopy frames are left out, since a dispersed star has no
-    meaningful width. So are frames shorter than `minimum_exposure_seconds`:
+    meaningful width. So are frames shorter than `minimum_exposure_s`:
     in a short exposure guiding error has no time to widen the star, and the
     bright single stars usually shot that briefly are clipped, which
     inflates their measured width.
@@ -320,7 +320,7 @@ def usable_star_frames(frames: Iterable[CaptureFrame], minimum_exposure_seconds:
         for frame in frames
         if not frame.is_spectral
         and frame.star_width_arcsec is not None
-        and frame.exposure_seconds >= minimum_exposure_seconds
+        and frame.exposure_s >= minimum_exposure_s
     ]
 
 
@@ -353,7 +353,7 @@ MAXIMUM_EXPOSURE_LENGTHS = TunedParameter(
 """Most exposure lengths the exposure-length view reports, most used first."""
 
 
-def exposure_lengths_in_use(frames: Iterable[CaptureFrame], minimum_exposure_seconds: float) -> list[float]:
+def exposure_lengths_in_use(frames: Iterable[CaptureFrame], minimum_exposure_s: float) -> list[float]:
     """List the exposure lengths the equipment is actually used with.
 
     Only lengths long enough for guiding error to matter count, since guiding
@@ -363,7 +363,7 @@ def exposure_lengths_in_use(frames: Iterable[CaptureFrame], minimum_exposure_sec
     ----------
     frames : `Iterable` [`CaptureFrame`]
         The equipment's light frames.
-    minimum_exposure_seconds : `float`
+    minimum_exposure_s : `float`
         Shortest exposure length that counts.
 
     Returns
@@ -374,8 +374,8 @@ def exposure_lengths_in_use(frames: Iterable[CaptureFrame], minimum_exposure_sec
     """
     counts: dict[float, int] = defaultdict(int)
     for frame in frames:
-        if frame.exposure_seconds >= minimum_exposure_seconds:
-            counts[round(frame.exposure_seconds, 3)] += 1
+        if frame.exposure_s >= minimum_exposure_s:
+            counts[round(frame.exposure_s, 3)] += 1
     used = [
         (length, count)
         for length, count in counts.items()
@@ -440,7 +440,7 @@ def night_captures(contexts: Iterable[EkosSessionContext], night: str) -> tuple[
 def collect_capture_baseline_values(
     frames: Sequence[CaptureFrame],
     contexts: Iterable[EkosSessionContext],
-    minimum_exposure_seconds: float | None,
+    minimum_exposure_s: float | None,
     before_night: str | None = None,
 ) -> dict[str, list[float]]:
     """Summarise each earlier night of this equipment's captures.
@@ -456,7 +456,7 @@ def collect_capture_baseline_values(
         Every light frame of the equipment in use.
     contexts : `Iterable` [`EkosSessionContext`]
         Every recorded Ekos session.
-    minimum_exposure_seconds : `float` or `None`
+    minimum_exposure_s : `float` or `None`
         Shortest exposure whose star measurements count. `None` when it is
         not yet known, in which case no star-quality history is built.
     before_night : `str` or `None`, optional
@@ -479,8 +479,8 @@ def collect_capture_baseline_values(
             continue
         if len(night_frames) < resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
             continue
-        if minimum_exposure_seconds is not None:
-            measured = usable_star_frames(night_frames, minimum_exposure_seconds)
+        if minimum_exposure_s is not None:
+            measured = usable_star_frames(night_frames, minimum_exposure_s)
             if len(measured) >= resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
                 widths.append(statistics.median(frame.star_width_arcsec for frame in measured))
                 night_roundness = [frame.roundness for frame in measured if frame.roundness is not None]

@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib import FilterType
 from wayfindinglib.models.planning.framing import Framing
@@ -51,13 +51,24 @@ class ExposureRequest(BaseModel):
 
     frame_type: FrameType = Field(alias="frameType")
     filter: FilterType = Field(default=FilterType.NONE, alias="filter")
-    exposure_sec: float = Field(..., gt=0.0, alias="exposureSec")
+    exposure_s: float = Field(
+        ...,
+        gt=0.0,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSec", "exposure_sec"),
+    )
     count: int = Field(..., gt=0, alias="count")
-    delay_sec: float = Field(default=0.0, ge=0.0, alias="delaySec")
-    gain_setting: int | None = Field(
+    delay_s: float = Field(
+        default=0.0,
+        ge=0.0,
+        alias="delayS",
+        validation_alias=AliasChoices("delayS", "delay_s", "delaySec", "delay_sec"),
+    )
+    gain: int | None = Field(
         default=None,
         ge=0,
-        alias="gainSetting",
+        alias="gain",
+        validation_alias=AliasChoices("gain", "gainSetting", "gain_setting"),
         description="The camera's gain setting (a unitless index, not electrons per ADU). None: not set.",
     )
     offset: int | None = Field(
@@ -112,7 +123,7 @@ class ExposureRequest(BaseModel):
         total_sec : `float`
             The total wall-clock time this request occupies.
         """
-        return self.count * self.exposure_sec + max(self.count - 1, 0) * self.delay_sec
+        return self.count * self.exposure_s + max(self.count - 1, 0) * self.delay_s
 
 
 class PackageStatus(StrEnum):

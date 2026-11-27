@@ -64,7 +64,7 @@ def _profile(*, with_bias_level: bool = True, with_noise: bool = True) -> Camera
     noise = (
         (
             SensorSettingNoise(
-                gain_setting="0",
+                gain="0",
                 offset="10",
                 binning="1x1",
                 gain_e_per_adu=ProvenancedValue(value=GAIN, provenance=SOURCE),
@@ -77,7 +77,7 @@ def _profile(*, with_bias_level: bool = True, with_noise: bool = True) -> Camera
     levels = (
         (
             SettingBiasLevel(
-                gain_setting="0",
+                gain="0",
                 offset="10",
                 binning="1x1",
                 bias_level_adu=ProvenancedValue(value=BIAS_LEVEL, provenance=SOURCE),
@@ -143,7 +143,7 @@ def _judge(kind: str, frames: list[FrameFacts], **options: object) -> SetJudgeme
         minimum_frames=MINIMUM_FRAMES,
         profile=options.pop("profile", _profile()),
         setting=SETTING,
-        exposure_seconds=options.pop("exposure_seconds", 30.0),
+        exposure_s=options.pop("exposure_s", 30.0),
         reference=reference,
     )
 
@@ -304,8 +304,8 @@ def test_a_dark_far_from_the_bias_level_fails_the_level_check() -> None:
 def test_the_dark_current_allowance_grows_with_the_exposure() -> None:
     """A long exposure is allowed a larger level difference above the bias."""
     frames = [_frame(i, **{FRAME_CLIPPED_MEAN_LEVEL: BIAS_LEVEL + 2 * STEP + 1.0}) for i in range(5)]
-    short = _judge("dark", frames, reference=_bias_reference(), exposure_seconds=1.0)
-    long = _judge("dark", frames, reference=_bias_reference(), exposure_seconds=600.0)
+    short = _judge("dark", frames, reference=_bias_reference(), exposure_s=1.0)
+    long = _judge("dark", frames, reference=_bias_reference(), exposure_s=600.0)
     assert _check(short, DARK_LEVEL_GATE_NAME).status is GateStatus.FAILED
     assert _check(long, DARK_LEVEL_GATE_NAME).status is GateStatus.PASSED
 

@@ -9,7 +9,15 @@ happens elsewhere to keep the code organized and avoid import errors.
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
@@ -107,14 +115,22 @@ class FrameMeasurements(BaseModel):
 
 
 class FrameRecord(BaseModel):
-    """A single raw photograph and its settings (like ISO, exposure)."""
+    """A single raw photograph and its settings (like gain and exposure)."""
 
     path: str = Field(alias="path")
     filter: FilterType = Field(default=FilterType.NONE, alias="filter")
     role: str = Field(default="LIGHT", alias="role")  # LIGHT, DARK, FLAT, BIAS
-    iso: str = Field(default="800", alias="iso")
-    offset: str = Field(default="0", alias="offset")
-    exposure: str = Field(default="1.0", alias="exposure")
+    # The camera's gain setting, or the ISO of a DSLR (a plain number, not
+    # electrons per ADU), or None when it is not known. Records saved before
+    # the rename hold it as text under ``iso``.
+    gain: int | None = Field(default=800, alias="gain", validation_alias=AliasChoices("gain", "iso"))
+    # The constant the camera adds to every pixel.
+    offset: int = Field(default=0, alias="offset")
+    # The exposure time of the frame, in seconds. Records saved before the
+    # rename hold it as text under ``exposure``.
+    exposure_s: float = Field(
+        default=1.0, alias="exposureS", validation_alias=AliasChoices("exposureS", "exposure_s", "exposure")
+    )
     timestamp: float | None = Field(default=None, alias="timestamp")
     camera: str = Field(default="Unknown", alias="camera")
     telescope: str = Field(default="Unknown", alias="telescope")
@@ -132,8 +148,16 @@ class FrameRecord(BaseModel):
     # 1.0 means straight overhead; higher numbers mean closer to the
     # horizon, where more air blurs and dims the picture.
     airmass: float | None = Field(default=None, alias="airmass")
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
-    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float | None = Field(
+        default=None,
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     # How much sky each pixel covers, in arcseconds. A smaller number
     # means a more zoomed-in picture.
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
@@ -214,6 +238,64 @@ class FrameRecord(BaseModel):
         migrated = {key: value for key, value in data.items() if key not in found}
         migrated["measurements"] = found
         return migrated
+
+    @field_validator("gain", mode="before")
+    @classmethod
+    def read_gain_number(cls, value: Any) -> Any:
+        """Read a gain stored as text, such as ``"800"``, as a number.
+
+        Records saved before this field was a number hold it as text under
+        ``iso``. Text that holds no number, such as ``"Auto"``, means the
+        gain is not known.
+
+        Returns
+        -------
+        gain : `int` or `None`
+            The gain as a whole number, or `None` when it is not known.
+        """
+        from astrometricslib.utilities.iso_text import setting_number
+
+        return setting_number(value)
+
+    @field_validator("offset", mode="before")
+    @classmethod
+    def read_offset_number(cls, value: Any) -> Any:
+        """Read an offset stored as text, such as ``"10"``, as a number.
+
+        Records saved before this field was a number hold it as text. A
+        missing offset, or text that holds no number, counts as 0, the way
+        the calibration library files a frame with no ``OFFSET`` card.
+
+        Returns
+        -------
+        offset : `int`
+            The offset as a whole number.
+        """
+        from astrometricslib.utilities.iso_text import setting_number
+
+        number = setting_number(value)
+        return 0 if number is None else number
+
+    @field_validator("exposure_s", mode="before")
+    @classmethod
+    def read_exposure_number(cls, value: Any) -> Any:
+        """Read an exposure stored as text, such as ``"30.0"``, as a number.
+
+        Records saved before this field was a number hold it as text. Text
+        that holds no number gives the 1 second stand-in a header with no
+        ``EXPTIME`` gets.
+
+        Returns
+        -------
+        exposure_s : `Any`
+            The exposure in seconds.
+        """
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return 1.0
+        return 1.0 if value is None else value
 
     @property
     def is_spectral(self) -> bool:
@@ -467,7 +549,13 @@ class Target(BaseModel):
     # The astrometry/photometry/spectroscopy run-level quality summaries,
     # grouped together (see `TargetQualitySummaries`).
     quality: TargetQualitySummaries = Field(default_factory=TargetQualitySummaries, alias="quality")
-    exposure_sec: float = Field(default=0, alias="exposureTime")
+    # The total exposure time of all the frames, in seconds. Records saved
+    # before the rename hold it under ``exposureTime``.
+    exposure_s: float = Field(
+        default=0,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureTime", "exposure_sec"),
+    )
     number_of_stars: int = Field(default=0, alias="numberOfStars")
     frames: list[FrameRecord] = Field(default_factory=list, alias="frames")
 
@@ -669,14 +757,8 @@ class Target(BaseModel):
         total : `float`
             The total exposure time in seconds.
         """
-        total = 0.0
-        if self.frames:
-            for frame in self.frames:
-                try:
-                    total += float(frame.exposure)
-                except ValueError, TypeError:
-                    continue
-        self.exposure_sec = total
+        total = float(sum(frame.exposure_s for frame in self.frames))
+        self.exposure_s = total
         return total
 
 

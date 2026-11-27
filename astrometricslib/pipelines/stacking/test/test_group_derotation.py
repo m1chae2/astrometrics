@@ -46,12 +46,12 @@ def _straight_streak(size: int, star_row: float, star_column: float) -> np.ndarr
     return image.astype(np.float32)
 
 
-def _tilted_streak(size: int, star_row: float, star_column: float, angle_degrees: float) -> np.ndarray:
+def _tilted_streak(size: int, star_row: float, star_column: float, angle_deg: float) -> np.ndarray:
     """Build a straight streak, then lean it by a known angle.
 
     Built by rotating a straight streak with `rotate_about_point` itself
     (rather than separate trigonometry), so a test that then rotates it
-    back by `angle_degrees` is checking the function against its own
+    back by `angle_deg` is checking the function against its own
     stated contract: turning a trail by its own tilt brings it to 0.
 
     Parameters
@@ -62,17 +62,17 @@ def _tilted_streak(size: int, star_row: float, star_column: float, angle_degrees
         The streak's starting row (the star's own position).
     star_column : `float`
         The streak's starting column.
-    angle_degrees : `float`
+    angle_deg : `float`
         The tilt the streak should measure as, in `rotate_about_point`'s own
         sense.
 
     Returns
     -------
     image : `numpy.ndarray`
-        The image, `float32`, with the streak leaning at `angle_degrees`.
+        The image, `float32`, with the streak leaning at `angle_deg`.
     """
     straight = _straight_streak(size, star_row, star_column)
-    return rotate_about_point(straight, star_row, star_column, -angle_degrees)
+    return rotate_about_point(straight, star_row, star_column, -angle_deg)
 
 
 def test_rotating_about_a_point_leaves_that_point_in_place() -> None:
@@ -126,7 +126,7 @@ def _stub_measurements(monkeypatch: pytest.MonkeyPatch, angles_and_contrasts: li
     monkeypatch : `pytest.MonkeyPatch`
         Used to replace the real measurement with the stub.
     angles_and_contrasts : `list` [`tuple`]
-        One `(angle_degrees, contrast_sigma)` per expected call, in order.
+        One `(angle_deg, contrast_sigma)` per expected call, in order.
     """
     import astrometricslib.pipelines.stacking.processing.group_derotation as module
 

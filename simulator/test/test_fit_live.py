@@ -103,7 +103,7 @@ def _measurements() -> Measurements:
     measurements = Measurements()
     rows = {
         "guide_rate": _candidate("newest real record", {"dec_rate_arcsec_per_s": 6.0}),
-        "periodic_error": _candidate("history fit", {"amplitude_arcsec": 3.0, "period_seconds": 40.0}),
+        "periodic_error": _candidate("history fit", {"amplitude_arcsec": 3.0, "period_s": 40.0}),
         "guiding_disturbance": _candidate(
             "history fit",
             {
@@ -149,7 +149,7 @@ def world(tmp_path: Path) -> Iterator[SimulatedObservatory]:
         SimulationKind.SIMULATED_SKY,
         indi_port,
         phd2_port,
-        exposure_seconds=EXPOSURE_SECONDS,
+        exposure_s=EXPOSURE_SECONDS,
         guider=GuiderKind.MOCK,
         fitted_settings_path=results_path,
     )

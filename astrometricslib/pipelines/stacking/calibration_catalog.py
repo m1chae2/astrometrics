@@ -186,11 +186,11 @@ def _row_key(kind: str, row: dict[str, Any]) -> str:
         kind,
         row.get("camera"),
         row.get("filter"),
-        row.get("iso"),
+        row.get("gain"),
         row.get("offset"),
         row.get("binning"),
         row.get("temperature_c"),
-        row.get("exposure"),
+        row.get("exposure_s"),
     ]
     return "|".join("" if part is None else str(part) for part in parts)
 
@@ -231,8 +231,8 @@ def _matches_setting(
     kind : `str`
         The set's kind.
     row : `dict` [`str`, `Any`]
-        The set as a counts row: ``camera``, ``iso``, ``offset``,
-        ``binning`` and, by kind, ``temperature_c``, ``exposure`` or
+        The set as a counts row: ``camera``, ``gain``, ``offset``,
+        ``binning`` and, by kind, ``temperature_c``, ``exposure_s`` or
         ``filter``.
     setting : `CaptureSetting` or `None`
         The settings to match (see the module description). `None` matches
@@ -249,7 +249,7 @@ def _matches_setting(
         return True
     if not _same_camera(row.get("camera"), setting.camera, config):
         return False
-    if setting.gain is not None and not _gains_match(row.get("iso"), setting.gain):
+    if setting.gain is not None and not _gains_match(row.get("gain"), setting.gain):
         return False
     if setting.offset is not None and not math.isclose(
         float(row.get("offset") or 0.0), float(setting.offset)
@@ -266,8 +266,8 @@ def _matches_setting(
         ):
             return False
         if setting.exposure_s is not None and (
-            row.get("exposure") is None
-            or abs(float(row["exposure"]) - setting.exposure_s)
+            row.get("exposure_s") is None
+            or abs(float(row["exposure_s"]) - setting.exposure_s)
             >= resolve(EXPOSURE_MATCH_TOLERANCE_SECONDS).value
         ):
             return False
@@ -324,11 +324,11 @@ def query_calibration_sets(
         CalibrationSetCount(
             kind=label,
             camera=str(row.get("camera") or ""),
-            gain=None if row.get("iso") is None else str(row.get("iso")),
+            gain=row.get("gain"),
             offset=row.get("offset"),
             binning=row.get("binning"),
             temperature_c=row.get("temperature_c"),
-            exposure_s=row.get("exposure"),
+            exposure_s=row.get("exposure_s"),
             filter_name=row.get("filter"),
             count=int(row.get("count") or 0),
             row_key=_row_key(label, row),
@@ -412,12 +412,12 @@ def match_calibration(library: CalibrationLibrary, frames: FrameChoice) -> list[
         if filter_text == "NONE":
             filter_text = "None"
         try:
-            exposure_s = float(frame.exposure)
+            exposure_s = float(frame.exposure_s)
         except ValueError, TypeError:
             exposure_s = 1.0
         focal_length = getattr(frame, "focal_length_mm", None)
         optic = None if focal_length is None else round(float(focal_length))
-        key = (frame.camera, filter_text, str(frame.iso), str(frame.offset), exposure_s, optic)
+        key = (frame.camera, filter_text, str(frame.gain), str(frame.offset), exposure_s, optic)
         groups.setdefault(key, []).append(frame)
 
     matches = []
@@ -465,7 +465,7 @@ def _flat_set_health(group: Any, minimum_frames: int) -> CalibrationSetHealth:
     row = {
         "camera": group.camera,
         "filter": group.filter,
-        "iso": group.gain,
+        "gain": group.gain,
         "offset": group.offset,
         "binning": group.binning,
     }
@@ -502,13 +502,13 @@ def _set_as_row(calibration_set: Any) -> dict[str, Any]:
     """
     row = {
         "camera": calibration_set.camera,
-        "iso": calibration_set.gain,
+        "gain": calibration_set.gain,
         "offset": calibration_set.offset,
         "binning": calibration_set.binning,
     }
     if calibration_set.kind == "dark":
         row["temperature_c"] = calibration_set.temperature_c
-        row["exposure"] = calibration_set.exposure_seconds
+        row["exposure_s"] = calibration_set.exposure_s
     return row
 
 
@@ -600,7 +600,7 @@ def _assess_version(
             calibration_set.offset,
             calibration_set.binning,
             calibration_set.temperature_c,
-            calibration_set.exposure_seconds,
+            calibration_set.exposure_s,
             tuple(calibration_set.paths),
         )
 
@@ -687,11 +687,11 @@ def _judge_dark_or_bias_sets(
             minimum_frames=minimum_frames,
             profile=profile,
             setting=setting,
-            exposure_seconds=calibration_set.exposure_seconds,
+            exposure_s=calibration_set.exposure_s,
             reference=reference,
         )
         row = {**_set_as_row(calibration_set), "temperature_c": calibration_set.temperature_c}
-        row["exposure"] = calibration_set.exposure_seconds
+        row["exposure_s"] = calibration_set.exposure_s
         health.append(
             health_of_judgement(
                 judgement,
@@ -702,7 +702,7 @@ def _judge_dark_or_bias_sets(
                 offset=calibration_set.offset,
                 binning=calibration_set.binning,
                 temperature_slot_c=calibration_set.temperature_c,
-                exposure_seconds=calibration_set.exposure_seconds,
+                exposure_s=calibration_set.exposure_s,
             )
         )
     return health

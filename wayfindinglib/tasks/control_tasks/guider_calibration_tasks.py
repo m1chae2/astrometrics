@@ -81,8 +81,8 @@ def compute_guider_calibration(
 
     camera_angle_deg = math.degrees(math.atan2(ra_end_xy[1] - ra_start_xy[1], ra_end_xy[0] - ra_start_xy[0]))
 
-    ra_rate_arcsec_per_sec = (ra_pixel_distance * arcsec_per_pixel) / ra_pulse_duration_sec
-    dec_rate_arcsec_per_sec = (dec_pixel_distance * arcsec_per_pixel) / dec_pulse_duration_sec
+    ra_rate_arcsec_per_s = (ra_pixel_distance * arcsec_per_pixel) / ra_pulse_duration_sec
+    dec_rate_arcsec_per_s = (dec_pixel_distance * arcsec_per_pixel) / dec_pulse_duration_sec
 
     return GuiderCalibration(
         id=calibration_id,
@@ -90,6 +90,6 @@ def compute_guider_calibration(
         telescope_id=telescope_id,
         arcsec_per_pixel=arcsec_per_pixel,
         camera_angle_deg=camera_angle_deg,
-        ra_rate_arcsec_per_sec=ra_rate_arcsec_per_sec,
-        dec_rate_arcsec_per_sec=dec_rate_arcsec_per_sec,
+        ra_rate_arcsec_per_s=ra_rate_arcsec_per_s,
+        dec_rate_arcsec_per_s=dec_rate_arcsec_per_s,
     )

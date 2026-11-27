@@ -337,7 +337,8 @@ def compare_target(name: str, manifest_path: str, siril_executable: str, work_ro
     images = [load_plane(group["stack_path"]) for group in groups]
     reference = int(np.argmax([group["weight"] for group in groups]))
     order = [reference] + [index for index in range(len(groups)) if index != reference]
-    seconds = [group["exposure_seconds"] for group in groups]
+    # An older manifest names the length "exposure_seconds".
+    seconds = [group.get("exposure_s", group.get("exposure_seconds")) for group in groups]
     print(f"\n=== {name}: {len(groups)} groups {seconds} s, reference = {seconds[reference]} s")
     aligned, covered, results = align_images_to_reference(
         images, reference, crop_fraction=crop, prefer_star_position=spectral

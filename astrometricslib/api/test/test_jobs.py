@@ -136,7 +136,7 @@ def test_an_unfinished_job_that_stopped_updating_looks_stale(database: Path, job
     stale = jobs.query(active=True)[0]
     assert stale.looks_stale is True
     assert stale.is_active is False
-    assert stale.idle_minutes > 60
+    assert stale.idle_min > 60
 
 
 def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:

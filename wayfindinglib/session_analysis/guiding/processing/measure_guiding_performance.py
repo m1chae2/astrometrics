@@ -121,10 +121,10 @@ def _net_dec_correction_arcsec_per_minute(
         speed is unknown or impossible, or the guider issued no declination
         corrections.
     """
-    duration = run.duration_seconds
+    duration = run.duration_s
     if duration is None or duration < resolve_parameter(MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE).value:
         return None
-    speed = run.dec_rate_arcsec_per_second
+    speed = run.dec_rate_arcsec_per_s
     if speed is None or not 0.0 < speed <= SIDEREAL_RATE_ARCSEC_PER_SECOND:
         return None
     pulses_ms = [sample["pulse_dec"] for sample in run_samples]
@@ -210,20 +210,20 @@ def measure_guiding_performance(
         if len(run_samples) >= resolve_parameter(MINIMUM_SAMPLES_PER_RUN).value:
             _, _, run_rms = _per_axis_error(run_samples)
         rate = _net_dec_correction_arcsec_per_minute(run, run_samples)
-        if rate is not None and run.duration_seconds is not None:
-            weighted_rates.append((rate, run.duration_seconds))
+        if rate is not None and run.duration_s is not None:
+            weighted_rates.append((rate, run.duration_s))
         run_results.append(
             GuidingRunPerformance(
                 run_id=run.id,
                 started_at=run.started_at,
-                duration_seconds=run.duration_seconds,
+                duration_s=run.duration_s,
                 samples=len(run_samples),
                 rms_per_axis_arcsec=run_rms,
                 lost_fraction=run.lost_fraction,
-                net_dec_correction_arcsec_per_minute=rate,
-                altitude_degrees=run.altitude_degrees,
-                azimuth_degrees=run.azimuth_degrees,
-                declination_degrees=run.declination_degrees,
+                net_dec_correction_arcsec_per_min=rate,
+                altitude_deg=run.altitude_deg,
+                azimuth_deg=run.azimuth_deg,
+                declination_deg=run.declination_deg,
                 pier_side=run.pier_side,
             )
         )
@@ -242,8 +242,8 @@ def measure_guiding_performance(
         rms_per_axis_arcsec=rms_per_axis,
         rms_including_excursions_arcsec=rms_including,
         expected_star_widening_fraction=widening,
-        net_dec_correction_arcsec_per_minute=net_rate,
+        net_dec_correction_arcsec_per_min=net_rate,
         runs=run_results,
         exposure_feasibility=feasibility,
-        longest_reliable_exposure_seconds=longest_reliable,
+        longest_reliable_exposure_s=longest_reliable,
     )

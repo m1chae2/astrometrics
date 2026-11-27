@@ -216,7 +216,7 @@ def test_a_review_with_long_evidence_lists_is_cut_for_the_mcp_reply_budget() -> 
             goal="faint_point_source",
             frames_taken=700,
             frames_set_aside=0,
-            captured_seconds=1.0,
+            captured_s=1.0,
             statements=[statement, statement],
             needs_attention=NeedsAttention(warning_count=2, worst_severity=Severity.ADVICE),
         )

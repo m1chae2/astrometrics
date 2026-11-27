@@ -231,7 +231,7 @@ class TargetImagingExecutor:
         target_name : `str`
             The id of the library target the plan is for.
         items : `list` [`dict`]
-            The plan items, each with ``count``, ``exposure`` (seconds) and
+            The plan items, each with ``count``, ``exposure_s`` (seconds) and
             ``filter`` (``"L"`` when missing).
 
         Returns
@@ -249,12 +249,12 @@ class TargetImagingExecutor:
         plan_items = []
         for item in items:
             count = int(item.get("count", 0))
-            exposure = float(item.get("exposure", 0.0))
+            exposure_s = float(item.get("exposure_s", 0.0))
             plan_items.append({
                 "count": count,
-                "exposure": exposure,
+                "exposure_s": exposure_s,
                 "filter": str(item.get("filter", "L")),
-                "duration": count * exposure,
+                "duration": count * exposure_s,
             })
         return {
             "id": str(uuid.uuid4()),
@@ -285,9 +285,9 @@ class TargetImagingExecutor:
             items = [
                 {
                     "count": request.count,
-                    "exposure": request.exposure_sec,
+                    "exposure_s": request.exposure_s,
                     "filter": request.filter.value,
-                    "duration": request.count * request.exposure_sec,
+                    "duration": request.count * request.exposure_s,
                 }
                 for request in entry.exposure_requests
             ]

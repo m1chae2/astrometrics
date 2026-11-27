@@ -86,7 +86,7 @@ FRAMES_SAMPLED_PER_GROUP = TunedParameter(
 )
 
 
-def group_weight(count: int, exposure_seconds: float, frame_noise: float) -> float:
+def group_weight(count: int, exposure_s: float, frame_noise: float) -> float:
     """Work out how much one exposure group counts when groups are combined.
 
     A group's stack carries information in proportion to its frame count
@@ -98,7 +98,7 @@ def group_weight(count: int, exposure_seconds: float, frame_noise: float) -> flo
     ----------
     count : `int`
         How many frames the group holds.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length of one frame, in seconds.
     frame_noise : `float`
         The noise of one raw frame, in counts.
@@ -106,9 +106,9 @@ def group_weight(count: int, exposure_seconds: float, frame_noise: float) -> flo
     Returns
     -------
     weight : `float`
-        ``count * exposure_seconds**2 / frame_noise**2``.
+        ``count * exposure_s**2 / frame_noise**2``.
     """
-    return count * exposure_seconds**2 / frame_noise**2
+    return count * exposure_s**2 / frame_noise**2
 
 
 def _prepare_group_inputs(

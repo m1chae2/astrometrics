@@ -42,11 +42,11 @@ def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
 
     groups: dict[str, list[Any]] = {}
     for frame in frames:
-        groups.setdefault(canonical_iso_text(frame.iso), []).append(frame)
+        groups.setdefault(canonical_iso_text(frame.gain), []).append(frame)
 
     dominant_gain = max(groups, key=lambda gain: len(groups[gain]))
     dominant_subset = groups[dominant_gain]
-    excluded = [f for f in frames if canonical_iso_text(f.iso) != dominant_gain]
+    excluded = [f for f in frames if canonical_iso_text(f.gain) != dominant_gain]
     return dominant_subset, excluded
 
 
@@ -72,7 +72,7 @@ def gain_homogeneity_gate(frames: list[Any], excluded: list[Any]) -> GateResult:
         with the number of frames set aside.
     """
     source = "frames of the most common gain are kept; the rest are set aside"
-    known = [frame for frame in frames if canonical_iso_text(frame.iso) not in _UNKNOWN_GAIN_TEXTS]
+    known = [frame for frame in frames if canonical_iso_text(frame.gain) not in _UNKNOWN_GAIN_TEXTS]
     if not known:
         return unchecked_gate(
             GAIN_GATE_NAME, "no frame records its gain setting, so gains could not be compared", source

@@ -54,7 +54,7 @@ _HOURS_PER_DAY = 24
 _DEGREES_PER_HOUR_OF_RA = 15.0
 
 
-def mid_exposure_unix(start_unix: float, exposure_seconds: float | None) -> float:
+def mid_exposure_unix(start_unix: float, exposure_s: float | None) -> float:
     """Find the middle of an exposure.
 
     ``DATE-OBS`` gives the moment the shutter opened, so the middle of the
@@ -64,7 +64,7 @@ def mid_exposure_unix(start_unix: float, exposure_seconds: float | None) -> floa
     ----------
     start_unix : `float`
         The exposure start (``DATE-OBS``), as a Unix timestamp in UTC.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure time (``EXPTIME``) in seconds. When `None`, the start
         time is returned unchanged, because the middle cannot be found.
 
@@ -73,9 +73,9 @@ def mid_exposure_unix(start_unix: float, exposure_seconds: float | None) -> floa
     mid_unix : `float`
         The middle of the exposure, as a Unix timestamp in UTC.
     """
-    if exposure_seconds is None:
+    if exposure_s is None:
         return start_unix
-    return start_unix + exposure_seconds / 2.0
+    return start_unix + exposure_s / 2.0
 
 
 def format_mpc_date(unix_time: float) -> str:
@@ -263,14 +263,14 @@ def mpc_lines_for_candidate(
     lines = [
         format_mpc_observation(
             designation,
-            mid_exposure_unix(detection.timestamp, detection.exposure_seconds),
+            mid_exposure_unix(detection.timestamp, detection.exposure_s),
             detection.right_ascension_deg,
             detection.declination_deg,
             observatory_code,
         )
         for detection in detections
     ]
-    start_time_lines = sum(1 for detection in detections if detection.exposure_seconds is None)
+    start_time_lines = sum(1 for detection in detections if detection.exposure_s is None)
     return lines, start_time_lines
 
 
@@ -435,7 +435,7 @@ def ades_psv_for_candidate(
             tracklet_id,
             "CCD",
             observatory_code,
-            format_ades_time(mid_exposure_unix(detection.timestamp, detection.exposure_seconds)),
+            format_ades_time(mid_exposure_unix(detection.timestamp, detection.exposure_s)),
             f"{detection.right_ascension_deg % 360.0:.6f}",
             f"{detection.declination_deg:.6f}",
             f"{error_ra:.3f}",
@@ -446,5 +446,5 @@ def ades_psv_for_candidate(
         lines.append(
             "|".join(value.ljust(width) for value, (_, width) in zip(values, _ADES_FIELDS, strict=True))
         )
-    start_time_rows = sum(1 for detection in detections if detection.exposure_seconds is None)
+    start_time_rows = sum(1 for detection in detections if detection.exposure_s is None)
     return AdesReport("\n".join(lines) + "\n", start_time_rows, assumed_error_rows)

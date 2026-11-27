@@ -50,7 +50,7 @@ def make_mixed_target() -> Target:
             path=f"/f/{name}.fits",
             role="LIGHT",
             camera=NIKON,
-            exposure="300",
+            exposure_s=300,
             timestamp=float(index),
             focalLengthMm=focal_length,
         )

@@ -169,7 +169,7 @@ def fixture_summary() -> StackQualitySummary:
     """
     groups = [
         ExposureGroupSummary(
-            exposureSeconds=60.0,
+            exposureS=60.0,
             framesSubmitted=10,
             framesStacked=10,
             darkApplied=True,
@@ -188,7 +188,7 @@ def fixture_summary() -> StackQualitySummary:
             peakLinearityLimitProvenance="measured",
         ),
         ExposureGroupSummary(
-            exposureSeconds=120.0,
+            exposureS=120.0,
             framesSubmitted=8,
             framesStacked=8,
             darkApplied=True,
@@ -223,11 +223,11 @@ def fixture_summary() -> StackQualitySummary:
         saturatedPixelFraction=0.0001,
         exposureGroups=groups,
         zeroPixelFraction=0.0,
-        negativePixelMaxPercent=12,
+        negativePixelMaxPct=12,
         stackedFwhmPx=3.1,
         medianInputFwhmPx=3.0,
         expectedStackFwhmPx=3.05,
-        stackingDurationSeconds=95.0,
+        stackingDurationS=95.0,
         registrationReferenceStarCount=150,
         framesAccepted=18,
         framesExcludedForGain=1,
@@ -253,10 +253,10 @@ def fixture_membership() -> StackMembership:
     """
     frames = [
         SimpleNamespace(
-            path="/frames/lights/M 99/Scope/Cam/a.fits", exposure="60", timestamp=1_792_000_000.0
+            path="/frames/lights/M 99/Scope/Cam/a.fits", exposure_s=60.0, timestamp=1_792_000_000.0
         ),
         SimpleNamespace(
-            path="/frames/lights/M 99/Scope/Cam/b.fits", exposure="120", timestamp=1_792_000_100.0
+            path="/frames/lights/M 99/Scope/Cam/b.fits", exposure_s=120.0, timestamp=1_792_000_100.0
         ),
     ]
     return StackMembership((StackMember(frames[0], 1.0), StackMember(frames[1], 2.0)))
@@ -284,7 +284,7 @@ def fixture_frame_geometry_rows(context: PipelineRunContext) -> list[QualityMeas
         SimpleNamespace(
             path=f"/frames/lights/M 99/Scope/Cam/{name}",
             camera="Cam",
-            exposure="60",
+            exposure_s=60.0,
             timestamp=1_792_000_000.0 + 120.0 * index,
         )
         for index, name in enumerate(names)
@@ -372,7 +372,7 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
         fixture_membership(),
         science=fixture_science(),
     )
-    frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
+    frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure_s=60)
     measurements.extend(fixture_frame_geometry_rows(context))
     measurements.extend(abandoned_stack_measurements(context, 3600.5, 3600))
     measurements.extend(

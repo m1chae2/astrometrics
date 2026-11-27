@@ -134,12 +134,12 @@ def test_the_pipeline_checks_a_gaia_star_against_the_drivers_xp_spectrum() -> No
     assert comparison.gaia_source_id == SOURCE_ID
     # The instrument response was applied exactly, so the star only differs
     # from XP by the template's own sharpness.
-    assert abs(comparison.slope_percent_per_1000_angstrom) < 1.0
+    assert abs(comparison.slope_pct_per_1000_angstrom) < 1.0
     values = checkpoint_metrics(star)
     assert values["gaia_xp_available"] == pytest.approx(1.0)
     assert values["gaia_xp_residual_rms_fraction"] == pytest.approx(comparison.residual_rms_fraction)
     assert values["gaia_xp_slope_percent_per_1000_angstrom"] == pytest.approx(
-        abs(comparison.slope_percent_per_1000_angstrom)
+        abs(comparison.slope_pct_per_1000_angstrom)
     )
 
 
@@ -244,7 +244,7 @@ def compared_star(star_id: str, slope: float) -> SimpleNamespace:
     """
     comparison = GaiaXpComparison(
         status="compared",
-        slope_percent_per_1000_angstrom=slope,
+        slope_pct_per_1000_angstrom=slope,
         bands=[
             {
                 "start_angstrom": low,
@@ -296,7 +296,7 @@ def test_the_runner_records_the_gaia_summary_and_fails_the_gate_for_tilted_stars
     assert summary.gate(GAIA_XP_GATE_NAME).status is GateStatus.FAILED
     gaia_summary = summary.spectroscopy_metrics.gaia_xp_summary
     assert gaia_summary.compared_star_count == 3
-    assert gaia_summary.median_slope_percent_per_1000_angstrom == pytest.approx(5.0)
+    assert gaia_summary.median_slope_pct_per_1000_angstrom == pytest.approx(5.0)
     assert [band.median_ratio for band in gaia_summary.bands] == pytest.approx([1.05] * 4)
 
 

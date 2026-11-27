@@ -102,14 +102,12 @@ def _periodic_error_feedforward_ms(
         ``(0, False)`` if the model has no usable dominant period or
         `elapsed_guiding_seconds` was not supplied.
     """
-    if elapsed_guiding_seconds is None or not mount_model.dominant_period_seconds:
+    if elapsed_guiding_seconds is None or not mount_model.dominant_period_s:
         return 0, False
     if mount_model.periodic_error_peak_to_peak_arcsec <= 0.0:
         return 0, False
 
-    phase = (elapsed_guiding_seconds % mount_model.dominant_period_seconds) / (
-        mount_model.dominant_period_seconds
-    )
+    phase = (elapsed_guiding_seconds % mount_model.dominant_period_s) / (mount_model.dominant_period_s)
     predicted_error_arcsec = (mount_model.periodic_error_peak_to_peak_arcsec / 2.0) * math.sin(
         2.0 * math.pi * phase
     )
@@ -209,7 +207,7 @@ def compute_guiding_correction(
         if ra_within_deadband
         else _signed_pulse_ms(
             drift_ra_arcsec,
-            calibration.ra_rate_arcsec_per_sec,
+            calibration.ra_rate_arcsec_per_s,
             config.guiding_aggressiveness,
             config.guiding_max_pulse_ms,
         )
@@ -219,7 +217,7 @@ def compute_guiding_correction(
         if dec_within_deadband
         else _signed_pulse_ms(
             drift_dec_arcsec,
-            calibration.dec_rate_arcsec_per_sec,
+            calibration.dec_rate_arcsec_per_s,
             config.guiding_aggressiveness,
             config.guiding_max_pulse_ms,
         )
@@ -231,7 +229,7 @@ def compute_guiding_correction(
         feedforward_ra_ms, ra_feedforward_clamped = _periodic_error_feedforward_ms(
             mount_model,
             elapsed_guiding_seconds,
-            calibration.ra_rate_arcsec_per_sec,
+            calibration.ra_rate_arcsec_per_s,
             config.guiding_aggressiveness,
             config.guiding_max_pulse_ms,
         )

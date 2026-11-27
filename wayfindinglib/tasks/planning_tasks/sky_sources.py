@@ -45,7 +45,7 @@ def _frame_seconds(frame: Any) -> float:
         The exposure in seconds, or 0 when it is missing or not a number.
     """
     try:
-        return float(getattr(frame, "exposure", 0) or 0.0)
+        return float(getattr(frame, "exposure_s", 0) or 0.0)
     except ValueError, TypeError:
         return 0.0
 

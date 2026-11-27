@@ -50,7 +50,7 @@ PIER_SIDES = ("East", "West")
 _AZIMUTH_SECTOR_WIDTH = 45.0
 
 
-def altitude_label(altitude_degrees: float) -> str:
+def altitude_label(altitude_deg: float) -> str:
     """Name the altitude band a pointing falls in.
 
     Returns
@@ -62,7 +62,7 @@ def altitude_label(altitude_degrees: float) -> str:
     bands = list(pairwise(resolve_parameter(ALTITUDE_BAND_EDGES).value))
     lower, upper = bands[-1]
     for band_lower, band_upper in bands:
-        if altitude_degrees < band_upper:
+        if altitude_deg < band_upper:
             lower, upper = band_lower, band_upper
             break
     return f"{lower:g}-{upper:g} deg"
@@ -80,7 +80,7 @@ def altitude_band_limits(label: str) -> tuple[float, float]:
     return float(lower), float(upper)
 
 
-def azimuth_label(azimuth_degrees: float) -> str:
+def azimuth_label(azimuth_deg: float) -> str:
     """Name the azimuth sector a pointing falls in.
 
     Returns
@@ -88,7 +88,7 @@ def azimuth_label(azimuth_degrees: float) -> str:
     label : `str`
         ``"N"``, ``"NE"`` and so on.
     """
-    index = int(((azimuth_degrees % 360.0) + _AZIMUTH_SECTOR_WIDTH / 2.0) // _AZIMUTH_SECTOR_WIDTH) % len(
+    index = int(((azimuth_deg % 360.0) + _AZIMUTH_SECTOR_WIDTH / 2.0) // _AZIMUTH_SECTOR_WIDTH) % len(
         AZIMUTH_SECTORS
     )
     return AZIMUTH_SECTORS[index]
@@ -110,7 +110,7 @@ def pier_label(pier_side: str | None) -> str | None:
 
 
 def bins_of(
-    altitude_degrees: float | None, azimuth_degrees: float | None, pier_side: str | None
+    altitude_deg: float | None, azimuth_deg: float | None, pier_side: str | None
 ) -> list[tuple[str, str]]:
     """List the parts of the sky a pointing belongs to.
 
@@ -120,10 +120,10 @@ def bins_of(
         A (dimension, label) pair for each dimension with a known value.
     """
     found = []
-    if altitude_degrees is not None:
-        found.append(("altitude", altitude_label(altitude_degrees)))
-    if azimuth_degrees is not None:
-        found.append(("azimuth", azimuth_label(azimuth_degrees)))
+    if altitude_deg is not None:
+        found.append(("altitude", altitude_label(altitude_deg)))
+    if azimuth_deg is not None:
+        found.append(("azimuth", azimuth_label(azimuth_deg)))
     pier = pier_label(pier_side)
     if pier is not None:
         found.append(("pier_side", pier))

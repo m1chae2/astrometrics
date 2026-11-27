@@ -4,7 +4,7 @@
 - `SpectroscopyCalibrationResult` is the whole report.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 __all__ = ["CalibrationLineFit", "SpectroscopyCalibrationResult"]
 
@@ -53,7 +53,7 @@ class SpectroscopyCalibrationResult(BaseModel):
     rms_error_nm : `float`
         The RMS difference between the fitted and the true wavelengths of the
         lines, in nanometers.
-    detected_angle_degrees : `float`
+    detected_angle_deg : `float`
         The angle of the spectrum trail, in degrees.
     detailed_calibration : `list` [`CalibrationLineFit`]
         The lines used in the fit.
@@ -69,7 +69,9 @@ class SpectroscopyCalibrationResult(BaseModel):
     fitted_grating_distance_mm: float
     fitted_dispersion_start_px: float
     rms_error_nm: float
-    detected_angle_degrees: float
+    detected_angle_deg: float = Field(
+        validation_alias=AliasChoices("detected_angle_deg", "detected_angle_degrees")
+    )
     detailed_calibration: list[CalibrationLineFit] = Field(default_factory=list)
     use_flare_mask_extraction: bool = False
     max_extraction_length_px: float | None = None

@@ -50,8 +50,8 @@ def _set_aside_records(target: Target, config: Any) -> list[FrameRecord]:
     records = []
     for entry in list_set_aside_frames_with_reasons(target, config):
         record = create_frame_record_from_fits(entry.path, config=config)
-        if entry.exposure_seconds is not None:
-            record.exposure = str(entry.exposure_seconds)
+        if entry.exposure_s is not None:
+            record.exposure_s = entry.exposure_s
         records.append(record)
     return records
 
@@ -151,13 +151,14 @@ def query_frames(
         frames = [
             frame
             for frame in frames
-            if (value := stored_number(frame.iso)) is not None and abs(value - float(gain)) < 0.1
+            if (value := stored_number(frame.gain)) is not None and abs(value - float(gain)) < 0.1
         ]
     if exposure_s is not None:
         frames = [
             frame
             for frame in frames
-            if (value := stored_number(frame.exposure)) is not None and abs(value - float(exposure_s)) < 0.001
+            if (value := stored_number(frame.exposure_s)) is not None
+            and abs(value - float(exposure_s)) < 0.001
         ]
     if status in ("included", "flagged", "not_stacked"):
         from astrometricslib.pipelines.stacking.frame_status import report_frame_statuses

@@ -96,7 +96,7 @@ def _inputs(setup: WorldSetup, ra_hours: float) -> dict[str, Any]:
         "main_camera": camera(setup.main),
         "guide_camera": camera(setup.guide),
         "target_ra_hours": ra_hours,
-        "target_dec_degrees": setup.declination_degrees,
+        "target_dec_degrees": setup.declination_deg,
     }
 
 

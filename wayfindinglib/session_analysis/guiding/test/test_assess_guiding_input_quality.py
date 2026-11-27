@@ -176,7 +176,7 @@ def test_the_guide_cadence_ignores_pauses_between_runs(
 
     quality = _assess(samples, [make_run()], make_envelope())
 
-    assert quality.cadence_seconds == pytest.approx(3.2)
+    assert quality.cadence_s == pytest.approx(3.2)
 
 
 def test_no_limits_apply_to_equipment_that_does_not_match(
@@ -217,7 +217,7 @@ def test_guided_time_adds_up_the_runs(make_samples: Any, make_run: Any, make_env
     quality = _assess(make_samples(), runs, make_envelope())
 
     assert quality.runs == 2
-    assert quality.guided_seconds == pytest.approx(1500.0)
+    assert quality.guided_s == pytest.approx(1500.0)
 
 
 def test_a_dim_guide_star_is_judged_against_the_equipments_earlier_nights(
@@ -232,7 +232,7 @@ def test_a_dim_guide_star_is_judged_against_the_equipments_earlier_nights(
     assert dim.median_star_mass == pytest.approx(4000.0)
     assert dim.star_mass_limit < usual.median_star_mass
     assert dim.typical_star_mass == pytest.approx(295000.0, rel=0.05)
-    assert dim.typical_cadence_seconds == pytest.approx(3.2, rel=0.05)
+    assert dim.typical_cadence_s == pytest.approx(3.2, rel=0.05)
 
 
 def test_star_brightness_is_not_judged_without_earlier_nights(make_samples: Any, make_envelope: Any) -> None:

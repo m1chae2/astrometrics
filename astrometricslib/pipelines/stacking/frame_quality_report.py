@@ -141,7 +141,7 @@ def _check_trend_metrics(frames: Sequence[FrameRecord]) -> tuple[dict[str, str],
         Plain sentences saying what was left out and why.
     """
     metrics = {"fwhm_px": "rising", "star_count": "falling"}
-    if len({_exposure_seconds(frame.exposure) for frame in frames}) <= 1:
+    if len({_exposure_seconds(frame.exposure_s) for frame in frames}) <= 1:
         metrics[SKY_LEVEL_KEY] = "either"
         return metrics, []
     return metrics, [

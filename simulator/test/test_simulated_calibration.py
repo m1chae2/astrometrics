@@ -144,8 +144,8 @@ def test_the_guider_calibration_holds_the_simulators_own_values(
             telescope_id="Real Scope",
             arcsec_per_pixel=6.39,
             camera_angle_deg=12.0,
-            ra_rate_arcsec_per_sec=7.1,
-            dec_rate_arcsec_per_sec=6.2,
+            ra_rate_arcsec_per_s=7.1,
+            dec_rate_arcsec_per_s=6.2,
             calibrated_at=datetime(2026, 10, 3, tzinfo=UTC),
         ),
         "guider_calibration",
@@ -160,8 +160,8 @@ def test_the_guider_calibration_holds_the_simulators_own_values(
     assert calibration.camera_angle_deg == pytest.approx(0.0)
     assert calibration.arcsec_per_pixel == pytest.approx(206.265 * 3.76 / 450.0, rel=1e-3)
     assert (
-        calibration.ra_rate_arcsec_per_sec
-        == calibration.dec_rate_arcsec_per_sec
+        calibration.ra_rate_arcsec_per_s
+        == calibration.dec_rate_arcsec_per_s
         == GUIDE_RATE_ARCSEC_PER_S.default
         == SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
     )

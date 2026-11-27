@@ -141,7 +141,7 @@ def test_the_prediction_uses_siril_star_width_weights_and_only_stacked_frames() 
     from astrometricslib.pipelines.stacking.post_processing.stack_quality import expected_stack_fwhm
 
     paths = ["a", "b", "c", "d"]
-    frames = [SimpleNamespace(path=path, exposure=60.0) for path in paths]
+    frames = [SimpleNamespace(path=path, exposure_s=60.0) for path in paths]
     widths = {"a": 2.0, "b": 3.0, "c": 4.0, "d": 9.0}
     diagnostics = wfwhm_diagnostics(paths, [2.0, 3.0, 4.0, 9.0], [True, True, True, False])
     summary = make_summary()
@@ -166,7 +166,7 @@ def test_the_prediction_uses_siril_star_width_weights_and_only_stacked_frames() 
 def test_an_equally_weighted_stack_predicts_the_plain_rms_of_its_members() -> None:
     """Without a weight mode every member counts the same."""
     paths = ["a", "b"]
-    frames = [SimpleNamespace(path=path, exposure=60.0) for path in paths]
+    frames = [SimpleNamespace(path=path, exposure_s=60.0) for path in paths]
     summary = make_summary()
 
     fwhm_sampling.measure_fwhm_degradation(

@@ -38,7 +38,7 @@ _DETAIL_ARGUMENTS = {
 """The arguments each detail uses. Any other argument is refused."""
 
 _ASSESS_ARGUMENTS = {
-    "dark": ("camera_id", "gain", "offset", "binning", "temperature_c", "exposure_seconds"),
+    "dark": ("camera_id", "gain", "offset", "binning", "temperature_c", "exposure_s"),
     "bias": ("camera_id", "gain", "offset", "binning"),
     "flat": ("camera_id", "gain", "offset", "binning", "telescope", "filter_name"),
 }
@@ -137,16 +137,16 @@ def _count_row(row: Any) -> dict[str, Any]:
     Returns
     -------
     row : `dict` [`str`, `Any`]
-        ``camera``, ``iso``, ``offset``, ``binning``, then ``temperature_c``
-        and ``exposure`` for a dark or ``filter`` for a flat, ``count`` and
+        ``camera``, ``gain``, ``offset``, ``binning``, then ``temperature_c``
+        and ``exposure_s`` for a dark or ``filter`` for a flat, ``count`` and
         ``row_key``.
     """
     shaped: dict[str, Any] = {"camera": row.camera}
     if row.kind == "flat":
         shaped["filter"] = row.filter_name
-    shaped.update({"iso": row.gain, "offset": row.offset, "binning": row.binning})
+    shaped.update({"gain": row.gain, "offset": row.offset, "binning": row.binning})
     if row.kind == "dark":
-        shaped.update({"temperature_c": row.temperature_c, "exposure": row.exposure_s})
+        shaped.update({"temperature_c": row.temperature_c, "exposure_s": row.exposure_s})
     shaped.update({"count": row.count, "row_key": row.row_key})
     return shaped
 
@@ -190,9 +190,9 @@ def _group_row(match: Any) -> dict[str, Any]:
     """
     return {
         "filter": match.filter_name,
-        "iso": match.gain,
+        "gain": match.gain,
         "offset": match.offset,
-        "exposure": f"{match.exposure_s:g}",
+        "exposureS": match.exposure_s,
         "count": match.frame_count,
         "darks": f"{match.dark.count}" if match.dark.count else "Missing",
         "camera": match.camera,
@@ -222,18 +222,18 @@ def light_frame_counts(target: Any) -> list[dict[str, Any]]:
         if frame.role != "LIGHT":
             continue
         filter_text = frame.filter.value if hasattr(frame.filter, "value") else str(frame.filter)
-        key = (frame.telescope, frame.camera, frame.iso, frame.exposure, filter_text)
+        key = (frame.telescope, frame.camera, frame.gain, frame.exposure_s, filter_text)
         counts[key] = counts.get(key, 0) + 1
     return [
         {
             "telescope": telescope,
             "camera": camera,
-            "iso": iso,
-            "exposure": exposure,
+            "gain": gain,
+            "exposure_s": exposure_s,
             "filter": filter_text,
             "count": n,
         }
-        for (telescope, camera, iso, exposure, filter_text), n in counts.items()
+        for (telescope, camera, gain, exposure_s, filter_text), n in counts.items()
     ]
 
 
@@ -268,7 +268,7 @@ class CalibrationService:
         detail: Literal["counts", "target_match", "target_frames", "match"] = "counts",
         target: str | None = None,
         camera_id: str | None = None,
-        gain: str | int | float | None = None,
+        gain: float | None = None,
         offset: float | None = None,
         binning: str | int | None = None,
         temperature_c: float | None = None,
@@ -396,11 +396,11 @@ class CalibrationService:
         self,
         kind: Literal["dark", "bias", "flat"],
         camera_id: str | None = None,
-        gain: str | int | float | None = None,
+        gain: float | None = None,
         offset: float | None = None,
         binning: str | int | None = None,
         temperature_c: float | None = None,
-        exposure_seconds: float | None = None,
+        exposure_s: float | None = None,
         telescope: str | None = None,
         filter_name: str | None = None,
     ) -> list[Any]:
@@ -409,7 +409,7 @@ class CalibrationService:
         Arguments used by each kind (any other argument is refused):
 
         - ``"dark"``: ``camera_id``, ``gain``, ``offset``, ``binning``,
-          ``temperature_c`` and ``exposure_seconds``.
+          ``temperature_c`` and ``exposure_s``.
         - ``"bias"``: ``camera_id``, ``gain``, ``offset`` and ``binning``.
         - ``"flat"``: ``camera_id``, ``gain``, ``offset``, ``binning``,
           ``telescope`` and ``filter_name``.
@@ -420,7 +420,7 @@ class CalibrationService:
             The kind of calibration frame.
         camera_id : `str`, optional
             Only this camera's sets. The other settings need it.
-        gain, offset, binning, temperature_c, exposure_seconds : optional
+        gain, offset, binning, temperature_c, exposure_s : optional
             Only sets with these settings.
         telescope, filter_name : `str`, optional
             Flats only: the telescope and the filter.
@@ -443,7 +443,7 @@ class CalibrationService:
             "offset": offset is not None,
             "binning": binning is not None,
             "temperature_c": temperature_c is not None,
-            "exposure_seconds": exposure_seconds is not None,
+            "exposure_s": exposure_s is not None,
             "telescope": telescope is not None,
             "filter_name": filter_name is not None,
         }
@@ -458,7 +458,7 @@ class CalibrationService:
             offset=_whole_number("offset", offset),
             binning=_whole_number("binning", binning),
             temperature_c=temperature_c,
-            exposure_s=exposure_seconds,
+            exposure_s=exposure_s,
             telescope=telescope,
             filter_name=filter_name,
         )
@@ -467,11 +467,11 @@ class CalibrationService:
     def measure_sensor_noise(
         self,
         camera_id: str,
-        gain: str | float,
-        offset: str | float,
+        gain: float,
+        offset: float,
         binning: str = "1x1",
         temperature_c: float | None = None,
-        exposure_seconds: float | None = None,
+        exposure_s: float | None = None,
         telescope: str | None = None,
         filter_name: str | None = None,
         save: bool = False,
@@ -482,15 +482,15 @@ class CalibrationService:
         ----------
         camera_id : `str`
             The camera, in any spelling of its name.
-        gain : `str` or `float`
-            The camera gain setting.
-        offset : `str` or `float`
-            The camera offset.
+        gain : `float`
+            The camera gain setting, a whole number.
+        offset : `float`
+            The camera offset, a whole number.
         binning : `str`, optional
             The binning, such as ``"1x1"``.
         temperature_c : `float`, optional
             Use only frames within 1 degree C of this sensor temperature.
-        exposure_seconds : `float`, optional
+        exposure_s : `float`, optional
             Use only flats of this exposure.
         telescope, filter_name : `str`, optional
             Use only flats taken through this telescope or filter.
@@ -514,7 +514,7 @@ class CalibrationService:
             offset=_whole_number("offset", offset),
             binning=_whole_number("binning", binning),
             temperature_c=temperature_c,
-            exposure_s=exposure_seconds,
+            exposure_s=exposure_s,
             telescope=telescope,
             filter_name=filter_name,
         )

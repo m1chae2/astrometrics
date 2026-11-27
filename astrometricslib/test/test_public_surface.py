@@ -119,6 +119,7 @@ EXPECTED_MODULE_NAMES = {
     "astrometricslib.arguments": frozenset({
         "FrameChoice",
         "Page",
+        "SettingNumber",
         "TimeInput",
         "check_choice",
         "check_frames",

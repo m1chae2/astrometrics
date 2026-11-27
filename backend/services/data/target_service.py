@@ -399,8 +399,8 @@ class TargetService:
                 "path": frame.path,
                 "name": os.path.basename(frame.path),
                 "camera": frame.camera,
-                "iso": frame.iso,
-                "exposure": frame.exposure,
+                "gain": frame.gain,
+                "exposureS": frame.exposure_s,
                 "filter": filter_str,
                 "date": frame.date,
                 "focalLengthMm": None if frame.focal_length_mm is None else float(frame.focal_length_mm),
@@ -410,7 +410,7 @@ class TargetService:
             "files": files,
             "stackedImage": self._existing_stack_path(target.stacking.stacked_image),
             "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
-            "totalExposure": target.exposure_sec,
+            "totalExposure": target.exposure_s,
             "stackConfiguration": self._current_stack_configuration(target),
             "stacks": self._stack_choices(target),
         }
@@ -504,7 +504,7 @@ class TargetService:
         -------
         report : `dict`
             ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
-            ``reason``, ``date``, ``exposure``, ``elongation``,
+            ``reason``, ``date``, ``exposure_s``, ``elongation``,
             ``originalPath``, ``restorable`` and ``restoreNote``) and
             ``stackedAt``, the time of the latest stack file in seconds since
             1970, or `None`.

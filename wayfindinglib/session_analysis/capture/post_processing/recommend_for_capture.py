@@ -116,7 +116,7 @@ def _captures_not_in_library(input_quality: CaptureInputQuality) -> TargetStatem
         },
         limits=[
             design_limit(
-                input_quality.match_window_seconds,
+                input_quality.match_window_s,
                 "s",
                 "Farthest apart an Ekos exposure and a frame may start and still be the same exposure.",
                 "WAY-D47",
@@ -262,7 +262,7 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[TargetStatem
         frames_total = sum(group.frames for group in groups)
         frames_clipped = sum(group.frames for group in clipped)
         if unclipped:
-            longest_clear = max(group.exposure_seconds for group in unclipped)
+            longest_clear = max(group.exposure_s for group in unclipped)
             plain_message = None
             message = (
                 f"{target_id}: a star clipped at {len(clipped)} of {len(groups)} exposure lengths, "
@@ -270,7 +270,7 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[TargetStatem
                 f"ceiling was {_format_exposure(longest_clear)}."
             )
         else:
-            shortest = min(group.exposure_seconds for group in groups)
+            shortest = min(group.exposure_s for group in groups)
             message = (
                 f"{target_id}: a star clipped at every exposure length tried, the shortest being "
                 f"{_format_exposure(shortest)}. If that star is the target, try a shorter exposure."

@@ -110,7 +110,7 @@ def test_each_star_is_compared_and_the_report_has_the_band_table() -> None:
     assert [star_id for star_id, _comparison in results] == ["HD 0", "HD 1", "HD 2"]
     for _star_id, comparison in results:
         assert comparison.status == "compared"
-        assert comparison.slope_percent_per_1000_angstrom == pytest.approx(
+        assert comparison.slope_pct_per_1000_angstrom == pytest.approx(
             TILT_PERCENT_PER_1000_ANGSTROM, abs=0.5
         )
     report = script.format_report(results)

@@ -389,9 +389,9 @@ def frame_altitudes(target: Target) -> dict[str, float]:
         frame with none is left out.
     """
     return {
-        target.frame_subject_id(frame): float(frame.altitude_degrees)
+        target.frame_subject_id(frame): float(frame.altitude_deg)
         for frame in target.frames
-        if frame.altitude_degrees is not None and str(frame.role).upper().endswith("LIGHT")
+        if frame.altitude_deg is not None and str(frame.role).upper().endswith("LIGHT")
     }
 
 
@@ -434,7 +434,7 @@ def _group_exposure(
 
     Returns
     -------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The stored group exposure, else the one written in the id, else
         ``None``.
     """
@@ -530,16 +530,16 @@ def _calibration_row(row: Any) -> dict[str, Any]:
     Returns
     -------
     row : `dict` [`str`, `Any`]
-        ``camera``, ``iso`` (the gain as text), ``offset``, ``binning``,
-        ``temperature_c``, ``exposure``, ``filter`` and ``count``.
+        ``camera``, ``gain``, ``offset``, ``binning``,
+        ``temperature_c``, ``exposure_s``, ``filter`` and ``count``.
     """
     return {
         "camera": row.camera,
-        "iso": row.gain,
+        "gain": row.gain,
         "offset": row.offset,
         "binning": row.binning,
         "temperature_c": row.temperature_c,
-        "exposure": row.exposure_s,
+        "exposure_s": row.exposure_s,
         "filter": row.filter_name,
         "count": row.count,
     }

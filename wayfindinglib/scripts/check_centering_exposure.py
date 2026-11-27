@@ -58,7 +58,7 @@ class FrameComparison:
     ----------
     frame : `str`
         The frame's file name.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The frame's exposure.
     limiting_magnitude : `float`
         The predicted faintest detectable Gaia G magnitude.
@@ -71,7 +71,7 @@ class FrameComparison:
     """
 
     frame: str
-    exposure_seconds: float
+    exposure_s: float
     limiting_magnitude: float
     predicted_in_circle: int
     predicted_in_frame: float
@@ -183,7 +183,7 @@ def _spread(frames: list[Any], count: int) -> list[Any]:
     picked : `list`
         At most `count` frames, shortest exposure first.
     """
-    ordered = sorted(frames, key=lambda frame: float(frame.exposure))
+    ordered = sorted(frames, key=lambda frame: float(frame.exposure_s))
     if len(ordered) <= count:
         return ordered
     step = (len(ordered) - 1) / max(count - 1, 1)
@@ -211,7 +211,7 @@ def compare_frames(wayfinder: Any, target_id: str, count: int) -> tuple[list[Fra
     from astropy.io import fits
 
     from astrometricslib import SkyPosition
-    from wayfindinglib.analytics.result_quality.library_inputs import frame_exposure_seconds, target_direction
+    from wayfindinglib.analytics.result_quality.library_inputs import frame_exposure_s, target_direction
     from wayfindinglib.tasks.control_tasks.centering_exposure import predict_star_counts
 
     target = wayfinder.astrometrics.targets.get(target_id)
@@ -226,12 +226,12 @@ def compare_frames(wayfinder: Any, target_id: str, count: int) -> tuple[list[Fra
         for frame in target.frames
         if str(frame.role).upper().endswith("LIGHT")
         and frame.timestamp is not None
-        and frame_exposure_seconds(frame.exposure)
+        and frame_exposure_s(frame.exposure_s)
     ]
     rows: list[FrameComparison] = []
     notes: list[str] = []
     for frame in _spread(lights, count):
-        exposure = float(frame_exposure_seconds(frame.exposure))
+        exposure = float(frame_exposure_s(frame.exposure_s))
         trials, _, missing = predict_star_counts(
             context,
             SkyPosition(ra_deg=direction[0], dec_deg=direction[1]),
@@ -254,7 +254,7 @@ def compare_frames(wayfinder: Any, target_id: str, count: int) -> tuple[list[Fra
         rows.append(
             FrameComparison(
                 frame=frame.path.rsplit("/", 1)[-1],
-                exposure_seconds=exposure,
+                exposure_s=exposure,
                 limiting_magnitude=trial.limiting_magnitude,
                 predicted_in_circle=trial.expected_star_count,
                 predicted_in_frame=trial.expected_star_count * factor,
@@ -286,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{'frame':40s} {'exp s':>7s} {'limit':>6s} {'pred':>8s} {'seen':>6s}")
     for row in rows:
         print(
-            f"{row.frame[:40]:40s} {row.exposure_seconds:7.1f} {row.limiting_magnitude:6.2f} "
+            f"{row.frame[:40]:40s} {row.exposure_s:7.1f} {row.limiting_magnitude:6.2f} "
             f"{row.predicted_in_frame:8.0f} {row.detected:6d}"
         )
     for note in notes:

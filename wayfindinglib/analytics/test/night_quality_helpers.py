@@ -55,7 +55,7 @@ def make_target(spec: tuple[str, str, str], nights: int, frames_per_night: int =
                 FrameRecord(
                     path=f"/lib/lights/{target_id}/Scope/CamA/n{night}_{index:03d}.fits",
                     timestamp=moment.timestamp(),
-                    exposure="60",
+                    exposure_s=60,
                 )
             )
     return Target(id=target_id, ra=ra, dec=dec, frames=frames)

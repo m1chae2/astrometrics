@@ -156,7 +156,7 @@ def test_observing_values_report_what_is_missing() -> None:
     frame = ov.FrameObservingInputs(
         frame_id="f",
         start_epoch_seconds=START + 4 * 3600,
-        exposure_seconds=60.0,
+        exposure_s=60.0,
         solved_ra_deg=300.0,
         solved_dec_deg=40.0,
     )

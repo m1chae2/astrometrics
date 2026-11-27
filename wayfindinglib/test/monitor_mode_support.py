@@ -259,7 +259,7 @@ def make_night_session(wayfinder: Any) -> ObservationSession:
         start_time_mode=StartTimeMode.SOONEST,
         computed_start_time=now,
         status=QueueEntryStatus.PENDING,
-        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=10.0, count=1)],
+        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=10.0, count=1)],
     )
     session = ObservationSession(
         id=NIGHT_SESSION_ID,
@@ -376,7 +376,7 @@ class RecordingDrivers:
             )
         )
 
-        def run_cycle(exposure_seconds: float, gain: float | None, commands: Any) -> None:
+        def run_cycle(exposure_s: float, gain: float | None, commands: Any) -> None:
             """Behave like a real guiding driver: use the cycle's commands.
 
             Real drivers expose and pulse only through `commands`, which
@@ -385,7 +385,7 @@ class RecordingDrivers:
             `AsyncMock` awaits the result of a plain function used as its
             side effect, so the mock still behaves as an async method.
             """
-            commands.expose(exposure_seconds, gain)
+            commands.expose(exposure_s, gain)
             commands.pulse("north", 100.0)
 
         self.drivers["guiding"].run_cycle = AsyncMock(side_effect=run_cycle)

@@ -15,9 +15,10 @@ them without re-deriving anything.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.models.quality.gate_result import GateResult
+from astrometricslib.utilities.iso_text import SettingNumber
 
 
 class FlatSetAssessment(BaseModel):
@@ -34,8 +35,8 @@ class FlatSetAssessment(BaseModel):
     telescope: str
     camera: str
     filter: str
-    # The gain (or ISO) setting, as text, and the camera offset.
-    gain: str
+    # The gain (or ISO) setting, and the camera offset.
+    gain: SettingNumber
     offset: float
     # The binning the flats were taken at, such as "2x2" ("1x1" for none).
     # Flats at another binning cannot calibrate these lights.
@@ -115,7 +116,7 @@ class CalibrationSetHealth(BaseModel):
         The set's camera and settings.
     temperature_slot_c : `float` or `None`
         A dark's temperature slot.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         A dark's exposure.
     telescope, filter : `str` or `None`
         A flat's telescope and filter.
@@ -149,11 +150,15 @@ class CalibrationSetHealth(BaseModel):
     kind: str
     row_key: str = Field(alias="rowKey")
     camera: str
-    gain: str
+    gain: SettingNumber
     offset: float
     binning: str | None = None
     temperature_slot_c: float | None = Field(default=None, alias="temperatureSlotC")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     telescope: str | None = None
     filter: str | None = None
     frame_count: int = Field(alias="frameCount")

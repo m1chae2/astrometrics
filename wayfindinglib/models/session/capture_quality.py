@@ -22,7 +22,7 @@ and so every limit, changed.
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -87,7 +87,7 @@ class CaptureInputQuality(BaseModel):
     frames_without_capture : `int` or `None`
         Library frames that no Ekos exposure accounts for. A high number means
         the Ekos log is incomplete, not that the frames are bad.
-    match_window_seconds : `float` or `None`
+    match_window_s : `float` or `None`
         How far apart an Ekos exposure and a frame may start and still be the
         same exposure.
     aborted_captures : `int` or `None`
@@ -132,7 +132,13 @@ class CaptureInputQuality(BaseModel):
         default=None, alias="capturesWithoutFrameOfUnknownKind"
     )
     frames_without_capture: int | None = Field(default=None, alias="framesWithoutCapture")
-    match_window_seconds: float | None = Field(default=None, alias="matchWindowSeconds")
+    match_window_s: float | None = Field(
+        default=None,
+        alias="matchWindowS",
+        validation_alias=AliasChoices(
+            "matchWindowS", "match_window_s", "matchWindowSeconds", "match_window_seconds"
+        ),
+    )
     aborted_captures: int | None = Field(default=None, alias="abortedCaptures")
     abort_fraction: float | None = Field(default=None, alias="abortFraction")
     abort_fraction_limit: float | None = Field(default=None, alias="abortFractionLimit")
@@ -157,7 +163,7 @@ class ExposureClipping(BaseModel):
         The target.
     is_spectral : `bool`
         Whether these are spectroscopy frames.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length.
     frames : `int`
         Frames taken at this length with a measured clipping value.
@@ -181,7 +187,10 @@ class ExposureClipping(BaseModel):
 
     target_id: str = Field(alias="targetId")
     is_spectral: bool = Field(alias="isSpectral")
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     frames: int
     clipped_frames: int = Field(alias="clippedFrames")
     clipped_fraction: float = Field(alias="clippedFraction")
@@ -200,7 +209,7 @@ class StarQuality(BaseModel):
     ----------
     frames : `int`
         Frames the figures rest on.
-    minimum_exposure_seconds : `float` or `None`
+    minimum_exposure_s : `float` or `None`
         Shortest exposure used, or `None` if it is not yet known.
     median_star_width_arcsec : `float` or `None`
         Median star width (FWHM), in arcseconds.
@@ -219,7 +228,13 @@ class StarQuality(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     frames: int = 0
-    minimum_exposure_seconds: float | None = Field(default=None, alias="minimumExposureSeconds")
+    minimum_exposure_s: float | None = Field(
+        default=None,
+        alias="minimumExposureS",
+        validation_alias=AliasChoices(
+            "minimumExposureS", "minimum_exposure_s", "minimumExposureSeconds", "minimum_exposure_seconds"
+        ),
+    )
     median_star_width_arcsec: float | None = Field(default=None, alias="medianStarWidthArcsec")
     star_width_limit_arcsec: float | None = Field(default=None, alias="starWidthLimitArcsec")
     median_roundness: float | None = Field(default=None, alias="medianRoundness")
@@ -233,20 +248,30 @@ class CaptureEfficiency(BaseModel):
 
     Attributes
     ----------
-    light_exposure_seconds : `float`
+    light_exposure_s : `float`
         Total exposure time of the night's light frames.
-    span_seconds : `float`
+    span_s : `float`
         From the start of the first light frame to the end of the last.
     duty_cycle : `float` or `None`
-        `light_exposure_seconds` divided by `span_seconds`. The rest of the
+        `light_exposure_s` divided by `span_s`. The rest of the
         span went to readout, slews, focusing, guiding set-up, calibration
         frames, and waiting. `None` for a single frame.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    light_exposure_seconds: float = Field(default=0.0, alias="lightExposureSeconds")
-    span_seconds: float = Field(default=0.0, alias="spanSeconds")
+    light_exposure_s: float = Field(
+        default=0.0,
+        alias="lightExposureS",
+        validation_alias=AliasChoices(
+            "lightExposureS", "light_exposure_s", "lightExposureSeconds", "light_exposure_seconds"
+        ),
+    )
+    span_s: float = Field(
+        default=0.0,
+        alias="spanS",
+        validation_alias=AliasChoices("spanS", "span_s", "spanSeconds", "span_seconds"),
+    )
     duty_cycle: float | None = Field(default=None, alias="dutyCycle")
 
 

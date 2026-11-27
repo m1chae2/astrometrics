@@ -357,10 +357,10 @@ def test_a_baseline_limit_for_a_positive_quantity_is_never_negative() -> None:
 
 def test_image_quality_records_the_exposure_cut_it_used() -> None:
     """Verify the minimum exposure behind a star width is on the record."""
-    quality = MeasuredImageQuality(5.6, 361, minimum_exposure_seconds=9.6)
+    quality = MeasuredImageQuality(5.6, 361, minimum_exposure_s=9.6)
     envelope = _envelope(measured_image_quality=quality)
 
-    assert envelope.limit_inputs["guiding_rms_limit"]["minimum_exposure_seconds"] == pytest.approx(9.6)
+    assert envelope.limit_inputs["guiding_rms_limit"]["minimum_exposure_s"] == pytest.approx(9.6)
 
 
 def test_the_excursion_limit_is_the_larger_of_five_sigma_and_one_guide_pixel() -> None:

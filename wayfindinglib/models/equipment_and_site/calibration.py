@@ -18,7 +18,7 @@ placement or priority.
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib import FilterType
 from wayfindinglib.models.planning.observation_package import FrameType
@@ -31,9 +31,13 @@ class CalibrationEntry(BaseModel):
 
     camera_id: str
     frame_type: FrameType
-    exposure_sec: float | None = Field(default=None)
+    exposure_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("exposure_s", "exposure_sec")
+    )
     filter: FilterType | None = Field(default=None)
-    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    gain: int | None = Field(
+        default=None, alias="gain", validation_alias=AliasChoices("gain", "gainSetting", "gain_setting")
+    )
     offset: int | None = Field(default=None)
     binning: int | None = Field(default=None)
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
@@ -63,9 +67,13 @@ class CalibrationAdvisory(BaseModel):
 
     camera_id: str
     frame_type: FrameType
-    exposure_sec: float | None = Field(default=None)
+    exposure_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("exposure_s", "exposure_sec")
+    )
     filter: FilterType | None = Field(default=None)
-    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    gain: int | None = Field(
+        default=None, alias="gain", validation_alias=AliasChoices("gain", "gainSetting", "gain_setting")
+    )
     offset: int | None = Field(default=None)
     binning: int | None = Field(default=None)
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")

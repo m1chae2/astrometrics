@@ -137,7 +137,7 @@ def make_frame(path: str) -> SimpleNamespace:
         A frame at `path` taken with one camera, gain, offset and exposure.
     """
     return SimpleNamespace(
-        path=path, telescope="Apertura 75Q", camera="ZWO", iso="0", offset="10", filter="L", exposure="60.0"
+        path=path, telescope="Apertura 75Q", camera="ZWO", gain=0, offset="10", filter="L", exposure_s=60.0
     )
 
 

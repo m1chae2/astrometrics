@@ -101,7 +101,7 @@ def _target(spec: tuple[str, str, str], frame_count: int, nights: int = 1, **ext
                 FrameRecord(
                     path=f"/lib/lights/{target_id}/Scope/CamA/n{night}_{index:03d}.fits",
                     timestamp=moment.timestamp(),
-                    exposure="60",
+                    exposure_s=60,
                 )
             )
     return Target(id=target_id, ra=ra, dec=dec, frames=frames, **extra)
@@ -322,7 +322,7 @@ def test_an_hour_is_counted_in_clock_time_with_overheads() -> None:
     candidate = ranking.lists[0].candidates[0]
     # (3600 - 120 s autofocus) / (60 s + 5 s download + 20 s / 3 dither) = 48.
     assert candidate.frames_in_hour == 48
-    assert candidate.exposure_seconds == pytest.approx(60.0)
+    assert candidate.exposure_s == pytest.approx(60.0)
     assert candidate.overhead_fraction is not None and candidate.overhead_fraction > 0.2
 
 
@@ -555,7 +555,7 @@ def _group_stack_library(measured: float, expected: float) -> FakeLibrary:
             FrameRecord(
                 path=f"/lib/lights/M 81/Scope/CamA/g_{index:03d}.fits",
                 timestamp=moment.timestamp(),
-                exposure="30" if short else "60",
+                exposure_s="30" if short else "60",
             )
         )
     target = Target(id="M 81", ra=M81[1], dec=M81[2], frames=frames)
@@ -596,7 +596,7 @@ def _group_stack_library(measured: float, expected: float) -> FakeLibrary:
         model_groups.append(
             StackFrame(
                 frame_id=subject_id,
-                exposure_seconds=exposure,
+                exposure_s=exposure,
                 sky_rate_e_per_s_per_px=sky,
                 read_noise_e=3.0,
                 star_width=width,

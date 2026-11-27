@@ -116,8 +116,8 @@ def statement(
             action_class=ActionClass.CAPTURE_SETTINGS,
             capture_setting=CaptureSetting(camera="Cam", telescope="Scope", filter_name="L"),
             message="Take more.",
-            proposed_action=ProposedAction(exposure_seconds=120.0, frame_count=frames),
-            expected_effect=ExpectedEffect(description="Less noise.", wall_clock_seconds=seconds),
+            proposed_action=ProposedAction(exposure_s=120.0, frame_count=frames),
+            expected_effect=ExpectedEffect(description="Less noise.", wall_clock_s=seconds),
             confidence=Confidence.DESIGN_ESTIMATE,
             values=values or {},
         )
@@ -251,7 +251,7 @@ def test_below_goal_gives_the_forecast_time(butler: DiskButler, forecast_status:
     assert result.state == DepthGoalState.BELOW_GOAL
     assert result.reached_level == DepthLevel.QUICK_LOOK
     assert result.level == DepthLevel.GOOD
-    assert result.seconds_to_goal == pytest.approx(4800.0) and result.frames_to_goal == 40
+    assert result.time_to_goal_s == pytest.approx(4800.0) and result.frames_to_goal == 40
     assert result.message == "About 1 h 20 min more integration needed."
     assert not result.provisional
     # The forecast is aimed at the noise ratio of the missing 0.5 magnitude.
@@ -272,7 +272,7 @@ def test_an_unchecked_forecast_hides_the_time(butler: DiskButler, forecast_statu
     forecast_status["status"] = RecommendedAdditionalFramesStatus.NOT_CHECKED
     recorder = Recorder([statement("more_frames", StatementKind.INSUFFICIENT_DATA)])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
-    assert result.seconds_to_goal is None
+    assert result.time_to_goal_s is None
     assert result.message == "Image this target on another night to get a time estimate."
 
 
@@ -313,7 +313,7 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
         "Additional integration will reduce noise only slightly. "
         "Part of the noise is fixed, from an unidentified source. Retake flats first."
     )
-    assert result.seconds_to_goal is None
+    assert result.time_to_goal_s is None
 
 
 @pytest.mark.parametrize(
@@ -397,7 +397,7 @@ def test_a_stop_signal_that_could_not_be_read_is_not_a_stop(
     ])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.state == DepthGoalState.BELOW_GOAL
-    assert result.seconds_to_goal == pytest.approx(1800.0)
+    assert result.time_to_goal_s == pytest.approx(1800.0)
 
 
 def test_a_cluster_uses_the_point_source_depth(butler: DiskButler, forecast_status: dict) -> None:
@@ -536,7 +536,7 @@ def test_an_unchanged_target_is_built_once(cached: SimpleNamespace, forecast_sta
     second = cached.ask()
     assert len(cached.recorder.ratios) == 1
     assert first == second and first is not second
-    assert second.seconds_to_goal == pytest.approx(4800.0)
+    assert second.time_to_goal_s == pytest.approx(4800.0)
 
 
 def test_a_change_to_the_target_builds_again(cached: SimpleNamespace, forecast_status: dict) -> None:

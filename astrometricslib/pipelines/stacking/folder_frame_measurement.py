@@ -82,11 +82,11 @@ def _frame_result(
         The frame's values, and the reasons of any notice rows.
     """
     try:
-        exposure = float(frame.exposure)
+        exposure = float(frame.exposure_s)
     except ValueError:
         exposure = None
     result = FolderFrameMeasurement(
-        file_name=os.path.basename(frame.path), exposure_seconds=exposure, timestamp=frame.timestamp
+        file_name=os.path.basename(frame.path), exposure_s=exposure, timestamp=frame.timestamp
     )
     notices: set[str] = set()
     for row in rows:

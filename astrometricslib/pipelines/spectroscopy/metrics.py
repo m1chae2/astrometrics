@@ -290,7 +290,7 @@ _STAGE_ROWS: tuple[_StageRow, ...] = (
     ),
     (
         "raw_frame",
-        "parallactic_to_dispersion_angle_degrees",
+        "parallactic_to_dispersion_angle_deg",
         "deg",
         Direction.NONE,
         "The angle between the direction to the zenith and the dispersion direction.",
@@ -740,7 +740,6 @@ STAGE_METRIC_KEYS: tuple[tuple[str, str], ...] = tuple((row[0], row[1]) for row 
 # maps a checkpoint metric name to the name used after ``stage_<stage>_``.
 _REGISTERED_NAME_BY_CHECKPOINT_METRIC: dict[str, str] = {
     "target_altitude_degrees": "target_altitude_deg",
-    "parallactic_to_dispersion_angle_degrees": "parallactic_to_dispersion_angle_deg",
     "median_trail_width": "median_trail_width_px",
     "streak_tilt": "streak_tilt_deg",
     "peak_above_sky": "peak_above_sky_adu",

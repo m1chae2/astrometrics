@@ -187,12 +187,12 @@ def _frames_by_exact_exposure(frames: list[Any]) -> list[tuple[float | None, lis
         The rounded length (`None` for frames with no readable length) and
         the frames of that length, shortest first.
     """
-    from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+    from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_s
     from astrometricslib.pipelines.stacking.processing.exposure_groups import exposure_group_key
 
     by_key: dict[float | None, list[Any]] = {}
     for frame in frames:
-        exposure = frame_exposure_seconds(frame)
+        exposure = frame_exposure_s(frame)
         by_key.setdefault(None if exposure is None else exposure_group_key(exposure), []).append(frame)
     return sorted(by_key.items(), key=lambda item: (item[0] is None, item[0] or 0.0))
 
@@ -232,7 +232,7 @@ def find_dominant_background_subset_by_exposure(
         own exposure length.
     split_summaries : `list` [`dict`]
         One entry per exposure length in which a split was found, as returned
-        by `find_dominant_background_subset` with an ``"exposure_seconds"``
+        by `find_dominant_background_subset` with an ``"exposure_s"``
         entry added.
     """
     if gap_ratio_threshold is None:
@@ -255,7 +255,7 @@ def find_dominant_background_subset_by_exposure(
         kept_ids.update(id(frame) for frame in dominant)
         excluded.extend(bucket_excluded)
         if split_summary:
-            split_summaries.append({**split_summary, "exposure_seconds": length})
+            split_summaries.append({**split_summary, "exposure_s": length})
     return [frame for frame in frames if id(frame) in kept_ids], excluded, split_summaries
 
 

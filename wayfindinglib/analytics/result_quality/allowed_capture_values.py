@@ -31,7 +31,7 @@ from collections.abc import Collection, Iterable, Sequence
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting, FilterType
 from astrometricslib.exceptions import ConfigurationError
@@ -61,7 +61,7 @@ class MeasuredCaptureSetting(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    gain_setting: int = Field(alias="gainSetting")
+    gain: int = Field(alias="gain", validation_alias=AliasChoices("gain", "gainSetting", "gain_setting"))
     offset: int = Field(alias="offset")
     binning: int = Field(alias="binning")
 
@@ -120,7 +120,7 @@ class AllowedCaptureValues(BaseModel):
 
     def check(
         self,
-        gain_setting: int | None = None,
+        gain: int | None = None,
         offset: int | None = None,
         binning: int | None = None,
         filter_name: str | FilterType | None = None,
@@ -133,7 +133,7 @@ class AllowedCaptureValues(BaseModel):
 
         Parameters
         ----------
-        gain_setting : `int`, optional
+        gain : `int`, optional
             The requested gain setting.
         offset : `int`, optional
             The requested offset.
@@ -150,7 +150,7 @@ class AllowedCaptureValues(BaseModel):
         reasons: list[str] = []
         notes: list[str] = []
         setting_measured: bool | None = None
-        named = {"gain setting": gain_setting, "offset": offset, "binning": binning}
+        named = {"gain setting": gain, "offset": offset, "binning": binning}
         if any(value is not None for value in named.values()):
             if not self.settings_measured:
                 setting_measured = False
@@ -159,7 +159,7 @@ class AllowedCaptureValues(BaseModel):
                 matches = [
                     measured
                     for measured in self.measured_settings
-                    if gain_setting in (None, measured.gain_setting)
+                    if gain in (None, measured.gain)
                     and offset in (None, measured.offset)
                     and binning in (None, measured.binning)
                 ]
@@ -169,8 +169,7 @@ class AllowedCaptureValues(BaseModel):
                         f"{name} {value}" for name, value in named.items() if value is not None
                     )
                     measured_text = "; ".join(
-                        f"gain setting {measured.gain_setting}, "
-                        f"offset {measured.offset}, binning {measured.binning}"
+                        f"gain setting {measured.gain}, offset {measured.offset}, binning {measured.binning}"
                         for measured in self.measured_settings
                     )
                     reasons.append(
@@ -330,12 +329,12 @@ def allowed_capture_values(
     measured: list[MeasuredCaptureSetting] = []
     if not camera_profile.is_generic_fallback:
         for entry in camera_profile.sensor_noise:
-            gain_setting = _as_whole_number(entry.gain_setting)
+            gain = _as_whole_number(entry.gain)
             offset = _as_whole_number(entry.offset)
             binning = _as_whole_number(entry.binning)
-            if gain_setting is None or offset is None or binning is None:
+            if gain is None or offset is None or binning is None:
                 continue
-            candidate = MeasuredCaptureSetting(gain_setting=gain_setting, offset=offset, binning=binning)
+            candidate = MeasuredCaptureSetting(gain=gain, offset=offset, binning=binning)
             if candidate not in measured:
                 measured.append(candidate)
     configured = sorted({name for name in configured_filter_names if name})

@@ -15,6 +15,8 @@ way.
   of frame records or a list of paths. A page cut short is refused.
   `check_frames` checks one as a pipeline run would (one camera, one optic,
   one kind), without reading a frame.
+* `SettingNumber`: a model field type for a camera gain, ISO or offset
+  setting, a whole number (text such as ``"800"`` is read as the number).
 * `check_choice`, `check_include`, `check_limit` and
   `reject_unused_arguments`: the argument checks, each raising
   `InvalidArgumentError`.
@@ -33,11 +35,13 @@ from astrometricslib.foundation.arguments import (
 )
 from astrometricslib.models.page import Page
 from astrometricslib.pipelines.shared.frame_choice import FrameChoice, check_frames
+from astrometricslib.utilities.iso_text import SettingNumber
 from astrometricslib.utilities.observing_night import observing_night_id
 
 __all__ = [
     "FrameChoice",
     "Page",
+    "SettingNumber",
     "TimeInput",
     "check_choice",
     "check_frames",

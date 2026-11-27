@@ -161,7 +161,7 @@ def test_update_changes_values_and_bumps_the_revision(isolated_butler: DiskButle
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
     edited = planning.packages.update(
-        package, exposure_requests=_rows(exposure_sec=30.0, count=5), priority=2, name="Wide M 81"
+        package, exposure_requests=_rows(exposure_s=30.0, count=5), priority=2, name="Wide M 81"
     )
     assert edited.revision == 1
     assert edited.priority == 2

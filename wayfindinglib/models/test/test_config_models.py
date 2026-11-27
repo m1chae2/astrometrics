@@ -23,7 +23,7 @@ def test_planning_config_defaults_match_documented_values() -> None:
     assert config.science_outcome_priority_boost == 1
     assert config.dither_every_n_frames_default == 3
     assert config.dither_pixels_default == pytest.approx(3.0)
-    assert config.mosaic_panel_overlap_percent == pytest.approx(10.0)
+    assert config.mosaic_panel_overlap_pct == pytest.approx(10.0)
 
 
 def test_correction_config_defaults_match_documented_values() -> None:

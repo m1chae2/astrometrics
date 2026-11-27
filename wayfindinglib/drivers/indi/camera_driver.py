@@ -73,7 +73,7 @@ class IndiCameraDriver(CameraDriver):
         """
         return await asyncio.to_thread(self._session.isServerConnected)
 
-    async def expose(self, exposure_seconds: float, gain: float | None = None) -> Any:
+    async def expose(self, exposure_s: float, gain: float | None = None) -> Any:
         """Start an exposure on this camera.
 
         For ``role="main"`` this triggers capture
@@ -86,8 +86,8 @@ class IndiCameraDriver(CameraDriver):
             The driver's raw exposure result.
         """
         if self._role == "guide":
-            return await asyncio.to_thread(self._session.guide_expose, exposure_seconds, gain)
-        return await asyncio.to_thread(self._session.capture_image, exposure_seconds)
+            return await asyncio.to_thread(self._session.guide_expose, exposure_s, gain)
+        return await asyncio.to_thread(self._session.capture_image, exposure_s)
 
     async def abort_exposure(self) -> bool:
         """Cancel the exposure this camera is taking.

@@ -92,9 +92,9 @@ def stand_in_header_reading(monkeypatch: pytest.MonkeyPatch) -> None:
             path=path,
             camera="Test Camera",
             telescope="Test Scope",
-            iso="100",
-            offset="0",
-            exposure=str(EXPOSURE_SECONDS),
+            gain=100,
+            offset=0,
+            exposure_s=str(EXPOSURE_SECONDS),
             timestamp=1.78e9,
         )
 
@@ -160,7 +160,7 @@ def test_star_width_and_sky_rate_are_recovered_and_nothing_is_stored(tmp_path: P
     assert report.medians["frame.star_width_moffat_px"] == pytest.approx(fwhm, rel=0.12)
     expected_rate = SKY_ADU * GAIN_E_PER_ADU / EXPOSURE_SECONDS
     assert report.medians["frame.sky_rate_e_per_s_per_px"] == pytest.approx(expected_rate, rel=0.05)
-    assert report.frames[0].exposure_seconds == pytest.approx(EXPOSURE_SECONDS)
+    assert report.frames[0].exposure_s == pytest.approx(EXPOSURE_SECONDS)
     assert storage.method_calls == []
 
 

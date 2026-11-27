@@ -541,7 +541,7 @@ def test_a_take_more_statement_on_assumed_fixed_pattern_noise_says_so() -> None:
     assumed = fc.history_fixed_pattern_noise(history, _run_of("T0", _target_rows("T0", 0.0)), "T0")
     assert assumed is not None
     frames = [
-        StackFrame(frame_id=f"f{i}", exposure_seconds=60.0, sky_rate_e_per_s_per_px=1.0, read_noise_e=3.0)
+        StackFrame(frame_id=f"f{i}", exposure_s=60.0, sky_rate_e_per_s_per_px=1.0, read_noise_e=3.0)
         for i in range(30)
     ]
     result = frames_to_cut_noise(

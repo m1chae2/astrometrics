@@ -74,7 +74,7 @@ def _entry(entry_id: str, count: int = 5) -> QueuedObservationPackage:
         id=entry_id,
         observation_package_id=f"package-{entry_id}",
         target_id="M 81",
-        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=60.0, count=count)],
+        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=60.0, count=count)],
         start_time_mode=StartTimeMode.SOONEST,
         computed_start_time=datetime(2026, 10, 24, 3, 0, tzinfo=UTC),
     )

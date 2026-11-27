@@ -235,7 +235,7 @@ def measure_exposure_feasibility(
         total = counts["windows"]
         results.append(
             ExposureFeasibility(
-                exposure_seconds=length,
+                exposure_s=length,
                 windows=total,
                 clean_fraction=counts["clean"] / total,
                 lost_fraction=counts["lost"] / total,
@@ -244,7 +244,7 @@ def measure_exposure_feasibility(
             )
         )
     reliable = [
-        result.exposure_seconds
+        result.exposure_s
         for result in results
         if result.clean_fraction is not None
         and result.clean_fraction >= resolve_parameter(RELIABLE_CLEAN_FRACTION).value

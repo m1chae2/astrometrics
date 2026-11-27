@@ -37,7 +37,7 @@ def make_frames(prefix: str, count: int) -> list[SimpleNamespace]:
     """
     return [
         SimpleNamespace(
-            path=f"{prefix}{index}", camera="cam", iso="800", offset="0", timestamp=1710540000.0 + index
+            path=f"{prefix}{index}", camera="cam", gain=800, offset="0", timestamp=1710540000.0 + index
         )
         for index in range(count)
     ]
@@ -98,7 +98,7 @@ def test_the_gate_fails_for_a_group_left_out_as_nonlinear() -> None:
 
 def test_the_merged_diagnostics_list_only_the_combined_frames() -> None:
     """The paths of a group that was not given to the merge do not appear."""
-    kept = SimpleNamespace(exposure_seconds=120.0, frames=make_frames("kept", 3))
+    kept = SimpleNamespace(exposure_s=120.0, frames=make_frames("kept", 3))
     merged = _merge_diagnostics([(kept, "kept.fits", {"images_stacked": 3})])
     assert merged["combined_frame_paths"] == ["kept0", "kept1", "kept2"]
 

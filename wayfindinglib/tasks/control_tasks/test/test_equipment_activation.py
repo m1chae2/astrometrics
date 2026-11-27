@@ -393,11 +393,11 @@ def test_camera_noise_reports_the_measured_setting_with_its_status_word(
 ) -> None:
     """The shipped ASI533 entry is measured, with its numbers and source."""
     (setting,) = list_camera_noise(library_with_camera_profiles(shipped_config), "ZWO ASI533MM Pro")
-    assert (setting.gain_setting, setting.offset, setting.binning) == ("0", "10", "1x1")
+    assert (setting.gain, setting.offset, setting.binning) == (0, 10, "1x1")
     assert setting.status == "measured"
     assert setting.temperature_c == pytest.approx(-10.0)
-    assert setting.gain.value == pytest.approx(0.783)
-    assert setting.gain.status == "measured"
+    assert setting.gain_e_per_adu.value == pytest.approx(0.783)
+    assert setting.gain_e_per_adu.status == "measured"
     assert setting.read_noise.value == pytest.approx(3.8)
     assert "bias-frame pairs" in setting.read_noise.source
 
@@ -414,7 +414,7 @@ def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
     )
 
     entry = SensorSettingNoise(
-        gain_setting="100",
+        gain="100",
         gain_e_per_adu=ProvenancedValue(
             value=0.9, provenance=ValueProvenance(kind="measured", source="flats")
         ),
@@ -428,7 +428,7 @@ def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
     library.calibration.get_profile = lambda camera=None: profile
     (setting,) = list_camera_noise(library, "ZWO ASI533MM Pro")
     assert setting.status == "partly_measured"
-    assert setting.gain.status == "measured"
+    assert setting.gain_e_per_adu.status == "measured"
     assert setting.read_noise.status == "design_estimate"
 
 
@@ -445,7 +445,7 @@ def test_camera_profiles_carry_the_noise_in_camel_case(shipped_config: AppConfig
         for profile in list_camera_profiles(shipped_config, library_with_camera_profiles(shipped_config))
     }
     first = profiles["ZWO ASI533MM Pro"]["sensorNoise"][0]
-    assert first["gainSetting"] == "0"
+    assert first["gain"] == 0
     assert first["readNoise"]["status"] == "measured"
-    assert first["gain"]["kind"] == "measured"
+    assert first["gainEPerAdu"]["kind"] == "measured"
     assert first["cameraName"] == "ZWO ASI533MM Pro"

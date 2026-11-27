@@ -1728,7 +1728,7 @@ def _base_stack_quality_summary(
             flat_noise_fraction=(diagnostics.get("flat_calibration") or {}).get("noise_fraction"),
             flat_smoothing_sigma_px=(diagnostics.get("flat_calibration") or {}).get("smoothing_sigma_pixels"),
             flat_calibration_issues=list((diagnostics.get("flat_calibration") or {}).get("issues", [])),
-            stacking_duration_seconds=diagnostics.get("stacking_duration_seconds"),
+            stacking_duration_s=diagnostics.get("stacking_duration_s"),
             debayer_applied=diagnostics.get("debayer_applied"),
             stacking_engine=diagnostics.get("stacking_engine"),
             stacking_engine_version=diagnostics.get("stacking_engine_version"),

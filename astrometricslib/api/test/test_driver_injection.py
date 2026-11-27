@@ -299,7 +299,7 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
             filter=FilterType.L,
             camera="ZWO ASI 533MM Pro",
             role="LIGHT",
-            exposure="30.0",
+            exposure_s=30.0,
             timestamp=1_777_593_600.0 + 60.0 * index,
         )
         for index, frame_path in enumerate(frame_paths)
@@ -354,7 +354,7 @@ def make_stacking_target(tmp_path: Path) -> Target:
             filter=FilterType.L,
             camera="ZWO ASI 533MM Pro",
             role="LIGHT",
-            exposure="60.0",
+            exposure_s=60.0,
             timestamp=1000.0 + 60.0 * index,
         )
         for index in range(3)

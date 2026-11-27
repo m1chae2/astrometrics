@@ -69,7 +69,7 @@ def describe_bias_settings(selection: CalibrationSelection) -> str:
     return " or ".join(f"gain {gain}, offset {offset:g}" for gain, offset in pairs) or "unknown settings"
 
 
-def dominant_exposure(frames: list[Any]) -> str:
+def dominant_exposure(frames: list[Any]) -> float:
     """Find the exposure length that most of a batch of frames share.
 
     The dark master is chosen by exposure length, so a batch is calibrated with
@@ -81,23 +81,26 @@ def dominant_exposure(frames: list[Any]) -> str:
     Parameters
     ----------
     frames : `list`
-        Frame records or dictionaries of them, with an ``exposure``.
+        Frame records or dictionaries of them, with an ``exposure_s``.
 
     Returns
     -------
-    exposure : `str`
-        The most common exposure, as it was written on the frames (ties go to
-        the one that appears first); ``"0"`` when no frame has one.
+    exposure_s : `float`
+        The most common exposure in seconds (ties go to the one that appears
+        first); 0 when no frame has one.
     """
-    counts: dict[str, int] = {}
+    counts: dict[float, int] = {}
     for frame in frames:
-        value = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
+        value = _field(frame, "exposure_s", None)
         if value is None:
             continue
-        key = str(value)
+        try:
+            key = float(value)
+        except TypeError, ValueError:
+            continue
         counts[key] = counts.get(key, 0) + 1
     if not counts:
-        return "0"
+        return 0.0
     return max(counts, key=counts.__getitem__)
 
 
@@ -187,9 +190,9 @@ class BatchCalibration:
     ----------
     camera, telescope, filter_name, gain, offset, binning : `str`
         The lights' settings the choice was made for.
-    exposure : `str`
+    exposure_s : `float`
         The exposure length the darks were chosen for (the batch's most
-        common one).
+        common one), in seconds.
     temperature_c : `float` or `None`
         The batch's mean sensor temperature, when its frames record one.
     dark, bias, flat : `CalibrationSelection`
@@ -202,7 +205,7 @@ class BatchCalibration:
     gain: str
     offset: str
     binning: str
-    exposure: str
+    exposure_s: float
     temperature_c: float | None
     dark: CalibrationSelection
     bias: CalibrationSelection
@@ -267,8 +270,8 @@ def choose_batch_calibration(
     first = frames[0]
     telescope = _field(first, "telescope", "Unknown")
     camera = _field(first, "camera", "Unknown")
-    gain = _field(first, "iso", "800")
-    offset = _field(first, "offset", "0")
+    gain = _field(first, "gain", 800)
+    offset = _field(first, "offset", 0)
     filter_type = _field(first, "filter", "None")
     # Take the length most of the batch has, not the first frame's: a batch
     # can hold a few frames of another length (small exposure groups are
@@ -318,7 +321,7 @@ def choose_batch_calibration(
         gain=str(gain),
         offset=str(offset),
         binning=binning,
-        exposure=exposure,
+        exposure_s=exposure,
         temperature_c=temperature_c,
         dark=dark,
         bias=bias,

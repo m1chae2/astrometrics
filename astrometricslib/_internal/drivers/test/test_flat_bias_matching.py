@@ -123,9 +123,9 @@ def stage(
             "path": light,
             "camera": CAMERA,
             "telescope": "T",
-            "iso": "100",
+            "gain": "100",
             "offset": str(LIGHT_OFFSET),
-            "exposure": 30.0,
+            "exposure_s": 30.0,
             "filter": light_filter,
             "binning": 1,
         }

@@ -493,7 +493,7 @@ def test_a_stack_of_several_exposure_groups_gets_its_own_reason() -> None:
     """Both row groups say the stack joins groups, not that lists differ."""
     frames = _frames(3)
     diagnostics = _diagnostics(frames, [_turned(0.004), IDENTITY, _turned(-0.006)])
-    diagnostics["exposure_groups"] = [{"exposure_seconds": 30.0}, {"exposure_seconds": 60.0}]
+    diagnostics["exposure_groups"] = [{"exposure_s": 30.0}, {"exposure_s": 60.0}]
     rows = record_quality.frame_geometry_measurements(
         fixture_summary(), CONTEXT, frames, diagnostics, "M99_Stacked.fits"
     )

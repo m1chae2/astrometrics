@@ -135,7 +135,7 @@ def get_live_session_status(
         dithers,
         analyze_file=os.path.basename(analyze_path),
         kstars_log_file=os.path.basename(kstars_path) if kstars_path else None,
-        window_seconds=None if window_minutes is None else window_minutes * 60.0,
+        window_s=None if window_minutes is None else window_minutes * 60.0,
     )
     if include:
         sections = ekos_sections(context, include, max(1, min(int(limit), MAXIMUM_LIMIT)))

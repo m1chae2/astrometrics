@@ -64,7 +64,7 @@ Numeric = float | np.ndarray
 LOCATION_SECTION = "Observatory.Location"
 PRESSURE_KEY = "pressure_hpa"
 TEMPERATURE_KEY = "temperature_c"
-HUMIDITY_KEY = "relative_humidity_percent"
+HUMIDITY_KEY = "relative_humidity_pct"
 
 # The lowest altitude, in degrees above the horizon, at which the
 # plane-parallel model is used. Below it the pipeline records that DAR was
@@ -126,7 +126,7 @@ class AtmosphericConditions:
         Air pressure at the telescope, in hectopascals (1 hPa is 1 mbar).
     temperature_c : `float`
         Air temperature, in degrees Celsius.
-    relative_humidity_percent : `float`
+    relative_humidity_pct : `float`
         Relative humidity, from 0 to 100. This is the water vapor pressure
         as a percentage of the saturation pressure at this temperature.
     source : `str`
@@ -137,7 +137,7 @@ class AtmosphericConditions:
 
     pressure_hpa: float
     temperature_c: float
-    relative_humidity_percent: float
+    relative_humidity_pct: float
     source: str
 
 
@@ -165,7 +165,7 @@ def standard_atmosphere(elevation_m: float) -> AtmosphericConditions:
     return AtmosphericConditions(
         pressure_hpa=float(pressure_pa / 100.0),
         temperature_c=float(temperature_k - 273.15),
-        relative_humidity_percent=0.0,
+        relative_humidity_pct=0.0,
         source=SOURCE_STANDARD_ATMOSPHERE,
     )
 
@@ -200,7 +200,7 @@ def load_atmospheric_conditions(app_config: Any, elevation_m: float) -> Atmosphe
     """Read the air's conditions from the config, with the standard fallback.
 
     The config may give ``pressure_hpa``, ``temperature_c`` and
-    ``relative_humidity_percent`` in the ``[Observatory.Location]`` section.
+    ``relative_humidity_pct`` in the ``[Observatory.Location]`` section.
     Each one that is missing, not a number, or out of range (a pressure of
     zero or less, a humidity outside 0 to 100) comes from the standard
     atmosphere at `elevation_m` instead.
@@ -244,7 +244,7 @@ def load_atmospheric_conditions(app_config: Any, elevation_m: float) -> Atmosphe
     return AtmosphericConditions(
         pressure_hpa=pressure if pressure is not None else fallback.pressure_hpa,
         temperature_c=temperature if temperature is not None else fallback.temperature_c,
-        relative_humidity_percent=humidity if humidity is not None else fallback.relative_humidity_percent,
+        relative_humidity_pct=humidity if humidity is not None else fallback.relative_humidity_pct,
         source=source,
     )
 
@@ -282,7 +282,7 @@ def _compressibility(temperature_k: float, pressure_pa: float, water_mole_fracti
     )
 
 
-def _water_mole_fraction(temperature_c: float, pressure_pa: float, relative_humidity_percent: float) -> float:
+def _water_mole_fraction(temperature_c: float, pressure_pa: float, relative_humidity_pct: float) -> float:
     """Give the fraction of the air's molecules that are water.
 
     It uses the saturation vapor pressure of Giacomo (1982) and Davis
@@ -294,7 +294,7 @@ def _water_mole_fraction(temperature_c: float, pressure_pa: float, relative_humi
         The air temperature, in degrees Celsius.
     pressure_pa : `float`
         The air pressure, in pascals.
-    relative_humidity_percent : `float`
+    relative_humidity_pct : `float`
         The relative humidity, from 0 to 100.
 
     Returns
@@ -311,7 +311,7 @@ def _water_mole_fraction(temperature_c: float, pressure_pa: float, relative_humi
     )
     alpha, beta, gamma = _ENHANCEMENT
     enhancement = alpha + beta * pressure_pa + gamma * temperature_c**2
-    return enhancement * (relative_humidity_percent / 100.0) * saturation_pa / pressure_pa
+    return enhancement * (relative_humidity_pct / 100.0) * saturation_pa / pressure_pa
 
 
 def air_refractive_index(wavelength_angstrom: Numeric, conditions: AtmosphericConditions) -> Numeric:
@@ -386,7 +386,7 @@ def air_refractive_index(wavelength_angstrom: Numeric, conditions: AtmosphericCo
         )
     )
     water_fraction = _water_mole_fraction(
-        conditions.temperature_c, pressure_pa, conditions.relative_humidity_percent
+        conditions.temperature_c, pressure_pa, conditions.relative_humidity_pct
     )
     compressibility = _compressibility(temperature_k, pressure_pa, water_fraction)
     common = pressure_pa / (compressibility * _GAS_CONSTANT * temperature_k)

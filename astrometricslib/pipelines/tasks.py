@@ -371,8 +371,8 @@ def stack_frames_with_timeout(
         stacking_thread.join(_STACKING_TIMEOUT_POLL_SECONDS)
         if not stacking_thread.is_alive():
             break
-        elapsed_seconds = time.monotonic() - started_at
-        if elapsed_seconds >= timeout_seconds + lock_wait.total:
+        elapsed_s = time.monotonic() - started_at
+        if elapsed_s >= timeout_seconds + lock_wait.total:
             break
 
     if stacking_thread.is_alive():

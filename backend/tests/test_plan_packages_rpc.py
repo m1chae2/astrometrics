@@ -237,14 +237,14 @@ def test_creating_a_package_builds_the_exposure_rows(setup: tuple[Any, _Sockets,
     """Exposure dictionaries and sequence items become exposure rows."""
     planning, _, service = setup
     planning.packages.create.return_value = _package(revision=0)
-    row = {"frame_type": "LIGHT", "filter": "Ha", "exposure_sec": 60, "count": 3}
+    row = {"frame_type": "LIGHT", "filter": "Ha", "exposure_s": 60, "count": 3}
 
     service.create_package("M 81", exposure_requests=[row])
     assert planning.packages.create.call_args.args[1] == [ExposureRequest.model_validate(row)]
 
-    service.create_package("M 81", plan_items=[{"count": 2, "exposure": 30, "filter": "ha"}])
+    service.create_package("M 81", plan_items=[{"count": 2, "exposure_s": 30, "filter": "ha"}])
     [made] = planning.packages.create.call_args.args[1]
-    assert (made.count, made.exposure_sec, made.filter.value, made.frame_type.value) == (
+    assert (made.count, made.exposure_s, made.filter.value, made.frame_type.value) == (
         2,
         30.0,
         "Ha",
@@ -254,7 +254,7 @@ def test_creating_a_package_builds_the_exposure_rows(setup: tuple[Any, _Sockets,
     with pytest.raises(InvalidArgumentError, match="not both"):
         service.create_package("M 81", exposure_requests=[], plan_items=[])
     with pytest.raises(InvalidArgumentError, match="Unknown filter"):
-        service.create_package("M 81", plan_items=[{"count": 1, "exposure": 1, "filter": "Z"}])
+        service.create_package("M 81", plan_items=[{"count": 1, "exposure_s": 1, "filter": "Z"}])
     with pytest.raises(InvalidArgumentError, match="not valid"):
         service.create_package("M 81", exposure_requests=[{"count": 1}])
 

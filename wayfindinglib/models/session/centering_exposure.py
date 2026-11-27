@@ -9,7 +9,7 @@ setting, the reason, and every number the calculation used, so a person can
 check it. The model is plain data and is never stored.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
@@ -20,7 +20,7 @@ class CenteringExposureTrial(BaseModel):
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The candidate exposure, in seconds.
     limiting_magnitude : `float`
         The faintest Gaia G magnitude a star can have and still be detected.
@@ -30,7 +30,7 @@ class CenteringExposureTrial(BaseModel):
 
     model_config = _MODEL_CONFIG
 
-    exposure_seconds: float
+    exposure_s: float = Field(validation_alias=AliasChoices("exposure_s", "exposure_seconds"))
     limiting_magnitude: float
     expected_star_count: int
 
@@ -40,12 +40,12 @@ class CenteringExposure(BaseModel):
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure to use, in seconds.
     source : `str`
         ``"computed"`` when it was worked out from the equipment's
         measurements; ``"fallback"`` when an input was missing and the fixed
-        ``alignment_exposure_seconds`` setting was used.
+        ``alignment_exposure_s`` setting was used.
     reason : `str`
         One or two plain sentences saying why this exposure was chosen, or
         which input was missing.
@@ -89,7 +89,7 @@ class CenteringExposure(BaseModel):
 
     model_config = _MODEL_CONFIG
 
-    exposure_seconds: float
+    exposure_s: float = Field(validation_alias=AliasChoices("exposure_s", "exposure_seconds"))
     source: str
     reason: str
     target_star_count: int

@@ -85,7 +85,7 @@ def _butler(stored: SiteProfile | None = None) -> Any:
 def test_frame_times_are_mid_exposure_of_light_frames() -> None:
     """Each light frame's time is its start plus half its exposure."""
     target = make_target(STAR, 1, frames_per_night=2)
-    target.frames.append(FrameRecord(path="/lib/darks/x.fits", role="DARK", timestamp=1.0, exposure="60"))
+    target.frames.append(FrameRecord(path="/lib/darks/x.fits", role="DARK", timestamp=1.0, exposure_s=60))
 
     times = frame_times(target)
 
@@ -178,8 +178,8 @@ def test_the_dominant_setting_holds_the_most_exposure() -> None:
     """The setting with the most exposure time wins."""
     other = SETTING.model_copy(update={"exposure_s": 120.0})
     observations = [
-        FrameObservation(frame_id="a", capture_setting=SETTING, exposure_seconds=60.0),
-        FrameObservation(frame_id="b", capture_setting=other, exposure_seconds=120.0),
+        FrameObservation(frame_id="a", capture_setting=SETTING, exposure_s=60.0),
+        FrameObservation(frame_id="b", capture_setting=other, exposure_s=120.0),
     ]
     assert dominant_setting(observations) == other
     assert dominant_setting([]) is None

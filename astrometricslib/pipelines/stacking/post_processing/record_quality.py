@@ -277,7 +277,7 @@ _METRICS_FIELDS: dict[str, tuple[str, str]] = {
         STACKING_ZERO_PIXEL_FRACTION,
         "the stack file could not be read to count zero pixels",
     ),
-    "negative_pixel_max_percent": (
+    "negative_pixel_max_pct": (
         STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
         "Siril printed no negative-pixel warning",
     ),
@@ -293,7 +293,7 @@ _METRICS_FIELDS: dict[str, tuple[str, str]] = {
         STACKING_EXPECTED_STACK_FWHM_PX,
         "the star width does not apply to this stack or the input frames could not be measured",
     ),
-    "stacking_duration_seconds": (STACKING_DURATION_S, "the stacking program reported no duration"),
+    "stacking_duration_s": (STACKING_DURATION_S, "the stacking program reported no duration"),
     "registration_reference_star_count": (
         STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
         "no single registration reference frame could be identified",
@@ -318,7 +318,7 @@ _METRICS_FIELDS: dict[str, tuple[str, str]] = {
 # Fields on `ExposureGroupSummary` that are plain numbers, with the reason
 # given when the group has none.
 _GROUP_FIELDS: dict[str, tuple[str, str]] = {
-    "exposure_seconds": (STACKING_GROUP_EXPOSURE_S, "the group reported no exposure"),
+    "exposure_s": (STACKING_GROUP_EXPOSURE_S, "the group reported no exposure"),
     "frames_submitted": (STACKING_GROUP_FRAMES_SUBMITTED, "the group reported no frame count"),
     "frames_stacked": (STACKING_GROUP_FRAMES_STACKED, "the group reported no frame count"),
     "gain_mid_range": (
@@ -373,7 +373,7 @@ def exposure_group_subject(
         folder = os.path.basename(os.path.dirname(group.stack_path))
         name = os.path.basename(group.stack_path)
         return context.stack_subject(f"groups/{name}" if folder == "groups" else name)
-    return context.stack_subject(f"{stack_file_name}#group-{group_index}-{group.exposure_seconds:g}s")
+    return context.stack_subject(f"{stack_file_name}#group-{group_index}-{group.exposure_s:g}s")
 
 
 def _value_measurement(
@@ -566,7 +566,7 @@ def stacking_notice_measurements(
                     float(group.frames_submitted),
                     context,
                     exposure_group_subject(context, stack_file_name, group, index),
-                    exposure_group_left_out_reason(group.exposure_seconds, group.left_out_reason),
+                    exposure_group_left_out_reason(group.exposure_s, group.left_out_reason),
                     action_taken="exposure group left out of the combined stack",
                 )
             )
@@ -578,7 +578,7 @@ def stacking_notice_measurements(
                     float(group.frames_submitted),
                     context,
                     exposure_group_subject(context, stack_file_name, group, index),
-                    exposure_group_not_judged_reason(group.exposure_seconds, group.gain_not_judged_reason),
+                    exposure_group_not_judged_reason(group.exposure_s, group.gain_not_judged_reason),
                     action_taken="exposure group kept without a brightness check",
                 )
             )
@@ -919,7 +919,7 @@ def membership_count_measurements(
         ]
     weights = normalized_weights(membership)
     exposures = [
-        float(member.frame.exposure) if member.frame.exposure else None for member in membership.members
+        float(member.frame.exposure_s) if member.frame.exposure_s else None for member in membership.members
     ]
     count = effective_frame_count(weights)
     seconds = effective_exposure_seconds(weights, exposures)
@@ -1125,7 +1125,7 @@ def stacking_measurements(
     measurements: list[QualityMeasurement] = []
     for field_name, (metric_name, reason) in _METRICS_FIELDS.items():
         value = getattr(metrics, field_name)
-        if field_name == "negative_pixel_max_percent" and value is not None:
+        if field_name == "negative_pixel_max_pct" and value is not None:
             value = value / 100.0
         measurements.append(_value_measurement(metric_name, value, reason, context, stack_subject))
 

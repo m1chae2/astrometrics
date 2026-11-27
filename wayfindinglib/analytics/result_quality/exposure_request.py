@@ -13,9 +13,9 @@ makes suggested packages and any other reader fill them the same way:
   filter gives ``FilterType.NONE``. A name that is not recognized gives no
   row, because a row with the wrong filter would waste a night.
 * ``count`` is the proposed ``frame_count``.
-* ``exposure_sec`` is the proposed ``exposure_seconds``, or the capture
+* ``exposure_s`` is the proposed ``exposure_s``, or the capture
   setting's exposure when the proposal has none.
-* ``gain_setting``, ``offset`` and ``binning`` come from the proposal when it
+* ``gain``, ``offset`` and ``binning`` come from the proposal when it
   has them, otherwise from the capture setting, so new frames match the
   frames already taken.
 
@@ -99,10 +99,10 @@ def exposure_request_from_statement(statement: TargetStatement) -> ExposureReque
     if action is None or action.frame_count is None or action.calibration_frame_type is not None:
         return None
     setting = statement.capture_setting
-    exposure_seconds = action.exposure_seconds
-    if exposure_seconds is None and setting is not None:
-        exposure_seconds = setting.exposure_s
-    if exposure_seconds is None:
+    exposure_s = action.exposure_s
+    if exposure_s is None and setting is not None:
+        exposure_s = setting.exposure_s
+    if exposure_s is None:
         return None
     filter_type = normalize_filter_name(setting.filter_name if setting is not None else None)
     if filter_type is None:
@@ -110,11 +110,9 @@ def exposure_request_from_statement(statement: TargetStatement) -> ExposureReque
     return ExposureRequest(
         frame_type=FrameType.LIGHT,
         filter=filter_type,
-        exposure_sec=exposure_seconds,
+        exposure_s=exposure_s,
         count=action.frame_count,
-        gain_setting=action.gain_setting
-        if action.gain_setting is not None
-        else _setting_value(setting, "gain"),
+        gain=action.gain if action.gain is not None else _setting_value(setting, "gain"),
         offset=action.offset if action.offset is not None else _setting_value(setting, "offset"),
         binning=action.binning if action.binning is not None else _setting_value(setting, "binning"),
     )

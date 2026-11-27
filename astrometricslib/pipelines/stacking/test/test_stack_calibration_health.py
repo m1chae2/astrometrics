@@ -136,7 +136,7 @@ def _lights(
         The records.
     """
     return [
-        FrameRecord(path=f"/lights/L_{index}.fits", exposure=exposure, sensorTemperatureC=temperature)
+        FrameRecord(path=f"/lights/L_{index}.fits", exposure_s=exposure, sensorTemperatureC=temperature)
         for index, temperature in enumerate(temperatures)
     ]
 
@@ -270,7 +270,7 @@ def test_a_temperature_spread_over_three_degrees_fails(tmp_path: Path) -> None:
 def test_lights_with_no_temperature_cannot_be_checked_for_spread(tmp_path: Path) -> None:
     """A DSLR records no sensor temperature, so the gate is not checked."""
     library, store, darks, biases = _library(tmp_path)
-    lights = [FrameRecord(path=f"/lights/L_{index}.fits", exposure=LIGHT_EXPOSURE) for index in range(3)]
+    lights = [FrameRecord(path=f"/lights/L_{index}.fits", exposure_s=LIGHT_EXPOSURE) for index in range(3)]
     gates = _gates(_assess(library, store, darks, biases, lights))
     assert gates[TEMPERATURE_SPREAD_GATE_NAME].status is GateStatus.NOT_CHECKED
 

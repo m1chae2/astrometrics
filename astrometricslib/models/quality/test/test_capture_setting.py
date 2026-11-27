@@ -73,20 +73,26 @@ def test_setting_is_spectral_follows_the_filter_name() -> None:
     assert not CaptureSetting(camera="Cam").is_spectral
 
 
-def test_the_unit_named_fields_read_the_old_names_and_write_the_old_json() -> None:
-    """Old field names and the JSON names load; the JSON names are written."""
+def test_the_unit_named_fields_read_the_old_names_and_write_the_new_json() -> None:
+    """Old field and JSON names load; the new JSON names are written."""
     from_old_names = CaptureSetting.model_validate({
         "camera": "Cam",
         "gain_setting": 100,
         "exposure_seconds": 60.0,
     })
-    from_json = CaptureSetting.model_validate({"camera": "Cam", "gainSetting": 100, "exposureSeconds": 60.0})
+    from_old_json = CaptureSetting.model_validate({
+        "camera": "Cam",
+        "gainSetting": 100,
+        "exposureSeconds": 60.0,
+    })
+    from_json = CaptureSetting.model_validate({"camera": "Cam", "gain": 100, "exposureS": 60.0})
     new = CaptureSetting(camera="Cam", gain=100, exposure_s=60.0)
 
-    assert from_old_names == from_json == new
+    assert from_old_names == from_old_json == from_json == new
     assert (new.gain, new.exposure_s) == (100, 60.0)
     dumped = new.model_dump(by_alias=True)
-    assert (dumped["gainSetting"], dumped["exposureSeconds"]) == (100, 60.0)
+    assert (dumped["gain"], dumped["exposureS"]) == (100, 60.0)
+    assert not {"gainSetting", "exposureSeconds"} & set(dumped)
 
 
 def test_the_sensor_temperature_is_an_optional_field() -> None:

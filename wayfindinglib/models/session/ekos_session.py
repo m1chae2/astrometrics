@@ -15,7 +15,7 @@ fields are deliberately not kept; altitude, azimuth, declination and pier
 side are consistent and are enough to place a sample on the sky.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 EKOS_SESSION_CONTEXT_SCHEMA_VERSION = 1
 """Bumped whenever the shape of `EkosSessionContext` changes meaningfully."""
@@ -28,11 +28,11 @@ class EkosMountPosition(BaseModel):
     ----------
     timestamp : `float`
         Seconds since the Unix epoch.
-    declination_degrees : `float`
+    declination_deg : `float`
         Declination, in degrees.
-    altitude_degrees : `float`
+    altitude_deg : `float`
         Altitude above the horizon, in degrees.
-    azimuth_degrees : `float`
+    azimuth_deg : `float`
         Azimuth, in degrees from north through east.
     pier_side : `str` or `None`
         ``"West"`` or ``"East"`` (the side of the pier the telescope is
@@ -42,9 +42,20 @@ class EkosMountPosition(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     timestamp: float
-    declination_degrees: float = Field(alias="declinationDegrees")
-    altitude_degrees: float = Field(alias="altitudeDegrees")
-    azimuth_degrees: float = Field(alias="azimuthDegrees")
+    declination_deg: float = Field(
+        alias="declinationDeg",
+        validation_alias=AliasChoices(
+            "declinationDeg", "declination_deg", "declinationDegrees", "declination_degrees"
+        ),
+    )
+    altitude_deg: float = Field(
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float = Field(
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     pier_side: str | None = Field(default=None, alias="pierSide")
 
 
@@ -74,7 +85,7 @@ class EkosCapture(BaseModel):
     ----------
     completed_at : `float`
         When the exposure finished, in seconds since the Unix epoch.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length, in seconds.
     filter_name : `str`
         Filter or filter-wheel slot name.
@@ -95,7 +106,10 @@ class EkosCapture(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     completed_at: float = Field(alias="completedAt")
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     filter_name: str = Field(alias="filterName")
     half_flux_radius_px: float | None = Field(default=None, alias="halfFluxRadiusPx")
     star_count: int = Field(default=0, alias="starCount")
@@ -111,14 +125,17 @@ class EkosAbortedCapture(BaseModel):
     ----------
     timestamp : `float`
         When it was aborted, in seconds since the Unix epoch.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length that was requested, in seconds.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
     timestamp: float
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
 
 
 class EkosFocusSample(BaseModel):

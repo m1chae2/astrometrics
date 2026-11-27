@@ -452,7 +452,7 @@ class TargetFrames(MovedNames):
         -------
         report : `FrameStatusReport`
             ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
-            ``reason``, ``date``, ``exposure``, ``elongation``,
+            ``reason``, ``date``, ``exposure_s``, ``elongation``,
             ``original_path``, ``restorable`` and ``restore_note``) and
             ``stacked_at``.
         """

@@ -18,14 +18,14 @@ from wayfindinglib.tasks.control_tasks.guiding_correction import compute_guiding
 
 
 def _mount_model(
-    dominant_period_seconds: float | None = 480.0,
+    dominant_period_s: float | None = 480.0,
     periodic_error_peak_to_peak_arcsec: float = 10.0,
     dec_backlash_estimate_ms: float | None = None,
 ) -> GuidingSpectrumAnalysis:
     return GuidingSpectrumAnalysis(
         sample_count=100,
-        duration_seconds=3600.0,
-        dominant_period_seconds=dominant_period_seconds,
+        duration_s=3600.0,
+        dominant_period_s=dominant_period_s,
         periodic_error_peak_to_peak_arcsec=periodic_error_peak_to_peak_arcsec,
         dec_backlash_estimate_ms=dec_backlash_estimate_ms,
     )
@@ -38,8 +38,8 @@ def _calibration(camera_angle_deg: float = 0.0) -> GuiderCalibration:
         telescope_id="scope-1",
         arcsec_per_pixel=2.0,
         camera_angle_deg=camera_angle_deg,
-        ra_rate_arcsec_per_sec=10.0,
-        dec_rate_arcsec_per_sec=10.0,
+        ra_rate_arcsec_per_s=10.0,
+        dec_rate_arcsec_per_s=10.0,
     )
 
 
@@ -116,8 +116,8 @@ def test_periodic_error_feedforward_issues_a_pulse_even_within_deadband() -> Non
     peaks, so a pulse must be issued canceling it even though the
     measured instantaneous drift is zero (well within the deadband).
     """
-    mount_model = _mount_model(dominant_period_seconds=480.0, periodic_error_peak_to_peak_arcsec=10.0)
-    elapsed_seconds = 480.0 * 0.25
+    mount_model = _mount_model(dominant_period_s=480.0, periodic_error_peak_to_peak_arcsec=10.0)
+    elapsed_s = 480.0 * 0.25
 
     correction = compute_guiding_correction(
         "f-9",
@@ -126,7 +126,7 @@ def test_periodic_error_feedforward_issues_a_pulse_even_within_deadband() -> Non
         _calibration(),
         _config(),
         mount_model=mount_model,
-        elapsed_guiding_seconds=elapsed_seconds,
+        elapsed_guiding_seconds=elapsed_s,
     )
 
     assert correction.pulse_ra_ms != 0
@@ -147,7 +147,7 @@ def test_periodic_error_feedforward_requires_elapsed_time() -> None:
 
 def test_periodic_error_feedforward_is_near_zero_at_zero_crossing() -> None:
     """Verify the modeled sinusoid's zero crossing adds ~no pulse."""
-    mount_model = _mount_model(dominant_period_seconds=480.0, periodic_error_peak_to_peak_arcsec=10.0)
+    mount_model = _mount_model(dominant_period_s=480.0, periodic_error_peak_to_peak_arcsec=10.0)
 
     correction = compute_guiding_correction(
         "f-11",
@@ -165,7 +165,7 @@ def test_periodic_error_feedforward_is_near_zero_at_zero_crossing() -> None:
 
 def test_backlash_feedforward_adds_lead_in_pulse_on_reversal() -> None:
     """Verify a flagged Dec reversal adds the learned backlash lead-in."""
-    mount_model = _mount_model(dominant_period_seconds=None, dec_backlash_estimate_ms=150.0)
+    mount_model = _mount_model(dominant_period_s=None, dec_backlash_estimate_ms=150.0)
 
     with_reversal = compute_guiding_correction(
         "f-12",
@@ -191,7 +191,7 @@ def test_backlash_feedforward_adds_lead_in_pulse_on_reversal() -> None:
 
 def test_backlash_feedforward_direction_matches_the_reactive_pulse() -> None:
     """Verify the lead-in pulse's sign matches the reactive correction's."""
-    mount_model = _mount_model(dominant_period_seconds=None, dec_backlash_estimate_ms=150.0)
+    mount_model = _mount_model(dominant_period_s=None, dec_backlash_estimate_ms=150.0)
 
     positive_drift = compute_guiding_correction(
         "f-13", 0.0, 5.0, _calibration(), _config(), mount_model=mount_model, dec_direction_reversal=True
@@ -206,7 +206,7 @@ def test_backlash_feedforward_direction_matches_the_reactive_pulse() -> None:
 
 def test_combined_feedforward_and_reactive_pulse_is_clamped_to_max_pulse() -> None:
     """Verify a large reactive plus feedforward sum is still clamped."""
-    mount_model = _mount_model(dominant_period_seconds=None, dec_backlash_estimate_ms=900.0)
+    mount_model = _mount_model(dominant_period_s=None, dec_backlash_estimate_ms=900.0)
     config = _config(guiding_max_pulse_ms=200)
 
     correction = compute_guiding_correction(
@@ -225,7 +225,7 @@ def test_combined_feedforward_and_reactive_pulse_is_clamped_to_max_pulse() -> No
 
 def test_periodic_error_feedforward_direction_flips_across_the_period() -> None:
     """Verify the feedforward pulse's sign flips a half-period apart."""
-    mount_model = _mount_model(dominant_period_seconds=480.0, periodic_error_peak_to_peak_arcsec=10.0)
+    mount_model = _mount_model(dominant_period_s=480.0, periodic_error_peak_to_peak_arcsec=10.0)
 
     quarter_phase = compute_guiding_correction(
         "f-16",

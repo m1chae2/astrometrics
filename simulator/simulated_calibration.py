@@ -96,8 +96,8 @@ class GuiderCalibrationValues:
     telescope_id: str
     arcsec_per_pixel: float
     camera_angle_deg: float
-    ra_rate_arcsec_per_sec: float
-    dec_rate_arcsec_per_sec: float
+    ra_rate_arcsec_per_s: float
+    dec_rate_arcsec_per_s: float
     source_note: str
     calibrated_at: datetime
 
@@ -201,8 +201,8 @@ def _calibration_values(record: object, **changes: object) -> GuiderCalibrationV
         "telescope_id": record.telescope_id,
         "arcsec_per_pixel": record.arcsec_per_pixel,
         "camera_angle_deg": record.camera_angle_deg,
-        "ra_rate_arcsec_per_sec": record.ra_rate_arcsec_per_sec,
-        "dec_rate_arcsec_per_sec": record.dec_rate_arcsec_per_sec,
+        "ra_rate_arcsec_per_s": record.ra_rate_arcsec_per_s,
+        "dec_rate_arcsec_per_s": record.dec_rate_arcsec_per_s,
         "source_note": record.source_note,
         "calibrated_at": record.calibrated_at,
     }
@@ -360,8 +360,8 @@ def build_simulated_calibrations(
         id=identifier,
         arcsec_per_pixel=plate_scale,
         camera_angle_deg=angle,
-        ra_rate_arcsec_per_sec=ra_rate,
-        dec_rate_arcsec_per_sec=dec_rate,
+        ra_rate_arcsec_per_s=ra_rate,
+        dec_rate_arcsec_per_s=dec_rate,
         source_note=f"Simulator value, not the real camera's: {guider_source}.",
         calibrated_at=datetime.now(UTC),
         **names,
@@ -424,8 +424,8 @@ def rpc_calls(report: SimulatedCalibrationReport) -> list[tuple[str, dict]]:
                 "telescope_id": calibration.telescope_id,
                 "arcsec_per_pixel": calibration.arcsec_per_pixel,
                 "camera_angle_deg": calibration.camera_angle_deg,
-                "ra_rate_arcsec_per_sec": calibration.ra_rate_arcsec_per_sec,
-                "dec_rate_arcsec_per_sec": calibration.dec_rate_arcsec_per_sec,
+                "ra_rate_arcsec_per_s": calibration.ra_rate_arcsec_per_s,
+                "dec_rate_arcsec_per_s": calibration.dec_rate_arcsec_per_s,
                 "source_note": calibration.source_note,
                 "replace": True,
             },

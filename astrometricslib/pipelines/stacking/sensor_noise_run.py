@@ -74,6 +74,7 @@ from astrometricslib.utilities.camera_setting_text import (
     canonical_gain_setting,
     canonical_offset_setting,
 )
+from astrometricslib.utilities.iso_text import setting_number
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def _choose_flat_group(groups: list[FlatGroup], notes: list[str]) -> FlatGroup:
 
 
 def _keep_near(
-    frames: list[CalibrationFrame], temperature_c: float | None, exposure_seconds: float | None
+    frames: list[CalibrationFrame], temperature_c: float | None, exposure_s: float | None
 ) -> list[CalibrationFrame]:
     """Keep the frames at the wanted temperature and exposure.
 
@@ -140,9 +141,9 @@ def _keep_near(
             or abs(frame.temperature_c - temperature_c) > maximum_temperature_spread_c
         ):
             continue
-        if exposure_seconds is not None and (
-            frame.exposure_seconds is None
-            or not math.isclose(frame.exposure_seconds, exposure_seconds, rel_tol=exposure_relative_tolerance)
+        if exposure_s is not None and (
+            frame.exposure_s is None
+            or not math.isclose(frame.exposure_s, exposure_s, rel_tol=exposure_relative_tolerance)
         ):
             continue
         kept.append(frame)
@@ -170,7 +171,7 @@ def save_measurement(
     """
     provenance = ValueProvenance(kind=ProvenanceKind.MEASURED, source=result.provenance or "")
     entry = SensorSettingNoise(
-        gain_setting=result.gain_setting,
+        gain=result.gain,
         offset=result.offset,
         binning=result.binning,
         gain_e_per_adu=ProvenancedValue(value=result.gain_e_per_adu, provenance=provenance),
@@ -196,7 +197,7 @@ def measure_sensor_noise_from_library(
     binning: object = "1x1",
     *,
     temperature_c: float | None = None,
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
     telescope: str | None = None,
     filter_type: str | None = None,
     measured_on: date,
@@ -221,7 +222,7 @@ def measure_sensor_noise_from_library(
     temperature_c : `float`, optional
         Use only frames within `MAXIMUM_TEMPERATURE_SPREAD_C` of this sensor
         temperature.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         Use only flats of this exposure.
     telescope : `str`, optional
         Use only flats taken through this telescope.
@@ -266,7 +267,7 @@ def measure_sensor_noise_from_library(
     if not bias_selection.paths:
         return make_unmeasured_result(camera_id, setting, bias_selection.reason, len(flat_group.paths), 0)
 
-    flat_frames = _keep_near(_load_frames(flat_group.paths, notes, "flat"), temperature_c, exposure_seconds)
+    flat_frames = _keep_near(_load_frames(flat_group.paths, notes, "flat"), temperature_c, exposure_s)
     bias_frames = _keep_near(_load_frames(bias_selection.paths, notes, "bias"), temperature_c, None)
     flat_pairing = pair_by_observation_time(flat_frames)
     if flat_pairing.undated_count:
@@ -292,8 +293,8 @@ def measure_sensor_noise_from_library(
     result = result.model_copy(
         update={
             "notes": [*notes, *result.notes],
-            "gain_setting": setting[0],
-            "offset": setting[1],
+            "gain": setting_number(setting[0]),
+            "offset": setting_number(setting[1]),
             "binning": setting[2],
         }
     )
@@ -461,7 +462,7 @@ def measure_camera_sensor_noise(
             offset,
             binning,
             temperature_c=None if setting is None else setting.temperature_c,
-            exposure_seconds=None if setting is None else setting.exposure_s,
+            exposure_s=None if setting is None else setting.exposure_s,
             telescope=None if setting is None else setting.telescope,
             filter_type=None if setting is None else setting.filter_name,
             measured_on=datetime.now(UTC).date(),

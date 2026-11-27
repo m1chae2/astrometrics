@@ -67,20 +67,24 @@ def test_the_dark_exposure_is_the_most_common_one_not_the_first_frames() -> None
 
     from astrometricslib._internal.drivers.siril_interface import dominant_exposure
 
-    frames = [SimpleNamespace(exposure="60.0")] + [SimpleNamespace(exposure="300.0") for _ in range(5)]
+    frames = [SimpleNamespace(exposure_s=60.0)] + [SimpleNamespace(exposure_s=300.0) for _ in range(5)]
 
-    assert dominant_exposure(frames) == "300.0"
-    assert dominant_exposure([{"exposure": "30.0"}, {"exposure": "30.0"}, {"exposure": "10.0"}]) == "30.0"
+    assert dominant_exposure(frames) == pytest.approx(300.0)
+    assert dominant_exposure([
+        {"exposure_s": 30.0},
+        {"exposure_s": 30.0},
+        {"exposure_s": 10.0},
+    ]) == pytest.approx(30.0)
 
 
 def test_the_dominant_exposure_of_frames_without_one_is_zero() -> None:
-    """With no readable exposure the lookup falls back to "0", as before."""
+    """With no readable exposure the lookup falls back to 0."""
     from types import SimpleNamespace
 
     from astrometricslib._internal.drivers.siril_interface import dominant_exposure
 
-    assert dominant_exposure([]) == "0"
-    assert dominant_exposure([SimpleNamespace(exposure=None)]) == "0"
+    assert dominant_exposure([]) == pytest.approx(0.0)
+    assert dominant_exposure([SimpleNamespace(exposure_s=None)]) == pytest.approx(0.0)
 
 
 def test_representative_light_temperature_averages_dict_frames() -> None:

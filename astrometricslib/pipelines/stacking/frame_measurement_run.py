@@ -445,7 +445,7 @@ def frames_whose_camera_profile_gap_closed(
             continue
         profile = find_camera_profile(frame)
         if (
-            profile.sensor_noise_for(frame.iso, frame.offset, frame.binning, clipped_at_zero=False)
+            profile.sensor_noise_for(frame.gain, frame.offset, frame.binning, clipped_at_zero=False)
             is not None
         ):
             closed.add(frame.path)
@@ -504,11 +504,11 @@ def build_capture_setting(frame: FrameRecord) -> CaptureSetting:
         `None`. A telescope recorded as ``"Unknown"`` is `None`.
     """
     try:
-        exposure_seconds: float | None = float(frame.exposure)
+        exposure_s: float | None = float(frame.exposure_s)
     except TypeError, ValueError:
-        exposure_seconds = None
-    if exposure_seconds is not None and not math.isfinite(exposure_seconds):
-        exposure_seconds = None
+        exposure_s = None
+    if exposure_s is not None and not math.isfinite(exposure_s):
+        exposure_s = None
     filter_name = str(frame.filter)
     return CaptureSetting(
         camera=frame.camera,
@@ -516,8 +516,8 @@ def build_capture_setting(frame: FrameRecord) -> CaptureSetting:
         focal_length_mm=frame.focal_length_mm,
         pixel_scale_arcsec=frame.pixel_scale_arcsec,
         filter_name=None if filter_name in ("", "None") else filter_name,
-        exposure_s=exposure_seconds,
-        gain=_whole_number(canonical_gain_setting(frame.iso)),
+        exposure_s=exposure_s,
+        gain=_whole_number(canonical_gain_setting(frame.gain)),
         offset=_whole_number(canonical_offset_setting(frame.offset)),
         binning=_whole_number(canonical_binning_setting(frame.binning).split("x")[0]),
     )
@@ -727,7 +727,7 @@ class BiasLevelFinder:
         reason : `str`
             Why the level is missing, or an empty string.
         """
-        gain = canonical_gain_setting(frame.iso)
+        gain = canonical_gain_setting(frame.gain)
         offset = canonical_offset_setting(frame.offset)
         binning = canonical_binning_setting(frame.binning)
         key = (frame.camera, gain, offset, binning)

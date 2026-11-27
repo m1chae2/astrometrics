@@ -77,6 +77,6 @@ def synthetic_run(
         dec_error_arcsec=0.1 * generator.normal(size=count) + 0.2 / 60.0 * relative,
         ra_pulse_ms=pulse_array,
         dec_pulse_ms=np.zeros(count),
-        ra_rate_arcsec_per_second=rate,
-        dec_rate_arcsec_per_second=rate,
+        ra_rate_arcsec_per_s=rate,
+        dec_rate_arcsec_per_s=rate,
     )

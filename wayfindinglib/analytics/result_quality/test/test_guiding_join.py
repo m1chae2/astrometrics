@@ -48,8 +48,8 @@ def test_join_cuts_the_samples_to_each_window() -> None:
     An uncovered frame has no numbers.
     """
     windows = [
-        FrameWindow(frame_id="a", start_epoch_seconds=10.0, exposure_seconds=10.0),
-        FrameWindow(frame_id="b", start_epoch_seconds=500.0, exposure_seconds=10.0),
+        FrameWindow(frame_id="a", start_epoch_seconds=10.0, exposure_s=10.0),
+        FrameWindow(frame_id="b", start_epoch_seconds=500.0, exposure_s=10.0),
     ]
     rows = join_frames_to_guiding(windows, list(reversed(_samples())))
     assert rows[0]["guide_samples"] == 5
@@ -59,8 +59,8 @@ def test_join_cuts_the_samples_to_each_window() -> None:
 def test_read_range_adds_the_margin() -> None:
     """The range adds 5 seconds before the start and after the end."""
     windows = [
-        FrameWindow(frame_id="a", start_epoch_seconds=100.0, exposure_seconds=10.0),
-        FrameWindow(frame_id="b", start_epoch_seconds=200.0, exposure_seconds=30.0),
+        FrameWindow(frame_id="a", start_epoch_seconds=100.0, exposure_s=10.0),
+        FrameWindow(frame_id="b", start_epoch_seconds=200.0, exposure_s=30.0),
     ]
     assert guiding_read_range(windows) == pytest.approx((95.0, 235.0))
     assert guiding_read_range([]) is None

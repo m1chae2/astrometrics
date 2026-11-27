@@ -156,8 +156,8 @@ def test_plan_counts_frames_missing_files_and_hashes_the_input(tmp_path: Path) -
     present = tmp_path / "a.fits"
     present.write_text("x")
     files = [
-        {"path": str(present), "camera": "C", "exposure": "30.0", "date": "2026-10-01 21:00:00"},
-        {"path": str(tmp_path / "gone.fits"), "camera": "C", "exposure": "30", "date": "2026-10-02 21:00:00"},
+        {"path": str(present), "camera": "C", "exposureS": 30.0, "date": "2026-10-01 21:00:00"},
+        {"path": str(tmp_path / "gone.fits"), "camera": "C", "exposureS": 30, "date": "2026-10-02 21:00:00"},
     ]
     plan = processing_run.describe_plan("M 31", "C", files, {"files": files, "stackedImage": "/s.fits"})
     assert plan["frame_count"] == 2

@@ -12,11 +12,10 @@ A caller also passes a `CaptureSetting` to say which calibration frames it
 means (`calibration.query`, `assess` and `measure_sensor_noise`). The fields
 it leaves empty are not compared.
 
-The field names carry their units (``exposure_s``). The JSON names stay the
-ones the app and the stored rows have always used (``gainSetting``,
-``exposureSeconds``), and the old field names ``gain_setting`` and
-``exposure_seconds`` are still read, so a record saved before the rename
-loads unchanged.
+The field names carry their units (``exposure_s``), and the JSON names
+follow them (``exposureS``, ``gain``). The names a record saved before the
+rename used (``exposureSeconds``, ``exposure_seconds``, ``gainSetting`` and
+``gain_setting``) are still read, so such a record loads unchanged.
 
 `StoredCaptureSetting` pairs a stored setting with the id the quality store
 gave it.
@@ -126,13 +125,13 @@ class CaptureSetting(BaseModel):
     filter_name: str | None = Field(default=None, alias="filterName")
     exposure_s: float | None = Field(
         default=None,
-        alias="exposureSeconds",
-        validation_alias=AliasChoices("exposureSeconds", "exposure_s", "exposure_seconds"),
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
     )
     gain: int | None = Field(
         default=None,
-        alias="gainSetting",
-        validation_alias=AliasChoices("gainSetting", "gain", "gain_setting"),
+        alias="gain",
+        validation_alias=AliasChoices("gain", "gainSetting", "gain_setting"),
     )
     offset: int | None = None
     binning: int | None = None

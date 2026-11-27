@@ -384,7 +384,7 @@ def _entry(gain_setting: str, gain: float, read_noise: float) -> SensorSettingNo
         The entry for the given gain setting.
     """
     return SensorSettingNoise(
-        gain_setting=gain_setting,
+        gain=gain_setting,
         offset="10",
         binning="1x1",
         gain_e_per_adu=_measured(gain),
@@ -446,10 +446,29 @@ def test_a_saved_entry_loads_back_and_replacing_keeps_the_others(
     assert len(list(tmp_path.glob("*.bak"))) == 3
     reloaded = AppConfiguration()
     profile = next(p for p in load_camera_profiles(reloaded) if p.camera_name == "Test Camera")
-    assert [entry.gain_setting for entry in profile.sensor_noise] == ["0", "100"]
+    assert [entry.gain for entry in profile.sensor_noise] == ["0", "100"]
     assert profile.sensor_noise_for("0", "10", "1x1").gain_e_per_adu.value == pytest.approx(0.9)
     assert profile.sensor_noise_for("100", "10", "1x1").read_noise_e.value == pytest.approx(1.5)
     assert tomlkit.parse(config_path.read_text(encoding="utf-8"))[NOISE_SECTION_NAME]["sensor_noise"]
+
+
+def test_an_entry_written_with_the_old_gain_setting_key_loads_and_saves_as_gain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry saved as ``gain_setting`` loads; saving writes ``gain``."""
+    old_text = write_profile("Test Camera") + (
+        'sensor_noise = [{ gain_setting = "0", offset = "10", binning = "1x1", '
+        'gain_e_per_adu = { value = 0.783, kind = "measured", source = "a test" } }]\n'
+    )
+    config = _real_config(tmp_path, monkeypatch, old_text)
+    profile = next(p for p in load_camera_profiles(config) if p.camera_name == "Test Camera")
+    assert profile.sensor_noise_for(0, 10, "1x1").gain_e_per_adu.value == pytest.approx(0.783)
+
+    save_sensor_setting_noise(config, "Test Camera", _entry("100", 0.2, 1.5))
+    saved = tomlkit.parse(Path(config.config_file_path).read_text(encoding="utf-8"))
+    entries = saved[NOISE_SECTION_NAME]["sensor_noise"]
+    assert [(entry["gain"], entry["offset"]) for entry in entries] == [(0, 10), (100, 10)]
+    assert all("gain_setting" not in entry for entry in entries)
 
 
 def test_saving_into_an_old_layout_section_is_refused(
@@ -472,7 +491,7 @@ def test_the_spread_pair_values_and_robust_read_noise_survive_a_save(
     """The extra fields of a measured entry round-trip through the file."""
     config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
     entry = SensorSettingNoise(
-        gain_setting="0",
+        gain="0",
         offset="10",
         binning="1x1",
         gain_e_per_adu=_measured(0.783),
@@ -571,7 +590,7 @@ def test_two_threads_saving_different_settings_both_keep_their_entry(
         thread.join(60)
 
     profile = next(p for p in load_camera_profiles(AppConfiguration()) if p.camera_name == "Test Camera")
-    assert sorted(entry.gain_setting for entry in profile.sensor_noise) == sorted(gain_settings)
+    assert sorted(entry.gain for entry in profile.sensor_noise) == sorted(gain_settings)
 
 
 def test_the_shipped_profiles_hold_the_measured_bias_levels() -> None:

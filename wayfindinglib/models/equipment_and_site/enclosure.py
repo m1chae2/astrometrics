@@ -12,7 +12,7 @@ them makes the interlock checkable without commanding anything.
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class EnclosureType(StrEnum):
@@ -56,7 +56,9 @@ class Enclosure(BaseModel):
     park_azimuth_deg: float = Field(..., ge=0.0, lt=360.0)
     park_altitude_deg: float = Field(..., ge=-90.0, le=90.0)
     clearance_tolerance_deg: float = Field(default=2.0, gt=0.0)
-    motion_timeout_sec: int = Field(default=180, gt=0)
+    motion_timeout_s: int = Field(
+        default=180, gt=0, validation_alias=AliasChoices("motion_timeout_s", "motion_timeout_sec")
+    )
     protocol: str = Field(
         default="indi",
         description="Hardware-control protocol driving this enclosure.",

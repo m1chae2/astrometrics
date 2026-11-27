@@ -763,8 +763,8 @@ def compare_spectrum_to_xp(
         gaia_source_id=gaia_source_id,
         sample_count=int(ratio.size),
         residual_rms_fraction=float(np.sqrt(np.mean((ratio - 1.0) ** 2))),
-        slope_percent_per_1000_angstrom=100.0 * slope,
-        slope_error_percent_per_1000_angstrom=100.0 * slope_error,
+        slope_pct_per_1000_angstrom=100.0 * slope,
+        slope_error_pct_per_1000_angstrom=100.0 * slope_error,
         wavelength_shift_angstrom=shift,
         wavelength_shift_correlation=shift_correlation,
         bands=bands,
@@ -895,7 +895,7 @@ def gaia_xp_metrics(comparison: GaiaXpComparison | None) -> list[StageQualityMet
         are designed, not fitted (see the module description).
     """
     compared = comparison is not None and comparison.status == "compared"
-    slope = comparison.slope_percent_per_1000_angstrom if compared else None
+    slope = comparison.slope_pct_per_1000_angstrom if compared else None
     shift = comparison.wavelength_shift_angstrom if compared else None
     rms = comparison.residual_rms_fraction if compared else None
     if comparison is None:
@@ -1046,12 +1046,12 @@ def summarize_gaia_xp(rows: Iterable[Mapping[str, Any]]) -> GaiaXpRunSummary | N
                 star_count=len(ratios),
             )
         )
-    slopes = _per_star_values(records, lambda row: row.get("slope_percent_per_1000_angstrom"))
+    slopes = _per_star_values(records, lambda row: row.get("slope_pct_per_1000_angstrom"))
     return GaiaXpRunSummary(
         compared_star_count=_star_count(records),
         bands=band_summaries,
-        median_slope_percent_per_1000_angstrom=float(statistics.median(slopes)) if slopes else None,
-        median_absolute_slope_percent_per_1000_angstrom=(
+        median_slope_pct_per_1000_angstrom=float(statistics.median(slopes)) if slopes else None,
+        median_absolute_slope_pct_per_1000_angstrom=(
             float(statistics.median(abs(value) for value in slopes)) if slopes else None
         ),
     )
@@ -1089,10 +1089,10 @@ def gaia_xp_gate(rows: Iterable[Mapping[str, Any]]) -> GateResult:
             f"at least {resolve(MINIMUM_STARS_FOR_GATE).value} are needed",
             source,
         )
-    median_absolute_slope = summary.median_absolute_slope_percent_per_1000_angstrom
+    median_absolute_slope = summary.median_absolute_slope_pct_per_1000_angstrom
     if median_absolute_slope is None:
         return unchecked_gate(GAIA_XP_GATE_NAME, "no compared star had a measurable tilt", source)
-    median_slope = summary.median_slope_percent_per_1000_angstrom
+    median_slope = summary.median_slope_pct_per_1000_angstrom
     detail = f"median tilt {median_slope:+.2f} percent per 1000 A over {compared} stars"
     if median_absolute_slope > resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value:
         return failed_gate(

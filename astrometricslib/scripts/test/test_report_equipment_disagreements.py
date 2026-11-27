@@ -41,7 +41,7 @@ def make_frame(**fields: object) -> SimpleNamespace:
         "focal_length_mm": 300.0,
         "telescope": "Nikkor 300mm",
         "path": "/x.fits",
-        "iso": "800",
+        "gain": 800,
     }
     defaults.update(fields)
     return SimpleNamespace(**defaults)
@@ -86,10 +86,10 @@ def test_iso_disagreements_compare_the_header_with_the_stored_value(tmp_path: Pa
 
     target = SimpleNamespace(
         frames=[
-            make_frame(path=write("a.fits", ISOSPEED=100), iso="800"),
-            make_frame(path=write("b.fits", ISOSPEED=800), iso="800"),
-            make_frame(path=write("c.fits"), iso="800"),
-            make_frame(path=str(tmp_path / "missing.fits"), iso="800"),
+            make_frame(path=write("a.fits", ISOSPEED=100), gain=800),
+            make_frame(path=write("b.fits", ISOSPEED=800), gain=800),
+            make_frame(path=write("c.fits"), gain=800),
+            make_frame(path=str(tmp_path / "missing.fits"), gain=800),
         ]
     )
     result = find_iso_disagreements([target])

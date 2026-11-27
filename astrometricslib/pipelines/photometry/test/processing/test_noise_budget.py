@@ -110,7 +110,7 @@ def _inputs(**changes: object) -> NoiseBudgetInputs:
     geometry = aperture_geometry_factor()
     session = SessionNoiseInputs(
         session_id="s",
-        exposure_seconds=10.0,
+        exposure_s=10.0,
         gain_e_per_adu=GAIN,
         gain_is_assumed=False,
         read_noise_e=READ_NOISE,
@@ -240,7 +240,7 @@ def test_session_inputs_are_gathered_from_light_curves_and_exposures() -> None:
     expected = (CIRCLE_PIXELS + CIRCLE_PIXELS**2 / ring_pixels) * (250.0 * GAIN + READ_NOISE**2)
     assert inputs.background_variance_e2 == pytest.approx(expected, rel=1e-9)
     assert inputs.point_count == 12
-    assert inputs.exposure_seconds == pytest.approx(10.0)
+    assert inputs.exposure_s == pytest.approx(10.0)
     assert inputs.gain_e_per_adu == GAIN
     assert not inputs.gain_is_assumed
 

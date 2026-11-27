@@ -171,8 +171,8 @@ def _minimum_altitude(
         Advice, or `None` if no altitude band was poor or the suggested
         altitude is not above the configured minimum.
     """
-    suggested = performance.suggested_minimum_altitude_degrees
-    configured = input_quality.configured_minimum_altitude_degrees
+    suggested = performance.suggested_minimum_altitude_deg
+    configured = input_quality.configured_minimum_altitude_deg
     if suggested is None or (configured is not None and suggested <= configured):
         return None
     return session_statement(
@@ -183,8 +183,8 @@ def _minimum_altitude(
             f"{suggested:g} degrees for work that needs sharp stars."
         ),
         values={
-            "suggested_minimum_altitude_degrees": suggested,
-            "configured_minimum_altitude_degrees": configured,
+            "suggested_minimum_altitude_deg": suggested,
+            "configured_minimum_altitude_deg": configured,
         },
         limits=[_tolerance_limit(tolerance)],
         confidence=rule_confidence("sky"),
@@ -202,7 +202,7 @@ def _coverage_gaps(input_quality: SkyInputQuality) -> TargetStatement | None:
     """
     if not input_quality.gaps:
         return None
-    lowest = input_quality.altitude_range_degrees[0] if input_quality.altitude_range_degrees else None
+    lowest = input_quality.altitude_range_deg[0] if input_quality.altitude_range_deg else None
     note = f" The lowest pointing measured was {lowest:.0f} degrees altitude." if lowest is not None else ""
     return session_statement(
         "sky_coverage_gap",

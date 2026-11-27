@@ -97,7 +97,7 @@ class ObservationSessionRecorder:
         return WeatherSample(
             time=time.time(),
             ambient_temperature_c=_parse_leading_float(getattr(status, "temperature", None)),
-            humidity_percent=_parse_leading_float(getattr(status, "humidity", None)),
+            humidity_pct=_parse_leading_float(getattr(status, "humidity", None)),
         )
 
     def save_checkpoint(self, session: ObservationSession) -> None:

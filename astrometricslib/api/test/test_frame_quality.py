@@ -50,7 +50,7 @@ def _frames(count: int = 4, filter_name: str = "Luminance", exposure: str = "60"
             role="LIGHT",
             camera="ZWO ASI533",
             filter=filter_name,
-            exposure=exposure,
+            exposure_s=exposure,
             timestamp=float(number),
         )
         for number in range(count)

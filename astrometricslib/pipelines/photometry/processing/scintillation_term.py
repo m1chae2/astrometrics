@@ -319,7 +319,7 @@ def fit_scintillation_coefficient(
 
 def _young_fraction_by_timestamp(
     stars: list[StellarObject],
-    exposure_seconds: dict[datetime, float],
+    exposure_s: dict[datetime, float],
     aperture_diameter_mm: float,
     site_elevation_m: float,
 ) -> dict[datetime, float]:
@@ -329,7 +329,7 @@ def _young_fraction_by_timestamp(
     ----------
     stars : `list` [`StellarObject`]
         The session's stars; each light curve holds the frame's airmass.
-    exposure_seconds : `dict` [`datetime`, `float`]
+    exposure_s : `dict` [`datetime`, `float`]
         The exposure of each frame.
     aperture_diameter_mm : `float`
         The telescope's aperture, in millimeters.
@@ -351,7 +351,7 @@ def _young_fraction_by_timestamp(
             airmass_by_timestamp.setdefault(timestamp, airmass)
     young: dict[datetime, float] = {}
     for timestamp, airmass in airmass_by_timestamp.items():
-        exposure = exposure_seconds.get(timestamp)
+        exposure = exposure_s.get(timestamp)
         if exposure is None or not (math.isfinite(airmass) and airmass > 0 and exposure > 0):
             continue
         young[timestamp] = scintillation_relative_noise(
@@ -408,7 +408,7 @@ def _record(
 
 def build_scintillation_term(
     stars: list[StellarObject],
-    exposure_seconds: dict[datetime, float],
+    exposure_s: dict[datetime, float],
     aperture_diameter_mm: float | None,
     aperture_reason: str | None,
     site_elevation_m: float,
@@ -423,7 +423,7 @@ def build_scintillation_term(
     ----------
     stars : `list` [`StellarObject`]
         The session's stars with their raw light curves.
-    exposure_seconds : `dict` [`datetime`, `float`]
+    exposure_s : `dict` [`datetime`, `float`]
         The exposure of each frame.
     aperture_diameter_mm : `float` or `None`
         The telescope's aperture, or `None` when it is not known.
@@ -445,7 +445,7 @@ def build_scintillation_term(
     if aperture_diameter_mm is None:
         reason = aperture_reason or "the telescope's aperture is not known"
         return ScintillationTerm(_record(SOURCE_NONE, reason=f"no term added: {reason}"), {})
-    young = _young_fraction_by_timestamp(stars, exposure_seconds, aperture_diameter_mm, site_elevation_m)
+    young = _young_fraction_by_timestamp(stars, exposure_s, aperture_diameter_mm, site_elevation_m)
     if not young:
         return ScintillationTerm(
             _record(SOURCE_NONE, reason="no term added: no frame gave an airmass and an exposure"), {}

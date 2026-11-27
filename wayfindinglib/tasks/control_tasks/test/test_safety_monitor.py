@@ -27,17 +27,17 @@ def _rule_set(**overrides: Any) -> SafetyRuleSet:
                 comparison="greater_than",
                 unsafe_threshold=80.0,
                 marginal_threshold=50.0,
-                staleness_bound_sec=120,
+                staleness_bound_s=120,
             ),
             SafetyRule(
                 id="wind",
                 measurement="wind_speed_kph",
                 comparison="greater_than",
                 unsafe_threshold=40.0,
-                staleness_bound_sec=120,
+                staleness_bound_s=120,
             ),
         ],
-        "settling_period_sec": 900,
+        "settling_period_s": 900,
     }
     defaults.update(overrides)
     return SafetyRuleSet(**defaults)
@@ -110,7 +110,7 @@ def test_unsafe_verdict_takes_effect_immediately() -> None:
 
 def test_reopening_withheld_until_settling_period_elapses() -> None:
     """Verify a safe reading right after an unsafe one is not immediate."""
-    rule_set = _rule_set(settling_period_sec=900)
+    rule_set = _rule_set(settling_period_s=900)
     monitor = SafetyMonitor()
     unsafe_readings = {"cloud_cover_pct": (10.0, _NOW), "wind_speed_kph": (50.0, _NOW)}
 
@@ -145,7 +145,7 @@ def test_reopening_withheld_until_settling_period_elapses() -> None:
 
 def test_settling_period_resets_on_a_new_non_safe_reading() -> None:
     """Verify a fresh non-safe reading during settling restarts the clock."""
-    rule_set = _rule_set(settling_period_sec=900)
+    rule_set = _rule_set(settling_period_s=900)
     monitor = SafetyMonitor()
     unsafe_readings = {"cloud_cover_pct": (10.0, _NOW), "wind_speed_kph": (50.0, _NOW)}
 

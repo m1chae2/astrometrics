@@ -24,7 +24,7 @@ OLD_VALUES = (
     'gain_e_per_adu = { value = 0.783, kind = "measured", source = "gain 0, offset 10" }\n'
     'read_noise_e = { value = 3.8, kind = "measured", source = "gain 0, offset 10" }\n'
 )
-SETTING = MigrationSetting(gain_setting="0", offset="10", binning="1x1", temperature_c=-10.0)
+SETTING = MigrationSetting(gain="0", offset="10", binning="1x1", temperature_c=-10.0)
 
 
 def _config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:

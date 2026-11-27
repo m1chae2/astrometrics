@@ -216,7 +216,7 @@ def create_guider_calibration(
         raise InvalidArgumentError(
             f"arcsec_per_pixel must be at most {MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL}."
         )
-    if max(calibration.ra_rate_arcsec_per_sec, calibration.dec_rate_arcsec_per_sec) > (
+    if max(calibration.ra_rate_arcsec_per_s, calibration.dec_rate_arcsec_per_s) > (
         MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC
     ):
         raise InvalidArgumentError(

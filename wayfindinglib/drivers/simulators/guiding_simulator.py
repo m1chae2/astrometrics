@@ -139,13 +139,13 @@ class SimulatedGuidingDriver(GuidingDriver):
         return error_arcsec + correction * MOUNT_RESPONSE, pulse_ms
 
     async def run_cycle(
-        self, exposure_seconds: float, gain: float | None, commands: GuideCommands
+        self, exposure_s: float, gain: float | None, commands: GuideCommands
     ) -> GuidingSample | None:
         """Run one simulated guide cycle.
 
         Parameters
         ----------
-        exposure_seconds : `float`
+        exposure_s : `float`
             Guide exposure length.
         gain : `float` or `None`
             Guide camera gain.
@@ -158,9 +158,9 @@ class SimulatedGuidingDriver(GuidingDriver):
             The simulated error after the correction and the pulses sent,
             or `None` if the guide camera did not start the exposure.
         """
-        if not commands.expose(exposure_seconds, gain):
+        if not commands.expose(exposure_s, gain):
             return None
-        commands.sleep(exposure_seconds + READOUT_SECONDS)
+        commands.sleep(exposure_s + READOUT_SECONDS)
         self._error_ra_arcsec += self._random.uniform(-DRIFT_STEP_ARCSEC, DRIFT_STEP_ARCSEC)
         self._error_dec_arcsec += self._random.uniform(-DRIFT_STEP_ARCSEC, DRIFT_STEP_ARCSEC)
         self._error_ra_arcsec, pulse_ra = self._correct(self._error_ra_arcsec, "west", "east", commands)

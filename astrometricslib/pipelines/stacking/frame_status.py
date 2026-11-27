@@ -210,7 +210,7 @@ def build_frame_statuses(
             )
         )
     for record in set_aside:
-        exposure = record.exposure_seconds
+        exposure = record.exposure_s
         statuses.append(
             FrameStatus(
                 path=record.path,
@@ -221,7 +221,7 @@ def build_frame_statuses(
                 camera=record.camera,
                 filter=record.filter,
                 date=record.date or "",
-                exposure="" if exposure is None else f"{float(exposure):g}",
+                exposure_s=None if exposure is None else float(exposure),
                 original_path=record.original_path,
                 restorable=bool(record.restorable),
                 restore_note=record.restore_note or "",

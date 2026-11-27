@@ -36,14 +36,14 @@ class _LightFrame:
         self.path = f"/lib/lights/Target/x/frame_{index}.fits"
         self.role = "LIGHT"
         self.timestamp = FIRST_NIGHT + 60.0 * index
-        self.exposure = 60.0
+        self.exposure_s = 60.0
         self.filter = "Luminance"
         self.is_spectral = False
         self.camera = camera
         self.telescope = telescope
         self.sensor_temperature_c = -10.0
-        self.altitude_degrees = 50.0
-        self.azimuth_degrees = 180.0
+        self.altitude_deg = 50.0
+        self.azimuth_deg = 180.0
         self.pier_side = "East"
         self.pixel_scale_arcsec = 2.0
         self.binning = 1

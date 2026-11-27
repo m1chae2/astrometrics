@@ -15,7 +15,7 @@ screen draws these numbers as they are and decides nothing.
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class RunState(StrEnum):
@@ -52,7 +52,7 @@ class RowProgress(BaseModel):
         The row's source key, when the library suggested it.
     filter_name : `str`
         The row's filter.
-    exposure_sec : `float`
+    exposure_s : `float`
         The row's frame length in seconds.
     requested : `int`
         How many frames the row asks for.
@@ -72,7 +72,10 @@ class RowProgress(BaseModel):
 
     source_key: str = Field(default="", alias="sourceKey")
     filter_name: str = Field(default="", alias="filterName")
-    exposure_sec: float = Field(alias="exposureSec")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSec", "exposure_sec"),
+    )
     requested: int
     captured: int
     judged: int

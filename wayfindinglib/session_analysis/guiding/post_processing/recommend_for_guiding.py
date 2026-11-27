@@ -151,7 +151,7 @@ def _dim_star_text(input_quality: GuidingInputQuality) -> str:
     if typical and mass > 0:
         text += f", {typical / mass:.0f} times fainter than this equipment's usual {typical:,.0f}"
     text += ")"
-    cycle, usual_cycle = input_quality.cadence_seconds, input_quality.typical_cadence_seconds
+    cycle, usual_cycle = input_quality.cadence_s, input_quality.typical_cadence_s
     if typical and mass > 0 and cycle and usual_cycle:
         explained = max(usual_cycle / cycle, 1.0)
         text += (
@@ -332,7 +332,7 @@ def _exposure_length_limited(
         "the error scatter was above what the equipment can absorb": longest.wobble_fraction or 0.0,
     }
     main_cause, main_share = max(causes.items(), key=lambda item: item[1])
-    reliable = performance.longest_reliable_exposure_seconds
+    reliable = performance.longest_reliable_exposure_s
     alternative = (
         f"The longest length that would have worked for at least half the exposures was {reliable:g} s."
         if reliable is not None
@@ -341,12 +341,12 @@ def _exposure_length_limited(
     return session_statement(
         "exposure_length_limited",
         message=(
-            f"Only {longest.clean_fraction:.0%} of {longest.exposure_seconds:g} s exposures would have "
+            f"Only {longest.clean_fraction:.0%} of {longest.exposure_s:g} s exposures would have "
             f"had clean guiding for their whole length. The main reason was that {main_cause} "
             f"({main_share:.0%} of the windows). {alternative}"
         ),
         values={
-            "exposure_seconds": longest.exposure_seconds,
+            "exposure_s": longest.exposure_s,
             "clean_fraction": longest.clean_fraction,
             "lost_fraction": longest.lost_fraction,
             "jump_fraction": longest.jump_fraction,
@@ -365,7 +365,7 @@ def _exposure_length_limited(
         ],
         # The longest length that worked is the one value the rule can propose.
         proposed_action=(
-            ProposedAction(exposure_seconds=reliable) if reliable is not None and reliable > 0 else None
+            ProposedAction(exposure_s=reliable) if reliable is not None and reliable > 0 else None
         ),
         # This rule rests on a proxy (the guide log stands in for the star
         # shape in the frame), so it is always one label lower.

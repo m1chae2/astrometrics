@@ -474,7 +474,7 @@ def frame_record_for_set_aside(
             `True` when both are known and equal.
         """
         try:
-            return exposure is not None and math.isclose(float(frame.exposure), exposure, abs_tol=1e-6)
+            return exposure is not None and math.isclose(float(frame.exposure_s), exposure, abs_tol=1e-6)
         except ValueError:
             return False
 
@@ -545,6 +545,6 @@ def find_blink_partner(target: Target, path: str, configuration: AppConfiguratio
         record = next((item for item in set_aside if item.path == path), None)
         if record is not None:
             clicked = frame_record_for_set_aside(
-                lights, path, record.camera, record.filter, record.exposure_seconds, record.date
+                lights, path, record.camera, record.filter, record.exposure_s, record.date
             )
     return choose_blink_pair(target.id, path, lights, clicked)

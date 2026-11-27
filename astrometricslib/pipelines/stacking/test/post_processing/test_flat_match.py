@@ -678,7 +678,7 @@ def _frames_for(paths: list[str], first_timestamp: float = 1_792_000_000.0) -> l
             path=path,
             timestamp=first_timestamp + 60.0 * index,
             camera="Cam",
-            iso="0",
+            gain=0,
             offset="10",
             binning=1,
         )
@@ -797,7 +797,7 @@ def test_the_sky_requirement_comes_from_the_camera_profile(monkeypatch: pytest.M
     )
     profile = SimpleNamespace(sensor_noise_for=lambda _gain, _offset, _binning: entry)
     monkeypatch.setattr(flat_match, "resolve_camera_profile", lambda _camera: profile)
-    frame = SimpleNamespace(camera="Cam", iso="0", offset="10", binning=1)
+    frame = SimpleNamespace(camera="Cam", gain=0, offset="10", binning=1)
     requirement = flat_match.sky_requirement_for_frame(frame)
     assert requirement.minimum_adu == pytest.approx(10.0 * 3.8 / 0.783)
     profile_without = SimpleNamespace(sensor_noise_for=lambda _gain, _offset, _binning: None)

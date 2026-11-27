@@ -16,7 +16,7 @@ def test_calibration_stats_groups_by_frame_type_list() -> None:
     """Verify darks/biases/flats are stored as separate lists."""
     stats = CalibrationStats(
         camera_id="c1",
-        darks=[CalibrationEntry(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=300.0, count=40)],
+        darks=[CalibrationEntry(camera_id="c1", frame_type=FrameType.DARK, exposure_s=300.0, count=40)],
         biases=[CalibrationEntry(camera_id="c1", frame_type=FrameType.BIAS, count=100)],
     )
     assert len(stats.darks) == 1
@@ -26,6 +26,6 @@ def test_calibration_stats_groups_by_frame_type_list() -> None:
 
 def test_calibration_advisory_defaults_to_zero_count() -> None:
     """Verify CalibrationAdvisory defaults existing_count to zero."""
-    advisory = CalibrationAdvisory(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=300.0)
+    advisory = CalibrationAdvisory(camera_id="c1", frame_type=FrameType.DARK, exposure_s=300.0)
     assert advisory.existing_count == 0
     assert advisory.generated_at is not None

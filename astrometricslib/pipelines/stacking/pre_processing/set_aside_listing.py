@@ -80,7 +80,7 @@ def _header_exposure_seconds(path: str) -> float | None:
 
     Returns
     -------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure, or `None` if the header has none or cannot be read.
     """
     try:
@@ -179,7 +179,7 @@ def build_set_aside_records(
             reason = ""
             action_taken = None
             capture_setting_id = None
-            exposure_seconds = None
+            exposure_s = None
             moved_at = entry.get("moved_at") if entry else None
             if entry:
                 kind, reason = entry["kind"], entry["reason"]
@@ -192,10 +192,10 @@ def build_set_aside_records(
                 action_taken = row.action_taken
                 capture_setting_id = row.subject.capture_setting_id
                 if capture_setting_id is not None:
-                    exposure_seconds = capture_exposure_seconds.get(capture_setting_id)
+                    exposure_s = capture_exposure_seconds.get(capture_setting_id)
                 moved_at = moved_at or row.measured_at.isoformat(timespec="seconds")
-            if exposure_seconds is None:
-                exposure_seconds = _header_exposure_seconds(path)
+            if exposure_s is None:
+                exposure_s = _header_exposure_seconds(path)
             camera, filter_name, date = _header_identity(path)
             records.append(
                 SetAsideFrameRecord(
@@ -207,7 +207,7 @@ def build_set_aside_records(
                     reason=reason,
                     reason_source=reason_source,
                     action_taken=action_taken,
-                    exposure_seconds=exposure_seconds,
+                    exposure_s=exposure_s,
                     capture_setting_id=capture_setting_id,
                     moved_at=moved_at,
                     camera=camera,

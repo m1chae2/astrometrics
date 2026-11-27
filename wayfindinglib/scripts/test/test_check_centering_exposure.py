@@ -48,9 +48,9 @@ def test_frames_with_no_prediction_are_left_out_of_the_ratios() -> None:
 
 def test_spread_picks_across_the_exposures() -> None:
     """Five frames from ten are spread from shortest to longest."""
-    frames = [SimpleNamespace(exposure=str(seconds)) for seconds in range(10, 0, -1)]
+    frames = [SimpleNamespace(exposure_s=str(seconds)) for seconds in range(10, 0, -1)]
     picked = script._spread(frames, 5)
-    exposures = [float(frame.exposure) for frame in picked]
+    exposures = [float(frame.exposure_s) for frame in picked]
     assert exposures[0] == pytest.approx(1.0)
     assert exposures[-1] == pytest.approx(10.0)
     assert len(picked) == 5

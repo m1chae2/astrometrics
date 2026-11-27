@@ -73,13 +73,13 @@ class _Frame:
         self.stored_width_arcsec = width_arcsec
         self.timestamp = 1_700_000_000.0
         self.sensor_temperature_c = None
-        self.altitude_degrees = None
-        self.azimuth_degrees = None
+        self.altitude_deg = None
+        self.azimuth_deg = None
         self.pier_side = None
         self.binning = 1
         self.camera = camera
         self.telescope = telescope
-        self.exposure = exposure
+        self.exposure_s = exposure
         self.pixel_scale_arcsec = 2.0
         self.role = role
         self.filter = filter_name
@@ -122,7 +122,7 @@ def test_star_width_is_the_median_of_the_stored_widths(
 
     assert quality.fwhm_arcsec == pytest.approx(6.0)
     assert quality.sample_count == 3
-    assert quality.minimum_exposure_seconds == pytest.approx(10.0)
+    assert quality.minimum_exposure_s == pytest.approx(10.0)
 
 
 def test_short_exposures_are_left_out(camera_profile_config: AppConfiguration) -> None:

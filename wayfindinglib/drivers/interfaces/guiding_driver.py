@@ -79,13 +79,13 @@ class GuidingDriver(ProtocolDriver):
 
     @abc.abstractmethod
     async def run_cycle(
-        self, exposure_seconds: float, gain: float | None, commands: GuideCommands
+        self, exposure_s: float, gain: float | None, commands: GuideCommands
     ) -> GuidingSample | None:
         """Run one cycle of this app's own guiding loop.
 
         Parameters
         ----------
-        exposure_seconds : `float`
+        exposure_s : `float`
             Guide exposure length.
         gain : `float` or `None`
             Guide camera gain, or `None` to leave it alone.

@@ -68,7 +68,7 @@ def test_coverage_counts_nights_and_samples_per_part(make_nights: Any) -> None:
     assert by_part["altitude", "30-45 deg"].nights == 6
     assert by_part["altitude", "30-45 deg"].samples == 60
     assert by_part["altitude", "45-60 deg"].nights == 0
-    assert quality.altitude_range_degrees == [35.0, 65.0]
+    assert quality.altitude_range_deg == [35.0, 65.0]
     assert quality.has_enough_data
 
 

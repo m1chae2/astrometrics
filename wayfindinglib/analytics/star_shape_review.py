@@ -436,7 +436,7 @@ def _shape_from_rows(
         path=path,
         timestamp=timestamp,
         elongation=None if elongation_row is None else float(elongation_row.value),
-        angle_degrees=None if angle_row is None else float(angle_row.value),
+        angle_deg=None if angle_row is None else float(angle_row.value),
         direction_coherence=None if coherence_row is None else float(coherence_row.value),
         center_width_px=None if center_row is None else float(center_row.value),
         corner_widths_px={
@@ -615,7 +615,7 @@ def _direction_verdict(
     angle, coherence = _direction(source, frames)
     cut = float(resolve_parameter(SHARED_DIRECTION_COHERENCE).value)
     numbers: dict[str, float | None] = {
-        "angle_degrees": angle,
+        "angle_deg": angle,
         "coherence": coherence,
         "coherence_cut": cut,
     }
@@ -666,12 +666,12 @@ def _direction(
 
     Returns
     -------
-    angle_degrees, coherence : `float` or `None`
+    angle_deg, coherence : `float` or `None`
         The direction in degrees from 0 up to 180, and the coherence.
     """
-    if source is not None and source.angle_degrees is not None:
-        return source.angle_degrees, source.direction_coherence
-    angles = [frame.angle_degrees for frame in frames if frame.angle_degrees is not None]
+    if source is not None and source.angle_deg is not None:
+        return source.angle_deg, source.direction_coherence
+    angles = [frame.angle_deg for frame in frames if frame.angle_deg is not None]
     coherences = [frame.direction_coherence for frame in frames if frame.direction_coherence is not None]
     angle = None
     if angles:

@@ -100,12 +100,12 @@ def _star_rates_adu_per_second(count: int) -> np.ndarray:
     return rates
 
 
-def _image_adu(exposure_seconds: float, scale: float, seed: int) -> np.ndarray:
+def _image_adu(exposure_s: float, scale: float, seed: int) -> np.ndarray:
     """Build an image in ADU: a flat sky, white noise and Gaussian stars.
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure. The stars grow with it, the sky does not (the sky is a
         pedestal here, which is taken off by the aperture's sky ring).
     scale : `float`
@@ -125,18 +125,18 @@ def _image_adu(exposure_seconds: float, scale: float, seed: int) -> np.ndarray:
         window = (slice(int(row) - 30, int(row) + 31), slice(int(column) - 30, int(column) + 31))
         image[window] += (
             rate
-            * exposure_seconds
+            * exposure_s
             * np.exp(-((rows[window] - row) ** 2 + (columns[window] - column) ** 2) / (2 * 2.5**2))
         )
     return ((image * scale) + SKY_ADU).astype(np.float32)
 
 
-def _header(exposure_seconds: float | None) -> fits.Header:
+def _header(exposure_s: float | None) -> fits.Header:
     """Build a header with a plain tangent-plane sky solution.
 
     Parameters
     ----------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The ``EXPTIME``, or `None` to leave it out.
 
     Returns
@@ -153,8 +153,8 @@ def _header(exposure_seconds: float | None) -> fits.Header:
     header["CRVAL2"] = 2.0
     header["CDELT1"] = -2.0 / 3600.0
     header["CDELT2"] = 2.0 / 3600.0
-    if exposure_seconds is not None:
-        header["EXPTIME"] = exposure_seconds
+    if exposure_s is not None:
+        header["EXPTIME"] = exposure_s
     return header
 
 
@@ -244,7 +244,7 @@ def _combined_group_stack(
     facts = [
         ExposureGroupNoiseFacts(
             combine_weight=combination.weights[index],
-            exposure_seconds=exposures[index],
+            exposure_s=exposures[index],
             frame_count=10,
             gain=combination.gains[index],
             gain_measured=combination.gains_measured[index],

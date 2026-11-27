@@ -167,7 +167,7 @@ def fit_pointing_model(
             sample_count=n,
             raw_rms_arcsec=round(raw_rms, 2),
             residual_rms_arcsec=round(raw_rms, 2),
-            improvement_percent=0.0,
+            improvement_pct=0.0,
             confidence="insufficient_data",
             message=f"Need at least 4 plate-solve points to decompose terms; found {n}.",
         )
@@ -244,7 +244,7 @@ def fit_pointing_model(
         sample_count=n,
         raw_rms_arcsec=round(raw_rms, 2),
         residual_rms_arcsec=round(res_rms, 2),
-        improvement_percent=round(improvement, 1),
+        improvement_pct=round(improvement, 1),
         ih_arcsec=round(ih, 2),
         id_arcsec=round(id_err, 2),
         me_arcsec=round(me, 2),

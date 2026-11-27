@@ -43,7 +43,7 @@ class ImagingService:
     def capture_sequence(
         self,
         target_id: str,
-        exposure_seconds: float,
+        exposure_s: float,
         count: int,
         image_type: str = "LIGHT",
         filter_name: str | None = None,
@@ -56,7 +56,7 @@ class ImagingService:
         ----------
         target_id : `str`
             Target the frames are recorded against.
-        exposure_seconds : `float`
+        exposure_s : `float`
             Exposure time per frame.
         count : `int`
             Number of frames to take.
@@ -83,7 +83,7 @@ class ImagingService:
         returning a job id.
         """
         self._observatory.imaging.check_capture(
-            exposure_seconds, count=count, filter_name=filter_name, dither=dither, delay_s=delay_seconds
+            exposure_s, count=count, filter_name=filter_name, dither=dither, delay_s=delay_seconds
         )
         started = threading.Event()
         state: dict[str, Any] = {}
@@ -94,9 +94,9 @@ class ImagingService:
                 with registered_job(job_type="capture", target_id=target_id) as job:
                     state["job_id"] = job.job_id
                     started.set()
-                    job.info(f"Capturing {count} x {exposure_seconds} s {image_type} frames")
+                    job.info(f"Capturing {count} x {exposure_s} s {image_type} frames")
                     self._observatory.imaging.capture(
-                        exposure_seconds,
+                        exposure_s,
                         count=count,
                         filter_name=filter_name,
                         dither=dither,

@@ -33,7 +33,7 @@ MM_HG_TO_HPA = 1.33322387415
 FILIPPENKO_CONDITIONS = AtmosphericConditions(
     pressure_hpa=600.0 * MM_HG_TO_HPA,
     temperature_c=7.0,
-    relative_humidity_percent=100.0,
+    relative_humidity_pct=100.0,
     source="Filippenko (1982)",
 )
 FILIPPENKO_AIRMASS = 1.5
@@ -200,11 +200,11 @@ def test_the_standard_atmosphere_scales_with_the_elevation() -> None:
 
 def test_the_conditions_come_from_the_config_when_it_gives_all_three() -> None:
     """The three config keys set the conditions and the source says so."""
-    config = _FakeConfig({"pressure_hpa": "830", "temperature_c": "-3.5", "relative_humidity_percent": "40"})
+    config = _FakeConfig({"pressure_hpa": "830", "temperature_c": "-3.5", "relative_humidity_pct": "40"})
 
     conditions = load_atmospheric_conditions(config, 1500.0)
 
-    assert (conditions.pressure_hpa, conditions.temperature_c, conditions.relative_humidity_percent) == (
+    assert (conditions.pressure_hpa, conditions.temperature_c, conditions.relative_humidity_pct) == (
         830.0,
         -3.5,
         40.0,
@@ -226,7 +226,7 @@ def test_a_partly_filled_config_mixes_both_and_names_each_group() -> None:
     assert conditions.pressure_hpa == pytest.approx(830.0)
     assert conditions.temperature_c == pytest.approx(5.25)
     assert "config for pressure_hpa" in conditions.source
-    assert "standard atmosphere for temperature_c, relative_humidity_percent" in conditions.source
+    assert "standard atmosphere for temperature_c, relative_humidity_pct" in conditions.source
 
 
 @pytest.mark.parametrize(
@@ -234,7 +234,7 @@ def test_a_partly_filled_config_mixes_both_and_names_each_group() -> None:
     [
         {"pressure_hpa": "0"},
         {"pressure_hpa": "abc"},
-        {"relative_humidity_percent": "140"},
+        {"relative_humidity_pct": "140"},
         {"temperature_c": "nan"},
     ],
 )

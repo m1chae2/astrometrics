@@ -142,13 +142,13 @@ ReferenceProvider = Callable[[CaptureSetting], EfficiencyReference | None]
 # -----------------------------------------------------------------------------
 
 
-def frame_exposure_seconds(exposure_text: str | float | None) -> float | None:
+def frame_exposure_s(exposure_text: str | float | None) -> float | None:
     """Read a frame record's exposure as seconds.
 
     Parameters
     ----------
     exposure_text : `str` or `float` or `None`
-        The frame record's ``exposure`` field.
+        The frame record's ``exposure_s`` field.
 
     Returns
     -------
@@ -182,7 +182,7 @@ def frame_times(target: Target) -> dict[str, float]:
     for frame in target.frames:
         if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
             continue
-        half = (frame_exposure_seconds(frame.exposure) or 0.0) / 2.0
+        half = (frame_exposure_s(frame.exposure_s) or 0.0) / 2.0
         times[target.frame_subject_id(frame)] = float(frame.timestamp) + half
     return times
 
@@ -1129,7 +1129,7 @@ __all__ = [
     "ReferenceProvider",
     "build_target_observations",
     "dominant_setting",
-    "frame_exposure_seconds",
+    "frame_exposure_s",
     "frame_times",
     "set_aside_reasons",
     "stored_site",

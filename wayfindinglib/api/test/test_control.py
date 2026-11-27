@@ -409,8 +409,8 @@ def test_compute_guiding_correction_succeeds_with_saved_calibration(
         telescope_id="Rig A",
         arcsec_per_pixel=2.0,
         camera_angle_deg=0.0,
-        ra_rate_arcsec_per_sec=10.0,
-        dec_rate_arcsec_per_sec=10.0,
+        ra_rate_arcsec_per_s=10.0,
+        dec_rate_arcsec_per_s=10.0,
     )
     control.guiding._save_calibration(calibration)
 
@@ -439,15 +439,15 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(
         telescope_id="Rig A",
         arcsec_per_pixel=2.0,
         camera_angle_deg=0.0,
-        ra_rate_arcsec_per_sec=10.0,
-        dec_rate_arcsec_per_sec=10.0,
+        ra_rate_arcsec_per_s=10.0,
+        dec_rate_arcsec_per_s=10.0,
     )
     control.guiding._save_calibration(calibration)
     control.guiding._save_spectrum_analysis(
         GuidingSpectrumAnalysis(
             sample_count=100,
-            duration_seconds=3600.0,
-            dominant_period_seconds=480.0,
+            duration_s=3600.0,
+            dominant_period_s=480.0,
             periodic_error_peak_to_peak_arcsec=10.0,
         )
     )
@@ -494,7 +494,7 @@ def test_save_and_active_guiding_spectrum_analysis_round_trip(
 
     assert control.guiding.get_status(include=["spectrum_analysis"]).spectrum_analysis is None
 
-    analysis = GuidingSpectrumAnalysis(sample_count=10, duration_seconds=60.0)
+    analysis = GuidingSpectrumAnalysis(sample_count=10, duration_s=60.0)
     control.guiding._save_spectrum_analysis(analysis)
 
     persisted = control.guiding.get_status(include=["spectrum_analysis"]).spectrum_analysis
@@ -559,7 +559,7 @@ def test_run_guider_calibration_persists_the_derived_calibration(
     persisted = control.guiding.get_status(include=["calibration"]).calibration
     assert persisted is not None
     assert persisted.id == calibration.id
-    assert persisted.ra_rate_arcsec_per_sec == pytest.approx(calibration.ra_rate_arcsec_per_sec)
+    assert persisted.ra_rate_arcsec_per_s == pytest.approx(calibration.ra_rate_arcsec_per_s)
 
 
 def test_run_backlash_calibration_delegates_to_the_task_module(
@@ -620,7 +620,7 @@ def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(
                 id="wind", measurement="wind_speed_kph", comparison="greater_than", unsafe_threshold=40.0
             )
         ],
-        settling_period_sec=900,
+        settling_period_s=900,
     )
     control._context.butler.put(rule_set, "safety_rule_set", {"id": "default"})
 
@@ -652,7 +652,7 @@ def test_refresh_safety_assessment_reflects_a_live_weather_reading(control: Obse
                 id="wind", measurement="wind_speed_kph", comparison="greater_than", unsafe_threshold=40.0
             )
         ],
-        settling_period_sec=1,
+        settling_period_s=1,
     )
     control._context.butler.put(rule_set, "safety_rule_set", {"id": "default"})
 
@@ -767,8 +767,8 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(
         telescope_id="Rig A",
         arcsec_per_pixel=2.0,
         camera_angle_deg=0.0,
-        ra_rate_arcsec_per_sec=10.0,
-        dec_rate_arcsec_per_sec=10.0,
+        ra_rate_arcsec_per_s=10.0,
+        dec_rate_arcsec_per_s=10.0,
     )
     control.guiding._save_calibration(calibration)
     control.imaging.create_focus_model(
@@ -1496,8 +1496,8 @@ def _calibration(**changes: object) -> GuiderCalibration:
         "telescope_id": "Rig A",
         "arcsec_per_pixel": 2.0,
         "camera_angle_deg": 12.5,
-        "ra_rate_arcsec_per_sec": 14.0,
-        "dec_rate_arcsec_per_sec": 13.0,
+        "ra_rate_arcsec_per_s": 14.0,
+        "dec_rate_arcsec_per_s": 13.0,
         "source_note": "PHD2 calibration of 2026-11-01",
         **changes,
     }
@@ -1539,7 +1539,7 @@ def test_create_guider_calibration_saves_a_record_with_its_source_note(control: 
 
 @pytest.mark.parametrize(
     "changes",
-    [{"arcsec_per_pixel": 150.0}, {"ra_rate_arcsec_per_sec": 2000.0}, {"source_note": "  "}, {"id": ""}],
+    [{"arcsec_per_pixel": 150.0}, {"ra_rate_arcsec_per_s": 2000.0}, {"source_note": "  "}, {"id": ""}],
 )
 def test_create_guider_calibration_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
     """A value out of the library's range, or a missing note, saves nothing."""

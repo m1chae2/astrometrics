@@ -32,7 +32,7 @@ def test_safety_rule_marginal_threshold_optional() -> None:
     """Verify a SafetyRule constructs with no marginal_threshold configured."""
     rule = SafetyRule(id="r1", measurement="wind_speed_kph", comparison="greater_than", unsafe_threshold=40.0)
     assert rule.marginal_threshold is None
-    assert rule.staleness_bound_sec == 120
+    assert rule.staleness_bound_s == 120
 
 
 def test_safety_assessment_carries_triggering_rule() -> None:

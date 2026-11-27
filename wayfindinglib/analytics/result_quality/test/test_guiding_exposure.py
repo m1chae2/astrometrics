@@ -102,9 +102,7 @@ def test_the_supported_exposure_is_the_longest_that_reaches_the_target() -> None
 def test_the_frames_own_share_is_found_from_their_windows() -> None:
     """Frames of 60 s from 0 to 3000 s: the share of them that stayed sharp."""
     spans = {"n": [(0.0, NIGHT_SECONDS)]}
-    frames = [
-        FrameWindow(frame_id=f"f{i}", start_epoch_seconds=i * 60.0, exposure_seconds=60.0) for i in range(50)
-    ]
+    frames = [FrameWindow(frame_id=f"f{i}", start_epoch_seconds=i * 60.0, exposure_s=60.0) for i in range(50)]
 
     outcome = assess_guiding_exposure(60.0, [STAR_WIDTH_ARCSEC] * 20, spans, {"n": _samples(150.0)}, frames)
 
@@ -138,7 +136,7 @@ def test_the_statement_names_the_exposure_that_stays_sharp() -> None:
     assert "; at 30 s, 80%" in statement.message
     assert_plain_message_is_sound(statement)
     assert "Try 30 s frames" in statement.plain_message
-    assert statement.proposed_action.exposure_seconds == pytest.approx(30.0)
+    assert statement.proposed_action.exposure_s == pytest.approx(30.0)
     assert statement.values["sharp_fraction_at_30s"] == pytest.approx(0.8)
     assert statement.values["allowed_guide_rms_arcsec"] == pytest.approx(0.584, abs=0.001)
 
@@ -160,7 +158,7 @@ def test_a_noisy_log_proposes_no_exposure_and_says_so() -> None:
 
     (statement,) = guiding_limits_statements(SETTING, outcome)
 
-    assert statement.proposed_action.exposure_seconds is None
+    assert statement.proposed_action.exposure_s is None
     assert statement.proposed_action.note
     assert "No tested exposure reaches" in statement.reason
     assert_plain_message_is_sound(statement)

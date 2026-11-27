@@ -827,7 +827,7 @@ def resolve_limit(limit: object, context: dict[str, float | None]) -> float | No
     ----------
     limit : `float`, `dict` or `None`
         A number in the TPM's unit, ``{"factor": f, "of": fact}`` (``f``
-        times a fact about the run, such as ``exposure_seconds``) or `None`.
+        times a fact about the run, such as ``exposure_s``) or `None`.
     context : `dict` [`str`, `float` or `None`]
         The run facts that a relative limit can name.
 
@@ -958,15 +958,15 @@ def run_facts(results: Path, observatory_metrics: dict | None) -> dict[str, floa
     Returns
     -------
     facts : `dict` [`str`, `float` or `None`]
-        ``exposure_seconds`` (the simulated exposure length, from the
+        ``exposure_s`` (the simulated exposure length, from the
         metrics or the exposure driver's statistics file) and
         ``frame_interval_seconds`` (`None`: not measured yet).
     """
-    exposure = (observatory_metrics or {}).get("exposure_seconds")
+    exposure = (observatory_metrics or {}).get("exposure_s")
     stats_file = results / "observatory-sim-stats.json"
     if exposure is None and stats_file.exists():
-        exposure = json.loads(stats_file.read_text()).get("exposure_seconds")
-    return {"exposure_seconds": exposure, "frame_interval_seconds": None}
+        exposure = json.loads(stats_file.read_text()).get("exposure_s")
+    return {"exposure_s": exposure, "frame_interval_seconds": None}
 
 
 def load_baseline() -> dict:

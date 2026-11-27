@@ -415,7 +415,7 @@ def measure_spectral_frame(data: np.ndarray, path: Path) -> dict[str, float]:
         positive=True,
         offset_px=float(pipeline.instrument.zero_order_offset_px),
         length_px=float(pipeline.instrument.expected_length_px),
-        exposure_seconds=30.0,
+        exposure_s=30.0,
     )
     tilt, contrast = pipeline.measure_dispersion_trail(AstrometricsImage(str(path)), (column, row))
     return {
@@ -469,7 +469,7 @@ def measure_photometry(
         ``star_NN_flux_adu_per_s`` and ``star_NN_saturated`` (1 if the
         aperture holds saturated pixels).
     """
-    exposure_seconds = _read_exposure_seconds(header)
+    exposure_s = _read_exposure_seconds(header)
     threshold = _saturation_threshold_adu(header)
     values: dict[str, float] = {}
     for rank, source in enumerate(sources[:BRIGHTEST_SOURCE_COUNT], start=1):
@@ -477,7 +477,7 @@ def measure_photometry(
         if whole_pixel_centres:
             x, y = float(round(x)), float(round(y))
         flux, saturated = _measure_aperture_flux(data, x, y, saturation_threshold_adu=threshold)
-        values[f"star_{rank:02d}_flux_adu_per_s"] = flux / exposure_seconds
+        values[f"star_{rank:02d}_flux_adu_per_s"] = flux / exposure_s
         values[f"star_{rank:02d}_saturated"] = int(bool(saturated))
     return values
 
@@ -529,14 +529,14 @@ def measure_photometry_sequence() -> dict[str, float]:
         (float(source["x_centroid"]), float(source["y_centroid"]), float(source["flux"]))
         for source in sources[slice(*SEQUENCE_ANCHOR_RANKS)]
     ]
-    exposure_seconds = _read_exposure_seconds(header)
+    exposure_s = _read_exposure_seconds(header)
     fluxes = [[], [], [], [], []]
     saturated = [[], [], [], [], []]
     for _, x, y in stars:
         measurement = measure_aperture_photometry(
             reference, x, y, saturation_threshold_adu=threshold, noise=noise
         )
-        fluxes[0].append(measurement.net_flux_adu / exposure_seconds)
+        fluxes[0].append(measurement.net_flux_adu / exposure_s)
         saturated[0].append(measurement.is_saturated)
     values: dict[str, float] = {}
     for index, name in enumerate(LUMINANCE_FRAMES[1:], start=1):

@@ -14,7 +14,7 @@ caller chose; rise, set and transit at the start moment are UTC times of
 day (``HH:MM:SS``), or ``"Circumpolar"`` / ``"Never Rises"``.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class TimeSpan(BaseModel):
@@ -38,8 +38,9 @@ class MeridianStatus(BaseModel):
     flip_required: bool = Field(
         description="True once the object is past the meridian by more than the flip delay."
     )
-    time_to_flip_seconds: float = Field(
-        description="Seconds until the object crosses the meridian. Negative once it has crossed."
+    time_to_flip_s: float = Field(
+        description="Seconds until the object crosses the meridian. Negative once it has crossed.",
+        validation_alias=AliasChoices("time_to_flip_s", "time_to_flip_seconds"),
     )
 
 
@@ -168,7 +169,9 @@ class NightConditions(BaseModel):
 
     start: str = Field(description="First moment of the table, as ISO 8601 text.")
     end: str = Field(description="Last moment of the table, as ISO 8601 text.")
-    step_minutes: float = Field(description="Time between rows.")
+    step_min: float = Field(
+        description="Time between rows.", validation_alias=AliasChoices("step_min", "step_minutes")
+    )
     sun_events: list[SunEvent] = Field(default_factory=list, description="Sunset, twilight and sunrise.")
     astronomical_night: list[TimeSpan] = Field(
         default_factory=list, description="When the Sun is below -18 degrees."

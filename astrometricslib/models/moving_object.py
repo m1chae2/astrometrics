@@ -7,7 +7,7 @@ tracked across a specific sequence of pictures.
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class FrameDetection(BaseModel):
@@ -53,9 +53,13 @@ class FrameDetection(BaseModel):
     astrometric_error_correlation: float | None = Field(default=None, alias="astrometricErrorCorrelation")
     # How long the shutter was open for this picture, in seconds (the
     # `EXPTIME` header). `timestamp` is the moment the exposure started, so
-    # the middle of the exposure is `timestamp + exposure_seconds / 2`.
+    # the middle of the exposure is `timestamp + exposure_s / 2`.
     # `None` if the header had no usable value.
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
 
 
 class MovingObjectTrack(BaseModel):

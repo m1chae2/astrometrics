@@ -177,7 +177,7 @@ def more_frames(frame_count: int = 40, *, filter_name: str = "L", exposure: floa
         ),
         message=f"Take {frame_count} more frames.",
         plain_message=f"Take {frame_count} more frames: we expect less noise.",
-        proposed_action=ProposedAction(exposure_seconds=exposure, frame_count=frame_count),
+        proposed_action=ProposedAction(exposure_s=exposure, frame_count=frame_count),
         evidence=[MeasurementReference(row_id=5)],
         confidence=Confidence.PARTLY_MEASURED,
     )
@@ -594,7 +594,7 @@ def test_a_rule_suggestion_becomes_a_suggested_package_with_a_keyed_row(fixture:
     assert change.added == [package.id]
     assert package.status == PackageStatus.SUGGESTED
     [row] = package.exposure_requests
-    assert (row.frame_type, row.count, row.exposure_sec) == (FrameType.LIGHT, 40, 60.0)
+    assert (row.frame_type, row.count, row.exposure_s) == (FrameType.LIGHT, 40, 60.0)
     assert row.source_key.startswith("more_frames|M 81|")
     assert row.reason == "Take 40 more frames: we expect less noise."
     assert row.evidence_fingerprint
@@ -1021,7 +1021,7 @@ def _planned_package_in_session(
     """
     package = fixture.planning.packages.create(
         target_named("M 81"),
-        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=count)],
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=count)],
     )
     session = night_session(fixture)
     queue(fixture, session, package)
@@ -1073,8 +1073,8 @@ def test_a_package_added_to_a_later_session_asks_only_for_missing_frames(fixture
     package = fixture.planning.packages.create(
         target_named("M 81"),
         [
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=10),
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_sec=60.0, count=2),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=10),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_s=60.0, count=2),
         ],
     )
     judge(
@@ -1119,7 +1119,7 @@ def test_a_new_row_starts_counting_now_and_an_unchanged_row_keeps_its_time(
     """A changed row restarts its counting time; a new count does not."""
     package = fixture.planning.packages.create(
         target_named("M 81"),
-        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=5)],
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=5)],
     )
     created = package.exposure_requests[0].counted_from
     assert created == NOW
@@ -1127,8 +1127,8 @@ def test_a_new_row_starts_counting_now_and_an_unchanged_row_keeps_its_time(
     edited = fixture.planning.packages.update(
         current(fixture, package),
         exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=9),
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_sec=60.0, count=3),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=9),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_s=60.0, count=3),
         ],
     )
     assert edited.exposure_requests[0].counted_from == NOW
@@ -1152,7 +1152,7 @@ def test_reopen_with_no_session_counts_from_now(fixture: Fixture, clock: Clock) 
     """A package in no session reopens with rows counting from now."""
     package = fixture.planning.packages.create(
         target_named("M 81"),
-        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=3)],
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=3)],
     )
     stored = fixture.planning._context.butler.get("observation_package", {"id": package.id})
     stored.status = PackageStatus.COMPLETE
@@ -1184,7 +1184,7 @@ def test_the_session_list_can_include_the_run_state_including_not_run(fixture: F
     past = night_session(fixture, offset_days=-3)
     package = fixture.planning.packages.create(
         target_named("M 81"),
-        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=4)],
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=4)],
     )
     queue(fixture, past, package)
     sessions = fixture.planning.sessions.query(include=["progress"])

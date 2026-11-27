@@ -11,7 +11,7 @@ import os
 import sys
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Union, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
@@ -281,6 +281,11 @@ def get_ts_type(py_type: Any) -> str:
 
     origin = get_origin(py_type)
     args = get_args(py_type)
+
+    if origin is Annotated:
+        # A field type with a validator attached, such as `SettingNumber`:
+        # the type it holds is what the JSON carries.
+        return get_ts_type(args[0])
 
     if origin is Union:
         # Resolve all arguments of the Union to map properly to TS

@@ -33,7 +33,7 @@ from astrometricslib import Astrometrics
 from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.frame_grouping import (
-    frame_exposure_seconds,
+    frame_exposure_s,
     frame_is_spectral,
     group_frames_by_configuration,
 )
@@ -108,9 +108,7 @@ def mixed_exposure_counts(frames: list[Any]) -> dict[float, int]:
         lengths each have `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames (only
         those sessions are stacked as several groups).
     """
-    counts = Counter(
-        round(exposure, 3) for exposure in map(frame_exposure_seconds, frames) if exposure is not None
-    )
+    counts = Counter(round(exposure, 3) for exposure in map(frame_exposure_s, frames) if exposure is not None)
     large = {
         exposure: count
         for exposure, count in counts.items()

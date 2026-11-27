@@ -351,7 +351,7 @@ class FrameObservingInputs(BaseModel):
         The frame.
     start_epoch_seconds : `float` or `None`
         When the exposure began, in seconds since the Unix epoch.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure length, in seconds.
     solved_ra_deg, solved_dec_deg : `float` or `None`
         The plate-solved center, in degrees (ICRS).
@@ -368,7 +368,7 @@ class FrameObservingInputs(BaseModel):
 
     frame_id: str
     start_epoch_seconds: float | None = None
-    exposure_seconds: float | None = None
+    exposure_s: float | None = None
     solved_ra_deg: float | None = None
     solved_dec_deg: float | None = None
     requested_ra_deg: float | None = None
@@ -411,7 +411,7 @@ def observing_values(
             frame = frames[index]
             ra = frame.solved_ra_deg if frame.solved_ra_deg is not None else frame.requested_ra_deg
             dec = frame.solved_dec_deg if frame.solved_ra_deg is not None else frame.requested_dec_deg
-            middle = (frame.start_epoch_seconds or 0.0) + (frame.exposure_seconds or 0.0) / 2.0
+            middle = (frame.start_epoch_seconds or 0.0) + (frame.exposure_s or 0.0) / 2.0
             centers.append((middle, ra, dec))
         found = sky_geometry(
             [item[0] for item in centers],

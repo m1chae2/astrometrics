@@ -189,7 +189,7 @@ def analyze_guiding_telemetry(
     -------
     analysis : `GuidingSpectrumAnalysis`
         Computed repeating-error metrics, dominant periods and PSD.
-        `duration_seconds` is the time spent guiding in the stretches used,
+        `duration_s` is the time spent guiding in the stretches used,
         not the span from the first sample to the last.
     """
     valid_samples: list[dict[str, Any]] = []
@@ -209,7 +209,7 @@ def analyze_guiding_telemetry(
     if n < resolve_parameter(MINIMUM_SAMPLES).value:
         return GuidingSpectrumAnalysis(
             sample_count=n,
-            duration_seconds=0.0,
+            duration_s=0.0,
             periodic_error_peak_to_peak_arcsec=0.0,
             message=(
                 f"Need at least {resolve_parameter(MINIMUM_SAMPLES).value} guiding samples "
@@ -231,7 +231,7 @@ def analyze_guiding_telemetry(
     if not stretches:
         return GuidingSpectrumAnalysis(
             sample_count=n,
-            duration_seconds=0.0,
+            duration_s=0.0,
             periodic_error_peak_to_peak_arcsec=0.0,
             message=(
                 f"No continuous stretch of guiding has "
@@ -243,7 +243,7 @@ def analyze_guiding_telemetry(
 
     durations = np.array([stretch[0][-1] - stretch[0][0] for stretch in stretches])
     counts = np.array([stretch[0].size for stretch in stretches])
-    guided_seconds = float(durations.sum())
+    guided_s = float(durations.sum())
     cadence = float(np.median(np.concatenate([np.diff(stretch[0]) for stretch in stretches])))
     f_max = min(_MAXIMUM_FREQUENCY_HZ, 0.5 / max(cadence, 1e-3))
     f_min = resolve_parameter(MINIMUM_CYCLES).value / float(durations.max())
@@ -292,7 +292,7 @@ def analyze_guiding_telemetry(
                 source = "Worm Harmonic"
             peaks.append(
                 GuidingSpectrumPeak(
-                    period_seconds=period,
+                    period_s=period,
                     amplitude_arcsec=round(float(np.sqrt(combined[index])), 2),
                     power=round(float(combined[index]) / maximum, 3),
                     probable_source=source,
@@ -301,9 +301,7 @@ def analyze_guiding_telemetry(
         # A slow drift is real wander in the error, but it is not a period of
         # the mount's gears, so it is never the dominant period that the
         # correction code phase-locks to.
-        dominant_period = next(
-            (peak.period_seconds for peak in peaks if peak.probable_source != SLOW_DRIFT), None
-        )
+        dominant_period = next((peak.period_s for peak in peaks if peak.probable_source != SLOW_DRIFT), None)
 
     psd_curve: list[dict[str, float]] = []
     if combined.max() > 0:
@@ -311,7 +309,7 @@ def analyze_guiding_telemetry(
         covered_indices = np.flatnonzero(covered)[::step]
         psd_curve = [
             {
-                "periodSeconds": round(1.0 / float(frequencies[index]), 1),
+                "periodS": round(1.0 / float(frequencies[index]), 1),
                 "power": round(float(combined[index]) / float(combined.max()), 3),
             }
             for index in covered_indices
@@ -324,15 +322,15 @@ def analyze_guiding_telemetry(
 
     return GuidingSpectrumAnalysis(
         sample_count=n,
-        duration_seconds=round(guided_seconds, 1),
+        duration_s=round(guided_s, 1),
         periodic_error_peak_to_peak_arcsec=round(pe_p_to_p, 2),
-        dominant_period_seconds=dominant_period,
+        dominant_period_s=dominant_period,
         dec_backlash_estimate_ms=dec_backlash_ms,
         peaks=peaks,
         psd_curve=psd_curve,
         message=(
             f"Analyzed {n} samples in {len(stretches)} continuous stretch(es), "
-            f"{round(guided_seconds / 60.0, 1)}m of guiding: "
+            f"{round(guided_s / 60.0, 1)}m of guiding: "
             f'PE={round(pe_p_to_p, 2)}", Backlash={dec_backlash_ms or "N/A"}ms.'
         ),
     )

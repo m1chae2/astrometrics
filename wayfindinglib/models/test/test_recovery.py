@@ -18,7 +18,7 @@ def test_interval_for_first_attempt_is_zero() -> None:
 
 def test_interval_backs_off_exponentially() -> None:
     """Verify each subsequent attempt grows by the backoff multiplier."""
-    policy = RecoveryPolicy(initial_interval_sec=30, backoff_multiplier=2.0)
+    policy = RecoveryPolicy(initial_interval_s=30, backoff_multiplier=2.0)
     assert policy.interval_for_attempt(2) == pytest.approx(30.0)
     assert policy.interval_for_attempt(3) == pytest.approx(60.0)
     assert policy.interval_for_attempt(4) == pytest.approx(120.0)

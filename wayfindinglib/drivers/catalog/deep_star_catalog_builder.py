@@ -393,7 +393,7 @@ def build_deep_star_catalog(
         ``pixels_total`` (the chunks asked for: the whole sky, or the
         chosen `pixels`), ``pixels_previously_done``, ``pixels_downloaded``,
         ``pixels_failed`` (a list of chunk numbers), ``stars_added``,
-        ``elapsed_seconds``, and ``stopped_early`` (true if the archive
+        ``elapsed_s``, and ``stopped_early`` (true if the archive
         seemed to be down so the run stopped, or `maximum_pixels` was hit).
 
     Raises
@@ -431,7 +431,7 @@ def build_deep_star_catalog(
         "pixels_downloaded": 0,
         "pixels_failed": [],
         "stars_added": 0,
-        "elapsed_seconds": 0.0,
+        "elapsed_s": 0.0,
         "stopped_early": False,
     }
     started_at = time.monotonic()
@@ -478,7 +478,7 @@ def build_deep_star_catalog(
         if request_delay_seconds > 0 and position < len(remaining) - 1:
             sleep(request_delay_seconds)
 
-    report["elapsed_seconds"] = time.monotonic() - started_at
+    report["elapsed_s"] = time.monotonic() - started_at
     return report
 
 

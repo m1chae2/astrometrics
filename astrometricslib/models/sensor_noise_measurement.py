@@ -12,9 +12,10 @@ pair to pair, the frames they came from, and a sentence ready to store in
 the camera profile as the value's source.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.models.quality.measurement import MeasurementStatus
+from astrometricslib.utilities.iso_text import SettingNumber
 
 
 class SensorNoiseMeasurement(BaseModel):
@@ -33,15 +34,16 @@ class SensorNoiseMeasurement(BaseModel):
         Why nothing was measured. `None` when ``status`` is ``measured``.
     camera_id : `str`
         The camera the frames came from.
-    gain_setting : `str`
-        The camera's gain setting (or the ISO of a DSLR), in standard form.
-    offset : `str`
-        The camera offset, in standard form.
+    gain : `int` or `None`
+        The camera's gain setting (or the ISO of a DSLR), or `None` when it
+        is not a number.
+    offset : `int` or `None`
+        The camera offset, or `None` when it is not a number.
     binning : `str`
         The binning, such as ``"1x1"``.
     temperature_c : `float` or `None`
         The mean sensor temperature of the frames, in degrees C.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure of the flat frames, in seconds.
     gain_e_per_adu : `float` or `None`
         The conversion gain: the median over the flat pairs.
@@ -92,11 +94,17 @@ class SensorNoiseMeasurement(BaseModel):
     status: MeasurementStatus
     reason: str | None = None
     camera_id: str = Field(alias="cameraId")
-    gain_setting: str = Field(alias="gainSetting")
-    offset: str
+    gain: SettingNumber = Field(
+        alias="gain", validation_alias=AliasChoices("gain", "gainSetting", "gain_setting")
+    )
+    offset: SettingNumber
     binning: str
     temperature_c: float | None = Field(default=None, alias="temperatureC")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     gain_e_per_adu: float | None = Field(default=None, alias="gainEPerAdu")
     gain_spread_e_per_adu: float | None = Field(default=None, alias="gainSpreadEPerAdu")
     read_noise_adu: float | None = Field(default=None, alias="readNoiseAdu")

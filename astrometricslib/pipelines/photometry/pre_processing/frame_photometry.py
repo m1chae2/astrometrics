@@ -87,7 +87,7 @@ def _read_exposure_seconds(header: Any) -> float:
 
     Returns
     -------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure time in seconds.
     """
     for key in ("EXPTIME", "EXPOSURE"):
@@ -2047,12 +2047,12 @@ def _process_single_frame_worker(
         The picture's path and one of:
 
         * A tuple ``(timestamp, fluxes, shift_x, shift_y, background,
-          airmass, positions, exposure_seconds, alignment, peaks)``.
+          airmass, positions, exposure_s, alignment, peaks)``.
           ``timestamp`` is the exposure start in UTC. ``fluxes`` maps
           each star id to ``(flux in ADU per second, is_saturated, flux
           error in ADU per second)``. ``positions`` maps each star id to its
           `StarPosition`, which says where the aperture sat and whether
-          the centroid was refused. ``exposure_seconds`` is the exposure
+          the centroid was refused. ``exposure_s`` is the exposure
           time used to turn ADU into ADU per second. ``alignment`` is the
           picture's `FrameAlignment`; ``shift_x`` and ``shift_y`` are its
           shift of the middle of the frame. The last item, ``peaks``, maps
@@ -2074,7 +2074,7 @@ def _process_single_frame_worker(
             logger.warning("Rejecting %s: %s", path, error)
             return path, FrameRejection(str(error))
         airmass = compute_frame_airmass(header)
-        exposure_seconds = _read_exposure_seconds(header)
+        exposure_s = _read_exposure_seconds(header)
 
         # Use sampling for median to speed up worker
         sampled_data = data[::4, ::4]  # 1/16th of pixels
@@ -2124,9 +2124,9 @@ def _process_single_frame_worker(
                 neighbors=frame_neighbors,
             )
             fluxes_dict[reference_id] = (
-                measurement.net_flux_adu / exposure_seconds,
+                measurement.net_flux_adu / exposure_s,
                 measurement.is_saturated,
-                measurement.flux_error_adu / exposure_seconds,
+                measurement.flux_error_adu / exposure_s,
             )
             peaks_dict[reference_id] = measurement.peak_adu
 
@@ -2138,7 +2138,7 @@ def _process_single_frame_worker(
             global_background,
             airmass,
             positions_dict,
-            exposure_seconds,
+            exposure_s,
             alignment,
             peaks_dict,
         )

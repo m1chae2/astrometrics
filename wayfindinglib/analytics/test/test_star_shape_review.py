@@ -45,7 +45,7 @@ def _frames(
             path=f"/lib/Target/frame_{index:03d}.fits",
             timestamp=1.0e9 + 60.0 * index,
             elongation=value,
-            angle_degrees=angle,
+            angle_deg=angle,
             direction_coherence=coherence,
         )
         for index, value in enumerate(elongations)
@@ -82,7 +82,7 @@ def test_elongated_stars_with_a_shared_direction_point_at_tracking() -> None:
     assert review.roundness.state == "elongated"
     assert review.direction.state == "shared"
     assert "tracking" in review.direction.sentence
-    assert review.direction.numbers["angle_degrees"] == pytest.approx(30.0)
+    assert review.direction.numbers["angle_deg"] == pytest.approx(30.0)
 
 
 def test_elongated_stars_in_random_directions_point_at_seeing_or_focus() -> None:
@@ -172,7 +172,7 @@ def test_without_a_history_limit_the_stars_are_not_called_round_or_elongated() -
 
 def test_a_stack_with_its_own_numbers_is_judged_against_the_stack_baseline() -> None:
     """The stack's elongation is judged against other stacks, not frames."""
-    stack = FrameStarShape(path="Target/stack", elongation=1.08, angle_degrees=100.0, direction_coherence=0.8)
+    stack = FrameStarShape(path="Target/stack", elongation=1.08, angle_deg=100.0, direction_coherence=0.8)
 
     review = judge_star_shape(
         "Target", _frames(_typical()), stack, roundness_low_limit=0.5, stack_roundness_low_limit=0.95
@@ -218,11 +218,11 @@ def test_a_stack_without_numbers_falls_back_to_the_frames() -> None:
 def test_frame_angles_are_averaged_as_axes() -> None:
     """Angles of 5 and 175 degrees are one direction, not 90."""
     frames = _frames(_typical(), angle=5.0)
-    frames[::2] = [frame.model_copy(update={"angle_degrees": 175.0}) for frame in frames[::2]]
+    frames[::2] = [frame.model_copy(update={"angle_deg": 175.0}) for frame in frames[::2]]
 
     review = judge_star_shape("Target", frames, roundness_low_limit=ROUNDNESS_LIMIT)
 
-    angle = review.direction.numbers["angle_degrees"]
+    angle = review.direction.numbers["angle_deg"]
     assert angle is not None
     assert min(angle, 180.0 - angle) < 6.0
 
@@ -367,8 +367,8 @@ def test_the_reader_gives_frames_oldest_first_with_the_stored_coherence() -> Non
 
     assert [frame.path for frame in frames] == ["a.fits", "b.fits"]
     assert frames[0].direction_coherence == pytest.approx(0.83)
-    assert frames[0].angle_degrees == pytest.approx(40.0)
-    assert frames[1].angle_degrees is None
+    assert frames[0].angle_deg == pytest.approx(40.0)
+    assert frames[1].angle_deg is None
     assert stack is None
 
 

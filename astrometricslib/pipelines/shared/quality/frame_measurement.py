@@ -91,7 +91,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_s
 from astrometricslib.pipelines.shared.quality.frame_notices import FRAME_NOTICE_METRICS
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BACKGROUND_LEVEL,
@@ -651,7 +651,7 @@ def measure_frame(
     path : `str`
         Path to the FITS file.
     frame : `FrameRecord`
-        The frame's record: its gain setting (``iso``), offset, binning,
+        The frame's record: its gain setting (``gain``), offset, binning,
         exposure, pixel scale, timestamp and temperatures.
     target_id : `str`
         The target the frame belongs to.
@@ -767,7 +767,7 @@ def measure_frame(
         )
     )
     top_level = usable_top_level_adu(camera_profile)
-    exposure_seconds = frame_exposure_seconds(frame)
+    exposure_s = frame_exposure_s(frame)
 
     # Quick metrics first: they are returned even when the budget runs out.
     _emit_background_and_saturation(context, collapsed, camera_profile)
@@ -779,7 +779,7 @@ def measure_frame(
             measure_clipped_mean_adu(plane),
             bias_level_adu,
             gain,
-            exposure_seconds,
+            exposure_s,
             noise_reason,
             bias_level_reason,
         )

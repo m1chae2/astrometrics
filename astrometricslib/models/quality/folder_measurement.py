@@ -8,7 +8,7 @@ the caller: one value per metric for each frame, and the median of each
 metric over the frames.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 __all__ = ["FolderFrameMeasurement", "FolderMeasurementReport"]
 
@@ -20,7 +20,7 @@ class FolderFrameMeasurement(BaseModel):
     ----------
     file_name : `str`
         The frame's file name.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure length from the header, in seconds.
     timestamp : `float` or `None`
         The start of the exposure, in seconds since the Unix epoch.
@@ -46,7 +46,11 @@ class FolderFrameMeasurement(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     file_name: str = Field(alias="fileName")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     timestamp: float | None = None
     values: dict[str, float] = Field(default_factory=dict)
     uncertainties: dict[str, float] = Field(default_factory=dict)

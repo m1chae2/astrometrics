@@ -10,7 +10,7 @@ processed), and specific classes for each pipeline's unique metrics
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpRunSummary
@@ -39,7 +39,10 @@ class ExposureGroupSummary(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     frames_submitted: int = Field(alias="framesSubmitted")
     frames_stacked: int = Field(alias="framesStacked")
     # False when no dark frames of this exposure length exist: the group was
@@ -319,7 +322,16 @@ class StackingPipelineQualityMetrics(BaseModel):
     zero_pixel_fraction: float | None = Field(default=None, alias="zeroPixelFraction")
     # Siril warns when calibration leaves a large share of a frame below zero;
     # this is the worst percentage it reported, or `None` if it did not warn.
-    negative_pixel_max_percent: int | None = Field(default=None, alias="negativePixelMaxPercent")
+    negative_pixel_max_pct: int | None = Field(
+        default=None,
+        alias="negativePixelMaxPct",
+        validation_alias=AliasChoices(
+            "negativePixelMaxPct",
+            "negative_pixel_max_pct",
+            "negativePixelMaxPercent",
+            "negative_pixel_max_percent",
+        ),
+    )
 
     # Standard-imaging-only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
@@ -341,7 +353,13 @@ class StackingPipelineQualityMetrics(BaseModel):
 
     # Technical details about the stacking run itself, such as how long it
     # took or if color-conversion (debayering) was applied.
-    stacking_duration_seconds: float | None = Field(default=None, alias="stackingDurationSeconds")
+    stacking_duration_s: float | None = Field(
+        default=None,
+        alias="stackingDurationS",
+        validation_alias=AliasChoices(
+            "stackingDurationS", "stacking_duration_s", "stackingDurationSeconds", "stacking_duration_seconds"
+        ),
+    )
     debayer_applied: bool | None = Field(default=None, alias="debayerApplied")
     # The program that did the pixel work (calibration, registration and
     # combination) and its version, so a stack can be traced to the tool that

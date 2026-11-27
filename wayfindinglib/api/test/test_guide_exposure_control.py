@@ -25,9 +25,9 @@ _SIZE = 64
 class _SimulatedCamera:
     """A guide camera showing one star, brighter at longer exposures."""
 
-    def __init__(self, flux_per_second: float) -> None:
+    def __init__(self, flux_per_s: float) -> None:
         """Start with an empty frame."""
-        self.flux_per_second = flux_per_second
+        self.flux_per_s = flux_per_s
         self.exposures: list[float] = []
         self._frame = np.zeros((_SIZE, _SIZE))
         self._generator = np.random.default_rng(0)
@@ -49,7 +49,7 @@ class _SimulatedCamera:
         )
         profile = np.exp(-((columns - centre[0]) ** 2 + (rows - centre[1]) ** 2) / (2.0 * 0.7**2))
         profile /= profile.sum()
-        signal = self.flux_per_second * seconds * profile
+        signal = self.flux_per_s * seconds * profile
         self._frame = 100.0 + signal + self._generator.normal(0.0, 4.0, signal.shape)
         return True
 
@@ -73,7 +73,7 @@ def camera(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> _Sim
     camera : `_SimulatedCamera`
         The simulated guide camera, with a bright star.
     """
-    simulated = _SimulatedCamera(flux_per_second=60000.0)
+    simulated = _SimulatedCamera(flux_per_s=60000.0)
     monkeypatch.setattr(remote_transfer_tasks, "check_remote_connection", lambda context: True)
     monkeypatch.setattr(
         hardware_operations,
@@ -103,7 +103,7 @@ def test_a_bright_star_recommends_the_shortest_exposure(
 
     assert test.plate_scale_arcsec_per_px == pytest.approx(206.265 * 3.75 / 120.0)
     assert test.guiding_rms_limit_arcsec is not None
-    assert test.recommended_exposure_seconds == pytest.approx(0.5)
+    assert test.recommended_exposure_s == pytest.approx(0.5)
     assert len(camera.exposures) == 12
 
 

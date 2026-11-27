@@ -21,7 +21,7 @@ fields instead of guessing at the keys of a dictionary.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
@@ -331,7 +331,7 @@ class PredictedCalibration(BaseModel):
 class PredictedGroup(BaseModel):
     """One exposure group of a stack and the calibration it would get."""
 
-    exposure_seconds: float
+    exposure_s: float = Field(validation_alias=AliasChoices("exposure_s", "exposure_seconds"))
     # The observing night, for a spectral group split by night; else None.
     night: str | None = None
     frames_kept: int

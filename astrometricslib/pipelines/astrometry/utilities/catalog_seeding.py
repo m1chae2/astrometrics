@@ -257,12 +257,12 @@ def derive_field_centers(
             center = _coordinate_from_header(header)
             if center is None:
                 continue
-            right_ascension_degrees, declination_degrees = center
+            right_ascension_degrees, declination_deg = center
 
             # A pointing of exactly (0, 0) is the placeholder written
             # when a mount reports nothing, not a real field in Cetus.
             if math.isclose(right_ascension_degrees, 0.0, abs_tol=1e-9) and math.isclose(
-                declination_degrees, 0.0, abs_tol=1e-9
+                declination_deg, 0.0, abs_tol=1e-9
             ):
                 continue
             gaia_depth = float(predict_gaia_depth_from_header(header).query_depth)
@@ -273,7 +273,7 @@ def derive_field_centers(
                         existing_center["right_ascension_deg"],
                         existing_center["declination_deg"],
                         right_ascension_degrees,
-                        declination_degrees,
+                        declination_deg,
                     )
                     <= separation_threshold_degrees
                 ):
@@ -285,7 +285,7 @@ def derive_field_centers(
             else:
                 field_centers.append({
                     "right_ascension_deg": right_ascension_degrees,
-                    "declination_deg": declination_degrees,
+                    "declination_deg": declination_deg,
                     "target_ids": [target_id],
                     "frames_examined": 1,
                     "gaia_depth": gaia_depth,
@@ -379,13 +379,13 @@ def seed_local_gaia_catalog(
 
 
 def seed_field_tiles(
-    right_ascension_degrees: float, declination_degrees: float, radius_degrees: float, depth: float | None
+    right_ascension_degrees: float, declination_deg: float, radius_degrees: float, depth: float | None
 ) -> int:
     """Fill the Gaia tiles of one circle of sky in the local cache.
 
     Parameters
     ----------
-    right_ascension_degrees, declination_degrees : `float`
+    right_ascension_degrees, declination_deg : `float`
         The circle's center, in degrees.
     radius_degrees : `float`
         The circle's radius, in degrees.
@@ -414,7 +414,7 @@ def seed_field_tiles(
     if depth is None:
         depth = float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value)
     level = int(resolve(catalog_store.GAIA_TILE_LEVEL).value)
-    tiles = tiles_for_cone(right_ascension_degrees, declination_degrees, radius_degrees, level)
+    tiles = tiles_for_cone(right_ascension_degrees, declination_deg, radius_degrees, level)
     fetch, reason = make_gaia_tile_fetcher()
     if fetch is None:
         raise ExternalServiceError(f"No Gaia download: {reason}.")
@@ -441,10 +441,10 @@ def _seed_one_field(
         `status` ("seeded" or "failed"), source count, and any error.
     """
     right_ascension_degrees = field_center["right_ascension_deg"]
-    declination_degrees = field_center["declination_deg"]
+    declination_deg = field_center["declination_deg"]
     field_result: dict[str, Any] = {
         "right_ascension_deg": right_ascension_degrees,
-        "declination_deg": declination_degrees,
+        "declination_deg": declination_deg,
         "target_ids": field_center["target_ids"],
         "status": "failed",
         "sources": 0,
@@ -454,7 +454,7 @@ def _seed_one_field(
     for attempt_number in range(1, max_attempts + 1):
         try:
             cached_count = seed_field_tiles(
-                right_ascension_degrees, declination_degrees, radius_degrees, magnitude_limit
+                right_ascension_degrees, declination_deg, radius_degrees, magnitude_limit
             )
             field_result["status"] = "seeded"
             field_result["sources"] = int(cached_count or 0)
@@ -468,7 +468,7 @@ def _seed_one_field(
         logger.warning(
             "Could not seed field at RA %.4f Dec %.4f: %s",
             right_ascension_degrees,
-            declination_degrees,
+            declination_deg,
             field_result["error"],
         )
 

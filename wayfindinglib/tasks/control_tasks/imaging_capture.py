@@ -225,7 +225,7 @@ def capture_frames(
 
 def _take_frames(
     context: ControlContext,
-    exposure_seconds: float,
+    exposure_s: float,
     count: int,
     filter_name: str | None,
     dither_config: DitherConfig,
@@ -239,7 +239,7 @@ def _take_frames(
     ----------
     context : `ControlContext`
         Supplies the drivers.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Length of each exposure, in seconds.
     count : `int`
         Number of exposures.
@@ -274,16 +274,16 @@ def _take_frames(
             job.stage(0, f"Selecting filter {filter_name}")
         hardware_operations.set_filter(context, filter_name)
 
-    result = CaptureResult(exposure_s=exposure_seconds, filter_name=filter_name or None)
+    result = CaptureResult(exposure_s=exposure_s, filter_name=filter_name or None)
     for index in range(count):
         if stop_flag.is_set():
             return _finish_stopped(result)
         if job is not None:
             job.stage(int(index / count * 100), f"Capturing frame {index + 1}/{count}")
-        logger.info("Capturing frame %s/%s (%s s)", index + 1, count, exposure_seconds)
-        if not hardware_operations.capture_image(context, exposure_seconds):
+        logger.info("Capturing frame %s/%s (%s s)", index + 1, count, exposure_s)
+        if not hardware_operations.capture_image(context, exposure_s):
             raise HardwareError(f"The camera did not start frame {index + 1} of {count}.")
-        if _wait_or_stop(stop_flag, exposure_seconds + READOUT_SECONDS):
+        if _wait_or_stop(stop_flag, exposure_s + READOUT_SECONDS):
             # Stopped during the exposure. Abort it here too, in case the
             # stop arrived just as the exposure started.
             try:

@@ -11,7 +11,7 @@ phase in radians. These are the numbers a mount simulator needs to behave like
 the real mount. The models are plain results and are never stored.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
@@ -26,9 +26,9 @@ class PeriodicErrorFit(BaseModel):
 
     Parameters
     ----------
-    period_seconds : `float`
+    period_s : `float`
         The period, in seconds.
-    period_uncertainty_seconds : `float`
+    period_uncertainty_s : `float`
         One standard error of the period, in seconds.
     amplitude_arcsec : `float`
         The zero-to-peak size of the repeating error, in arcseconds. The
@@ -36,12 +36,12 @@ class PeriodicErrorFit(BaseModel):
     amplitude_uncertainty_arcsec : `float`
         One standard error of the amplitude, in arcseconds.
     phase_radians : `float` or `None`
-        The phase at `reference_epoch_seconds`, from 0 to 2 pi. `None` for a
+        The phase at `reference_epoch_s`, from 0 to 2 pi. `None` for a
         pooled fit: the worm gear is at an unrelated angle at the start of
         each night, so phases of different nights cannot be averaged.
     phase_uncertainty_radians : `float` or `None`
         One standard error of the phase. `None` when `phase_radians` is.
-    reference_epoch_seconds : `float` or `None`
+    reference_epoch_s : `float` or `None`
         The time the phase is counted from, in seconds since the Unix epoch
         (the start of the run). `None` for a pooled fit.
     significance : `float`
@@ -50,7 +50,7 @@ class PeriodicErrorFit(BaseModel):
     runs_used : `int`
         1 for a single run, otherwise the number of runs pooled. A pooled
         period and amplitude are the medians of the runs' values.
-    period_scatter_seconds : `float` or `None`
+    period_scatter_s : `float` or `None`
         For a pooled fit with two or more runs, the robust spread (1.4826
         times the median absolute deviation) of the runs' periods, in
         seconds.
@@ -61,16 +61,22 @@ class PeriodicErrorFit(BaseModel):
 
     model_config = _MODEL_CONFIG
 
-    period_seconds: float
-    period_uncertainty_seconds: float
+    period_s: float = Field(validation_alias=AliasChoices("period_s", "period_seconds"))
+    period_uncertainty_s: float = Field(
+        validation_alias=AliasChoices("period_uncertainty_s", "period_uncertainty_seconds")
+    )
     amplitude_arcsec: float
     amplitude_uncertainty_arcsec: float
     phase_radians: float | None = None
     phase_uncertainty_radians: float | None = None
-    reference_epoch_seconds: float | None = None
+    reference_epoch_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("reference_epoch_s", "reference_epoch_seconds")
+    )
     significance: float
     runs_used: int = 1
-    period_scatter_seconds: float | None = None
+    period_scatter_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("period_scatter_s", "period_scatter_seconds")
+    )
     amplitude_scatter_arcsec: float | None = None
 
 
@@ -81,11 +87,11 @@ class AxisErrorTerms(BaseModel):
     ----------
     samples : `int`
         Guide samples the terms rest on.
-    drift_arcsec_per_minute : `float`
+    drift_arcsec_per_min : `float`
         The slow linear drift, in arcseconds per minute. The sign follows the
         guide log's axis (positive error is the direction the guider's raw
         error is positive in).
-    drift_uncertainty_arcsec_per_minute : `float`
+    drift_uncertainty_arcsec_per_min : `float`
         One standard error of the drift.
     random_rms_arcsec : `float`
         The root-mean-square of what remains after the drift and repeating
@@ -102,8 +108,14 @@ class AxisErrorTerms(BaseModel):
     model_config = _MODEL_CONFIG
 
     samples: int
-    drift_arcsec_per_minute: float
-    drift_uncertainty_arcsec_per_minute: float
+    drift_arcsec_per_min: float = Field(
+        validation_alias=AliasChoices("drift_arcsec_per_min", "drift_arcsec_per_minute")
+    )
+    drift_uncertainty_arcsec_per_min: float = Field(
+        validation_alias=AliasChoices(
+            "drift_uncertainty_arcsec_per_min", "drift_uncertainty_arcsec_per_minute"
+        )
+    )
     random_rms_arcsec: float
     random_step_rms_arcsec: float
 
@@ -117,12 +129,12 @@ class PooledAxisTerms(BaseModel):
         Runs pooled.
     samples : `int`
         Total guide samples.
-    drift_median_arcsec_per_minute : `float`
+    drift_median_arcsec_per_min : `float`
         The median of the runs' drifts, in arcseconds per minute, with its
         sign. A few runs with a wild drift (a cloud, a bumped mount) do not
         move a median, so this is the typical drift. Use it, not a mean or
         a root-mean-square, to set a simulated mount.
-    drift_spread_arcsec_per_minute : `float`
+    drift_spread_arcsec_per_min : `float`
         How much the runs' drifts differ, in arcseconds per minute: 1.4826
         times the median absolute deviation, which equals the standard
         deviation when the drifts are normally distributed and ignores
@@ -143,8 +155,12 @@ class PooledAxisTerms(BaseModel):
 
     runs_used: int
     samples: int
-    drift_median_arcsec_per_minute: float
-    drift_spread_arcsec_per_minute: float
+    drift_median_arcsec_per_min: float = Field(
+        validation_alias=AliasChoices("drift_median_arcsec_per_min", "drift_median_arcsec_per_minute")
+    )
+    drift_spread_arcsec_per_min: float = Field(
+        validation_alias=AliasChoices("drift_spread_arcsec_per_min", "drift_spread_arcsec_per_minute")
+    )
     random_median_arcsec: float
     random_step_median_arcsec: float
 
@@ -160,7 +176,7 @@ class UnguidedRunError(BaseModel):
         The observing night.
     started_at : `float`
         When the run began, in seconds since the Unix epoch.
-    duration_seconds : `float`
+    duration_s : `float`
         The time the samples used cover, in seconds.
     samples_used : `int`
         Guide samples used.
@@ -184,7 +200,7 @@ class UnguidedRunError(BaseModel):
     run_id: str
     session_id: str
     started_at: float
-    duration_seconds: float
+    duration_s: float = Field(validation_alias=AliasChoices("duration_s", "duration_seconds"))
     samples_used: int
     periodic_error: PeriodicErrorFit | None = None
     significant_periodic_error: bool = False

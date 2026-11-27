@@ -47,7 +47,7 @@ def test_each_failed_threshold_gives_one_failed_gate() -> None:
     metrics = make_metrics()
     metrics.rejected_pixel_fraction = 0.3
     metrics.zero_pixel_fraction = 0.9
-    metrics.negative_pixel_max_percent = 60
+    metrics.negative_pixel_max_pct = 60
     sentences = failed_sentences(output_quality_gates(metrics))
     assert len(sentences) == 3
     assert any("exactly zero" in sentence for sentence in sentences)

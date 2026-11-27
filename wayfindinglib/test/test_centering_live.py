@@ -169,7 +169,7 @@ def test_centering_syncs_the_real_mount_with_correct_units(
     target_ra_deg, target_dec_deg = 150.0, 20.0
     solved_ra_deg, solved_dec_deg = 165.0, 21.0
     monkeypatch.setattr(centering, "SETTLE_SECONDS", 0.0)
-    monkeypatch.setattr(centering, "_capture_frame", lambda context, exposure_seconds: Path("frame.fits"))
+    monkeypatch.setattr(centering, "_capture_frame", lambda context, exposure_s: Path("frame.fits"))
     monkeypatch.setattr(centering, "_solve", lambda context, path: (solved_ra_deg, solved_dec_deg))
 
     with (

@@ -77,8 +77,8 @@ class MosaicService:
         panels : `list` [`dict`]
             The panels, as `preview_mosaic` returned them.
         image_config : `dict`
-            ``type``, ``count``, ``exposure``, ``filter`` and an optional
-            ``delay`` for every panel.
+            ``type``, ``count``, ``exposure_s``, ``filter`` and an optional
+            ``delay_s`` for every panel.
         dither_config : `dict`
             The dithering for every panel; kept only when ``enabled``.
 
@@ -108,9 +108,9 @@ class MosaicService:
                 "id": str(uuid.uuid4()),
                 "type": image_config["type"],
                 "count": image_config["count"],
-                "exposure": image_config["exposure"],
+                "exposure_s": image_config["exposure_s"],
                 "filter": image_config["filter"],
-                "delay": image_config.get("delay", 0),
+                "delay_s": image_config.get("delay_s", 0),
                 "coordinates": {"ra": panel.ra_deg, "dec": panel.dec_deg},
                 "dither": dither,
                 "name": panel.panel_id,

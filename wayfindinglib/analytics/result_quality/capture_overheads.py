@@ -240,7 +240,7 @@ class WallClockEstimate(BaseModel):
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         Total exposure time, in seconds.
     download_seconds : `float`
         Total download time.
@@ -257,7 +257,7 @@ class WallClockEstimate(BaseModel):
 
     model_config = _MODEL_CONFIG
 
-    exposure_seconds: float
+    exposure_s: float
     download_seconds: float
     dither_seconds: float
     autofocus_seconds: float
@@ -267,7 +267,7 @@ class WallClockEstimate(BaseModel):
 
 def estimate_capture_overheads(
     contexts: Sequence[EkosSessionContext],
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
     filter_name: str | None = None,
 ) -> CaptureOverheads:
     """Find the overheads of a capture setting from Ekos session records.
@@ -276,7 +276,7 @@ def estimate_capture_overheads(
     ----------
     contexts : `Sequence` [`EkosSessionContext`]
         The stored session records.
-    exposure_seconds : `float` or `None`, optional
+    exposure_s : `float` or `None`, optional
         Use only captures of this exposure length (within half a second).
         ``None`` uses all.
     filter_name : `str` or `None`, optional
@@ -297,9 +297,8 @@ def estimate_capture_overheads(
                 capture
                 for capture in context.captures
                 if (
-                    exposure_seconds is None
-                    or abs(capture.exposure_seconds - exposure_seconds)
-                    <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
+                    exposure_s is None
+                    or abs(capture.exposure_s - exposure_s) <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
                 )
                 and (filter_name is None or capture.filter_name == filter_name)
             ),
@@ -307,7 +306,7 @@ def estimate_capture_overheads(
         )
         focus_times = [run.timestamp for run in context.autofocus_runs]
         for previous, current in pairwise(captures):
-            gap = current.completed_at - previous.completed_at - current.exposure_seconds
+            gap = current.completed_at - previous.completed_at - current.exposure_s
             if gap < 0.0 or gap > resolve_parameter(PAUSE_SECONDS).value:
                 continue
             has_focus = any(previous.completed_at <= time <= current.completed_at for time in focus_times)
@@ -344,7 +343,7 @@ def estimate_capture_overheads(
 
 def wall_clock_estimate(
     frame_count: int,
-    exposure_seconds: float,
+    exposure_s: float,
     overheads: CaptureOverheads,
     *,
     dither_every_frames: int | None = None,
@@ -356,7 +355,7 @@ def wall_clock_estimate(
     ----------
     frame_count : `int`
         Number of frames. At least 0.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure time of one frame, in seconds.
     overheads : `CaptureOverheads`
         The overheads (`estimate_capture_overheads`).
@@ -371,7 +370,7 @@ def wall_clock_estimate(
     estimate : `WallClockEstimate`
         The parts and the total.
     """
-    exposure_total = frame_count * exposure_seconds
+    exposure_total = frame_count * exposure_s
     download_total = frame_count * overheads.download_seconds
     dither_count = math.floor(frame_count / dither_every_frames) if dither_every_frames else 0
     dither_total = dither_count * overheads.dither_settle_seconds
@@ -379,7 +378,7 @@ def wall_clock_estimate(
     total = exposure_total + download_total + dither_total + focus_total
     fraction = (total - exposure_total) / exposure_total if exposure_total > 0.0 else 0.0
     return WallClockEstimate(
-        exposure_seconds=exposure_total,
+        exposure_s=exposure_total,
         download_seconds=download_total,
         dither_seconds=dither_total,
         autofocus_seconds=focus_total,

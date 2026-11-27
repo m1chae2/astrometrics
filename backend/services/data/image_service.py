@@ -182,7 +182,7 @@ class ImageService:
         return self.target_service.astrometrics
 
     def get_light_frame_data_by_id(
-        self, target_id: str, iso: str, exposure: str, index: int = 0, stretch: bool = True
+        self, target_id: str, gain: float | None, exposure_s: float, index: int = 0, stretch: bool = True
     ) -> dict[str, Any] | None:
         """Draw one of a target's frames, chosen by gain, exposure and order.
 
@@ -190,10 +190,11 @@ class ImageService:
         ----------
         target_id : `str`
             The target whose frame to draw.
-        iso : `str`
-            The gain or ISO of the frame.
-        exposure : `str`
-            The exposure length of the frame.
+        gain : `float` or `None`
+            The gain or ISO of the frame, or `None` for a frame whose gain
+            is not known (any gain then matches).
+        exposure_s : `float`
+            The exposure length of the frame, in seconds.
         index : `int`, optional
             Which matching frame, by order. Defaults to 0.
         stretch : `bool`, optional
@@ -209,14 +210,28 @@ class ImageService:
         A gain or exposure that is not a number raises
         `InvalidArgumentError`, and no matching frame `NotFoundError`.
         """
-        path = self.get_target_frame_by_id(target_id, iso, exposure, index)
+        path = self.get_target_frame_by_id(target_id, gain, exposure_s, index)
         picture = self._astrometrics.visualization.render(path, stretch=stretch)
         # The reply uses the stored target id, whatever spelling the app sent.
         shown_id = self.target_service.subjects.target(target_id).id
         return _viewer_payload(picture, shown_id, self._astrometrics.targets.frames.get_header)
 
-    def get_target_frame_by_id(self, target_id: str, iso: str, exposure: str, index: int = 0) -> str:
+    def get_target_frame_by_id(
+        self, target_id: str, gain: float | None, exposure_s: float, index: int = 0
+    ) -> str:
         """Find the path of a target's frame by gain, exposure and order.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose frame to find.
+        gain : `float` or `None`
+            The gain or ISO of the frame, or `None` for a frame whose gain
+            is not known (any gain then matches).
+        exposure_s : `float`
+            The exposure length of the frame, in seconds.
+        index : `int`, optional
+            Which matching frame, by order. Defaults to 0.
 
         Returns
         -------
@@ -233,16 +248,19 @@ class ImageService:
         """
         target = self.target_service.subjects.target(target_id)
         try:
-            gain, exposure_s = float(iso), float(exposure)
+            gain_number = None if gain is None else float(gain)
+            exposure_number = float(exposure_s)
         except (TypeError, ValueError) as error:
             raise InvalidArgumentError(
-                "The gain and exposure must be numbers.", details={"iso": iso, "exposure": exposure}
+                "The gain and exposure must be numbers.", details={"gain": gain, "exposure_s": exposure_s}
             ) from error
-        matches = self._astrometrics.targets.frames.query(target, gain=gain, exposure_s=exposure_s)
+        matches = self._astrometrics.targets.frames.query(
+            target, gain=gain_number, exposure_s=exposure_number
+        )
         if not len(matches):
             raise NotFoundError(
-                f"No frame found for ISO={iso} Exposure={exposure} Index={index}",
-                details={"target": target.id, "iso": iso, "exposure": exposure, "index": index},
+                f"No frame found for gain {gain}, exposure {exposure_s} s, index {index}",
+                details={"target": target.id, "gain": gain, "exposure_s": exposure_s, "index": index},
             )
         return matches[max(0, min(index, len(matches) - 1))].path
 
@@ -312,7 +330,7 @@ class ImageService:
         x: float,
         y: float,
         radius_px: float | None = None,
-        cut_angle_degrees: float = 0.0,
+        cut_angle_deg: float = 0.0,
         cut_half_length_px: float | None = None,
         search_radius_px: float | None = None,
     ) -> dict[str, Any]:
@@ -328,7 +346,7 @@ class ImageService:
         radius_px : `float`, optional
             How far from the star's center the profile reaches. The star's
             width sets it when left out.
-        cut_angle_degrees : `float`, optional
+        cut_angle_deg : `float`, optional
             The direction of the straight cut, from +y toward +x.
         cut_half_length_px : `float`, optional
             How far the cut reaches each way from the center.
@@ -352,7 +370,7 @@ class ImageService:
             resolved,
             (x, y),
             radius_px=radius_px,
-            cut_angle_deg=cut_angle_degrees,
+            cut_angle_deg=cut_angle_deg,
             cut_half_length_px=cut_half_length_px,
             search_radius_px=search_radius_px,
         )

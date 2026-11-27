@@ -152,14 +152,14 @@ class RefractionGeometry:
     ----------
     mid_exposure_utc : `str`
         The time of mid-exposure, in UTC, as an ISO string.
-    altitude_degrees : `float`
+    altitude_deg : `float`
         The target's altitude above the horizon, without refraction.
     zenith_distance_degrees : `float`
         The apparent zenith distance: 90 degrees minus the altitude, minus
         the refraction at 5000 A. The refraction formula uses this angle.
-    parallactic_angle_degrees : `float`
+    parallactic_angle_deg : `float`
         The position angle of the zenith as seen from the target.
-    dispersion_position_angle_degrees : `float`
+    dispersion_position_angle_deg : `float`
         The position angle of the direction of increasing wavelength.
     pixel_scale_arcsec : `float`
         The sky angle covered by one pixel along the dispersion.
@@ -170,27 +170,27 @@ class RefractionGeometry:
     """
 
     mid_exposure_utc: str
-    altitude_degrees: float
+    altitude_deg: float
     zenith_distance_degrees: float
-    parallactic_angle_degrees: float
-    dispersion_position_angle_degrees: float
+    parallactic_angle_deg: float
+    dispersion_position_angle_deg: float
     pixel_scale_arcsec: float
     effective_wavelength_angstrom: float
     conditions: AtmosphericConditions
 
     @property
-    def parallactic_to_dispersion_angle_degrees(self) -> float:
+    def parallactic_to_dispersion_angle_deg(self) -> float:
         """`float`: The angle `phi` from the zenith to the dispersion.
 
         It is the dispersion position angle minus the parallactic angle,
         wrapped to -180 to 180 degrees.
         """
-        return _wrap_degrees(self.dispersion_position_angle_degrees - self.parallactic_angle_degrees)
+        return _wrap_degrees(self.dispersion_position_angle_deg - self.parallactic_angle_deg)
 
     @property
     def is_usable(self) -> bool:
         """`bool`: Whether the plane-parallel model may be used."""
-        return self.altitude_degrees >= resolve(MINIMUM_ALTITUDE_DEGREES).value
+        return self.altitude_deg >= resolve(MINIMUM_ALTITUDE_DEGREES).value
 
     def displacement_arcsec(self, wavelength_angstrom: np.ndarray | float) -> tuple[np.ndarray, np.ndarray]:
         """Give how far the light of a wavelength sits from the model's place.
@@ -221,7 +221,7 @@ class RefractionGeometry:
             ),
             dtype=float,
         )
-        phi = math.radians(self.parallactic_to_dispersion_angle_degrees)
+        phi = math.radians(self.parallactic_to_dispersion_angle_deg)
         return toward_zenith * math.cos(phi), -toward_zenith * math.sin(phi)
 
 
@@ -243,19 +243,19 @@ class DifferentialRefraction:
         applied. `None` when both happened.
     mid_exposure_utc : `str` or `None`
         The time of mid-exposure, in UTC.
-    altitude_degrees : `float` or `None`
+    altitude_deg : `float` or `None`
         The target's altitude.
-    parallactic_angle_degrees : `float` or `None`
+    parallactic_angle_deg : `float` or `None`
         The position angle of the zenith as seen from the target.
-    dispersion_position_angle_degrees : `float` or `None`
+    dispersion_position_angle_deg : `float` or `None`
         The position angle of the direction of increasing wavelength.
-    parallactic_to_dispersion_angle_degrees : `float` or `None`
+    parallactic_to_dispersion_angle_deg : `float` or `None`
         The angle from the zenith direction to the dispersion direction.
     pixel_scale_arcsec : `float` or `None`
         The sky angle of one pixel along the dispersion.
     effective_wavelength_angstrom : `float` or `None`
         The effective wavelength of the zero order.
-    pressure_hpa, temperature_c, relative_humidity_percent : `float` or `None`
+    pressure_hpa, temperature_c, relative_humidity_pct : `float` or `None`
         The air's conditions.
     atmosphere_source : `str` or `None`
         Where the conditions came from.
@@ -284,15 +284,15 @@ class DifferentialRefraction:
     is_applied: bool
     reason: str | None = None
     mid_exposure_utc: str | None = None
-    altitude_degrees: float | None = None
-    parallactic_angle_degrees: float | None = None
-    dispersion_position_angle_degrees: float | None = None
-    parallactic_to_dispersion_angle_degrees: float | None = None
+    altitude_deg: float | None = None
+    parallactic_angle_deg: float | None = None
+    dispersion_position_angle_deg: float | None = None
+    parallactic_to_dispersion_angle_deg: float | None = None
     pixel_scale_arcsec: float | None = None
     effective_wavelength_angstrom: float | None = None
     pressure_hpa: float | None = None
     temperature_c: float | None = None
-    relative_humidity_percent: float | None = None
+    relative_humidity_pct: float | None = None
     atmosphere_source: str | None = None
     along_dispersion_arcsec_at_4200: float | None = None
     along_dispersion_arcsec_at_8000: float | None = None
@@ -314,12 +314,12 @@ class DifferentialRefraction:
         return dict(self.__dict__)
 
 
-def _wrap_degrees(angle_degrees: float) -> float:
+def _wrap_degrees(angle_deg: float) -> float:
     """Wrap an angle to the range -180 to 180 degrees.
 
     Parameters
     ----------
-    angle_degrees : `float`
+    angle_deg : `float`
         The angle, in degrees.
 
     Returns
@@ -329,7 +329,7 @@ def _wrap_degrees(angle_degrees: float) -> float:
     """
     # Python's modulo of a positive divisor is never negative. Mirroring the
     # angle first puts 180 inside the range and -180 outside it.
-    return 180.0 - (180.0 - angle_degrees) % 360.0
+    return 180.0 - (180.0 - angle_deg) % 360.0
 
 
 def local_dispersion_angstrom_per_px(
@@ -493,7 +493,7 @@ def _direction_on_sky(
     return float(position_angle), float(scale)
 
 
-def parallactic_angle_degrees(target: SkyCoord, obstime: Time, site: ObservatorySite) -> tuple[float, float]:
+def parallactic_angle_deg(target: SkyCoord, obstime: Time, site: ObservatorySite) -> tuple[float, float]:
     """Find the target's altitude and the position angle of the zenith.
 
     The function takes the target's altitude and azimuth, moves a short way
@@ -512,7 +512,7 @@ def parallactic_angle_degrees(target: SkyCoord, obstime: Time, site: Observatory
 
     Returns
     -------
-    altitude_degrees : `float`
+    altitude_deg : `float`
         The target's altitude, without refraction.
     parallactic_angle : `float`
         The position angle of the zenith as seen from the target, in
@@ -588,7 +588,7 @@ def measure_refraction_geometry(
     try:
         sky = wcs.celestial.pixel_to_world(float(target_pixel_xy[0]), float(target_pixel_xy[1]))
         target = SkyCoord(ra=sky.icrs.ra, dec=sky.icrs.dec, frame="icrs")
-        altitude, parallactic = parallactic_angle_degrees(target, obstime, site)
+        altitude, parallactic = parallactic_angle_deg(target, obstime, site)
         dispersion_angle, pixel_scale = _direction_on_sky(
             wcs, target_pixel_xy, dispersion_image_angle_degrees
         )
@@ -604,10 +604,10 @@ def measure_refraction_geometry(
         return None, f"{REASON_ASTROPY}: {error}"
     geometry = RefractionGeometry(
         mid_exposure_utc=str(obstime.utc.isot),
-        altitude_degrees=altitude,
+        altitude_deg=altitude,
         zenith_distance_degrees=apparent_zenith_distance,
-        parallactic_angle_degrees=parallactic,
-        dispersion_position_angle_degrees=dispersion_angle,
+        parallactic_angle_deg=parallactic,
+        dispersion_position_angle_deg=dispersion_angle,
         pixel_scale_arcsec=pixel_scale,
         effective_wavelength_angstrom=float(effective_wavelength_angstrom),
         conditions=conditions,
@@ -683,15 +683,15 @@ def _describe(
         "is_applied": is_applied,
         "reason": reason,
         "mid_exposure_utc": geometry.mid_exposure_utc,
-        "altitude_degrees": geometry.altitude_degrees,
-        "parallactic_angle_degrees": geometry.parallactic_angle_degrees,
-        "dispersion_position_angle_degrees": geometry.dispersion_position_angle_degrees,
-        "parallactic_to_dispersion_angle_degrees": geometry.parallactic_to_dispersion_angle_degrees,
+        "altitude_deg": geometry.altitude_deg,
+        "parallactic_angle_deg": geometry.parallactic_angle_deg,
+        "dispersion_position_angle_deg": geometry.dispersion_position_angle_deg,
+        "parallactic_to_dispersion_angle_deg": geometry.parallactic_to_dispersion_angle_deg,
         "pixel_scale_arcsec": geometry.pixel_scale_arcsec,
         "effective_wavelength_angstrom": geometry.effective_wavelength_angstrom,
         "pressure_hpa": geometry.conditions.pressure_hpa,
         "temperature_c": geometry.conditions.temperature_c,
-        "relative_humidity_percent": geometry.conditions.relative_humidity_percent,
+        "relative_humidity_pct": geometry.conditions.relative_humidity_pct,
         "atmosphere_source": geometry.conditions.source,
     }
     if geometry.is_usable:

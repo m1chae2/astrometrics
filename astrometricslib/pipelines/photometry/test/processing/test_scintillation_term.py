@@ -241,7 +241,7 @@ def _analyzer_for(
     """
     analyzer = VariabilityAnalyzer()
     analyzer.stellar_objects = stars
-    analyzer.frame_exposure_seconds = dict(exposures)
+    analyzer.frame_exposure_s = dict(exposures)
     analyzer.timestamp_to_path = {stamp: f"frame_{index:03d}.fits" for index, stamp in enumerate(timestamps)}
     analyzer.aperture_diameter_mm = _APERTURE_MM
     analyzer.aperture_reason = None

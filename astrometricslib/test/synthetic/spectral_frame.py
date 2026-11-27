@@ -18,7 +18,7 @@ Coordinate convention, chosen to match the extractor:
 * The trail centre at column ``x`` is
   ``y = y0 - tan(angle_deg) * (x - x0)``. This is the same rule as
   ``SpectrumExtractor.extract_with_flare_mask``, which uses
-  ``slope = -tan(angle_degrees)``. So a positive angle moves the trail
+  ``slope = -tan(angle_deg)``. So a positive angle moves the trail
   toward smaller row numbers as x grows.
 * The offset ``d`` of a sample from the zero order is the column offset
   ``x - x0``, the same offset the pipeline passes to the wavelength

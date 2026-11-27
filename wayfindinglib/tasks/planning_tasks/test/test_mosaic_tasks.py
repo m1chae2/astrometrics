@@ -98,7 +98,7 @@ def test_create_mosaic_adds_one_target_and_package_per_panel() -> None:
     """A 2x2 grid gives four distinct panel targets and four packages."""
     astrometrics = _FakeAstrometrics()
     panels = calculate_panels(None, 314.695833, 44.33, 2, 2, 10.0, _equipment())
-    exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)]
+    exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=300.0, count=10)]
 
     plan = create_mosaic(astrometrics, _parent(), panels, exposure_requests, None, packages=True)
 

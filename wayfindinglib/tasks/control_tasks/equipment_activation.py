@@ -344,18 +344,18 @@ def list_camera_noise(astrometrics: Any, camera_name: str) -> list[CameraNoiseSe
         return []
     settings = []
     for entry in profile.sensor_noise:
-        gain = _noise_value(entry.gain_e_per_adu)
+        gain_e_per_adu = _noise_value(entry.gain_e_per_adu)
         read_noise = _noise_value(entry.read_noise_e)
         settings.append(
             CameraNoiseSetting(
                 camera_name=camera_name,
-                gain_setting=entry.gain_setting,
+                gain=entry.gain,
                 offset=entry.offset,
                 binning=entry.binning,
                 temperature_c=entry.temperature_c,
-                gain=gain,
+                gain_e_per_adu=gain_e_per_adu,
                 read_noise=read_noise,
-                status=_noise_status([value for value in (gain, read_noise) if value is not None]),
+                status=_noise_status([value for value in (gain_e_per_adu, read_noise) if value is not None]),
             )
         )
     return settings

@@ -178,7 +178,7 @@ def test_the_light_struck_dark_is_found_and_the_set_warns(catalog: CalibrationCa
     assert [Path(concern.path).name for concern in health.frames_of_concern] == [
         f"Dark_{FRAMES_PER_SET - 1}.fits"
     ]
-    assert health.exposure_seconds == pytest.approx(30.0)
+    assert health.exposure_s == pytest.approx(30.0)
 
 
 def test_the_row_key_matches_the_counts_row(catalog: CalibrationCatalog) -> None:

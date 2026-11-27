@@ -100,7 +100,7 @@ def _build_summary(  # ruff: ignore[missing-return-type-private-function]
 def test_reference_frame_is_recorded_for_a_normal_sequence() -> None:
     """The one zero-shift frame in a well-formed sequence is the reference."""
     paths = ["/lib/a.fits", "/lib/b.fits", "/lib/c.fits"]
-    frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure="1.0") for p in paths]
+    frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure_s=1.0) for p in paths]
     registration_frames = [
         _registration_fact(dx=0.0, dy=0.0, nb_stars=250),
         _registration_fact(dx=1.2, dy=-0.4),
@@ -121,7 +121,7 @@ def test_length_mismatch_does_not_name_a_reference() -> None:
     to sit at that position -- not necessarily the true reference.
     """
     paths = ["/lib/a.fits", "/lib/b.fits"]  # one fewer path than facts
-    frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure="1.0") for p in paths]
+    frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure_s=1.0) for p in paths]
     registration_frames = [
         _registration_fact(dx=0.0, dy=0.0, nb_stars=250),
         _registration_fact(dx=1.2, dy=-0.4),
@@ -142,7 +142,7 @@ def test_all_zero_shifts_does_not_fabricate_a_reference() -> None:
     the first would be fabricated, not measured.
     """
     paths = ["/lib/a.fits", "/lib/b.fits", "/lib/c.fits"]
-    frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure="1.0") for p in paths]
+    frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure_s=1.0) for p in paths]
     registration_frames = [
         _registration_fact(dx=0.0, dy=0.0, nb_stars=100),
         _registration_fact(dx=0.0, dy=0.0, nb_stars=110),
@@ -160,13 +160,13 @@ def test_the_stack_summary_records_the_camera_profile_of_its_frames() -> None:
     paths = ["/lib/a.fits", "/lib/b.fits"]
     registration_frames = [_registration_fact(dx=0.0, dy=0.0), _registration_fact(dx=1.0, dy=1.0)]
 
-    listed = [FrameRecord(path=p, role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0") for p in paths]
+    listed = [FrameRecord(path=p, role="LIGHT", camera="ZWO ASI 533MM Pro", exposure_s=1.0) for p in paths]
     listed_summary = _build_summary(listed, registration_frames, paths)
     assert listed_summary.camera_profile is not None
     assert listed_summary.camera_profile.profile_name == "ZWO ASI533MM Pro"
     assert listed_summary.camera_profile.is_generic_fallback is False
 
-    unlisted = [FrameRecord(path=p, role="LIGHT", camera="Acme Imager 9000", exposure="1.0") for p in paths]
+    unlisted = [FrameRecord(path=p, role="LIGHT", camera="Acme Imager 9000", exposure_s=1.0) for p in paths]
     unlisted_summary = _build_summary(unlisted, registration_frames, paths)
     assert unlisted_summary.camera_profile is not None
     assert unlisted_summary.camera_profile.is_generic_fallback is True
@@ -174,8 +174,8 @@ def test_the_stack_summary_records_the_camera_profile_of_its_frames() -> None:
 
 def test_registration_facts_fill_the_honestly_named_fields_only() -> None:
     """Siril's values fill the new fields; the mislabeled ones stay empty."""
-    frame = FrameRecord(path="/lib/a.fits", role="LIGHT", camera="c", exposure="1.0")
-    other = FrameRecord(path="/lib/b.fits", role="LIGHT", camera="c", exposure="1.0")
+    frame = FrameRecord(path="/lib/a.fits", role="LIGHT", camera="c", exposure_s=1.0)
+    other = FrameRecord(path="/lib/b.fits", role="LIGHT", camera="c", exposure_s=1.0)
     registration_fact = _registration_fact(
         dx=0.0, dy=0.0, nb_stars=1163, fwhm_px=2.83064, weighted_fwhm_px=3.27475, background_level=0.0238392
     )

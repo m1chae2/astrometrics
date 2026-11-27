@@ -59,14 +59,14 @@ def test_queued_observation_package_freezes_a_self_contained_snapshot() -> None:
         id="qp1",
         observation_package_id="pkg1",
         target_id="M 81",
-        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)],
+        exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=300.0, count=10)],
         dither_config=DitherConfig(enabled=True),
         minimum_altitude_deg=30.0,
         priority=5,
         applied_priority_boost=2,
         start_time_mode=StartTimeMode.SOONEST,
     )
-    assert entry.exposure_requests[0].exposure_sec == pytest.approx(300.0)
+    assert entry.exposure_requests[0].exposure_s == pytest.approx(300.0)
     assert entry.dither_config.enabled is True
     assert entry.priority == 5
     assert entry.applied_priority_boost == 2
@@ -126,5 +126,5 @@ def test_weather_sample_optional_fields_default_none() -> None:
     """Verify WeatherSample's readings default to absent, no populator yet."""
     sample = WeatherSample(time=1723334400.0)
     assert sample.ambient_temperature_c is None
-    assert sample.humidity_percent is None
+    assert sample.humidity_pct is None
     assert sample.dew_point_c is None

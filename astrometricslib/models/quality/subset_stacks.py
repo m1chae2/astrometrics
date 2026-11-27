@@ -22,7 +22,7 @@ what was done, so a caller can tell a step that was skipped from one that
 failed.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 EARLIER_NIGHTS_VARIANT = "earlier-nights"
 """The label, and so the ``variant``, of the stack of all nights but the last.
@@ -55,7 +55,7 @@ class SubsetStackResult(BaseModel):
         The observing nights of the submitted frames, sorted.
     effective_frame_count : `float` or `None`
         The weighted frame count (`None` when the weights are unknown).
-    effective_time_seconds : `float` or `None`
+    effective_time_s : `float` or `None`
         The weighted exposure time (`None` when the weights are unknown).
     normalized_noise : `float` or `None`
         The empty-aperture noise as a fraction of the reference stars'
@@ -82,7 +82,13 @@ class SubsetStackResult(BaseModel):
     frames_stacked: int = Field(default=0, alias="framesStacked")
     observing_night_ids: list[str] = Field(default_factory=list, alias="observingNightIds")
     effective_frame_count: float | None = Field(default=None, alias="effectiveFrameCount")
-    effective_time_seconds: float | None = Field(default=None, alias="effectiveTimeSeconds")
+    effective_time_s: float | None = Field(
+        default=None,
+        alias="effectiveTimeS",
+        validation_alias=AliasChoices(
+            "effectiveTimeS", "effective_time_s", "effectiveTimeSeconds", "effective_time_seconds"
+        ),
+    )
     normalized_noise: float | None = Field(default=None, alias="normalizedNoise")
     normalized_noise_uncertainty: float | None = Field(default=None, alias="normalizedNoiseUncertainty")
     noise_reason: str = Field(default="", alias="noiseReason")

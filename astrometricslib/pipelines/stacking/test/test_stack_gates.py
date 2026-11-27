@@ -69,9 +69,9 @@ def make_frame(index: int, gain: Any, background: float | None = None) -> FrameR
         path=f"/fake/l_{index}.fits",
         filter=FilterType.L,
         camera="ZWO ASI 533MM Pro",
-        exposure="120.0",
+        exposure_s=120.0,
         timestamp=float(index) * 120.0,
-        iso=gain,
+        gain=gain,
     )
     frame.measurements.background_level = background
     return frame
@@ -409,7 +409,7 @@ def _zero_fraction_entries(*pairs: tuple[float, float]) -> dict:
     """
     return {
         "exposure_group_frame_zero_fractions": [
-            {"exposure_seconds": exposure, "frame_zero_fraction": fraction} for exposure, fraction in pairs
+            {"exposure_s": exposure, "frame_zero_fraction": fraction} for exposure, fraction in pairs
         ]
     }
 
@@ -474,7 +474,7 @@ def test_a_summary_with_clipped_raw_frames_is_flagged_by_the_gate() -> None:
 def test_negative_pixel_gate_goes_red_on_siril_warning() -> None:
     """A Siril warning of 99% negative pixels fails; no warning passes."""
     metrics = make_metrics()
-    metrics.negative_pixel_max_percent = 99
+    metrics.negative_pixel_max_pct = 99
     assert output_gates(metrics)[aoq.NEGATIVE_PIXELS_GATE_NAME].status is GateStatus.FAILED
 
     clean = make_metrics()
@@ -542,7 +542,7 @@ def test_every_stack_condition_still_gives_a_failed_gate_at_its_limit() -> None:
         (aoq.SATURATION_GATE_NAME, "saturated_pixel_fraction", 0.001, 0.0009, False),
         (aoq.ZERO_FRACTION_GATE_NAME, "zero_pixel_fraction", 0.5, 0.49, False),
         (aoq.ZERO_FRACTION_GATE_NAME, "zero_pixel_fraction", 0.05, 0.04, True),
-        (aoq.NEGATIVE_PIXELS_GATE_NAME, "negative_pixel_max_percent", 50, 49, False),
+        (aoq.NEGATIVE_PIXELS_GATE_NAME, "negative_pixel_max_pct", 50, 49, False),
     ]
     for gate_name, field, at_limit, below_limit, is_spectral in cases:
         failing = make_metrics(is_spectral=is_spectral)

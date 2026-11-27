@@ -142,13 +142,13 @@ def _summarize(job: ProcessingJob, with_metrics: bool) -> JobSummary:
     summary : `JobSummary`
         Id, type, target, status, progress, message and times. An unfinished
         job that has not been updated for `STALE_AFTER_MINUTES` has
-        ``looks_stale`` set, ``is_active`` false and ``idle_minutes`` filled
+        ``looks_stale`` set, ``is_active`` false and ``idle_min`` filled
         in: its process most likely died and left the row at ``started`` or
         ``running``.
     """
     unfinished = job.status in ACTIVE_STATUSES
-    idle_minutes = _minutes_since(job.updated_at or job.created_at) if unfinished else None
-    looks_stale = idle_minutes is not None and idle_minutes > STALE_AFTER_MINUTES
+    idle_min = _minutes_since(job.updated_at or job.created_at) if unfinished else None
+    looks_stale = idle_min is not None and idle_min > STALE_AFTER_MINUTES
     return JobSummary(
         id=job.id,
         job_type=job.job_type,
@@ -162,7 +162,7 @@ def _summarize(job: ProcessingJob, with_metrics: bool) -> JobSummary:
         completed_at=job.completed_at,
         is_active=unfinished and not looks_stale,
         looks_stale=looks_stale,
-        idle_minutes=None if idle_minutes is None else round(idle_minutes),
+        idle_min=None if idle_min is None else round(idle_min),
         input_metrics=dict(job.input_metrics or {}) if with_metrics else None,
         output_metrics=dict(job.output_metrics or {}) if with_metrics else None,
         log_file_path=job.log_file_path if with_metrics else None,

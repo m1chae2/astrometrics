@@ -245,7 +245,7 @@ def test_a_stored_row_gives_the_reason_exposure_and_setting(frames: TargetFrames
     assert records["a.fits"].reason_source == "stored_row"
     assert (records["a.fits"].kind, records["a.fits"].reason) == ("trailed", "stars stretched")
     assert records["a.fits"].action_taken == action
-    assert records["a.fits"].exposure_seconds == pytest.approx(120.0)
+    assert records["a.fits"].exposure_s == pytest.approx(120.0)
     assert records["a.fits"].capture_setting_id == setting_id
     assert records["b.fits"].reason_source == "manifest"
 

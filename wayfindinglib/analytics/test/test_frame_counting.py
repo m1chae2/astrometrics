@@ -48,7 +48,7 @@ def _request(**changes: object) -> ExposureRequest:
     request : `ExposureRequest`
         The row.
     """
-    fields = {"frame_type": FrameType.LIGHT, "filter": FilterType.L, "exposure_sec": 60.0, "count": 10}
+    fields = {"frame_type": FrameType.LIGHT, "filter": FilterType.L, "exposure_s": 60.0, "count": 10}
     fields.update(changes)
     return ExposureRequest(**fields)
 
@@ -89,16 +89,16 @@ def test_a_matching_frame_counts() -> None:
         ({"camera": "Other Camera"}, "camera"),
         ({"telescope": "Other Scope"}, "telescope"),
         ({"filter_value": FilterType.R}, "filter"),
-        ({"exposure": 61.0}, "length beyond 0.5 s"),
-        ({"iso": "200"}, "gain"),
-        ({"offset": "20"}, "offset"),
+        ({"exposure_s": 61.0}, "length beyond 0.5 s"),
+        ({"gain": 200}, "gain"),
+        ({"offset": 20}, "offset"),
         ({"binning": 2}, "binning"),
         ({"role": "DARK"}, "frame type"),
     ],
 )
 def test_a_frame_that_differs_in_one_field_does_not_count(frame_changes: dict, reason: str) -> None:
     """Each field of the match rule excludes a frame that differs in it."""
-    request = _request(gain_setting=120, offset=10, binning=1)
+    request = _request(gain=120, offset=10, binning=1)
     frame = make_frame(0, **frame_changes)
     assert not frame_matches_request(frame, request, EQUIPMENT), reason
 
@@ -106,13 +106,13 @@ def test_a_frame_that_differs_in_one_field_does_not_count(frame_changes: dict, r
 def test_a_length_within_half_a_second_counts() -> None:
     """The length may differ by 0.5 s, the width the calibration match uses."""
     request = _request()
-    assert frame_matches_request(make_frame(0, exposure=60.5), request, EQUIPMENT)
-    assert not frame_matches_request(make_frame(0, exposure=60.6), request, EQUIPMENT)
+    assert frame_matches_request(make_frame(0, exposure_s=60.5), request, EQUIPMENT)
+    assert not frame_matches_request(make_frame(0, exposure_s=60.6), request, EQUIPMENT)
 
 
 def test_an_unset_gain_offset_and_binning_match_any() -> None:
     """A row that leaves gain, offset and binning unset matches any value."""
-    frame = make_frame(0, iso="999", offset="77", binning=4)
+    frame = make_frame(0, gain=999, offset=77, binning=4)
     assert frame_matches_request(frame, _request(), EQUIPMENT)
 
 

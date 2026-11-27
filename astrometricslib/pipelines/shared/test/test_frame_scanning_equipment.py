@@ -82,7 +82,7 @@ def test_an_asi533_frame_is_recorded_under_the_librarys_spelling_with_its_gain(t
     path = write_frame(tmp_path / "a.fits", INSTRUME="ZWO CCD ASI533MM Pro", GAIN=0.0, FOCALLEN=405.0)
     record = create_frame_record_from_fits(path, config=make_config())
     assert record.camera == "ZWO ASI 533MM Pro"
-    assert record.iso == "0.0"
+    assert record.gain == 0
     assert record.telescope == "Apertura 75Q"
 
 
@@ -95,14 +95,14 @@ def test_a_d5300_frame_keeps_the_iso_in_its_header(tmp_path: Path) -> None:
     path = write_frame(tmp_path / "a.fits", INSTRUME="Nikon DSLR DSC D5300", ISOSPEED=100, FOCALLEN=300.0)
     record = create_frame_record_from_fits(path, config=make_config())
     assert record.camera == "Nikon DSLR DSC D5300"
-    assert record.iso == "100"
+    assert record.gain == 100
 
 
 def test_a_d5300_frame_with_no_iso_in_its_header_gets_the_configured_default(tmp_path: Path) -> None:
     """Check `default_iso`, found although the section name differs."""
     path = write_frame(tmp_path / "a.fits", INSTRUME="Nikon DSLR DSC D5300", FOCALLEN=300.0)
     record = create_frame_record_from_fits(path, config=make_config())
-    assert record.iso == "800"
+    assert record.gain == 800
 
 
 def test_a_camera_with_no_iso_and_no_default_gets_the_placeholder_and_a_warning(
@@ -112,7 +112,7 @@ def test_a_camera_with_no_iso_and_no_default_gets_the_placeholder_and_a_warning(
     path = write_frame(tmp_path / "a.fits", INSTRUME="Acme Imager 9000")
     with caplog.at_level(logging.WARNING):
         record = create_frame_record_from_fits(path, config=make_config())
-    assert record.iso == PLACEHOLDER_RECORD_ISO
+    assert record.gain == int(PLACEHOLDER_RECORD_ISO)
     assert any("default_iso" in entry.getMessage() for entry in caplog.records)
 
 
@@ -198,16 +198,18 @@ def test_a_frame_with_no_camera_in_its_header_goes_under_the_primary_camera(tmp_
     assert (expected / "light.fits").exists()
 
 
-def test_an_iso_written_with_a_decimal_is_recorded_without_it(tmp_path: Path) -> None:
-    """Check the change to the stored ISO text: 800.0 becomes 800."""
+def test_an_iso_written_with_a_decimal_is_recorded_as_a_whole_number(tmp_path: Path) -> None:
+    """Check that an ISOSPEED of 800.0 is stored as the number 800."""
     path = write_frame(tmp_path / "a.fits", INSTRUME="Nikon DSLR DSC D5300", ISOSPEED=800.0, FOCALLEN=300.0)
-    assert create_frame_record_from_fits(path, config=make_config()).iso == "800"
+    assert create_frame_record_from_fits(path, config=make_config()).gain == 800
 
 
-def test_a_gain_is_recorded_exactly_as_the_header_writes_it(tmp_path: Path) -> None:
-    """Check that session ids built from the gain text do not change."""
+def test_a_gain_written_with_a_decimal_is_recorded_as_a_whole_number(tmp_path: Path) -> None:
+    """Check that a GAIN of 0.0 is stored as the number 0, not as text."""
     path = write_frame(tmp_path / "a.fits", INSTRUME="ZWO CCD ASI533MM Pro", GAIN=0.0, FOCALLEN=405.0)
-    assert create_frame_record_from_fits(path, config=make_config()).iso == "0.0"
+    record = create_frame_record_from_fits(path, config=make_config())
+    assert record.gain == 0
+    assert isinstance(record.gain, int)
 
 
 def test_a_stacked_output_is_recognised_by_name_or_stack_count(tmp_path: Path) -> None:
@@ -250,7 +252,7 @@ def test_scanning_a_target_folder_skips_a_stack_among_the_lights(tmp_path: Path)
         "M31_Light_001.fits",
         "M31_Light_002.fits",
     ]
-    assert target.exposure_sec == pytest.approx(60.0)
+    assert target.exposure_s == pytest.approx(60.0)
 
 
 def test_sorting_a_stack_files_it_under_others_not_the_lights(tmp_path: Path) -> None:

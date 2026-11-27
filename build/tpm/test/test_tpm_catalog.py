@@ -287,10 +287,10 @@ def test_threshold_never_fails_unless_confirmed(catalog: dict) -> None:
 def test_relative_threshold_uses_the_run_fact(catalog: dict) -> None:
     """The frame-to-library limit is the exposure length, if known."""
     tpms = [{"name": "frame_to_library_seconds", "unit": "s", "value": 15.0, "n": 1}]
-    compile_tpm.annotate(tpms, catalog, {"exposure_seconds": 60.0})
+    compile_tpm.annotate(tpms, catalog, {"exposure_s": 60.0})
     assert tpms[0]["limit"]["threshold"] == pytest.approx(60.0)
     assert tpms[0]["limit"]["objective"] == pytest.approx(15.0)
-    compile_tpm.annotate(tpms, catalog, {"exposure_seconds": None})
+    compile_tpm.annotate(tpms, catalog, {"exposure_s": None})
     assert tpms[0]["limit"]["threshold"] is None
 
 

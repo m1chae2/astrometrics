@@ -409,7 +409,7 @@ def _stamped_rows(old_rows: list[ExposureRequest], new_rows: list[ExposureReques
         key : `tuple`
             Frame type, filter, length, gain, offset and binning.
         """
-        return (row.frame_type, row.filter, row.exposure_sec, row.gain_setting, row.offset, row.binning)
+        return (row.frame_type, row.filter, row.exposure_s, row.gain, row.offset, row.binning)
 
     old_by_key = {match_key(row): row for row in old_rows}
     moment = planning_context.utc_now()

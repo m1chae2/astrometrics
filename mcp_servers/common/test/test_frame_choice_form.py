@@ -58,7 +58,7 @@ class _FakeFrames:
             frame
             for frame in target.frames
             if (night is None or observing_night_id(frame.timestamp) == night)
-            and (gain is None or frame.iso == str(gain))
+            and (gain is None or frame.gain == gain)
         ]
 
 
@@ -70,9 +70,9 @@ class _FakeTargets:
         self.held = Target(
             id="M 31",
             frames=[
-                FrameRecord(path="/f/a.fits", timestamp=_FIRST, iso="100"),
-                FrameRecord(path="/f/b.fits", timestamp=_FIRST, iso="200"),
-                FrameRecord(path="/f/c.fits", timestamp=_SECOND, iso="100"),
+                FrameRecord(path="/f/a.fits", timestamp=_FIRST, gain=100),
+                FrameRecord(path="/f/b.fits", timestamp=_FIRST, gain=200),
+                FrameRecord(path="/f/c.fits", timestamp=_SECOND, gain=100),
             ],
         )
         self.frames = _FakeFrames()

@@ -280,9 +280,7 @@ def _rows(**fields: object) -> list[ExposureRequest]:
     rows : `list` [`ExposureRequest`]
         The one row.
     """
-    return [
-        ExposureRequest.model_validate({"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 1, **fields})
-    ]
+    return [ExposureRequest.model_validate({"frame_type": "LIGHT", "exposure_s": 60.0, "count": 1, **fields})]
 
 
 def _package(planning: ObservationPlanning, target_id: str = "M 81") -> ObservationPackage:
@@ -519,13 +517,13 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker: object, isolate
     (segment,) = planning.sky.get_constellation_lines()
     assert (segment.constellation, segment.ra2) == ("Ori", 3.0)
     fake_sky.list_catalog_driver_metadata.return_value = [
-        {"driver_name": "deep_stars", "display_name": "Gaia deep stars", "maximum_query_radius_degrees": 2.0}
+        {"driver_name": "deep_stars", "display_name": "Gaia deep stars", "maximum_query_radius_deg": 2.0}
     ]
     (driver,) = planning.catalogs.query()
     assert driver.model_dump() == {
         "driver_name": "deep_stars",
         "display_name": "Gaia deep stars",
-        "maximum_query_radius_degrees": 2.0,
+        "maximum_query_radius_deg": 2.0,
     }
 
 
@@ -675,7 +673,7 @@ def _measured_profile() -> SimpleNamespace:
     return SimpleNamespace(
         camera_name="c1",
         is_generic_fallback=False,
-        sensor_noise=[SimpleNamespace(gain_setting="100", offset="10", binning="1x1")],
+        sensor_noise=[SimpleNamespace(gain="100", offset="10", binning="1x1")],
     )
 
 
@@ -772,7 +770,7 @@ def test_a_session_stored_before_the_night_plan_fields_still_loads(isolated_butl
                 ]
                 requests.extend(data.get("exposureRequests", []))
                 for request in requests:
-                    for key in ("gainSetting", "offset", "binning"):
+                    for key in ("gain", "offset", "binning"):
                         request.pop(key, None)
                 connection.execute(updates[table], (json.dumps(data), row_id))
         connection.commit()
@@ -781,7 +779,7 @@ def test_a_session_stored_before_the_night_plan_fields_still_loads(isolated_butl
 
     loaded = planning.sessions.get("2026-08-10")
     assert (loaded.checklist, loaded.framing, loaded.revision) == ([], None, 0)
-    assert loaded.queue[0].exposure_requests[0].gain_setting is None
+    assert loaded.queue[0].exposure_requests[0].gain is None
     assert planning.sessions.add(loaded, [package]).revision == 1
 
 
@@ -807,7 +805,7 @@ def test_exact_duplicates_merge_and_conflicting_ones_are_refused(isolated_butler
             [
                 QueueRequest(
                     package_id=package.id,
-                    exposure_requests=[light, light.model_copy(update={"delay_sec": 2.0})],
+                    exposure_requests=[light, light.model_copy(update={"delay_s": 2.0})],
                 )
             ],
         )
@@ -823,8 +821,8 @@ def test_a_measured_camera_refuses_an_unmeasured_setting(
     )
     session = _session(planning)
     package = _package(planning)
-    good = _rows(gain_setting=100, offset=10)
-    bad = _rows(gain_setting=250, offset=10)
+    good = _rows(gain=100, offset=10)
+    bad = _rows(gain=250, offset=10)
 
     changed = planning.sessions.add(session, [QueueRequest(package_id=package.id, exposure_requests=good)])
     with pytest.raises(InvalidArgumentError, match="gain setting 100"):
@@ -838,10 +836,10 @@ def test_an_unprofiled_camera_accepts_the_setting(isolated_butler: DiskButler) -
     package = _package(planning)
 
     changed = planning.sessions.add(
-        _session(planning), [QueueRequest(package_id=package.id, exposure_requests=_rows(gain_setting=321))]
+        _session(planning), [QueueRequest(package_id=package.id, exposure_requests=_rows(gain=321))]
     )
 
-    assert changed.queue[0].exposure_requests[0].gain_setting == 321
+    assert changed.queue[0].exposure_requests[0].gain == 321
 
 
 def test_update_exposures_changes_a_pending_entry_only(isolated_butler: DiskButler) -> None:
@@ -850,9 +848,9 @@ def test_update_exposures_changes_a_pending_entry_only(isolated_butler: DiskButl
     filled = planning.sessions.add(_session(planning), [_package(planning)])
     entry_id = filled.queue[0].id
 
-    changed = planning.sessions.update(filled, exposures={entry_id: _rows(exposure_sec=30.0, count=4)})
+    changed = planning.sessions.update(filled, exposures={entry_id: _rows(exposure_s=30.0, count=4)})
 
-    assert changed.queue[0].exposure_requests[0].exposure_sec == pytest.approx(30.0)
+    assert changed.queue[0].exposure_requests[0].exposure_s == pytest.approx(30.0)
     with pytest.raises(NotFoundError):
         planning.sessions.update(changed, exposures={"missing": []})
 
@@ -908,7 +906,7 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
     target = planning._context.astrometrics.targets.get("M 81")
     package = planning.packages.create(
         target,
-        _rows(count=12, gain_setting=100, offset=10, binning=1),
+        _rows(count=12, gain=100, offset=10, binning=1),
         dither_config=DitherConfig(enabled=True, every_n_frames=4, pixels=5.0),
     )
     panels = planning.sky.get_panels(_point(150.0, 30.0), 1, 2, overlap_pct=10.0, rotation_deg=45.0)
@@ -923,10 +921,10 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
     summary = SequenceSummary.from_session(changed)
     assert [field.name for field in summary.rows[0].fields] == [
         "filter",
-        "exposure_seconds",
+        "exposure_s",
         "count",
         "binning",
-        "gain_setting",
+        "gain",
         "offset",
     ]
     assert [field.value for field in summary.rows[0].fields][1:] == [60.0, 12, 1, 100, 10]

@@ -100,7 +100,7 @@ def _why_no_budget(inputs: NoiseBudgetInputs) -> str:
             inputs.zero_point_reason
             or "the run has no catalog zero point, so a magnitude cannot be turned into a flux"
         )
-    if session.exposure_seconds is None:
+    if session.exposure_s is None:
         return "the session's frames gave no exposure time"
     return "no point of the session's light curves had a positive flux error"
 
@@ -121,7 +121,7 @@ def _scintillation_relative(inputs: NoiseBudgetInputs) -> tuple[float | None, st
         Why it is `None`. Empty when it is not.
     """
     session = inputs.session
-    if session is None or session.exposure_seconds is None:
+    if session is None or session.exposure_s is None:
         return None, "the session's frames gave no exposure time"
     if inputs.aperture_diameter_mm is None:
         return None, inputs.aperture_reason or "the telescope's aperture is not known"
@@ -131,7 +131,7 @@ def _scintillation_relative(inputs: NoiseBudgetInputs) -> tuple[float | None, st
         scintillation_relative_noise(
             inputs.aperture_diameter_mm,
             inputs.airmass,
-            session.exposure_seconds,
+            session.exposure_s,
             inputs.site_elevation_m if inputs.site_elevation_m is not None else 0.0,
         ),
         "",

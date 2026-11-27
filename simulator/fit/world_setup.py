@@ -65,7 +65,7 @@ class WorldSetup:
     ----------
     main, guide : `CameraSetup`
         The main and guide cameras.
-    declination_degrees : `float`
+    declination_deg : `float`
         The declination of the simulated target.
     guide_pixel_scale_arcsec : `float` or `None`
         The guide camera's pixel scale, in arcseconds per pixel (pixel size
@@ -75,7 +75,7 @@ class WorldSetup:
 
     main: CameraSetup
     guide: CameraSetup
-    declination_degrees: float
+    declination_deg: float
     guide_pixel_scale_arcsec: float | None = None
 
 
@@ -106,7 +106,7 @@ def _matching_noise_entry(profile: Mapping[str, Any], gain: float, offset: float
     entries = profile.get("sensor_noise") or []
     for entry in entries:
         try:
-            if math.isclose(float(entry["gain_setting"]), gain) and math.isclose(
+            if math.isclose(float(device_settings._entry_gain(entry)), gain) and math.isclose(
                 float(entry["offset"]), offset
             ):
                 return entry
@@ -157,14 +157,14 @@ def _camera_setup(profile: Mapping[str, Any], default_gain: float | None) -> Cam
     )
 
 
-def world_setup_from_settings(settings: Mapping[str, Any], declination_degrees: float) -> WorldSetup:
+def world_setup_from_settings(settings: Mapping[str, Any], declination_deg: float) -> WorldSetup:
     """Read the simulated cameras from the world's settings.
 
     Parameters
     ----------
     settings : `~collections.abc.Mapping`
         The parsed settings file of the world.
-    declination_degrees : `float`
+    declination_deg : `float`
         The simulated target's declination.
 
     Returns
@@ -179,6 +179,6 @@ def world_setup_from_settings(settings: Mapping[str, Any], declination_degrees: 
     return WorldSetup(
         main=_camera_setup(primary, None),
         guide=_camera_setup(secondary, GUIDE_DEFAULT_GAIN),
-        declination_degrees=declination_degrees,
+        declination_deg=declination_deg,
         guide_pixel_scale_arcsec=device_settings.guide_pixel_scale(settings),
     )

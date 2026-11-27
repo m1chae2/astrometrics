@@ -17,21 +17,21 @@ STATS = {
     "darks": [
         {
             "camera": "ASI533",
-            "iso": "100",
+            "gain": "100",
             "offset": 10.0,
             "binning": "1x1",
             "temperature_c": -9.0,
-            "exposure": 60.0,
+            "exposure_s": 60.0,
             "count": 20,
         },
     ],
     "biases": [
-        {"camera": "ASI533", "iso": "100", "offset": 10.0, "binning": "2x2", "count": 30},
-        {"camera": "ASI533", "iso": "0", "offset": 10.0, "binning": "1x1", "count": 5},
-        {"camera": "D5300", "iso": "800", "offset": 0.0, "binning": "1x1", "count": 7},
+        {"camera": "ASI533", "gain": "100", "offset": 10.0, "binning": "2x2", "count": 30},
+        {"camera": "ASI533", "gain": "0", "offset": 10.0, "binning": "1x1", "count": 5},
+        {"camera": "D5300", "gain": "800", "offset": 0.0, "binning": "1x1", "count": 7},
     ],
     "flats": [
-        {"camera": "ASI533", "filter": "L", "iso": "100", "offset": 10.0, "binning": "2x2", "count": 25},
+        {"camera": "ASI533", "filter": "L", "gain": "100", "offset": 10.0, "binning": "2x2", "count": 25},
     ],
 }
 
@@ -59,7 +59,7 @@ def test_counts_rows_carry_unique_row_keys_in_kind_order(catalog: CalibrationCat
     assert [row.count for row in catalog.query("bias")] == [30, 5, 7]
     dark = catalog.query("dark")[0]
     assert (dark.gain, dark.offset, dark.binning, dark.temperature_c, dark.exposure_s) == (
-        "100",
+        100,
         10.0,
         "1x1",
         -9.0,

@@ -237,7 +237,7 @@ class SetAsideInput(BaseModel):
     ----------
     frame_id : `str`
         The frame.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Its exposure time, in seconds.
     reason : `str`
         Why it was set aside (``clouded``, ``trailed`` or the stacker's own
@@ -251,7 +251,7 @@ class SetAsideInput(BaseModel):
     model_config = _MODEL_CONFIG
 
     frame_id: str
-    exposure_seconds: float = Field(ge=0.0)
+    exposure_s: float = Field(ge=0.0)
     reason: str
     capture_setting: CaptureSetting
     night_id: str | None = None
@@ -293,9 +293,9 @@ class DataSummary(BaseModel):
         Kept and set-aside frames.
     frames_set_aside : `int`
         Frames set aside.
-    captured_seconds : `float`
+    captured_s : `float`
         Exposure time of all frames taken.
-    efficiency_effective_seconds : `float` or `None`
+    efficiency_effective_s : `float` or `None`
         Effective time of the kept frames (eta times captured time). ``None``
         when no frame could be assessed.
     setting_summaries : `list` [`CaptureSettingSummary`]
@@ -315,8 +315,8 @@ class DataSummary(BaseModel):
     nights: list[str] = Field(default_factory=list)
     frames_taken: int = Field(ge=0)
     frames_set_aside: int = Field(ge=0)
-    captured_seconds: float = Field(ge=0.0)
-    efficiency_effective_seconds: float | None = Field(default=None, ge=0.0)
+    captured_s: float = Field(ge=0.0)
+    efficiency_effective_s: float | None = Field(default=None, ge=0.0)
     setting_summaries: list[CaptureSettingSummary] = Field(default_factory=list)
     loss_account: LossAccount | None = None
     notes: list[str] = Field(default_factory=list)
@@ -407,7 +407,7 @@ def _set_aside_shares(set_aside: Iterable[SetAsideInput]) -> tuple[float, list[L
     """
     by_reason: dict[str, float] = {}
     for frame in set_aside:
-        by_reason[frame.reason] = by_reason.get(frame.reason, 0.0) + frame.exposure_seconds
+        by_reason[frame.reason] = by_reason.get(frame.reason, 0.0) + frame.exposure_s
     shares = [
         LossShare(cause=reason, seconds=seconds, recoverableWithTime=True, modelDerived=False)
         for reason, seconds in sorted(by_reason.items(), key=lambda item: -item[1])
@@ -469,7 +469,7 @@ def loss_account(
                 set_aside_inputs.append(
                     SetAsideInput(
                         frame_id=observation.frame_id,
-                        exposure_seconds=observation.effective_exposure_seconds or 0.0,
+                        exposure_s=observation.effective_exposure_seconds or 0.0,
                         reason=observation.set_aside_reason,
                         capture_setting=setting,
                         night_id=observation.night_id,
@@ -498,15 +498,15 @@ def loss_account(
         moonless_sky_rate_by_frame=moonless_sky_rate_by_frame,
         sky_rate_by_frame=sky_rates,
     )
-    effective = sum(item.exposure_seconds * (item.eta or 0.0) for item in frame_results)
+    effective = sum(item.exposure_s * (item.eta or 0.0) for item in frame_results)
     unknown_seconds, unknown_reason = _unknown_part(effective, measured_noise_check)
     account = LossAccount(
         goal=goal,
         referenceName="; ".join(reference_names),
-        setAsideSeconds=set_aside_total,
+        setAsideS=set_aside_total,
         setAside=set_aside_shares,
         keptFrameDeficit=deficit,
-        causeUnknownSeconds=unknown_seconds,
+        causeUnknownS=unknown_seconds,
         causeUnknownReason=unknown_reason,
         transparencyIncluded=False,
         transparencyReason=TRANSPARENCY_NOT_INCLUDED_REASON,
@@ -565,15 +565,13 @@ def capture_setting_summaries(
         marked = [o for o in group if o.set_aside_reason is not None]
         kept_group = [o for o in group if o.set_aside_reason is None]
         nights = {o.night_id for o in group if o.night_id} | {f.night_id for f in extra if f.night_id}
-        captured = sum(o.effective_exposure_seconds or 0.0 for o in group) + sum(
-            f.exposure_seconds for f in extra
-        )
+        captured = sum(o.effective_exposure_seconds or 0.0 for o in group) + sum(f.exposure_s for f in extra)
         reference = reference_for(setting)
         efficiency_effective = None
         account = None
         if reference is not None:
             assessment: EfficiencyAssessment = assess_efficiency(kept_group, goal, reference)
-            efficiency_effective = assessment.result.efficiency_effective_seconds
+            efficiency_effective = assessment.result.efficiency_effective_s
             result = loss_account(
                 group,
                 extra,
@@ -588,9 +586,9 @@ def capture_setting_summaries(
                 framesTaken=len(group) + len(extra),
                 nights=len(nights),
                 framesSetAside=len(marked) + len(extra),
-                capturedSeconds=captured,
-                weightEffectiveSeconds=(weight_effective_seconds_by_setting or {}).get(setting),
-                efficiencyEffectiveSeconds=efficiency_effective,
+                capturedS=captured,
+                weightEffectiveS=(weight_effective_seconds_by_setting or {}).get(setting),
+                efficiencyEffectiveS=efficiency_effective,
                 lossAccount=account,
             )
         )
@@ -654,9 +652,7 @@ def _summary(
         notes.extend(f"{issue.frame_id}: {issue.reason}" for issue in overall.frames_without_efficiency)
     else:
         notes.append("No reference could be built, so there is no efficiency or loss account.")
-    effective_values = [
-        s.efficiency_effective_seconds for s in settings if s.efficiency_effective_seconds is not None
-    ]
+    effective_values = [s.efficiency_effective_s for s in settings if s.efficiency_effective_s is not None]
     nights = sorted(
         {o.night_id for o in observations if o.night_id} | {f.night_id for f in set_aside if f.night_id}
     )
@@ -666,8 +662,8 @@ def _summary(
         nights=nights,
         framesTaken=sum(s.frames_taken for s in settings),
         framesSetAside=sum(s.frames_set_aside for s in settings),
-        capturedSeconds=sum(s.captured_seconds for s in settings),
-        efficiencyEffectiveSeconds=sum(effective_values) if effective_values else None,
+        capturedS=sum(s.captured_s for s in settings),
+        efficiencyEffectiveS=sum(effective_values) if effective_values else None,
         settingSummaries=settings,
         lossAccount=overall.account if overall else None,
         notes=notes,

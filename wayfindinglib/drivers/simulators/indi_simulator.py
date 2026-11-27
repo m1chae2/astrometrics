@@ -255,7 +255,7 @@ class _SimulatedCameraController:
         """
         return True
 
-    def expose(self, device: object, exposure_seconds: float, gain: float | None = None) -> bool:
+    def expose(self, device: object, exposure_s: float, gain: float | None = None) -> bool:
         """Report success: the simulator has no real camera hardware.
 
         Returns

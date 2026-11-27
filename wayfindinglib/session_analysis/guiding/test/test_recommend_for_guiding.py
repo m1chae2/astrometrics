@@ -182,7 +182,7 @@ def test_no_polar_alignment_claim_is_ever_made(make_envelope: Any) -> None:
     misalignment must produce and did not fit, so the analysis does not
     estimate or advise on polar alignment.
     """
-    performance = GuidingPerformance(rms_per_axis_arcsec=2.5, net_dec_correction_arcsec_per_minute=8.0)
+    performance = GuidingPerformance(rms_per_axis_arcsec=2.5, net_dec_correction_arcsec_per_min=8.0)
 
     recommendations = recommend_for_guiding(_quality(), performance, make_envelope())
 
@@ -208,8 +208,8 @@ def test_a_dim_star_says_how_much_fainter_and_whether_a_shorter_exposure_explain
         median_star_mass=4000.0,
         star_mass_limit=50000.0,
         typical_star_mass=200000.0,
-        cadence_seconds=3.4,
-        typical_cadence_seconds=3.2,
+        cadence_s=3.4,
+        typical_cadence_s=3.2,
     )
 
     recommendations = recommend_for_guiding(quality, GuidingPerformance(), None)
@@ -228,8 +228,8 @@ def test_a_shorter_guide_cycle_is_credited_with_its_share_of_the_drop() -> None:
         median_star_mass=50000.0,
         star_mass_limit=60000.0,
         typical_star_mass=200000.0,
-        cadence_seconds=1.6,
-        typical_cadence_seconds=3.2,
+        cadence_s=1.6,
+        typical_cadence_s=3.2,
     )
 
     (warning,) = [

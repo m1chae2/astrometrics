@@ -67,8 +67,8 @@ class _FakeFrame:
     """A stand-in frame record with the fields reconciliation reads."""
 
     timestamp: float
-    iso: str = "800"
-    offset: str = "0"
+    gain: int | None = 800
+    offset: int = 0
     path: str = "frame.fits"
 
 
@@ -192,7 +192,7 @@ def test_reconcile_session_persists_the_session_and_writes_no_calibration_stats(
         "entry-1",
         "M 81",
         QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=20)],
+        [ExposureRequest(frame_type=FrameType.DARK, exposure_s=300.0, count=20)],
     )
     session = _session("session-1", "cam-1", SessionStatus.COMPLETED, [entry])
     butler.put(session, "observation_session", {"session_id": session.id})

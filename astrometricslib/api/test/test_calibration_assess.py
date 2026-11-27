@@ -1,4 +1,4 @@
-"""Tests for `CalibrationCatalog.assess` and `frames.record_measurements`.
+"""Tests for `CalibrationCatalog.assess` and `frames.record`.
 
 A small library of synthetic darks and biases is written under a temporary
 folder and measured by the job. The camera is the shipped ASI 533 profile, so
@@ -158,7 +158,7 @@ def test_before_measuring_every_check_but_the_count_is_not_checked(catalog: Cali
 
 def test_a_measured_bias_set_is_good(catalog: CalibrationCatalog) -> None:
     """Twelve clean biases at the profile level and noise pass."""
-    report = catalog.frames.record_measurements()
+    report = catalog.frames.record()
     assert report.measured_count == 2 * FRAMES_PER_SET
     (health,) = catalog.assess("bias")
     assert health.status == "good"
@@ -169,7 +169,7 @@ def test_a_measured_bias_set_is_good(catalog: CalibrationCatalog) -> None:
 
 def test_the_light_struck_dark_is_found_and_the_set_warns(catalog: CalibrationCatalog) -> None:
     """The dark with the bright band fails the light leak check."""
-    catalog.frames.record_measurements()
+    catalog.frames.record()
     (health,) = catalog.assess("dark")
     statuses = _statuses(health)
     assert statuses["dark_light_leak"] is GateStatus.FAILED
@@ -190,8 +190,8 @@ def test_the_row_key_matches_the_counts_row(catalog: CalibrationCatalog) -> None
 
 def test_a_second_measuring_run_reads_nothing(catalog: CalibrationCatalog) -> None:
     """Unchanged files are skipped by their stamps."""
-    catalog.frames.record_measurements()
-    again = catalog.frames.record_measurements()
+    catalog.frames.record()
+    again = catalog.frames.record()
     assert again.measured_count == 0
     assert again.unchanged_count == 2 * FRAMES_PER_SET
 
@@ -213,7 +213,7 @@ def test_a_rescan_reports_the_health_of_new_dark_and_bias_sets(
     catalog: CalibrationCatalog, tmp_path: Path
 ) -> None:
     """New frames give a health record that says they are not measured yet."""
-    catalog.frames.record_measurements()
+    catalog.frames.record()
     _write(tmp_path / "frames" / "biases" / "Bias_new.fits", 500, BIAS_LEVEL_ADU, EXPTIME=0.0)
     _write(
         tmp_path / "frames" / "darks" / "Dark_new.fits",
@@ -271,7 +271,7 @@ def test_an_unchanged_library_is_judged_once(
     catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unchanged library is answered from memory the second time."""
-    catalog.frames.record_measurements()
+    catalog.frames.record()
     calls = _count_judgements(catalog, monkeypatch)
     first = catalog.assess("dark")
     second = catalog.assess("dark")
@@ -287,7 +287,7 @@ def test_new_numbers_or_a_new_file_judge_again(
     calls = _count_judgements(catalog, monkeypatch)
     (before,) = catalog.assess("bias")
     assert before.measured_frame_count == 0
-    catalog.frames.record_measurements()
+    catalog.frames.record()
     (measured,) = catalog.assess("bias")
     assert len(calls) == 2
     assert measured.measured_frame_count == FRAMES_PER_SET

@@ -466,10 +466,10 @@ DECISIONS = {
         tool_class="observe",
     ),
     "calibration_measure_sensor_noise": ToolDecision(
-        "withhold",
+        "keep",
         "Since 2026-11-27 (#206) it only reads: it measures a setting's gain and read noise from the "
-        "library's flats and biases and writes nothing. Withheld until an AI use is reviewed; "
-        "calibration_record_sensor_noise is the writer.",
+        "library's flats and biases and writes nothing, like the other measure_ tools. "
+        "calibration_record_sensor_noise is the writer and stays withheld.",
         tool_class="compute",
     ),
     "quality_measure_star_profile": ToolDecision(
@@ -1003,7 +1003,7 @@ TOOL_RENAMES: dict[str, str] = {
     # Step 4c of #206: calibration is a sub-API with a `frames` child.
     "calibration_add_frames": "calibration_frames_add",
     "calibration_reindex_frames": "calibration_frames_scan",
-    "calibration_measure_frames": "calibration_frames_record_measurements",
+    "calibration_measure_frames": "calibration_frames_record",
     "calibration_camera_profile": "calibration_get_profile",
 }
 """Old tool name -> new tool name, for a tool whose public method was

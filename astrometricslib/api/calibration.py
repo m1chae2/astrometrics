@@ -97,7 +97,7 @@ class CalibrationFrames(MovedNames):
         Owner:
             astrometricslib.pipelines.stacking.calibration_catalog.scan_calibration_frames
 
-        Darks and biases are judged from the numbers `record_measurements`
+        Darks and biases are judged from the numbers `record`
         stored, and nothing is measured during the rescan, so a new frame
         with no numbers yet gives checks that are ``not_checked`` with the
         reason. New flats are measured.
@@ -122,7 +122,7 @@ class CalibrationFrames(MovedNames):
         )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def record_measurements(
+    def record(
         self,
         kind: Literal["dark", "bias"] | None = None,
         *,
@@ -296,7 +296,7 @@ class CalibrationCatalog(MovedNames):
         Each set (the frames of one camera at one setting) is judged on its
         own, and the answer is one common record for darks, biases and
         flats. A dark or bias set is judged from the numbers
-        `frames.record_measurements` stored for each of its frames, against
+        `frames.record` stored for each of its frames, against
         limits taken from the equipment: the camera profile's read noise and
         bias level, and the bias frames of the same setting. Nothing is
         stored for the judgement, so a changed limit shows at once. A check

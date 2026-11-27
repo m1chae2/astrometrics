@@ -24,9 +24,7 @@ class _Frames:
         self.release = threading.Event()
         self.release.set()
 
-    def record_measurements(
-        self, kind: str | None = None, *, setting: Any = None, force: bool = False
-    ) -> dict[str, int]:
+    def record(self, kind: str | None = None, *, setting: Any = None, force: bool = False) -> dict[str, int]:
         """Record the call and wait for the release.
 
         Returns

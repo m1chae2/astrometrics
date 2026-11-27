@@ -379,7 +379,7 @@ SUB_API_MEMBERS = {
         "query",
         "record_sensor_noise",
     },
-    "calibration.frames": {"add", "record_measurements", "scan"},
+    "calibration.frames": {"add", "record", "scan"},
     "quality": {
         "blocks",
         "calibration_identities",

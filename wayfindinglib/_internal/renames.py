@@ -22,7 +22,11 @@ __all__ = ["RENAMES", "MovedNames"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
-RENAMES: dict[str, str] = {}
+RENAMES: dict[str, str] = {
+    "wayfindinglib.ObservationExecution.build_divergence_record": (
+        "wayfindinglib's internals (record_divergence); it is no longer public"
+    ),
+}
 
 
 class MovedNames:

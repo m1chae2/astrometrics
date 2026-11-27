@@ -35,7 +35,7 @@ The rules:
 
 ### `execution.py`
 
-`ObservationExecution` (`wayfinder.execution`) runs and recovers an observing session. It advances the queue, aborts a session, reconciles a session with what was captured, builds a divergence record (how the night differed from the plan) and creates the recorder that logs a run.
+`ObservationExecution` (`wayfinder.execution`) runs and recovers an observing session. It advances the queue, aborts a session, reconciles a session with what was captured and creates the recorder that logs a run.
 
 ### `review.py`
 

@@ -153,25 +153,6 @@ def test_recover_guide_star_loss_delegates_to_task_function() -> None:
     assert event.reacquire_attempts == 1
 
 
-def test_record_divergence_delegates_to_task_function() -> None:
-    """Verify build_divergence_record builds a DivergenceRecord."""
-    from wayfindinglib.models.policy.delegation import ObservatoryCapability
-
-    execution = ObservationExecution()
-    record = execution.build_divergence_record(
-        "div-1",
-        "session-1",
-        "entry-1",
-        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
-        "frame-1",
-        10.0,
-        9.5,
-        1.0,
-        "arcsec",
-    )
-    assert record.within_tolerance is True
-
-
 def test_create_recorder_binds_the_astrometrics_own_butler(butler: DiskButler) -> None:
     """Verify create_recorder binds the recorder to this interface's butler."""
     control = ObservatoryControl(config=butler.config, butler=butler, driver=object())

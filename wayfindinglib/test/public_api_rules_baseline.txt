@@ -126,16 +126,6 @@ wayfinder.execution.abort_session: owner
 wayfinder.execution.abort_session: verb
 wayfinder.execution.advance_session: owner
 wayfinder.execution.advance_session: verb
-wayfinder.execution.build_divergence_record: banned-argument(detail)
-wayfinder.execution.build_divergence_record: no-default(capability)
-wayfinder.execution.build_divergence_record: no-default(comparison_input_id)
-wayfinder.execution.build_divergence_record: no-default(divergence_unit)
-wayfinder.execution.build_divergence_record: no-default(intended_value)
-wayfinder.execution.build_divergence_record: no-default(observed_value)
-wayfinder.execution.build_divergence_record: no-default(queued_observation_package_id)
-wayfinder.execution.build_divergence_record: no-default(tolerance)
-wayfinder.execution.build_divergence_record: owner
-wayfinder.execution.build_divergence_record: verb
 wayfinder.execution.create_recorder: owner
 wayfinder.execution.create_recorder: unit-suffix(snapshot_interval_seconds)
 wayfinder.execution.create_recorder: verb
